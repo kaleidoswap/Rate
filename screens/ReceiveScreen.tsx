@@ -9,49 +9,105 @@ import {
   Alert,
   Share,
   Clipboard,
+  ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import { Picker } from '@react-native-picker/picker';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import RGBApiService from '../services/RGBApiService';
+import { theme } from '../theme';
+import { Card, Button, Input } from '../components';
+import { useAssetIcon } from '../utils';
 
 interface Props {
   navigation: any;
 }
 
-type ReceiveType = 'bitcoin' | 'rgb' | 'lightning';
+interface RGBAsset {
+  asset_id: string;
+  ticker: string;
+  name: string;
+  balance: {
+    settled: number;
+    future: number;
+    spendable: number;
+  };
+}
+
+interface Asset {
+  asset_id: string;
+  ticker: string;
+  name: string;
+  isRGB: boolean;
+  balance?: number;
+}
 
 export default function ReceiveScreen({ navigation }: Props) {
-  const { rgbAssets } = useSelector((state: RootState) => state.wallet);
-  const [receiveType, setReceiveType] = useState<ReceiveType>('bitcoin');
+  const { rgbAssets = [], btcBalance } = useSelector((state: RootState) => state.wallet) as { 
+    rgbAssets: RGBAsset[];
+    btcBalance: any;
+  };
+  
+  const [selectedAsset, setSelectedAsset] = useState<Asset>({
+    asset_id: 'BTC',
+    ticker: 'BTC',
+    name: 'Bitcoin',
+    isRGB: false,
+  });
+  const [networkType, setNetworkType] = useState<'on-chain' | 'lightning'>('on-chain');
   const [address, setAddress] = useState('');
-  const [selectedAsset, setSelectedAsset] = useState('');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showAssetSelector, setShowAssetSelector] = useState(false);
 
   const apiService = RGBApiService.getInstance();
 
-  useEffect(() => {
-    generateAddress();
-  }, [receiveType, selectedAsset]);
+  // Combine BTC with RGB assets
+  const allAssets: Asset[] = [
+    { 
+      asset_id: 'BTC', 
+      ticker: 'BTC', 
+      name: 'Bitcoin',
+      isRGB: false,
+      balance: btcBalance?.vanilla?.spendable || 0,
+    },
+    ...rgbAssets.map((asset: RGBAsset) => ({
+      asset_id: asset.asset_id,
+      ticker: asset.ticker,
+      name: asset.name,
+      isRGB: true,
+      balance: asset.balance.spendable,
+    }))
+  ];
 
   const generateAddress = async () => {
-    if (loading) return;
+    if (!selectedAsset) return;
     
     setLoading(true);
     try {
-      if (receiveType === 'bitcoin') {
-        const result = await apiService.getNewAddress();
-        setAddress(result.address);
-      } else if (receiveType === 'rgb') {
-        const result = await apiService.createRgbInvoice(selectedAsset || undefined);
-        setAddress(result.invoice);
-      } else if (receiveType === 'lightning') {
-        const amountMsat = amount ? parseFloat(amount) * 100000000000 : undefined;
-        const result = await apiService.createLnInvoice(amountMsat, selectedAsset, amount ? parseFloat(amount) : undefined);
+      if (selectedAsset.asset_id === 'BTC') {
+        if (networkType === 'on-chain') {
+          const result = await apiService.getNewAddress();
+          setAddress(result);
+        } else {
+          // Lightning invoice for BTC
+          const result = await apiService.createLightningInvoice({
+            amount_msat: amount ? parseFloat(amount) * 100000000 * 1000 : undefined,
+            description: `Receive ${amount ? amount + ' ' : ''}${selectedAsset.ticker}`,
+          });
+          setAddress(result.invoice);
+        }
+      } else {
+        // For RGB assets, create an RGB invoice
+        const result = await apiService.getRGBInvoice({
+          asset_id: selectedAsset.asset_id,
+          min_confirmations: 1,
+          duration_seconds: 3600, // 1 hour
+        });
         setAddress(result.invoice);
       }
     } catch (error) {
@@ -62,8 +118,15 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   };
 
+  useEffect(() => {
+    if (selectedAsset) {
+      setAddress('');
+      generateAddress();
+    }
+  }, [selectedAsset, networkType, amount]);
+
   const copyToClipboard = async () => {
-    await Clipboard.setStringAsync(address);
+    await Clipboard.setString(address);
     Alert.alert('Copied', 'Address copied to clipboard');
   };
 
@@ -71,131 +134,265 @@ export default function ReceiveScreen({ navigation }: Props) {
     try {
       await Share.share({
         message: address,
-        title: `${receiveType === 'bitcoin' ? 'Bitcoin' : receiveType === 'rgb' ? 'RGB' : 'Lightning'} Address`,
+        title: `${selectedAsset?.ticker} ${networkType === 'lightning' ? 'Invoice' : 'Address'}`,
       });
     } catch (error) {
       console.error('Failed to share:', error);
     }
   };
 
-  const renderReceiveTypeSelector = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Receive Type</Text>
-      <View style={styles.receiveTypeButtons}>
-        <TouchableOpacity
-          style={[styles.receiveTypeButton, receiveType === 'bitcoin' && styles.receiveTypeButtonActive]}
-          onPress={() => setReceiveType('bitcoin')}
-        >
-          <Text style={[styles.receiveTypeButtonText, receiveType === 'bitcoin' && styles.receiveTypeButtonTextActive]}>
-            Bitcoin
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.receiveTypeButton, receiveType === 'rgb' && styles.receiveTypeButtonActive]}
-          onPress={() => setReceiveType('rgb')}
-        >
-          <Text style={[styles.receiveTypeButtonText, receiveType === 'rgb' && styles.receiveTypeButtonTextActive]}>
-            RGB Asset
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.receiveTypeButton, receiveType === 'lightning' && styles.receiveTypeButtonActive]}
-          onPress={() => setReceiveType('lightning')}
-        >
-          <Text style={[styles.receiveTypeButtonText, receiveType === 'lightning' && styles.receiveTypeButtonTextActive]}>
-            Lightning
-          </Text>
-        </TouchableOpacity>
+  const AssetIcon = ({ asset }: { asset: Asset }) => {
+    const { iconUrl } = useAssetIcon(asset.ticker);
+    
+    if (asset.ticker === 'BTC') {
+      return (
+        <View style={styles.assetIconContainer}>
+          <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
+        </View>
+      );
+    }
+    
+    if (iconUrl) {
+      return (
+        <View style={styles.assetIconContainer}>
+          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.assetIconContainer}>
+        <Ionicons name="diamond" size={24} color={theme.colors.primary[500]} />
       </View>
-    </View>
+    );
+  };
+
+  const renderHeader = () => (
+    <LinearGradient
+      colors={['#667eea', '#764ba2']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.headerGradient}
+    >
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Receive Payment</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      
+      {/* Asset Selector in Header */}
+      <TouchableOpacity 
+        style={styles.assetSelector}
+        onPress={() => setShowAssetSelector(!showAssetSelector)}
+      >
+        <AssetIcon asset={selectedAsset} />
+        <View style={styles.assetInfo}>
+          <Text style={styles.assetTicker}>{selectedAsset.ticker}</Text>
+          <Text style={styles.assetName}>{selectedAsset.name}</Text>
+        </View>
+        <Ionicons 
+          name={showAssetSelector ? "chevron-up" : "chevron-down"} 
+          size={20} 
+          color={theme.colors.text.inverse} 
+        />
+      </TouchableOpacity>
+      
+      {/* Asset Dropdown */}
+      {showAssetSelector && (
+        <View style={styles.assetDropdown}>
+          {allAssets.map((asset) => (
+            <TouchableOpacity
+              key={asset.asset_id}
+              style={[
+                styles.assetOption,
+                selectedAsset.asset_id === asset.asset_id && styles.assetOptionSelected
+              ]}
+              onPress={() => {
+                setSelectedAsset(asset);
+                setShowAssetSelector(false);
+              }}
+            >
+              <AssetIcon asset={asset} />
+              <View style={styles.assetOptionInfo}>
+                <Text style={styles.assetOptionTicker}>{asset.ticker}</Text>
+                <Text style={styles.assetOptionName}>{asset.name}</Text>
+                {asset.balance && (
+                  <Text style={styles.assetOptionBalance}>
+                    Balance: {asset.balance.toLocaleString()}
+                  </Text>
+                )}
+              </View>
+              {selectedAsset.asset_id === asset.asset_id && (
+                <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </LinearGradient>
   );
 
-  const renderAssetSelector = () => {
-    if (receiveType !== 'rgb' && receiveType !== 'lightning') return null;
+  const renderNetworkSelector = () => {
+    // Only show network selector for BTC
+    if (selectedAsset.isRGB) return null;
 
     return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>
-          {receiveType === 'rgb' ? 'RGB Asset (Optional)' : 'RGB Asset for Invoice'}
-        </Text>
-        <View style={styles.pickerContainer}>
-          <Picker
-            selectedValue={selectedAsset}
-            onValueChange={setSelectedAsset}
-            style={styles.picker}
+      <Card style={styles.networkCard}>
+        <Text style={styles.sectionTitle}>Network Type</Text>
+        <View style={styles.networkSelector}>
+          <TouchableOpacity
+            style={[
+              styles.networkButton,
+              networkType === 'on-chain' && styles.networkButtonActive
+            ]}
+            onPress={() => setNetworkType('on-chain')}
           >
-            <Picker.Item label="Any asset" value="" />
-            {rgbAssets.map((asset) => (
-              <Picker.Item
-                key={asset.asset_id}
-                label={`${asset.ticker} - ${asset.name}`}
-                value={asset.asset_id}
-              />
-            ))}
-          </Picker>
+            <Ionicons 
+              name="link" 
+              size={18} 
+              color={networkType === 'on-chain' ? theme.colors.text.inverse : theme.colors.text.secondary} 
+            />
+            <Text style={[
+              styles.networkButtonText,
+              networkType === 'on-chain' && styles.networkButtonTextActive
+            ]}>
+              On-chain
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.networkButton,
+              networkType === 'lightning' && styles.networkButtonActive
+            ]}
+            onPress={() => setNetworkType('lightning')}
+          >
+            <Ionicons 
+              name="flash" 
+              size={18} 
+              color={networkType === 'lightning' ? theme.colors.text.inverse : theme.colors.text.secondary} 
+            />
+            <Text style={[
+              styles.networkButtonText,
+              networkType === 'lightning' && styles.networkButtonTextActive
+            ]}>
+              Lightning
+            </Text>
+          </TouchableOpacity>
         </View>
-      </View>
+      </Card>
+    );
+  };
+
+  const renderAmountInput = () => {
+    // Show amount input for Lightning or RGB assets
+    const showAmount = networkType === 'lightning' || selectedAsset.isRGB;
+    if (!showAmount) return null;
+
+    return (
+      <Card style={styles.amountCard}>
+        <Text style={styles.sectionTitle}>
+          Amount {networkType === 'lightning' ? '(Optional)' : ''}
+        </Text>
+        <Text style={styles.amountDescription}>
+          {selectedAsset.isRGB 
+            ? `Specify the amount of ${selectedAsset.ticker} for the invoice`
+            : 'Specify an amount for the Lightning invoice'
+          }
+        </Text>
+        <Input
+          placeholder="0.00000000"
+          value={amount}
+          onChangeText={setAmount}
+          keyboardType="decimal-pad"
+          variant="outlined"
+          rightIcon={<Text style={styles.currencyLabel}>{selectedAsset.ticker}</Text>}
+        />
+      </Card>
     );
   };
 
   const renderQRCode = () => {
     if (!address) return null;
 
+    const qrTitle = selectedAsset.isRGB 
+      ? 'RGB Asset Invoice'
+      : selectedAsset.asset_id === 'BTC' && networkType === 'lightning' 
+      ? 'Lightning Invoice'
+      : 'Bitcoin Address';
+
     return (
-      <View style={styles.qrSection}>
+      <Card variant="elevated" style={styles.qrCard}>
+        <View style={styles.qrHeader}>
+          <Text style={styles.qrTitle}>{qrTitle}</Text>
+          {amount && (
+            <Text style={styles.qrAmount}>
+              {amount} {selectedAsset.ticker}
+            </Text>
+          )}
+        </View>
+
         <View style={styles.qrContainer}>
           <QRCode
             value={address}
             size={200}
-            backgroundColor="white"
-            color="black"
+            backgroundColor={theme.colors.surface.primary}
+            color={theme.colors.text.primary}
           />
         </View>
-        
+
         <View style={styles.addressContainer}>
-          <Text style={styles.addressLabel}>
-            {receiveType === 'bitcoin' ? 'Bitcoin Address' : 
-             receiveType === 'rgb' ? 'RGB Invoice' : 'Lightning Invoice'}
-          </Text>
-          <Text style={styles.addressText} numberOfLines={3}>
+          <Text style={styles.addressText} numberOfLines={3} selectable>
             {address}
           </Text>
         </View>
 
-        <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.actionButton} onPress={copyToClipboard}>
-            <Ionicons name="copy" size={20} color="#007AFF" />
-            <Text style={styles.actionButtonText}>Copy</Text>
+        <View style={styles.qrActions}>
+          <TouchableOpacity style={styles.qrActionButton} onPress={copyToClipboard}>
+            <Ionicons name="copy" size={20} color={theme.colors.primary[500]} />
+            <Text style={styles.qrActionText}>Copy</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionButton} onPress={shareAddress}>
-            <Ionicons name="share" size={20} color="#007AFF" />
-            <Text style={styles.actionButtonText}>Share</Text>
+          <TouchableOpacity style={styles.qrActionButton} onPress={shareAddress}>
+            <Ionicons name="share" size={20} color={theme.colors.primary[500]} />
+            <Text style={styles.qrActionText}>Share</Text>
           </TouchableOpacity>
           
-          <TouchableOpacity style={styles.actionButton} onPress={generateAddress}>
-            <Ionicons name="refresh" size={20} color="#007AFF" />
-            <Text style={styles.actionButtonText}>New</Text>
+          <TouchableOpacity style={styles.qrActionButton} onPress={generateAddress}>
+            <Ionicons name="refresh" size={20} color={theme.colors.primary[500]} />
+            <Text style={styles.qrActionText}>New</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </Card>
     );
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Receive</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      {renderHeader()}
+      
+      <ScrollView 
+        style={styles.scrollView}
+        showsVerticalScrollIndicator={false}
+      >
+        {renderNetworkSelector()}
+        {renderAmountInput()}
 
-      <ScrollView style={styles.scrollView}>
-        {renderReceiveTypeSelector()}
-        {renderAssetSelector()}
-        {renderQRCode()}
+        {loading ? (
+          <Card style={styles.loadingCard}>
+            <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+            <Text style={styles.loadingText}>
+              Generating {networkType === 'lightning' || selectedAsset.isRGB ? 'invoice' : 'address'}...
+            </Text>
+          </Card>
+        ) : (
+          renderQRCode()
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -204,191 +401,261 @@ export default function ReceiveScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.background.secondary,
   },
+  
+  headerGradient: {
+    paddingBottom: theme.spacing[4],
+  },
+  
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing[5],
+    paddingTop: theme.spacing[4],
+    marginBottom: theme.spacing[4],
   },
+  
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: '700',
+    color: theme.colors.text.inverse,
   },
+  
+  headerSpacer: {
+    width: 40,
+  },
+  
+  assetSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[3],
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginHorizontal: theme.spacing[5],
+    borderRadius: theme.borderRadius.lg,
+  },
+  
+  assetIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing[3],
+  },
+  
+  assetIconImage: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  
+  assetInfo: {
+    flex: 1,
+  },
+  
+  assetTicker: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '700',
+    color: theme.colors.text.inverse,
+  },
+  
+  assetName: {
+    fontSize: theme.typography.fontSize.sm,
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  
+  assetDropdown: {
+    backgroundColor: theme.colors.surface.primary,
+    marginHorizontal: theme.spacing[5],
+    marginTop: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    maxHeight: 300,
+  },
+  
+  assetOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: theme.spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border.light,
+  },
+  
+  assetOptionSelected: {
+    backgroundColor: theme.colors.primary[50],
+  },
+  
+  assetOptionInfo: {
+    flex: 1,
+    marginLeft: theme.spacing[3],
+  },
+  
+  assetOptionTicker: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  
+  assetOptionName: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+  },
+  
+  assetOptionBalance: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing[1],
+  },
+  
   scrollView: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: theme.spacing[5],
   },
-  section: {
-    marginBottom: 25,
+  
+  networkCard: {
+    marginTop: theme.spacing[5],
+    marginBottom: theme.spacing[4],
   },
+  
   sectionTitle: {
-    fontSize: 16,
+    fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
-    color: '#333',
-    marginBottom: 10,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing[3],
   },
-  sendTypeButtons: {
+  
+  networkSelector: {
     flexDirection: 'row',
-    borderRadius: 10,
-    backgroundColor: 'white',
-    padding: 4,
+    backgroundColor: theme.colors.gray[100],
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[1],
   },
-  sendTypeButton: {
+  
+  networkButton: {
     flex: 1,
-    paddingVertical: 12,
+    flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 8,
+    justifyContent: 'center',
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.base,
+    gap: theme.spacing[2],
   },
-  sendTypeButtonActive: {
-    backgroundColor: '#007AFF',
+  
+  networkButtonActive: {
+    backgroundColor: theme.colors.primary[500],
   },
-  sendTypeButtonText: {
-    fontSize: 14,
+  
+  networkButtonText: {
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '500',
-    color: '#666',
+    color: theme.colors.text.secondary,
   },
-  sendTypeButtonTextActive: {
-    color: 'white',
+  
+  networkButtonTextActive: {
+    color: theme.colors.text.inverse,
   },
-  receiveTypeButtons: {
-    flexDirection: 'row',
-    borderRadius: 10,
-    backgroundColor: 'white',
-    padding: 4,
+  
+  amountCard: {
+    marginBottom: theme.spacing[4],
   },
-  receiveTypeButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderRadius: 8,
+  
+  amountDescription: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[3],
   },
-  receiveTypeButtonActive: {
-    backgroundColor: '#007AFF',
-  },
-  receiveTypeButtonText: {
-    fontSize: 14,
+  
+  currencyLabel: {
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '500',
-    color: '#666',
+    color: theme.colors.text.secondary,
   },
-  receiveTypeButtonTextActive: {
-    color: 'white',
-  },
-  inputContainer: {
-    flexDirection: 'row',
+  
+  qrCard: {
     alignItems: 'center',
-    backgroundColor: 'white',
-    borderRadius: 10,
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: '#ddd',
+    marginBottom: theme.spacing[4],
   },
-  textInput: {
-    flex: 1,
-    paddingVertical: 15,
-    fontSize: 16,
-    color: '#333',
+  
+  qrHeader: {
+    alignItems: 'center',
+    marginBottom: theme.spacing[4],
   },
-  scanButton: {
-    padding: 8,
-  },
-  maxButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-  },
-  maxButtonText: {
-    color: 'white',
-    fontSize: 12,
+  
+  qrTitle: {
+    fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
+    color: theme.colors.text.primary,
+    textAlign: 'center',
   },
-  balanceText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 5,
+  
+  qrAmount: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '500',
+    color: theme.colors.primary[600],
+    marginTop: theme.spacing[1],
   },
-  feeEstimate: {
-    fontSize: 12,
-    color: '#007AFF',
-    marginTop: 5,
-  },
-  pickerContainer: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  picker: {
-    height: 50,
-  },
-  sendButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 10,
-    paddingVertical: 15,
-    alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 40,
-  },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  qrSection: {
-    alignItems: 'center',
-    marginTop: 20,
-  },
+  
   qrContainer: {
-    backgroundColor: 'white',
-    padding: 20,
-    borderRadius: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    padding: theme.spacing[4],
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing[4],
   },
+  
   addressContainer: {
-    marginTop: 20,
-    backgroundColor: 'white',
-    borderRadius: 10,
-    padding: 15,
     width: '100%',
+    backgroundColor: theme.colors.gray[50],
+    borderRadius: theme.borderRadius.base,
+    padding: theme.spacing[3],
+    marginBottom: theme.spacing[4],
   },
-  addressLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 8,
-  },
+  
   addressText: {
-    fontSize: 12,
-    color: '#333',
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.primary,
     fontFamily: 'monospace',
+    textAlign: 'center',
   },
-  actionButtons: {
+  
+  qrActions: {
     flexDirection: 'row',
-    marginTop: 20,
     justifyContent: 'space-around',
     width: '100%',
   },
-  actionButton: {
+  
+  qrActionButton: {
     alignItems: 'center',
-    padding: 15,
+    padding: theme.spacing[3],
   },
-  actionButtonText: {
-    fontSize: 12,
-    color: '#007AFF',
-    marginTop: 5,
+  
+  qrActionText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[500],
+    marginTop: theme.spacing[1],
     fontWeight: '500',
+  },
+  
+  loadingCard: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing[8],
+    marginBottom: theme.spacing[4],
+  },
+  
+  loadingText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[4],
   },
 });

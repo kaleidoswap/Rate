@@ -570,6 +570,127 @@ export class RGBApiService {
       return this.handleError(error);
     }
   }
+  /**
+   * Get a new Bitcoin address
+   */
+  public async getNewAddress(): Promise<string> {
+    try {
+      console.log('RGB API Request: POST /address');
+      const response = await this.api!.post<string>('/address');
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Create a Lightning Network invoice
+   */
+  public async createLightningInvoice(params: {
+    amount_msat?: number;
+    asset_id?: string;
+    asset_amount?: number;
+    duration_seconds?: number;
+    description?: string;
+  }): Promise<{ invoice: string; payment_hash: string }> {
+    try {
+      console.log('RGB API Request: POST /lninvoice');
+      const response = await this.api!.post<{ invoice: string; payment_hash: string }>('/lninvoice', {
+        amount_msat: params.amount_msat,
+        asset_id: params.asset_id,
+        asset_amount: params.asset_amount,
+        duration_seconds: params.duration_seconds || 3600,
+        description: params.description || 'Lightning payment',
+      });
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Pay a Lightning Network invoice
+   */
+  public async payLightningInvoice(params: { invoice: string }): Promise<{ 
+    payment_hash: string; 
+    status: string;
+  }> {
+    try {
+      console.log('RGB API Request: POST /lnpay');
+      const response = await this.api!.post<{ 
+        payment_hash: string; 
+        status: string;
+      }>('/lnpay', params);
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Send Bitcoin
+   */
+  public async sendBitcoin(params: {
+    address: string;
+    amount: number;
+    fee_rate: number;
+  }): Promise<{ txid: string }> {
+    try {
+      console.log('RGB API Request: POST /sendbtc');
+      const response = await this.api!.post<{ txid: string }>('/sendbtc', {
+        address: params.address,
+        amount_sat: Math.round(params.amount * 100000000), // Convert BTC to satoshis
+        fee_rate: params.fee_rate,
+      });
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Send RGB Asset
+   */
+  public async sendRGBAsset(params: {
+    asset_id: string;
+    address: string;
+    amount: number;
+  }): Promise<{ txid: string }> {
+    try {
+      console.log('RGB API Request: POST /sendasset');
+      const response = await this.api!.post<{ txid: string }>('/sendasset', {
+        asset_id: params.asset_id,
+        assignment: {
+          type: 'Fungible',
+          value: params.amount,
+        },
+        recipient_id: params.address,
+        donation: false,
+        fee_rate: 1.0,
+        min_confirmations: 1,
+        transport_endpoints: ['rpc://127.0.0.1:3000/json-rpc'],
+        skip_sync: false,
+      });
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Estimate transaction fee
+   */
+  public async estimateFee(params: { blocks: number }): Promise<{ fee_rate: number }> {
+    try {
+      console.log('RGB API Request: POST /estimatefee');
+      const response = await this.api!.post<{ fee_rate: number }>('/estimatefee', {
+        blocks: params.blocks,
+      });
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
 
   /**
    * Issue an RGB CFA asset

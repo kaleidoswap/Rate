@@ -7,9 +7,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Platform } from 'react-native';
 
 import { store, persistor } from './store';
+import { theme } from './theme';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
 import DashboardScreen from './screens/DashboardScreen';
@@ -34,8 +35,29 @@ function DashboardTabs() {
   return (
     <Tab.Navigator
       screenOptions={{
-        tabBarActiveTintColor: '#007AFF',
-        tabBarInactiveTintColor: 'gray',
+        tabBarActiveTintColor: theme.colors.primary[500],
+        tabBarInactiveTintColor: theme.colors.gray[400],
+        tabBarStyle: {
+          backgroundColor: theme.colors.surface.primary,
+          borderTopColor: theme.colors.border.light,
+          borderTopWidth: 1,
+          paddingTop: Platform.OS === 'ios' ? 8 : 4,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 8,
+          height: Platform.OS === 'ios' ? 85 : 65,
+          elevation: 0,
+          shadowColor: theme.colors.gray[900],
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.1,
+          shadowRadius: 8,
+        },
+        tabBarLabelStyle: {
+          fontSize: theme.typography.fontSize.xs,
+          fontWeight: '500',
+          marginTop: 4,
+        },
+        tabBarIconStyle: {
+          marginTop: 4,
+        },
         headerShown: false,
       }}
     >
@@ -47,7 +69,7 @@ function DashboardTabs() {
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
               name={focused ? 'home' : 'home-outline'} 
-              size={size} 
+              size={focused ? size + 2 : size} 
               color={color} 
             />
           ),
@@ -61,7 +83,7 @@ function DashboardTabs() {
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
               name={focused ? 'diamond' : 'diamond-outline'} 
-              size={size} 
+              size={focused ? size + 2 : size} 
               color={color} 
             />
           ),
@@ -75,7 +97,7 @@ function DashboardTabs() {
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
               name={focused ? 'map' : 'map-outline'} 
-              size={size} 
+              size={focused ? size + 2 : size} 
               color={color} 
             />
           ),
@@ -89,7 +111,7 @@ function DashboardTabs() {
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
               name={focused ? 'settings' : 'settings-outline'} 
-              size={size} 
+              size={focused ? size + 2 : size} 
               color={color} 
             />
           ),
@@ -100,8 +122,20 @@ function DashboardTabs() {
 }
 
 function AppNavigator() {
+  const navigationTheme = {
+    dark: false,
+    colors: {
+      primary: theme.colors.primary[500],
+      background: theme.colors.background.primary,
+      card: theme.colors.surface.primary,
+      text: theme.colors.text.primary,
+      border: theme.colors.border.light,
+      notification: theme.colors.primary[500],
+    },
+  };
+
   return (
-    <NavigationContainer>
+    <NavigationContainer theme={navigationTheme}>
       <Stack.Navigator
         initialRouteName="InitialLoad"
         screenOptions={{
@@ -117,6 +151,16 @@ function AppNavigator() {
           component={SendScreen}
           options={{
             presentation: 'modal',
+            headerShown: true,
+            headerTitle: 'Send Payment',
+            headerStyle: {
+              backgroundColor: theme.colors.surface.primary,
+            },
+            headerTitleStyle: {
+              color: theme.colors.text.primary,
+              fontWeight: '600',
+            },
+            headerTintColor: theme.colors.primary[500],
           }}
         />
         <Stack.Screen 
@@ -124,6 +168,16 @@ function AppNavigator() {
           component={ReceiveScreen}
           options={{
             presentation: 'modal',
+            headerShown: true,
+            headerTitle: 'Receive Payment',
+            headerStyle: {
+              backgroundColor: theme.colors.surface.primary,
+            },
+            headerTitleStyle: {
+              color: theme.colors.text.primary,
+              fontWeight: '600',
+            },
+            headerTintColor: theme.colors.primary[500],
           }}
         />
         <Stack.Screen 
@@ -131,6 +185,16 @@ function AppNavigator() {
           component={QRScannerScreen}
           options={{
             presentation: 'modal',
+            headerShown: true,
+            headerTitle: 'Scan QR Code',
+            headerStyle: {
+              backgroundColor: theme.colors.surface.primary,
+            },
+            headerTitleStyle: {
+              color: theme.colors.text.primary,
+              fontWeight: '600',
+            },
+            headerTintColor: theme.colors.primary[500],
           }}
         />
         <Stack.Screen 
@@ -138,6 +202,16 @@ function AppNavigator() {
           component={AIAssistantScreen}
           options={{
             presentation: 'modal',
+            headerShown: true,
+            headerTitle: 'AI Assistant',
+            headerStyle: {
+              backgroundColor: theme.colors.surface.primary,
+            },
+            headerTitleStyle: {
+              color: theme.colors.text.primary,
+              fontWeight: '600',
+            },
+            headerTintColor: theme.colors.primary[500],
           }}
         />
       </Stack.Navigator>
@@ -147,8 +221,13 @@ function AppNavigator() {
 
 function LoadingScreen() {
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-      <ActivityIndicator size="large" color="#007AFF" />
+    <View style={{ 
+      flex: 1, 
+      justifyContent: 'center', 
+      alignItems: 'center',
+      backgroundColor: theme.colors.background.secondary,
+    }}>
+      <ActivityIndicator size="large" color={theme.colors.primary[500]} />
     </View>
   );
 }
@@ -157,7 +236,7 @@ export default function App() {
   return (
     <Provider store={store}>
       <PersistGate loading={<LoadingScreen />} persistor={persistor}>
-        <StatusBar style="auto" />
+        <StatusBar style="dark" backgroundColor={theme.colors.background.primary} />
         <AppNavigator />
       </PersistGate>
     </Provider>
