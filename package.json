@@ -38,7 +38,7 @@
     "react-native-gesture-handler": "~2.24.0",
     "react-native-picker": "^4.3.7",
     "react-native-qrcode-svg": "^6.3.15",
-    "react-native-safe-area-context": "5.4.0",
+    "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "~4.11.1",
     "react-native-svg": "15.11.2",
     "react-native-web": "^0.20.0",
