@@ -18,6 +18,8 @@ import ReceiveScreen from './screens/ReceiveScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import AssetsScreen from './screens/AssetsScreen';
 import SettingsScreen from './screens/SettingsScreen';
+import AIAssistantScreen from './screens/AIAssistantScreen';
+import MapScreen from './screens/MapScreen';
 
 type TabBarIconProps = {
   focused: boolean;
@@ -59,6 +61,20 @@ function DashboardTabs() {
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
               name={focused ? 'diamond' : 'diamond-outline'} 
+              size={size} 
+              color={color} 
+            />
+          ),
+        }}
+      />
+      <Tab.Screen 
+        name="Map" 
+        component={MapScreen}
+        options={{
+          tabBarLabel: 'Map',
+          tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
+            <Ionicons 
+              name={focused ? 'map' : 'map-outline'} 
               size={size} 
               color={color} 
             />
@@ -113,6 +129,13 @@ function AppNavigator() {
         <Stack.Screen 
           name="QRScanner" 
           component={QRScannerScreen}
+          options={{
+            presentation: 'modal',
+          }}
+        />
+        <Stack.Screen 
+          name="AIAssistant" 
+          component={AIAssistantScreen}
           options={{
             presentation: 'modal',
           }}

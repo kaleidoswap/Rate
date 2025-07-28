@@ -322,31 +322,43 @@ interface ListChannelsResponse {
 
 export class RGBApiService {
   private static instance: RGBApiService;
-  private api: AxiosInstance;
+  private api: AxiosInstance | null = null;
   private nodeService: RGBNodeService;
-  private config: RGBApiConfig;
+  private config: RGBApiConfig | null = null;
   private retryCount: number = 3;
   private retryDelay: number = 1000;
+  private isInitialized: boolean = false;
 
-  private constructor(config: RGBApiConfig) {
+  private constructor() {
     this.nodeService = RGBNodeService.getInstance();
-    this.config = config;
-    this.api = this.createApiInstance();
   }
 
-  public static getInstance(config?: RGBApiConfig): RGBApiService {
+  public static getInstance(): RGBApiService {
     if (!RGBApiService.instance) {
-      if (!config) {
-        throw new Error('RGBApiService must be initialized with a config first');
-      }
-      RGBApiService.instance = new RGBApiService(config);
-    } else if (config) {
-      RGBApiService.instance.updateConfig(config);
+      RGBApiService.instance = new RGBApiService();
     }
     return RGBApiService.instance;
   }
 
+  public isApiInitialized(): boolean {
+    return this.isInitialized && this.api !== null;
+  }
+
+  public initialize(config: RGBApiConfig): void {
+    this.config = config;
+    this.api = this.createApiInstance();
+    this.isInitialized = true;
+    console.log('RGB API Service initialized with config:', config);
+  }
+
+  private ensureInitialized(): void {
+    if (!this.isInitialized || !this.api) {
+      throw new Error('RGBApiService must be initialized with a config first');
+    }
+  }
+
   private async retryRequest<T>(request: () => Promise<T>): Promise<T> {
+    this.ensureInitialized();
     let lastError: Error | null = null;
     
     for (let i = 0; i < this.retryCount; i++) {
@@ -370,7 +382,7 @@ export class RGBApiService {
       const axiosError = error as AxiosError<ErrorResponse>;
       if (!axiosError.response) {
         // Network error or no response
-        const message = `Network error: Cannot reach RGB Lightning Node at ${this.config.baseURL}. Please check:
+        const message = `Network error: Cannot reach RGB Lightning Node at ${this.config?.baseURL}. Please check:
 1. The node is running
 2. The URL is correct
 3. Your network connection is stable`;
@@ -393,7 +405,7 @@ export class RGBApiService {
   public async initializeNode(password: string): Promise<InitResponse> {
     try {
       console.log('RGB API Request: POST /init');
-      const response = await this.api.post<InitResponse>('/init', { password });
+      const response = await this.api!.post<InitResponse>('/init', { password });
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -406,7 +418,7 @@ export class RGBApiService {
   public async unlockNode(params: UnlockRequest): Promise<void> {
     try {
       console.log('RGB API Request: POST /unlock');
-      await this.api.post('/unlock', {
+      await this.api!.post('/unlock', {
         announce_addresses: [],
         announce_alias: '',
         bitcoind_rpc_host: params.bitcoind_rpc_host,
@@ -428,7 +440,7 @@ export class RGBApiService {
   public async getBtcBalance(): Promise<BTCBalanceResponse> {
     return this.retryRequest(async () => {
       console.log('RGB API Request: POST /btcbalance');
-      const response = await this.api.post<BTCBalanceResponse>('/btcbalance', {
+      const response = await this.api!.post<BTCBalanceResponse>('/btcbalance', {
         skip_sync: false,
       });
       return response.data;
@@ -441,7 +453,7 @@ export class RGBApiService {
   public async getNodeInfo(): Promise<NodeInfoResponse> {
     return this.retryRequest(async () => {
       console.log('RGB API Request: GET /nodeinfo');
-      const response = await this.api.get<NodeInfoResponse>('/nodeinfo');
+      const response = await this.api!.get<NodeInfoResponse>('/nodeinfo');
       return response.data;
     });
   }
@@ -452,7 +464,7 @@ export class RGBApiService {
   public async listAssets(): Promise<ListAssetsResponse> {
     return this.retryRequest(async () => {
       console.log('RGB API Request: POST /listassets');
-      const response = await this.api.post<ListAssetsResponse>('/listassets', {
+      const response = await this.api!.post<ListAssetsResponse>('/listassets', {
         filter_asset_schemas: ['Nia']
       });
       return response.data;
@@ -470,7 +482,7 @@ export class RGBApiService {
   ): Promise<IssueNiaAssetResponse> {
     try {
       console.log('RGB API Request: POST /issueassetnia');
-      const response = await this.api.post<IssueNiaAssetResponse>('/issueassetnia', {
+      const response = await this.api!.post<IssueNiaAssetResponse>('/issueassetnia', {
         amounts,
         ticker,
         name,
@@ -488,7 +500,7 @@ export class RGBApiService {
   public async getAssetBalance(params: AssetBalanceRequest): Promise<AssetBalanceResponse> {
     try {
       console.log('RGB API Request: POST /assetbalance');
-      const response = await this.api.post<AssetBalanceResponse>('/assetbalance', params);
+      const response = await this.api!.post<AssetBalanceResponse>('/assetbalance', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -501,7 +513,7 @@ export class RGBApiService {
   public async getAssetMetadata(params: AssetMetadataRequest): Promise<AssetMetadataResponse> {
     try {
       console.log('RGB API Request: POST /assetmetadata');
-      const response = await this.api.post<AssetMetadataResponse>('/assetmetadata', params);
+      const response = await this.api!.post<AssetMetadataResponse>('/assetmetadata', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -514,7 +526,7 @@ export class RGBApiService {
   public async createUtxos(params: CreateUtxosRequest): Promise<void> {
     try {
       console.log('RGB API Request: POST /createutxos');
-      await this.api.post('/createutxos', params);
+      await this.api!.post('/createutxos', params);
     } catch (error) {
       return this.handleError(error);
     }
@@ -526,7 +538,7 @@ export class RGBApiService {
   public async decodeRGBInvoice(params: DecodeRGBInvoiceRequest): Promise<DecodeRGBInvoiceResponse> {
     try {
       console.log('RGB API Request: POST /decodergbinvoice');
-      const response = await this.api.post<DecodeRGBInvoiceResponse>('/decodergbinvoice', params);
+      const response = await this.api!.post<DecodeRGBInvoiceResponse>('/decodergbinvoice', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -539,7 +551,7 @@ export class RGBApiService {
   public async failTransfers(params: FailTransfersRequest): Promise<FailTransfersResponse> {
     try {
       console.log('RGB API Request: POST /failtransfers');
-      const response = await this.api.post<FailTransfersResponse>('/failtransfers', params);
+      const response = await this.api!.post<FailTransfersResponse>('/failtransfers', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -552,7 +564,7 @@ export class RGBApiService {
   public async getAssetMedia(params: GetAssetMediaRequest): Promise<GetAssetMediaResponse> {
     try {
       console.log('RGB API Request: POST /getassetmedia');
-      const response = await this.api.post<GetAssetMediaResponse>('/getassetmedia', params);
+      const response = await this.api!.post<GetAssetMediaResponse>('/getassetmedia', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -565,7 +577,7 @@ export class RGBApiService {
   public async issueAssetCFA(params: IssueAssetCFARequest): Promise<IssueAssetCFAResponse> {
     try {
       console.log('RGB API Request: POST /issueassetcfa');
-      const response = await this.api.post<IssueAssetCFAResponse>('/issueassetcfa', params);
+      const response = await this.api!.post<IssueAssetCFAResponse>('/issueassetcfa', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -578,7 +590,7 @@ export class RGBApiService {
   public async issueAssetUDA(params: IssueAssetUDARequest): Promise<IssueAssetUDAResponse> {
     try {
       console.log('RGB API Request: POST /issueassetuda');
-      const response = await this.api.post<IssueAssetUDAResponse>('/issueassetuda', params);
+      const response = await this.api!.post<IssueAssetUDAResponse>('/issueassetuda', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -593,7 +605,7 @@ export class RGBApiService {
       console.log('RGB API Request: POST /postassetmedia');
       const formData = new FormData();
       formData.append('file', file);
-      const response = await this.api.post<PostAssetMediaResponse>('/postassetmedia', formData, {
+      const response = await this.api!.post<PostAssetMediaResponse>('/postassetmedia', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -610,7 +622,7 @@ export class RGBApiService {
   public async refreshTransfers(params: RefreshRequest): Promise<void> {
     try {
       console.log('RGB API Request: POST /refreshtransfers');
-      await this.api.post('/refreshtransfers', params);
+      await this.api!.post('/refreshtransfers', params);
     } catch (error) {
       return this.handleError(error);
     }
@@ -622,7 +634,7 @@ export class RGBApiService {
   public async getRGBInvoice(params: RgbInvoiceRequest): Promise<RgbInvoiceResponse> {
     try {
       console.log('RGB API Request: POST /rgbinvoice');
-      const response = await this.api.post<RgbInvoiceResponse>('/rgbinvoice', params);
+      const response = await this.api!.post<RgbInvoiceResponse>('/rgbinvoice', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -635,7 +647,7 @@ export class RGBApiService {
   public async sendAsset(params: SendAssetRequest): Promise<SendAssetResponse> {
     try {
       console.log('RGB API Request: POST /sendasset');
-      const response = await this.api.post<SendAssetResponse>('/sendasset', params);
+      const response = await this.api!.post<SendAssetResponse>('/sendasset', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -648,7 +660,7 @@ export class RGBApiService {
   public async sync(): Promise<void> {
     try {
       console.log('RGB API Request: POST /sync');
-      await this.api.post('/sync');
+      await this.api!.post('/sync');
     } catch (error) {
       return this.handleError(error);
     }
@@ -660,7 +672,7 @@ export class RGBApiService {
   public async listChannels(): Promise<ListChannelsResponse> {
     try {
       console.log('RGB API Request: GET /listchannels');
-      const response = await this.api.get<ListChannelsResponse>('/listchannels');
+      const response = await this.api!.get<ListChannelsResponse>('/listchannels');
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -671,6 +683,10 @@ export class RGBApiService {
    * Create a new API instance with the current node configuration
    */
   private createApiInstance(): AxiosInstance {
+    if (!this.config) {
+      throw new Error('Cannot create API instance without config');
+    }
+
     const api = axios.create({
       ...this.config,
       headers: {
@@ -709,6 +725,8 @@ export class RGBApiService {
   public updateConfig(config: RGBApiConfig): void {
     this.config = config;
     this.api = this.createApiInstance();
+    this.isInitialized = true;
+    console.log('RGB API Service config updated:', config);
   }
 }
 

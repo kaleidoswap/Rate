@@ -2,7 +2,6 @@
 
 // store/slices/settingsSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import { updateRGBApiConfig } from '../../services/initializeServices';
 
 interface SettingsState {
   nodeType: 'remote' | 'local';
@@ -20,6 +19,7 @@ interface SettingsState {
   autoLockTimeout: number;
   currency: string;
   network: string;
+  needsApiConfigUpdate: boolean;
 }
 
 const initialState: SettingsState = {
@@ -37,7 +37,8 @@ const initialState: SettingsState = {
   pinEnabled: false,
   autoLockTimeout: 5,
   currency: 'USD',
-  network: 'regtest'
+  network: 'regtest',
+  needsApiConfigUpdate: false
 };
 
 const settingsSlice = createSlice({
@@ -46,11 +47,11 @@ const settingsSlice = createSlice({
   reducers: {
     setNodeType: (state, action: PayloadAction<'remote' | 'local'>) => {
       state.nodeType = action.payload;
-      updateRGBApiConfig();
+      state.needsApiConfigUpdate = true;
     },
     setRemoteNodeUrl: (state, action: PayloadAction<string>) => {
       state.remoteNodeUrl = action.payload;
-      updateRGBApiConfig();
+      state.needsApiConfigUpdate = true;
     },
     setBitcoinUnit: (state, action: PayloadAction<'BTC' | 'sats'>) => {
       state.bitcoinUnit = action.payload;
@@ -87,6 +88,9 @@ const settingsSlice = createSlice({
     },
     setNetwork: (state, action: PayloadAction<string>) => {
       state.network = action.payload;
+    },
+    clearApiConfigUpdateFlag: (state) => {
+      state.needsApiConfigUpdate = false;
     }
   },
 });
@@ -105,7 +109,8 @@ export const {
   setPinEnabled,
   setAutoLockTimeout,
   setCurrency,
-  setNetwork
+  setNetwork,
+  clearApiConfigUpdateFlag
 } = settingsSlice.actions;
 
 export default settingsSlice.reducer;

@@ -12,7 +12,8 @@ export function setApiInstance(instance: RGBApiService | null) {
 }
 
 export function createApiInstance(config: { baseURL: string; timeout: number }): RGBApiService {
-  const instance = RGBApiService.getInstance(config);
+  const instance = RGBApiService.getInstance();
+  instance.initialize(config);
   setApiInstance(instance);
   return instance;
 } 

@@ -1,6 +1,5 @@
 // services/RGBNodeService.ts
 import { Platform } from 'react-native';
-import { store } from '../store';
 
 interface NodeStatus {
   daemonPort: number;
@@ -9,13 +8,19 @@ interface NodeStatus {
   isUnlocked: boolean;
 }
 
+interface NodeSettings {
+  nodePort?: number;
+}
+
+const DEFAULT_NODE_PORT = 3000;
+
 export class RGBNodeService {
   private static instance: RGBNodeService;
   private nodeStatus: NodeStatus;
 
   private constructor() {
     this.nodeStatus = {
-      daemonPort: 3000,
+      daemonPort: DEFAULT_NODE_PORT,
       isRunning: false,
       isInitialized: false,
       isUnlocked: false,
@@ -29,14 +34,13 @@ export class RGBNodeService {
     return RGBNodeService.instance;
   }
 
-  public async initializeNode(): Promise<boolean> {
+  public async initializeNode(settings?: NodeSettings): Promise<boolean> {
     try {
       // For remote node, we just need to verify the connection
-      const settings = store.getState().settings;
       
       // Set the node status based on remote connection
       this.nodeStatus = {
-        daemonPort: settings.nodePort || 3000,
+        daemonPort: settings?.nodePort || DEFAULT_NODE_PORT,
         isRunning: true,
         isInitialized: true,
         isUnlocked: true,

@@ -12,6 +12,9 @@ import assetsReducer from './slices/assetsSlice';
 import transactionsReducer from './slices/transactionsSlice';
 import uiReducer from './slices/uiSlice';
 
+// Import middleware
+import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
+
 // Redux persist configuration
 const persistConfig: PersistConfig<any> = {
   key: 'root',
@@ -57,7 +60,7 @@ export const store = configureStore({
       immutableCheck: {
         ignoredPaths: ['register'],
       },
-    }),
+    }).concat(apiConfigMiddleware),
   devTools: __DEV__,
 });
 
