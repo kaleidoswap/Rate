@@ -17,7 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { DrawerActions } from '@react-navigation/native';
 import { RootState } from '../store';
 import { initializeRGBApiService } from '../services/initializeServices';
 import { setBtcBalance } from '../store/slices/walletSlice';
@@ -342,9 +343,14 @@ export default function DashboardScreen({ navigation }: Props) {
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.headerActionButton}
-                  onPress={() => navigation.openDrawer()}
+                  onPress={() => {
+                    const drawerNavigation = navigation.getParent();
+                    if (drawerNavigation) {
+                      drawerNavigation.dispatch(DrawerActions.openDrawer());
+                    }
+                  }}
                 >
-                  <Ionicons name="menu" size={20} color={theme.colors.text.inverse} />
+                  <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.text.inverse} />
                 </TouchableOpacity>
               </View>
             </View>
@@ -550,21 +556,6 @@ export default function DashboardScreen({ navigation }: Props) {
     </View>
   );
 
-  const renderFloatingAIButton = () => (
-    <TouchableOpacity
-      style={styles.floatingAIButton}
-      onPress={() => navigation.navigate('AIAssistant')}
-      activeOpacity={0.8}
-    >
-      <LinearGradient
-        colors={['#667eea', '#764ba2'] as [string, string]}
-        style={styles.floatingAIGradient}
-      >
-        <Ionicons name="chatbubble-ellipses" size={20} color={theme.colors.text.inverse} />
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-
   if (isConnecting) {
     return (
       <SafeAreaView style={styles.container}>
@@ -638,8 +629,6 @@ export default function DashboardScreen({ navigation }: Props) {
         {/* Bottom padding */}
         <View style={styles.bottomPadding} />
       </ScrollView>
-      
-      {renderFloatingAIButton()}
     </View>
   );
 }

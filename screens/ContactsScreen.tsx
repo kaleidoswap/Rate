@@ -9,6 +9,8 @@ import {
   Alert,
   TextInput,
   FlatList,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -31,6 +33,8 @@ import { theme } from '../theme';
 import { Card, Button } from '../components';
 import { NostrContact } from '../services/NostrService';
 import { nip19 } from 'nostr-tools';
+
+const statusBarHeight = StatusBar.currentHeight || 0;
 
 interface Props {
   navigation: any;
@@ -199,21 +203,25 @@ export default function ContactsScreen({ navigation }: Props) {
         end={{ x: 1, y: 1 }}
         style={styles.headerGradient}
       >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Contacts</Text>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() => setShowAddForm(!showAddForm)}
-          >
-            <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-        </View>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <View style={styles.headerIcon}>
+                <Ionicons name="people" size={24} color="white" />
+              </View>
+              <View style={styles.headerText}>
+                <Text style={styles.headerTitle}>Contacts</Text>
+                <Text style={styles.headerSubtitle}>Lightning Network Connections</Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => setShowAddForm(!showAddForm)}
+            >
+              <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
       </LinearGradient>
     </View>
   );
@@ -462,7 +470,7 @@ export default function ContactsScreen({ navigation }: Props) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {renderHeader()}
       {renderSearchBar()}
       {renderContactControls()}
@@ -488,7 +496,7 @@ export default function ContactsScreen({ navigation }: Props) {
           </View>
         )}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -503,10 +511,14 @@ const styles = StyleSheet.create({
   },
   
   headerGradient: {
-    paddingTop: theme.spacing[2],
+    paddingTop: Platform.OS === 'android' ? statusBarHeight : 0,
     paddingBottom: theme.spacing[6],
     borderBottomLeftRadius: theme.borderRadius['2xl'],
     borderBottomRightRadius: theme.borderRadius['2xl'],
+  },
+  
+  headerSafeArea: {
+    backgroundColor: 'transparent',
   },
   
   header: {
@@ -514,22 +526,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[4],
+    paddingVertical: theme.spacing[4],
   },
   
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  headerLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    flex: 1,
+  },
+  
+  headerIcon: {
+    marginRight: theme.spacing[3],
+  },
+  
+  headerText: {
+    flex: 1,
   },
   
   headerTitle: {
-    fontSize: theme.typography.fontSize.xl,
+    fontSize: 18,
     fontWeight: '700',
     color: theme.colors.text.inverse,
+    marginBottom: 2,
+  },
+  
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
   },
   
   addButton: {

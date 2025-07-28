@@ -235,12 +235,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
       >
         <SafeAreaView style={styles.headerSafeArea}>
           <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.headerBackButton}
-              onPress={() => navigation.openDrawer ? navigation.openDrawer() : navigation.goBack()}
-            >
-              <Ionicons name="menu" size={24} color="white" />
-            </TouchableOpacity>
             <View style={styles.headerContent}>
               <View style={styles.headerIcon}>
                 <Ionicons name="chatbubble" size={24} color="white" />
@@ -250,7 +244,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 <Text style={styles.headerSubtitle}>Bitcoin & Crypto Expert</Text>
               </View>
             </View>
-            <View style={styles.headerRight} />
           </View>
         </SafeAreaView>
       </LinearGradient>
@@ -323,10 +316,7 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[4],
     minHeight: 60,
   },
-  headerBackButton: {
-    padding: theme.spacing[1],
-    marginRight: theme.spacing[3],
-  },
+
   headerContent: {
     flex: 1,
     flexDirection: 'row',
@@ -349,9 +339,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.8)',
     fontWeight: '500',
   },
-  headerRight: {
-    width: 40,
-  },
+
   content: {
     flex: 1,
     backgroundColor: theme.colors.background.secondary,

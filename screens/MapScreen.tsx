@@ -40,12 +40,6 @@ export default function MapScreen({ navigation }: Props) {
       >
         <SafeAreaView style={styles.headerSafeArea}>
           <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.menuButton}
-              onPress={() => navigation.openDrawer()}
-            >
-              <Ionicons name="menu" size={24} color="white" />
-            </TouchableOpacity>
             <View style={styles.headerContent}>
               <View style={styles.headerIcon}>
                 <Ionicons name="map" size={24} color={theme.colors.text.inverse} />
@@ -55,7 +49,6 @@ export default function MapScreen({ navigation }: Props) {
                 <Text style={styles.headerSubtitle}>Discover Bitcoin-accepting venues worldwide</Text>
               </View>
             </View>
-            <View style={styles.headerRight} />
           </View>
         </SafeAreaView>
       </LinearGradient>
@@ -104,11 +97,6 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[3],
   },
   
-  menuButton: {
-    padding: theme.spacing[2],
-    marginRight: theme.spacing[3],
-  },
-  
   headerContent: {
     flex: 1,
     flexDirection: 'row',
@@ -136,9 +124,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  headerRight: {
-    width: 40,
-  },
+
   
   mapContainer: {
     flex: 1,

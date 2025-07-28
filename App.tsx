@@ -1,4 +1,5 @@
 // App.tsx
+import 'react-native-gesture-handler';
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
@@ -158,8 +159,6 @@ function DrawerNavigator() {
           backgroundColor: theme.colors.surface.primary,
           width: 280,
         },
-        drawerActiveTintColor: theme.colors.primary[500],
-        drawerInactiveTintColor: theme.colors.text.secondary,
         swipeEnabled: true,
         swipeEdgeWidth: 50,
       }}
