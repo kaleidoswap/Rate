@@ -599,7 +599,7 @@ export class RGBApiService {
         amount_msat: params.amount_msat,
         asset_id: params.asset_id,
         asset_amount: params.asset_amount,
-        duration_seconds: params.duration_seconds || 3600,
+        expiry_sec: params.duration_seconds || 3600,
         description: params.description || 'Lightning payment',
       });
       return response.data;

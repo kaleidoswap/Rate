@@ -253,76 +253,159 @@ export default function DashboardScreen({ navigation }: Props) {
 
   const totalBalance = offChainBalance + getTotalBtcBalance();
 
+  // Get current hour to determine greeting
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  };
+
   const renderHeader = () => (
-    <LinearGradient
-      colors={['#667eea', '#764ba2']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.headerGradient}
-    >
-      <View style={styles.header}>
+    <View style={styles.headerContainer}>
+      <LinearGradient
+        colors={['#4338ca', '#7c3aed'] as [string, string]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
         <View style={styles.headerContent}>
-          <View style={styles.headerText}>
-            <Text style={styles.greeting}>Good morning</Text>
-            <Text style={styles.headerTitle}>Rate Wallet</Text>
+          <View style={styles.headerTop}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.greeting}>{getGreeting()}</Text>
+              <Text style={styles.headerTitle}>Rate Wallet</Text>
+            </View>
+            <View style={styles.headerActions}>
+              <TouchableOpacity 
+                style={styles.headerActionButton}
+                onPress={() => navigation.navigate('Notifications')}
+              >
+                <Ionicons name="notifications-outline" size={20} color={theme.colors.text.inverse} />
+                <View style={styles.notificationDot} />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.headerActionButton}
+                onPress={() => navigation.navigate('Settings')}
+              >
+                <Ionicons name="settings-outline" size={20} color={theme.colors.text.inverse} />
+              </TouchableOpacity>
+            </View>
           </View>
-          <TouchableOpacity 
-            style={styles.settingsButton}
-            onPress={() => navigation.navigate('Settings')}
-          >
-            <Ionicons name="settings-outline" size={20} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
+
+          {/* Enhanced Balance Display */}
+          <View style={styles.balanceSection}>
+            <View style={styles.totalBalanceContainer}>
+              <Text style={styles.balanceLabel}>Total Portfolio</Text>
+              <View style={styles.balanceRow}>
+                <Text style={styles.balanceAmount}>
+                  {formatSatoshis(totalBalance)}
+                </Text>
+                <Text style={styles.balanceCurrency}>BTC</Text>
+              </View>
+              <Text style={styles.balanceUsd}>
+                ${formatUSD(totalBalance)} USD
+              </Text>
+              
+              {/* Price Change Indicator */}
+              <View style={styles.priceChangeContainer}>
+                <Ionicons name="trending-up" size={12} color="#10b981" />
+                <Text style={styles.priceChange}>+2.4% today</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.refreshButton} 
+              onPress={onRefresh}
+              disabled={refreshing}
+            >
+              <Ionicons 
+                name="refresh" 
+                size={16} 
+                color={theme.colors.text.inverse} 
+                style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
+              />
+            </TouchableOpacity>
+          </View>
+
+          {/* Balance Breakdown */}
+          <View style={styles.balanceBreakdown}>
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownIcon}>
+                <Ionicons name="wallet" size={14} color="#10b981" />
+              </View>
+              <View style={styles.breakdownText}>
+                <Text style={styles.breakdownLabel}>On-chain</Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSatoshis(getTotalBtcBalance())}
+                </Text>
+              </View>
+            </View>
+            
+            <View style={styles.breakdownDivider} />
+            
+            <View style={styles.breakdownItem}>
+              <View style={styles.breakdownIcon}>
+                <Ionicons name="flash" size={14} color="#f59e0b" />
+              </View>
+              <View style={styles.breakdownText}>
+                <Text style={styles.breakdownLabel}>Lightning</Text>
+                <Text style={styles.breakdownValue}>
+                  {formatSatoshis(offChainBalance)}
+                </Text>
+              </View>
+            </View>
+          </View>
         </View>
-      </View>
-    </LinearGradient>
+      </LinearGradient>
+    </View>
   );
 
-  const renderBalanceCard = () => (
-    <Card variant="elevated" style={styles.balanceCard}>
-      <View style={styles.balanceHeader}>
-        <Text style={styles.balanceLabel}>Total Balance</Text>
-        <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-          <Ionicons name="refresh" size={18} color={theme.colors.gray[500]} />
+  const renderActionButtons = () => (
+    <View style={styles.actionButtonsContainer}>
+      <View style={styles.actionButtons}>
+        <TouchableOpacity 
+          style={styles.actionButton}
+          onPress={() => navigation.navigate('Receive')}
+          activeOpacity={0.7}
+        >
+          <LinearGradient
+            colors={['#10b981', '#059669'] as [string, string]}
+            style={styles.actionButtonGradient}
+          >
+            <Ionicons name="arrow-down" size={20} color="white" />
+          </LinearGradient>
+          <Text style={styles.actionButtonText}>Receive</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.scanButton}
+          onPress={() => navigation.navigate('QRScanner')}
+          activeOpacity={0.7}
+        >
+          <LinearGradient
+            colors={['#4338ca', '#7c3aed'] as [string, string]}
+            style={styles.scanButtonGradient}
+          >
+            <Ionicons name="qr-code" size={24} color="white" />
+          </LinearGradient>
+          <Text style={styles.scanButtonText}>Scan</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={styles.actionButton}
+          onPress={() => navigation.navigate('Send')}
+          activeOpacity={0.7}
+        >
+          <LinearGradient
+            colors={['#ef4444', '#dc2626'] as [string, string]}
+            style={styles.actionButtonGradient}
+          >
+            <Ionicons name="arrow-up" size={20} color="white" />
+          </LinearGradient>
+          <Text style={styles.actionButtonText}>Send</Text>
         </TouchableOpacity>
       </View>
-      
-      <View style={styles.balanceAmountContainer}>
-        <Text style={styles.balanceAmount}>
-          {formatSatoshis(totalBalance)}
-        </Text>
-        <Text style={styles.balanceCurrency}>BTC</Text>
-      </View>
-      
-      <Text style={styles.balanceUsd}>
-        ${formatUSD(totalBalance)} USD
-      </Text>
-      
-      <View style={styles.balanceBreakdown}>
-        <View style={styles.balanceItem}>
-          <View style={styles.balanceIconContainer}>
-            <Ionicons name="wallet" size={14} color={theme.colors.primary[500]} />
-          </View>
-          <View style={styles.balanceItemText}>
-            <Text style={styles.balanceItemLabel}>On-chain</Text>
-            <Text style={styles.balanceItemValue}>
-              {formatSatoshis(getTotalBtcBalance())} BTC
-            </Text>
-          </View>
-        </View>
-        
-        <View style={styles.balanceItem}>
-          <View style={styles.balanceIconContainer}>
-            <Ionicons name="flash" size={14} color={theme.colors.warning[500]} />
-          </View>
-          <View style={styles.balanceItemText}>
-            <Text style={styles.balanceItemLabel}>Lightning</Text>
-            <Text style={styles.balanceItemValue}>
-              {formatSatoshis(offChainBalance)} BTC
-            </Text>
-          </View>
-        </View>
-      </View>
-    </Card>
+    </View>
   );
 
   const renderRGBAssets = () => (
@@ -413,50 +496,12 @@ export default function DashboardScreen({ navigation }: Props) {
       activeOpacity={0.8}
     >
       <LinearGradient
-        colors={['#667eea', '#764ba2']}
+        colors={['#667eea', '#764ba2'] as [string, string]}
         style={styles.floatingAIGradient}
       >
         <Ionicons name="chatbubble-ellipses" size={20} color={theme.colors.text.inverse} />
       </LinearGradient>
     </TouchableOpacity>
-  );
-
-  const renderCompactActions = () => (
-    <View style={styles.compactActionsContainer}>
-      <View style={styles.compactActions}>
-        <TouchableOpacity 
-          style={styles.compactActionButton}
-          onPress={() => navigation.navigate('Receive')}
-        >
-          <View style={[styles.compactActionIcon, styles.receiveIcon]}>
-            <Ionicons name="arrow-down" size={18} color={theme.colors.success[500]} />
-          </View>
-          <Text style={styles.compactActionText}>Receive</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.scanActionButton}
-          onPress={() => navigation.navigate('QRScanner')}
-        >
-          <LinearGradient
-            colors={['#667eea', '#764ba2']}
-            style={styles.scanActionGradient}
-          >
-            <Ionicons name="camera" size={22} color={theme.colors.text.inverse} />
-          </LinearGradient>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.compactActionButton}
-          onPress={() => navigation.navigate('Send')}
-        >
-          <View style={[styles.compactActionIcon, styles.sendIcon]}>
-            <Ionicons name="arrow-up" size={18} color={theme.colors.text.inverse} />
-          </View>
-          <Text style={styles.compactActionText}>Send</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
   );
 
   if (isConnecting) {
@@ -512,6 +557,8 @@ export default function DashboardScreen({ navigation }: Props) {
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
+      {renderActionButtons()}
+      
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
@@ -524,16 +571,14 @@ export default function DashboardScreen({ navigation }: Props) {
         }
         showsVerticalScrollIndicator={false}
       >
-        {renderBalanceCard()}
         {renderRGBAssets()}
         {renderQuickStats()}
         
-        {/* Bottom padding for compact actions */}
+        {/* Bottom padding */}
         <View style={styles.bottomPadding} />
       </ScrollView>
       
       {renderFloatingAIButton()}
-      {renderCompactActions()}
     </SafeAreaView>
   );
 }
@@ -549,7 +594,7 @@ const styles = StyleSheet.create({
   },
   
   scrollContent: {
-    paddingBottom: 80, // Space for compact actions
+    paddingBottom: 20,
   },
   
   centerContent: {
@@ -559,171 +604,267 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing[5],
   },
   
-  // Smaller Header
-  headerGradient: {
-    paddingBottom: theme.spacing[4], // Reduced from spacing[8]
+  // Enhanced Header
+  headerContainer: {
+    marginBottom: theme.spacing[4],
   },
   
-  header: {
-    paddingTop: theme.spacing[2], // Reduced from spacing[4]
-    paddingHorizontal: theme.spacing[5],
-    paddingBottom: theme.spacing[3], // Added bottom padding
+  headerGradient: {
+    paddingTop: theme.spacing[2],
+    paddingBottom: theme.spacing[6],
+    borderBottomLeftRadius: theme.borderRadius['2xl'],
+    borderBottomRightRadius: theme.borderRadius['2xl'],
   },
   
   headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center', // Changed to center for better alignment
+    paddingHorizontal: theme.spacing[5],
   },
   
-  headerText: {
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: theme.spacing[6],
+  },
+  
+  headerLeft: {
     flex: 1,
   },
   
   greeting: {
-    fontSize: theme.typography.fontSize.xs, // Smaller
-    color: theme.colors.text.inverse,
-    opacity: 0.8,
+    fontSize: theme.typography.fontSize.sm,
+    color: 'rgba(255, 255, 255, 0.8)',
     marginBottom: theme.spacing[1],
+    fontWeight: '500',
   },
   
   headerTitle: {
-    fontSize: theme.typography.fontSize['2xl'], // Smaller from 3xl
+    fontSize: theme.typography.fontSize['3xl'],
     fontWeight: '700',
     color: theme.colors.text.inverse,
   },
   
-  settingsButton: {
-    width: 36, // Smaller
-    height: 36,
+  headerActions: {
+    flexDirection: 'row',
+    gap: theme.spacing[2],
+  },
+  
+  headerActionButton: {
+    width: 40,
+    height: 40,
     borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
   },
   
-  // Always visible balance card
-  balanceCard: {
-    marginHorizontal: theme.spacing[5],
-    marginTop: theme.spacing[5], // Always visible, no overlap
-    marginBottom: theme.spacing[6],
+  notificationDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#ef4444',
   },
   
-  balanceHeader: {
+  balanceSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[4], // Reduced
+    alignItems: 'flex-start',
+    marginBottom: theme.spacing[5],
+  },
+  
+  totalBalanceContainer: {
+    flex: 1,
   },
   
   balanceLabel: {
-    fontSize: theme.typography.fontSize.sm, // Smaller
-    color: theme.colors.text.secondary,
+    fontSize: theme.typography.fontSize.sm,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: theme.spacing[2],
+    fontWeight: '500',
+  },
+  
+  balanceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    marginBottom: theme.spacing[1],
+  },
+  
+  balanceAmount: {
+    fontSize: theme.typography.fontSize['4xl'],
+    fontWeight: '700',
+    color: theme.colors.text.inverse,
+    marginRight: theme.spacing[2],
+  },
+  
+  balanceCurrency: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '600',
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  
+  balanceUsd: {
+    fontSize: theme.typography.fontSize.lg,
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginBottom: theme.spacing[2],
+  },
+  
+  priceChangeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[1],
+  },
+  
+  priceChange: {
+    fontSize: theme.typography.fontSize.sm,
+    color: '#10b981',
     fontWeight: '500',
   },
   
   refreshButton: {
-    width: 28, // Smaller
-    height: 28,
+    width: 36,
+    height: 36,
     borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.gray[100],
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  
-  balanceAmountContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[2],
-  },
-  
-  balanceAmount: {
-    fontSize: theme.typography.fontSize['3xl'], // Smaller from 4xl
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-  
-  balanceCurrency: {
-    fontSize: theme.typography.fontSize.base, // Smaller
-    fontWeight: '600',
-    color: theme.colors.text.secondary,
-    marginLeft: theme.spacing[2],
-  },
-  
-  balanceUsd: {
-    fontSize: theme.typography.fontSize.base, // Smaller
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing[4], // Reduced
   },
   
   balanceBreakdown: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingTop: theme.spacing[4], // Reduced
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border.light,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[4],
   },
   
-  balanceItem: {
+  breakdownItem: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
   
-  balanceIconContainer: {
-    width: 28, // Smaller
-    height: 28,
+  breakdownIcon: {
+    width: 32,
+    height: 32,
     borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.gray[100],
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: theme.spacing[2], // Reduced
+    marginRight: theme.spacing[3],
   },
   
-  balanceItemText: {
+  breakdownText: {
     flex: 1,
   },
   
-  balanceItemLabel: {
-    fontSize: theme.typography.fontSize.xs, // Smaller
-    color: theme.colors.text.secondary,
+  breakdownLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    color: 'rgba(255, 255, 255, 0.7)',
     marginBottom: theme.spacing[1],
   },
   
-  balanceItemValue: {
-    fontSize: theme.typography.fontSize.xs, // Smaller
+  breakdownValue: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.inverse,
+  },
+  
+  breakdownDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    marginHorizontal: theme.spacing[4],
+  },
+  
+  // Enhanced Action Buttons
+  actionButtonsContainer: {
+    paddingHorizontal: theme.spacing[5],
+    marginBottom: theme.spacing[6],
+    marginTop: -theme.spacing[4], // Overlap with header
+  },
+  
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[4],
+    ...theme.shadows.lg,
+  },
+  
+  actionButton: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  
+  actionButtonGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing[2],
+    ...theme.shadows.md,
+  },
+  
+  actionButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  
+  scanButton: {
+    alignItems: 'center',
+    marginHorizontal: theme.spacing[4],
+  },
+  
+  scanButtonGradient: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing[2],
+    ...theme.shadows.lg,
+  },
+  
+  scanButtonText: {
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
   },
   
   section: {
     paddingHorizontal: theme.spacing[5],
-    marginBottom: theme.spacing[6], // Reduced
+    marginBottom: theme.spacing[6],
   },
   
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing[3], // Reduced
+    marginBottom: theme.spacing[4],
   },
   
   sectionTitle: {
-    fontSize: theme.typography.fontSize.lg, // Smaller
+    fontSize: theme.typography.fontSize.xl,
     fontWeight: '700',
     color: theme.colors.text.primary,
   },
   
   sectionAction: {
-    fontSize: theme.typography.fontSize.xs, // Smaller
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
     color: theme.colors.primary[500],
   },
   
   emptyCard: {
-    paddingVertical: theme.spacing[6], // Reduced
+    paddingVertical: theme.spacing[8],
   },
   
   emptyState: {
@@ -731,31 +872,31 @@ const styles = StyleSheet.create({
   },
   
   emptyIcon: {
-    width: 56, // Smaller
-    height: 56,
+    width: 64,
+    height: 64,
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.gray[100],
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: theme.spacing[3],
+    marginBottom: theme.spacing[4],
   },
   
   emptyTitle: {
-    fontSize: theme.typography.fontSize.base, // Smaller
+    fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
     color: theme.colors.text.primary,
     marginBottom: theme.spacing[2],
   },
   
   emptyDescription: {
-    fontSize: theme.typography.fontSize.xs, // Smaller
+    fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     textAlign: 'center',
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[5],
   },
   
   emptyButton: {
-    paddingHorizontal: theme.spacing[4], // Reduced
+    paddingHorizontal: theme.spacing[6],
   },
   
   assetsScroll: {
@@ -763,13 +904,14 @@ const styles = StyleSheet.create({
   },
   
   assetCard: {
-    width: 120, // Smaller
+    width: 140,
     backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3], // Reduced
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[4],
     marginLeft: theme.spacing[5],
     borderWidth: 1,
     borderColor: theme.colors.border.light,
+    ...theme.shadows.sm,
   },
   
   firstAssetCard: {
@@ -784,25 +926,25 @@ const styles = StyleSheet.create({
   },
   
   assetTicker: {
-    fontSize: theme.typography.fontSize.sm, // Smaller
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '700',
     color: theme.colors.primary[500],
   },
   
   assetName: {
-    fontSize: 10, // Smaller
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.secondary,
     marginBottom: theme.spacing[2],
   },
   
   assetBalance: {
-    fontSize: theme.typography.fontSize.base, // Smaller
+    fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.text.primary,
   },
   
   statsCard: {
-    padding: theme.spacing[4], // Reduced
+    padding: theme.spacing[5],
   },
   
   statsGrid: {
@@ -812,113 +954,45 @@ const styles = StyleSheet.create({
   
   statItem: {
     width: '50%',
-    marginBottom: theme.spacing[3], // Reduced
+    marginBottom: theme.spacing[4],
   },
   
   statLabel: {
-    fontSize: theme.typography.fontSize.xs, // Smaller
+    fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     marginBottom: theme.spacing[1],
   },
   
   statValue: {
-    fontSize: theme.typography.fontSize.sm, // Smaller
+    fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
     color: theme.colors.text.primary,
   },
   
-  // Smaller Floating AI Button
   floatingAIButton: {
     position: 'absolute',
-    right: theme.spacing[4],
-    bottom: 100, // Above compact actions
-    width: 48, // Smaller
-    height: 48,
-    borderRadius: 24,
-    elevation: 6, // Reduced
+    right: theme.spacing[5],
+    bottom: theme.spacing[5],
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   
   floatingAIGradient: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  
-  // Compact Actions
-  compactActionsContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(255, 255, 255, 0.98)',
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border.light,
-    paddingBottom: theme.spacing[6], // Safe area
-  },
-  
-  compactActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[5],
-  },
-  
-  compactActionButton: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  
-  compactActionIcon: {
-    width: 36, // Smaller
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[1],
-  },
-  
-  sendIcon: {
-    backgroundColor: theme.colors.primary[500],
-  },
-  
-  receiveIcon: {
-    backgroundColor: theme.colors.success[50],
-    borderWidth: 1.5,
-    borderColor: theme.colors.success[500],
-  },
-  
-  compactActionText: {
-    fontSize: 11, // Smaller
-    fontWeight: '500',
-    color: theme.colors.text.primary,
-  },
-  
-  scanActionButton: {
-    marginHorizontal: theme.spacing[4],
-  },
-  
-  scanActionGradient: {
-    width: 48, // Smaller
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 3,
   },
   
   bottomPadding: {
-    height: theme.spacing[2],
+    height: theme.spacing[4],
   },
   
   loadingContainer: {
