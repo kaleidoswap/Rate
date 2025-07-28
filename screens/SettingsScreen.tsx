@@ -95,13 +95,24 @@ export default function SettingsScreen({ navigation }: Props) {
     
     if (enabled) {
       Alert.alert(
-        'Nostr Wallet Connect',
-        'This feature is coming soon! It will allow you to connect external wallets via NWC protocol.',
-        [{ text: 'OK' }]
+        'Enable Nostr Wallet Connect',
+        'Go to your Nostr profile settings to generate a connection string and configure NWC.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Go to Profile',
+            onPress: () => {
+              dispatch(setWalletConnectEnabled(enabled));
+              // Navigate to nostr profile (this would need navigation prop passed to settings)
+              // For now, just enable it
+            }
+          }
+        ]
       );
+    } else {
+      // Disable directly
+      dispatch(setWalletConnectEnabled(enabled));
     }
-    
-    dispatch(setWalletConnectEnabled(enabled));
   };
 
   return (
@@ -148,7 +159,7 @@ export default function SettingsScreen({ navigation }: Props) {
                   <View style={styles.featureInfo}>
                     <Text style={styles.featureTitle}>Nostr Wallet Connect</Text>
                     <Text style={styles.featureDescription}>
-                      Connect external wallets via NWC protocol (Coming Soon)
+                      Share your wallet with other applications via NWC protocol
                     </Text>
                   </View>
                   <Switch
@@ -161,11 +172,14 @@ export default function SettingsScreen({ navigation }: Props) {
                 {nostrState.walletConnectEnabled && (
                   <View style={styles.walletConnectInfo}>
                     <Text style={styles.walletConnectInfoText}>
-                      🚧 This feature is under development. It will allow you to:
+                      ✅ Nostr Wallet Connect is active. You can now:
                     </Text>
-                    <Text style={styles.walletConnectFeature}>• Connect to Alby, Mutiny, and other NWC wallets</Text>
-                    <Text style={styles.walletConnectFeature}>• Make Lightning payments through connected wallets</Text>
-                    <Text style={styles.walletConnectFeature}>• Manage multiple wallet connections</Text>
+                    <Text style={styles.walletConnectFeature}>• Generate connection strings for other apps</Text>
+                    <Text style={styles.walletConnectFeature}>• Allow external wallets to make payments</Text>
+                    <Text style={styles.walletConnectFeature}>• Manage NWC connections in your Nostr profile</Text>
+                    {nostrState.nwcConnectionString && (
+                      <Text style={styles.walletConnectFeature}>• Active connection string available</Text>
+                    )}
                   </View>
                 )}
               </View>

@@ -152,9 +152,17 @@ export class NWCService {
 
       // Generate wallet keypair for NWC
       const randomArray = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
-        randomArray[i] = Math.floor(Math.random() * 256);
+      
+      // Use crypto.getRandomValues for secure random generation
+      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+        crypto.getRandomValues(randomArray);
+      } else {
+        // Fallback to Math.random if crypto is not available
+        for (let i = 0; i < 32; i++) {
+          randomArray[i] = Math.floor(Math.random() * 256);
+        }
       }
+      
       const privateKey = Array.from(randomArray, byte => byte.toString(16).padStart(2, '0')).join('');
       this.walletSigner = new NDKPrivateKeySigner(privateKey);
       this.ndk.signer = this.walletSigner;
@@ -226,7 +234,21 @@ export class NWCService {
         randomArray[i] = Math.floor(Math.random() * 256);
       }
       const clientSecret = Array.from(randomArray, byte => byte.toString(16).padStart(2, '0')).join('');
-      const clientPubkey = getPublicKey(clientSecret);
+      
+      // Handle Buffer conversion more safely
+      let clientSecretUint8: Uint8Array;
+      if (typeof Buffer !== 'undefined') {
+        clientSecretUint8 = new Uint8Array(Buffer.from(clientSecret, 'hex'));
+      } else {
+        // Fallback: convert hex string to Uint8Array manually
+        const bytes = [];
+        for (let i = 0; i < clientSecret.length; i += 2) {
+          bytes.push(parseInt(clientSecret.substr(i, 2), 16));
+        }
+        clientSecretUint8 = new Uint8Array(bytes);
+      }
+      
+      const clientPubkey = getPublicKey(clientSecretUint8);
       const walletPubkey = await this.walletSigner.user().then(u => u.pubkey);
 
       // Store connection
@@ -583,7 +605,7 @@ export class NWCService {
         throw new Error('RGB API service not available');
       }
 
-      const balance = await this.rgbApiService.getBtcBalance({ skip_sync: false });
+      const balance = await this.rgbApiService.getBtcBalance();
 
       return {
         result_type: NWC_METHODS.GET_BALANCE,

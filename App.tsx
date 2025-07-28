@@ -4,6 +4,20 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+
+type RootStackParamList = {
+  InitialLoad: undefined;
+  WalletSetup: undefined;
+  Dashboard: undefined;
+  Send: { selectedAsset?: any } | undefined;
+  Receive: { selectedAsset?: any } | undefined;
+  QRScanner: undefined;
+  AIAssistant: undefined;
+  Assets: undefined;
+  Swap: undefined;
+  NostrContacts: undefined;
+  AssetDetail: { asset: any };
+};
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +39,7 @@ import MapScreen from './screens/MapScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrContactsScreen from './screens/NostrContactsScreen';
+import AssetDetailScreen from './screens/AssetDetailScreen';
 
 type TabBarIconProps = {
   focused: boolean;
@@ -32,7 +47,7 @@ type TabBarIconProps = {
   size: number;
 };
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
 
 function DashboardTabs() {
@@ -266,6 +281,14 @@ function AppNavigator() {
         <Stack.Screen 
           name="NostrContacts" 
           component={NostrContactsScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen 
+          name="AssetDetail" 
+          component={AssetDetailScreen}
           options={{
             presentation: 'modal',
             headerShown: false,

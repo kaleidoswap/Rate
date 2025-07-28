@@ -8,12 +8,16 @@ import {
   RefreshControl,
   ScrollView,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
+import { Ionicons } from '@expo/vector-icons';
 import { AppDispatch, RootState } from '../store';
 import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useAssetIcon } from '../utils';
+import { theme } from '../theme';
 
 interface Props {
   navigation: any;
@@ -24,6 +28,25 @@ export default function AssetsScreen({ navigation }: Props) {
   const { activeWallet } = useSelector((state: RootState) => state.wallet);
   const { rgbAssets, isLoading } = useSelector((state: RootState) => state.assets);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Asset Icon Component
+  const AssetIcon = ({ ticker }: { ticker: string }) => {
+    const { iconUrl } = useAssetIcon(ticker);
+    
+    if (iconUrl) {
+      return (
+        <View style={styles.assetIconContainer}>
+          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.assetIconContainer}>
+        <Ionicons name="diamond" size={24} color={theme.colors.primary[500]} />
+      </View>
+    );
+  };
 
   useEffect(() => {
     if (activeWallet) {
@@ -56,8 +79,9 @@ export default function AssetsScreen({ navigation }: Props) {
     <TouchableOpacity
       key={asset.asset_id}
       style={styles.assetItem}
-      onPress={() => navigation.navigate('AssetDetails', { asset })}
+      onPress={() => navigation.navigate('AssetDetail', { asset })}
     >
+      <AssetIcon ticker={asset.ticker} />
       <View style={styles.assetInfo}>
         <Text style={styles.assetName}>{asset.name}</Text>
         <Text style={styles.assetTicker}>{asset.ticker}</Text>
@@ -140,6 +164,20 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
+  },
+  assetIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.borderRadius?.lg || 8,
+    backgroundColor: theme.colors?.gray?.[100] || '#f5f5f5',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  assetIconImage: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
   },
   assetInfo: {
     flex: 1,

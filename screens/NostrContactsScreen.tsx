@@ -4,14 +4,13 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
   Alert,
   TextInput,
-  FlatList,
+  VirtualizedList,
   RefreshControl,
   ActivityIndicator,
-  Share,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -21,10 +20,7 @@ import { RootState } from '../store';
 import { 
   loadContactList, 
   followUser, 
-  unfollowUser, 
-  getUserInfo,
-  setShowContactSync,
-  clearContactsError,
+  unfollowUser,
 } from '../store/slices/nostrSlice';
 import { theme } from '../theme';
 import { Card, Button, Input } from '../components';
@@ -35,6 +31,8 @@ interface Props {
   navigation: any;
 }
 
+const CONTACTS_PER_PAGE = 20;
+
 export default function NostrContactsScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const nostrState = useSelector((state: RootState) => state.nostr);
@@ -44,28 +42,30 @@ export default function NostrContactsScreen({ navigation }: Props) {
   const [newContactName, setNewContactName] = useState('');
   const [isAddingContact, setIsAddingContact] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const {
     contacts,
     isContactsLoading,
     contactsError,
     isConnected,
-    contactsLastUpdated,
   } = nostrState;
 
   // Filter contacts based on search query
-  const filteredContacts = contacts.filter(contact => {
+  const filteredContacts = contacts.filter((contact: NostrContact) => {
     const profile = contact.profile;
     const searchLower = searchQuery.toLowerCase();
     
     return (
       (profile?.name || '').toLowerCase().includes(searchLower) ||
       (profile?.display_name || '').toLowerCase().includes(searchLower) ||
-      (profile?.nip05 || '').toLowerCase().includes(searchLower) ||
-      (contact.petname || '').toLowerCase().includes(searchLower) ||
-      contact.pubkey.toLowerCase().includes(searchLower)
+      (profile?.lud16 || '').toLowerCase().includes(searchLower)
     );
   });
+
+  // Get paginated contacts
+  const paginatedContacts = filteredContacts.slice(0, (page + 1) * CONTACTS_PER_PAGE);
 
   useEffect(() => {
     if (isConnected && contacts.length === 0) {
@@ -80,6 +80,7 @@ export default function NostrContactsScreen({ navigation }: Props) {
     }
 
     setRefreshing(true);
+    setPage(0);
     try {
       await dispatch(loadContactList() as any);
     } catch (error) {
@@ -88,6 +89,14 @@ export default function NostrContactsScreen({ navigation }: Props) {
       setRefreshing(false);
     }
   }, [dispatch, isConnected]);
+
+  const loadMoreContacts = () => {
+    if (loadingMore || paginatedContacts.length >= filteredContacts.length) return;
+    
+    setLoadingMore(true);
+    setPage(prevPage => prevPage + 1);
+    setLoadingMore(false);
+  };
 
   const parseContactInput = (input: string): { pubkey: string; error?: string } => {
     const trimmed = input.trim();
@@ -125,7 +134,7 @@ export default function NostrContactsScreen({ navigation }: Props) {
     }
 
     // Check if already following
-    if (contacts.some(c => c.pubkey === pubkey)) {
+    if (contacts.some((c: NostrContact) => c.pubkey === pubkey)) {
       Alert.alert('Already Following', 'You are already following this user');
       return;
     }
@@ -137,7 +146,6 @@ export default function NostrContactsScreen({ navigation }: Props) {
         petname: newContactName.trim() || undefined 
       }) as any);
       
-      // Refresh contact list to show the new contact
       await dispatch(loadContactList() as any);
       
       setShowAddForm(false);
@@ -149,44 +157,6 @@ export default function NostrContactsScreen({ navigation }: Props) {
       Alert.alert('Error', 'Failed to add contact');
     } finally {
       setIsAddingContact(false);
-    }
-  };
-
-  const handleUnfollow = (contact: NostrContact) => {
-    const displayName = contact.profile?.display_name || contact.profile?.name || contact.petname || 'this user';
-    
-    Alert.alert(
-      'Unfollow User',
-      `Are you sure you want to unfollow ${displayName}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Unfollow', 
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await dispatch(unfollowUser(contact.pubkey) as any);
-              Alert.alert('Success', 'User unfollowed');
-            } catch (error) {
-              Alert.alert('Error', 'Failed to unfollow user');
-            }
-          }
-        }
-      ]
-    );
-  };
-
-  const handleShareContact = async (contact: NostrContact) => {
-    try {
-      const npub = nip19.npubEncode(contact.pubkey);
-      const displayName = contact.profile?.display_name || contact.profile?.name || 'Nostr user';
-      
-      await Share.share({
-        message: `Check out ${displayName} on Nostr: ${npub}`,
-        title: 'Share Nostr Contact',
-      });
-    } catch (error) {
-      console.error('Failed to share contact:', error);
     }
   };
 
@@ -232,60 +202,6 @@ export default function NostrContactsScreen({ navigation }: Props) {
       </LinearGradient>
     </View>
   );
-
-  const renderConnectionStatus = () => {
-    if (!isConnected) {
-      return (
-        <Card style={styles.statusCard}>
-          <View style={styles.statusContent}>
-            <Ionicons name="warning-outline" size={24} color={theme.colors.warning[500]} />
-            <View style={styles.statusText}>
-              <Text style={styles.statusTitle}>Not Connected</Text>
-              <Text style={styles.statusDescription}>
-                Connect to Nostr in Settings to sync your contacts
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.statusButton}
-              onPress={() => navigation.navigate('Settings')}
-            >
-              <Text style={styles.statusButtonText}>Go to Settings</Text>
-            </TouchableOpacity>
-          </View>
-        </Card>
-      );
-    }
-
-    return null;
-  };
-
-  const renderSyncStatus = () => {
-    if (!isConnected) return null;
-
-    const lastUpdated = contactsLastUpdated 
-      ? new Date(contactsLastUpdated).toLocaleTimeString()
-      : 'Never';
-
-    return (
-      <View style={styles.syncStatus}>
-        <Text style={styles.syncStatusText}>
-          Last synced: {lastUpdated}
-        </Text>
-        <TouchableOpacity 
-          style={styles.syncButton}
-          onPress={handleRefresh}
-          disabled={isContactsLoading}
-        >
-          <Ionicons 
-            name="refresh" 
-            size={16} 
-            color={theme.colors.primary[500]} 
-          />
-          <Text style={styles.syncButtonText}>Sync</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  };
 
   const renderSearchBar = () => (
     <View style={styles.searchContainer}>
@@ -341,7 +257,7 @@ export default function NostrContactsScreen({ navigation }: Props) {
           <Button
             title="Cancel"
             onPress={() => setShowAddForm(false)}
-            variant="outline"
+            variant="secondary"
             style={styles.addFormCancelButton}
           />
           <Button
@@ -359,63 +275,48 @@ export default function NostrContactsScreen({ navigation }: Props) {
   const renderContactItem = ({ item: contact }: { item: NostrContact }) => {
     const profile = contact.profile;
     const displayName = profile?.display_name || profile?.name || contact.petname || 'Anonymous';
-    const npub = nip19.npubEncode(contact.pubkey);
-    const hasLightning = !!(profile?.lud16 || profile?.lud06);
+    const lightningAddress = profile?.lud16 || profile?.lud06;
+    const avatarUrl = profile?.picture || `https://robohash.org/${contact.pubkey}?set=set3&size=96x96`;
 
     return (
-      <Card style={styles.contactCard}>
-        <View style={styles.contactHeader}>
+      <TouchableOpacity 
+        style={styles.contactCard}
+        onPress={() => lightningAddress && handleSendToContact(contact)}
+      >
+        <View style={styles.contactContent}>
           <View style={styles.contactAvatar}>
-            {profile?.picture ? (
-              <Text>🖼️</Text>
-            ) : (
-              <Ionicons name="person" size={24} color={theme.colors.text.secondary} />
-            )}
+            <Image 
+              source={{ uri: avatarUrl }} 
+              style={styles.avatarImage}
+              defaultSource={require('../assets/default-avatar.png')}
+            />
           </View>
           
           <View style={styles.contactInfo}>
             <Text style={styles.contactName}>{displayName}</Text>
-            {profile?.nip05 && (
-              <Text style={styles.contactNip05}>✓ {profile.nip05}</Text>
-            )}
-            <Text style={styles.contactPubkey} numberOfLines={1}>
-              {npub.slice(0, 16)}...{npub.slice(-8)}
-            </Text>
-            {profile?.about && (
-              <Text style={styles.contactAbout} numberOfLines={2}>
-                {profile.about}
+            {lightningAddress && (
+              <Text style={styles.lightningAddress} numberOfLines={1}>
+                <Ionicons name="flash" size={12} color={theme.colors.warning[500]} />
+                {' '}{lightningAddress}
               </Text>
             )}
           </View>
           
-          <View style={styles.contactActions}>
-            {hasLightning && (
-              <TouchableOpacity
-                style={styles.contactActionButton}
-                onPress={() => handleSendToContact(contact)}
-              >
-                <Ionicons name="flash" size={18} color={theme.colors.primary[500]} />
-              </TouchableOpacity>
-            )}
-            
-            <TouchableOpacity
-              style={styles.contactActionButton}
-              onPress={() => handleShareContact(contact)}
-            >
-              <Ionicons name="share-outline" size={18} color={theme.colors.text.secondary} />
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={styles.contactActionButton}
-              onPress={() => handleUnfollow(contact)}
-            >
-              <Ionicons name="person-remove" size={18} color={theme.colors.error[500]} />
-            </TouchableOpacity>
-          </View>
+          {lightningAddress && (
+            <Ionicons 
+              name="chevron-forward" 
+              size={20} 
+              color={theme.colors.text.muted} 
+            />
+          )}
         </View>
-      </Card>
+      </TouchableOpacity>
     );
   };
+
+  const getItem = (_data: any, index: number) => paginatedContacts[index];
+  const getItemCount = () => paginatedContacts.length;
+  const keyExtractor = (item: NostrContact) => item.pubkey;
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
@@ -439,70 +340,46 @@ export default function NostrContactsScreen({ navigation }: Props) {
     </View>
   );
 
-  const renderError = () => {
-    if (!contactsError) return null;
-
-    return (
-      <Card style={styles.errorCard}>
-        <View style={styles.errorContent}>
-          <Ionicons name="warning-outline" size={24} color={theme.colors.error[500]} />
-          <View style={styles.errorText}>
-            <Text style={styles.errorTitle}>Error Loading Contacts</Text>
-            <Text style={styles.errorDescription}>{contactsError}</Text>
-          </View>
-          <TouchableOpacity
-            style={styles.errorButton}
-            onPress={() => dispatch(clearContactsError())}
-          >
-            <Ionicons name="close" size={20} color={theme.colors.error[500]} />
-          </TouchableOpacity>
-        </View>
-      </Card>
-    );
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
+      {renderSearchBar()}
+      {renderAddForm()}
       
-      <ScrollView 
-        style={styles.scrollView}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            colors={[theme.colors.primary[500]]}
-          />
-        }
-      >
-        {renderConnectionStatus()}
-        {renderError()}
-        {renderAddForm()}
-        
-        {isConnected && (
-          <>
-            {renderSyncStatus()}
-            {renderSearchBar()}
-            
-            {isContactsLoading && !refreshing ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-                <Text style={styles.loadingText}>Loading contacts...</Text>
-              </View>
-            ) : filteredContacts.length > 0 ? (
-              <FlatList
-                data={filteredContacts}
-                renderItem={renderContactItem}
-                keyExtractor={(item) => item.pubkey}
-                contentContainerStyle={styles.contactsList}
-                scrollEnabled={false}
+      {isContactsLoading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+          <Text style={styles.loadingText}>Loading contacts...</Text>
+        </View>
+      ) : (
+        <VirtualizedList
+          data={paginatedContacts}
+          renderItem={renderContactItem}
+          keyExtractor={keyExtractor}
+          getItem={getItem}
+          getItemCount={getItemCount}
+          onEndReached={loadMoreContacts}
+          onEndReachedThreshold={0.5}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              colors={[theme.colors.primary[500]]}
+            />
+          }
+          ListEmptyComponent={renderEmptyState()}
+          contentContainerStyle={styles.contactsList}
+          ListFooterComponent={
+            loadingMore ? (
+              <ActivityIndicator 
+                size="small" 
+                color={theme.colors.primary[500]} 
+                style={styles.loadingMore} 
               />
-            ) : (
-              renderEmptyState()
-            )}
-          </>
-        )}
-      </ScrollView>
+            ) : null
+          }
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -519,7 +396,7 @@ const styles = StyleSheet.create({
   
   headerGradient: {
     paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[6],
+    paddingBottom: theme.spacing[4],
     borderBottomLeftRadius: theme.borderRadius['2xl'],
     borderBottomRightRadius: theme.borderRadius['2xl'],
   },
@@ -556,79 +433,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: theme.spacing[5],
-  },
-  
-  statusCard: {
-    marginBottom: theme.spacing[4],
-  },
-  
-  statusContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-  },
-  
-  statusText: {
-    flex: 1,
-  },
-  
-  statusTitle: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[1],
-  },
-  
-  statusDescription: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  
-  statusButton: {
-    backgroundColor: theme.colors.primary[500],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
-    borderRadius: theme.borderRadius.base,
-  },
-  
-  statusButtonText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.inverse,
-  },
-  
-  syncStatus: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[4],
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-  },
-  
-  syncStatusText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  
-  syncButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[1],
-  },
-  
-  syncButtonText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[500],
-    fontWeight: '500',
-  },
-  
   searchContainer: {
+    paddingHorizontal: theme.spacing[5],
     marginBottom: theme.spacing[4],
   },
   
@@ -649,6 +455,7 @@ const styles = StyleSheet.create({
   },
   
   addFormCard: {
+    marginHorizontal: theme.spacing[5],
     marginBottom: theme.spacing[4],
   },
   
@@ -683,30 +490,40 @@ const styles = StyleSheet.create({
   },
   
   contactsList: {
-    paddingBottom: theme.spacing[6],
+    paddingHorizontal: theme.spacing[5],
   },
   
   contactCard: {
-    marginBottom: theme.spacing[3],
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing[2],
+    padding: theme.spacing[3],
   },
   
-  contactHeader: {
+  contactContent: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: theme.spacing[3],
+    alignItems: 'center',
   },
   
   contactAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: theme.colors.gray[100],
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  
+  avatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
   },
   
   contactInfo: {
     flex: 1,
+    marginLeft: theme.spacing[3],
   },
   
   contactName: {
@@ -716,48 +533,25 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing[1],
   },
   
-  contactNip05: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.success[600],
-    marginBottom: theme.spacing[1],
-  },
-  
-  contactPubkey: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.muted,
-    fontFamily: 'monospace',
-    marginBottom: theme.spacing[1],
-  },
-  
-  contactAbout: {
+  lightningAddress: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
-    lineHeight: 18,
-  },
-  
-  contactActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[1],
-  },
-  
-  contactActionButton: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   
   loadingContainer: {
+    flex: 1,
     alignItems: 'center',
-    paddingVertical: theme.spacing[8],
+    justifyContent: 'center',
   },
   
   loadingText: {
     marginTop: theme.spacing[3],
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.secondary,
+  },
+  
+  loadingMore: {
+    paddingVertical: theme.spacing[4],
   },
   
   emptyState: {
@@ -783,38 +577,5 @@ const styles = StyleSheet.create({
   
   emptyStateButton: {
     paddingHorizontal: theme.spacing[6],
-  },
-  
-  errorCard: {
-    marginBottom: theme.spacing[4],
-    backgroundColor: theme.colors.error[50],
-    borderWidth: 1,
-    borderColor: theme.colors.error[100],
-  },
-  
-  errorContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-  },
-  
-  errorText: {
-    flex: 1,
-  },
-  
-  errorTitle: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.error[700],
-    marginBottom: theme.spacing[1],
-  },
-  
-  errorDescription: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[600],
-  },
-  
-  errorButton: {
-    padding: theme.spacing[1],
   },
 }); 

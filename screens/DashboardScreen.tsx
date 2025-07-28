@@ -10,6 +10,7 @@ import {
   Alert,
   Dimensions,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -24,6 +25,7 @@ import RGBApiService from '../services/RGBApiService';
 import PriceService from '../services/PriceService';
 import { theme } from '../theme';
 import { Card, Button } from '../components';
+import { useAssetIcon } from '../utils';
 
 const { width } = Dimensions.get('window');
 
@@ -100,6 +102,25 @@ export default function DashboardScreen({ navigation }: Props) {
   const [rgbAssets, setRgbAssetsState] = useState<NiaAsset[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+
+  // Asset Icon Component
+  const AssetIcon = ({ ticker }: { ticker: string }) => {
+    const { iconUrl } = useAssetIcon(ticker);
+    
+    if (iconUrl) {
+      return (
+        <View style={styles.assetIconContainer}>
+          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.assetIconContainer}>
+        <Ionicons name="diamond" size={20} color={theme.colors.primary[500]} />
+      </View>
+    );
+  };
 
   // Initialize API service
   const initializeApi = useCallback(() => {
@@ -233,8 +254,8 @@ export default function DashboardScreen({ navigation }: Props) {
       refreshData();
     }
 
-    // Set up polling every 15 seconds
-    intervalId = setInterval(refreshData, 15000);
+    // Set up polling every 30 seconds
+    intervalId = setInterval(refreshData, 30000);
 
     return () => {
       if (intervalId) {
@@ -445,7 +466,7 @@ export default function DashboardScreen({ navigation }: Props) {
           </LinearGradient>
           <Text style={styles.actionButtonText}>Swap</Text>
         </TouchableOpacity>
-        
+
         {/* Send Button */}
         <TouchableOpacity 
           style={styles.actionButton}
@@ -498,14 +519,23 @@ export default function DashboardScreen({ navigation }: Props) {
           showsHorizontalScrollIndicator={false}
           style={styles.assetsScroll}
         >
+          {/* RGB Assets */}
           {rgbAssets.map((asset, index) => (
             <TouchableOpacity
               key={asset.asset_id}
-              style={[styles.assetCard, index === 0 && styles.firstAssetCard]}
-              onPress={() => navigation.navigate('AssetDetail', { asset })}
+              style={styles.assetCard}
+              onPress={() => navigation.navigate('AssetDetail', { 
+                asset: {
+                  ...asset,
+                  isRGB: true
+                }
+              })}
             >
               <View style={styles.assetHeader}>
-                <Text style={styles.assetTicker}>{asset.ticker}</Text>
+                <View style={styles.assetHeaderLeft}>
+                  <AssetIcon ticker={asset.ticker} />
+                  <Text style={styles.assetTicker}>{asset.ticker}</Text>
+                </View>
                 <Ionicons name="chevron-forward" size={14} color={theme.colors.gray[400]} />
               </View>
               <Text style={styles.assetName}>{asset.name}</Text>
@@ -960,6 +990,12 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing[2],
   },
   
+  assetHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  
   assetTicker: {
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '700',
@@ -1096,5 +1132,21 @@ const styles = StyleSheet.create({
   
   errorButton: {
     width: '100%',
+  },
+  
+  assetIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing[3],
+  },
+  
+  assetIconImage: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
   },
 });

@@ -1,6 +1,61 @@
 // store/slices/nostrSlice.ts
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
+import * as SecureStore from 'expo-secure-store';
 import NostrService, { NostrProfile, NostrContact, NostrSettings } from '../../services/NostrService';
+
+// Secure storage keys
+const NOSTR_PRIVATE_KEY = 'nostr_private_key';
+const NOSTR_NSEC_KEY = 'nostr_nsec_key';
+
+// Async thunks for secure key operations
+export const saveKeysSecurely = createAsyncThunk(
+  'nostr/saveKeysSecurely',
+  async ({ privateKey, nsec }: { privateKey: string; nsec: string }) => {
+    await SecureStore.setItemAsync(NOSTR_PRIVATE_KEY, privateKey);
+    await SecureStore.setItemAsync(NOSTR_NSEC_KEY, nsec);
+    return { saved: true };
+  }
+);
+
+export const loadKeysSecurely = createAsyncThunk(
+  'nostr/loadKeysSecurely',
+  async () => {
+    const privateKey = await SecureStore.getItemAsync(NOSTR_PRIVATE_KEY);
+    const nsec = await SecureStore.getItemAsync(NOSTR_NSEC_KEY);
+    return { privateKey, nsec };
+  }
+);
+
+export const clearKeysSecurely = createAsyncThunk(
+  'nostr/clearKeysSecurely',
+  async () => {
+    await SecureStore.deleteItemAsync(NOSTR_PRIVATE_KEY);
+    await SecureStore.deleteItemAsync(NOSTR_NSEC_KEY);
+    return { cleared: true };
+  }
+);
+
+export const restoreNostrConnection = createAsyncThunk(
+  'nostr/restoreConnection',
+  async (_, { getState }: any) => {
+    const state = getState();
+    const { relays } = state.nostr;
+    
+    const privateKey = await SecureStore.getItemAsync(NOSTR_PRIVATE_KEY);
+    if (!privateKey) {
+      throw new Error('No stored private key found');
+    }
+
+    const nostrService = NostrService.getInstance();
+    const settings: NostrSettings = {
+      privateKey,
+      relays,
+    };
+    
+    const success = await nostrService.initialize(settings);
+    return { success, privateKey };
+  }
+);
 
 // Async thunks for Nostr operations
 export const initializeNostr = createAsyncThunk(
@@ -76,39 +131,42 @@ export const getUserInfo = createAsyncThunk(
 );
 
 interface NostrState {
-  // Connection status
+  // Connection status (not persisted - determined at runtime)
   isConnected: boolean;
   isInitializing: boolean;
   
-  // User profile
+  // User profile (persisted)
   profile: NostrProfile | null;
   isProfileLoading: boolean;
   profileError: string | null;
   
-  // Keys and identity
-  privateKey: string | null;
-  publicKey: string | null;
-  npub: string | null;
-  nsec: string | null;
+  // Keys and identity (private keys stored securely, public data persisted)
+  privateKey: string | null; // NOT persisted - loaded from secure storage
+  publicKey: string | null; // persisted
+  npub: string | null; // persisted  
+  nsec: string | null; // NOT persisted - loaded from secure storage
+  hasStoredKeys: boolean; // persisted - indicates if keys are saved securely
   
-  // Contacts
+  // Contacts (persisted)
   contacts: NostrContact[];
   isContactsLoading: boolean;
   contactsError: string | null;
   contactsLastUpdated: number | null;
   
-  // Settings
+  // Settings (persisted)
   relays: string[];
+  isRelaysExpanded: boolean; // UI state for condensed relay view
   
-  // Wallet Connect (placeholder)
+  // Wallet Connect (persisted settings, not connection state)
   walletConnectEnabled: boolean;
   connectedWallet: string | null;
+  nwcConnectionString: string | null; // persisted for easy access
   
-  // UI State
+  // UI State (some persisted, some not)
   showContactSync: boolean;
-  subscriptionId: string | null;
+  subscriptionId: string | null; // not persisted
   
-  // General error state
+  // General error state (not persisted)
   error: string | null;
 }
 
@@ -124,6 +182,7 @@ const initialState: NostrState = {
   publicKey: null,
   npub: null,
   nsec: null,
+  hasStoredKeys: false,
   
   contacts: [],
   isContactsLoading: false,
@@ -137,9 +196,11 @@ const initialState: NostrState = {
     'wss://relay.nostr.band',
     'wss://nostr.wine',
   ],
+  isRelaysExpanded: false,
   
   walletConnectEnabled: false,
   connectedWallet: null,
+  nwcConnectionString: null,
   
   showContactSync: false,
   subscriptionId: null,
@@ -155,13 +216,9 @@ const nostrSlice = createSlice({
     setConnected: (state, action: PayloadAction<boolean>) => {
       state.isConnected = action.payload;
       if (!action.payload) {
-        // Clear sensitive data when disconnected
+        // Only clear runtime data when disconnected, keep persisted data
         state.privateKey = null;
-        state.publicKey = null;
-        state.npub = null;
         state.nsec = null;
-        state.profile = null;
-        state.contacts = [];
       }
     },
     
@@ -176,6 +233,15 @@ const nostrSlice = createSlice({
       state.publicKey = action.payload.publicKey;
       state.npub = action.payload.npub;
       state.nsec = action.payload.nsec;
+      state.hasStoredKeys = true; // Will be saved securely
+    },
+    
+    setPublicKeyData: (state, action: PayloadAction<{
+      publicKey: string;
+      npub: string;
+    }>) => {
+      state.publicKey = action.payload.publicKey;
+      state.npub = action.payload.npub;
     },
     
     clearKeys: (state) => {
@@ -183,6 +249,7 @@ const nostrSlice = createSlice({
       state.publicKey = null;
       state.npub = null;
       state.nsec = null;
+      state.hasStoredKeys = false;
     },
     
     // Profile management
@@ -237,13 +304,21 @@ const nostrSlice = createSlice({
       state.relays = state.relays.filter(relay => relay !== action.payload);
     },
     
-    // Wallet Connect (placeholder)
+    setRelaysExpanded: (state, action: PayloadAction<boolean>) => {
+      state.isRelaysExpanded = action.payload;
+    },
+    
+    // Wallet Connect
     setWalletConnectEnabled: (state, action: PayloadAction<boolean>) => {
       state.walletConnectEnabled = action.payload;
     },
     
     setConnectedWallet: (state, action: PayloadAction<string | null>) => {
       state.connectedWallet = action.payload;
+    },
+    
+    setNWCConnectionString: (state, action: PayloadAction<string | null>) => {
+      state.nwcConnectionString = action.payload;
     },
     
     // UI State
@@ -294,6 +369,56 @@ const nostrSlice = createSlice({
         state.isInitializing = false;
         state.isConnected = false;
         state.error = action.error.message || 'Failed to initialize Nostr';
+      });
+    
+    // Secure key operations
+    builder
+      .addCase(saveKeysSecurely.fulfilled, (state) => {
+        state.hasStoredKeys = true;
+      })
+      .addCase(saveKeysSecurely.rejected, (state, action) => {
+        state.error = action.error.message || 'Failed to save keys securely';
+      });
+    
+    builder
+      .addCase(loadKeysSecurely.fulfilled, (state, action) => {
+        if (action.payload.privateKey && action.payload.nsec) {
+          state.privateKey = action.payload.privateKey;
+          state.nsec = action.payload.nsec;
+          state.hasStoredKeys = true;
+        } else {
+          state.hasStoredKeys = false;
+        }
+      })
+      .addCase(loadKeysSecurely.rejected, (state, action) => {
+        state.hasStoredKeys = false;
+        state.error = action.error.message || 'Failed to load stored keys';
+      });
+    
+    builder
+      .addCase(clearKeysSecurely.fulfilled, (state) => {
+        state.privateKey = null;
+        state.nsec = null;
+        state.hasStoredKeys = false;
+      });
+    
+    // Restore connection
+    builder
+      .addCase(restoreNostrConnection.pending, (state) => {
+        state.isInitializing = true;
+        state.error = null;
+      })
+      .addCase(restoreNostrConnection.fulfilled, (state, action) => {
+        state.isInitializing = false;
+        state.isConnected = action.payload.success;
+        if (action.payload.privateKey) {
+          state.privateKey = action.payload.privateKey;
+        }
+      })
+      .addCase(restoreNostrConnection.rejected, (state, action) => {
+        state.isInitializing = false;
+        state.isConnected = false;
+        state.error = action.error.message || 'Failed to restore connection';
       });
     
     // Load profile
@@ -381,6 +506,7 @@ const nostrSlice = createSlice({
 export const {
   setConnected,
   setKeys,
+  setPublicKeyData,
   clearKeys,
   setProfile,
   updateProfileField,
@@ -391,8 +517,10 @@ export const {
   setRelays,
   addRelay,
   removeRelay,
+  setRelaysExpanded,
   setWalletConnectEnabled,
   setConnectedWallet,
+  setNWCConnectionString,
   setShowContactSync,
   setSubscriptionId,
   setError,
