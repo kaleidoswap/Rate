@@ -20,6 +20,7 @@ import {
 } from '../store/slices/settingsSlice';
 import { RGBNodeService } from '../services/RGBNodeService';
 import { Button, ListItem, Input } from '../components';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Props {
   navigation: any;
@@ -95,7 +96,7 @@ export default function SettingsScreen({ navigation }: Props) {
       {/* Backup & Recovery */}
       {/* Advanced */}
       
-      <View style={styles.section}>
+      <SafeAreaView style={styles.section}>
         <Text style={styles.sectionTitle}>Node Settings</Text>
         
         <ListItem>
@@ -149,7 +150,7 @@ export default function SettingsScreen({ navigation }: Props) {
             </View>
           </ListItem>
         )}
-      </View>
+      </SafeAreaView>
 
       {/* Danger Zone */}
     </ScrollView>

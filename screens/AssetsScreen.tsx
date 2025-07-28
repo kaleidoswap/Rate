@@ -13,6 +13,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { AppDispatch, RootState } from '../store';
 import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface Props {
   navigation: any;
@@ -82,7 +83,7 @@ export default function AssetsScreen({ navigation }: Props) {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Assets</Text>
         <TouchableOpacity
@@ -107,7 +108,7 @@ export default function AssetsScreen({ navigation }: Props) {
           renderEmptyState()
         )}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
