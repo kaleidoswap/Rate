@@ -11,6 +11,9 @@ import settingsReducer from './slices/settingsSlice';
 import assetsReducer from './slices/assetsSlice';
 import transactionsReducer from './slices/transactionsSlice';
 import uiReducer from './slices/uiSlice';
+import contactsReducer from './slices/contactsSlice';
+import swapReducer from './slices/swapSlice';
+import nostrReducer from './slices/nostrSlice';
 
 // Import middleware
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
@@ -19,8 +22,8 @@ import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
 const persistConfig: PersistConfig<any> = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['settings', 'ui'], // Only persist non-sensitive data
-  blacklist: ['wallet', 'node', 'assets', 'transactions'], // Don't persist sensitive data
+  whitelist: ['settings', 'ui', 'contacts'], // Only persist non-sensitive data
+  blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap', 'nostr'], // Don't persist sensitive data
   version: 1,
   migrate: (state: any) => {
     // Handle migrations if needed
@@ -36,6 +39,9 @@ const rootReducer = combineReducers({
   assets: assetsReducer,
   transactions: transactionsReducer,
   ui: uiReducer,
+  contacts: contactsReducer,
+  swap: swapReducer,
+  nostr: nostrReducer,
 });
 
 // Create persisted reducer
@@ -55,7 +61,7 @@ export const store = configureStore({
           'persist/PAUSE',
           'persist/PURGE',
         ],
-        ignoredPaths: ['register'],
+        ignoredPaths: ['register', 'nostr.privateKey'],
       },
       immutableCheck: {
         ignoredPaths: ['register'],

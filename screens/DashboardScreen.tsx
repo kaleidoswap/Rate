@@ -98,6 +98,8 @@ export default function DashboardScreen({ navigation }: Props) {
     colored: { settled: 0, future: 0, spendable: 0 },
   });
   const [rgbAssets, setRgbAssetsState] = useState<NiaAsset[]>([]);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
 
   // Initialize API service
   const initializeApi = useCallback(() => {
@@ -139,14 +141,17 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   };
 
-  const loadDashboardData = async () => {
-    if (!apiService) {
-      console.error('Cannot load dashboard data: API service not initialized');
+  const loadDashboardData = async (showLoadingIndicator = true) => {
+    if (!apiService || isUpdating) {
+      console.log('Skipping update: Service not ready or update in progress');
       return;
     }
 
     try {
-      setLoading(true);
+      setIsUpdating(true);
+      if (showLoadingIndicator) {
+        setLoading(true);
+      }
       console.log('Loading dashboard data...');
 
       // Load BTC balance
@@ -165,7 +170,7 @@ export default function DashboardScreen({ navigation }: Props) {
       
       // Convert NiaAsset to AssetRecord before dispatching
       const assetRecords = assets.map(asset => ({
-        wallet_id: 1, // Default wallet ID since we're not using multiple wallets
+        wallet_id: 1,
         asset_id: asset.asset_id,
         ticker: asset.ticker,
         name: asset.name,
@@ -183,14 +188,20 @@ export default function DashboardScreen({ navigation }: Props) {
       console.log('Channels received:', channelsList);
       setChannels(channelsList);
 
+      setLastUpdateTime(new Date());
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
-      Alert.alert(
-        'Error',
-        error instanceof Error ? error.message : 'Failed to load dashboard data'
-      );
+      if (showLoadingIndicator) {
+        Alert.alert(
+          'Error',
+          error instanceof Error ? error.message : 'Failed to load dashboard data'
+        );
+      }
     } finally {
-      setLoading(false);
+      setIsUpdating(false);
+      if (showLoadingIndicator) {
+        setLoading(false);
+      }
     }
   };
 
@@ -207,20 +218,62 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   };
 
+  // Add this useEffect for auto-refresh of wallet data
   useEffect(() => {
-    fetchBitcoinPrice();
-    const priceInterval = setInterval(fetchBitcoinPrice, 30000);
-    return () => clearInterval(priceInterval);
+    let intervalId: NodeJS.Timeout;
+
+    const refreshData = async () => {
+      if (isNodeUnlocked && !isConnecting && !isUpdating) {
+        await loadDashboardData(false); // Don't show loading indicator for background updates
+      }
+    };
+
+    // Initial load
+    if (isNodeUnlocked && !isConnecting) {
+      refreshData();
+    }
+
+    // Set up polling every 15 seconds
+    intervalId = setInterval(refreshData, 15000);
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isNodeUnlocked, isConnecting]);
+
+  // Add this useEffect for Bitcoin price updates
+  useEffect(() => {
+    let priceIntervalId: NodeJS.Timeout;
+
+    const updatePrice = async () => {
+      await fetchBitcoinPrice();
+    };
+
+    // Initial price fetch
+    updatePrice();
+
+    // Update price every 30 seconds
+    priceIntervalId = setInterval(updatePrice, 30000);
+
+    return () => {
+      if (priceIntervalId) {
+        clearInterval(priceIntervalId);
+      }
+    };
   }, []);
 
+  // Update the useFocusEffect to handle screen focus
   useFocusEffect(
     useCallback(() => {
       const initializeAndLoad = async () => {
-        await checkNodeStatus();
-        if (isNodeUnlocked) {
-          await loadDashboardData();
+        const isUnlocked = await checkNodeStatus();
+        if (isUnlocked) {
+          await loadDashboardData(true); // Show loading indicator for manual refresh
         }
       };
+
       initializeAndLoad();
     }, [settings.nodeUrl])
   );
@@ -363,6 +416,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const renderActionButtons = () => (
     <View style={styles.actionButtonsContainer}>
       <View style={styles.actionButtons}>
+        {/* Receive Button */}
         <TouchableOpacity 
           style={styles.actionButton}
           onPress={() => navigation.navigate('Receive')}
@@ -372,25 +426,27 @@ export default function DashboardScreen({ navigation }: Props) {
             colors={['#10b981', '#059669'] as [string, string]}
             style={styles.actionButtonGradient}
           >
-            <Ionicons name="arrow-down" size={20} color="white" />
+            <Ionicons name="arrow-down" size={18} color="white" />
           </LinearGradient>
           <Text style={styles.actionButtonText}>Receive</Text>
         </TouchableOpacity>
-        
+
+        {/* Swap Button */}
         <TouchableOpacity 
-          style={styles.scanButton}
-          onPress={() => navigation.navigate('QRScanner')}
+          style={styles.actionButton}
+          onPress={() => navigation.navigate('Swap')}
           activeOpacity={0.7}
         >
           <LinearGradient
-            colors={['#4338ca', '#7c3aed'] as [string, string]}
-            style={styles.scanButtonGradient}
+            colors={['#f59e0b', '#d97706'] as [string, string]}
+            style={styles.actionButtonGradient}
           >
-            <Ionicons name="qr-code" size={24} color="white" />
+            <Ionicons name="swap-horizontal" size={18} color="white" />
           </LinearGradient>
-          <Text style={styles.scanButtonText}>Scan</Text>
+          <Text style={styles.actionButtonText}>Swap</Text>
         </TouchableOpacity>
         
+        {/* Send Button */}
         <TouchableOpacity 
           style={styles.actionButton}
           onPress={() => navigation.navigate('Send')}
@@ -400,7 +456,7 @@ export default function DashboardScreen({ navigation }: Props) {
             colors={['#ef4444', '#dc2626'] as [string, string]}
             style={styles.actionButtonGradient}
           >
-            <Ionicons name="arrow-up" size={20} color="white" />
+            <Ionicons name="arrow-up" size={18} color="white" />
           </LinearGradient>
           <Text style={styles.actionButtonText}>Send</Text>
         </TouchableOpacity>
@@ -412,7 +468,7 @@ export default function DashboardScreen({ navigation }: Props) {
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>RGB Assets</Text>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={() => navigation.navigate('Assets')}>
           <Text style={styles.sectionAction}>View All</Text>
         </TouchableOpacity>
       </View>
@@ -783,8 +839,8 @@ const styles = StyleSheet.create({
   // Enhanced Action Buttons
   actionButtonsContainer: {
     paddingHorizontal: theme.spacing[5],
-    marginBottom: theme.spacing[6],
-    marginTop: -theme.spacing[4], // Overlap with header
+    marginBottom: theme.spacing[4],
+    marginTop: -theme.spacing[4],
   },
   
   actionButtons: {
@@ -794,7 +850,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface.primary,
     borderRadius: theme.borderRadius.xl,
     padding: theme.spacing[4],
-    ...theme.shadows.lg,
+    ...theme.shadows.md,
   },
   
   actionButton: {
@@ -803,38 +859,17 @@ const styles = StyleSheet.create({
   },
   
   actionButtonGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: theme.spacing[2],
-    ...theme.shadows.md,
+    ...theme.shadows.sm,
   },
   
   actionButtonText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  scanButton: {
-    alignItems: 'center',
-    marginHorizontal: theme.spacing[4],
-  },
-  
-  scanButtonGradient: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[2],
-    ...theme.shadows.lg,
-  },
-  
-  scanButtonText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     fontWeight: '600',
     color: theme.colors.text.primary,
   },

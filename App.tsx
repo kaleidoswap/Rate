@@ -7,7 +7,8 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator, Platform } from 'react-native';
+import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { store, persistor } from './store';
 import { theme } from './theme';
@@ -21,6 +22,9 @@ import AssetsScreen from './screens/AssetsScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import AIAssistantScreen from './screens/AIAssistantScreen';
 import MapScreen from './screens/MapScreen';
+import ContactsScreen from './screens/ContactsScreen';
+import SwapScreen from './screens/SwapScreen';
+import NostrContactsScreen from './screens/NostrContactsScreen';
 
 type TabBarIconProps = {
   focused: boolean;
@@ -76,18 +80,38 @@ function DashboardTabs() {
         }}
       />
       <Tab.Screen 
-        name="Assets" 
-        component={AssetsScreen}
+        name="Contacts" 
+        component={ContactsScreen}
         options={{
-          tabBarLabel: 'Assets',
+          tabBarLabel: 'Contacts',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
-              name={focused ? 'diamond' : 'diamond-outline'} 
+              name={focused ? 'people' : 'people-outline'} 
               size={focused ? size + 2 : size} 
               color={color} 
             />
           ),
         }}
+      />
+      <Tab.Screen
+        name="Scan"
+        component={QRScannerScreen}
+        options={({ navigation }) => ({
+          tabBarLabel: '',
+          tabBarIcon: ({ focused }) => (
+            <TouchableOpacity
+              style={styles.scanButton}
+              onPress={() => navigation.navigate('QRScanner')}
+            >
+              <LinearGradient
+                colors={['#4338ca', '#7c3aed']}
+                style={styles.scanButtonGradient}
+              >
+                <Ionicons name="qr-code" size={24} color="white" />
+              </LinearGradient>
+            </TouchableOpacity>
+          ),
+        })}
       />
       <Tab.Screen 
         name="Map" 
@@ -154,13 +178,13 @@ function AppNavigator() {
             headerShown: true,
             headerTitle: 'Send Payment',
             headerStyle: {
-              backgroundColor: theme.colors.surface.primary,
+              backgroundColor: '#4338ca',
             },
             headerTitleStyle: {
-              color: theme.colors.text.primary,
+              color: theme.colors.text.inverse,
               fontWeight: '600',
             },
-            headerTintColor: theme.colors.primary[500],
+            headerTintColor: theme.colors.text.inverse,
           }}
         />
         <Stack.Screen 
@@ -171,13 +195,13 @@ function AppNavigator() {
             headerShown: true,
             headerTitle: 'Receive Payment',
             headerStyle: {
-              backgroundColor: theme.colors.surface.primary,
+              backgroundColor: '#4338ca',
             },
             headerTitleStyle: {
-              color: theme.colors.text.primary,
+              color: theme.colors.text.inverse,
               fontWeight: '600',
             },
-            headerTintColor: theme.colors.primary[500],
+            headerTintColor: theme.colors.text.inverse,
           }}
         />
         <Stack.Screen 
@@ -188,13 +212,13 @@ function AppNavigator() {
             headerShown: true,
             headerTitle: 'Scan QR Code',
             headerStyle: {
-              backgroundColor: theme.colors.surface.primary,
+              backgroundColor: '#4338ca',
             },
             headerTitleStyle: {
-              color: theme.colors.text.primary,
+              color: theme.colors.text.inverse,
               fontWeight: '600',
             },
-            headerTintColor: theme.colors.primary[500],
+            headerTintColor: theme.colors.text.inverse,
           }}
         />
         <Stack.Screen 
@@ -205,13 +229,46 @@ function AppNavigator() {
             headerShown: true,
             headerTitle: 'AI Assistant',
             headerStyle: {
-              backgroundColor: theme.colors.surface.primary,
+              backgroundColor: '#4338ca',
             },
             headerTitleStyle: {
-              color: theme.colors.text.primary,
+              color: theme.colors.text.inverse,
               fontWeight: '600',
             },
-            headerTintColor: theme.colors.primary[500],
+            headerTintColor: theme.colors.text.inverse,
+          }}
+        />
+        <Stack.Screen 
+          name="Assets" 
+          component={AssetsScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: true,
+            headerTitle: 'Assets',
+            headerStyle: {
+              backgroundColor: '#4338ca',
+            },
+            headerTitleStyle: {
+              color: theme.colors.text.inverse,
+              fontWeight: '600',
+            },
+            headerTintColor: theme.colors.text.inverse,
+          }}
+        />
+        <Stack.Screen 
+          name="Swap" 
+          component={SwapScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen 
+          name="NostrContacts" 
+          component={NostrContactsScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: false,
           }}
         />
       </Stack.Navigator>
@@ -242,4 +299,25 @@ export default function App() {
     </Provider>
   );
 }
+
+const styles = StyleSheet.create({
+  scanButton: {
+    top: -20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: 56,
+  },
+  scanButtonGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+});
 

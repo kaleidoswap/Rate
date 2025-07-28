@@ -801,6 +801,23 @@ export class RGBApiService {
   }
 
   /**
+   * Get swap status by RFQ ID
+   */
+  public async getSwap(params: { rfq_id: string }): Promise<{ 
+    status: 'pending' | 'whitelisted' | 'executing' | 'completed' | 'failed';
+    txid?: string;
+    error?: string;
+  }> {
+    try {
+      console.log('RGB API Request: GET /swap');
+      const response = await this.api!.get(`/swap/${params.rfq_id}`);
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
    * Create a new API instance with the current node configuration
    */
   private createApiInstance(): AxiosInstance {

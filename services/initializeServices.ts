@@ -3,6 +3,8 @@ import { store } from '../store';
 import { createApiInstance, getApiInstance } from './apiInstance';
 import RGBApiService from './RGBApiService';
 import { RGBNodeService } from './RGBNodeService';
+import NostrService from './NostrService';
+import NWCService from './NWCService';
 
 const DEFAULT_TIMEOUT = 30000;
 
@@ -75,4 +77,59 @@ export function updateRGBApiConfig() {
     console.error('Failed to update RGB API Service config:', error);
     return null;
   }
-} 
+}
+
+export async function initializeNostrWalletConnect() {
+  try {
+    console.log('Initializing Nostr Wallet Connect...');
+    
+    const nostrService = NostrService.getInstance();
+    
+    // Initialize NostrService first (if not already done)
+    const settings = store.getState().settings;
+    if (!nostrService.connected) {
+      await nostrService.initialize({
+        relays: settings?.nostrRelays || [
+          'wss://relay.damus.io',
+          'wss://relay.snort.social',
+          'wss://nos.lol',
+        ],
+      });
+    }
+    
+    // Initialize NWC service
+    const success = await nostrService.initializeNWC(settings?.nostrRelays);
+    
+    if (success) {
+      console.log('Nostr Wallet Connect initialized successfully');
+      
+      // Optionally generate a connection string for testing
+      const connectionString = await nostrService.getWalletConnectInfo(
+        ['pay_invoice', 'make_invoice', 'get_balance', 'get_info'],
+        settings?.lud16
+      );
+      
+      if (connectionString) {
+        console.log('NWC Connection String:', connectionString);
+        // You might want to store this or make it available to the UI
+      }
+    } else {
+      console.error('Failed to initialize Nostr Wallet Connect');
+    }
+    
+    return success;
+  } catch (error) {
+    console.error('Error initializing Nostr Wallet Connect:', error);
+    return false;
+  }
+}
+
+export async function getNostrWalletConnectStatus() {
+  try {
+    const nostrService = NostrService.getInstance();
+    return nostrService.getNWCStatus();
+  } catch (error) {
+    console.error('Error getting NWC status:', error);
+    return null;
+  }
+}
