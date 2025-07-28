@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Switch, TextInput, Alert, Text, TouchableOpacity } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import { 
   setTheme, 
@@ -51,61 +52,88 @@ export default function SettingsScreen({ navigation }: Props) {
         [{ text: 'OK' }]
       );
     } catch (error) {
-      Alert.alert(
-        'Error',
-        'Failed to update node configuration. Please try again.',
-        [{ text: 'OK' }]
-      );
+      console.error('Failed to change node type:', error);
+      Alert.alert('Error', 'Failed to change node type. Please try again.');
     }
   };
 
-  const handleNodeUrlSave = async () => {
-    if (!tempNodeUrl) {
-      Alert.alert('Error', 'Node URL cannot be empty');
+  const handleNodeUrlSave = () => {
+    if (!tempNodeUrl.trim()) {
+      Alert.alert('Error', 'Please enter a valid node URL');
       return;
     }
 
     try {
+      const url = new URL(tempNodeUrl);
       dispatch(setRemoteNodeUrl(tempNodeUrl));
       setIsEditingUrl(false);
-      
       Alert.alert(
         'Node URL Updated',
-        'Node URL has been updated. You may need to restart the app for changes to take effect.',
+        'The remote node URL has been updated. You may need to restart the app for changes to take effect.',
         [{ text: 'OK' }]
       );
     } catch (error) {
-      Alert.alert(
-        'Error',
-        'Failed to update node URL. Please try again.',
-        [{ text: 'OK' }]
-      );
+      Alert.alert('Error', 'Please enter a valid URL (e.g., https://example.com:3000)');
     }
   };
 
+  const handleBiometricToggle = (enabled: boolean) => {
+    dispatch(setBiometricEnabled(enabled));
+  };
+
+  const handlePinToggle = (enabled: boolean) => {
+    dispatch(setPinEnabled(enabled));
+  };
+
+  const handleAutoLockChange = (timeout: number) => {
+    dispatch(setAutoLockTimeout(timeout));
+  };
+
+  const handleNotificationsToggle = (enabled: boolean) => {
+    dispatch(setNotifications(enabled));
+  };
+
+  const handleTransactionNotificationsToggle = (enabled: boolean) => {
+    dispatch(setTransactionNotifications(enabled));
+  };
+
+  const handlePriceAlertsToggle = (enabled: boolean) => {
+    dispatch(setPriceAlerts(enabled));
+  };
+
+  const handleHideBalancesToggle = (enabled: boolean) => {
+    dispatch(setHideBalances(enabled));
+  };
+
   const handleWalletConnectToggle = (enabled: boolean) => {
-    if (enabled && !nostrState.isConnected) {
-      Alert.alert(
-        'Nostr Connection Required',
-        'You need to connect to Nostr first before enabling Wallet Connect',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    
-    if (enabled) {
-      Alert.alert(
-        'Nostr Wallet Connect',
-        'This feature is coming soon! It will allow you to connect external wallets via NWC protocol.',
-        [{ text: 'OK' }]
-      );
-    }
-    
     dispatch(setWalletConnectEnabled(enabled));
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Drawer Header */}
+      <LinearGradient
+        colors={['#667eea', '#764ba2']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerContent}>
+            <View style={styles.headerIcon}>
+              <Ionicons name="settings" size={24} color="white" />
+            </View>
+            <Text style={styles.headerTitle}>Settings</Text>
+          </View>
+          <TouchableOpacity 
+            style={styles.closeButton}
+            onPress={() => navigation.closeDrawer()}
+          >
+            <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
+
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Nostr Section */}
         <View style={styles.section}>
@@ -460,5 +488,36 @@ const styles = StyleSheet.create({
   
   editButton: {
     minWidth: 60,
+  },
+
+  headerGradient: {
+    paddingTop: theme.spacing[5],
+    paddingBottom: theme.spacing[3],
+    paddingHorizontal: theme.spacing[5],
+  },
+
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  headerIcon: {
+    marginRight: theme.spacing[3],
+  },
+
+  headerTitle: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+
+  closeButton: {
+    padding: theme.spacing[2],
   },
 });

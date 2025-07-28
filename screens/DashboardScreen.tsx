@@ -10,6 +10,8 @@ import {
   Alert,
   Dimensions,
   ActivityIndicator,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -26,6 +28,7 @@ import { theme } from '../theme';
 import { Card, Button } from '../components';
 
 const { width } = Dimensions.get('window');
+const statusBarHeight = StatusBar.currentHeight || 0;
 
 interface Props {
   navigation: any;
@@ -322,28 +325,29 @@ export default function DashboardScreen({ navigation }: Props) {
         end={{ x: 1, y: 1 }}
         style={styles.headerGradient}
       >
-        <View style={styles.headerContent}>
-          <View style={styles.headerTop}>
-            <View style={styles.headerLeft}>
-              <Text style={styles.greeting}>{getGreeting()}</Text>
-              <Text style={styles.headerTitle}>Rate Wallet</Text>
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.headerContent}>
+            <View style={styles.headerTop}>
+              <View style={styles.headerLeft}>
+                <Text style={styles.greeting}>{getGreeting()}</Text>
+                <Text style={styles.headerTitle}>Rate Wallet</Text>
+              </View>
+              <View style={styles.headerActions}>
+                <TouchableOpacity 
+                  style={styles.headerActionButton}
+                  onPress={() => navigation.navigate('Notifications')}
+                >
+                  <Ionicons name="notifications-outline" size={20} color={theme.colors.text.inverse} />
+                  <View style={styles.notificationDot} />
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={styles.headerActionButton}
+                  onPress={() => navigation.openDrawer()}
+                >
+                  <Ionicons name="menu" size={20} color={theme.colors.text.inverse} />
+                </TouchableOpacity>
+              </View>
             </View>
-            <View style={styles.headerActions}>
-              <TouchableOpacity 
-                style={styles.headerActionButton}
-                onPress={() => navigation.navigate('Notifications')}
-              >
-                <Ionicons name="notifications-outline" size={20} color={theme.colors.text.inverse} />
-                <View style={styles.notificationDot} />
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.headerActionButton}
-                onPress={() => navigation.navigate('Settings')}
-              >
-                <Ionicons name="settings-outline" size={20} color={theme.colors.text.inverse} />
-              </TouchableOpacity>
-            </View>
-          </View>
 
           {/* Enhanced Balance Display */}
           <View style={styles.balanceSection}>
@@ -409,6 +413,7 @@ export default function DashboardScreen({ navigation }: Props) {
             </View>
           </View>
         </View>
+        </SafeAreaView>
       </LinearGradient>
     </View>
   );
@@ -611,7 +616,7 @@ export default function DashboardScreen({ navigation }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {renderHeader()}
       {renderActionButtons()}
       
@@ -635,7 +640,7 @@ export default function DashboardScreen({ navigation }: Props) {
       </ScrollView>
       
       {renderFloatingAIButton()}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -666,10 +671,14 @@ const styles = StyleSheet.create({
   },
   
   headerGradient: {
-    paddingTop: theme.spacing[2],
+    paddingTop: Platform.OS === 'android' ? statusBarHeight : 0,
     paddingBottom: theme.spacing[6],
     borderBottomLeftRadius: theme.borderRadius['2xl'],
     borderBottomRightRadius: theme.borderRadius['2xl'],
+  },
+  
+  headerSafeArea: {
+    backgroundColor: 'transparent',
   },
   
   headerContent: {

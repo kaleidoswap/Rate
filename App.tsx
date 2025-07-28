@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,6 +35,7 @@ type TabBarIconProps = {
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+const Drawer = createDrawerNavigator();
 
 function DashboardTabs() {
   return (
@@ -128,13 +130,13 @@ function DashboardTabs() {
         }}
       />
       <Tab.Screen 
-        name="Settings" 
-        component={SettingsScreen}
+        name="ChatBot" 
+        component={AIAssistantScreen}
         options={{
-          tabBarLabel: 'Settings',
+          tabBarLabel: 'ChatBot',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
-              name={focused ? 'settings' : 'settings-outline'} 
+              name={focused ? 'chatbubble' : 'chatbubble-outline'} 
               size={focused ? size + 2 : size} 
               color={color} 
             />
@@ -142,6 +144,29 @@ function DashboardTabs() {
         }}
       />
     </Tab.Navigator>
+  );
+}
+
+function DrawerNavigator() {
+  return (
+    <Drawer.Navigator
+      screenOptions={{
+        headerShown: false,
+        drawerPosition: 'left',
+        drawerType: 'slide',
+        drawerStyle: {
+          backgroundColor: theme.colors.surface.primary,
+          width: 280,
+        },
+        drawerActiveTintColor: theme.colors.primary[500],
+        drawerInactiveTintColor: theme.colors.text.secondary,
+        swipeEnabled: true,
+        swipeEdgeWidth: 50,
+      }}
+      drawerContent={(props: any) => <SettingsScreen {...props} />}
+    >
+      <Drawer.Screen name="Main" component={DashboardTabs} />
+    </Drawer.Navigator>
   );
 }
 
@@ -169,7 +194,7 @@ function AppNavigator() {
       >
         <Stack.Screen name="InitialLoad" component={InitialLoadScreen} />
         <Stack.Screen name="WalletSetup" component={WalletSetupScreen} />
-        <Stack.Screen name="Dashboard" component={DashboardTabs} />
+        <Stack.Screen name="Dashboard" component={DrawerNavigator} />
         <Stack.Screen 
           name="Send" 
           component={SendScreen}
@@ -211,23 +236,6 @@ function AppNavigator() {
             presentation: 'modal',
             headerShown: true,
             headerTitle: 'Scan QR Code',
-            headerStyle: {
-              backgroundColor: '#4338ca',
-            },
-            headerTitleStyle: {
-              color: theme.colors.text.inverse,
-              fontWeight: '600',
-            },
-            headerTintColor: theme.colors.text.inverse,
-          }}
-        />
-        <Stack.Screen 
-          name="AIAssistant" 
-          component={AIAssistantScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: true,
-            headerTitle: 'AI Assistant',
             headerStyle: {
               backgroundColor: '#4338ca',
             },
@@ -293,7 +301,7 @@ export default function App() {
   return (
     <Provider store={store}>
       <PersistGate loading={<LoadingScreen />} persistor={persistor}>
-        <StatusBar style="dark" backgroundColor={theme.colors.background.primary} />
+        <StatusBar style="light" backgroundColor="transparent" translucent={true} />
         <AppNavigator />
       </PersistGate>
     </Provider>

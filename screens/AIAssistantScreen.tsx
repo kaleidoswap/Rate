@@ -9,14 +9,15 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
   Alert,
   Animated,
   Dimensions,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { theme } from '../theme';
 
 interface Props {
   navigation: any;
@@ -29,7 +30,8 @@ interface Message {
   timestamp: Date;
 }
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const statusBarHeight = StatusBar.currentHeight || 0;
 
 export default function AIAssistantScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<Message[]>([
@@ -223,14 +225,35 @@ export default function AIAssistantScreen({ navigation }: Props) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>AI Assistant</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <View style={styles.container}>
+      {/* Extended Header with Gradient over Status Bar */}
+      <LinearGradient
+        colors={['#667eea', '#764ba2']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.headerGradient}
+      >
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity 
+              style={styles.headerBackButton}
+              onPress={() => navigation.openDrawer ? navigation.openDrawer() : navigation.goBack()}
+            >
+              <Ionicons name="menu" size={24} color="white" />
+            </TouchableOpacity>
+            <View style={styles.headerContent}>
+              <View style={styles.headerIcon}>
+                <Ionicons name="chatbubble" size={24} color="white" />
+              </View>
+              <View style={styles.headerText}>
+                <Text style={styles.headerTitle}>AI Assistant</Text>
+                <Text style={styles.headerSubtitle}>Bitcoin & Crypto Expert</Text>
+              </View>
+            </View>
+            <View style={styles.headerRight} />
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
 
       <KeyboardAvoidingView 
         style={styles.content}
@@ -247,58 +270,98 @@ export default function AIAssistantScreen({ navigation }: Props) {
         </ScrollView>
 
         <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.textInput}
-            value={inputText}
-            onChangeText={setInputText}
-            placeholder="Type your message..."
-            multiline
-            maxLength={500}
-            returnKeyType="send"
-            onSubmitEditing={() => sendMessage(inputText)}
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
-            onPress={() => sendMessage(inputText)}
-            disabled={!inputText.trim() || isLoading}
-          >
-            <Ionicons name="send" size={20} color="white" />
-          </TouchableOpacity>
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={styles.textInput}
+              value={inputText}
+              onChangeText={setInputText}
+              placeholder="Ask me about Bitcoin, Lightning, RGB..."
+              placeholderTextColor={theme.colors.text.secondary}
+              multiline
+              maxLength={500}
+              returnKeyType="send"
+              onSubmitEditing={() => sendMessage(inputText)}
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
+              onPress={() => sendMessage(inputText)}
+              disabled={!inputText.trim() || isLoading}
+            >
+              <LinearGradient
+                colors={inputText.trim() ? ['#667eea', '#764ba2'] : [theme.colors.gray[300], theme.colors.gray[300]]}
+                style={styles.sendButtonGradient}
+              >
+                <Ionicons 
+                  name="send" 
+                  size={20} 
+                  color={inputText.trim() ? "white" : theme.colors.text.secondary} 
+                />
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: theme.colors.background.secondary,
+  },
+  headerGradient: {
+    paddingTop: Platform.OS === 'android' ? statusBarHeight : 0,
+  },
+  headerSafeArea: {
+    backgroundColor: 'transparent',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    paddingHorizontal: theme.spacing[6],
+    paddingVertical: theme.spacing[4],
+    minHeight: 60,
+  },
+  headerBackButton: {
+    padding: theme.spacing[1],
+    marginRight: theme.spacing[3],
+  },
+  headerContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerIcon: {
+    marginRight: theme.spacing[3],
+  },
+  headerText: {
+    flex: 1,
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontWeight: '700',
+    color: 'white',
+    marginBottom: 2,
+  },
+  headerSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
+  },
+  headerRight: {
+    width: 40,
   },
   content: {
     flex: 1,
+    backgroundColor: theme.colors.background.secondary,
   },
   messagesContainer: {
     flex: 1,
   },
   messagesContent: {
-    padding: 20,
-    paddingBottom: 10,
+    padding: 24,
+    paddingBottom: 16,
   },
   messageContainer: {
     flexDirection: 'row',
@@ -328,7 +391,7 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: screenWidth * 0.75,
-    borderRadius: 20,
+    borderRadius: theme.borderRadius.xl,
     overflow: 'hidden',
   },
   userBubble: {
@@ -336,9 +399,9 @@ const styles = StyleSheet.create({
   },
   aiBubble: {
     alignSelf: 'flex-start',
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.surface.primary,
     padding: 16,
-    shadowColor: '#000',
+    shadowColor: theme.colors.gray[900],
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
@@ -356,7 +419,7 @@ const styles = StyleSheet.create({
   aiMessageText: {
     fontSize: 16,
     lineHeight: 22,
-    color: '#1a1a1a',
+    color: theme.colors.text.primary,
     fontWeight: '400',
   },
   messageTime: {
@@ -369,7 +432,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   aiMessageTime: {
-    color: '#8E8E93',
+    color: theme.colors.text.secondary,
   },
   typingContainer: {
     flexDirection: 'row',
@@ -385,35 +448,41 @@ const styles = StyleSheet.create({
   },
   typingText: {
     fontSize: 14,
-    color: '#8E8E93',
+    color: theme.colors.text.secondary,
     fontStyle: 'italic',
     marginLeft: 8,
   },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.surface.primary,
     borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopColor: theme.colors.border.light,
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: theme.colors.background.secondary,
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    paddingHorizontal: 16,
+    paddingVertical: 4,
   },
   textInput: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-    borderRadius: 25,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
     fontSize: 16,
-    marginRight: 12,
-    backgroundColor: '#f9f9f9',
+    color: theme.colors.text.primary,
+    maxHeight: 120,
+    paddingVertical: 12,
   },
   sendButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#007AFF',
+    marginLeft: 12,
+  },
+  sendButtonGradient: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },

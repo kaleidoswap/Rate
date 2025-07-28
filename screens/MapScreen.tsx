@@ -6,6 +6,8 @@ import {
   StyleSheet,
   ActivityIndicator,
   Platform,
+  StatusBar,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
@@ -13,6 +15,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { Card } from '../components';
+
+const statusBarHeight = StatusBar.currentHeight || 0;
 
 interface Props {
   navigation: any;
@@ -26,25 +30,34 @@ export default function MapScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Modern Header with Gradient */}
+    <View style={styles.container}>
+      {/* Extended Header with Gradient over Status Bar */}
       <LinearGradient
         colors={['#667eea', '#764ba2']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.headerGradient}
       >
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerIcon}>
-              <Ionicons name="map" size={24} color={theme.colors.text.inverse} />
+        <SafeAreaView style={styles.headerSafeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity 
+              style={styles.menuButton}
+              onPress={() => navigation.openDrawer()}
+            >
+              <Ionicons name="menu" size={24} color="white" />
+            </TouchableOpacity>
+            <View style={styles.headerContent}>
+              <View style={styles.headerIcon}>
+                <Ionicons name="map" size={24} color={theme.colors.text.inverse} />
+              </View>
+              <View style={styles.headerText}>
+                <Text style={styles.headerTitle}>Bitcoin Map</Text>
+                <Text style={styles.headerSubtitle}>Discover Bitcoin-accepting venues worldwide</Text>
+              </View>
             </View>
-            <View style={styles.headerText}>
-              <Text style={styles.headerTitle}>Bitcoin Map</Text>
-              <Text style={styles.headerSubtitle}>Discover Bitcoin-accepting venues worldwide</Text>
-            </View>
+            <View style={styles.headerRight} />
           </View>
-        </View>
+        </SafeAreaView>
       </LinearGradient>
 
       {/* Map Container */}
@@ -65,7 +78,7 @@ export default function MapScreen({ navigation }: Props) {
           />
         </Card>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -76,28 +89,34 @@ const styles = StyleSheet.create({
   },
   
   headerGradient: {
-    paddingBottom: theme.spacing[1],
+    paddingTop: Platform.OS === 'android' ? statusBarHeight : 0,
+    paddingBottom: theme.spacing[4],
+  },
+  
+  headerSafeArea: {
+    backgroundColor: 'transparent',
   },
   
   header: {
-    paddingTop: theme.spacing[2],
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: theme.spacing[5],
-    paddingBottom: theme.spacing[5],
+    paddingVertical: theme.spacing[3],
+  },
+  
+  menuButton: {
+    padding: theme.spacing[2],
+    marginRight: theme.spacing[3],
   },
   
   headerContent: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
   },
   
   headerIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing[4],
+    marginRight: theme.spacing[3],
   },
   
   headerText: {
@@ -105,104 +124,35 @@ const styles = StyleSheet.create({
   },
   
   headerTitle: {
-    fontSize: theme.typography.fontSize['2xl'],
+    fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.text.inverse,
-    marginBottom: theme.spacing[1],
+    marginBottom: 2,
   },
   
   headerSubtitle: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.inverse,
-    opacity: 0.9,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
+  },
+  
+  headerRight: {
+    width: 40,
   },
   
   mapContainer: {
     flex: 1,
     padding: theme.spacing[4],
-    position: 'relative',
   },
   
   mapCard: {
     flex: 1,
-    padding: 0,
+    borderRadius: theme.borderRadius.lg,
     overflow: 'hidden',
+    backgroundColor: theme.colors.surface.primary,
   },
   
   webview: {
     flex: 1,
-    backgroundColor: 'transparent',
-    borderRadius: theme.borderRadius.lg,
-  },
-  
-  loadingContainer: {
-    position: 'absolute',
-    top: theme.spacing[4],
-    left: theme.spacing[4],
-    right: theme.spacing[4],
-    bottom: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    overflow: 'hidden',
-  },
-  
-  loadingBackground: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  loadingContent: {
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing[8],
-  },
-  
-  loadingIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.surface.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[5],
-    ...theme.shadows.md,
-  },
-  
-  loadingText: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
-    textAlign: 'center',
-  },
-  
-  loadingSubtext: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: theme.typography.lineHeight.relaxed,
-  },
-  
-  footer: {
-    paddingHorizontal: theme.spacing[4],
-    paddingBottom: theme.spacing[4],
-  },
-  
-  infoCard: {
-    backgroundColor: theme.colors.primary[50],
-    borderColor: theme.colors.primary[100],
-    borderWidth: 1,
-  },
-  
-  infoContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  
-  infoText: {
-    flex: 1,
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginLeft: theme.spacing[3],
-    lineHeight: theme.typography.lineHeight.relaxed,
   },
 }); 
