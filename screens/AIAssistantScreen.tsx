@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import PremAI from 'premai';
-import { VoiceService } from '../services/VoiceService';
+import SpeechToText, { SpeechToTextRef } from '../components/SpeechToText';
 
 interface Props {
   navigation: any;
@@ -38,24 +38,23 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Hello! I\'m your AI assistant specialized in Bitcoin, Lightning Network, and RGB assets. I can help you understand cryptocurrency concepts, wallet security, transaction processes, and much more. How can I assist you today? 🚀',
+      text: 'Hello! I\'m your AI assistant specialized in Bitcoin, Lightning Network, and RGB assets. I can help you understand cryptocurrency concepts, wallet security, transaction processes, and much more. How can I assist you today? 🚀\n\n💡 Tip: Hold the microphone button and speak to convert your voice to text!',
       isUser: false,
       timestamp: new Date(),
     },
   ]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isVoiceAvailable, setIsVoiceAvailable] = useState(false);
-  const [voiceResults, setVoiceResults] = useState<string[]>([]);
-  const [partialResults, setPartialResults] = useState<string[]>([]);
+  const [isListening, setIsListening] = useState(false);
+  const [isVoiceAvailable, setIsVoiceAvailable] = useState(true);
+  const [partialText, setPartialText] = useState('');
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const [voiceStatus, setVoiceStatus] = useState<string>('Initializing...');
+  const [baseInputText, setBaseInputText] = useState(''); // Track text before speech started
   const scrollViewRef = useRef<ScrollView>(null);
+  const speechToTextRef = useRef<SpeechToTextRef>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const typingAnim = useRef(new Animated.Value(0)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
-  const voiceService = useRef<VoiceService>(VoiceService.getInstance()).current;
 
   // Initialize PremAI client
   const premaiClient = new PremAI({
@@ -63,55 +62,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   });
 
   useEffect(() => {
-    // Initialize voice service
-    const initializeVoice = async () => {
-      try {
-        console.log('🔍 Initializing voice service...');
-        
-        // Set up event handlers
-        voiceService.setEventHandlers({
-          onStart: onSpeechStart,
-          onEnd: onSpeechEnd,
-          onResults: onSpeechResults,
-          onPartialResults: onSpeechPartialResults,
-          onError: onSpeechError,
-          onVolumeChanged: onSpeechVolumeChanged,
-        });
-
-        // Initialize the service
-        const success = await voiceService.initialize();
-        const available = await voiceService.isAvailable();
-        
-        setIsVoiceAvailable(success && available);
-        setVoiceStatus(voiceService.getStatus());
-        
-        console.log('✅ Voice service initialized:', {
-          success,
-          available,
-          status: voiceService.getStatus(),
-          isMock: voiceService.isMock()
-        });
-        
-      } catch (error) {
-        console.error('❌ Voice service initialization failed:', error);
-        setIsVoiceAvailable(false);
-        setVoiceStatus('Failed to initialize');
-      }
-    };
-
-    initializeVoice();
-
-    return () => {
-      // Clean up voice service and timer
-      if (recordingTimer.current) {
-        clearInterval(recordingTimer.current);
-      }
-      voiceService.destroy();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isRecording) {
+    if (isListening) {
       // Pulse animation for recording button
       Animated.loop(
         Animated.sequence([
@@ -146,7 +97,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         clearInterval(recordingTimer.current);
       }
     };
-  }, [isRecording]);
+  }, [isListening]);
 
   useEffect(() => {
     if (isLoading) {
@@ -170,131 +121,96 @@ export default function AIAssistantScreen({ navigation }: Props) {
     }
   }, [isLoading]);
 
-  const onSpeechStart = () => {
-    console.log('🎤 Voice service: Speech started');
-    setVoiceResults([]);
-    setPartialResults([]);
+  const handleSpeechStart = () => {
+    console.log('🎤 Speech recognition started');
+    setIsListening(true);
+    setPartialText('');
+    // Store the current input text as base text
+    setBaseInputText(inputText);
+    Vibration.vibrate(50);
   };
 
-  const onSpeechEnd = () => {
-    console.log('🛑 Voice service: Speech ended');
-    setIsRecording(false);
+  const handleSpeechEnd = () => {
+    console.log('🛑 Speech recognition ended');
+    setIsListening(false);
+    setPartialText('');
+    setBaseInputText('');
+    Vibration.vibrate(100);
   };
 
-  const onSpeechError = (error: any) => {
-    console.error('❌ Voice service: Error:', error);
-    setIsRecording(false);
+  const handleSpeechResult = (text: string) => {
+    console.log('✅ Final speech result:', text);
+    if (!text.trim()) return;
     
-    let errorMessage = 'Voice recognition failed. Please try again.';
-    
-    if (voiceService.isMock()) {
-      errorMessage = 'Voice simulation encountered an error. This is normal in emulator mode.';
-    } else if (error?.message) {
-      if (error.message.includes('permission')) {
-        errorMessage = 'Microphone permission denied. Please enable microphone access.';
-      } else if (error.message.includes('network')) {
-        errorMessage = 'Network error. Please check your connection and try again.';
-      } else if (error.message.includes('busy')) {
-        errorMessage = 'Voice service is busy. Please wait a moment and try again.';
+    // Add the new speech result to the base text (text that existed before speech started)
+    setInputText(prevText => {
+      const cleanBaseText = baseInputText.trim();
+      const cleanNewText = text.trim();
+      
+      if (cleanBaseText && cleanNewText) {
+        return `${cleanBaseText} ${cleanNewText}`;
+      } else if (cleanNewText) {
+        return cleanNewText;
+      } else {
+        return cleanBaseText;
       }
+    });
+    
+    // Clear partial text since we now have final result
+    setPartialText('');
+  };
+
+  const handlePartialResult = (text: string) => {
+    console.log('🔄 Partial speech result:', text);
+    // Only update partial text, don't modify input text yet
+    setPartialText(text.trim());
+  };
+
+  const handleSpeechError = (error: string) => {
+    console.error('❌ Speech recognition error:', error);
+    setIsListening(false);
+    setPartialText('');
+    setBaseInputText('');
+    
+    let errorMessage = 'Speech recognition failed. Please try again.';
+    
+    if (error.includes('not-allowed')) {
+      errorMessage = 'Microphone access denied. Please enable microphone permissions.';
+      setIsVoiceAvailable(false);
+    } else if (error.includes('network')) {
+      errorMessage = 'Network error. Please check your connection.';
+    } else if (error.includes('no-speech')) {
+      errorMessage = 'No speech detected. Please speak clearly.';
+    } else if (error.includes('not supported')) {
+      errorMessage = 'Speech recognition is not supported on this device.';
+      setIsVoiceAvailable(false);
     }
     
-    Alert.alert('Voice Recognition', errorMessage);
+    Alert.alert('Voice Recognition Error', errorMessage);
   };
 
-  const onSpeechResults = (results: string[]) => {
-    console.log('✅ Voice service: Results:', results);
-    setVoiceResults(results);
-    
-    if (results.length > 0) {
-      const bestResult = results[0];
-      setInputText(prevText => {
-        // If there's existing text, add a space before the new voice input
-        return prevText.trim() ? `${prevText.trim()} ${bestResult}` : bestResult;
-      });
-    }
-  };
-
-  const onSpeechPartialResults = (partials: string[]) => {
-    console.log('🔄 Voice service: Partial results:', partials);
-    setPartialResults(partials);
-  };
-
-  const onSpeechVolumeChanged = (volume: number) => {
-    // Could be used for visual feedback of voice volume
-    // console.log('🔊 Volume changed:', volume);
-  };
-
-  const startVoiceRecording = async () => {
-    if (isRecording) {
-      await stopVoiceRecording();
-      return;
-    }
-
+  const startListening = () => {
     if (!isVoiceAvailable) {
       Alert.alert(
-        'Voice Not Available', 
-        `Voice recognition is not available. Status: ${voiceStatus}`,
+        'Voice Recognition Unavailable',
+        'Speech recognition is not available. Please type your message instead.',
         [{ text: 'OK' }]
       );
       return;
     }
 
-    try {
-      // Haptic feedback
-      Vibration.vibrate(50);
-      
-      setIsRecording(true);
-      setVoiceResults([]);
-      setPartialResults([]);
-      
-      console.log('🎤 Starting voice recording...');
-      
-      // Use our abstracted voice service
-      await voiceService.start('en-US');
-      
-      console.log('✅ Voice recording started successfully');
-    } catch (error) {
-      console.error('❌ Error starting voice recording:', error);
-      setIsRecording(false);
-      
-      let errorMessage = 'Failed to start voice recording.';
-      
-      if (voiceService.isMock()) {
-        errorMessage = 'Voice simulation failed to start. This can happen in emulator environments.';
-      } else {
-        errorMessage = 'Voice recognition failed to start. Please check your microphone permissions and try again.';
-      }
-      
-      Alert.alert('Voice Recording Error', errorMessage);
+    if (isListening) {
+      stopListening();
+      return;
     }
+
+    console.log('🎤 Starting speech recognition...');
+    speechToTextRef.current?.startListening();
   };
 
-  const stopVoiceRecording = async () => {
-    try {
-      await voiceService.stop();
-      setIsRecording(false);
-      
-      // Haptic feedback
-      Vibration.vibrate(100);
-      
-      console.log('🛑 Voice recording stopped');
-      
-      // Auto-send if we got voice results and no manual text
-      if (voiceResults.length > 0 && !inputText.trim()) {
-        const voiceText = voiceResults[0];
-        if (voiceText.trim()) {
-          setInputText(voiceText);
-          // Auto-send after a short delay to allow user to see the transcription
-          setTimeout(() => {
-            sendMessage(voiceText);
-          }, 500);
-        }
-      }
-    } catch (error) {
-      console.error('❌ Error stopping voice recording:', error);
-      setIsRecording(false);
-    }
+  const stopListening = () => {
+    console.log('🛑 Stopping speech recognition...');
+    speechToTextRef.current?.stopListening();
   };
 
   const sendMessage = async (text: string) => {
@@ -310,9 +226,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     setMessages(prev => [...prev, userMessage]);
     setInputText('');
+    setPartialText('');
     setIsLoading(true);
-    setVoiceResults([]);
-    setPartialResults([]);
 
     try {
       // Use PremAI for actual AI responses
@@ -488,6 +403,16 @@ export default function AIAssistantScreen({ navigation }: Props) {
         colors={['#f8f9ff', '#e8f4f8']}
         style={styles.background}
       >
+        {/* Hidden Speech-to-Text Component */}
+        <SpeechToText
+          ref={speechToTextRef}
+          onStart={handleSpeechStart}
+          onEnd={handleSpeechEnd}
+          onResult={handleSpeechResult}
+          onPartialResult={handlePartialResult}
+          onError={handleSpeechError}
+        />
+
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
@@ -501,15 +426,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
             </View>
             <View style={styles.headerText}>
               <Text style={styles.headerTitle}>AI Assistant</Text>
-              <Text style={styles.headerSubtitle}>
-                {voiceService.isMock() ? 'Bitcoin Expert • Voice: Simulation' : 'Bitcoin & Crypto Expert'}
-              </Text>
+              <Text style={styles.headerSubtitle}>Bitcoin & Crypto Expert</Text>
             </View>
             <View style={styles.voiceIndicator}>
               <Ionicons 
                 name="mic" 
                 size={16} 
-                color={isVoiceAvailable ? (isRecording ? "#ff6b6b" : "#28a745") : "#ccc"} 
+                color={isVoiceAvailable ? (isListening ? "#ff6b6b" : "#28a745") : "#ccc"} 
               />
               {__DEV__ && (
                 <TouchableOpacity 
@@ -552,21 +475,29 @@ export default function AIAssistantScreen({ navigation }: Props) {
                   <TextInput
                     style={styles.textInput}
                     value={inputText}
-                    onChangeText={setInputText}
-                    placeholder={isRecording ? "Listening..." : "Ask me about Bitcoin, Lightning, RGB..."}
+                    onChangeText={(text) => {
+                      setInputText(text);
+                      // Update base text if user is manually editing
+                      if (!isListening) {
+                        setBaseInputText(text);
+                      }
+                    }}
+                    placeholder={isListening ? "Listening... speak now" : "Ask me about Bitcoin, Lightning, RGB..."}
                     placeholderTextColor="#8E8E93"
                     multiline
                     maxLength={500}
                     returnKeyType="send"
                     onSubmitEditing={() => sendMessage(inputText)}
-                    editable={!isRecording}
+                    editable={!isListening}
                   />
                   
-                  {/* Show partial voice results */}
-                  {isRecording && partialResults.length > 0 && (
-                    <Text style={styles.partialResultText}>
-                      "{partialResults[0]}"
-                    </Text>
+                  {/* Show partial speech results */}
+                  {isListening && partialText && (
+                    <View style={styles.partialTextContainer}>
+                      <Text style={styles.partialText}>
+                        "{partialText}"
+                      </Text>
+                    </View>
                   )}
                 </View>
                 
@@ -575,18 +506,18 @@ export default function AIAssistantScreen({ navigation }: Props) {
                   <TouchableOpacity
                     style={[
                       styles.voiceButton,
-                      isRecording && styles.voiceButtonActive,
+                      isListening && styles.voiceButtonActive,
                       !isVoiceAvailable && styles.disabledButton
                     ]}
-                    onPress={startVoiceRecording}
+                    onPress={startListening}
                     disabled={!isVoiceAvailable || isLoading}
                   >
                     <LinearGradient
-                      colors={isRecording ? ['#ff6b6b', '#ee5a24'] : ['#00d2d3', '#54a0ff']}
+                      colors={isListening ? ['#ff6b6b', '#ee5a24'] : ['#00d2d3', '#54a0ff']}
                       style={styles.buttonGradient}
                     >
                       <Ionicons 
-                        name={isRecording ? "stop" : "mic"} 
+                        name={isListening ? "stop" : "mic"} 
                         size={20} 
                         color="white" 
                       />
@@ -597,7 +528,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 <TouchableOpacity
                   style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
                   onPress={() => sendMessage(inputText)}
-                  disabled={!inputText.trim() || isLoading || isRecording}
+                  disabled={!inputText.trim() || isLoading || isListening}
                 >
                   <LinearGradient
                     colors={inputText.trim() ? ['#667eea', '#764ba2'] : ['#E5E5EA', '#E5E5EA']}
@@ -612,7 +543,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 </TouchableOpacity>
               </View>
               
-              {isRecording && (
+              {isListening && (
                 <Animated.View style={[
                   styles.recordingIndicator,
                   {
@@ -625,12 +556,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
                   <View style={styles.recordingInfo}>
                     <View style={styles.recordingDot} />
                     <Text style={styles.recordingText}>
-                      Recording... {formatRecordingDuration(recordingDuration)}
+                      Listening... {formatRecordingDuration(recordingDuration)}
                     </Text>
                   </View>
                   <TouchableOpacity 
                     style={styles.stopRecordingButton}
-                    onPress={stopVoiceRecording}
+                    onPress={stopListening}
                   >
                     <Text style={styles.stopRecordingText}>Tap to stop</Text>
                   </TouchableOpacity>
@@ -638,11 +569,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
               )}
 
               {/* Voice input tips */}
-              {!isRecording && isVoiceAvailable && messages.length === 1 && (
+              {!isListening && isVoiceAvailable && messages.length === 1 && (
                 <View style={styles.voiceTips}>
                   <Ionicons name="bulb-outline" size={14} color="#8E8E93" />
                   <Text style={styles.voiceTipsText}>
-                    Tip: Hold the microphone button to record your voice, or type your message
+                    Tip: Hold the microphone button and speak to convert your voice to text
                   </Text>
                 </View>
               )}
@@ -697,9 +628,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   voiceIndicator: {
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
+    flexDirection: 'row',
     alignItems: 'center',
   },
   content: {
@@ -832,12 +761,18 @@ const styles = StyleSheet.create({
     maxHeight: 120,
     color: '#1a1a1a',
   },
-  partialResultText: {
+  partialTextContainer: {
     paddingHorizontal: 20,
     paddingBottom: 10,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(102, 126, 234, 0.2)',
+    backgroundColor: 'rgba(102, 126, 234, 0.05)',
+  },
+  partialText: {
     fontSize: 14,
     color: '#667eea',
     fontStyle: 'italic',
+    lineHeight: 18,
   },
   voiceButton: {
     width: 48,
