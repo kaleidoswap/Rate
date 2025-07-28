@@ -1,42 +1,31 @@
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { useDispatch, useSelector } from 'react-redux';
-import { RootState } from '../store';
+import { useDispatch } from 'react-redux';
 import { RGBNodeService } from '../services/RGBNodeService';
 import { setUnlocked, setInitialized } from '../store/slices/walletSlice';
-import { resetStore } from '../store';
 
 export default function InitialLoadScreen({ navigation }: { navigation: any }) {
   const dispatch = useDispatch();
-  const settings = useSelector((state: RootState) => state.settings);
   const nodeService = RGBNodeService.getInstance();
 
   useEffect(() => {
-    resetAndCheckInitialState();
+    initializeApp();
   }, []);
 
-  const resetAndCheckInitialState = async () => {
+  const initializeApp = async () => {
     try {
-      // Reset the store to clear any cached state
-      await resetStore();
+      // Initialize remote node connection
+      const nodeInitialized = await nodeService.initializeNode();
       
-      // Now check the node connection
-      if (settings.nodeType === 'remote') {
-        // For remote node, verify connection and proceed to dashboard
-        const nodeInitialized = await nodeService.initializeNode();
-        if (nodeInitialized) {
-          // Set wallet as initialized and unlocked for remote node
-          dispatch(setUnlocked(true));
-          dispatch(setInitialized(true));
-          
-          // Navigate directly to dashboard
-          navigation.replace('Dashboard');
-        } else {
-          // If remote connection fails, go to wallet setup where the error will be handled
-          navigation.replace('WalletSetup');
-        }
+      if (nodeInitialized) {
+        // Set wallet as initialized and unlocked for remote node
+        dispatch(setInitialized(true));
+        dispatch(setUnlocked(true));
+        
+        // Navigate directly to dashboard
+        navigation.replace('Dashboard');
       } else {
-        // For local node, go to wallet setup to handle initialization
+        // If remote connection fails, show error in wallet setup
         navigation.replace('WalletSetup');
       }
     } catch (error) {

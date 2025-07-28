@@ -1,6 +1,10 @@
 // services/RGBApiService.ts
-import axios, { AxiosInstance } from 'axios';
-import RGBNodeService from './RGBNodeService';
+import axios, { AxiosInstance, AxiosError } from 'axios';
+import { RGBNodeService } from './RGBNodeService';
+
+interface ErrorResponse {
+  error?: string;
+}
 
 enum AssetSchema {
   Nia = 'Nia',
@@ -76,7 +80,7 @@ interface AssetUDA {
   token?: Token;
 }
 
-interface RGBApiConfig {
+export interface RGBApiConfig {
   baseURL: string;
   timeout?: number;
 }
@@ -291,21 +295,96 @@ interface SendAssetResponse {
   txid: string;
 }
 
+interface Channel {
+  channel_id: string;
+  funding_txid: string;
+  peer_pubkey: string;
+  peer_alias: string;
+  short_channel_id: number;
+  status: 'Opening' | 'Opened' | 'Closing';
+  ready: boolean;
+  capacity_sat: number;
+  local_balance_sat: number;
+  outbound_balance_msat: number;
+  inbound_balance_msat: number;
+  next_outbound_htlc_limit_msat: number;
+  next_outbound_htlc_minimum_msat: number;
+  is_usable: boolean;
+  public: boolean;
+  asset_id: string;
+  asset_local_amount: number;
+  asset_remote_amount: number;
+}
+
+interface ListChannelsResponse {
+  channels: Channel[];
+}
+
 export class RGBApiService {
   private static instance: RGBApiService;
   private api: AxiosInstance;
   private nodeService: RGBNodeService;
+  private config: RGBApiConfig;
+  private retryCount: number = 3;
+  private retryDelay: number = 1000;
 
-  private constructor() {
+  private constructor(config: RGBApiConfig) {
     this.nodeService = RGBNodeService.getInstance();
+    this.config = config;
     this.api = this.createApiInstance();
   }
 
-  public static getInstance(): RGBApiService {
+  public static getInstance(config?: RGBApiConfig): RGBApiService {
     if (!RGBApiService.instance) {
-      RGBApiService.instance = new RGBApiService();
+      if (!config) {
+        throw new Error('RGBApiService must be initialized with a config first');
+      }
+      RGBApiService.instance = new RGBApiService(config);
+    } else if (config) {
+      RGBApiService.instance.updateConfig(config);
     }
     return RGBApiService.instance;
+  }
+
+  private async retryRequest<T>(request: () => Promise<T>): Promise<T> {
+    let lastError: Error | null = null;
+    
+    for (let i = 0; i < this.retryCount; i++) {
+      try {
+        return await request();
+      } catch (error) {
+        lastError = error as Error;
+        console.warn(`Request failed (attempt ${i + 1}/${this.retryCount}):`, error);
+        
+        if (i < this.retryCount - 1) {
+          await new Promise(resolve => setTimeout(resolve, this.retryDelay * Math.pow(2, i)));
+        }
+      }
+    }
+    
+    throw lastError || new Error('Request failed after retries');
+  }
+
+  private handleError(error: unknown): never {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError<ErrorResponse>;
+      if (!axiosError.response) {
+        // Network error or no response
+        const message = `Network error: Cannot reach RGB Lightning Node at ${this.config.baseURL}. Please check:
+1. The node is running
+2. The URL is correct
+3. Your network connection is stable`;
+        throw new Error(message);
+      }
+      
+      // Server responded with error
+      const statusCode = axiosError.response.status;
+      const errorMessage = axiosError.response.data?.error || axiosError.message;
+      throw new Error(`RGB API Error (${statusCode}): ${errorMessage}`);
+    }
+    
+    // Unknown error
+    throw error;
   }
 
   /**
@@ -317,13 +396,7 @@ export class RGBApiService {
       const response = await this.api.post<InitResponse>('/init', { password });
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -345,13 +418,7 @@ export class RGBApiService {
         proxy_endpoint: params.proxy_endpoint,
       });
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -359,61 +426,37 @@ export class RGBApiService {
    * Get BTC balance
    */
   public async getBtcBalance(): Promise<BTCBalanceResponse> {
-    try {
+    return this.retryRequest(async () => {
       console.log('RGB API Request: POST /btcbalance');
       const response = await this.api.post<BTCBalanceResponse>('/btcbalance', {
         skip_sync: false,
       });
       return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
-    }
+    });
   }
 
   /**
    * Get node information
    */
   public async getNodeInfo(): Promise<NodeInfoResponse> {
-    try {
+    return this.retryRequest(async () => {
       console.log('RGB API Request: GET /nodeinfo');
       const response = await this.api.get<NodeInfoResponse>('/nodeinfo');
       return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
-    }
+    });
   }
 
   /**
    * List all assets
    */
   public async listAssets(): Promise<ListAssetsResponse> {
-    try {
+    return this.retryRequest(async () => {
       console.log('RGB API Request: POST /listassets');
       const response = await this.api.post<ListAssetsResponse>('/listassets', {
         filter_asset_schemas: ['Nia']
       });
       return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
-    }
+    });
   }
 
   /**
@@ -435,13 +478,7 @@ export class RGBApiService {
       });
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -454,13 +491,7 @@ export class RGBApiService {
       const response = await this.api.post<AssetBalanceResponse>('/assetbalance', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -473,13 +504,7 @@ export class RGBApiService {
       const response = await this.api.post<AssetMetadataResponse>('/assetmetadata', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -491,13 +516,7 @@ export class RGBApiService {
       console.log('RGB API Request: POST /createutxos');
       await this.api.post('/createutxos', params);
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -510,13 +529,7 @@ export class RGBApiService {
       const response = await this.api.post<DecodeRGBInvoiceResponse>('/decodergbinvoice', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -529,13 +542,7 @@ export class RGBApiService {
       const response = await this.api.post<FailTransfersResponse>('/failtransfers', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -548,13 +555,7 @@ export class RGBApiService {
       const response = await this.api.post<GetAssetMediaResponse>('/getassetmedia', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -567,13 +568,7 @@ export class RGBApiService {
       const response = await this.api.post<IssueAssetCFAResponse>('/issueassetcfa', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -586,13 +581,7 @@ export class RGBApiService {
       const response = await this.api.post<IssueAssetUDAResponse>('/issueassetuda', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -611,13 +600,7 @@ export class RGBApiService {
       });
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -629,13 +612,7 @@ export class RGBApiService {
       console.log('RGB API Request: POST /refreshtransfers');
       await this.api.post('/refreshtransfers', params);
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -648,13 +625,7 @@ export class RGBApiService {
       const response = await this.api.post<RgbInvoiceResponse>('/rgbinvoice', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -667,13 +638,7 @@ export class RGBApiService {
       const response = await this.api.post<SendAssetResponse>('/sendasset', params);
       return response.data;
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
     }
   }
 
@@ -685,13 +650,20 @@ export class RGBApiService {
       console.log('RGB API Request: POST /sync');
       await this.api.post('/sync');
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (!error.response) {
-          throw new Error('Network error: Cannot reach RGB Lightning Node. Is it running?');
-        }
-        throw new Error(`RGB API Error: ${error.response.data?.error || error.message}`);
-      }
-      throw error;
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * List all channels
+   */
+  public async listChannels(): Promise<ListChannelsResponse> {
+    try {
+      console.log('RGB API Request: GET /listchannels');
+      const response = await this.api.get<ListChannelsResponse>('/listchannels');
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
     }
   }
 
@@ -699,13 +671,13 @@ export class RGBApiService {
    * Create a new API instance with the current node configuration
    */
   private createApiInstance(): AxiosInstance {
-    const nodeStatus = this.nodeService.getNodeStatus();
-    const config: RGBApiConfig = {
-      baseURL: `http://localhost:${nodeStatus.daemonPort}`,
-      timeout: 30000,
-    };
-
-    const api = axios.create(config);
+    const api = axios.create({
+      ...this.config,
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      }
+    });
 
     // Add request interceptor for logging
     api.interceptors.request.use(
@@ -723,12 +695,8 @@ export class RGBApiService {
     api.interceptors.response.use(
       (response) => response,
       (error) => {
-        if (axios.isAxiosError(error)) {
-          console.error('RGB API Error:', error.response?.data || error.message);
-        } else {
-          console.error('RGB API Error:', error);
-        }
-        return Promise.reject(error);
+        console.error('RGB API Error:', error);
+        return Promise.reject(this.handleError(error));
       }
     );
 
@@ -736,11 +704,11 @@ export class RGBApiService {
   }
 
   /**
-   * Update the API configuration when node status changes
+   * Update the API configuration
    */
-  public updateApiConfig(): void {
-    const nodeStatus = this.nodeService.getNodeStatus();
-    this.api.defaults.baseURL = `http://localhost:${nodeStatus.daemonPort}`;
+  public updateConfig(config: RGBApiConfig): void {
+    this.config = config;
+    this.api = this.createApiInstance();
   }
 }
 
