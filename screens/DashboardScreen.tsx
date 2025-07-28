@@ -532,7 +532,6 @@ export default function DashboardScreen({ navigation }: Props) {
         <View style={styles.bottomPadding} />
       </ScrollView>
       
-      {renderFloatingAIButton()}
       {renderCompactActions()}
     </SafeAreaView>
   );

@@ -76,20 +76,6 @@ function DashboardTabs() {
         }}
       />
       <Tab.Screen 
-        name="Assets" 
-        component={AssetsScreen}
-        options={{
-          tabBarLabel: 'Assets',
-          tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons 
-              name={focused ? 'diamond' : 'diamond-outline'} 
-              size={focused ? size + 2 : size} 
-              color={color} 
-            />
-          ),
-        }}
-      />
-      <Tab.Screen 
         name="Map" 
         component={MapScreen}
         options={{
@@ -112,6 +98,20 @@ function DashboardTabs() {
             <Ionicons 
               name={focused ? 'settings' : 'settings-outline'} 
               size={focused ? size + 2 : size} 
+              color={color} 
+            />
+          ),
+        }}
+      />
+      <Tab.Screen 
+        name="ChatBot" 
+        component={AIAssistantScreen}
+        options={{
+          tabBarLabel: 'ChatBot',
+          tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
+            <Ionicons 
+              name={focused ? 'chatbubble' : 'chatbubble-outline'} 
+              size={size} 
               color={color} 
             />
           ),
