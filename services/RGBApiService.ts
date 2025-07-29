@@ -652,15 +652,24 @@ export class RGBApiService {
    */
   public async payLightningInvoice(params: { invoice: string }): Promise<{ 
     payment_hash: string; 
+    payment_secret: string;
     status: string;
   }> {
     try {
-      console.log('RGB API Request: POST /lnpay');
+      console.log('RGB API Request: POST /sendpayment');
       const response = await this.api!.post<{ 
-        payment_hash: string; 
+        payment_hash: string;
+        payment_secret: string;
         status: string;
-      }>('/lnpay', params);
-      return response.data;
+      }>('/sendpayment', {
+        invoice: params.invoice,
+      });
+      
+      return {
+        payment_hash: response.data.payment_hash,
+        payment_secret: response.data.payment_secret,
+        status: response.data.status
+      };
     } catch (error) {
       return this.handleError(error);
     }

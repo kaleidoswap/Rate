@@ -11,4 +11,7 @@ config.resolver.alias = {
   buffer: 'buffer',
 };
 
+// Add Node.js polyfills to resolver platforms
+config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+
 module.exports = config;

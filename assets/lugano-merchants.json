@@ -1,0 +1,1502 @@
+[
+  {
+    "id": 1138,
+    "name": "Shoe Club",
+    "address": "Via della Posta Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41588663030"
+  },
+  {
+    "id": 1136,
+    "name": "Francorosso SA",
+    "address": "Via Canova Lugano 6900",
+    "icon": "luggage",
+    "phone": "+41919236092",
+    "website": "https://www.francorosso.ch/"
+  },
+  {
+    "id": 2034,
+    "name": "Level Sushi",
+    "address": "7 Piazza Cioccaro Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Tu-Su 11:45-22:30",
+    "phone": "+41919220808",
+    "website": "https://www.facebook.com/levelsushilugano/"
+  },
+  {
+    "id": 2035,
+    "name": "In Style Hair Nails Beauty",
+    "address": "Salita Mario e Antonio Chiattone Lugano 6900",
+    "icon": "content_cut",
+    "phone": "+41 91 225 30 96",
+    "website": "https://www.facebook.com/divaedivini/"
+  },
+  {
+    "id": 2125,
+    "name": "Love Estetica",
+    "address": "4 Via dei Solari Lugano 6900",
+    "icon": "spa",
+    "phone": "+41 76 731 64 30",
+    "website": "https://www.love-estetica-lugano.info/"
+  },
+  {
+    "id": 2131,
+    "name": "Lo Stralisco",
+    "address": "20 Via La Santa Lugano 6900",
+    "icon": "menu_book",
+    "opening_hours": "Mo-Fr 09:00-12:00, Sa 13:30-18:00",
+    "phone": "+41919702841",
+    "website": "https://lostralisco.ch/"
+  },
+  {
+    "id": 2130,
+    "name": "Nuova Immagine",
+    "address": "1 Via Camoghè Lugano 6900",
+    "icon": "content_cut",
+    "opening_hours": "Tu, Sa 8:30-18:00, We 8:30-14:00, Th 8:30-20:00, Fr 8:30-17:00",
+    "phone": "+41919210404",
+    "website": "https://www.nuova-immagine.ch/"
+  },
+  {
+    "id": 2039,
+    "name": "Shaker",
+    "address": "3 Via degli Albrizzi Lugano 6900",
+    "icon": "local_bar",
+    "opening_hours": "Tu-Sa 12:00-01:00",
+    "phone": "+41 91 993 19 52"
+  },
+  {
+    "id": 11289,
+    "name": "Magic travel",
+    "address": "5 Via delle Scuole Lugano 6900",
+    "icon": "luggage",
+    "phone": "+41 919702808",
+    "website": "https://www.magictravel.ch"
+  },
+  {
+    "id": 2798,
+    "name": "Pizza Burger",
+    "address": "5 Via Luigi Lavizzari Lugano 6900",
+    "icon": "lunch_dining",
+    "phone": "+41919231428"
+  },
+  {
+    "id": 2800,
+    "name": "Boutique Vintage Lugano",
+    "address": "20 Via Pretorio Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41919231313"
+  },
+  {
+    "id": 2803,
+    "name": "Dalfasport",
+    "address": "5 Via Centro Scolastico Lugano 6965",
+    "icon": "sports",
+    "phone": "+41794011175",
+    "website": "https://www.dalfasport.ch/"
+  },
+  {
+    "id": 5642,
+    "name": "piadineria",
+    "address": "2 Via Generale Dufour Lugano 6900",
+    "icon": "restaurant"
+  },
+  {
+    "id": 13689,
+    "name": "Osteria Trani",
+    "address": "12 Via Cattedrale Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Fr 11:45-14:00,18:45-24:00; Sa 18:45-24:00; Su off",
+    "phone": "+41 91 922 05 05",
+    "website": "https://www.trani.ch/"
+  },
+  {
+    "id": 2795,
+    "name": "Scuola Guida City",
+    "address": "1 Via Dufour Lugano 6900",
+    "icon": "directions_car",
+    "phone": "+41 76 323 5728",
+    "website": "https://scuolaguidacity.com/"
+  },
+  {
+    "id": 19752,
+    "name": "Storica",
+    "address": "7 Via Pretorio Lugano 6900",
+    "icon": "chair",
+    "opening_hours": "Mo-Fr 09:00-12:30,13:30-19:00; Sa 09:00-12:30,13:30-18:00",
+    "phone": "+41 91 921 31 11",
+    "website": "https://storica.ch/"
+  },
+  {
+    "id": 11932,
+    "name": "Farmacia Contrada dei Patrizi",
+    "address": "1 Via Trevano Lugano 6900",
+    "icon": "local_pharmacy",
+    "opening_hours": "Mo-Fr 08:00-18:45; Sa 08:00-13:00",
+    "website": "https://www.farmaciacontradadeipatrizi.com/"
+  },
+  {
+    "id": 9433,
+    "name": "Lido Riva Caccia",
+    "address": "5 Riva Antonio Caccia Lugano 6900",
+    "icon": "beach_access",
+    "website": "https://www.gabbani.com/ristoranti--bar/lido-riva-caccia/"
+  },
+  {
+    "id": 2120,
+    "name": "El Cid",
+    "address": "28 Via Antonio Adamini Lugano 6900",
+    "icon": "local_bar",
+    "opening_hours": "Mo-Tu, Su 15:00-00:00; Fr 15:00-01:00; Sa 15:00-02:00"
+  },
+  {
+    "id": 17507,
+    "name": "Pesperuncino",
+    "address": "23 Via Madonnetta Lugano 6900",
+    "icon": "storefront"
+  },
+  {
+    "id": 17506,
+    "name": "Unnamed",
+    "address": "2 Via Zurigo Lugano 6900",
+    "icon": "content_cut"
+  },
+  {
+    "id": 11269,
+    "name": "Commercio",
+    "address": "4 Via Lodovico Ariosto Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Sa 06:00-01:00",
+    "phone": "+41 91 923 43 64",
+    "website": "https://www.ristorantecommercio.ch"
+  },
+  {
+    "id": 11218,
+    "name": "Argentino",
+    "address": "Piazza della Riforma Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "11:30-22:30; Fr,Sa 11:30-23:00",
+    "phone": "+41 91 922 90 49",
+    "website": "https://ristoranteargentino.ch/"
+  },
+  {
+    "id": 17443,
+    "name": "Gabbani",
+    "address": "12 Via Pessina Lugano 6900",
+    "icon": "tapas",
+    "phone": "+41 91 911 30 80"
+  },
+  {
+    "id": 17426,
+    "name": "Agua",
+    "address": "1 Piazza della Riforma Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Fr 08:00-01:00",
+    "phone": "+41 91 923 80 80",
+    "website": "https://agualugano.ch/"
+  },
+  {
+    "id": 833,
+    "name": "Dieci Style Factory",
+    "address": "8 Via Cattedrale Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Sa 10:00-18:00",
+    "phone": "+41 91 923 55 10",
+    "website": "https://www.diecilugano.com/"
+  },
+  {
+    "id": 11480,
+    "name": "Ristorante Stadio",
+    "address": "93 VIa Trevano Lugano 6900",
+    "icon": "restaurant",
+    "website": "https://ristorantestadio.ch/"
+  },
+  {
+    "id": 12709,
+    "name": "Polyplus Lab",
+    "address": "21 Via Clemente Maraini Lugano 6900",
+    "icon": "business",
+    "phone": "+41919809595",
+    "website": "https://www.polypluslab.ch"
+  },
+  {
+    "id": 4115,
+    "name": "1979 Tattoo shop",
+    "address": "8 Via Zurigo Lugano 6900",
+    "icon": "storefront"
+  },
+  {
+    "id": 4134,
+    "name": "3P food",
+    "address": "1 Via Al Nido Lugano 6900",
+    "icon": "local_pizza"
+  },
+  {
+    "id": 14386,
+    "name": "Wilma's Pizza",
+    "address": "21 Via Pretorio Lugano 6900",
+    "icon": "local_pizza",
+    "phone": "+41 91 923 61 61",
+    "website": "https://www.wilmas.pizza/"
+  },
+  {
+    "id": 4124,
+    "name": "Al Lido Ristorante Bar Beach Lounge",
+    "address": "6 Viale Castagnola Lugano 6900",
+    "icon": "restaurant",
+    "website": "https://allidobar.com"
+  },
+  {
+    "id": 2243,
+    "name": "11teamsports",
+    "address": "10 Maghetti Lugano 6900",
+    "icon": "sports",
+    "opening_hours": "Tu-Fr 11:00-18:30",
+    "phone": "+41912262784",
+    "website": "https://instagram.com/11ts_lugano?igshid=YmMyMTA2M2Y="
+  },
+  {
+    "id": 10169,
+    "name": "Antonioli Boutique Donna",
+    "address": "29 Via Nassa Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Su 10:00-18:30",
+    "phone": "+41919238882",
+    "website": "https://antoniolishop.ch"
+  },
+  {
+    "id": 14130,
+    "name": "Bar Pinard",
+    "address": "5 Piazza Molino Nuovo Lugano 6900",
+    "icon": "local_bar",
+    "opening_hours": "Mo-Sa 17:00-01:00",
+    "phone": "+41 91 921 04 59",
+    "website": "https://barpinard.ch/"
+  },
+  {
+    "id": 4148,
+    "name": "Barbiere Latino",
+    "address": "2 Via Antonio Ciseri Lugano 6900",
+    "icon": "content_cut",
+    "opening_hours": "Tu-Sa 08:00-18:30"
+  },
+  {
+    "id": 2799,
+    "name": "Boutique Sesto Senso",
+    "address": "4 Via Serafino Balestra Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41919231526"
+  },
+  {
+    "id": 2797,
+    "name": "CCT Formazione linguistica e culturale",
+    "address": "27 Viale Cattaneo Lugano 6900",
+    "icon": "school",
+    "phone": "+41919234918",
+    "website": "https://www.cct.ch"
+  },
+  {
+    "id": 3643,
+    "name": "Cambio Prada",
+    "address": "72 Via Trevano Lugano 6900",
+    "icon": "currency_exchange"
+  },
+  {
+    "id": 4102,
+    "name": "Corcione Architects",
+    "address": "9 Via Gaggini da Bissone Lugano 6900",
+    "icon": "architecture",
+    "phone": "+41783148806",
+    "website": "https://www.corcionearchitects.com"
+  },
+  {
+    "id": 4140,
+    "name": "Doctor Phone Lugano",
+    "address": "13 Corso Elvezia Lugano 6900",
+    "icon": "build",
+    "website": "https://www.doctorphone.ch"
+  },
+  {
+    "id": 823,
+    "name": "Dolce Vita Shop",
+    "address": "3A Via Antonio Riva Lugano 6900",
+    "icon": "tapas",
+    "phone": "+41912104029",
+    "website": "https://www.dolcevitashop.ch"
+  },
+  {
+    "id": 1134,
+    "name": "Donde Art Gallery",
+    "address": "68 Via Nassa Lugano 6900",
+    "icon": "palette",
+    "website": "https://dondeartgallery.com"
+  },
+  {
+    "id": 11276,
+    "name": "Farmacia Della Piazzetta",
+    "address": "2 Via Dogana Vecchia Lugano 6900",
+    "icon": "local_pharmacy",
+    "website": "https://www.farmacialugano.com"
+  },
+  {
+    "id": 4145,
+    "name": "Edicola Ginevra",
+    "address": "5 Via Ginevra Lugano 6900",
+    "icon": "newspaper"
+  },
+  {
+    "id": 834,
+    "name": "Groovy Concept",
+    "address": "5 Via Vegezzi Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41910000000",
+    "website": "https://www.groovyconcept.com"
+  },
+  {
+    "id": 4106,
+    "name": "CLUB.G",
+    "address": "1 Piazza Cioccaro Lugano 6900",
+    "icon": "local_bar"
+  },
+  {
+    "id": 10168,
+    "name": "Antonioli",
+    "address": "66 Via Nassa Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Su 10:00-18:30",
+    "phone": "+49 91 923 8881",
+    "website": "https://www.antoniolishop.ch/"
+  },
+  {
+    "id": 2124,
+    "name": "SH21",
+    "address": "12 Piazza Alessandro Manzoni Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Su 10:00-19:00",
+    "phone": "+41919249696",
+    "website": "https://sh21.ch/"
+  },
+  {
+    "id": 3154,
+    "name": "Engel & Völkers",
+    "address": "1 Viale Carlo Cattaneo Lugano 6900",
+    "icon": "home",
+    "opening_hours": "Mo-Fr 08:30-18:00",
+    "phone": "+41919804260",
+    "website": "https://www.engelvoelkers.com/it-ch/lugano/"
+  },
+  {
+    "id": 13872,
+    "name": "Dilo's",
+    "address": "31 Via Serafino Balestra Lugano 6900",
+    "icon": "local_cafe",
+    "phone": "+41 (0)91 921 17 16",
+    "website": "https://www.diloslugano.ch"
+  },
+  {
+    "id": 26449,
+    "name": "Spar Express",
+    "address": "14 Via Giovan Battista Pioda Lugano 6900",
+    "icon": "local_grocery_store",
+    "opening_hours": "Mo-Fr 06:30-19:00; Sa-Su off",
+    "phone": "+41 91 921 21 69",
+    "website": "https://www.spar.ch/standorte/detail/se-lugano"
+  },
+  {
+    "id": 3644,
+    "name": "Guess",
+    "address": "13 Via Pessina Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41919804543"
+  },
+  {
+    "id": 17446,
+    "name": "Guess Accessories",
+    "address": "6 Via Pessina Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41919804543"
+  },
+  {
+    "id": 2127,
+    "name": "Historian Lugano",
+    "address": "10 Via al Forte Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "We, Fr, Sa 10:00-17:00",
+    "phone": "+41763022043",
+    "website": "https://historianlugano.com"
+  },
+  {
+    "id": 10170,
+    "name": "IMAGO Art Gallery",
+    "address": "46 Via Nassa Lugano 6900",
+    "icon": "palette",
+    "opening_hours": "Tu-Sa 11:00-16:00",
+    "phone": "+41919214354",
+    "website": "https://imago-artgallery.com"
+  },
+  {
+    "id": 2789,
+    "name": "Imago Art Cafè",
+    "address": "62 Via Nassa Lugano 6900",
+    "icon": "local_cafe",
+    "phone": "091 923 35 50",
+    "website": "https://www.imagoartcafe.com"
+  },
+  {
+    "id": 2793,
+    "name": "Jungle Club",
+    "address": "1A Via Cantonale Lugano 6900",
+    "icon": "nightlife",
+    "opening_hours": "Fr-Sa 11:45-30:00",
+    "phone": "+41799516265"
+  },
+  {
+    "id": 5,
+    "name": "La Dispensa",
+    "address": "4 Via della Posta Lugano 6900",
+    "icon": "local_bar",
+    "website": "https://ladispensa.ch"
+  },
+  {
+    "id": 832,
+    "name": "La signora degli anelli",
+    "address": "6 Via Cattedrale Lugano 6900",
+    "icon": "storefront",
+    "website": "https://www.lasignoradeglianelli.ch"
+  },
+  {
+    "id": 2788,
+    "name": "Lidia Leone Photography",
+    "address": "22 Corso Elvezia Lugano 6900",
+    "icon": "photo_camera",
+    "opening_hours": "Tu 10:00-16:00; Th-Fr 10:00-15:00",
+    "phone": "+41792620699",
+    "website": "https://lidialeone.ch"
+  },
+  {
+    "id": 4135,
+    "name": "Lavanderia Mary Besso",
+    "address": "1 Via al Nido Lugano 6900",
+    "icon": "local_laundry_service",
+    "website": "https://www.lavanderiamary.ch"
+  },
+  {
+    "id": 4143,
+    "name": "Kost Make-Up",
+    "address": "4 Via Serafino Balestra Lugano 6900",
+    "icon": "spa",
+    "opening_hours": "Mo-Fr 10:00-13:30,14:30-18:30; Sa 10:00-12:30,13:30-17:00"
+  },
+  {
+    "id": 26459,
+    "name": "Intersport Zappa",
+    "address": "15 Via Pietro Peri Lugano 6900",
+    "icon": "sports",
+    "website": "https://www.zappasport.ch"
+  },
+  {
+    "id": 350,
+    "name": "Marco Lucchetti Art Gallery",
+    "address": "3 Via Cattedrale Lugano 6900",
+    "icon": "palette",
+    "phone": "+41768051960",
+    "website": "https://www.marcolucchettiartgallery.ch"
+  },
+  {
+    "id": 4131,
+    "name": "Maruska Riva gioielli",
+    "address": "13 Cattedrale Lugano 6900",
+    "icon": "diamond",
+    "website": "https://maruskariva.ch"
+  },
+  {
+    "id": 11301,
+    "name": "New Motors",
+    "address": "11 Via Brentani Lugano 6900",
+    "icon": "two_wheeler",
+    "website": "https://newmotorslugano.com"
+  },
+  {
+    "id": 825,
+    "name": "New Limousine",
+    "address": "62 Via Carona Lugano 6900",
+    "icon": "local_taxi",
+    "website": "https://www.newlimousine.ch"
+  },
+  {
+    "id": 3637,
+    "name": "Negio Food, Kebab & Grill",
+    "address": "1 Piazza dell'Indipendenza Lugano 6900",
+    "icon": "lunch_dining",
+    "phone": "+41912241050",
+    "website": "https://negiofood.com"
+  },
+  {
+    "id": 4119,
+    "name": "Orlospeedy",
+    "address": "30 Via Trevano Lugano 6900",
+    "icon": "checkroom",
+    "website": "https://www.orlospeedy.ch"
+  },
+  {
+    "id": 839,
+    "name": "Ottica Vicari",
+    "address": "4 Via Balestra Lugano 6900",
+    "icon": "visibility",
+    "opening_hours": "Mo-Fr 08:30-18:30; Sa 09:00-17:00",
+    "website": "https://www.otticavicari.ch"
+  },
+  {
+    "id": 840,
+    "name": "RepairStore",
+    "address": "1 Piazza Molino Nuovo Lugano 6900",
+    "icon": "build",
+    "opening_hours": "Mo-Fr 09:30-18:00; Sa 10:00-13:00+",
+    "website": "https://www.repairstore.ch"
+  },
+  {
+    "id": 4103,
+    "name": "Ottica Visio",
+    "address": "12 Via Motta Lugano 6900",
+    "icon": "visibility",
+    "phone": "+41919235948",
+    "website": "https://www.otticavisio.ch"
+  },
+  {
+    "id": 842,
+    "name": "Salone Pink",
+    "address": "21/A Via Castagnola Lugano 6900",
+    "icon": "spa",
+    "phone": "+41919716869"
+  },
+  {
+    "id": 2037,
+    "name": "SAM Hair Attitude & Barber Shop",
+    "address": "5A Via Soave Lugano 6900",
+    "icon": "content_cut",
+    "opening_hours": "Tu-Sa 09:00-19:00",
+    "phone": "+41 91 921 09 83"
+  },
+  {
+    "id": 4116,
+    "name": "Swiss Free Shop",
+    "address": "2 Via Zurigo Lugano 6900",
+    "icon": "grass",
+    "website": "https://www.swissfreeshop.com"
+  },
+  {
+    "id": 4136,
+    "name": "TCC EXCHANGE",
+    "address": "31 Via Besso Lugano 6900",
+    "icon": "currency_exchange"
+  },
+  {
+    "id": 26503,
+    "name": "Taleda",
+    "address": "20 Via Pessina Lugano 6900",
+    "icon": "currency_exchange",
+    "website": "https://taleda.com"
+  },
+  {
+    "id": 2043,
+    "name": "The Joker Shop",
+    "address": "90 Via Trevano Lugano 6900",
+    "icon": "sports",
+    "opening_hours": "Mo-Su 14:00-19:00",
+    "phone": "+41 91 970 11 47",
+    "website": "https://thejokershop.ch"
+  },
+  {
+    "id": 2796,
+    "name": "Yoyo-Tennis & Phili-Riding",
+    "address": "3 Via del Tiglio Lugano 6900",
+    "icon": "sports",
+    "opening_hours": "Mo-Fr 09:00-18:00; Sa 09:00-18:30",
+    "phone": "+41792573550",
+    "website": "https://yoyo-tennis.ch"
+  },
+  {
+    "id": 4133,
+    "name": "Valentina Beauty Center",
+    "address": "7 Via Besso Lugano 6900",
+    "icon": "spa"
+  },
+  {
+    "id": 4149,
+    "name": "White luxury hair salon",
+    "address": "17 Viale S. Franscini Lugano 6900",
+    "icon": "spa"
+  },
+  {
+    "id": 10687,
+    "name": "Zoeyland",
+    "address": "5 Via Contrada Sassello Lugano 6900",
+    "icon": "toys"
+  },
+  {
+    "id": 26517,
+    "name": "boutique per la schiena",
+    "address": "19 Viale Cattaneo Lugano 6900",
+    "icon": "storefront",
+    "phone": "41 91 972 58 08",
+    "website": "https://www.boutiqueperlaschiena.ch/"
+  },
+  {
+    "id": 26518,
+    "name": "Ristorante Cinese Orient Express",
+    "address": "22 Corso Elvezia Lugano 6900",
+    "icon": "restaurant",
+    "phone": "+41 91 921 00 66",
+    "website": "http://ristoranteorient.ch/"
+  },
+  {
+    "id": 15,
+    "name": "Gabbani Enoteca",
+    "address": "1 Piazza Cioccaro Lugano 6900",
+    "icon": "restaurant",
+    "phone": "41 91 911 30 80 ",
+    "website": "https://www.gabbani.com/home/"
+  },
+  {
+    "id": 1998,
+    "name": "Stage 12",
+    "address": "12 Corso Pestalozzi Lugano 6900",
+    "icon": "storefront",
+    "phone": "41 91 222 62 96",
+    "website": "https://stage12.ch/"
+  },
+  {
+    "id": 1999,
+    "name": "Ottico Michel di Claudia",
+    "address": "14 Via Pretorio Lugano 6900",
+    "icon": "visibility",
+    "opening_hours": "Mo-Fr 08:30-18:30; Sa 08:30-17:00",
+    "phone": "41 91 922 03 72",
+    "website": "https://www.otticomichellugano.ch/"
+  },
+  {
+    "id": 26522,
+    "name": "Hotel Gabbani",
+    "address": "1 Piazza Cioccaro Lugano 6900",
+    "icon": "hotel",
+    "phone": "41 91 921 34 70",
+    "website": "https://www.gabbani.com/home/"
+  },
+  {
+    "id": 17445,
+    "name": "Ceresio Jewelry",
+    "address": "9 Galleria Rezzonico - Via Pessina Lugano 6900",
+    "icon": "diamond",
+    "phone": "+41 76 522 77 78"
+  },
+  {
+    "id": 26523,
+    "name": "Frutor fruttivendolo",
+    "address": "5 Via Fusoni Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41 91 922 85 22"
+  },
+  {
+    "id": 26524,
+    "name": "Health Park",
+    "address": "11 Via Balestra Lugano 6900",
+    "icon": "fitness_center",
+    "phone": "+41 91 973 47 90",
+    "website": "https://www.healthpark.ch/"
+  },
+  {
+    "id": 21249,
+    "name": "The Trinity Irish Pub",
+    "address": "1 Via Canonica Lugano 6900",
+    "icon": "sports_bar",
+    "phone": "+41 91 966 65 41"
+  },
+  {
+    "id": 26543,
+    "name": "La Cucina di Alice",
+    "address": "4 Riva Vela Lugano 6900",
+    "icon": "restaurant",
+    "phone": "+41 91 922 01 03",
+    "website": "https://www.lacucinadialice.ch/"
+  },
+  {
+    "id": 3642,
+    "name": "The Market Lugano",
+    "address": "12 Via Pasquale Lucchini Lugano 6900",
+    "icon": "local_bar",
+    "phone": "+41 76 238 79 47"
+  },
+  {
+    "id": 26555,
+    "name": "Cinema Iride",
+    "address": "3 Piazza S. Rocco Lugano 6900",
+    "icon": "local_movies",
+    "phone": "091 922 96 53",
+    "website": "https://www.jfcinema.ch/"
+  },
+  {
+    "id": 26557,
+    "name": "Maison Clinic | Estetica Sartoriale",
+    "address": "2A Salita dei Frati Lugano 6900",
+    "icon": "spa",
+    "phone": "079 651 17 11",
+    "website": "https://maison-clinic.com/"
+  },
+  {
+    "id": 17481,
+    "name": "Sonego Lugano",
+    "address": "16 Via Peri Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41 91 921 13 96",
+    "website": "https://sonego.ch/"
+  },
+  {
+    "id": 17485,
+    "name": "Auberge Lugano",
+    "address": "21 Corso Enrico Pestalozzi Lugano 6900",
+    "icon": "nightlife",
+    "phone": "+41 91 944 20 20",
+    "website": "https://www.aubergelugano.ch/"
+  },
+  {
+    "id": 17505,
+    "name": "Z-Bike",
+    "address": "14 Via Vignola Lugano 6900",
+    "icon": "pedal_bike",
+    "opening_hours": "Mo-Fr 09:00-13:00,14:00-18:00; Sa 09:00-14:00",
+    "phone": "+41 91 975 05 45",
+    "website": "https://www.z-bike.ch/"
+  },
+  {
+    "id": 26559,
+    "name": "2wheels Rental Ebike rental Ticino",
+    "address": "14 Via Vignola Lugano 6900",
+    "icon": "pedal_bike",
+    "phone": "+41 76 361 96 61",
+    "website": "https://2wheelsrental.com/"
+  },
+  {
+    "id": 2,
+    "name": "Boatcenter Lugano",
+    "address": "2 Piazza Bernardino Luini Lugano 6900",
+    "icon": "local_cafe",
+    "website": "https://boatcenterlugano.com"
+  },
+  {
+    "id": 836,
+    "name": "Alla Fermata",
+    "address": "3 Via Ludovico Ariosto Lugano 6900",
+    "icon": "storefront",
+    "website": "https://www.alla-fermata.ch"
+  },
+  {
+    "id": 1135,
+    "name": "CeresaOttica",
+    "address": "10 Via Maghetti Lugano 6900",
+    "icon": "visibility",
+    "phone": "+41 (91) 923 16 16",
+    "website": "https://www.ceresaottica.ch"
+  },
+  {
+    "id": 13147,
+    "name": "Balmelli Sport",
+    "address": "10 Via G.B. Pioda Lugano 6900",
+    "icon": "sports",
+    "website": "https://balmelli-sport.ch"
+  },
+  {
+    "id": 5035,
+    "name": "Millymetri Creativi",
+    "address": "1 Via Carlo Maderno Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Fr 09:00-18:00; Sa 09:00-17:00; PH closed",
+    "phone": "+41 91 921 34 59",
+    "website": "https://www.instagram.com/millymetri_creativi/"
+  },
+  {
+    "id": 12597,
+    "name": "Corallo",
+    "address": "4 Via Mons. Angelo Jelmini Lugano 6900",
+    "icon": "local_bar"
+  },
+  {
+    "id": 21440,
+    "name": "Kream",
+    "address": "2B Piazza Manzoni Lugano 6900",
+    "icon": "local_bar",
+    "opening_hours": "Su-Th 08:00-20:00; Fr-Sa 08:00-22:00",
+    "phone": "+41 91 222 59 15"
+  },
+  {
+    "id": 17450,
+    "name": "FlorArt",
+    "address": "2 Via Sorengo Lugano 6900",
+    "icon": "local_florist",
+    "website": "https://florart-lugano.ch"
+  },
+  {
+    "id": 26626,
+    "name": "K Moto Sagl",
+    "address": "A Via Balestra 39 Lugano 6900",
+    "icon": "two_wheeler",
+    "opening_hours": "Mo-Fr 08:00-12:00, 13:30-18:00",
+    "phone": "+41 79 621 76 50",
+    "website": "https://www.kmoto.ch/"
+  },
+  {
+    "id": 2790,
+    "name": "Il Canapé",
+    "address": "2 Crocicchio di Cortogna Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Sa 07:00-20:00",
+    "phone": "+41 91 225 60 00",
+    "website": "https://www.canapelugano.ch/"
+  },
+  {
+    "id": 26625,
+    "name": "Oops",
+    "address": "24 Via Maderno Lugano 6900",
+    "icon": "local_bar",
+    "opening_hours": "Mo-Fr 08:00-01:00; Sa-So 17:00-01:00",
+    "phone": "+41 91 923 74 21"
+  },
+  {
+    "id": 17488,
+    "name": "Farmacia Chimica Internazionale",
+    "address": "22B Via Balestra Lugano 6900",
+    "icon": "local_pharmacy",
+    "website": "https://www.farmaciachimica.ch"
+  },
+  {
+    "id": 2792,
+    "name": "Class Café",
+    "address": "3 Corso Pestalozzi Lugano 6900",
+    "icon": "local_bar",
+    "opening_hours": "Mo-We 6:30-00:00; Th 6:30-01:00; Fr 6:30-02:00; Sa 18:00-02:00",
+    "phone": "+41 91 922 60 80",
+    "website": "https://classcafe.ch/"
+  },
+  {
+    "id": 4142,
+    "name": "La Kloche",
+    "address": "11 Via Pioda Lugano 6900",
+    "icon": "restaurant",
+    "website": "https://kloche.ch"
+  },
+  {
+    "id": 26636,
+    "name": "Fully Burgers and Fries",
+    "address": "9 Via Pretorio Lugano 6900",
+    "icon": "lunch_dining",
+    "opening_hours": "Mo-Th 11:30-22:00; Fr-Sa 11:30-00:00",
+    "website": "https://fullyburgers.ch/"
+  },
+  {
+    "id": 4117,
+    "name": "Piadineria Romagna Mia",
+    "address": "2 Via Marco Da Carona Lugano 6900",
+    "icon": "local_pizza"
+  },
+  {
+    "id": 2184,
+    "name": "Purest",
+    "address": "2 Via Pietro Capelli Lugano 6962",
+    "icon": "storefront",
+    "opening_hours": "Mo-Fr 09:00-12:30,14:00-18:30",
+    "phone": "+41 919701630",
+    "website": "https://purest.com/"
+  },
+  {
+    "id": 17475,
+    "name": "Porto Bello!",
+    "address": "11 Via Foce Lugano 6900",
+    "icon": "restaurant"
+  },
+  {
+    "id": 11819,
+    "name": "Mary",
+    "address": "2 Piazza Riziero Rezzonico Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-So 11:30-00:00",
+    "phone": "+41 91 923 38 06",
+    "website": "https://ristorantemary.ch/"
+  },
+  {
+    "id": 3248,
+    "name": "Staglio",
+    "address": "8 Corso Elvezia Lugano 6900",
+    "icon": "lunch_dining",
+    "opening_hours": "Mo-Fr 11:00-21:00; Sa-Su 12:00-21:00",
+    "phone": "+41 91 923 24 25",
+    "website": "https://staglio.ch"
+  },
+  {
+    "id": 17486,
+    "name": "AD Tech",
+    "address": "4 Via G.B. Pioda Lugano 6900",
+    "icon": "smartphone",
+    "opening_hours": "Mo-Fr 09:00-18:00; Sa 09:00-16:00",
+    "phone": "+41 91 922 95 05",
+    "website": "https://techlugano.ch"
+  },
+  {
+    "id": 17441,
+    "name": "Hotel Federale",
+    "address": "8 Via Paolo Regazzoni Lugano 6900",
+    "icon": "hotel",
+    "phone": "+41 91 910 08 08",
+    "website": "https://www.hotel-federale.ch/"
+  },
+  {
+    "id": 17435,
+    "name": "Cigar Must",
+    "address": "1 Piazza Riforma Lugano 6900",
+    "icon": "smoking_rooms",
+    "phone": "+41 91 923 12 59",
+    "website": "https://cigarmust.com/it/"
+  },
+  {
+    "id": 17470,
+    "name": "Ristorante La Fermata",
+    "address": "21 Via Carlo Cattaneo Lugano 6900",
+    "icon": "restaurant",
+    "phone": "+41 91 225 79 77"
+  },
+  {
+    "id": 17494,
+    "name": "Love is in the Hair",
+    "address": "1 Via delle Scuole Lugano 6900",
+    "icon": "content_cut",
+    "phone": "+41 78 830 29 61",
+    "website": "https://loveisinthe-hair.com/?fbclid=IwAR3nTuhTVS6By5kR3BE7hWwJ_NXhGUblJ_YmBlElDzjZReEWoX_oTDZb5Ew"
+  },
+  {
+    "id": 17476,
+    "name": "Ashri Boutique",
+    "address": "20 Quartiere Maghetti Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Fr 10:00-18:30; Sa 10:00-18:00",
+    "phone": "+41 79 944 88 00",
+    "website": "https://www.ashri.ch/"
+  },
+  {
+    "id": 17433,
+    "name": "Juliana Jewelry",
+    "address": "64 Via Nassa Lugano 6900",
+    "icon": "diamond",
+    "phone": "+41 91 922 82 22",
+    "website": "https://www.julianajewelry.ch/"
+  },
+  {
+    "id": 17431,
+    "name": "Hotel Delfino",
+    "address": "6 Via Cassarinetta Lugano 6900",
+    "icon": "hotel",
+    "phone": "+41 91 985 99 99",
+    "website": "https://hoteldelfinolugano.ch/"
+  },
+  {
+    "id": 26657,
+    "name": "Evellyn Beauty",
+    "address": "5 Via Rinaldo Simen Lugano 6900",
+    "icon": "spa",
+    "opening_hours": "Mo-Fr 09:00-19:00; Sa \"Su appuntamento\"; PH off",
+    "phone": "+41 76 569 32 23",
+    "website": "https://evellynbeauty.com"
+  },
+  {
+    "id": 26658,
+    "name": "Kinetic Center",
+    "address": "13 Via Ferruccio Pelli Lugano 6900",
+    "icon": "medical_services",
+    "opening_hours": "Mo-Fr 07:00-19:00; PH off",
+    "phone": "+41 91 921 41 88",
+    "website": "https://www.kinetic-center.ch/"
+  },
+  {
+    "id": 17512,
+    "name": "Ceresio",
+    "address": "19 Via Serafino Balestra Lugano 6900",
+    "icon": "hotel",
+    "phone": "+41 91 923 10 44",
+    "website": "https://www.hotelceresio.ch"
+  },
+  {
+    "id": 26659,
+    "name": "Shoppa",
+    "address": "21A Viale Castagnola Lugano 6900",
+    "icon": "smartphone",
+    "opening_hours": "Mo-Fr 08:00-11:30, 13:30-18:00; Sa 0:00-11:30, 13:30-17:00; PH off",
+    "phone": "+41 91 994 10 00",
+    "website": "https://www.shoppa.ch"
+  },
+  {
+    "id": 26660,
+    "name": "Casa Emilia",
+    "address": "20 Via Serafino Balestra Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-We 07:30-17:00; Th 07:30-21:00; PH off",
+    "phone": "+41 91 922 26 26",
+    "website": "https://www.casaemilialugano.ch"
+  },
+  {
+    "id": 17501,
+    "name": "Monster House",
+    "address": "5 Via Luigi Canonica Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Tu-Sa 10:00-19:00",
+    "phone": "+41 78 258 19 17"
+  },
+  {
+    "id": 26661,
+    "name": "Linea Sana",
+    "address": "11 Via Pretorio Lugano 6900",
+    "icon": "medical_services",
+    "opening_hours": "Mo-Fr 09:00-19:00 \"si riceve su appuntamento\"; Sa 09:00-16:00 \"si riceve su appuntamento\"",
+    "phone": "+41 91 923 20 90",
+    "website": "https://www.lineasana.ch"
+  },
+  {
+    "id": 17452,
+    "name": "Galleria Doppia V",
+    "address": "3 Via Moncucco Lugano 6900",
+    "icon": "palette",
+    "phone": "+41 91 966 0894",
+    "website": "https://www.galleriadoppiav.com/"
+  },
+  {
+    "id": 17510,
+    "name": "PaneLento Lievito Madre",
+    "address": "1 Via Rinaldo Simen Lugano 6900",
+    "icon": "bakery_dining",
+    "phone": "+41 79 296 87 09"
+  },
+  {
+    "id": 17456,
+    "name": "Cyberconnect",
+    "address": "59 Via Besso Lugano 6900",
+    "icon": "computer",
+    "phone": "+41 78 717 29 27",
+    "website": "https://cyberconnect.ch/"
+  },
+  {
+    "id": 17487,
+    "name": "AB Digital",
+    "address": "A Corso Pestalozzi 21 Lugano 6900",
+    "icon": "business",
+    "phone": "+41 76 483 15 45",
+    "website": "https://www.abdigital.ch/"
+  },
+  {
+    "id": 17432,
+    "name": "Da Lia Coiffure",
+    "address": "18 Via Maraini Lugano 6900",
+    "icon": "content_cut",
+    "phone": "+41 91 994 60 87"
+  },
+  {
+    "id": 4150,
+    "name": "Edicola Molino Nuovo",
+    "address": "1 Via Zurigo Lugano 6900",
+    "icon": "newspaper",
+    "opening_hours": "Mo-Fri 08:00-19:00; Sa 08:30-14:00; Su 09:00-12:00",
+    "phone": "+41 91 921 05 06"
+  },
+  {
+    "id": 17484,
+    "name": "Rolfing Ticino di Angelo Bigontina",
+    "address": "B Corso Pestalozzi 21 Lugano 6900",
+    "icon": "spa",
+    "phone": "076 650 51 15",
+    "website": "https://www.ticinorolfing.com/"
+  },
+  {
+    "id": 26691,
+    "name": "Pepita Lugano Take Away",
+    "address": "Riva Vincenzo Vela Lugano 6900",
+    "icon": "lunch_dining",
+    "opening_hours": "Mo-Sa 07:00-21:00",
+    "phone": "+41 78 661 75 45"
+  },
+  {
+    "id": 4118,
+    "name": "Ristorante Pizzeria Dal Gallo",
+    "address": "19 Via Trevano Lugano 6900",
+    "icon": "restaurant",
+    "phone": "+41 91 921 02 23"
+  },
+  {
+    "id": 26692,
+    "name": "Triticum",
+    "address": "27 Viale Stefano Franscini Lugano 6900",
+    "icon": "bakery_dining",
+    "opening_hours": "Mo-Fr 07:30-19:00",
+    "phone": "+41 78 269 33 63",
+    "website": "https://www.triticumbakery.com/"
+  },
+  {
+    "id": 26702,
+    "name": "Centrostampa Express",
+    "address": "2 Via Vignola Lugano 6900",
+    "icon": "design_services",
+    "phone": "+41 91 605 62 22",
+    "website": "https://www.centrostampa.ch/"
+  },
+  {
+    "id": 26708,
+    "name": "Ristorante Fresco",
+    "address": "5 Via Bertaro Lambertenghi Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Fr 07:00-23:00; Sa-So 18:00-23:00",
+    "phone": "+41 91 220 60 64",
+    "website": "https://ristorantefresco.ch/"
+  },
+  {
+    "id": 26712,
+    "name": "Grande Caffè Bistrot",
+    "address": "1 Via Giosuè Carducci Lugano 6900",
+    "icon": "lunch_dining",
+    "opening_hours": "Mo-So 11:30-23:00",
+    "phone": "+41 91 922 22 16",
+    "website": "https://grande-caffe-bistrot.digitalone.site/"
+  },
+  {
+    "id": 17491,
+    "name": "Scuola guida Lugano",
+    "address": "39a Via Serafino Balestra Lugano 6900",
+    "icon": "directions_car",
+    "website": "https://scuolaguidalugano.ch"
+  },
+  {
+    "id": 17509,
+    "name": "Ceresio Gold",
+    "address": "24 Via Carlo Maderno Lugano 6900",
+    "icon": "diamond",
+    "phone": "+41 76 336 62 18"
+  },
+  {
+    "id": 838,
+    "name": "Zenzero Beauty Culture",
+    "address": "15 Via Canova Lugano 6900",
+    "icon": "spa",
+    "website": "https://www.zezerobeautyculture.com"
+  },
+  {
+    "id": 26769,
+    "name": "SH21",
+    "address": "36/38 Via Nassa Lugano 6900",
+    "icon": "storefront"
+  },
+  {
+    "id": 26771,
+    "name": "Asia",
+    "address": "31 Via Besso Lugano 6900",
+    "icon": "local_grocery_store",
+    "opening_hours": "Mo-Sa 08:00-18:00",
+    "phone": "+41 78 812 24 27"
+  },
+  {
+    "id": 26773,
+    "name": "Il Piccolo Principe - Ottico Michel",
+    "address": "4 Corso Pestalozzi Lugano 6900",
+    "icon": "visibility",
+    "opening_hours": "Mo-Fr 10:00-18:00; Sa 10:00-17:00",
+    "phone": "+41 91 922 03 72",
+    "website": "https://www.otticomichel.ch/"
+  },
+  {
+    "id": 2126,
+    "name": "MEA Milano",
+    "address": "1 Via Emilio Bossi Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Sa 09:00-18:30",
+    "phone": "+41 91 921 07 44",
+    "website": "https://mea-milano.com/"
+  },
+  {
+    "id": 18369,
+    "name": "Union Change",
+    "address": "2 Via Pietro Peri Lugano 6900",
+    "icon": "currency_exchange",
+    "phone": "+41916000440",
+    "website": "https://www.ufc.ch/points-de-vente/store/652/corner-services-lugano"
+  },
+  {
+    "id": 26804,
+    "name": "Conservatorio della Svizzera Italiana",
+    "address": "9 Via Soldino Lugano 6900",
+    "icon": "school",
+    "phone": "091 960 30 40",
+    "website": "https://www.conservatorio.ch/it"
+  },
+  {
+    "id": 26805,
+    "name": "Fattoria Moncucchetto",
+    "address": "27 Via Marietta Crivelli Torricelli Lugano 6900",
+    "icon": "restaurant",
+    "phone": "091 967 70 60"
+  },
+  {
+    "id": 26819,
+    "name": "Mustis",
+    "address": "23 Via Viale Stefano Franscini Lugano 6900",
+    "icon": "lunch_dining",
+    "opening_hours": "Mo-Sa 11:00-22:00; So 12:00-22:00",
+    "website": "https://mustispizzakebab.ch/"
+  },
+  {
+    "id": 12877,
+    "name": "GastroSnack Bernasconi",
+    "address": "7 Bernasconi Lugano 6900",
+    "icon": "tapas",
+    "opening_hours": "Mo-Fr 07:30-18:30; Sa 07:30-17:00",
+    "phone": "+41 91 967 30 13",
+    "website": "https://www.cibodivino.ch/"
+  },
+  {
+    "id": 11219,
+    "name": "Tango",
+    "address": "1 Piazza Riforma Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Su,PH 09:00-01:00",
+    "phone": "+41-91-922 27 01",
+    "website": "https://www.tango-ti.ch/"
+  },
+  {
+    "id": 11270,
+    "name": "Pestalozzi",
+    "address": "9 Piazza Indipendenza Lugano 6900",
+    "icon": "hotel",
+    "phone": "+41 (0)91 921 46 46",
+    "website": "https://www.pestalozzi-lugano.ch/"
+  },
+  {
+    "id": 26770,
+    "name": "Antica Osteria del Porto",
+    "address": "9 Via Foce Lugano 6900",
+    "icon": "restaurant",
+    "phone": "+41 91 971 42 00",
+    "website": "https://anticaosteriadelporto.ch/"
+  },
+  {
+    "id": 4110,
+    "name": "Farmacia Migliore",
+    "address": "16 Via Canova Lugano 6900",
+    "icon": "local_pharmacy",
+    "opening_hours": "Mo-Fr 09:00-18:30; Sa 10:00-17:30",
+    "phone": "+41 91 922 28 20",
+    "website": "https://farmaciamigliore.ch"
+  },
+  {
+    "id": 10658,
+    "name": "Zurigo Downtown",
+    "address": "13 Corso Pestalozzi Lugano 6900",
+    "icon": "hotel",
+    "phone": "+41 91 923 43 43",
+    "website": "https://www.hotelzurigo.ch/"
+  },
+  {
+    "id": 13866,
+    "name": "Harp Center",
+    "address": "15 Piazza Molino Nuovo Lugano 6900",
+    "icon": "music_note",
+    "phone": "+41797139436",
+    "website": "https://www.harpcenterlugano.com/"
+  },
+  {
+    "id": 11736,
+    "name": "Spaghetti Pomodoro",
+    "address": "10 Via Francesco Soave Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Su-Th 09:00-23:30; Fr-Sa 09:00-00:00",
+    "phone": "+41 91 922 01 70"
+  },
+  {
+    "id": 17469,
+    "name": "Cantinone",
+    "address": "8 Piazza Cioccaro Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Sa 09:00-23:00",
+    "phone": "+41 91 923 10 68"
+  },
+  {
+    "id": 27387,
+    "name": "Acquarello",
+    "address": "9 Piazza Cioccaro Lugano 6900",
+    "icon": "hotel",
+    "phone": "+41 91 911 68 68",
+    "website": "https://acquarello.ch/"
+  },
+  {
+    "id": 14086,
+    "name": "Casa Libanese البيت اللبناني",
+    "address": "17 Via Concordia Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Tu-Sa 11:00-21:00; Su 12:00-21:00",
+    "phone": "+41 91 222 90 00",
+    "website": "http://www.casalibanesemenu.byethost31.com/?i=1"
+  },
+  {
+    "id": 17495,
+    "name": "Amalo momento italiano",
+    "address": "25 Viale Castagnola Lugano 6900",
+    "icon": "icecream",
+    "phone": "+41 76 346 41 70",
+    "website": "https://amalo.ch/"
+  },
+  {
+    "id": 17492,
+    "name": "YogandMore",
+    "address": "7 Viale dei faggi Lugano 6900",
+    "icon": "fitness_center",
+    "website": "https://yogandmore.ch"
+  },
+  {
+    "id": 17493,
+    "name": "La Fioreria",
+    "address": "33 Via Maggio Lugano 6900",
+    "icon": "local_florist",
+    "phone": "+41 91 921 21 31",
+    "website": "https://www.fioreria.ch/"
+  },
+  {
+    "id": 17498,
+    "name": "Giulia Beauty Lounge",
+    "address": "28 Via al Chioso Lugano 6900",
+    "icon": "spa",
+    "phone": "+41 91 225 70 25"
+  },
+  {
+    "id": 17499,
+    "name": "Salone Conticello",
+    "address": "9 Viale dei Faggi Lugano 6900",
+    "icon": "content_cut",
+    "phone": "+41 91 224 38 63"
+  },
+  {
+    "id": 10561,
+    "name": "McDonald's",
+    "address": "1 Riva Giocondo Albertolli Lugano 6900",
+    "icon": "lunch_dining",
+    "opening_hours": "Su-Th 07:30-23:00; Fr-Sa 07:30-01:00",
+    "phone": "+41 91 924 92 39",
+    "website": "https://www.mcdonalds.com/ch/it-ch/location/lugano/lugano-albertolli/riva-albertolli-1/780119.html"
+  },
+  {
+    "id": 27385,
+    "name": "Dr. Migliore",
+    "address": "16 Via Canova Lugano 6900",
+    "icon": "local_pharmacy",
+    "website": "https://farmaciamigliore.ch"
+  },
+  {
+    "id": 3633,
+    "name": "Ristorante Vistalago",
+    "address": "5 Riva Albertolli Lugano 6900",
+    "icon": "restaurant",
+    "opening_hours": "Mo-Su 08:00-23:00",
+    "phone": "+41919211048",
+    "website": "https://ristorantevistalago.ch"
+  },
+  {
+    "id": 3635,
+    "name": "Caffè Pascucci",
+    "address": "5 Riva Albertolli Lugano 6900",
+    "icon": "local_cafe",
+    "opening_hours": "Mo-Su 08:00-23:00",
+    "phone": "+41919211161",
+    "website": "https://pascucci.it"
+  },
+  {
+    "id": 4107,
+    "name": "Kohakinho",
+    "address": "4 Via della Posta Lugano 6900",
+    "icon": "restaurant",
+    "website": "https://kohakinho.com"
+  },
+  {
+    "id": 4109,
+    "name": "Masi Palazzo Reali",
+    "address": "10 Via Canova Lugano 6900",
+    "icon": "palette"
+  },
+  {
+    "id": 26541,
+    "name": "Vitti",
+    "address": "2 Via Pretorio Lugano 6900",
+    "icon": "local_cafe",
+    "phone": "+41 91 605 61 61",
+    "website": "https://vittilugano.ch/"
+  },
+  {
+    "id": 11832,
+    "name": "Sass Café Vineria",
+    "address": "9 Piazza della Riforma Lugano 6900",
+    "icon": "local_bar",
+    "opening_hours": "Mo-Sa 11:00-00:00",
+    "phone": "+41 91 922 21 83",
+    "website": "https://www.sasscafe.ch/"
+  },
+  {
+    "id": 827,
+    "name": "Musicdoor",
+    "address": "2 Via dei Gorini Lugano 6900",
+    "icon": "music_note",
+    "website": "https://www.musicdoor.com"
+  },
+  {
+    "id": 828,
+    "name": "Ottica Götte",
+    "address": "8 Via Pessina Lugano 6900",
+    "icon": "storefront",
+    "website": "https://www.otticagoette.ch"
+  },
+  {
+    "id": 17482,
+    "name": "The Store",
+    "address": "3 Via al Forte Lugano 6900",
+    "icon": "local_florist",
+    "phone": "+41 91 921 22 44",
+    "website": "https://www.thestorelugano.ch/"
+  },
+  {
+    "id": 26544,
+    "name": "Amor Fati Lounge Bar",
+    "address": "4 Via al Forte Lugano 6900",
+    "icon": "local_bar",
+    "phone": "+41 91 261 42 46",
+    "website": "https://amorfatilugano.ch/"
+  },
+  {
+    "id": 27503,
+    "name": "Libreria Libera",
+    "address": "1 via Carducci Lugano 6900",
+    "icon": "storefront",
+    "opening_hours": "Mo-Sa 10:00-18:00",
+    "phone": "+41 762365833",
+    "website": "https://librerialibera.ch"
+  },
+  {
+    "id": 835,
+    "name": "Bijoux Io",
+    "address": "7 Via Pretorio Lugano 6900",
+    "icon": "storefront",
+    "phone": "+41919220360",
+    "website": "https://www.bijoux-io.ch"
+  },
+  {
+    "id": 2036,
+    "name": "Il Cannolo sua eccellenza",
+    "address": "1 Via Pasquale Lucchini Lugano 6900",
+    "icon": "local_cafe",
+    "phone": "+39 333 71 67 083",
+    "website": "https://www.ilcannolo.com"
+  },
+  {
+    "id": 11271,
+    "name": "Bar Apollo",
+    "address": "8 Corso Elvezia Lugano 6900",
+    "icon": "local_cafe",
+    "opening_hours": "Mo-Fr 06:00-19:00; Sa-Su,PH off"
+  }
+]

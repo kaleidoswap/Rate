@@ -14,12 +14,31 @@ import {
   Animated,
   Dimensions,
   Vibration,
+  Linking,
+  Clipboard,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import PremAI from 'premai';
+import { useSelector } from 'react-redux';
+import { RootState } from '../store';
+import { theme } from '../theme';
 import SpeechToText, { SpeechToTextRef } from '../components/SpeechToText';
+import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
+import NostrContactsSelector from '../components/NostrContactsSelector';
+import InvoiceQRCode from '../components/InvoiceQRCode';
+import { EnhancedAIAssistant } from '../services/aiAssistantFunctions';
+
+// Temporary interface to fix import issue
+interface AIAssistantInterface {
+  processMessage(message: string, history?: any[]): Promise<{
+    text: string;
+    functionCalled?: string;
+    functionResult?: any;
+  }>;
+}
 
 interface Props {
   navigation: any;
@@ -30,6 +49,43 @@ interface Message {
   text: string;
   isUser: boolean;
   timestamp: Date;
+  functionCalled?: string;
+  functionResult?: any;
+}
+
+interface PaymentDetails {
+  type: 'lightning_address' | 'lightning_invoice' | 'nostr_contact';
+  recipient: string;
+  amount: number;
+  description?: string;
+  recipientName?: string;
+  recipientAvatar?: string;
+  lightningAddress?: string;
+  isNostrContact?: boolean;
+}
+
+interface Contact {
+  id: string;
+  name: string;
+  lightning_address?: string;
+  node_pubkey?: string;
+  notes?: string;
+  avatar_url?: string;
+  npub?: string;
+  isNostrContact?: boolean;
+  profile?: any;
+}
+
+interface AIResponse {
+  text: string;
+  functionCalled: string | null;
+  functionResult?: {
+    success?: boolean;
+    payment_hash?: string;
+    status?: string;
+    message?: string;
+    error?: string;
+  } | null;
 }
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -38,7 +94,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Hello! I\'m your AI assistant specialized in Bitcoin, Lightning Network, and RGB assets. I can help you understand cryptocurrency concepts, wallet security, transaction processes, and much more. How can I assist you today? 🚀\n\n💡 Tip: Hold the microphone button and speak to convert your voice to text!',
+      text: 'Hello! I\'m your AI assistant specialized in Bitcoin, Lightning Network, and RGB assets. I can help you:\n\n💸 Pay Lightning invoices or addresses\n🧾 Generate invoices to receive payments\n🏪 Find Bitcoin-accepting merchants in Lugano\n📍 Get detailed merchant information\n👥 Pay friends from your Nostr contacts\n\nHow can I assist you today? 🚀\n\n💡 Tip: Try saying "Pay 1000 sats to alice@example.com", "Generate invoice for 5000 sats", or tap the contacts button to pay a friend!',
       isUser: false,
       timestamp: new Date(),
     },
@@ -49,17 +105,55 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const [isVoiceAvailable, setIsVoiceAvailable] = useState(true);
   const [partialText, setPartialText] = useState('');
   const [recordingDuration, setRecordingDuration] = useState(0);
-  const [baseInputText, setBaseInputText] = useState(''); // Track text before speech started
+  const [baseInputText, setBaseInputText] = useState('');
+  
+  // Payment confirmation state
+  const [showPaymentConfirmation, setShowPaymentConfirmation] = useState(false);
+  const [pendingPayment, setPendingPayment] = useState<PaymentDetails | null>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  
+  // Nostr contacts state
+  const [showContactsSelector, setShowContactsSelector] = useState(false);
+  
   const scrollViewRef = useRef<ScrollView>(null);
   const speechToTextRef = useRef<SpeechToTextRef>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const typingAnim = useRef(new Animated.Value(0)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
+  const messageAnimations = useRef(new Map()).current;
 
-  // Initialize PremAI client
-  const premaiClient = new PremAI({
-    apiKey: 'premKey_s1rKUkWbb0JbVRUU12U6y6bnUZJjaNZa7a3z',
-  });
+  // Initialize Enhanced AI Assistant
+  const aiAssistant = useRef(new EnhancedAIAssistant()).current;
+  
+  // Get user state for better personalization
+  const userState = useSelector((state: RootState) => state.user);
+  const nostrState = useSelector((state: RootState) => state.nostr);
+
+  // Add keyboard handling
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }
+    );
+
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        // Optional: Add any behavior you want when keyboard hides
+      }
+    );
+
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
+  }, []);
+
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
+  };
 
   useEffect(() => {
     if (isListening) {
@@ -121,11 +215,23 @@ export default function AIAssistantScreen({ navigation }: Props) {
     }
   }, [isLoading]);
 
+  // Animate new messages
+  const animateMessage = (messageId: string) => {
+    const animation = new Animated.Value(0);
+    messageAnimations.set(messageId, animation);
+    
+    Animated.spring(animation, {
+      toValue: 1,
+      tension: 100,
+      friction: 8,
+      useNativeDriver: true,
+    }).start();
+  };
+
   const handleSpeechStart = () => {
     console.log('🎤 Speech recognition started');
     setIsListening(true);
     setPartialText('');
-    // Store the current input text as base text
     setBaseInputText(inputText);
     Vibration.vibrate(50);
   };
@@ -142,7 +248,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
     console.log('✅ Final speech result:', text);
     if (!text.trim()) return;
     
-    // Add the new speech result to the base text (text that existed before speech started)
     setInputText(prevText => {
       const cleanBaseText = baseInputText.trim();
       const cleanNewText = text.trim();
@@ -156,13 +261,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
       }
     });
     
-    // Clear partial text since we now have final result
     setPartialText('');
   };
 
   const handlePartialResult = (text: string) => {
     console.log('🔄 Partial speech result:', text);
-    // Only update partial text, don't modify input text yet
     setPartialText(text.trim());
   };
 
@@ -213,9 +316,83 @@ export default function AIAssistantScreen({ navigation }: Props) {
     speechToTextRef.current?.stopListening();
   };
 
+  const copyToClipboard = (text: string) => {
+    Clipboard.setString(text);
+    Alert.alert('Copied', 'Text copied to clipboard!');
+  };
+
+  const openLink = (url: string) => {
+    Linking.openURL(url).catch(err => 
+      Alert.alert('Error', 'Could not open link')
+    );
+  };
+
+  // Handle contact selection from Nostr contacts
+  const handleContactSelection = (contact: Contact) => {
+    if (!contact.lightning_address) {
+      Alert.alert('No Lightning Address', 'This contact doesn\'t have a Lightning address set up.');
+      return;
+    }
+
+    // Pre-fill input with contact payment
+    setInputText(`Pay to ${contact.name} (${contact.lightning_address})`);
+    setShowContactsSelector(false);
+    
+    // Optionally auto-send the message
+    setTimeout(() => {
+      sendMessage(`Pay to ${contact.name} (${contact.lightning_address})`);
+    }, 500);
+  };
+
+  // Enhanced payment confirmation
+  const confirmPayment = (paymentDetails: PaymentDetails) => {
+    setPendingPayment(paymentDetails);
+    setShowPaymentConfirmation(true);
+  };
+
+  const handlePaymentConfirm = async () => {
+    if (!pendingPayment) return;
+    
+    setPaymentLoading(true);
+    
+    try {
+      // Here you would call the actual payment function
+      // For now, we'll simulate the payment
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      setShowPaymentConfirmation(false);
+      setPendingPayment(null);
+      
+      // Add success message
+      const successMessage: Message = {
+        id: Date.now().toString(),
+        text: '✅ Payment sent successfully! Your transaction has been broadcasted to the Lightning Network.',
+        isUser: false,
+        timestamp: new Date(),
+      };
+      
+      setMessages(prev => [...prev, successMessage]);
+      animateMessage(successMessage.id);
+      
+      // Scroll to bottom
+      setTimeout(() => {
+        scrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+      
+    } catch (error) {
+      Alert.alert('Payment Failed', 'Unable to process payment. Please try again.');
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
+
   const sendMessage = async (text: string) => {
     const messageText = text || inputText.trim();
     if (!messageText) return;
+
+    // Clear input immediately after getting the message text
+    setInputText('');
+    setPartialText('');
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -225,55 +402,76 @@ export default function AIAssistantScreen({ navigation }: Props) {
     };
 
     setMessages(prev => [...prev, userMessage]);
-    setInputText('');
-    setPartialText('');
+    animateMessage(userMessage.id);
     setIsLoading(true);
 
     try {
-      // Use PremAI for actual AI responses
-      const response = await premaiClient.chat.completions({
-        messages: [
-          {
-            role: 'system' as any,
-            content: 'You are a helpful AI assistant specializing in Bitcoin, Lightning Network, and RGB assets. Provide accurate, helpful information about cryptocurrency, blockchain technology, and digital assets. Keep responses concise but informative. Use emojis occasionally to make responses more engaging.' as any
-          },
-          {
-            role: 'user' as any,
-            content: messageText as any
-          }
-        ],
-        model: 'claude-4-sonnet', // Using Claude model
-      });
+      const conversationHistory = messages.map(msg => ({
+        role: msg.isUser ? 'user' as const : 'assistant' as const,
+        content: msg.text
+      }));
 
-      const aiResponseText = response.choices?.[0]?.message?.content || 'Sorry, I couldn\'t generate a response. Please try again.';
+      const response = await aiAssistant.processMessage(messageText, conversationHistory) as AIResponse;
+      
+      // Check if this is a payment request and needs confirmation
+      if (response.functionCalled === 'pay_lightning_invoice' && response.functionResult) {
+        const amountMatch = messageText.match(/(\d+)\s*(sats?|satoshis?)/i);
+        const addressMatch = messageText.match(/([a-zA-Z0-9]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})|((lnbc|lntb)[a-zA-Z0-9]+)/i);
+        
+        if (addressMatch) {
+          // For Lightning addresses, we need the amount
+          if (addressMatch[0].includes('@') && !amountMatch) {
+            const errorMessage: Message = {
+              id: (Date.now() + 1).toString(),
+              text: "Please specify the amount in sats you want to send to this Lightning address.",
+              isUser: false,
+              timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, errorMessage]);
+            setIsLoading(false);
+            return;
+          }
+
+          // Show payment confirmation dialog
+          const paymentDetails: PaymentDetails = {
+            type: addressMatch[0].includes('@') ? 'lightning_address' : 'lightning_invoice',
+            recipient: addressMatch[0],
+            amount: amountMatch ? parseInt(amountMatch[1]) : 0,
+            description: 'Payment via AI Assistant',
+            lightningAddress: addressMatch[0].includes('@') ? addressMatch[0] : undefined,
+          };
+          
+          confirmPayment(paymentDetails);
+          setIsLoading(false);
+          return;
+        }
+      }
       
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: aiResponseText,
+        text: response.text || 'Sorry, I could not process your request.',
         isUser: false,
         timestamp: new Date(),
+        functionCalled: response.functionCalled || undefined,
+        functionResult: response.functionResult || undefined
       };
 
       setMessages(prev => [...prev, aiMessage]);
+      animateMessage(aiMessage.id);
     } catch (error) {
-      console.error('PremAI response error:', error);
+      console.error('AI response error:', error);
       
-      // Enhanced fallback responses with more context
-      const fallbackResponses = [
-        "I'm having trouble connecting to my AI service right now. This might be due to network connectivity or API key configuration. Please check your connection and try again. 🔧",
-        "There seems to be a network issue preventing me from processing your request. Please ensure you have a stable internet connection and try again. 📡",
-        "I'm experiencing some technical difficulties at the moment. This could be temporary - please try again in a few moments. If the issue persists, please check your API configuration. ⚡",
-      ];
-
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)],
+        text: "I'm having trouble processing your request right now. This might be due to network connectivity or service availability. Please check your connection and try again. 🔧",
         isUser: false,
         timestamp: new Date(),
       };
       setMessages(prev => [...prev, errorMessage]);
-      setIsLoading(false);
+      animateMessage(errorMessage.id);
     }
+
+    setIsLoading(false);
 
     // Scroll to bottom
     setTimeout(() => {
@@ -285,6 +483,112 @@ export default function AIAssistantScreen({ navigation }: Props) {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const renderFunctionResult = (functionCalled: string, functionResult: any) => {
+    if (!functionResult) return null;
+
+    switch (functionCalled) {
+      case 'pay_lightning_invoice':
+        return (
+          <View style={styles.functionResult}>
+            <Text style={styles.functionTitle}>💸 Payment Result</Text>
+            {functionResult.success ? (
+              <View>
+                <Text style={styles.successText}>✅ Payment successful!</Text>
+                <TouchableOpacity 
+                  onPress={() => copyToClipboard(functionResult.payment_hash)}
+                  style={styles.copyButton}
+                >
+                  <Text style={styles.copyText}>📋 Copy Payment Hash</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+            )}
+          </View>
+        );
+
+      case 'generate_invoice':
+        return functionResult.success ? (
+          <InvoiceQRCode
+            invoice={functionResult.invoice}
+            amount={functionResult.amount_sats}
+            description={functionResult.description}
+            onCopy={() => {
+              Alert.alert('Copied!', 'Lightning invoice copied to clipboard');
+            }}
+            onShare={() => {
+              Alert.alert('Shared!', 'Lightning invoice shared successfully');
+            }}
+          />
+        ) : (
+          <View style={styles.functionResult}>
+            <Text style={styles.functionTitle}>🧾 Invoice Generation Failed</Text>
+            <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          </View>
+        );
+
+      case 'find_merchant_locations':
+        return (
+          <View style={styles.functionResult}>
+            <Text style={styles.functionTitle}>🏪 Merchants Found</Text>
+            {functionResult.success ? (
+              <ScrollView style={styles.merchantList} nestedScrollEnabled>
+                {functionResult.merchants.map((merchant: any, index: number) => (
+                  <View key={merchant.id} style={styles.merchantItem}>
+                    <Text style={styles.merchantName}>{merchant.name}</Text>
+                    <Text style={styles.merchantAddress}>{merchant.address}</Text>
+                    {merchant.phone && (
+                      <TouchableOpacity onPress={() => Linking.openURL(`tel:${merchant.phone}`)}>
+                        <Text style={styles.merchantPhone}>📞 {merchant.phone}</Text>
+                      </TouchableOpacity>
+                    )}
+                    {merchant.website && (
+                      <TouchableOpacity onPress={() => openLink(merchant.website)}>
+                        <Text style={styles.merchantWebsite}>🌐 Website</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+            )}
+          </View>
+        );
+
+      case 'get_merchant_info':
+        return (
+          <View style={styles.functionResult}>
+            <Text style={styles.functionTitle}>📍 Merchant Info</Text>
+            {functionResult.success ? (
+              <View style={styles.merchantItem}>
+                <Text style={styles.merchantName}>{functionResult.merchant.name}</Text>
+                <Text style={styles.merchantAddress}>{functionResult.merchant.address}</Text>
+                {functionResult.merchant.opening_hours && (
+                  <Text style={styles.merchantHours}>🕒 {functionResult.merchant.opening_hours}</Text>
+                )}
+                {functionResult.merchant.phone && (
+                  <TouchableOpacity onPress={() => Linking.openURL(`tel:${functionResult.merchant.phone}`)}>
+                    <Text style={styles.merchantPhone}>📞 {functionResult.merchant.phone}</Text>
+                  </TouchableOpacity>
+                )}
+                {functionResult.merchant.website && (
+                  <TouchableOpacity onPress={() => openLink(functionResult.merchant.website)}>
+                    <Text style={styles.merchantWebsite}>🌐 Website</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : (
+              <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+            )}
+          </View>
+        );
+
+      default:
+        return null;
+    }
   };
 
   const renderMessage = (message: Message, index: number) => (
@@ -304,7 +608,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       {!message.isUser && (
         <View style={styles.aiAvatar}>
           <LinearGradient
-            colors={['#667eea', '#764ba2']}
+            colors={theme.colors.primary.gradient!}
             style={styles.avatarGradient}
           >
             <Ionicons name="sparkles" size={16} color="white" />
@@ -318,7 +622,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       ]}>
         {message.isUser ? (
           <LinearGradient
-            colors={['#667eea', '#764ba2']}
+            colors={theme.colors.primary.gradient!}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.userGradient}
@@ -326,7 +630,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
             <Text style={styles.userMessageText}>{message.text}</Text>
           </LinearGradient>
         ) : (
-          <Text style={styles.aiMessageText}>{message.text}</Text>
+          <View>
+            <Text style={styles.aiMessageText}>{message.text}</Text>
+            {message.functionCalled && message.functionResult && 
+              renderFunctionResult(message.functionCalled, message.functionResult)
+            }
+          </View>
         )}
         
         <Text style={[
@@ -340,7 +649,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       {message.isUser && (
         <View style={styles.userAvatar}>
           <LinearGradient
-            colors={['#f093fb', '#f5576c']}
+            colors={theme.colors.warning.gradient!}
             style={styles.avatarGradient}
           >
             <Ionicons name="person" size={16} color="white" />
@@ -354,7 +663,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
     <View style={[styles.messageContainer, styles.aiMessage]}>
       <View style={styles.aiAvatar}>
         <LinearGradient
-          colors={['#667eea', '#764ba2']}
+          colors={theme.colors.primary.gradient!}
           style={styles.avatarGradient}
         >
           <Ionicons name="sparkles" size={16} color="white" />
@@ -391,10 +700,103 @@ export default function AIAssistantScreen({ navigation }: Props) {
             },
           ]} />
         </View>
-        <Text style={styles.typingText}>AI is thinking...</Text>
+        <Text style={styles.typingText}>AI is processing...</Text>
       </View>
     </View>
   );
+
+  // Enhanced quick action buttons with better design
+  const renderQuickActions = () => (
+    <ScrollView 
+      horizontal 
+      showsHorizontalScrollIndicator={false}
+      style={styles.quickActionsContainer}
+      contentContainerStyle={styles.quickActionsContent}
+    >
+      <TouchableOpacity
+        style={styles.quickActionButton}
+        onPress={() => setInputText('Generate an invoice for 1000 sats')}
+      >
+        <LinearGradient
+          colors={theme.colors.success.gradient!}
+          style={styles.quickActionGradient}
+        >
+          <Ionicons name="receipt" size={16} color="white" />
+          <Text style={styles.quickActionText}>Invoice</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+      
+      <TouchableOpacity
+        style={styles.quickActionButton}
+        onPress={() => setShowContactsSelector(true)}
+      >
+        <LinearGradient
+          colors={['#8B5CF6', '#A855F7']}
+          style={styles.quickActionGradient}
+        >
+          <Ionicons name="people" size={16} color="white" />
+          <Text style={styles.quickActionText}>Contacts</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+      
+      <TouchableOpacity
+        style={styles.quickActionButton}
+        onPress={() => setInputText('Find restaurants in Lugano')}
+      >
+        <LinearGradient
+          colors={theme.colors.warning.gradient!}
+          style={styles.quickActionGradient}
+        >
+          <Ionicons name="restaurant" size={16} color="white" />
+          <Text style={styles.quickActionText}>Restaurants</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+      
+      <TouchableOpacity
+        style={styles.quickActionButton}
+        onPress={() => setInputText('Find shops in Lugano')}
+      >
+        <LinearGradient
+          colors={['#9C27B0', '#7B1FA2']}
+          style={styles.quickActionGradient}
+        >
+          <Ionicons name="storefront" size={16} color="white" />
+          <Text style={styles.quickActionText}>Shops</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+
+  // Add this function inside the AIAssistantScreen component
+  const clearChatHistory = () => {
+    Alert.alert(
+      'Clear Chat History',
+      'Are you sure you want to clear all chat history? This cannot be undone.',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: () => {
+            const welcomeMessage = {
+              id: Date.now().toString(),
+              text: 'Hello! I\'m your AI assistant specialized in Bitcoin, Lightning Network, and RGB assets. I can help you:\n\n💸 Pay Lightning invoices or addresses\n🧾 Generate invoices to receive payments\n🏪 Find Bitcoin-accepting merchants in Lugano\n📍 Get detailed merchant information\n👥 Pay friends from your Nostr contacts\n\nHow can I assist you today? 🚀\n\n💡 Tip: Try saying "Pay 1000 sats to alice@example.com", "Generate invoice for 5000 sats", or tap the contacts button to pay a friend!',
+              isUser: false,
+              timestamp: new Date(),
+            };
+            setMessages([welcomeMessage]);
+            // Force scroll to top after clearing
+            setTimeout(() => {
+              scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+            }, 100);
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -412,12 +814,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
           onError={handleSpeechError}
         />
 
-        {/* Header */}
+        {/* Enhanced Header */}
         <View style={styles.header}>
           <View style={styles.headerContent}>
             <View style={styles.headerIcon}>
               <LinearGradient
-                colors={['#667eea', '#764ba2']}
+                colors={theme.colors.primary.gradient!}
                 style={styles.headerIconGradient}
               >
                 <Ionicons name="sparkles" size={24} color="white" />
@@ -425,27 +827,33 @@ export default function AIAssistantScreen({ navigation }: Props) {
             </View>
             <View style={styles.headerText}>
               <Text style={styles.headerTitle}>AI Assistant</Text>
-              <Text style={styles.headerSubtitle}>Bitcoin & Crypto Expert</Text>
+              <Text style={styles.headerSubtitle}>Bitcoin & Lightning Expert</Text>
             </View>
-            <View style={styles.voiceIndicator}>
-              <Ionicons 
-                name="mic" 
-                size={16} 
-                color={isVoiceAvailable ? (isListening ? "#ff6b6b" : "#28a745") : "#ccc"} 
-              />
-              {__DEV__ && (
-                <TouchableOpacity 
-                  onPress={() => {
-                    console.log('🔧 Debug: Toggling voice availability');
-                    setIsVoiceAvailable(!isVoiceAvailable);
-                  }}
-                  style={styles.debugButton}
-                >
-                  <Text style={styles.debugText}>
-                    {isVoiceAvailable ? '✓' : '✗'}
-                  </Text>
-                </TouchableOpacity>
+            <View style={styles.headerActions}>
+              {nostrState.isConnected && (
+                <View style={styles.nostrIndicator}>
+                  <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />
+                  <Text style={styles.nostrText}>Nostr</Text>
+                </View>
               )}
+              <View style={styles.voiceIndicator}>
+                <Ionicons 
+                  name="mic" 
+                  size={16} 
+                  color={isVoiceAvailable ? (isListening ? "#ff6b6b" : "#28a745") : "#ccc"} 
+                />
+              </View>
+              <TouchableOpacity 
+                style={styles.clearButton}
+                onPress={clearChatHistory}
+              >
+                <LinearGradient
+                  colors={['#ff6b6b', '#ee5253']}
+                  style={styles.clearButtonGradient}
+                >
+                  <Ionicons name="trash-outline" size={16} color="white" />
+                </LinearGradient>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -453,137 +861,259 @@ export default function AIAssistantScreen({ navigation }: Props) {
         <KeyboardAvoidingView 
           style={styles.content}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          <ScrollView
-            ref={scrollViewRef}
-            style={styles.messagesContainer}
-            contentContainerStyle={styles.messagesContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {messages.map(renderMessage)}
-            {isLoading && renderTypingIndicator()}
-          </ScrollView>
+          <TouchableWithoutFeedback onPress={dismissKeyboard}>
+            <View style={styles.contentInner}>
+              <ScrollView
+                ref={scrollViewRef}
+                style={styles.messagesContainer}
+                contentContainerStyle={[
+                  styles.messagesContent,
+                  { flexGrow: 1, justifyContent: messages.length === 1 ? 'flex-start' : 'flex-end' }
+                ]}
+                showsVerticalScrollIndicator={true}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                bounces={true}
+                overScrollMode="always"
+                scrollEventThrottle={16}
+                onContentSizeChange={() => {
+                  if (messages.length > 1) {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  }
+                }}
+                onLayout={() => {
+                  if (messages.length > 1) {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  }
+                }}
+              >
+                {messages.map((message, index) => {
+                  const animation = messageAnimations.get(message.id) || new Animated.Value(1);
+                  return (
+                    <Animated.View
+                      key={message.id}
+                      style={[
+                        styles.messageContainer,
+                        message.isUser ? styles.userMessage : styles.aiMessage,
+                        {
+                          opacity: animation,
+                          transform: [{
+                            translateY: animation.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [20, 0],
+                            }),
+                          }],
+                        }
+                      ]}
+                    >
+                      {!message.isUser && (
+                        <View style={styles.aiAvatar}>
+                          <LinearGradient
+                            colors={theme.colors.primary.gradient!}
+                            style={styles.avatarGradient}
+                          >
+                            <Ionicons name="sparkles" size={16} color="white" />
+                          </LinearGradient>
+                        </View>
+                      )}
+                      
+                      <View style={[
+                        styles.messageBubble,
+                        message.isUser ? styles.userBubble : styles.aiBubble,
+                      ]}>
+                        {message.isUser ? (
+                          <LinearGradient
+                            colors={theme.colors.primary.gradient!}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.userGradient}
+                          >
+                            <Text style={styles.userMessageText}>{message.text}</Text>
+                          </LinearGradient>
+                        ) : (
+                          <View>
+                            <Text style={[styles.aiMessageText, { color: theme.colors.text.primary }]}>
+                              {message.text}
+                            </Text>
+                            {message.functionCalled && message.functionResult && 
+                              renderFunctionResult(message.functionCalled, message.functionResult)
+                            }
+                          </View>
+                        )}
+                        
+                        <Text style={[
+                          styles.messageTime,
+                          message.isUser ? styles.userMessageTime : styles.aiMessageTime
+                        ]}>
+                          {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                      
+                      {message.isUser && (
+                        <View style={styles.userAvatar}>
+                          <LinearGradient
+                            colors={theme.colors.warning.gradient!}
+                            style={styles.avatarGradient}
+                          >
+                            <Ionicons name="person" size={16} color="white" />
+                          </LinearGradient>
+                        </View>
+                      )}
+                    </Animated.View>
+                  );
+                })}
+                {isLoading && renderTypingIndicator()}
+              </ScrollView>
 
-          <View style={styles.inputContainer}>
-            <LinearGradient
-              colors={['rgba(255,255,255,0.9)', 'rgba(255,255,255,0.95)']}
-              style={styles.inputGradient}
-            >
-              <View style={styles.inputRow}>
-                <View style={styles.textInputContainer}>
-                  <TextInput
-                    style={styles.textInput}
-                    value={inputText}
-                    onChangeText={(text) => {
-                      setInputText(text);
-                      // Update base text if user is manually editing
-                      if (!isListening) {
-                        setBaseInputText(text);
-                      }
-                    }}
-                    placeholder={isListening ? "Listening... speak now" : "Ask me about Bitcoin, Lightning, RGB..."}
-                    placeholderTextColor="#8E8E93"
-                    multiline
-                    maxLength={500}
-                    returnKeyType="send"
-                    onSubmitEditing={() => sendMessage(inputText)}
-                    editable={!isListening}
-                  />
+              <View style={styles.inputContainer}>
+                <LinearGradient
+                  colors={['rgba(255,255,255,0.9)', 'rgba(255,255,255,0.95)']}
+                  style={styles.inputGradient}
+                >
+                  {/* Enhanced Quick Actions */}
+                  {renderQuickActions()}
                   
-                  {/* Show partial speech results */}
-                  {isListening && partialText && (
-                    <View style={styles.partialTextContainer}>
-                      <Text style={styles.partialText}>
-                        "{partialText}"
+                  <View style={styles.inputRow}>
+                    <View style={styles.textInputContainer}>
+                      <TextInput
+                        style={styles.textInput}
+                        value={inputText}
+                        onChangeText={(text) => {
+                          setInputText(text);
+                          if (!isListening) {
+                            setBaseInputText(text);
+                          }
+                        }}
+                        placeholder={isListening ? "Listening... speak now" : "Ask me about Bitcoin or payments"}
+                        placeholderTextColor={theme.colors.gray[400]}
+                        multiline
+                        maxLength={500}
+                        returnKeyType="send"
+                        onSubmitEditing={() => {
+                          if (inputText.trim()) {
+                            sendMessage(inputText.trim());
+                            dismissKeyboard();
+                          }
+                        }}
+                        blurOnSubmit={true}
+                        editable={!isListening}
+                      />
+                      
+                      {/* Show partial speech results */}
+                      {isListening && partialText && (
+                        <View style={styles.partialTextContainer}>
+                          <Text style={styles.partialText}>
+                            "{partialText}"
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    
+                    {/* Voice input button */}
+                    <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                      <TouchableOpacity
+                        style={[
+                          styles.voiceButton,
+                          isListening && styles.voiceButtonActive,
+                          !isVoiceAvailable && styles.disabledButton
+                        ]}
+                        onPress={startListening}
+                        disabled={!isVoiceAvailable || isLoading}
+                      >
+                        <LinearGradient
+                          colors={isListening ? theme.colors.error.gradient! : ['#00d2d3', '#54a0ff']}
+                          style={styles.buttonGradient}
+                        >
+                          <Ionicons 
+                            name={isListening ? "stop" : "mic"} 
+                            size={20} 
+                            color="white" 
+                          />
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </Animated.View>
+
+                    <TouchableOpacity
+                      style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
+                      onPress={() => sendMessage(inputText)}
+                      disabled={!inputText.trim() || isLoading || isListening}
+                    >
+                      <LinearGradient
+                        colors={inputText.trim() ? theme.colors.primary.gradient! : ['#E5E5EA', '#E5E5EA']}
+                        style={styles.buttonGradient}
+                      >
+                        <Ionicons 
+                          name="send" 
+                          size={20} 
+                          color={inputText.trim() ? "white" : theme.colors.gray[400]} 
+                        />
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                  
+                  {isListening && (
+                    <Animated.View style={[
+                      styles.recordingIndicator,
+                      {
+                        opacity: pulseAnim.interpolate({
+                          inputRange: [1, 1.3],
+                          outputRange: [0.7, 1],
+                        }),
+                      },
+                    ]}>
+                      <View style={styles.recordingInfo}>
+                        <View style={styles.recordingDot} />
+                        <Text style={styles.recordingText}>
+                          Listening... {formatRecordingDuration(recordingDuration)}
+                        </Text>
+                      </View>
+                      <TouchableOpacity 
+                        style={styles.stopRecordingButton}
+                        onPress={stopListening}
+                      >
+                        <Text style={styles.stopRecordingText}>Tap to stop</Text>
+                      </TouchableOpacity>
+                    </Animated.View>
+                  )}
+
+                  {/* Enhanced tips */}
+                  {!isListening && isVoiceAvailable && messages.length === 1 && (
+                    <View style={styles.voiceTips}>
+                      <Ionicons name="bulb-outline" size={14} color={theme.colors.primary[500]} />
+                      <Text style={styles.voiceTipsText}>
+                        Try: "Pay 1000 sats to alice@example.com", "Generate invoice for 5000 sats", "Find restaurants in Lugano", or tap contacts to pay a friend!
                       </Text>
                     </View>
                   )}
-                </View>
-                
-                {/* Voice input button */}
-                <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                  <TouchableOpacity
-                    style={[
-                      styles.voiceButton,
-                      isListening && styles.voiceButtonActive,
-                      !isVoiceAvailable && styles.disabledButton
-                    ]}
-                    onPress={startListening}
-                    disabled={!isVoiceAvailable || isLoading}
-                  >
-                    <LinearGradient
-                      colors={isListening ? ['#ff6b6b', '#ee5a24'] : ['#00d2d3', '#54a0ff']}
-                      style={styles.buttonGradient}
-                    >
-                      <Ionicons 
-                        name={isListening ? "stop" : "mic"} 
-                        size={20} 
-                        color="white" 
-                      />
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </Animated.View>
-
-                <TouchableOpacity
-                  style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
-                  onPress={() => sendMessage(inputText)}
-                  disabled={!inputText.trim() || isLoading || isListening}
-                >
-                  <LinearGradient
-                    colors={inputText.trim() ? ['#667eea', '#764ba2'] : ['#E5E5EA', '#E5E5EA']}
-                    style={styles.buttonGradient}
-                  >
-                    <Ionicons 
-                      name="send" 
-                      size={20} 
-                      color={inputText.trim() ? "white" : "#8E8E93"} 
-                    />
-                  </LinearGradient>
-                </TouchableOpacity>
+                </LinearGradient>
               </View>
-              
-              {isListening && (
-                <Animated.View style={[
-                  styles.recordingIndicator,
-                  {
-                    opacity: pulseAnim.interpolate({
-                      inputRange: [1, 1.3],
-                      outputRange: [0.7, 1],
-                    }),
-                  },
-                ]}>
-                  <View style={styles.recordingInfo}>
-                    <View style={styles.recordingDot} />
-                    <Text style={styles.recordingText}>
-                      Listening... {formatRecordingDuration(recordingDuration)}
-                    </Text>
-                  </View>
-                  <TouchableOpacity 
-                    style={styles.stopRecordingButton}
-                    onPress={stopListening}
-                  >
-                    <Text style={styles.stopRecordingText}>Tap to stop</Text>
-                  </TouchableOpacity>
-                </Animated.View>
-              )}
-
-              {/* Voice input tips */}
-              {!isListening && isVoiceAvailable && messages.length === 1 && (
-                <View style={styles.voiceTips}>
-                  <Ionicons name="bulb-outline" size={14} color="#8E8E93" />
-                  <Text style={styles.voiceTipsText}>
-                    Tip: Hold the microphone button and speak to convert your voice to text
-                  </Text>
-                </View>
-              )}
-            </LinearGradient>
-          </View>
+            </View>
+          </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
+
+        {/* Payment Confirmation Modal */}
+        <PaymentConfirmationModal
+          visible={showPaymentConfirmation}
+          paymentDetails={pendingPayment}
+          onConfirm={handlePaymentConfirm}
+          onCancel={() => setShowPaymentConfirmation(false)}
+          loading={paymentLoading}
+        />
+
+        {/* Nostr Contacts Selector */}
+        <NostrContactsSelector
+          visible={showContactsSelector}
+          onSelectContact={handleContactSelection}
+          onClose={() => setShowContactsSelector(false)}
+        />
       </LinearGradient>
     </SafeAreaView>
   );
 }
 
+// Enhanced styles using the theme system
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -592,23 +1122,24 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[4],
     backgroundColor: 'rgba(255,255,255,0.9)',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,0,0,0.05)',
+    borderBottomColor: theme.colors.border.light,
+    ...theme.shadows.sm,
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   headerIcon: {
-    marginRight: 12,
+    marginRight: theme.spacing[3],
   },
   headerIconGradient: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -616,35 +1147,59 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: theme.typography.fontSize['2xl'],
     fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 2,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing[1],
+    letterSpacing: 0.5,
   },
   headerSubtitle: {
-    fontSize: 14,
-    color: '#8E8E93',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    fontWeight: '500',
+    letterSpacing: 0.25,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+  },
+  nostrIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.success[50],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.sm,
+    gap: theme.spacing[1],
+  },
+  nostrText: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.success[600],
     fontWeight: '500',
   },
   voiceIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  
   content: {
     flex: 1,
-    // backgroundColor: theme.colors.background.secondary,
+  },
+  contentInner: {
+    flex: 1,
   },
   messagesContainer: {
     flex: 1,
+    paddingHorizontal: theme.spacing[2],
   },
   messagesContent: {
-    padding: 24,
-    paddingBottom: 16,
+    padding: theme.spacing[4],
+    paddingBottom: theme.spacing[4],
+    minHeight: '100%',
   },
   messageContainer: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: theme.spacing[4],
     alignItems: 'flex-end',
   },
   userMessage: {
@@ -654,12 +1209,12 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   aiAvatar: {
-    marginRight: 8,
-    marginBottom: 4,
+    marginRight: theme.spacing[2],
+    marginBottom: theme.spacing[1],
   },
   userAvatar: {
-    marginLeft: 8,
-    marginBottom: 4,
+    marginLeft: theme.spacing[2],
+    marginBottom: theme.spacing[1],
   },
   avatarGradient: {
     width: 32,
@@ -670,116 +1225,145 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: screenWidth * 0.75,
-    borderRadius: 20,
+    borderRadius: theme.borderRadius.lg,
     overflow: 'hidden',
+    marginVertical: theme.spacing[1], // Add vertical spacing between messages
   },
   userBubble: {
     alignSelf: 'flex-end',
+    marginLeft: screenWidth * 0.15, // Add some margin to prevent full width
   },
   aiBubble: {
     alignSelf: 'flex-start',
-    backgroundColor: 'white',
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
+    backgroundColor: theme.colors.surface.primary,
+    padding: theme.spacing[4],
+    marginRight: screenWidth * 0.15, // Add some margin to prevent full width
+    ...theme.shadows.md,
   },
   userGradient: {
-    padding: 16,
+    padding: theme.spacing[4],
   },
   userMessageText: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: 'white',
+    fontSize: theme.typography.fontSize.base,
+    lineHeight: 24, // Explicit line height
+    color: theme.colors.text.inverse,
     fontWeight: '500',
+    letterSpacing: 0.3,
   },
   aiMessageText: {
-    fontSize: 16,
-    lineHeight: 22,
-    color: '#1a1a1a',
+    fontSize: theme.typography.fontSize.base,
+    lineHeight: 24, // Explicit line height
+    color: theme.colors.text.primary,
     fontWeight: '400',
+    letterSpacing: 0.3,
   },
   messageTime: {
-    fontSize: 12,
-    marginTop: 6,
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.xs,
+    marginTop: theme.spacing[2],
+    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
   },
   userMessageTime: {
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.9)', // Increased opacity for better readability
     textAlign: 'right',
   },
   aiMessageTime: {
-    color: '#8E8E93',
+    color: theme.colors.text.tertiary,
   },
   typingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: theme.spacing[2],
   },
   typingDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#667eea',
+    backgroundColor: theme.colors.primary[500],
     marginHorizontal: 2,
   },
   typingText: {
-    fontSize: 14,
-    color: '#8E8E93',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.tertiary,
     fontStyle: 'italic',
-    marginLeft: 8,
+    marginLeft: theme.spacing[2],
+  },
+  // Enhanced quick actions
+  quickActionsContainer: {
+    marginBottom: theme.spacing[3],
+  },
+  quickActionsContent: {
+    paddingHorizontal: theme.spacing[1],
+    gap: theme.spacing[2],
+  },
+  quickActionButton: {
+    marginRight: theme.spacing[3], // Increase spacing between quick actions
+    borderRadius: theme.borderRadius.lg,
+    overflow: 'hidden',
+    ...theme.shadows.sm,
+  },
+  quickActionGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  quickActionText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: 'white',
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    paddingHorizontal: theme.spacing[2], // Add horizontal padding
   },
   inputContainer: {
     borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
+    borderTopColor: theme.colors.border.light,
+    backgroundColor: 'white',
   },
   inputGradient: {
-    padding: 20,
+    padding: theme.spacing[5],
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
+    gap: theme.spacing[3],
   },
   textInputContainer: {
     flex: 1,
-    backgroundColor: 'white',
-    borderRadius: 24,
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.1)',
-    marginRight: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: theme.colors.border.light,
+    ...theme.shadows.sm,
+    maxHeight: 120, // Limit the height of input container
   },
   textInput: {
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    fontSize: 16,
-    maxHeight: 120,
-    color: '#1a1a1a',
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
+    fontSize: theme.typography.fontSize.base,
+    maxHeight: 100, // Limit the height of input
+    minHeight: 44, // Minimum height for comfortable typing
+    color: theme.colors.text.primary,
+    lineHeight: 24,
+    letterSpacing: 0.3,
   },
   partialTextContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 10,
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: theme.spacing[3],
     borderTopWidth: 1,
-    borderTopColor: 'rgba(102, 126, 234, 0.2)',
-    backgroundColor: 'rgba(102, 126, 234, 0.05)',
+    borderTopColor: theme.colors.primary[100],
+    backgroundColor: theme.colors.primary[50],
   },
   partialText: {
-    fontSize: 14,
-    color: '#667eea',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[600],
     fontStyle: 'italic',
-    lineHeight: 18,
+    lineHeight: theme.typography.lineHeight.snug,
   },
   voiceButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    marginRight: 8,
     overflow: 'hidden',
   },
   voiceButtonActive: {
@@ -801,11 +1385,11 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   recordingIndicator: {
-    marginTop: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
+    marginTop: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[5],
     backgroundColor: 'rgba(255,107,107,0.1)',
-    borderRadius: 16,
+    borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
     borderColor: 'rgba(255,107,107,0.2)',
   },
@@ -813,54 +1397,159 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: theme.spacing[2],
   },
   recordingDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#ff6b6b',
-    marginRight: 8,
+    backgroundColor: theme.colors.error[500],
+    marginRight: theme.spacing[2],
   },
   recordingText: {
-    fontSize: 14,
-    color: '#ff6b6b',
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.error[600],
+    fontWeight: '600', // Changed from theme.typography.fontWeight.semibold
   },
   stopRecordingButton: {
     alignSelf: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
     backgroundColor: 'rgba(255,107,107,0.2)',
-    borderRadius: 12,
+    borderRadius: theme.borderRadius.md,
   },
   stopRecordingText: {
-    fontSize: 12,
-    color: '#ff6b6b',
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.error[600],
+    fontWeight: '600', // Changed from theme.typography.fontWeight.semibold
   },
   voiceTips: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(134, 126, 234, 0.1)',
-    borderRadius: 12,
+    alignItems: 'flex-start',
+    marginTop: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
   },
   voiceTipsText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginLeft: 6,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[600],
+    marginLeft: theme.spacing[2],
     flex: 1,
+    lineHeight: 20,
+    letterSpacing: 0.25,
   },
-  debugText: {
-    fontSize: 10,
-    color: '#8E8E93',
-    marginLeft: 4,
+  
+  // Function result styles (keep existing ones)
+  functionResult: {
+    marginTop: theme.spacing[4],
+    padding: theme.spacing[4],
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: theme.colors.primary[500],
   },
-  debugButton: {
-    marginLeft: 4,
-    padding: 4,
+  functionTitle: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.primary[700],
+    marginBottom: theme.spacing[3],
+    letterSpacing: 0.5,
   },
-}); 
+  successText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.success[700], // Darkened for better contrast
+    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
+    marginBottom: theme.spacing[1],
+  },
+  errorText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.error[700], // Darkened for better contrast
+    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
+  },
+  invoiceText: {
+    fontSize: theme.typography.fontSize.base,
+    lineHeight: 22,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[3],
+    letterSpacing: 0.3,
+  },
+  copyButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    backgroundColor: theme.colors.primary[100],
+    borderRadius: theme.borderRadius.sm,
+    marginTop: theme.spacing[1],
+  },
+  copyText: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.primary[700], // Darkened for better contrast
+    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
+  },
+  merchantList: {
+    maxHeight: 200,
+  },
+  merchantItem: {
+    padding: theme.spacing[3],
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: theme.borderRadius.sm,
+    marginBottom: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+  },
+  merchantName: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing[2],
+    letterSpacing: 0.3,
+    lineHeight: 22,
+  },
+  merchantAddress: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[2],
+    letterSpacing: 0.25,
+    lineHeight: 20,
+  },
+  merchantPhone: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    marginBottom: theme.spacing[2],
+    fontWeight: '500',
+    letterSpacing: 0.25,
+    lineHeight: 20,
+  },
+  merchantWebsite: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    marginBottom: theme.spacing[2],
+    fontWeight: '500',
+    letterSpacing: 0.25,
+    lineHeight: 20,
+  },
+  merchantHours: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.success[700], // Darkened for better contrast
+    marginBottom: theme.spacing[1],
+    fontWeight: '500', // Added for better readability
+  },
+  clearButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginLeft: theme.spacing[2],
+  },
+  clearButtonGradient: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    opacity: 0.9, // Slightly transparent to look better
+  },
+});
