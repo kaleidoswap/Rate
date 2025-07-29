@@ -9,6 +9,7 @@ import {
   Dimensions,
   Animated,
   Easing,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -384,56 +385,35 @@ export default function QRScannerScreen({ navigation }: Props) {
 
   if (!permission) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <SafeAreaView style={styles.centerContent}>
           <Text style={styles.permissionText}>Requesting camera permission...</Text>
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     );
   }
 
   if (!permission.granted) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+        <SafeAreaView style={styles.centerContent}>
           <Text style={styles.permissionText}>
             Camera permission is required to scan QR codes
           </Text>
           <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
             <Text style={styles.permissionButtonText}>Grant Permission</Text>
           </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+        </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={['rgba(0,0,0,0.8)', 'transparent']}
-        style={styles.headerGradient}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.headerButton} 
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="white" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Scan QR Code</Text>
-          <TouchableOpacity 
-            style={styles.headerButton} 
-            onPress={toggleFlash}
-          >
-            <Ionicons 
-              name={flashEnabled ? "flash" : "flash-off"} 
-              size={24} 
-              color="white" 
-            />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+      
       <View style={styles.cameraContainer}>
         <CameraView
           style={styles.camera}
@@ -467,17 +447,48 @@ export default function QRScannerScreen({ navigation }: Props) {
         </LinearGradient>
       </View>
 
-      <View style={styles.bottomControls}>
-        {scanned && (
-          <TouchableOpacity 
-            style={styles.scanAgainButton} 
-            onPress={() => setScanned(false)}
-          >
-            <Text style={styles.scanAgainButtonText}>Scan Again</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </SafeAreaView>
+      {/* Compact header overlay */}
+      <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
+        <LinearGradient
+          colors={['rgba(0,0,0,0.9)', 'rgba(0,0,0,0.7)', 'transparent']}
+          style={styles.headerGradient}
+        >
+          <View style={styles.header}>
+            <TouchableOpacity 
+              style={styles.headerButton} 
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="arrow-back" size={20} color="white" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Scan QR Code</Text>
+            <TouchableOpacity 
+              style={styles.headerButton} 
+              onPress={toggleFlash}
+            >
+              <Ionicons 
+                name={flashEnabled ? "flash" : "flash-off"} 
+                size={20} 
+                color="white" 
+              />
+            </TouchableOpacity>
+          </View>
+        </LinearGradient>
+      </SafeAreaView>
+
+      {/* Bottom controls with SafeAreaView */}
+      <SafeAreaView style={styles.bottomSafeArea} edges={['bottom']}>
+        <View style={styles.bottomControls}>
+          {scanned && (
+            <TouchableOpacity 
+              style={styles.scanAgainButton} 
+              onPress={() => setScanned(false)}
+            >
+              <Text style={styles.scanAgainButtonText}>Scan Again</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
@@ -496,17 +507,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    minHeight: 44,
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: 'white',
   },
   cameraContainer: {
     flex: 1,
-    position: 'relative',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   camera: {
     flex: 1,
@@ -612,17 +628,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   headerGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1,
-    height: 120,
+    paddingBottom: 12,
   },
   headerButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -658,7 +669,7 @@ const styles = StyleSheet.create({
   
   scanInstructions: {
     position: 'absolute',
-    top: 80,
+    top: '15%',
     left: 0,
     right: 0,
     flexDirection: 'row',
@@ -671,5 +682,19 @@ const styles = StyleSheet.create({
   instructionItem: {
     alignItems: 'center',
     gap: 4,
+  },
+  headerSafeArea: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  bottomSafeArea: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
   },
 });
