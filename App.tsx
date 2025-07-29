@@ -9,7 +9,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemeProvider } from '@react-navigation/native';
 
@@ -165,7 +165,7 @@ function DashboardTabs() {
           ),
         }}
       />
-    </Tab.Navigator>
+      </Tab.Navigator>
   );
 }
 
@@ -324,7 +324,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   scanButton: {
-    top: -20,
+    top: 10,
     justifyContent: 'center',
     alignItems: 'center',
     height: 56,
