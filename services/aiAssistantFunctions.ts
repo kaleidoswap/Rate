@@ -503,6 +503,25 @@ export class AIAssistantFunctions {
 
       console.log('✅ Invoice generated successfully');
 
+      // Format expiry time
+      const expiryDate = new Date(Date.now() + expiry_seconds * 1000);
+      const expiryTime = expiryDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      // Format response message with markdown
+      const responseMessage = `
+⚡️ **Lightning Invoice Generated!**
+
+💰 **Amount:** ${amount_sats.toLocaleString()} sats
+${description ? `📝 **Description:** ${description}\n` : ''}⏰ **Expires:** ${expiryTime}
+
+Here's your invoice QR code and details below. You can:
+- 📱 Scan the QR code with any Lightning wallet
+- 📋 Copy the invoice to clipboard
+- 📤 Share the invoice with others
+
+_The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sure to pay it before expiration!_
+`;
+
       return {
         success: true,
         invoice: result.invoice,
@@ -510,9 +529,9 @@ export class AIAssistantFunctions {
         amount_sats,
         description,
         expiry_seconds,
-        expires_at: new Date(Date.now() + expiry_seconds * 1000).toISOString(),
+        expires_at: expiryDate.toISOString(),
         qr_data: result.invoice,
-        message: `🧾 Invoice generated successfully! Amount: ${amount_sats.toLocaleString()} sats`,
+        message: responseMessage,
         timestamp: new Date().toISOString()
       };
     } catch (error) {
@@ -522,7 +541,7 @@ export class AIAssistantFunctions {
       return {
         success: false,
         error: errorMessage,
-        message: `❌ Failed to generate invoice: ${errorMessage}`,
+        message: `❌ **Invoice Generation Failed**\n\n${errorMessage}\n\nPlease try again or contact support if the issue persists.`,
         timestamp: new Date().toISOString()
       };
     }
