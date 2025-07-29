@@ -1,7 +1,9 @@
 // aiAssistantFunctions.ts
 import { RGBApiService } from '../services/RGBApiService';
+import NostrService from '../services/NostrService';
 import PremAI from 'premai';
 import { LightningAddress, Invoice } from '@getalby/lightning-tools';
+import { getStore } from '../store/storeProvider';
 
 // Initialize PremAI client
 const premaiClient = new PremAI({
@@ -11,6 +13,22 @@ const premaiClient = new PremAI({
 // Location data from Lugano merchants
 import LUGANO_MERCHANTS_DATA from '../assets/lugano-merchants.json';
 const LUGANO_MERCHANTS = LUGANO_MERCHANTS_DATA;
+
+// Interface for Nostr contacts
+interface NostrContact {
+  id?: string;
+  name?: string;
+  npub?: string;
+  lightning_address?: string;
+  profile?: {
+    display_name?: string;
+    name?: string;
+    picture?: string;
+    [key: string]: any;
+  };
+  avatar_url?: string;
+  [key: string]: any;
+}
 
 // Enhanced validation utilities
 const validateInput = {
@@ -153,15 +171,43 @@ export const AI_FUNCTIONS = [
         }
       }
     }
+  },
+  {
+    name: 'pay_nostr_contact',
+    description: 'Pay a Nostr contact by resolving their Lightning address and sending payment',
+    parameters: {
+      type: 'object',
+      properties: {
+        contact_name: {
+          type: 'string',
+          description: 'Name of the Nostr contact to pay'
+        },
+        contact_npub: {
+          type: 'string',
+          description: 'Npub of the Nostr contact to pay'
+        },
+        amount_sats: {
+          type: 'number',
+          description: 'Amount in satoshis to send (1-100000000)'
+        },
+        description: {
+          type: 'string',
+          description: 'Optional payment description (max 200 characters)'
+        }
+      },
+      required: ['amount_sats']
+    }
   }
 ];
 
 // Function implementations
 export class AIAssistantFunctions {
   private rgbApi: RGBApiService;
+  private nostrService: NostrService;
 
   constructor() {
     this.rgbApi = RGBApiService.getInstance();
+    this.nostrService = NostrService.getInstance();
   }
 
   /**
@@ -310,6 +356,197 @@ export class AIAssistantFunctions {
       return 'Check the Lightning address format (should be like: username@domain.com).';
     }
     return 'Check your internet connection and ensure the recipient is available to receive payments.';
+  }
+
+  /**
+   * Resolve Nostr contact and get their Lightning address
+   */
+  async resolveNostrContact({
+    contact_name,
+    contact_npub
+  }: {
+    contact_name?: string;
+    contact_npub?: string;
+  }) {
+    try {
+      console.log('👥 Resolving Nostr contact:', { contact_name, contact_npub });
+
+      // Get the current state from store
+      const store = getStore();
+      const state = store.getState();
+      const nostrContacts = state.nostr.contacts || [];
+
+      let contact;
+
+      // Try to find contact by name first
+      if (contact_name) {
+        contact = nostrContacts.find((c: NostrContact) => 
+          c.name?.toLowerCase().includes(contact_name.toLowerCase()) ||
+          c.profile?.display_name?.toLowerCase().includes(contact_name.toLowerCase()) ||
+          c.profile?.name?.toLowerCase().includes(contact_name.toLowerCase())
+        );
+      }
+
+      // If not found by name, try by npub
+      if (!contact && contact_npub) {
+        contact = nostrContacts.find((c: NostrContact) => c.npub === contact_npub);
+      }
+
+      if (!contact) {
+        return {
+          success: false,
+          error: 'Contact not found',
+          message: `❌ Could not find Nostr contact${contact_name ? ` "${contact_name}"` : contact_npub ? ` with npub "${contact_npub}"` : ''}`,
+          suggestions: contact_name ? this.getSimilarContactSuggestions(contact_name, nostrContacts) : undefined
+        };
+      }
+
+      // Check if contact has lightning address
+      if (!contact.lightning_address) {
+        return {
+          success: false,
+          error: 'No Lightning address',
+          message: `❌ Contact "${contact.name || contact.npub}" doesn't have a Lightning address set up`,
+          contact: {
+            name: contact.name,
+            npub: contact.npub,
+            profile: contact.profile
+          }
+        };
+      }
+
+      // Validate the lightning address
+      const validation = await this.validateLightningAddress(contact.lightning_address);
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: 'Invalid Lightning address',
+          message: `❌ Contact "${contact.name || contact.npub}" has an invalid Lightning address: ${validation.error}`,
+          contact: {
+            name: contact.name,
+            npub: contact.npub,
+            lightning_address: contact.lightning_address
+          }
+        };
+      }
+
+      console.log('✅ Nostr contact resolved successfully:', contact.name);
+
+      return {
+        success: true,
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          npub: contact.npub,
+          lightning_address: contact.lightning_address,
+          profile: contact.profile,
+          avatar_url: contact.avatar_url || contact.profile?.picture
+        },
+        message: `✅ Found contact: ${contact.name || contact.npub}`
+      };
+    } catch (error) {
+      console.error('❌ Contact resolution error:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Contact resolution failed',
+        message: '❌ Failed to resolve Nostr contact'
+      };
+    }
+  }
+
+  /**
+   * Pay a Nostr contact by resolving their Lightning address
+   */
+  async payNostrContact({
+    contact_name,
+    contact_npub,
+    amount_sats,
+    description = 'Payment to Nostr contact'
+  }: {
+    contact_name?: string;
+    contact_npub?: string;
+    amount_sats: number;
+    description?: string;
+  }) {
+    try {
+      console.log('💸 Processing payment to Nostr contact:', { contact_name, contact_npub, amount_sats });
+
+      // Validate amount
+      if (!validateInput.amount(amount_sats)) {
+        throw new Error('Amount must be between 1 and 100,000,000 satoshis');
+      }
+
+      // Resolve the contact first
+      const contactResolution = await this.resolveNostrContact({ contact_name, contact_npub });
+      
+      if (!contactResolution.success) {
+        return contactResolution;
+      }
+
+      const contact = contactResolution.contact!;
+      const lightningAddress = contact.lightning_address!;
+
+      // Update description to include contact name
+      const paymentDescription = `${description} (to ${contact.name || contact.npub})`;
+
+      // Use the existing payment function to pay the Lightning address
+      const paymentResult = await this.payLightningInvoice({
+        invoice_or_address: lightningAddress,
+        amount_sats,
+        description: paymentDescription
+      });
+
+      if (paymentResult.success) {
+        return {
+          ...paymentResult,
+          contact: {
+            name: contact.name,
+            npub: contact.npub,
+            lightning_address: contact.lightning_address,
+            avatar_url: contact.avatar_url
+          },
+          message: `💸 Payment sent successfully to ${contact.name || 'Nostr contact'}! ⚡️`,
+          payment_type: 'nostr_contact'
+        };
+      } else {
+        return {
+          ...paymentResult,
+          contact: {
+            name: contact.name,
+            npub: contact.npub,
+            lightning_address: contact.lightning_address
+          },
+          message: `❌ Payment to ${contact.name || 'Nostr contact'} failed: ${paymentResult.error}`
+        };
+      }
+    } catch (error) {
+      console.error('❌ Nostr contact payment error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Payment to contact failed';
+      
+      return {
+        success: false,
+        error: errorMessage,
+        message: `❌ Payment to Nostr contact failed: ${errorMessage}`,
+        timestamp: new Date().toISOString(),
+        troubleshooting: this.getPaymentTroubleshooting(errorMessage)
+      };
+    }
+  }
+
+  /**
+   * Get similar contact name suggestions
+   */
+  private getSimilarContactSuggestions(searchName: string, contacts: NostrContact[], limit: number = 3): string[] {
+    return contacts
+      .map((c: NostrContact) => ({
+        name: c.name || c.profile?.display_name || c.profile?.name || c.npub,
+        score: fuzzySearch(searchName.toLowerCase(), (c.name || c.profile?.display_name || c.profile?.name || '').toLowerCase())
+      }))
+      .filter(result => result.score > 0.3 && result.name)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map(result => result.name!)
+      .filter((name): name is string => name !== undefined);
   }
 
   /**
@@ -778,6 +1015,29 @@ export class EnhancedAIAssistant {
       const satoshiMatch = message.match(/(\d+(?:\,\d+)?)\s*(sats?|satoshis?)/i);
       const addressMatch = message.match(/([a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})|((lnbc|lntb)[a-zA-Z0-9]+)/i);
       
+      // Check for contact-based payment patterns
+      const contactMatch = message.match(/\b(?:pay|send|transfer).*?(?:to|contact|friend)\s+([a-zA-Z0-9._-]+)/i) ||
+                           message.match(/\b(?:pay|send)\s+([a-zA-Z0-9._-]+)/i);
+      
+      if (contactMatch && !addressMatch && satoshiMatch) {
+        const amount = parseInt(satoshiMatch[1].replace(/,/g, ''));
+        const contactName = contactMatch[1];
+        
+        // Check if it looks like a contact name (not an email or invoice)
+        if (!contactName.includes('@') && !contactName.startsWith('lnbc') && !contactName.startsWith('lntb')) {
+          return {
+            needsFunction: true,
+            functionName: 'pay_nostr_contact',
+            parameters: {
+              contact_name: contactName,
+              amount_sats: amount,
+              description: 'Payment via AI Assistant'
+            },
+            confidence: 0.85
+          };
+        }
+      }
+      
       if (satoshiMatch || addressMatch) {
         const amount = satoshiMatch ? parseInt(satoshiMatch[1].replace(/,/g, '')) : undefined;
         return {
@@ -897,6 +1157,8 @@ export class EnhancedAIAssistant {
           switch (functionName) {
             case 'pay_lightning_invoice':
               return await this.functions.payLightningInvoice(functionArgs);
+            case 'pay_nostr_contact':
+              return await this.functions.payNostrContact(functionArgs);
             case 'generate_invoice':
               return await this.functions.generateInvoice(functionArgs);
             case 'find_merchant_locations':
@@ -984,15 +1246,17 @@ Keep your response concise but informative (max 200 words).`;
 
 You can help users with:
 1. 💸 Paying Lightning invoices or Lightning addresses
-2. 🧾 Generating Lightning invoices for receiving payments  
-3. 🏪 Finding Bitcoin-accepting merchants in Lugano
-4. 📍 Getting detailed information about specific merchants
-5. 💡 Answering questions about Bitcoin, Lightning Network, and RGB assets
+2. 👥 Paying Nostr contacts by name (if they have Lightning addresses)
+3. 🧾 Generating Lightning invoices for receiving payments  
+4. 🏪 Finding Bitcoin-accepting merchants in Lugano
+5. 📍 Getting detailed information about specific merchants
+6. 💡 Answering questions about Bitcoin, Lightning Network, and RGB assets
 
 Provide accurate, helpful information. Be conversational and use emojis appropriately. Keep responses concise but informative. If users want to perform specific actions, guide them on how to ask for what they need.
 
 Examples of what you can help with:
 - "Pay 1000 sats to alice@getalby.com"
+- "Pay 500 sats to Alice" (if Alice is in your Nostr contacts)
 - "Generate invoice for 5000 sats for coffee"
 - "Find restaurants in Lugano"
 - "Tell me about Bitcoin adoption in Lugano"`;
@@ -1054,6 +1318,8 @@ Examples of what you can help with:
       switch (functionName) {
         case 'pay_lightning_invoice':
           return `✅ Payment completed successfully! ${functionResult.message || ''}`;
+        case 'pay_nostr_contact':
+          return `✅ Payment to ${functionResult.contact?.name || 'Nostr contact'} completed successfully! ${functionResult.message || ''}`;
         case 'generate_invoice':
           return `🧾 Invoice generated! Amount: ${functionResult.amount_sats} sats. ${functionResult.message || ''}`;
         case 'find_merchant_locations':

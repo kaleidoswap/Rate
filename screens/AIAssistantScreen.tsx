@@ -85,6 +85,12 @@ interface AIResponse {
     status?: string;
     message?: string;
     error?: string;
+    contact?: {
+      name?: string;
+      npub?: string;
+      lightning_address?: string;
+      avatar_url?: string;
+    };
   } | null;
 }
 
@@ -424,11 +430,31 @@ export default function AIAssistantScreen({ navigation }: Props) {
       const response = await aiAssistant.processMessage(messageText, conversationHistory) as AIResponse;
       
       // Check if this is a payment request and needs confirmation
-      if (response.functionCalled === 'pay_lightning_invoice' && response.functionResult) {
+      if ((response.functionCalled === 'pay_lightning_invoice' || response.functionCalled === 'pay_nostr_contact') && response.functionResult) {
         const amountMatch = messageText.match(/(\d+)\s*(sats?|satoshis?)/i);
         const addressMatch = messageText.match(/([a-zA-Z0-9]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})|((lnbc|lntb)[a-zA-Z0-9]+)/i);
         
-        if (addressMatch) {
+        // Handle Nostr contact payments
+        if (response.functionCalled === 'pay_nostr_contact' && response.functionResult.contact) {
+          const contact = response.functionResult.contact;
+          const paymentDetails: PaymentDetails = {
+            type: 'nostr_contact',
+            recipient: contact.lightning_address || contact.name || contact.npub || 'Unknown contact',
+            amount: amountMatch ? parseInt(amountMatch[1]) : 0,
+            description: 'Payment to Nostr contact',
+            recipientName: contact.name,
+            recipientAvatar: contact.avatar_url,
+            lightningAddress: contact.lightning_address,
+            isNostrContact: true,
+          };
+          
+          confirmPayment(paymentDetails);
+          setIsLoading(false);
+          return;
+        }
+        
+        // Handle regular Lightning payments
+        if (response.functionCalled === 'pay_lightning_invoice' && addressMatch) {
           // For Lightning addresses, we need the amount
           if (addressMatch[0].includes('@') && !amountMatch) {
             const errorMessage: Message = {
