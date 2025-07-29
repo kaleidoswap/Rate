@@ -875,32 +875,33 @@ export default function AIAssistantScreen({ navigation }: Props) {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          <TouchableWithoutFeedback onPress={dismissKeyboard}>
-            <View style={styles.contentInner}>
-              <ScrollView
-                ref={scrollViewRef}
-                style={styles.messagesContainer}
-                contentContainerStyle={styles.messagesContent}
-                showsVerticalScrollIndicator={true}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="on-drag"
-                scrollEventThrottle={16}
-                alwaysBounceVertical={true}
-                onContentSizeChange={() => {
-                  if (messages.length > 1) {
-                    scrollToBottom(true);
-                  }
-                }}
-                onLayout={() => {
-                  if (messages.length > 1) {
-                    scrollToBottom(false);
-                  }
-                }}
-              >
-                {messages.map((message, index) => renderMessage(message, index))}
-                {isLoading && renderTypingIndicator()}
-              </ScrollView>
+          <View style={styles.contentInner}>
+            <ScrollView
+              ref={scrollViewRef}
+              style={styles.messagesContainer}
+              contentContainerStyle={styles.messagesContent}
+              showsVerticalScrollIndicator={true}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              scrollEventThrottle={16}
+              alwaysBounceVertical={false}
+              bounces={true}
+              onContentSizeChange={() => {
+                if (messages.length > 1) {
+                  scrollToBottom(true);
+                }
+              }}
+              onLayout={() => {
+                if (messages.length > 1) {
+                  scrollToBottom(false);
+                }
+              }}
+            >
+              {messages.map((message, index) => renderMessage(message, index))}
+              {isLoading && renderTypingIndicator()}
+            </ScrollView>
 
+            <TouchableWithoutFeedback onPress={dismissKeyboard}>
               <View style={styles.inputContainer}>
                 <LinearGradient
                   colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.98)']}
@@ -1011,20 +1012,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
                       </TouchableOpacity>
                     </Animated.View>
                   )}
-
-                  {/* Enhanced tips */}
-                  {!isListening && isVoiceAvailable && messages.length === 1 && (
-                    <View style={styles.voiceTips}>
-                      <Ionicons name="bulb-outline" size={14} color={theme.colors.primary[500]} />
-                      <Text style={styles.voiceTipsText}>
-                        Try: "Pay 1000 sats to alice@example.com", "Generate invoice for 5000 sats", "Find restaurants in Lugano", or tap contacts to pay a friend!
-                      </Text>
-                    </View>
-                  )}
                 </LinearGradient>
               </View>
-            </View>
-          </TouchableWithoutFeedback>
+            </TouchableWithoutFeedback>
+          </View>
         </KeyboardAvoidingView>
 
         {/* Payment Confirmation Modal */}
@@ -1123,17 +1114,16 @@ const styles = StyleSheet.create({
   },
   contentInner: {
     flex: 1,
-    flexDirection: 'column',
   },
   messagesContainer: {
     flex: 1,
-    width: '100%',
   },
   messagesContent: {
     flexGrow: 1,
     paddingHorizontal: theme.spacing[4],
     paddingVertical: theme.spacing[4],
-    width: '100%',
+    paddingBottom: theme.spacing[6], // Extra padding at bottom for better scrolling
+    minHeight: screenHeight * 0.5, // Ensure minimum scrollable area
   },
   messageContainer: {
     flexDirection: 'row',
