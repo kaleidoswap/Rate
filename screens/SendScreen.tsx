@@ -20,7 +20,7 @@ import RGBApiService from '../services/RGBApiService';
 import { theme } from '../theme';
 import { Card, Button, Input } from '../components';
 import { useAssetIcon } from '../utils';
-import { useFormattedBitcoinAmount, parseInputAmount, convertAmountToUnit } from '../utils/bitcoinUnits';
+import { useFormattedBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 interface Props {
   navigation: any;
@@ -100,6 +100,7 @@ function SendScreen({ navigation, route }: Props) {
   const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  const { formatSatoshisToUSD } = useBitcoinConversion();
 
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
@@ -800,7 +801,7 @@ function SendScreen({ navigation, route }: Props) {
           </Text>
           {selectedAsset.asset_id === 'BTC' && amount && (
             <Text style={styles.usdValue}>
-              ≈ ${((bitcoinUnit === 'sats' ? parseFloat(amount) / 100000000 : parseFloat(amount)) * 50000).toLocaleString()} USD
+              ≈ ${parseFloat(formatSatoshisToUSD(amount)).toLocaleString()} USD
             </Text>
           )}
         </View>
@@ -968,7 +969,7 @@ function SendScreen({ navigation, route }: Props) {
               <View style={styles.reviewRow}>
                 <Text style={styles.reviewLabel}>USD Value</Text>
                 <Text style={styles.reviewValue}>
-                  ≈ ${((bitcoinUnit === 'sats' ? parseFloat(effectiveAmount) / 100000000 : parseFloat(effectiveAmount)) * 50000).toLocaleString()}
+                  ≈ ${parseFloat(formatSatoshisToUSD(effectiveAmount)).toLocaleString()}
                 </Text>
               </View>
             )}

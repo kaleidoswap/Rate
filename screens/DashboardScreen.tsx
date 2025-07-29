@@ -26,11 +26,11 @@ import { initializeRGBApiService } from '../services/initializeServices';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
 import RGBApiService from '../services/RGBApiService';
-import PriceService from '../services/PriceService';
+
 import { theme } from '../theme';
 import { Card, Button } from '../components';
 import { useAssetIcon } from '../utils';
-import { formatBitcoinAmount } from '../utils/bitcoinUnits';
+import { formatBitcoinAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 const { width } = Dimensions.get('window');
 const statusBarHeight = StatusBar.currentHeight || 0;
@@ -96,7 +96,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [apiService, setApiService] = useState<RGBApiService | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [bitcoinPrice, setBitcoinPrice] = useState<number>(0);
+  const { bitcoinPrice, formatSatoshisToUSD } = useBitcoinConversion();
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [btcBalance, setBtcBalanceState] = useState<{
@@ -237,18 +237,7 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   };
 
-  const fetchBitcoinPrice = async () => {
-    try {
-      const priceService = PriceService.getInstance();
-      const price = await priceService.getBitcoinPrice();
-      setBitcoinPrice(price);
-    } catch (error) {
-      console.error('Failed to fetch Bitcoin price:', error);
-      if (!bitcoinPrice) {
-        setBitcoinPrice(0);
-      }
-    }
-  };
+
 
   // Add this useEffect for auto-refresh of wallet data
   useEffect(() => {
@@ -275,26 +264,7 @@ export default function DashboardScreen({ navigation }: Props) {
     };
   }, [isNodeUnlocked, isConnecting]);
 
-  // Add this useEffect for Bitcoin price updates
-  useEffect(() => {
-    let priceIntervalId: NodeJS.Timeout;
 
-    const updatePrice = async () => {
-      await fetchBitcoinPrice();
-    };
-
-    // Initial price fetch
-    updatePrice();
-
-    // Update price every 30 seconds
-    priceIntervalId = setInterval(updatePrice, 30000);
-
-    return () => {
-      if (priceIntervalId) {
-        clearInterval(priceIntervalId);
-      }
-    };
-  }, []);
 
   // Update the useFocusEffect to handle screen focus
   useFocusEffect(
@@ -322,9 +292,7 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const formatUSD = (satoshis: number): string => {
-    const btc = bitcoinUnit === 'BTC' ? satoshis / 100000000 : satoshis;
-    const usd = btc * bitcoinPrice;
-    return usd.toFixed(2);
+    return formatSatoshisToUSD(satoshis);
   };
 
   const getTotalBtcBalance = (): number => {
