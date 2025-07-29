@@ -13,6 +13,7 @@ import {
   StatusBar,
   Platform,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -108,6 +109,10 @@ export default function DashboardScreen({ navigation }: Props) {
   const [rgbAssets, setRgbAssetsState] = useState<NiaAsset[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+  
+  // Modal state for channel details
+  const [channelModalVisible, setChannelModalVisible] = useState(false);
+  const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
   // Asset Icon Component
   const AssetIcon = ({ ticker }: { ticker: string }) => {
@@ -528,16 +533,11 @@ export default function DashboardScreen({ navigation }: Props) {
           </View>
         </Card>
       ) : (
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          style={styles.assetsScroll}
-        >
-          {/* RGB Assets */}
-          {rgbAssets.map((asset, index) => (
+        <View style={styles.assetsVerticalContainer}>
+          {rgbAssets.slice(0, 3).map((asset, index) => (
             <TouchableOpacity
               key={asset.asset_id}
-              style={styles.assetCard}
+              style={styles.assetVerticalCard}
               onPress={() => navigation.navigate('AssetDetail', { 
                 asset: {
                   ...asset,
@@ -545,20 +545,33 @@ export default function DashboardScreen({ navigation }: Props) {
                 }
               })}
             >
-              <View style={styles.assetHeader}>
-                <View style={styles.assetHeaderLeft}>
+              <View style={styles.assetVerticalContent}>
+                <View style={styles.assetVerticalLeft}>
                   <AssetIcon ticker={asset.ticker} />
-                  <Text style={styles.assetTicker}>{asset.ticker}</Text>
+                  <View style={styles.assetVerticalInfo}>
+                    <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
+                    <Text style={styles.assetVerticalName}>{asset.name}</Text>
+                  </View>
                 </View>
-                <Ionicons name="chevron-forward" size={14} color={theme.colors.gray[400]} />
+                <View style={styles.assetVerticalRight}>
+                  <Text style={styles.assetVerticalBalance}>
+                    {asset.balance.spendable.toFixed(asset.precision)}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
+                </View>
               </View>
-              <Text style={styles.assetName}>{asset.name}</Text>
-              <Text style={styles.assetBalance}>
-                {asset.balance.spendable.toFixed(asset.precision)}
-              </Text>
             </TouchableOpacity>
           ))}
-        </ScrollView>
+          {rgbAssets.length > 3 && (
+            <TouchableOpacity 
+              style={styles.viewMoreButton}
+              onPress={() => navigation.navigate('Assets')}
+            >
+              <Text style={styles.viewMoreText}>View {rgbAssets.length - 3} more assets</Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
+            </TouchableOpacity>
+          )}
+        </View>
       )}
     </View>
   );
@@ -601,127 +614,273 @@ export default function DashboardScreen({ navigation }: Props) {
           </View>
         </Card>
       ) : (
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          style={styles.channelsScroll}
-        >
-          {channels.map((channel, index) => (
+        <View style={styles.channelsVerticalContainer}>
+          {channels.slice(0, 3).map((channel, index) => (
             <TouchableOpacity
               key={channel.channel_id}
-              style={styles.channelCard}
-              onPress={() => navigation.navigate('ChannelDetail', { channel })}
+              style={styles.channelVerticalCard}
+              onPress={() => {
+                setSelectedChannel(channel);
+                setChannelModalVisible(true);
+              }}
             >
-              {/* Status indicator */}
-                             <View style={[
-                 styles.channelStatusDot,
-                 { backgroundColor: channel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
-               ]} />
-              
-              {/* Channel header */}
-              <View style={styles.channelHeader}>
-                <View style={styles.channelPeerInfo}>
-                  <Text style={styles.channelPeerName} numberOfLines={1}>
-                    {channel.peer_alias || channel.peer_pubkey.slice(0, 8)}
-                  </Text>
-                  <View style={styles.channelStatusBadge}>
-                                         <Text style={[
-                       styles.channelStatusText,
-                       { 
-                         color: channel.ready ? theme.colors.success[500] : theme.colors.warning[500],
-                         backgroundColor: channel.ready ? theme.colors.success[50] : theme.colors.warning[50]
-                       }
-                     ]}>
-                      {channel.ready ? 'Open' : 'Pending'}
-                    </Text>
-                    {channel.public ? (
-                      <Ionicons name="globe-outline" size={10} color={theme.colors.gray[400]} />
-                    ) : (
-                      <Ionicons name="lock-closed-outline" size={10} color={theme.colors.gray[400]} />
-                    )}
+              <View style={styles.channelVerticalContent}>
+                <View style={styles.channelVerticalLeft}>
+                  <View style={styles.channelVerticalStatus}>
+                    <View style={[
+                      styles.channelVerticalStatusDot,
+                      { backgroundColor: channel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
+                    ]} />
+                    <View style={styles.channelVerticalInfo}>
+                      <Text style={styles.channelVerticalPeerName} numberOfLines={1}>
+                        {channel.peer_alias || channel.peer_pubkey.slice(0, 8)}
+                      </Text>
+                      <View style={styles.channelVerticalStatusRow}>
+                        <Text style={[
+                          styles.channelVerticalStatusText,
+                          { color: channel.ready ? theme.colors.success[500] : theme.colors.warning[500] }
+                        ]}>
+                          {channel.ready ? 'Open' : 'Pending'}
+                        </Text>
+                        <Text style={styles.channelVerticalCapacity}>
+                          {formatSatoshis(channel.capacity_sat)} {bitcoinUnit}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+                <View style={styles.channelVerticalRight}>
+                  <View style={styles.channelVerticalTopRow}>
+                    <View style={styles.channelVerticalLiquidity}>
+                      <View style={styles.liquidityVerticalRow}>
+                        <View style={styles.liquidityVerticalItem}>
+                          <Ionicons name="arrow-up" size={10} color={theme.colors.success[500]} />
+                          <Text style={styles.liquidityVerticalAmount}>
+                            {formatSatoshis(channel.outbound_balance_msat / 1000)}
+                          </Text>
+                        </View>
+                        <View style={styles.liquidityVerticalItem}>
+                          <Ionicons name="arrow-down" size={10} color={theme.colors.primary[500]} />
+                          <Text style={styles.liquidityVerticalAmount}>
+                            {formatSatoshis(channel.inbound_balance_msat / 1000)}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.liquidityVerticalBar}>
+                        <View style={[
+                          styles.liquidityVerticalBarFill,
+                          { 
+                            width: `${(channel.outbound_balance_msat + channel.inbound_balance_msat) > 0 ? 
+                              (channel.outbound_balance_msat / (channel.outbound_balance_msat + channel.inbound_balance_msat) * 100) : 0}%`,
+                            backgroundColor: theme.colors.success[500]
+                          }
+                        ]} />
+                      </View>
+                    </View>
+                    <Ionicons name="chevron-forward" size={14} color={theme.colors.gray[400]} />
                   </View>
                 </View>
               </View>
+            </TouchableOpacity>
+          ))}
+          {channels.length > 3 && (
+            <TouchableOpacity 
+              style={styles.viewMoreButton}
+              onPress={() => navigation.navigate('Channels')}
+            >
+              <Text style={styles.viewMoreText}>View {channels.length - 3} more channels</Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+    </View>
+  );
 
-              {/* Capacity */}
-              <View style={styles.channelCapacity}>
-                <Text style={styles.channelCapacityLabel}>Capacity</Text>
-                <Text style={styles.channelCapacityValue}>
-                  {formatSatoshis(channel.capacity_sat)} {bitcoinUnit}
+  const renderChannelModal = () => (
+    <Modal
+      visible={channelModalVisible}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setChannelModalVisible(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Channel Details</Text>
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={() => setChannelModalVisible(false)}
+            >
+              <Ionicons name="close" size={24} color={theme.colors.text.primary} />
+            </TouchableOpacity>
+          </View>
+          
+          {selectedChannel && (
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {/* Channel Status */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Status</Text>
+                <View style={styles.modalStatusRow}>
+                  <View style={[
+                    styles.modalStatusDot,
+                    { backgroundColor: selectedChannel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
+                  ]} />
+                  <Text style={styles.modalStatusText}>
+                    {selectedChannel.ready ? 'Channel Open' : 'Channel Pending'}
+                  </Text>
+                  {selectedChannel.public ? (
+                    <View style={styles.modalPublicBadge}>
+                      <Ionicons name="globe-outline" size={12} color={theme.colors.primary[500]} />
+                      <Text style={styles.modalPublicText}>Public</Text>
+                    </View>
+                  ) : (
+                    <View style={styles.modalPrivateBadge}>
+                      <Ionicons name="lock-closed-outline" size={12} color={theme.colors.gray[500]} />
+                      <Text style={styles.modalPrivateText}>Private</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* Peer Information */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Peer Information</Text>
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalInfoLabel}>Alias</Text>
+                  <Text style={styles.modalInfoValue}>
+                    {selectedChannel.peer_alias || 'Unknown'}
+                  </Text>
+                </View>
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalInfoLabel}>Public Key</Text>
+                  <Text style={styles.modalInfoValue} numberOfLines={1}>
+                    {selectedChannel.peer_pubkey}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Channel Capacity */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Capacity</Text>
+                <Text style={styles.modalCapacityValue}>
+                  {formatSatoshis(selectedChannel.capacity_sat)} {bitcoinUnit}
                 </Text>
               </View>
 
               {/* Bitcoin Liquidity */}
-              <View style={styles.liquiditySection}>
-                                 <View style={styles.liquidityHeader}>
-                   <Ionicons name="logo-bitcoin" size={12} color={theme.colors.warning[500]} />
-                   <Text style={styles.liquidityTitle}>Bitcoin</Text>
-                 </View>
-                 <View style={styles.liquidityValues}>
-                   <View style={styles.liquidityItem}>
-                     <Ionicons name="arrow-up" size={8} color={theme.colors.success[500]} />
-                     <Text style={styles.liquidityAmount}>
-                       {formatSatoshis(channel.outbound_balance_msat / 1000)}
-                     </Text>
-                   </View>
-                   <View style={styles.liquidityItem}>
-                     <Ionicons name="arrow-down" size={8} color={theme.colors.primary[500]} />
-                     <Text style={styles.liquidityAmount}>
-                       {formatSatoshis(channel.inbound_balance_msat / 1000)}
-                     </Text>
-                   </View>
-                 </View>
-                 {/* Simple liquidity bar */}
-                 <View style={styles.liquidityBar}>
-                   <View style={[
-                     styles.liquidityBarFill,
-                     { 
-                       width: `${(channel.outbound_balance_msat + channel.inbound_balance_msat) > 0 ? 
-                         (channel.outbound_balance_msat / (channel.outbound_balance_msat + channel.inbound_balance_msat) * 100) : 0}%`,
-                       backgroundColor: theme.colors.success[500]
-                     }
-                   ]} />
-                 </View>
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Bitcoin Liquidity</Text>
+                <View style={styles.modalLiquidityContainer}>
+                  <View style={styles.modalLiquidityRow}>
+                    <View style={styles.modalLiquidityItem}>
+                      <View style={styles.modalLiquidityIcon}>
+                        <Ionicons name="arrow-up" size={16} color={theme.colors.success[500]} />
+                      </View>
+                      <View>
+                        <Text style={styles.modalLiquidityLabel}>Outbound</Text>
+                        <Text style={styles.modalLiquidityValue}>
+                          {formatSatoshis(selectedChannel.outbound_balance_msat / 1000)} {bitcoinUnit}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.modalLiquidityItem}>
+                      <View style={styles.modalLiquidityIcon}>
+                        <Ionicons name="arrow-down" size={16} color={theme.colors.primary[500]} />
+                      </View>
+                      <View>
+                        <Text style={styles.modalLiquidityLabel}>Inbound</Text>
+                        <Text style={styles.modalLiquidityValue}>
+                          {formatSatoshis(selectedChannel.inbound_balance_msat / 1000)} {bitcoinUnit}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                  <View style={styles.modalLiquidityBar}>
+                    <View style={[
+                      styles.modalLiquidityBarFill,
+                      { 
+                        width: `${(selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) > 0 ? 
+                          (selectedChannel.outbound_balance_msat / (selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) * 100) : 0}%`,
+                        backgroundColor: theme.colors.success[500]
+                      }
+                    ]} />
+                  </View>
+                </View>
               </View>
 
               {/* RGB Asset Liquidity (if applicable) */}
-              {channel.asset_id && (
-                                 <View style={styles.liquiditySection}>
-                   <View style={styles.liquidityHeader}>
-                     <Ionicons name="diamond" size={12} color={theme.colors.secondary[500]} />
-                     <Text style={styles.liquidityTitle}>RGB Asset</Text>
-                   </View>
-                   <View style={styles.liquidityValues}>
-                     <View style={styles.liquidityItem}>
-                       <Ionicons name="arrow-up" size={8} color={theme.colors.secondary[500]} />
-                       <Text style={styles.liquidityAmount}>
-                         {(channel.asset_local_amount / Math.pow(10, 8)).toFixed(2)}
-                       </Text>
-                     </View>
-                     <View style={styles.liquidityItem}>
-                       <Ionicons name="arrow-down" size={8} color={theme.colors.secondary[600]} />
-                       <Text style={styles.liquidityAmount}>
-                         {(channel.asset_remote_amount / Math.pow(10, 8)).toFixed(2)}
-                       </Text>
-                     </View>
-                   </View>
-                   <View style={styles.liquidityBar}>
-                     <View style={[
-                       styles.liquidityBarFill,
-                       { 
-                         width: `${(channel.asset_local_amount + channel.asset_remote_amount) > 0 ? 
-                           (channel.asset_local_amount / (channel.asset_local_amount + channel.asset_remote_amount) * 100) : 0}%`,
-                         backgroundColor: theme.colors.secondary[500]
-                       }
-                     ]} />
-                   </View>
-                 </View>
+              {selectedChannel.asset_id && (
+                <View style={styles.modalSection}>
+                  <Text style={styles.modalSectionTitle}>RGB Asset Liquidity</Text>
+                  <View style={styles.modalLiquidityContainer}>
+                    <View style={styles.modalLiquidityRow}>
+                      <View style={styles.modalLiquidityItem}>
+                        <View style={styles.modalLiquidityIcon}>
+                          <Ionicons name="arrow-up" size={16} color={theme.colors.secondary[500]} />
+                        </View>
+                        <View>
+                          <Text style={styles.modalLiquidityLabel}>Local</Text>
+                          <Text style={styles.modalLiquidityValue}>
+                            {(selectedChannel.asset_local_amount / Math.pow(10, 8)).toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.modalLiquidityItem}>
+                        <View style={styles.modalLiquidityIcon}>
+                          <Ionicons name="arrow-down" size={16} color={theme.colors.secondary[600]} />
+                        </View>
+                        <View>
+                          <Text style={styles.modalLiquidityLabel}>Remote</Text>
+                          <Text style={styles.modalLiquidityValue}>
+                            {(selectedChannel.asset_remote_amount / Math.pow(10, 8)).toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                    <View style={styles.modalLiquidityBar}>
+                      <View style={[
+                        styles.modalLiquidityBarFill,
+                        { 
+                          width: `${(selectedChannel.asset_local_amount + selectedChannel.asset_remote_amount) > 0 ? 
+                            (selectedChannel.asset_local_amount / (selectedChannel.asset_local_amount + selectedChannel.asset_remote_amount) * 100) : 0}%`,
+                          backgroundColor: theme.colors.secondary[500]
+                        }
+                      ]} />
+                    </View>
+                  </View>
+                </View>
               )}
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
-    </View>
+
+              {/* Technical Details */}
+              <View style={styles.modalSection}>
+                <Text style={styles.modalSectionTitle}>Technical Details</Text>
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalInfoLabel}>Channel ID</Text>
+                  <Text style={styles.modalInfoValue} numberOfLines={1}>
+                    {selectedChannel.channel_id}
+                  </Text>
+                </View>
+                {selectedChannel.short_channel_id && (
+                  <View style={styles.modalInfoRow}>
+                    <Text style={styles.modalInfoLabel}>Short Channel ID</Text>
+                    <Text style={styles.modalInfoValue}>
+                      {selectedChannel.short_channel_id}
+                    </Text>
+                  </View>
+                )}
+                <View style={styles.modalInfoRow}>
+                  <Text style={styles.modalInfoLabel}>Funding TxID</Text>
+                  <Text style={styles.modalInfoValue} numberOfLines={1}>
+                    {selectedChannel.funding_txid}
+                  </Text>
+                </View>
+              </View>
+            </ScrollView>
+          )}
+        </View>
+      </View>
+    </Modal>
   );
 
   if (isConnecting) {
@@ -798,7 +957,7 @@ export default function DashboardScreen({ navigation }: Props) {
         <View style={styles.bottomPadding} />
       </ScrollView>
       
-      {/* {renderCompactActions()} */}
+      {renderChannelModal()}
     </View>
   );
 }
@@ -1102,178 +1261,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing[6],
   },
   
-  assetsScroll: {
-    marginLeft: -theme.spacing[5],
-  },
-  
-  assetCard: {
-    width: 140,
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[4],
-    marginLeft: theme.spacing[5],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    ...theme.shadows.sm,
-  },
-  
-  firstAssetCard: {
-    marginLeft: theme.spacing[5],
-  },
-  
-  assetHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[2],
-  },
-  
-  assetHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  
-  assetTicker: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '700',
-    color: theme.colors.primary[500],
-  },
-  
-  assetName: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[2],
-  },
-  
-  assetBalance: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  channelsScroll: {
-    marginLeft: -theme.spacing[5],
-  },
-  
-     channelCard: {
-     width: 280,
-     backgroundColor: theme.colors.surface.primary,
-     borderRadius: theme.borderRadius.xl,
-     padding: theme.spacing[4],
-     marginLeft: theme.spacing[5],
-     borderWidth: 1,
-     borderColor: theme.colors.border.light,
-     ...theme.shadows.sm,
-   },
-  
-  channelStatusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginBottom: theme.spacing[3],
-  },
-  
-  channelHeader: {
-    width: '100%',
-    marginBottom: theme.spacing[3],
-  },
-  
-  channelPeerInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  
-  channelPeerName: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    flex: 1,
-    marginRight: theme.spacing[2],
-  },
-  
-     channelStatusBadge: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     backgroundColor: theme.colors.gray[100],
-     borderRadius: theme.borderRadius.md,
-     paddingHorizontal: theme.spacing[2],
-     paddingVertical: theme.spacing[1],
-   },
-  
-  channelStatusText: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '600',
-    marginRight: theme.spacing[1],
-  },
-  
-  channelCapacity: {
-    width: '100%',
-    marginBottom: theme.spacing[3],
-  },
-  
-     channelCapacityLabel: {
-     fontSize: theme.typography.fontSize.sm,
-     color: theme.colors.text.secondary,
-     marginBottom: theme.spacing[1],
-   },
-  
-  channelCapacityValue: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  liquiditySection: {
-    width: '100%',
-    marginBottom: theme.spacing[3],
-  },
-  
-  liquidityHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing[1],
-  },
-  
-  liquidityTitle: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginLeft: theme.spacing[2],
-  },
-  
-  liquidityValues: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing[1],
-  },
-  
-  liquidityItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  
-  liquidityAmount: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginLeft: theme.spacing[1],
-  },
-  
-     liquidityBar: {
-     width: '100%',
-     height: 8,
-     backgroundColor: theme.colors.gray[200],
-     borderRadius: 4,
-     marginTop: theme.spacing[1],
-   },
-  
-  liquidityBarFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  
   floatingAIButton: {
     position: 'absolute',
     right: theme.spacing[5],
@@ -1387,5 +1374,314 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: theme.spacing[3],
     marginTop: theme.spacing[4],
+  },
+
+  // New styles for vertical layouts
+  assetsVerticalContainer: {
+    marginTop: theme.spacing[4],
+  },
+  assetVerticalCard: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[4],
+    marginBottom: theme.spacing[3],
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    ...theme.shadows.sm,
+  },
+  assetVerticalContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  assetVerticalLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  assetVerticalInfo: {
+    marginLeft: theme.spacing[3],
+  },
+  assetVerticalTicker: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '700',
+    color: theme.colors.primary[500],
+  },
+  assetVerticalName: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.secondary,
+  },
+  assetVerticalRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  assetVerticalBalance: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginRight: theme.spacing[2],
+  },
+  viewMoreButton: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
+    marginTop: theme.spacing[3],
+    ...theme.shadows.sm,
+  },
+  viewMoreText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.primary[500],
+  },
+
+  channelsVerticalContainer: {
+    marginTop: theme.spacing[4],
+  },
+  channelVerticalCard: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[4],
+    marginBottom: theme.spacing[3],
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    ...theme.shadows.sm,
+  },
+     channelVerticalContent: {
+     flexDirection: 'row',
+     alignItems: 'flex-start',
+   },
+   channelVerticalLeft: {
+     flex: 1,
+     flexDirection: 'row',
+     alignItems: 'center',
+     marginRight: theme.spacing[3],
+   },
+   channelVerticalStatus: {
+     flexDirection: 'row',
+     alignItems: 'center',
+   },
+   channelVerticalStatusDot: {
+     width: 10,
+     height: 10,
+     borderRadius: 5,
+     marginRight: theme.spacing[2],
+   },
+   channelVerticalInfo: {
+     flex: 1,
+     marginLeft: theme.spacing[2],
+   },
+   channelVerticalPeerName: {
+     fontSize: theme.typography.fontSize.base,
+     fontWeight: '600',
+     color: theme.colors.text.primary,
+     marginBottom: theme.spacing[1],
+   },
+   channelVerticalStatusRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     flexWrap: 'wrap',
+   },
+   channelVerticalStatusText: {
+     fontSize: theme.typography.fontSize.xs,
+     fontWeight: '600',
+     marginRight: theme.spacing[2],
+   },
+   channelVerticalCapacity: {
+     fontSize: theme.typography.fontSize.xs,
+     color: theme.colors.text.secondary,
+   },
+   channelVerticalRight: {
+     alignItems: 'flex-end',
+     justifyContent: 'space-between',
+     minWidth: 80,
+   },
+   channelVerticalTopRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     justifyContent: 'flex-end',
+   },
+   channelVerticalLiquidity: {
+     alignItems: 'flex-end',
+     marginRight: theme.spacing[2],
+   },
+   liquidityVerticalRow: {
+     flexDirection: 'column',
+     alignItems: 'flex-end',
+     marginBottom: theme.spacing[1],
+   },
+   liquidityVerticalItem: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     marginBottom: theme.spacing[0.5],
+   },
+   liquidityVerticalAmount: {
+     fontSize: theme.typography.fontSize.xs,
+     fontWeight: '600',
+     color: theme.colors.text.primary,
+     marginLeft: theme.spacing[1],
+   },
+   liquidityVerticalBar: {
+     width: 60,
+     height: 4,
+     backgroundColor: theme.colors.gray[200],
+     borderRadius: 2,
+     marginTop: theme.spacing[1],
+   },
+   liquidityVerticalBarFill: {
+     height: '100%',
+     borderRadius: 2,
+   },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    width: '90%',
+    maxHeight: '80%',
+    ...theme.shadows.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: theme.spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border.light,
+  },
+  modalTitle: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  modalCloseButton: {
+    padding: theme.spacing[2],
+  },
+  modalBody: {
+    padding: theme.spacing[4],
+  },
+  modalSection: {
+    marginBottom: theme.spacing[4],
+  },
+  modalSectionTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing[2],
+  },
+  modalStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing[1],
+  },
+  modalStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: theme.spacing[2],
+  },
+  modalStatusText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  modalPublicBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.success[50],
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    marginLeft: theme.spacing[3],
+  },
+  modalPublicText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '600',
+    color: theme.colors.success[500],
+    marginLeft: theme.spacing[1],
+  },
+  modalPrivateBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.warning[50],
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+    marginLeft: theme.spacing[3],
+  },
+  modalPrivateText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '600',
+    color: theme.colors.warning[500],
+    marginLeft: theme.spacing[1],
+  },
+  modalInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing[1],
+  },
+  modalInfoLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+  },
+  modalInfoValue: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    flexShrink: 1,
+  },
+  modalCapacityValue: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  modalLiquidityContainer: {
+    marginTop: theme.spacing[2],
+  },
+  modalLiquidityRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing[1],
+  },
+  modalLiquidityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  modalLiquidityIcon: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: theme.colors.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing[2],
+  },
+  modalLiquidityLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+  },
+  modalLiquidityValue: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  modalLiquidityBar: {
+    width: '100%',
+    height: 8,
+    backgroundColor: theme.colors.gray[200],
+    borderRadius: 4,
+    marginTop: theme.spacing[1],
+  },
+  modalLiquidityBarFill: {
+    height: '100%',
+    borderRadius: 4,
   },
 });
