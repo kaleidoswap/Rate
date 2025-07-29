@@ -17,6 +17,7 @@ import nostrReducer from './slices/nostrSlice';
 
 // Import middleware
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
+import { setStore } from './storeProvider';
 
 // Redux persist configuration
 const persistConfig: PersistConfig<any> = {
@@ -69,6 +70,9 @@ export const store = configureStore({
     }).concat(apiConfigMiddleware),
   devTools: __DEV__,
 });
+
+// Set store in provider
+setStore(store);
 
 // Create persistor
 export const persistor = persistStore(store);

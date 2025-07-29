@@ -630,15 +630,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontWeight: '500',
-  },
-
+  
   content: {
     flex: 1,
-    backgroundColor: theme.colors.background.secondary,
+    // backgroundColor: theme.colors.background.secondary,
   },
   messagesContainer: {
     flex: 1,

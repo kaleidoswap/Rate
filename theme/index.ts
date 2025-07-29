@@ -1,5 +1,175 @@
 // theme/index.ts
-export const theme = {
+
+// Define types for nested color objects
+type ColorGradient = [string, string];
+
+interface ColorShades {
+  50?: string;
+  100?: string;
+  500: string;
+  600?: string;
+  700?: string;
+  900?: string;
+  gradient?: ColorGradient;
+}
+
+interface Colors {
+  primary: ColorShades;
+  secondary: ColorShades;
+  success: ColorShades;
+  warning: ColorShades;
+  error: ColorShades;
+  gray: {
+    [key: string]: string;
+  };
+  background: {
+    primary: string;
+    secondary: string;
+    tertiary: string;
+    dark: string;
+    darkSecondary: string;
+  };
+  text: {
+    primary: string;
+    secondary: string;
+    tertiary: string;
+    inverse: string;
+    muted: string;
+  };
+  surface: {
+    primary: string;
+    secondary: string;
+    elevated: string;
+    overlay: string;
+  };
+  border: {
+    light: string;
+    medium: string;
+    dark: string;
+  };
+}
+
+interface Typography {
+  fontFamily: {
+    regular: string;
+    medium: string;
+    semibold: string;
+    bold: string;
+  };
+  fontSize: {
+    xs: number;
+    sm: number;
+    base: number;
+    lg: number;
+    xl: number;
+    '2xl': number;
+    '3xl': number;
+    '4xl': number;
+    '5xl': number;
+  };
+  lineHeight: {
+    tight: number;
+    snug: number;
+    normal: number;
+    relaxed: number;
+    loose: number;
+  };
+  fontWeight: {
+    normal: string;
+    medium: string;
+    semibold: string;
+    bold: string;
+    extrabold: string;
+  };
+}
+
+interface Shadow {
+  shadowColor: string;
+  shadowOffset: { width: number; height: number };
+  shadowOpacity: number;
+  shadowRadius: number;
+  elevation: number;
+}
+
+interface ThemeType {
+  dark: boolean;
+  colors: Colors;
+  typography: Typography;
+  spacing: {
+    [key: number]: number;
+  };
+  borderRadius: {
+    none: number;
+    sm: number;
+    base: number;
+    md: number;
+    lg: number;
+    xl: number;
+    '2xl': number;
+    full: number;
+  };
+  shadows: {
+    sm: Shadow;
+    base: Shadow;
+    md: Shadow;
+    lg: Shadow;
+    xl: Shadow;
+  };
+  components: {
+    button: {
+      primary: {
+        backgroundColor: string;
+        borderRadius: number;
+        paddingVertical: number;
+        paddingHorizontal: number;
+      };
+      secondary: {
+        backgroundColor: string;
+        borderRadius: number;
+        paddingVertical: number;
+        paddingHorizontal: number;
+        borderWidth: number;
+        borderColor: string;
+      };
+      ghost: {
+        backgroundColor: string;
+        borderRadius: number;
+        paddingVertical: number;
+        paddingHorizontal: number;
+      };
+    };
+    card: {
+      default: {
+        backgroundColor: string;
+        borderRadius: number;
+        padding: number;
+      } & Shadow;
+      elevated: {
+        backgroundColor: string;
+        borderRadius: number;
+        padding: number;
+      } & Shadow;
+    };
+    input: {
+      default: {
+        backgroundColor: string;
+        borderRadius: number;
+        paddingVertical: number;
+        paddingHorizontal: number;
+        borderWidth: number;
+        borderColor: string;
+        fontSize: number;
+      };
+      focused: {
+        borderColor: string;
+        backgroundColor: string;
+      };
+    };
+  };
+}
+
+export const theme: ThemeType = {
+  dark: false,
   colors: {
     // Primary brand colors with gradients
     primary: {
@@ -258,5 +428,20 @@ export const theme = {
     },
   },
 };
+
+// Convert our theme to @react-navigation/native theme format
+export function createNavigationTheme() {
+  return {
+    dark: theme.dark,
+    colors: {
+      primary: theme.colors.primary[500],
+      background: theme.colors.background.primary,
+      card: theme.colors.surface.primary,
+      text: theme.colors.text.primary,
+      border: theme.colors.border.light,
+      notification: theme.colors.primary[500],
+    },
+  };
+}
 
 export type Theme = typeof theme; 

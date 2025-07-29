@@ -29,6 +29,7 @@ import {
   loadContactList,
   setShowContactSync 
 } from '../store/slices/nostrSlice';
+import { Image } from 'react-native';
 import { theme } from '../theme';
 import { Card, Button } from '../components';
 import { NostrContact } from '../services/NostrService';

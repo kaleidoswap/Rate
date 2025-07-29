@@ -1,5 +1,5 @@
 // services/initializeServices.ts
-import { store } from '../store';
+import { getStore } from '../store/storeProvider';
 import { createApiInstance, getApiInstance } from './apiInstance';
 import RGBApiService from './RGBApiService';
 import { RGBNodeService } from './RGBNodeService';
@@ -10,7 +10,7 @@ import { restoreNostrConnection, loadKeysSecurely } from '../store/slices/nostrS
 const DEFAULT_TIMEOUT = 30000;
 
 export function initializeRGBApiService() {
-  const settings = store.getState().settings;
+  const settings = getStore().getState().settings;
   console.log('Initializing RGB API Service with settings:', settings);
 
   // Check if we already have an instance and it's initialized
@@ -51,7 +51,7 @@ export function initializeRGBApiService() {
 }
 
 export function updateRGBApiConfig() {
-  const settings = store.getState().settings;
+  const settings = getStore().getState().settings;
   console.log('Updating RGB API config with settings:', settings);
 
   // If settings are not available, we can't update the API service yet
@@ -85,9 +85,13 @@ export async function initializeNostrWalletConnect() {
     console.log('Initializing Nostr Wallet Connect...');
     
     const nostrService = NostrService.getInstance();
+    const nwcService = NWCService.getInstance();
+    
+    // Set up NWC service in NostrService
+    nostrService.setNWCService(nwcService);
     
     // Initialize NostrService first (if not already done)
-    const settings = store.getState().settings;
+    const settings = getStore().getState().settings;
     if (!nostrService.connected) {
       await nostrService.initialize({
         relays: settings?.nostrRelays || [
@@ -139,7 +143,7 @@ export async function autoRestoreNostrConnection() {
   try {
     console.log('Attempting to auto-restore Nostr connection...');
     
-    const state = store.getState();
+    const state = getStore().getState();
     
     // Check if we have stored keys indicator
     if (!state.nostr.hasStoredKeys) {
@@ -148,7 +152,7 @@ export async function autoRestoreNostrConnection() {
     }
     
     // Try to restore the connection
-    const result = await store.dispatch(restoreNostrConnection());
+    const result = await getStore().dispatch(restoreNostrConnection());
     
     if (restoreNostrConnection.fulfilled.match(result)) {
       console.log('Nostr connection restored successfully');

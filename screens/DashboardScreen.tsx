@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   StatusBar,
   Platform,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -115,7 +116,7 @@ export default function DashboardScreen({ navigation }: Props) {
     if (iconUrl) {
       return (
         <View style={styles.assetIconContainer}>
-          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
+          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} resizeMode="contain" />
         </View>
       );
     }
