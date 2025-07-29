@@ -655,11 +655,11 @@ export class RGBApiService {
     status: string;
   }> {
     try {
-      console.log('RGB API Request: POST /lnpay');
+      console.log('RGB API Request: POST /sendpayment');
       const response = await this.api!.post<{ 
         payment_hash: string; 
         status: string;
-      }>('/lnpay', params);
+      }>('/sendpayment', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -869,7 +869,7 @@ export class RGBApiService {
     asset_amount?: number;
   }> {
     try {
-      console.log('RGB API Request: POST /decodeln');
+      console.log('RGB API Request: POST /decodelninvoice');
       const response = await this.api!.post<{
         payment_hash: string;
         amt_msat: number;
@@ -878,7 +878,7 @@ export class RGBApiService {
         payee_pubkey: string;
         asset_id?: string;
         asset_amount?: number;
-      }>('/decodeln', params);
+      }>('/decodelninvoice', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);

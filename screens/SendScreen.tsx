@@ -344,6 +344,10 @@ function SendScreen({ navigation, route }: Props) {
     }
   };
 
+  // Format available balance using the hook at component level
+  const maxAmount = getMaxAmount();
+  const formattedMaxAmount = useFormattedBitcoinAmount(maxAmount);
+
   const validateInputs = (): boolean => {
     if (!address.trim()) {
       Alert.alert('Missing Address', 'Please enter a recipient address or scan a QR code.');
@@ -792,7 +796,7 @@ function SendScreen({ navigation, route }: Props) {
         
         <View style={styles.balanceInfo}>
           <Text style={styles.balanceText}>
-            Available: {useFormattedBitcoinAmount(maxAmount)} {bitcoinUnit}
+            Available: {formattedMaxAmount} {bitcoinUnit}
           </Text>
           {selectedAsset.asset_id === 'BTC' && amount && (
             <Text style={styles.usdValue}>
