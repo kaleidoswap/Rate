@@ -9,9 +9,10 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
-import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemeProvider } from '@react-navigation/native';
+import { LoadingScreen } from './components/LoadingScreen';
 
 import { store, persistor } from './store';
 import { theme, createNavigationTheme } from './theme';
@@ -165,7 +166,7 @@ function DashboardTabs() {
           ),
         }}
       />
-    </Tab.Navigator>
+      </Tab.Navigator>
   );
 }
 
@@ -290,19 +291,8 @@ function AppNavigator() {
   );
 }
 
-function LoadingScreen() {
-  const theme = useAppTheme();
-  
-  return (
-    <View style={{ 
-      flex: 1, 
-      justifyContent: 'center', 
-      alignItems: 'center',
-      backgroundColor: theme.colors.background.secondary,
-    }}>
-      <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-    </View>
-  );
+function AppLoadingScreen() {
+  return <LoadingScreen variant="app" title="Loading Rate Wallet" />;
 }
 
 export default function App() {
@@ -310,7 +300,7 @@ export default function App() {
 
   return (
     <Provider store={store}>
-      <PersistGate loading={<LoadingScreen />} persistor={persistor}>
+      <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
         <AppThemeProvider>
           <ThemeProvider value={navigationTheme}>
             <StatusBar style="light" backgroundColor="transparent" translucent={true} />
@@ -324,7 +314,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   scanButton: {
-    top: -20,
+    top: 10,
     justifyContent: 'center',
     alignItems: 'center',
     height: 56,
