@@ -38,11 +38,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   const progressAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Initial fade in animation
+    // Immediate fade in animation (no delay)
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 800,
+        duration: 0,
         useNativeDriver: true,
       }),
       Animated.spring(scaleAnim, {
@@ -53,32 +53,32 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       }),
     ]).start();
 
-    // Continuous pulse animation for logo
-    const pulseAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.1,
-          duration: 1500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1500,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    pulseAnimation.start();
+    // Remove pulse animation to eliminate delays
+    // const pulseAnimation = Animated.loop(
+    //   Animated.sequence([
+    //     Animated.timing(pulseAnim, {
+    //       toValue: 1.1,
+    //       duration: 1500,
+    //       useNativeDriver: true,
+    //     }),
+    //     Animated.timing(pulseAnim, {
+    //       toValue: 1,
+    //       duration: 1500,
+    //       useNativeDriver: true,
+    //     }),
+    //   ])
+    // );
+    // pulseAnimation.start();
 
-    return () => pulseAnimation.stop();
+    // return () => pulseAnimation.stop();
   }, []);
 
-  // Progress animation
+  // Progress animation (immediate)
   useEffect(() => {
     if (showProgress) {
       Animated.timing(progressAnim, {
         toValue: progress,
-        duration: 300,
+        duration: 0,
         useNativeDriver: false,
       }).start();
     }
