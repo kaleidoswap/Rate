@@ -580,6 +580,7 @@ export class RGBApiService {
       console.log('RGB API Request: POST /decodergbinvoice');
       const response = await this.api!.post<DecodeRGBInvoiceResponse>('/decodergbinvoice', params);
       return response.data;
+      console.log('RGB API Response: Decoded RGB invoice', response.data);
     } catch (error) {
       return this.handleError(error);
     }
@@ -675,12 +676,32 @@ export class RGBApiService {
     fee_rate: number;
   }): Promise<{ txid: string }> {
     try {
-      console.log('RGB API Request: POST /sendbtc');
-      const response = await this.api!.post<{ txid: string }>('/sendbtc', {
+      // Validate parameters before making API call
+      if (!params.address || !params.address.trim()) {
+        throw new Error('Address is required');
+      }
+      
+      if (isNaN(params.amount) || params.amount <= 0) {
+        throw new Error('Valid amount is required');
+      }
+      
+      if (isNaN(params.fee_rate) || params.fee_rate <= 0) {
+        throw new Error('Valid fee rate is required');
+      }
+      
+      const amount_sat = Math.round(params.amount * 100000000);
+      const requestData = {
         address: params.address,
-        amount_sat: Math.round(params.amount * 100000000), // Convert BTC to satoshis
+        amount: amount_sat,
         fee_rate: params.fee_rate,
-      });
+        skip_sync: false,
+      };
+      
+      console.log('RGB API Request: POST /sendbtc');
+      console.log('Request data:', requestData);
+      console.log('Original amount:', params.amount, 'Converted to satoshis (amount field):', amount_sat);
+      
+      const response = await this.api!.post<{ txid: string }>('/sendbtc', requestData);
       return response.data;
     } catch (error) {
       return this.handleError(error);
@@ -696,6 +717,19 @@ export class RGBApiService {
     amount: number;
   }): Promise<{ txid: string }> {
     try {
+      // Validate parameters before making API call
+      if (!params.asset_id || !params.asset_id.trim()) {
+        throw new Error('Asset ID is required');
+      }
+      
+      if (!params.address || !params.address.trim()) {
+        throw new Error('Address is required');
+      }
+      
+      if (isNaN(params.amount) || params.amount <= 0) {
+        throw new Error('Valid amount is required');
+      }
+      
       console.log('RGB API Request: POST /sendasset');
       const response = await this.api!.post<{ txid: string }>('/sendasset', {
         asset_id: params.asset_id,
@@ -869,7 +903,7 @@ export class RGBApiService {
     asset_amount?: number;
   }> {
     try {
-      console.log('RGB API Request: POST /decodeln');
+      console.log('RGB API Request: POST /decodelninvoice');
       const response = await this.api!.post<{
         payment_hash: string;
         amt_msat: number;
@@ -878,7 +912,7 @@ export class RGBApiService {
         payee_pubkey: string;
         asset_id?: string;
         asset_amount?: number;
-      }>('/decodeln', params);
+      }>('/decodelninvoice  ', params);
       return response.data;
     } catch (error) {
       return this.handleError(error);
