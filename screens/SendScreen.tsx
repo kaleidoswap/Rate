@@ -120,6 +120,7 @@ function SendScreen({ navigation, route }: Props) {
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [paymentStep, setPaymentStep] = useState<'input' | 'review' | 'sending'>('input');
 
   const apiService = RGBApiService.getInstance();
 
@@ -188,13 +189,17 @@ function SendScreen({ navigation, route }: Props) {
       setAddressType('lightning');
     }
 
-    // Auto-advance to confirmation if coming from QR scanner with complete data
-    if (route.params?.fromQRScanner && route.params?.prefilledAmount && 
-        (route.params?.decodedInvoice?.amt_msat > 0 || route.params?.decodedRGBInvoice?.amount)) {
-      // Small delay to allow state to settle, then show confirmation
-      setTimeout(() => {
-        setShowConfirmation(true);
-      }, 500);
+    // Auto-advance to review step if coming from QR scanner with complete data
+    if (route.params?.fromQRScanner) {
+      const hasCompleteData = route.params?.prefilledAmount && 
+        (route.params?.decodedInvoice?.amt_msat > 0 || route.params?.decodedRGBInvoice?.amount);
+      
+      if (hasCompleteData) {
+        // Small delay to allow state to settle, then show review
+        setTimeout(() => {
+          setPaymentStep('review');
+        }, 300);
+      }
     }
   }, [route.params]);
 
@@ -381,12 +386,15 @@ function SendScreen({ navigation, route }: Props) {
 
   const handleSend = async () => {
     if (!validateInputs()) return;
-    setShowConfirmation(true);
-  };
-
-  const confirmSend = async () => {
+    
+    if (paymentStep === 'input') {
+      setPaymentStep('review');
+      return;
+    }
+    
+    // We're in review step, proceed with sending
+    setPaymentStep('sending');
     setLoading(true);
-    setShowConfirmation(false);
 
     try {
       if (addressType === 'lightning' || addressType === 'lightning-address') {
@@ -395,7 +403,7 @@ function SendScreen({ navigation, route }: Props) {
         });
         
         Alert.alert(
-          'Success',
+          'Payment Sent! ⚡',
           'Lightning payment sent successfully!',
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
@@ -407,8 +415,8 @@ function SendScreen({ navigation, route }: Props) {
         });
         
         Alert.alert(
-          'Success',
-          `Bitcoin sent successfully!\nTXID: ${result.txid}`,
+          'Payment Sent! ₿',
+          `Bitcoin transaction broadcasted successfully!\nTXID: ${result.txid}`,
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
       } else if (addressType === 'rgb') {
@@ -419,8 +427,8 @@ function SendScreen({ navigation, route }: Props) {
         });
         
         Alert.alert(
-          'Success',
-          `RGB asset sent successfully!\nTXID: ${result.txid}`,
+          'Asset Sent! 💎',
+          `RGB asset transfer completed successfully!\nTXID: ${result.txid}`,
           [{ text: 'OK', onPress: () => navigation.goBack() }]
         );
       }
@@ -464,11 +472,19 @@ function SendScreen({ navigation, route }: Props) {
         <View style={styles.header}>
           <TouchableOpacity 
             style={styles.backButton}
-            onPress={() => navigation.goBack()}
+            onPress={() => {
+              if (paymentStep === 'review') {
+                setPaymentStep('input');
+              } else {
+                navigation.goBack();
+              }
+            }}
           >
             <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Send</Text>
+          <Text style={styles.headerTitle}>
+            {paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
+          </Text>
           <TouchableOpacity
             style={styles.helpButton}
             onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
@@ -660,9 +676,9 @@ function SendScreen({ navigation, route }: Props) {
         {showAssetSelector && (
           <View style={styles.assetDropdown}>
             <ScrollView style={styles.assetDropdownScroll} nestedScrollEnabled>
-              {allAssets.map((asset) => (
+              {allAssets.map((asset, index) => (
                 <TouchableOpacity
-                  key={asset.asset_id}
+                  key={`asset-${asset.asset_id}-${index}`}
                   style={[
                     styles.assetOption,
                     selectedAsset.asset_id === asset.asset_id && styles.assetOptionSelected
@@ -761,17 +777,17 @@ function SendScreen({ navigation, route }: Props) {
         
         {/* Quick amount buttons */}
         <View style={styles.quickAmounts}>
-          {getQuickAmounts().map((amt) => (
-            <TouchableOpacity
-              key={amt}
-              style={styles.quickAmountButton}
-              onPress={() => setAmount(amt)}
-            >
-              <Text style={styles.quickAmountText}>
-                {amt} {bitcoinUnit}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                  {getQuickAmounts().map((amt, index) => (
+          <TouchableOpacity
+            key={`quick-amount-${amt}-${index}`}
+            style={styles.quickAmountButton}
+            onPress={() => setAmount(amt)}
+          >
+            <Text style={styles.quickAmountText}>
+              {amt} {bitcoinUnit}
+            </Text>
+          </TouchableOpacity>
+        ))}
         </View>
         
         <View style={styles.balanceInfo}>
@@ -798,9 +814,9 @@ function SendScreen({ navigation, route }: Props) {
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Network Fee</Text>
         <View style={styles.feeSelector}>
-          {feeRates.map((fee) => (
+          {feeRates.map((fee, index) => (
             <TouchableOpacity
-              key={fee.value}
+              key={`fee-rate-${fee.value}-${index}`}
               style={[
                 styles.feeButton,
                 feeRate === fee.value && styles.feeButtonActive
@@ -845,25 +861,22 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderSendButton = () => {
+    // Hide send button during review and sending steps
+    if (paymentStep === 'review' || paymentStep === 'sending') return null;
+
     const hasAddress = address && addressType !== 'invalid' && addressType !== 'unknown';
     const hasFixedAmount = (decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) || decodedRGBInvoice?.amount;
     const hasAmount = amount || hasFixedAmount;
     const canSend = hasAddress && hasAmount;
 
     // Dynamic button text based on state
-    let buttonTitle = 'Send Payment';
-    if (loading) {
-      buttonTitle = 'Sending...';
-    } else if (!hasAddress) {
-      buttonTitle = 'Enter Address';
+    let buttonTitle = 'Continue';
+    if (!hasAddress) {
+      buttonTitle = 'Enter Address or Scan QR';
     } else if (!hasAmount) {
       buttonTitle = 'Enter Amount';
-    } else if (addressType === 'lightning') {
-      buttonTitle = 'Pay Lightning Invoice';
-    } else if (addressType === 'rgb') {
-      buttonTitle = 'Send RGB Asset';
     } else {
-      buttonTitle = 'Send Bitcoin';
+      buttonTitle = 'Review Payment';
     }
 
     return (
@@ -871,8 +884,7 @@ function SendScreen({ navigation, route }: Props) {
         <Button
           title={buttonTitle}
           onPress={handleSend}
-          disabled={loading || !canSend}
-          loading={loading}
+          disabled={!canSend}
           variant="primary"
           fullWidth={true}
           size="lg"
@@ -902,57 +914,80 @@ function SendScreen({ navigation, route }: Props) {
     );
   };
 
-  const renderConfirmationModal = () => {
-    if (!showConfirmation) return null;
+  const renderPaymentReview = () => {
+    if (paymentStep !== 'review') return null;
+
+    const effectiveAmount = amount || 
+      (decodedInvoice?.amt_msat ? (decodedInvoice.amt_msat / 100000000000).toFixed(8) : '0') ||
+      (decodedRGBInvoice?.amount ? (decodedRGBInvoice.amount / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8) : '0');
 
     return (
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <Text style={styles.modalTitle}>Confirm Payment</Text>
-          
-          <View style={styles.confirmationDetails}>
-            <View style={styles.confirmationRow}>
-              <Text style={styles.confirmationLabel}>To:</Text>
-              <Text style={styles.confirmationValue} numberOfLines={2}>
-                {address.length > 30 ? `${address.slice(0, 15)}...${address.slice(-15)}` : address}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Review Payment</Text>
+        
+        <View style={styles.reviewCard}>
+          <View style={styles.reviewHeader}>
+            <AssetIcon asset={selectedAsset} />
+            <View style={styles.reviewHeaderText}>
+              <Text style={styles.reviewAmount}>
+                {effectiveAmount} {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
+              </Text>
+              <Text style={styles.reviewAsset}>{selectedAsset.name}</Text>
+            </View>
+          </View>
+
+          <View style={styles.reviewDetails}>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>To</Text>
+              <Text style={styles.reviewValue} numberOfLines={2}>
+                {address.length > 40 ? `${address.slice(0, 20)}...${address.slice(-20)}` : address}
               </Text>
             </View>
             
-            <View style={styles.confirmationRow}>
-              <Text style={styles.confirmationLabel}>Asset:</Text>
-              <Text style={styles.confirmationValue}>{selectedAsset.ticker}</Text>
-            </View>
-            
-            <View style={styles.confirmationRow}>
-              <Text style={styles.confirmationLabel}>Amount:</Text>
-              <Text style={styles.confirmationValue}>
-                {amount || (decodedInvoice?.amt_msat ? useFormattedBitcoinAmount(decodedInvoice.amt_msat / 1000) : '0')} {bitcoinUnit}
-              </Text>
-            </View>
-            
+            {addressType === 'lightning' && decodedInvoice?.description && (
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Description</Text>
+                <Text style={styles.reviewValue}>{decodedInvoice.description}</Text>
+              </View>
+            )}
+
             {(addressType === 'bitcoin' || addressType === 'rgb') && (
-              <View style={styles.confirmationRow}>
-                <Text style={styles.confirmationLabel}>Fee Rate:</Text>
-                <Text style={styles.confirmationValue}>
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Network Fee</Text>
+                <Text style={styles.reviewValue}>
                   {feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB
+                </Text>
+              </View>
+            )}
+
+            {selectedAsset.ticker === 'BTC' && effectiveAmount && (
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>USD Value</Text>
+                <Text style={styles.reviewValue}>
+                  ≈ ${((bitcoinUnit === 'sats' ? parseFloat(effectiveAmount) / 100000000 : parseFloat(effectiveAmount)) * 50000).toLocaleString()}
                 </Text>
               </View>
             )}
           </View>
 
-          <View style={styles.modalActions}>
-            <TouchableOpacity
-              style={styles.modalCancelButton}
-              onPress={() => setShowConfirmation(false)}
-            >
-              <Text style={styles.modalCancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalConfirmButton}
-              onPress={confirmSend}
-            >
-              <Text style={styles.modalConfirmText}>Confirm</Text>
-            </TouchableOpacity>
+          <View style={styles.reviewActions}>
+            <Button
+              title="Edit"
+              variant="secondary"
+              onPress={() => setPaymentStep('input')}
+              style={styles.reviewEditButton}
+            />
+            <Button
+              title={
+                addressType === 'lightning' ? 'Pay Invoice' :
+                addressType === 'rgb' ? 'Send RGB Asset' :
+                'Send Bitcoin'
+              }
+              variant="primary"
+              onPress={handleSend}
+              loading={loading}
+              style={styles.reviewConfirmButton}
+            />
           </View>
         </View>
       </View>
@@ -972,10 +1007,21 @@ function SendScreen({ navigation, route }: Props) {
         {renderAssetSelector()}
         {renderAmountInput()}
         {renderFeeSelector()}
+        {renderPaymentReview()}
       </ScrollView>
 
       {renderSendButton()}
-      {renderConfirmationModal()}
+      
+      {/* Loading overlay when sending */}
+      {paymentStep === 'sending' && (
+        <View style={styles.sendingOverlay}>
+          <View style={styles.sendingContent}>
+            <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+            <Text style={styles.sendingText}>Processing Payment...</Text>
+            <Text style={styles.sendingSubtext}>This may take a few moments</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1540,6 +1586,119 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.primary[700],
     fontWeight: '500',
+  },
+
+  reviewCard: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[5],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+
+  reviewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing[4],
+    paddingBottom: theme.spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border.light,
+  },
+
+  reviewHeaderText: {
+    marginLeft: theme.spacing[3],
+    flex: 1,
+  },
+
+  reviewAmount: {
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+
+  reviewAsset: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[1],
+  },
+
+  reviewDetails: {
+    marginBottom: theme.spacing[5],
+  },
+
+  reviewRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: theme.spacing[3],
+    gap: theme.spacing[3],
+  },
+
+  reviewLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    fontWeight: '500',
+    minWidth: 80,
+  },
+
+  reviewValue: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    fontWeight: '600',
+    flex: 1,
+    textAlign: 'right',
+    lineHeight: 20,
+  },
+
+  reviewActions: {
+    flexDirection: 'row',
+    gap: theme.spacing[3],
+  },
+
+  reviewEditButton: {
+    flex: 1,
+  },
+
+  reviewConfirmButton: {
+    flex: 2,
+  },
+
+  sendingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+
+  sendingContent: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[8],
+    alignItems: 'center',
+    minWidth: 200,
+  },
+
+  sendingText: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginTop: theme.spacing[4],
+    textAlign: 'center',
+  },
+
+  sendingSubtext: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[2],
+    textAlign: 'center',
   },
 });
 

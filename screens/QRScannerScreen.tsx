@@ -50,8 +50,8 @@ export default function QRScannerScreen({ navigation }: Props) {
         Animated.sequence([
           Animated.timing(scanLineAnim, {
             toValue: 1,
-            duration: 2000,
-            easing: Easing.linear,
+            duration: 2500,
+            easing: Easing.bezier(0.4, 0.0, 0.6, 1.0),
             useNativeDriver: true,
           }),
         ])
@@ -76,39 +76,33 @@ export default function QRScannerScreen({ navigation }: Props) {
       setScanSuccess(true);
       successAnim.current?.play();
       
-      // Faster transition - reduced from 1500ms to 800ms
+      // Always go directly to Send screen - no PaymentConfirmation
       setTimeout(() => {
         setScanSuccess(null);
         setScanned(false);
         
-        // Smart navigation: skip PaymentConfirmation for complete invoices
-        if (shouldSkipConfirmation(paymentData)) {
-          navigation.navigate('Send', {
-            selectedAsset: paymentData.selectedAsset,
-            prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
-            prefilledAmount: 'amount' in paymentData ? paymentData.amount : undefined,
-            label: 'label' in paymentData ? paymentData.label : undefined,
-            message: 'message' in paymentData ? paymentData.message : undefined,
-            decodedInvoice: 'decodedInvoice' in paymentData ? paymentData.decodedInvoice : undefined,
-            decodedRGBInvoice: 'decodedRGBInvoice' in paymentData ? paymentData.decodedRGBInvoice : undefined,
-            isLightning: paymentData.type === 'lightning',
-            fromQRScanner: true,
-          });
-        } else {
-          navigation.navigate('PaymentConfirmation', { paymentData });
-        }
-      }, 800);
+        navigation.navigate('Send', {
+          selectedAsset: paymentData.selectedAsset,
+          prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
+          prefilledAmount: 'amount' in paymentData ? paymentData.amount : undefined,
+          label: 'label' in paymentData ? paymentData.label : undefined,
+          message: 'message' in paymentData ? paymentData.message : undefined,
+          decodedInvoice: 'decodedInvoice' in paymentData ? paymentData.decodedInvoice : undefined,
+          decodedRGBInvoice: 'decodedRGBInvoice' in paymentData ? paymentData.decodedRGBInvoice : undefined,
+          isLightning: paymentData.type === 'lightning',
+          fromQRScanner: true,
+          paymentType: paymentData.type,
+        });
+      }, 600); // Faster transition
     } catch (error) {
       console.error('Error processing scanned data:', error);
       setScanSuccess(false);
       errorAnim.current?.play();
       
-      // Faster error feedback
       setTimeout(() => {
         setScanSuccess(null);
         setScanned(false);
         
-        // Better error messaging
         const errorMessage = getErrorMessage(error);
         Alert.alert('Scan Error', errorMessage, [
           { 
@@ -122,7 +116,7 @@ export default function QRScannerScreen({ navigation }: Props) {
             style: 'cancel'
           }
         ]);
-      }, 800);
+      }, 600);
     }
   };
 
@@ -180,16 +174,6 @@ export default function QRScannerScreen({ navigation }: Props) {
       // Unknown format - throw error to be handled by caller
       throw new Error('The scanned QR code is not a recognized Bitcoin, Lightning, or RGB format.');
     }
-  };
-
-  // Helper function to determine if we should skip confirmation screen
-  const shouldSkipConfirmation = (paymentData: any): boolean => {
-    // Skip confirmation for invoices with fixed amounts (Lightning/RGB with amount)
-    const hasFixedAmount = 
-      (paymentData.type === 'lightning' && paymentData.decodedInvoice?.amt_msat > 0) ||
-      (paymentData.type === 'rgb' && paymentData.decodedRGBInvoice?.amount);
-    
-    return hasFixedAmount;
   };
 
   // Better error message handling
@@ -352,7 +336,7 @@ export default function QRScannerScreen({ navigation }: Props) {
             transform: [{
               translateY: scanLineAnim.interpolate({
                 inputRange: [0, 1],
-                outputRange: [0, 250],
+                outputRange: [0, 280],
               }),
             }],
           },
@@ -376,6 +360,27 @@ export default function QRScannerScreen({ navigation }: Props) {
       </View>
     );
   };
+
+  const renderScanInstructions = () => (
+    <View style={styles.scanInstructions}>
+      <View style={styles.instructionItem}>
+        <Ionicons name="qr-code" size={24} color="white" />
+        <Text style={styles.instructionText}>QR Codes</Text>
+      </View>
+      <View style={styles.instructionItem}>
+        <Ionicons name="flash" size={24} color="#FFD700" />
+        <Text style={styles.instructionText}>Lightning</Text>
+      </View>
+      <View style={styles.instructionItem}>
+        <Ionicons name="diamond" size={24} color="#10b981" />
+        <Text style={styles.instructionText}>RGB Assets</Text>
+      </View>
+      <View style={styles.instructionItem}>
+        <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
+        <Text style={styles.instructionText}>Bitcoin</Text>
+      </View>
+    </View>
+  );
 
   if (!permission) {
     return (
@@ -434,15 +439,17 @@ export default function QRScannerScreen({ navigation }: Props) {
           style={styles.camera}
           facing="back"
           barcodeScannerSettings={{
-            barcodeTypes: ["qr"],
+            barcodeTypes: ["qr", "code128", "code39", "aztec", "datamatrix", "ean13", "ean8", "pdf417"],
           }}
           onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
           enableTorch={flashEnabled}
+          ratio="16:9"
         />
         
         <View style={styles.overlay}>
           {renderScanAnimation()}
           {renderFeedbackAnimation()}
+          {renderScanInstructions()}
         </View>
 
         <LinearGradient
@@ -514,18 +521,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scanArea: {
-    width: 250,
-    height: 250,
+    width: 280,
+    height: 280,
     position: 'relative',
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: 'hidden',
   },
   corner: {
     position: 'absolute',
-    width: 30,
-    height: 30,
-    borderColor: theme.colors.primary[500],
-    borderWidth: 3,
+    width: 40,
+    height: 40,
+    borderColor: '#00ff88',
+    borderWidth: 4,
   },
   topLeft: {
     top: 0,
@@ -647,5 +654,22 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     height: 160,
+  },
+  
+  scanInstructions: {
+    position: 'absolute',
+    top: 80,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingVertical: 12,
+  },
+  
+  instructionItem: {
+    alignItems: 'center',
+    gap: 4,
   },
 });

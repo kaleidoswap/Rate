@@ -366,18 +366,18 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
         {paymentData.selectedAsset?.ticker === 'BTC' && (
           <View style={styles.quickAmounts}>
             {bitcoinUnit === 'BTC' 
-              ? ['0.001', '0.005', '0.01'].map((amount) => (
+              ? ['0.001', '0.005', '0.01'].map((amount, index) => (
                   <TouchableOpacity
-                    key={amount}
+                    key={`btc-amount-${amount}-${index}`}
                     style={styles.quickAmountButton}
                     onPress={() => setCustomAmount(amount)}
                   >
                     <Text style={styles.quickAmountText}>{amount} BTC</Text>
                   </TouchableOpacity>
                 ))
-              : ['1000', '5000', '10000'].map((amount) => (
+              : ['1000', '5000', '10000'].map((amount, index) => (
                   <TouchableOpacity
-                    key={amount}
+                    key={`sats-amount-${amount}-${index}`}
                     style={styles.quickAmountButton}
                     onPress={() => setCustomAmount(amount)}
                   >
