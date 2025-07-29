@@ -29,6 +29,7 @@ import RGBApiService from '../services/RGBApiService';
 
 import { theme } from '../theme';
 import { Card, Button } from '../components';
+import { LoadingScreen } from '../components/LoadingScreen';
 import { useAssetIcon } from '../utils';
 import { formatBitcoinAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
@@ -853,15 +854,11 @@ export default function DashboardScreen({ navigation }: Props) {
 
   if (isConnecting) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-            <Text style={styles.loadingText}>Connecting to node...</Text>
-            <Text style={styles.loadingDetails}>URL: {settings.nodeUrl || 'Not configured'}</Text>
-          </View>
-        </View>
-      </SafeAreaView>
+      <LoadingScreen 
+        variant="connection" 
+        title="Connecting to Node"
+        subtitle={`Establishing connection to ${settings.nodeUrl || 'Lightning node'}...`}
+      />
     );
   }
 
@@ -1255,23 +1252,7 @@ const styles = StyleSheet.create({
     height: theme.spacing[4],
   },
   
-  loadingContainer: {
-    alignItems: 'center',
-  },
   
-  loadingText: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginTop: theme.spacing[4],
-    marginBottom: theme.spacing[2],
-  },
-  
-  loadingDetails: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-  },
   
   errorCard: {
     width: '100%',
