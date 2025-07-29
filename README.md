@@ -1,294 +1,214 @@
-# Rate - RGB Lightning Wallet Setup Guide
+# Rate - Smart RGB Lightning Wallet
 
-## Prerequisites
+A next-generation non-custodial mobile wallet that integrates RGB assets, Lightning Network, AI assistance, and social features into a unified Bitcoin experience.
 
-Before setting up the Rate app, you need to have the RGB Lightning Node binary available. The app expects the binary to be bundled with the mobile application.
+## Overview
 
-### 1. Build RGB Lightning Node
+Rate is a React Native mobile application that provides a complete self-custodial wallet solution for Bitcoin and RGB assets. The wallet features an embedded RGB Lightning Node, AI-powered natural language interface, Nostr social integration, and local business discovery through BTC Map integration.
 
-First, clone and build the RGB Lightning Node:
+## Key Features
+
+### 💰 **Wallet Core**
+- **Non-custodial**: Users control their private keys
+- **Multi-asset support**: Bitcoin and RGB assets (stablecoins, tokens, NFTs)
+- **Lightning Network**: Fast, low-cost payments
+- **On-chain transactions**: Full Bitcoin blockchain support
+- **HD wallet**: BIP39 mnemonic seed phrase backup
+
+### 🤖 **AI Assistant**
+- **Natural language interface**: Control wallet with voice or text
+- **Smart commands**: "Send 100,000 sats to Alice" or "Create invoice for $50"
+- **MCP server integration**: Direct AI-to-wallet communication
+- **Location services**: Find Bitcoin-accepting businesses with AI
+
+### 🌐 **Social Features (Nostr)**
+- **Contact management**: Sync contacts via Nostr protocol
+- **Lightning Zaps**: Social micropayments
+- **Lightning Address**: Send to username@domain.com
+- **Wallet Connect**: Connect to external applications
+- **Social payments**: Pay friends directly from contact list
+
+### 🗺️ **Local Discovery**
+- **BTC Map integration**: Find nearby Bitcoin merchants
+- **Real-world utility**: Bridge digital assets to physical commerce
+- **Merchant payments**: Direct payments to discovered businesses
+- **Stablecoin support**: Spend RGB stablecoins locally
+
+### ⚡ **Advanced Features**
+- **Atomic swaps**: Exchange assets via Kaleidoswap integration
+- **LSP integration**: Automated Lightning liquidity management
+- **QR code support**: Scan Bitcoin addresses, Lightning invoices, RGB invoices
+- **Biometric security**: Face ID, Touch ID, Fingerprint authentication
+
+## Technology Stack
+
+- **Frontend**: React Native with Expo
+- **State Management**: Redux Toolkit
+- **Database**: SQLite with SQLCipher encryption
+- **Security**: Expo SecureStore, biometric authentication
+- **AI**: OpenAI GPT integration with custom MCP server
+- **Bitcoin/RGB**: Embedded RGB Lightning Node binary
+- **Nostr**: NDK (Nostr Development Kit)
+- **Maps**: BTC Map API integration
+
+## Architecture
+
+### Node Options
+- **Local Mode**: RGB Lightning Node runs as embedded binary in the app
+- **Cloud Mode**: Connect to remote Thunderstack nodes for demo/production
+
+### Security
+- Hardware security module integration
+- Multi-layer encryption (SQLCipher + AES)
+- Secure key derivation and storage
+- Background app protection
+
+## Quick Start
+
+### Installation
 
 ```bash
-# Clone the RGB Lightning Node repository
-git clone https://github.com/RGB-Tools/rgb-lightning-node.git
-cd rgb-lightning-node
-
-# Build for mobile targets
-# For Android
-rustup target add aarch64-linux-android armv7-linux-androideabi
-cargo ndk --target aarch64-linux-android --platform 21 -- build --release
-
-# For iOS
-rustup target add aarch64-apple-ios x86_64-apple-ios
-cargo build --target aarch64-apple-ios --release
-```
-
-### 2. Copy Binary to React Native Project
-
-Copy the built binary to your React Native project:
-
-```bash
-# Create assets directory in your Rate project
-mkdir -p Rate/assets
-
-# Copy the binary (adjust path based on your build)
-cp target/aarch64-linux-android/release/rgb-lightning-node Rate/assets/
-# or for iOS
-cp target/aarch64-apple-ios/release/rgb-lightning-node Rate/assets/
-```
-
-## App Installation
-
-### 1. Create the Expo Project
-
-```bash
-# Create new Expo app with TypeScript template
-npx create-expo-app Rate --template blank-typescript
+git clone https://github.com/kaleidoswap/rate.git
 cd Rate
+npm install
+npx expo start
 ```
 
-### 2. Install Dependencies
+### Development Setup
 
-```bash
-# Install navigation dependencies
-npm install @react-navigation/native @react-navigation/stack @react-navigation/bottom-tabs
-npx expo install react-native-screens react-native-safe-area-context
+For detailed development setup including RGB node compilation and Bitcoin node configuration, see [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md).
 
-# Install state management
-npm install @reduxjs/toolkit react-redux redux-persist
-npm install @react-native-async-storage/async-storage
+### Demo Mode
 
-# Install crypto and security
-npm install crypto-js
-npm install @types/crypto-js
+The app comes pre-configured to work with Thunderstack demo nodes - no additional setup required for testing.
 
-# Install UI and utilities
-npm install @expo/vector-icons
-npm install react-native-qrcode-svg react-native-svg
-npm install @react-native-picker/picker
-npm install axios
+## Usage
 
-# Install Expo modules
-npx expo install expo-sqlite expo-secure-store expo-camera expo-local-authentication expo-clipboard
+### First Time Setup
+
+1. **Create Wallet**: Generate new wallet or restore from backup
+2. **Secure Wallet**: Set password and enable biometric authentication
+3. **Backup Phrase**: Securely store your 12-word recovery phrase
+4. **Configure Node**: Choose local or cloud node connection
+
+### Basic Operations
+
+#### Send Bitcoin/RGB Assets
+```
+1. Tap "Send" on dashboard
+2. Select asset type (Bitcoin/RGB)
+3. Enter amount and recipient
+4. Confirm transaction
 ```
 
-### 3. Configure App Permissions
+#### AI Commands
+```
+Voice: "Send 50,000 sats to John"
+Text: "Create an invoice for $25"
+Location: "Find coffee shops that accept Bitcoin"
+```
 
-Update your `app.json` with the provided configuration that includes camera permissions, biometric authentication, and SQLite encryption.
+#### Social Payments
+```
+1. Go to Contacts (Nostr)
+2. Select friend
+3. Tap "Zap" for Lightning payment
+4. Enter amount and send
+```
 
-### 4. Project Structure
+### Asset Management
 
-Create the following directory structure:
+- **View Balances**: Dashboard shows all Bitcoin and RGB assets
+- **Transaction History**: Complete history with transaction details
+- **Asset Details**: Detailed information for each RGB asset
+- **Atomic Swaps**: Exchange assets through integrated DEX
 
+## API Integration
+
+### AI Service
+The wallet integrates with OpenAI GPT through a custom MCP (Model Context Protocol) server that provides secure access to wallet functions.
+
+### Nostr Integration
+Uses NDK for Nostr protocol integration, enabling social features and wallet connect functionality.
+
+### BTC Map API
+Integrates with BTC Map to discover local Bitcoin-accepting merchants and enable location-based payments.
+
+## Security Considerations
+
+### Key Management
+- Private keys never leave the device
+- Hardware security module integration
+- Secure enclave storage on supported devices
+
+### Data Protection
+- SQLCipher database encryption
+- AES encryption for sensitive data
+- TLS/SSL for network communications
+
+### Authentication
+- Biometric authentication (Face ID, Touch ID, Fingerprint)
+- PIN protection with attempt limiting
+- Session management with automatic locks
+
+## Development
+
+### Project Structure
 ```
 Rate/
-├── src/
-│   ├── services/
-│   │   ├── RGBNodeService.ts
-│   │   ├── RGBApiService.ts
-│   │   └── DatabaseService.ts
-│   ├── store/
-│   │   ├── index.ts
-│   │   └── slices/
-│   │       ├── walletSlice.ts
-│   │       ├── nodeSlice.ts
-│   │       └── settingsSlice.ts
-│   ├── screens/
-│   │   ├── WalletSetupScreen.tsx
-│   │   ├── DashboardScreen.tsx
-│   │   ├── SendScreen.tsx
-│   │   ├── ReceiveScreen.tsx
-│   │   ├── QRScannerScreen.tsx
-│   │   ├── AssetsScreen.tsx
-│   │   └── SettingsScreen.tsx
-│   └── types/
-├── assets/
-│   └── rgb-lightning-node (binary)
-├── App.tsx
-├── app.json
-└── package.json
+├── screens/          # React Native screens
+├── services/         # Business logic and API integrations
+├── store/           # Redux state management
+├── components/      # Reusable UI components
+├── navigation/      # Navigation configuration
+├── utils/          # Helper functions
+├── types/          # TypeScript definitions
+└── assets/         # Static assets and RGB node binary
 ```
 
-## Bitcoin Node Setup
+### Building
 
-### 1. Local Bitcoin Node (Regtest)
-
-For development, set up a local Bitcoin node in regtest mode:
-
+#### Development
 ```bash
-# Install Bitcoin Core
-# On macOS: brew install bitcoin
-# On Ubuntu: sudo apt-get install bitcoin
-
-# Create bitcoin.conf
-mkdir -p ~/.bitcoin
-cat > ~/.bitcoin/bitcoin.conf << EOF
-regtest=1
-server=1
-rpcuser=user
-rpcpassword=password
-rpcport=18443
-rpcbind=127.0.0.1
-rpcallowip=127.0.0.1
-EOF
-
-# Start Bitcoin daemon
-bitcoind -daemon
-
-# Generate initial blocks
-bitcoin-cli -regtest generatetoaddress 101 $(bitcoin-cli -regtest getnewaddress)
-```
-
-### 2. Electrum Server (Optional)
-
-For better performance, you can run an Electrum server:
-
-```bash
-# Using electrs
-git clone https://github.com/romanz/electrs.git
-cd electrs
-cargo build --release
-
-# Run electrs
-./target/release/electrs --network regtest --daemon-dir ~/.bitcoin
-```
-
-## RGB Node Configuration
-
-The app will automatically configure the RGB Lightning Node with these default settings:
-
-- **API Port**: 3001 (REST API)
-- **Lightning Port**: 9735 (P2P communications)
-- **Network**: Regtest (for development)
-- **Data Directory**: App's documents directory
-
-### Default Configuration
-
-```json
-{
-  "bitcoind_rpc_host": "localhost",
-  "bitcoind_rpc_port": 18443,
-  "bitcoind_rpc_username": "user",
-  "bitcoind_rpc_password": "password",
-  "indexer_url": "127.0.0.1:50001",
-  "proxy_endpoint": "rpc://127.0.0.1:3000/json-rpc"
-}
-```
-
-## Running the App
-
-### 1. Development Mode
-
-```bash
-# Start the development server
-npx expo start
-
-# Run on specific platform
 npx expo start --android  # Android
 npx expo start --ios      # iOS
 ```
 
-### 2. Building for Production
-
+#### Production
 ```bash
-# Install EAS CLI
-npm install -g @expo/eas-cli
-
-# Configure EAS
-eas build:configure
-
-# Build for Android
 eas build --platform android
-
-# Build for iOS
 eas build --platform ios
 ```
 
-## First Time Setup
+## Contributing
 
-When you first run the app:
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
 
-1. **Initialize Wallet**: The app will prompt you to create a new wallet or restore from backup
-2. **Set Password**: Choose a strong password for wallet encryption
-3. **Save Mnemonic**: Write down the 12-word recovery phrase
-4. **Configure Node**: Set up Bitcoin node connection details
-5. **Unlock Wallet**: Use your password or biometric authentication
+## License
 
-## Features
+MIT License - see [LICENSE](LICENSE) file for details.
 
-### Core Functionality
+## Support
 
-- **Wallet Management**: Create, backup, and restore RGB Lightning wallets
-- **Bitcoin Operations**: Send and receive Bitcoin on-chain
-- **RGB Assets**: Issue, send, and receive RGB assets (NIA, UDA, CFA)
-- **Lightning Network**: Send and receive Lightning payments
-- **QR Code Scanning**: Scan Bitcoin addresses, Lightning invoices, and RGB invoices
+- **Documentation**: See [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md) for detailed setup
+- **Issues**: Report bugs via GitHub Issues
+- **Hackathon Info**: See [HACKATHON.md](HACKATHON.md) for presentation details
 
-### Security Features
+## Roadmap
 
-- **Encrypted Storage**: All sensitive data encrypted with SQLCipher
-- **Biometric Authentication**: Fingerprint and Face ID support
-- **Secure Key Storage**: Uses device secure enclave
-- **PIN Protection**: Additional PIN layer for wallet access
+- [x] Core wallet functionality
+- [x] AI assistant integration
+- [x] Nostr social features
+- [x] BTC Map integration
+- [ ] Enhanced AI capabilities
+- [ ] Plugin architecture
+- [ ] Multi-language support
+- [ ] Hardware wallet integration
 
-### Development Features
+---
 
-- **Redux State Management**: Predictable state management
-- **TypeScript**: Full type safety
-- **SQLite Database**: Local data persistence
-- **Background Sync**: Automatic wallet synchronization
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Node Binary Not Found**: Ensure the RGB Lightning Node binary is in the `assets` folder
-2. **Permission Denied**: Make sure the binary has execute permissions
-3. **Network Connection**: Check Bitcoin node connectivity
-4. **Database Issues**: Clear app data if SQLite corruption occurs
-
-### Debug Mode
-
-Enable debug logging by setting:
-
-```typescript
-// In your service files
-const DEBUG = __DEV__;
-if (DEBUG) {
-  console.log('Debug info:', data);
-}
-```
-
-### Reset Wallet
-
-To completely reset the wallet:
-
-1. Go to Settings > Reset Wallet
-2. Confirm the action
-3. All local data will be deleted
-4. RGB node process will be stopped
-
-## Production Considerations
-
-### Security
-
-- Use production Bitcoin network (mainnet/testnet)
-- Implement proper error handling
-- Add crash reporting (Sentry, Bugsnag)
-- Enable SSL/TLS for all network communications
-
-### Performance
-
-- Optimize RGB node startup time
-- Implement proper caching strategies
-- Use lazy loading for screens
-- Monitor memory usage
-
-### Distribution
-
-- Configure app store metadata
-- Add proper icons and splash screens
-- Test on various device sizes
-- Implement update mechanisms
-
-This setup provides a complete RGB Lightning wallet with modern React Native architecture, secure storage, and comprehensive Bitcoin/Lightning/RGB functionality.
+*Rate: Making Bitcoin and RGB assets accessible through conversational AI and social integration.*

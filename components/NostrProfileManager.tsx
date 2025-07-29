@@ -21,6 +21,11 @@ import {
   clearKeys,
   setConnected,
   setError,
+  saveKeysSecurely,
+  clearKeysSecurely,
+  setRelaysExpanded,
+  setNWCConnectionString,
+  setWalletConnectEnabled,
 } from '../store/slices/nostrSlice';
 import NostrService from '../services/NostrService';
 import { theme } from '../theme';
@@ -45,6 +50,10 @@ export default function NostrProfileManager({ navigation }: Props) {
     website: '',
     lud16: '', // Lightning address
   });
+  const [relayInput, setRelayInput] = useState('');
+  const [isAddingRelay, setIsAddingRelay] = useState(false);
+  const [isRemovingRelay, setIsRemovingRelay] = useState(false);
+  const [isGeneratingNWC, setIsGeneratingNWC] = useState(false);
 
   const {
     isConnected,
@@ -55,6 +64,8 @@ export default function NostrProfileManager({ navigation }: Props) {
     npub,
     nsec,
     error,
+    walletConnectEnabled,
+    nwcConnectionString,
   } = nostrState;
 
   useEffect(() => {
@@ -72,7 +83,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   const handleGenerateKeys = async () => {
     Alert.alert(
       'Generate New Keys',
-      'This will create a new Nostr identity. Make sure to backup your keys safely!',
+      'This will create a new Nostr identity and save it securely on your device.',
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -82,6 +93,13 @@ export default function NostrProfileManager({ navigation }: Props) {
               const nostrService = NostrService.getInstance();
               const keys = nostrService.generateKeyPair();
               
+              // Save keys securely first
+              await dispatch(saveKeysSecurely({ 
+                privateKey: keys.privateKey, 
+                nsec: keys.nsec 
+              }) as any);
+              
+              // Set keys in state (private key will be cleared from persisted store)
               dispatch(setKeys(keys));
               
               // Initialize with new keys
@@ -94,11 +112,11 @@ export default function NostrProfileManager({ navigation }: Props) {
               
               Alert.alert(
                 'Keys Generated',
-                'New Nostr keys have been generated. Please backup your private key (nsec) safely!',
+                'New Nostr keys have been generated and saved securely! Your account will be restored automatically next time you open the app.',
                 [
                   { text: 'OK' },
                   { 
-                    text: 'Backup Now', 
+                    text: 'Backup Keys', 
                     onPress: () => handleBackupKeys(keys.nsec)
                   }
                 ]
@@ -128,6 +146,13 @@ export default function NostrProfileManager({ navigation }: Props) {
         return;
       }
 
+      // Save keys securely first
+      await dispatch(saveKeysSecurely({ 
+        privateKey: keys.privateKey, 
+        nsec: keys.nsec 
+      }) as any);
+
+      // Set keys in state
       dispatch(setKeys(keys));
       
       // Initialize with imported keys
@@ -141,7 +166,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       setShowKeyImport(false);
       setKeyInput('');
       
-      Alert.alert('Success', 'Keys imported successfully');
+      Alert.alert('Success', 'Keys imported and saved securely! Your account will be restored automatically next time you open the app.');
       
       // Load profile
       await dispatch(loadNostrProfile() as any);
@@ -206,22 +231,211 @@ export default function NostrProfileManager({ navigation }: Props) {
   const handleDisconnect = () => {
     Alert.alert(
       'Disconnect from Nostr',
-      'This will clear your keys and disconnect from the Nostr network. You can reconnect anytime.',
+      'Do you want to disconnect temporarily or remove your stored keys?',
       [
         { text: 'Cancel', style: 'cancel' },
         { 
-          text: 'Disconnect', 
+          text: 'Disconnect Only', 
+          onPress: async () => {
+            try {
+              const nostrService = NostrService.getInstance();
+              await nostrService.disconnect();
+              dispatch(setConnected(false));
+              Alert.alert('Disconnected', 'You have been disconnected from Nostr. Your keys are still stored and you will be reconnected automatically next time.');
+            } catch (error) {
+              console.error('Failed to disconnect:', error);
+            }
+          }
+        },
+        { 
+          text: 'Remove Keys', 
           style: 'destructive',
           onPress: async () => {
             try {
               const nostrService = NostrService.getInstance();
               await nostrService.disconnect();
+              
+              // Clear from secure storage
+              await dispatch(clearKeysSecurely() as any);
+              
+              // Clear from state
               dispatch(clearKeys());
               dispatch(setConnected(false));
-              Alert.alert('Disconnected', 'You have been disconnected from Nostr');
+              
+              Alert.alert('Keys Removed', 'You have been disconnected and your stored keys have been removed.');
             } catch (error) {
               console.error('Failed to disconnect:', error);
             }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleAddRelay = async () => {
+    if (!relayInput.trim()) {
+      Alert.alert('Error', 'Please enter a relay URL');
+      return;
+    }
+
+    setIsAddingRelay(true);
+    try {
+      const nostrService = NostrService.getInstance();
+      const success = await nostrService.addRelay(relayInput.trim());
+      
+      if (success) {
+        setRelayInput('');
+        // Refresh relays in Redux state
+        const settings = { 
+          privateKey: nostrState.privateKey!, 
+          relays: await nostrService.getRelays() 
+        };
+        await dispatch(initializeNostr(settings) as any);
+        Alert.alert('Success', 'Relay added successfully');
+      } else {
+        Alert.alert('Error', 'Failed to add relay');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to add relay');
+    } finally {
+      setIsAddingRelay(false);
+    }
+  };
+
+  const handleRemoveRelay = async (url: string) => {
+    Alert.alert(
+      'Remove Relay',
+      `Are you sure you want to remove ${url}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            setIsRemovingRelay(true);
+            try {
+              const nostrService = NostrService.getInstance();
+              const success = await nostrService.removeRelay(url);
+              
+              if (success) {
+                // Refresh relays in Redux state
+                const settings = { 
+                  privateKey: nostrState.privateKey!, 
+                  relays: await nostrService.getRelays() 
+                };
+                await dispatch(initializeNostr(settings) as any);
+                Alert.alert('Success', 'Relay removed successfully');
+              } else {
+                Alert.alert('Error', 'Failed to remove relay');
+              }
+            } catch (error) {
+              Alert.alert('Error', 'Failed to remove relay');
+            } finally {
+              setIsRemovingRelay(false);
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleGenerateNWCConnection = async () => {
+    if (!isConnected) {
+      Alert.alert('Error', 'Please connect to Nostr first');
+      return;
+    }
+
+    setIsGeneratingNWC(true);
+    try {
+      const nostrService = NostrService.getInstance();
+      
+      // First, initialize NWC service if not already done
+      console.log('Initializing NWC service...');
+      const nwcInitialized = await nostrService.initializeNWC(nostrState.relays);
+      
+      if (!nwcInitialized) {
+        Alert.alert('Error', 'Failed to initialize Nostr Wallet Connect service');
+        return;
+      }
+      
+      const permissions = [
+        'pay_invoice',
+        'make_invoice', 
+        'get_balance',
+        'get_info',
+        'lookup_invoice',
+        'list_transactions'
+      ];
+      
+      console.log('Generating NWC connection string...');
+      const connectionString = await nostrService.getWalletConnectInfo(permissions, profile?.lud16);
+      
+      if (connectionString) {
+        dispatch(setNWCConnectionString(connectionString));
+        dispatch(setWalletConnectEnabled(true));
+        
+        Alert.alert(
+          'NWC Connection Generated',
+          'Nostr Wallet Connect connection string has been generated successfully!',
+          [
+            { text: 'OK' },
+            { 
+              text: 'Copy Connection', 
+              onPress: () => handleCopyNWCConnection(connectionString)
+            }
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to generate NWC connection string');
+      }
+    } catch (error) {
+      console.error('NWC Generation Error:', error);
+      Alert.alert('Error', `Failed to generate NWC connection: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsGeneratingNWC(false);
+    }
+  };
+
+  const handleCopyNWCConnection = (connectionString?: string) => {
+    const stringToCopy = connectionString || nwcConnectionString;
+    if (!stringToCopy) {
+      Alert.alert('Error', 'No connection string available');
+      return;
+    }
+
+    Clipboard.setString(stringToCopy);
+    Alert.alert('Copied', 'NWC connection string copied to clipboard');
+  };
+
+  const handleShareNWCConnection = async () => {
+    if (!nwcConnectionString) {
+      Alert.alert('Error', 'No connection string available');
+      return;
+    }
+
+    try {
+      await Share.share({
+        message: `Connect to my Nostr wallet:\n\n${nwcConnectionString}`,
+        title: 'Nostr Wallet Connect',
+      });
+    } catch (error) {
+      console.error('Failed to share NWC connection:', error);
+    }
+  };
+
+  const handleDisableNWC = () => {
+    Alert.alert(
+      'Disable Nostr Wallet Connect',
+      'This will disable wallet connect functionality and clear the connection string.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disable',
+          style: 'destructive',
+          onPress: () => {
+            dispatch(setWalletConnectEnabled(false));
+            dispatch(setNWCConnectionString(null));
+            Alert.alert('Disabled', 'Nostr Wallet Connect has been disabled');
           }
         }
       ]
@@ -540,6 +754,194 @@ export default function NostrProfileManager({ navigation }: Props) {
     );
   };
 
+  const renderRelayManager = () => {
+    if (!isConnected) return null;
+
+    const displayedRelays = nostrState.isRelaysExpanded 
+      ? nostrState.relays 
+      : nostrState.relays.slice(0, 2);
+
+    // Get actual relay status
+    const nostrService = NostrService.getInstance();
+    const relayStatus = nostrService.getRelayStatus();
+    
+    const getRelayStatus = (relayUrl: string) => {
+      const status = relayStatus.find(r => r.url === relayUrl);
+      return status?.connected || false;
+    };
+
+    return (
+      <Card style={styles.card}>
+        <TouchableOpacity 
+          style={styles.relayHeader}
+          onPress={() => dispatch(setRelaysExpanded(!nostrState.isRelaysExpanded))}
+        >
+          <View style={styles.relayHeaderContent}>
+            <Text style={styles.cardTitle}>Relays</Text>
+            <View style={styles.relayCount}>
+              <Text style={styles.relayCountText}>{nostrState.relays.length}</Text>
+            </View>
+            {relayStatus.length > 0 && (
+              <View style={styles.relayConnectionStatus}>
+                <Text style={styles.relayConnectionText}>
+                  {relayStatus.filter(r => r.connected).length}/{relayStatus.length} connected
+                </Text>
+              </View>
+            )}
+          </View>
+          <Ionicons 
+            name={nostrState.isRelaysExpanded ? "chevron-up" : "chevron-down"} 
+            size={20} 
+            color={theme.colors.text.secondary} 
+          />
+        </TouchableOpacity>
+        
+        {/* Always show a preview of relays */}
+        <View style={styles.relayPreview}>
+          {displayedRelays.map((relay: string, index: number) => {
+            const isConnected = getRelayStatus(relay);
+            return (
+              <View key={relay} style={styles.relayPreviewItem}>
+                <Ionicons 
+                  name={isConnected ? "radio" : "radio-outline"} 
+                  size={12} 
+                  color={isConnected ? theme.colors.success[500] : theme.colors.gray[400]} 
+                  style={styles.relayStatusIcon}
+                />
+                <Text style={[
+                  styles.relayPreviewText,
+                  !isConnected && styles.relayDisconnectedText
+                ]} numberOfLines={1}>
+                  {relay.replace('wss://', '').replace('ws://', '')}
+                </Text>
+                {nostrState.isRelaysExpanded && (
+                  <TouchableOpacity
+                    style={styles.removeRelayButtonSmall}
+                    onPress={() => handleRemoveRelay(relay)}
+                    disabled={isRemovingRelay}
+                  >
+                    <Ionicons name="close" size={16} color={theme.colors.error[500]} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+          
+          {!nostrState.isRelaysExpanded && nostrState.relays.length > 2 && (
+            <Text style={styles.moreRelaysText}>
+              +{nostrState.relays.length - 2} more
+            </Text>
+          )}
+        </View>
+        
+        {/* Expanded content */}
+        {nostrState.isRelaysExpanded && (
+          <View style={styles.expandedRelayContent}>
+            <View style={styles.relayInputContainer}>
+              <Input
+                placeholder="wss://relay.example.com"
+                value={relayInput}
+                onChangeText={setRelayInput}
+                variant="outlined"
+                style={styles.relayInput}
+              />
+              <Button
+                title={isAddingRelay ? "Adding..." : "Add"}
+                onPress={handleAddRelay}
+                disabled={isAddingRelay || !relayInput.trim()}
+                loading={isAddingRelay}
+                size="sm"
+                style={styles.addRelayButton}
+              />
+            </View>
+            
+            {nostrState.relays.length === 0 && (
+              <Text style={styles.noRelaysText}>No relays configured</Text>
+            )}
+          </View>
+        )}
+      </Card>
+    );
+  };
+
+  const renderNWCManager = () => {
+    if (!isConnected) return null;
+
+    return (
+      <Card style={styles.card}>
+        <View style={styles.nwcHeader}>
+          <View style={styles.nwcHeaderContent}>
+            <Ionicons 
+              name="link-outline" 
+              size={20} 
+              color={theme.colors.primary[500]} 
+              style={styles.nwcIcon}
+            />
+            <Text style={styles.cardTitle}>Nostr Wallet Connect</Text>
+            {walletConnectEnabled && (
+              <View style={styles.nwcEnabledBadge}>
+                <Text style={styles.nwcEnabledText}>Active</Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        <Text style={styles.nwcDescription}>
+          Allow other applications to connect to your wallet via Nostr Wallet Connect protocol
+        </Text>
+
+        {!walletConnectEnabled ? (
+          <View style={styles.nwcDisabledContent}>
+            <Button
+              title={isGeneratingNWC ? "Generating..." : "Enable Wallet Connect"}
+              onPress={handleGenerateNWCConnection}
+              loading={isGeneratingNWC}
+              disabled={isGeneratingNWC}
+              style={styles.enableNWCButton}
+            />
+          </View>
+        ) : (
+          <View style={styles.nwcEnabledContent}>
+            {nwcConnectionString && (
+              <View style={styles.connectionStringContainer}>
+                <Text style={styles.connectionStringLabel}>Connection String:</Text>
+                <View style={styles.connectionStringPreview}>
+                  <Text style={styles.connectionStringText} numberOfLines={2}>
+                    {nwcConnectionString}
+                  </Text>
+                </View>
+                
+                <View style={styles.nwcActions}>
+                  <Button
+                    title="Copy"
+                    onPress={() => handleCopyNWCConnection()}
+                    variant="ghost"
+                    size="sm"
+                    style={styles.nwcActionButton}
+                  />
+                  <Button
+                    title="Share"
+                    onPress={handleShareNWCConnection}
+                    variant="ghost"
+                    size="sm"
+                    style={styles.nwcActionButton}
+                  />
+                  <Button
+                    title="Disable"
+                    onPress={handleDisableNWC}
+                    variant="ghost"
+                    size="sm"
+                    style={{...styles.nwcActionButton, ...styles.disableButton}}
+                  />
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+      </Card>
+    );
+  };
+
   const renderActions = () => {
     if (!isConnected) return null;
 
@@ -571,6 +973,8 @@ export default function NostrProfileManager({ navigation }: Props) {
       {renderKeyImportForm()}
       {renderIdentityInfo()}
       {renderProfileSection()}
+      {renderRelayManager()}
+      {renderNWCManager()}
       {renderActions()}
     </ScrollView>
   );
@@ -813,5 +1217,200 @@ const styles = StyleSheet.create({
   
   disconnectButton: {
     borderColor: theme.colors.error[500],
+  },
+
+  relayHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing[3],
+  },
+
+  relayHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+  },
+
+  relayCount: {
+    backgroundColor: theme.colors.primary[100],
+    borderRadius: theme.borderRadius.base,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+
+  relayCountText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.primary[700], // Fixed: use 700 instead of 800
+  },
+
+  relayPreview: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[3],
+  },
+
+  relayPreviewItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.gray[100],
+    borderRadius: theme.borderRadius.base,
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
+    gap: theme.spacing[1],
+  },
+
+  relayStatusIcon: {
+    marginRight: theme.spacing[1],
+  },
+
+  relayPreviewText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    flex: 1,
+  },
+
+  relayDisconnectedText: {
+    color: theme.colors.text.secondary,
+    fontStyle: 'italic',
+  },
+
+  expandedRelayContent: {
+    marginTop: theme.spacing[3],
+  },
+
+  relayInputContainer: {
+    flexDirection: 'row',
+    gap: theme.spacing[3],
+    marginBottom: theme.spacing[4],
+  },
+
+  relayInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+
+  addRelayButton: {
+    minWidth: 80,
+  },
+
+  removeRelayButtonSmall: {
+    padding: theme.spacing[1],
+  },
+
+  noRelaysText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+    padding: theme.spacing[4],
+  },
+
+  moreRelaysText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+    marginTop: theme.spacing[2],
+  },
+
+  // NWC Styles
+  nwcHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: theme.spacing[3],
+  },
+
+  nwcHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+  },
+
+  nwcIcon: {
+    marginRight: theme.spacing[1],
+  },
+
+  nwcEnabledBadge: {
+    backgroundColor: theme.colors.success[50], // Fixed: use 50 instead of 100
+    borderRadius: theme.borderRadius.base,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+
+  nwcEnabledText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.success[600], // Fixed: use 600 instead of 700
+  },
+
+  nwcDescription: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[4],
+    lineHeight: 20,
+  },
+
+  nwcDisabledContent: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing[4],
+  },
+
+  enableNWCButton: {
+    width: '100%',
+  },
+
+  nwcEnabledContent: {
+    marginTop: theme.spacing[3],
+  },
+
+  connectionStringContainer: {
+    marginBottom: theme.spacing[4],
+  },
+
+  connectionStringLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[2],
+  },
+
+  connectionStringPreview: {
+    backgroundColor: theme.colors.gray[50],
+    borderRadius: theme.borderRadius.base,
+    padding: theme.spacing[3],
+  },
+
+  connectionStringText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    fontFamily: 'monospace',
+  },
+
+  nwcActions: {
+    flexDirection: 'row',
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[4],
+  },
+
+  nwcActionButton: {
+    flex: 1,
+  },
+
+  disableButton: {
+    borderColor: theme.colors.error[500],
+  },
+
+  relayConnectionStatus: {
+    backgroundColor: theme.colors.gray[50],
+    borderRadius: theme.borderRadius.base,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
+  },
+
+  relayConnectionText: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.secondary,
+    fontWeight: '500',
   },
 }); 

@@ -22,6 +22,7 @@ import RGBApiService from '../services/RGBApiService';
 import { theme } from '../theme';
 import { Card, Button, Input } from '../components';
 import { useAssetIcon } from '../utils';
+import { useFormattedBitcoinAmount, parseInputAmount } from '../utils/bitcoinUnits';
 
 interface Props {
   navigation: any;
@@ -31,6 +32,7 @@ interface RGBAsset {
   asset_id: string;
   ticker: string;
   name: string;
+  precision?: number;
   balance: {
     settled: number;
     future: number;
@@ -46,12 +48,49 @@ interface Asset {
   balance?: number;
 }
 
+interface Channel {
+  channel_id: string;
+  funding_txid: string;
+  peer_pubkey: string;
+  peer_alias: string;
+  short_channel_id: number;
+  status: 'Opening' | 'Opened' | 'Closing';
+  ready: boolean;
+  capacity_sat: number;
+  local_balance_sat: number;
+  outbound_balance_msat: number;
+  inbound_balance_msat: number;
+  next_outbound_htlc_limit_msat: number;
+  next_outbound_htlc_minimum_msat: number;
+  is_usable: boolean;
+  public: boolean;
+  asset_id: string;
+  asset_local_amount: number;
+  asset_remote_amount: number;
+}
+
 export default function ReceiveScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
+  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   
   // Safe destructuring with fallbacks
   const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
+  
+  // Get asset precision for validation (similar to desktop app)
+  const getAssetPrecision = (ticker: string): number => {
+    if (ticker === 'BTC') {
+      return bitcoinUnit === 'BTC' ? 8 : 0; // 8 decimals for BTC, 0 for sats
+    }
+    const rgbAsset = rgbAssets.find(asset => asset.ticker === ticker);
+    return rgbAsset?.precision || 8; // Default to 8 if not found
+  };
+
+  // Format asset amount with proper precision
+  const formatAssetAmount = (amount: number, ticker: string): string => {
+    const precision = getAssetPrecision(ticker);
+    return amount.toFixed(precision);
+  };
   
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
@@ -64,11 +103,95 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+  const [maxDepositAmount, setMaxDepositAmount] = useState<number>(0);
 
   const apiService = RGBApiService.getInstance();
+  
+  // Constants for HTLC calculations (from desktop app)
+  const MSATS_PER_SAT = 1000;
+  const RGB_HTLC_MIN_SAT = 3000;
 
-  // Combine BTC with RGB assets with proper validation
-  const allAssets: Asset[] = [
+  // Load Lightning channels
+  const loadChannels = async () => {
+    if (channelsLoading) return;
+    
+    try {
+      setChannelsLoading(true);
+      const channelsResponse = await apiService.listChannels();
+      const channelsList = channelsResponse.channels || [];
+      setChannels(channelsList);
+    } catch (error) {
+      console.error('Failed to load channels:', error);
+    } finally {
+      setChannelsLoading(false);
+    }
+  };
+
+  // Calculate max deposit amount based on HTLC limits (from desktop app)
+  const calculateMaxDepositAmount = (asset: string): number => {
+    if (channels.length === 0) {
+      return 0;
+    }
+
+    if (asset === 'BTC') {
+      const channelHtlcLimits = channels
+        .filter(channel => channel.is_usable)
+        .map(channel => channel.next_outbound_htlc_limit_msat / MSATS_PER_SAT);
+
+      if (channelHtlcLimits.length === 0 || Math.max(...channelHtlcLimits) <= 0) {
+        return 0;
+      }
+
+      const maxHtlcLimit = Math.max(...channelHtlcLimits);
+      const maxDepositableAmount = maxHtlcLimit - RGB_HTLC_MIN_SAT;
+      return Math.max(0, maxDepositableAmount);
+    } else {
+      // For RGB assets, we still need to consider the BTC HTLC limits
+      // since RGB transfers require BTC for fees
+      return calculateMaxDepositAmount('BTC');
+    }
+  };
+
+  // Get assets available for Lightning (assets that have channels)
+  const getLightningAssets = (): Asset[] => {
+    const lightningAssets: Asset[] = [
+      { 
+        asset_id: 'BTC', 
+        ticker: 'BTC', 
+        name: 'Bitcoin',
+        isRGB: false,
+        balance: btcBalance?.vanilla?.spendable || 0,
+      }
+    ];
+
+    // Add RGB assets that have Lightning channels
+    const rgbAssetsWithChannels = channels
+      .filter(channel => channel.asset_id && channel.asset_id !== 'BTC' && channel.is_usable)
+      .map(channel => {
+        const rgbAsset = rgbAssets.find(asset => asset.asset_id === channel.asset_id);
+        return rgbAsset ? {
+          asset_id: rgbAsset.asset_id,
+          ticker: rgbAsset.ticker,
+          name: rgbAsset.name,
+          isRGB: true,
+          balance: rgbAsset.balance?.spendable || 0,
+        } : null;
+      })
+      .filter(asset => asset !== null) as Asset[];
+
+    // Remove duplicates
+    const uniqueRgbAssets = rgbAssetsWithChannels.filter((asset, index, self) => 
+      index === self.findIndex(a => a.asset_id === asset.asset_id)
+    );
+
+    return [...lightningAssets, ...uniqueRgbAssets];
+  };
+
+  // Get assets available for on-chain (all assets)
+  const getOnChainAssets = (): Asset[] => [
     { 
       asset_id: 'BTC', 
       ticker: 'BTC', 
@@ -85,84 +208,202 @@ export default function ReceiveScreen({ navigation }: Props) {
     })) : [])
   ];
 
+  // Get available assets based on network type
+  const allAssets: Asset[] = networkType === 'lightning' 
+    ? getLightningAssets() 
+    : getOnChainAssets();
+
+  // Enhanced validation function
+  const validateAddressOrInvoice = (data: any): string | null => {
+    if (!data) return null;
+    
+    const cleanData = typeof data === 'string' ? data.trim() : String(data).trim();
+    
+    if (cleanData.length === 0) return null;
+    
+    // More lenient validation - accept any non-empty string that looks like an address or invoice
+    if (cleanData.length < 10) return null;
+    
+    return cleanData;
+  };
+
+  // Check if amount is required and valid
+  const isAmountRequired = (): boolean => {
+    return networkType === 'lightning';
+  };
+
+  const isAmountValid = (): boolean => {
+    if (!isAmountRequired()) return true;
+    
+    const numAmount = parseFloat(amount);
+    return !isNaN(numAmount) && numAmount > 0;
+  };
+
   const generateAddress = async () => {
     if (!selectedAsset) return;
     
+    // Clear previous error
+    setError(null);
+    
+    // Validate amount if required
+    if (isAmountRequired() && !isAmountValid()) {
+      setError('Please enter a valid amount for Lightning invoices');
+      return;
+    }
+    
     setLoading(true);
     try {
-      let result: string | null = null;
+      let result: any = null;
       
-      if (selectedAsset.asset_id === 'BTC') {
-        if (networkType === 'on-chain') {
-          const response = await apiService.getNewAddress();
-          result = response || null;
+              if (selectedAsset.asset_id === 'BTC') {
+          if (networkType === 'on-chain') {
+            // BTC on-chain address
+            const response = await apiService.getNewAddress();
+            result = (response as any)?.address || response;
         } else {
           // Lightning invoice for BTC
-          const amountMsat = amount ? Math.round(parseFloat(amount) * 100000000 * 1000) : undefined;
-          if (networkType === 'lightning' && !amountMsat && !amount) {
+          if (!amount || !isAmountValid()) {
             throw new Error('Amount is required for Lightning invoices');
           }
           
+          // Clean amount and convert to msat
+          const cleanAmount = amount.replace(/,/g, '');
+          const numericAmount = parseFloat(cleanAmount);
+          const amountMsat = bitcoinUnit === 'BTC' 
+            ? Math.round(numericAmount * 100000000 * 1000)
+            : Math.round(numericAmount * 1000);
+          
           const response = await apiService.createLightningInvoice({
             amount_msat: amountMsat,
-            description: `Receive ${amount ? amount + ' ' : ''}${selectedAsset.ticker}`,
+            description: `Receive ${cleanAmount} ${bitcoinUnit}`,
             duration_seconds: 3600, // 1 hour expiry
           });
-          result = response?.invoice || null;
+          result = response?.invoice;
         }
       } else {
         // For RGB assets
         if (networkType === 'on-chain') {
-          // Create RGB invoice for on-chain transfer
+          // Create RGB invoice for on-chain transfer (similar to desktop app)
           const response = await apiService.getRGBInvoice({
             asset_id: selectedAsset.asset_id,
             min_confirmations: 1,
             duration_seconds: 3600, // 1 hour
           });
-          result = response?.invoice || null;
+          result = response?.invoice;
         } else {
           // Lightning invoice for RGB asset
-          if (!amount) {
+          if (!amount || !isAmountValid()) {
             throw new Error('Amount is required for RGB Lightning invoices');
           }
           
-          const assetAmount = parseFloat(amount);
-          if (isNaN(assetAmount) || assetAmount <= 0) {
-            throw new Error('Please enter a valid amount');
-          }
+          // Clean amount and parse with proper precision
+          const cleanAmount = amount.replace(/,/g, '');
+          const assetAmount = parseFloat(cleanAmount);
 
           const response = await apiService.createLightningInvoice({
             asset_id: selectedAsset.asset_id,
             asset_amount: assetAmount,
-            description: `Receive ${amount} ${selectedAsset.ticker}`,
+            description: `Receive ${cleanAmount} ${selectedAsset.ticker}`,
             duration_seconds: 3600, // 1 hour expiry
           });
-          result = response?.invoice || null;
+          result = response?.invoice;
         }
       }
 
-      // Validate the result before setting
-      if (result && typeof result === 'string' && result.trim().length > 0) {
-        setAddress(result.trim());
+      // Enhanced validation with better error handling
+      const validatedResult = validateAddressOrInvoice(result);
+      if (validatedResult) {
+        setAddress(validatedResult);
+        setError(null);
       } else {
-        throw new Error('Invalid or empty address/invoice received');
+        throw new Error('Unable to generate a valid address or invoice. Please try again.');
       }
     } catch (error) {
       console.error('Failed to generate address:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
-      Alert.alert('Error', errorMessage);
+      
+      // Handle UTXO-related errors (similar to desktop app)
+      if (error && typeof error === 'object' && error !== null && 'data' in error) {
+        const errorData = (error as any).data;
+        if (errorData && typeof errorData === 'object' && 'error' in errorData) {
+          const errorMessage = String(errorData.error);
+          if (errorMessage.includes('No uncolored UTXOs are available')) {
+            setError('No uncolored UTXOs available. Please create UTXOs first or try a different network.');
+          } else {
+            setError(errorMessage);
+          }
+        } else {
+          const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
+          setError(errorMessage);
+        }
+      } else {
+        const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
+        setError(errorMessage);
+      }
+      
       setAddress(''); // Reset address on error
     } finally {
       setLoading(false);
     }
   };
 
+  // Load channels when component mounts or network type changes
+  useEffect(() => {
+    if (networkType === 'lightning') {
+      loadChannels();
+    }
+  }, [networkType]);
+
+  // Update max amounts when network or channels change
+  useEffect(() => {
+    if (networkType === 'lightning' && selectedAsset) {
+      const maxAmount = calculateMaxDepositAmount(
+        selectedAsset.asset_id === 'BTC' ? 'BTC' : selectedAsset.asset_id
+      );
+      setMaxDepositAmount(maxAmount);
+    } else {
+      setMaxDepositAmount(0);
+    }
+  }, [networkType, selectedAsset, channels]);
+
+  // Reset selected asset if not available in current network type
+  useEffect(() => {
+    if (selectedAsset && allAssets.length > 0) {
+      const isAssetAvailable = allAssets.some(asset => asset.asset_id === selectedAsset.asset_id);
+      if (!isAssetAvailable) {
+        // Reset to BTC if current asset is not available
+        const btcAsset = allAssets.find(asset => asset.asset_id === 'BTC');
+        if (btcAsset) {
+          setSelectedAsset(btcAsset);
+        } else if (allAssets.length > 0) {
+          setSelectedAsset(allAssets[0]);
+        }
+      }
+    }
+  }, [allAssets, networkType]);
+
+  // Auto-generate address when conditions change
   useEffect(() => {
     if (selectedAsset) {
       setAddress('');
-      generateAddress();
+      setError(null);
+      
+      // Only auto-generate if amount is not required, or if it's valid
+      if (!isAmountRequired() || isAmountValid()) {
+        generateAddress();
+      }
     }
-  }, [selectedAsset, networkType, amount]);
+  }, [selectedAsset, networkType, channels]);
+
+  // Generate address when amount changes for lightning
+  useEffect(() => {
+    if (networkType === 'lightning' && amount && isAmountValid()) {
+      const timeoutId = setTimeout(() => {
+        generateAddress();
+      }, 500); // Debounce amount changes
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [amount]);
 
   const copyToClipboard = async () => {
     if (!address) return;
@@ -303,7 +544,9 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   const renderNetworkTabs = () => {
-    // Show network tabs for all assets
+    const onChainAssets = getOnChainAssets();
+    const lightningAssets = getLightningAssets();
+    
     return (
       <View style={styles.networkTabsContainer}>
         <View style={styles.networkTabs}>
@@ -320,46 +563,111 @@ export default function ReceiveScreen({ navigation }: Props) {
               size={18} 
               color={networkType === 'on-chain' ? theme.colors.primary[500] : theme.colors.text.secondary} 
             />
-            <Text style={[
-              styles.networkTabText,
-              networkType === 'on-chain' && styles.networkTabTextActive
-            ]}>
-              {selectedAsset?.isRGB ? 'RGB On-chain' : 'On-chain'}
-            </Text>
+            <View style={styles.networkTabContent}>
+              <Text style={[
+                styles.networkTabText,
+                networkType === 'on-chain' && styles.networkTabTextActive
+              ]}>
+                On-chain
+              </Text>
+              <Text style={[
+                styles.networkTabSubtext,
+                networkType === 'on-chain' && styles.networkTabSubtextActive
+              ]}>
+                {onChainAssets.length} assets
+              </Text>
+            </View>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[
               styles.networkTab,
-              networkType === 'lightning' && styles.networkTabActive
+              networkType === 'lightning' && styles.networkTabActive,
+              lightningAssets.length === 1 && styles.networkTabDisabled // Only BTC available
             ]}
             onPress={() => setNetworkType('lightning')}
-            activeOpacity={0.8}
+            activeOpacity={lightningAssets.length > 1 ? 0.8 : 0.5}
           >
             <Ionicons 
               name="flash" 
               size={18} 
               color={networkType === 'lightning' ? theme.colors.primary[500] : theme.colors.text.secondary} 
             />
-            <Text style={[
-              styles.networkTabText,
-              networkType === 'lightning' && styles.networkTabTextActive
-            ]}>
-              {selectedAsset?.isRGB ? 'RGB Lightning' : 'Lightning'}
-            </Text>
+            <View style={styles.networkTabContent}>
+              <Text style={[
+                styles.networkTabText,
+                networkType === 'lightning' && styles.networkTabTextActive
+              ]}>
+                Lightning
+              </Text>
+              <Text style={[
+                styles.networkTabSubtext,
+                networkType === 'lightning' && styles.networkTabSubtextActive
+              ]}>
+                {lightningAssets.length} assets
+              </Text>
+            </View>
+            {channelsLoading && (
+              <ActivityIndicator 
+                size="small" 
+                color={theme.colors.text.secondary} 
+                style={styles.networkTabLoader}
+              />
+            )}
           </TouchableOpacity>
         </View>
+        
+        {/* Warning for Lightning with limited assets */}
+        {networkType === 'lightning' && lightningAssets.length === 1 && (
+          <View style={styles.networkWarning}>
+            <Ionicons name="information-circle" size={16} color={theme.colors.warning[500]} />
+            <Text style={styles.networkWarningText}>
+              Only Bitcoin available. Open RGB Lightning channels to receive RGB assets.
+            </Text>
+          </View>
+        )}
       </View>
     );
   };
 
   const renderAmountInput = () => {
-    // Show amount input for Lightning or RGB assets
     if (!selectedAsset) return null;
-    const showAmount = networkType === 'lightning' || selectedAsset.isRGB;
+    
+    const showAmount = isAmountRequired() || selectedAsset.isRGB;
     if (!showAmount) return null;
 
-    const isRequired = networkType === 'lightning';
+    const isRequired = isAmountRequired();
+
+    // Quick amount buttons for BTC
+    const renderQuickAmounts = () => {
+      if (selectedAsset.ticker !== 'BTC') return null;
+      
+      const quickAmounts = bitcoinUnit === 'BTC' 
+        ? ['0.001', '0.005', '0.01'] 
+        : ['1000', '5000', '10000'];
+      
+      return (
+        <View style={styles.quickAmounts}>
+          {quickAmounts.map((amt) => (
+            <TouchableOpacity
+              key={amt}
+              style={[
+                styles.quickAmountButton,
+                amount === amt && styles.quickAmountButtonSelected
+              ]}
+              onPress={() => setAmount(amt)}
+            >
+              <Text style={[
+                styles.quickAmountText,
+                amount === amt && styles.quickAmountTextSelected
+              ]}>
+                {amt} {bitcoinUnit}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      );
+    };
 
     return (
       <View style={styles.amountSection}>
@@ -372,91 +680,192 @@ export default function ReceiveScreen({ navigation }: Props) {
               ? `Enter the amount of ${selectedAsset.ticker} to receive via Lightning`
               : `Specify the amount of ${selectedAsset.ticker} for the RGB invoice`
             : isRequired
-              ? `Enter the amount of ${selectedAsset.ticker} to receive`
+              ? `Enter the amount of ${bitcoinUnit} to receive`
               : 'Leave empty for any amount or specify a fixed amount'
           }
         </Text>
+        
+        {/* Error message for amount */}
+        {isRequired && amount && !isAmountValid() && (
+          <View style={styles.errorMessage}>
+            <Ionicons name="warning" size={16} color={theme.colors.error[500]} />
+            <Text style={styles.errorMessageText}>Please enter a valid amount</Text>
+          </View>
+        )}
+        
         <View style={styles.inputContainer}>
           <Input
-            placeholder="0.00000000"
+            placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
             value={amount}
-            onChangeText={setAmount}
+            onChangeText={(value) => {
+              // Enhanced input handling similar to desktop app
+              let cleanValue = value.replace(/[^\d.,]/g, ''); // Allow digits, dots, and commas
+              
+              // Remove commas for processing
+              cleanValue = cleanValue.replace(/,/g, '');
+              
+              // Handle multiple decimal points - keep only the first one
+              const parts = cleanValue.split('.');
+              if (parts.length > 2) {
+                cleanValue = parts[0] + '.' + parts.slice(1).join('');
+              }
+              
+              // Get precision for current asset
+              const precision = getAssetPrecision(selectedAsset.ticker);
+              
+              // Limit decimal places based on asset precision
+              const decimalParts = cleanValue.split('.');
+              if (decimalParts.length === 2 && decimalParts[1].length > precision) {
+                cleanValue = decimalParts[0] + '.' + decimalParts[1].substring(0, precision);
+              }
+              
+              // Validate against max deposit amount for lightning
+              if (networkType === 'lightning' && maxDepositAmount > 0) {
+                const numValue = parseFloat(cleanValue);
+                if (!isNaN(numValue) && numValue > 0) {
+                  // Convert to base units and check against max
+                  const baseUnits = selectedAsset.ticker === 'BTC' 
+                    ? (bitcoinUnit === 'BTC' ? numValue * 100000000 : numValue)
+                    : numValue;
+                  const maxBaseUnits = selectedAsset.ticker === 'BTC' 
+                    ? (bitcoinUnit === 'BTC' ? maxDepositAmount / 100000000 : maxDepositAmount)
+                    : maxDepositAmount;
+
+                  if (baseUnits > maxBaseUnits) {
+                    // Don't update if it exceeds the limit
+                    return;
+                  }
+                }
+              }
+
+              // Format with comma separators for display (only for integer part)
+              const formattedValue = decimalParts.length === 2
+                ? decimalParts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + decimalParts[1]
+                : cleanValue.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+              
+              setAmount(formattedValue);
+            }}
             keyboardType="decimal-pad"
             variant="outlined"
-            style={styles.amountInput}
+            style={
+              isRequired && amount && !isAmountValid() 
+                ? { ...styles.amountInput, ...styles.amountInputError }
+                : styles.amountInput
+            }
           />
           <View style={styles.currencyLabel}>
-            <Text style={styles.currencyText}>{selectedAsset.ticker}</Text>
+            <Text style={styles.currencyText}>
+              {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
+            </Text>
           </View>
         </View>
+        
+        {renderQuickAmounts()}
+        
+        {/* Lightning warnings and limits */}
+        {networkType === 'lightning' && (
+          <View style={styles.lightningWarnings}>
+            {selectedAsset.isRGB && (
+              <View style={styles.warningContainer}>
+                <Ionicons name="information-circle" size={16} color={theme.colors.primary[500]} />
+                <Text style={styles.warningText}>
+                  3,000 sats required for RGB asset transfers via Lightning
+                </Text>
+              </View>
+            )}
+            
+            {maxDepositAmount === 0 && (
+              <View style={[styles.warningContainer, styles.errorWarning]}>
+                <Ionicons name="warning" size={16} color={theme.colors.warning[500]} />
+                <Text style={[styles.warningText, styles.errorWarningText]}>
+                  No active Lightning channels found. Lightning deposits are not available.
+                </Text>
+              </View>
+            )}
+            
+            {maxDepositAmount > 0 && (
+              <View style={styles.warningContainer}>
+                <Ionicons name="flash" size={16} color={theme.colors.success[500]} />
+                <Text style={styles.warningText}>
+                  Max Lightning deposit: {formatAssetAmount(maxDepositAmount, selectedAsset.ticker)} {selectedAsset.ticker}
+                </Text>
+              </View>
+            )}
+          </View>
+        )}
+        
+        {selectedAsset.ticker === 'BTC' && amount && isAmountValid() && (
+          <Text style={styles.approximateValue}>
+            ≈ ${((bitcoinUnit === 'sats' ? parseFloat(amount.replace(/,/g, '')) / 100000000 : parseFloat(amount.replace(/,/g, ''))) * 50000).toLocaleString()} USD
+          </Text>
+        )}
       </View>
     );
   };
 
   // Helper function to validate address for QR code
   const isValidQRData = (data: string): boolean => {
-    if (!data || typeof data !== 'string' || data.trim().length === 0) {
-      return false;
-    }
-    
-    // Basic validation for different types of data
-    const trimmed = data.trim();
-    
-    // Bitcoin address patterns
-    const bitcoinPatterns = [
-      /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/, // Legacy
-      /^bc1[a-z0-9]{39,59}$/, // Bech32
-      /^bc1p[a-z0-9]{58}$/, // Bech32m
-      /^[2mn][a-km-zA-HJ-NP-Z1-9]{25,34}$/, // Testnet
-      /^tb1[a-z0-9]{39,59}$/, // Testnet Bech32
-      /^bcrt1[a-z0-9]{39,59}$/, // Regtest
-    ];
-    
-    // Lightning invoice patterns
-    const lightningPatterns = [
-      /^lnbc[a-z0-9]+$/i, // Lightning mainnet
-      /^lnbcrt[a-z0-9]+$/i, // Lightning regtest
-      /^lntb[a-z0-9]+$/i, // Lightning testnet
-    ];
-    
-    // RGB invoice pattern
-    const rgbPattern = /^rgb:/;
-    
-    return (
-      bitcoinPatterns.some(pattern => pattern.test(trimmed)) ||
-      lightningPatterns.some(pattern => pattern.test(trimmed)) ||
-      rgbPattern.test(trimmed) ||
-      trimmed.length >= 10 // Fallback for other valid formats
-    );
+    return validateAddressOrInvoice(data) !== null;
   };
 
-  const renderQRCode = () => {
-    if (!selectedAsset) return null;
-    
-    // Validate address before rendering QR code
-    if (!address || !isValidQRData(address)) {
+  const renderContent = () => {
+    if (loading) {
       return (
-        <View style={styles.qrSection}>
-          <View style={styles.qrHeader}>
-            <Text style={styles.qrTitle}>No Address Generated</Text>
-          </View>
-          <View style={styles.errorContainer}>
-            <Ionicons name="alert-circle" size={48} color={theme.colors.warning[500]} />
-            <Text style={styles.errorText}>
-              Unable to generate a valid address or invoice.
-            </Text>
-            <TouchableOpacity 
-              style={styles.retryButton} 
-              onPress={generateAddress}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.retryButtonText}>Try Again</Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.loadingSection}>
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
+          <Text style={styles.loadingText}>
+            Generating {networkType === 'lightning' ? 'invoice' : 'address'}...
+          </Text>
         </View>
       );
     }
 
+    if (error) {
+      return (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={48} color={theme.colors.error[500]} />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton} 
+            onPress={generateAddress}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (isAmountRequired() && !isAmountValid()) {
+      return (
+        <View style={styles.promptContainer}>
+          <Ionicons name="calculator" size={48} color={theme.colors.primary[500]} />
+          <Text style={styles.promptText}>
+            Please enter an amount to generate a Lightning invoice
+          </Text>
+        </View>
+      );
+    }
+
+    if (!address) {
+      return (
+        <View style={styles.promptContainer}>
+          <Ionicons name="qr-code-outline" size={48} color={theme.colors.primary[500]} />
+          <Text style={styles.promptText}>
+            Generate an address or invoice to receive payments
+          </Text>
+          <TouchableOpacity 
+            style={styles.generateButton} 
+            onPress={generateAddress}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.generateButtonText}>Generate</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    // Render QR code
     const qrTitle = selectedAsset.isRGB 
       ? 'RGB Asset Invoice'
       : selectedAsset.asset_id === 'BTC' && networkType === 'lightning' 
@@ -535,21 +944,6 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
-  // Loading state
-  if (loading && !address) {
-    return (
-      <SafeAreaView style={styles.container}>
-        {renderHeader()}
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-          <Text style={styles.loadingText}>
-            Generating {networkType === 'lightning' || (selectedAsset && selectedAsset.isRGB) ? 'invoice' : 'address'}...
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
       {renderHeader()}
@@ -561,17 +955,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         showsVerticalScrollIndicator={false}
       >
         {renderAmountInput()}
-
-        {loading ? (
-          <View style={styles.loadingSection}>
-            <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-            <Text style={styles.loadingText}>
-              Generating {networkType === 'lightning' || (selectedAsset && selectedAsset.isRGB) ? 'invoice' : 'address'}...
-            </Text>
-          </View>
-        ) : (
-          renderQRCode()
-        )}
+        {renderContent()}
       </ScrollView>
     </SafeAreaView>
   );
@@ -782,6 +1166,46 @@ const styles = StyleSheet.create({
   networkTabTextActive: {
     color: theme.colors.primary[500],
   },
+
+  networkTabContent: {
+    alignItems: 'center',
+  },
+
+  networkTabSubtext: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.muted,
+    marginTop: theme.spacing[1],
+  },
+
+  networkTabSubtextActive: {
+    color: theme.colors.primary[500],
+  },
+
+  networkTabDisabled: {
+    opacity: 0.6,
+  },
+
+  networkTabLoader: {
+    marginLeft: theme.spacing[2],
+  },
+
+  networkWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.warning[50],
+    borderRadius: theme.borderRadius.base,
+    padding: theme.spacing[3],
+    marginTop: theme.spacing[3],
+    marginHorizontal: theme.spacing[1],
+    gap: theme.spacing[2],
+  },
+
+  networkWarningText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.warning[600],
+    flex: 1,
+    lineHeight: 18,
+  },
   
   scrollView: {
     flex: 1,
@@ -811,12 +1235,34 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
+  errorMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.error[50],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.base,
+    marginBottom: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  
+  errorMessageText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.error[600],
+    fontWeight: '500',
+  },
+  
   inputContainer: {
     position: 'relative',
   },
   
   amountInput: {
     paddingRight: theme.spacing[16], // Make room for currency label
+  },
+  
+  amountInputError: {
+    borderColor: theme.colors.error[500],
+    borderWidth: 2,
   },
   
   currencyLabel: {
@@ -834,6 +1280,176 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.secondary,
+  },
+
+  quickAmounts: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  
+  quickAmountButton: {
+    flex: 1,
+    backgroundColor: theme.colors.primary[50],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+  },
+  
+  quickAmountButtonSelected: {
+    backgroundColor: theme.colors.primary[100],
+    borderColor: theme.colors.primary[500],
+  },
+  
+  quickAmountText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    fontWeight: '600',
+  },
+  
+  quickAmountTextSelected: {
+    color: theme.colors.primary[700],
+    fontWeight: '700',
+  },
+  
+  approximateValue: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[2],
+    textAlign: 'right',
+  },
+
+  lightningWarnings: {
+    marginTop: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+
+  warningContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.base,
+    padding: theme.spacing[3],
+    gap: theme.spacing[2],
+    borderWidth: 1,
+    borderColor: theme.colors.primary[500] + '20', // 20% opacity
+  },
+
+  errorWarning: {
+    backgroundColor: theme.colors.warning[50],
+    borderColor: theme.colors.warning[500] + '20', // 20% opacity
+  },
+
+  warningText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[600],
+    flex: 1,
+    lineHeight: 18,
+  },
+
+  errorWarningText: {
+    color: theme.colors.warning[600],
+  },
+  
+  // Content sections
+  loadingSection: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[12],
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 6.27,
+    elevation: 10,
+  },
+  
+  loadingText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[4],
+    textAlign: 'center',
+  },
+
+  errorContainer: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[8],
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 6.27,
+    elevation: 10,
+  },
+  
+  errorText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[4],
+    marginBottom: theme.spacing[6],
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  
+  promptContainer: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing[8],
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 6.27,
+    elevation: 10,
+  },
+  
+  promptText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[4],
+    marginBottom: theme.spacing[6],
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  
+  retryButton: {
+    backgroundColor: theme.colors.primary[500],
+    paddingHorizontal: theme.spacing[6],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+  },
+  
+  retryButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.inverse,
+  },
+  
+  generateButton: {
+    backgroundColor: theme.colors.primary[500],
+    paddingHorizontal: theme.spacing[8],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+  },
+  
+  generateButtonText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.inverse,
   },
   
   // QR Section
@@ -946,74 +1562,5 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.primary[500],
     fontWeight: '600',
-  },
-  
-  // Loading states
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing[5],
-  },
-  
-  loadingSection: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[12],
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 6.27,
-    elevation: 10,
-  },
-  
-  loadingText: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    marginTop: theme.spacing[4],
-    textAlign: 'center',
-  },
-
-  // Error states
-  errorContainer: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[12],
-    alignItems: 'center',
-    marginHorizontal: theme.spacing[5],
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 6.27,
-    elevation: 10,
-  },
-  
-  errorText: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    marginTop: theme.spacing[4],
-    marginBottom: theme.spacing[6],
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  
-  retryButton: {
-    backgroundColor: theme.colors.primary[500],
-    paddingHorizontal: theme.spacing[6],
-    paddingVertical: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-  },
-  
-  retryButtonText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.inverse,
   },
 });

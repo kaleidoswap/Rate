@@ -22,8 +22,8 @@ import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
 const persistConfig: PersistConfig<any> = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['settings', 'ui', 'contacts'], // Only persist non-sensitive data
-  blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap', 'nostr'], // Don't persist sensitive data
+  whitelist: ['settings', 'ui', 'contacts', 'nostr'], // Added nostr to persist non-sensitive nostr data
+  blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
   version: 1,
   migrate: (state: any) => {
     // Handle migrations if needed

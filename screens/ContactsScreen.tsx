@@ -75,6 +75,35 @@ export default function ContactsScreen({ navigation }: Props) {
     };
   };
 
+  // Generate avatar background color based on name
+  const getAvatarColor = (name: string) => {
+    const colors = [
+      theme.colors.primary[50],
+      theme.colors.success[50], 
+      '#FEF3C7', // yellow light
+      '#E1E7FF', // blue light
+      '#FFE1E7', // pink light
+      '#E7FFE1', // green light
+      '#FFF1E1', // orange light
+    ];
+    const index = name.charCodeAt(0) % colors.length;
+    return colors[index];
+  };
+
+  const getAvatarTextColor = (name: string) => {
+    const colors = [
+      theme.colors.primary[600],
+      theme.colors.success[600], 
+      '#D97706', // yellow dark
+      '#3B4FE6', // blue dark
+      '#E63B5A', // pink dark
+      '#059669', // green dark
+      '#EA580C', // orange dark
+    ];
+    const index = name.charCodeAt(0) % colors.length;
+    return colors[index];
+  };
+
   // Combine local and Nostr contacts
   const nostrContacts = nostrState.isConnected ? 
     nostrState.contacts.map(convertNostrContact) : [];
@@ -394,34 +423,54 @@ export default function ContactsScreen({ navigation }: Props) {
         onPress={() => handleContactPress(contact)}
       >
         <View style={styles.contactHeader}>
-          <View style={styles.contactAvatar}>
-            <Text style={styles.contactInitial}>
-              {contact.name.charAt(0).toUpperCase()}
-            </Text>
+          <View style={[
+            styles.contactAvatar, 
+            { backgroundColor: getAvatarColor(contact.name) }
+          ]}>
+            {contact.avatar_url ? (
+              <Image source={{ uri: contact.avatar_url }} style={styles.contactImage} />
+            ) : (
+              <Text style={[
+                styles.contactInitial,
+                { color: getAvatarTextColor(contact.name) }
+              ]}>
+                {contact.name.charAt(0).toUpperCase()}
+              </Text>
+            )}
           </View>
           <View style={styles.contactInfo}>
             <View style={styles.contactNameRow}>
-              <Text style={styles.contactName}>{contact.name}</Text>
-              {contact.isNostrContact && (
-                <View style={styles.nostrBadge}>
-                  <Ionicons name="planet" size={12} color={theme.colors.primary[500]} />
-                  <Text style={styles.nostrBadgeText}>Nostr</Text>
-                </View>
-              )}
-              {contact.is_favorite && (
-                <Ionicons name="star" size={16} color="#f59e0b" />
-              )}
+              <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
+              <View style={styles.contactBadges}>
+                {contact.isNostrContact && (
+                  <View style={styles.nostrBadge}>
+                    <Ionicons name="planet" size={12} color={theme.colors.primary[500]} />
+                  </View>
+                )}
+                {contact.is_favorite && (
+                  <Ionicons name="star" size={16} color="#f59e0b" />
+                )}
+              </View>
             </View>
+            
+            {/* Only show lightning address if available */}
             {contact.lightning_address && (
-              <Text style={styles.contactDetail}>⚡ {contact.lightning_address}</Text>
+              <View style={styles.contactDetailRow}>
+                <Ionicons name="flash" size={14} color={theme.colors.warning[500]} />
+                <Text style={styles.contactDetail} numberOfLines={1}>
+                  {contact.lightning_address}
+                </Text>
+              </View>
             )}
-            {contact.node_pubkey && (
-              <Text style={styles.contactDetail}>
-                🔗 {contact.node_pubkey.substring(0, 16)}...
-              </Text>
-            )}
-            {contact.notes && (
-              <Text style={styles.contactNotes}>{contact.notes}</Text>
+            
+            {/* Show Nostr pubkey for Nostr contacts */}
+            {contact.isNostrContact && contact.npub && (
+              <View style={styles.contactDetailRow}>
+                <Ionicons name="key" size={14} color={theme.colors.primary[500]} />
+                <Text style={styles.contactDetail} numberOfLines={1}>
+                  {contact.npub.substring(0, 20)}...
+                </Text>
+              </View>
             )}
           </View>
         </View>
@@ -651,77 +700,104 @@ const styles = StyleSheet.create({
   },
   
   contactCard: {
-    marginBottom: theme.spacing[3],
+    marginBottom: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    shadowColor: theme.colors.gray[900],
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  
+
   contactItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: theme.spacing[4],
+    justifyContent: 'space-between',
   },
-  
+
   contactHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: theme.spacing[3],
+    alignItems: 'center',
+    flex: 1,
   },
-  
+
   contactAvatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: theme.colors.primary[500],
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: theme.spacing[3],
+    overflow: 'hidden',
   },
-  
+
+  contactImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+  },
+
   contactInitial: {
     fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
+    fontWeight: '600',
   },
-  
+    
   contactInfo: {
     flex: 1,
+    marginRight: theme.spacing[2],
   },
-  
+
   contactNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing[2],
+    justifyContent: 'space-between',
     marginBottom: theme.spacing[1],
   },
-  
+
   contactName: {
     fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.text.primary,
+    flex: 1,
   },
-  
+
+  contactBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+  },
+
+  nostrBadge: {
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.base,
+    padding: theme.spacing[1],
+  },
+
+  contactDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing[1],
+    gap: theme.spacing[1],
+  },
+
   contactDetail: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[1],
+    flex: 1,
   },
-  
-  contactNotes: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.muted,
-    fontStyle: 'italic',
-  },
-  
+
   contactActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: theme.spacing[2],
   },
-  
+
   contactActionButton: {
-    width: 36,
-    height: 36,
+    padding: theme.spacing[2],
     borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: theme.colors.gray[50],
   },
   
   emptyCard: {
@@ -851,16 +927,6 @@ const styles = StyleSheet.create({
   connectNostrText: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
-  },
-
-  nostrBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[1],
-    backgroundColor: theme.colors.primary[50],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.base,
   },
 
   nostrBadgeText: {

@@ -100,40 +100,144 @@ class NostrService {
 
   // Generate new key pair
   generateKeyPair(): { privateKey: string; publicKey: string; nsec: string; npub: string } {
-    // Generate 32 random bytes for private key
-    const randomArray = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) {
-      randomArray[i] = Math.floor(Math.random() * 256);
-    }
-    const privateKey = Array.from(randomArray, byte => byte.toString(16).padStart(2, '0')).join('');
-    const publicKey = getPublicKey(privateKey);
-    const nsec = nip19.nsecEncode(privateKey);
-    const npub = nip19.npubEncode(publicKey);
+    try {
+      // Use crypto.getRandomValues for secure random generation
+      const randomArray = new Uint8Array(32);
+      crypto.getRandomValues(randomArray);
+      const privateKey = utils.bytesToHex(randomArray);
+      const publicKey = getPublicKey(randomArray);
+      const nsec = nip19.nsecEncode(randomArray);
+      const npub = nip19.npubEncode(publicKey);
 
-    return { privateKey, publicKey, nsec, npub };
+      return { privateKey, publicKey, nsec, npub };
+    } catch (error) {
+      console.error('NostrService: Failed to generate key pair:', error);
+      throw error;
+    }
   }
 
   // Import existing private key
   importPrivateKey(nsecOrPrivateKey: string): { privateKey: string; publicKey: string; nsec: string; npub: string } | null {
     try {
-      let privateKey: string;
+      let privateKeyBytes: Uint8Array;
 
       if (nsecOrPrivateKey.startsWith('nsec')) {
-        const decoded = nip19.decode(nsecOrPrivateKey);
-        if (decoded.type !== 'nsec') throw new Error('Invalid nsec format');
-        privateKey = utils.bytesToHex(decoded.data as Uint8Array);
+        const { type, data } = nip19.decode(nsecOrPrivateKey);
+        if (type !== 'nsec') throw new Error('Invalid nsec format');
+        privateKeyBytes = data as Uint8Array;
       } else {
-        privateKey = nsecOrPrivateKey;
+        // Validate hex format
+        if (!/^[0-9a-f]{64}$/i.test(nsecOrPrivateKey)) {
+          throw new Error('Invalid private key format');
+        }
+        privateKeyBytes = utils.hexToBytes(nsecOrPrivateKey.toLowerCase());
       }
 
-      const publicKey = getPublicKey(privateKey);
-      const nsec = nip19.nsecEncode(privateKey);
+      const privateKey = utils.bytesToHex(privateKeyBytes);
+      const publicKey = getPublicKey(privateKeyBytes);
+      const nsec = nip19.nsecEncode(privateKeyBytes);
       const npub = nip19.npubEncode(publicKey);
 
       return { privateKey, publicKey, nsec, npub };
     } catch (error) {
       console.error('NostrService: Failed to import private key:', error);
       return null;
+    }
+  }
+
+  // Add a new relay
+  async addRelay(url: string): Promise<boolean> {
+    try {
+      if (!url.startsWith('wss://')) {
+        throw new Error('Relay URL must start with wss://');
+      }
+
+      // Validate URL format
+      new URL(url);
+
+      // Add to NDK if connected
+      if (this.ndk) {
+        // Add to explicit relays
+        this.ndk.explicitRelayUrls = [...(this.ndk.explicitRelayUrls || []), url];
+        // Reconnect to include new relay
+        await this.ndk.connect();
+      }
+
+      // Update relays list
+      const currentRelays = await this.getRelays();
+      if (!currentRelays.includes(url)) {
+        await AsyncStorage.setItem('nostr_relays', JSON.stringify([...currentRelays, url]));
+      }
+
+      return true;
+    } catch (error) {
+      console.error('NostrService: Failed to add relay:', error);
+      return false;
+    }
+  }
+
+  // Remove a relay
+  async removeRelay(url: string): Promise<boolean> {
+    try {
+      // Remove from NDK if connected
+      if (this.ndk) {
+        // Remove from explicit relays
+        this.ndk.explicitRelayUrls = (this.ndk.explicitRelayUrls || []).filter(r => r !== url);
+        // Disconnect from all relays
+        for (const relay of Array.from(this.ndk.pool.relays.values())) {
+          await relay.disconnect();
+        }
+        // Reconnect to remaining relays
+        await this.ndk.connect();
+      }
+
+      // Update relays list
+      const currentRelays = await this.getRelays();
+      const updatedRelays = currentRelays.filter(relay => relay !== url);
+      await AsyncStorage.setItem('nostr_relays', JSON.stringify(updatedRelays));
+
+      return true;
+    } catch (error) {
+      console.error('NostrService: Failed to remove relay:', error);
+      return false;
+    }
+  }
+
+  // Get current relays
+  async getRelays(): Promise<string[]> {
+    try {
+      // If NDK is connected, return the actual connected relays
+      if (this.ndk && this.ndk.explicitRelayUrls) {
+        return this.ndk.explicitRelayUrls;
+      }
+      
+      // Fallback to stored relays
+      const storedRelays = await AsyncStorage.getItem('nostr_relays');
+      if (storedRelays) {
+        return JSON.parse(storedRelays);
+      }
+      return this.defaultRelays;
+    } catch (error) {
+      console.error('NostrService: Failed to get relays:', error);
+      return this.defaultRelays;
+    }
+  }
+
+  // Get relay connection status
+  getRelayStatus(): { url: string; connected: boolean }[] {
+    if (!this.ndk || !this.ndk.pool) {
+      return [];
+    }
+
+    try {
+      const relays = Array.from(this.ndk.pool.relays.values());
+      return relays.map(relay => ({
+        url: relay.url,
+        connected: relay.connectivity.status === 1 // 1 = connected in NDK
+      }));
+    } catch (error) {
+      console.error('NostrService: Failed to get relay status:', error);
+      return [];
     }
   }
 

@@ -11,9 +11,11 @@ import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { ThemeProvider } from '@react-navigation/native';
 
 import { store, persistor } from './store';
-import { theme } from './theme';
+import { theme, createNavigationTheme } from './theme';
+import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
 import DashboardScreen from './screens/DashboardScreen';
@@ -27,6 +29,23 @@ import MapScreen from './screens/MapScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrContactsScreen from './screens/NostrContactsScreen';
+import AssetDetailScreen from './screens/AssetDetailScreen';
+import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
+
+type RootStackParamList = {
+  InitialLoad: undefined;
+  WalletSetup: undefined;
+  Dashboard: undefined;
+  Send: { selectedAsset?: any } | undefined;
+  Receive: { selectedAsset?: any } | undefined;
+  QRScanner: undefined;
+  PaymentConfirmation: { paymentData: any };
+  AIAssistant: undefined;
+  Assets: undefined;
+  Swap: undefined;
+  NostrContacts: undefined;
+  AssetDetail: { asset: any };
+};
 
 type TabBarIconProps = {
   focused: boolean;
@@ -34,11 +53,13 @@ type TabBarIconProps = {
   size: number;
 };
 
-const Stack = createNativeStackNavigator();
+const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
 const Drawer = createDrawerNavigator();
 
 function DashboardTabs() {
+  const theme = useAppTheme();
+  
   return (
     <Tab.Navigator
       screenOptions={{
@@ -138,7 +159,7 @@ function DashboardTabs() {
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons 
               name={focused ? 'chatbubble' : 'chatbubble-outline'} 
-              size={focused ? size + 2 : size} 
+              size={size} 
               color={color} 
             />
           ),
@@ -149,6 +170,7 @@ function DashboardTabs() {
 }
 
 function DrawerNavigator() {
+  const theme = useAppTheme();
   return (
     <Drawer.Navigator
       screenOptions={{
@@ -157,10 +179,10 @@ function DrawerNavigator() {
         drawerType: 'slide',
         drawerStyle: {
           backgroundColor: theme.colors.surface.primary,
-          width: 280,
+          width: "100%",
         },
         swipeEnabled: true,
-        swipeEdgeWidth: 50,
+        swipeEdgeWidth: 100,
       }}
       drawerContent={(props: any) => <SettingsScreen {...props} />}
     >
@@ -170,17 +192,8 @@ function DrawerNavigator() {
 }
 
 function AppNavigator() {
-  const navigationTheme = {
-    dark: false,
-    colors: {
-      primary: theme.colors.primary[500],
-      background: theme.colors.background.primary,
-      card: theme.colors.surface.primary,
-      text: theme.colors.text.primary,
-      border: theme.colors.border.light,
-      notification: theme.colors.primary[500],
-    },
-  };
+  const navigationTheme = createNavigationTheme();
+  const theme = useAppTheme();
 
   return (
     <NavigationContainer theme={navigationTheme}>
@@ -228,23 +241,9 @@ function AppNavigator() {
             headerTintColor: theme.colors.text.inverse,
           }}
         />
-        <Stack.Screen 
-          name="QRScanner" 
-          component={QRScannerScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: true,
-            headerTitle: 'Scan QR Code',
-            headerStyle: {
-              backgroundColor: '#4338ca',
-            },
-            headerTitleStyle: {
-              color: theme.colors.text.inverse,
-              fontWeight: '600',
-            },
-            headerTintColor: theme.colors.text.inverse,
-          }}
-        />
+        <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+        <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
+        <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
         <Stack.Screen 
           name="Assets" 
           component={AssetsScreen}
@@ -278,12 +277,22 @@ function AppNavigator() {
             headerShown: false,
           }}
         />
+        <Stack.Screen 
+          name="AssetDetail" 
+          component={AssetDetailScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: false,
+          }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );
 }
 
 function LoadingScreen() {
+  const theme = useAppTheme();
+  
   return (
     <View style={{ 
       flex: 1, 
@@ -297,11 +306,17 @@ function LoadingScreen() {
 }
 
 export default function App() {
+  const navigationTheme = createNavigationTheme();
+
   return (
     <Provider store={store}>
       <PersistGate loading={<LoadingScreen />} persistor={persistor}>
-        <StatusBar style="light" backgroundColor="transparent" translucent={true} />
-        <AppNavigator />
+        <AppThemeProvider>
+          <ThemeProvider value={navigationTheme}>
+            <StatusBar style="light" backgroundColor="transparent" translucent={true} />
+            <AppNavigator />
+          </ThemeProvider>
+        </AppThemeProvider>
       </PersistGate>
     </Provider>
   );

@@ -5,6 +5,7 @@ import RGBApiService from './RGBApiService';
 import { RGBNodeService } from './RGBNodeService';
 import NostrService from './NostrService';
 import NWCService from './NWCService';
+import { restoreNostrConnection, loadKeysSecurely } from '../store/slices/nostrSlice';
 
 const DEFAULT_TIMEOUT = 30000;
 
@@ -131,5 +132,33 @@ export async function getNostrWalletConnectStatus() {
   } catch (error) {
     console.error('Error getting NWC status:', error);
     return null;
+  }
+}
+
+export async function autoRestoreNostrConnection() {
+  try {
+    console.log('Attempting to auto-restore Nostr connection...');
+    
+    const state = store.getState();
+    
+    // Check if we have stored keys indicator
+    if (!state.nostr.hasStoredKeys) {
+      console.log('No stored keys found, skipping auto-restore');
+      return false;
+    }
+    
+    // Try to restore the connection
+    const result = await store.dispatch(restoreNostrConnection());
+    
+    if (restoreNostrConnection.fulfilled.match(result)) {
+      console.log('Nostr connection restored successfully');
+      return true;
+    } else {
+      console.log('Failed to restore Nostr connection:', result.error?.message);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error during Nostr auto-restore:', error);
+    return false;
   }
 }

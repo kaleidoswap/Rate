@@ -27,6 +27,8 @@ import RGBApiService from '../services/RGBApiService';
 import PriceService from '../services/PriceService';
 import { theme } from '../theme';
 import { Card, Button } from '../components';
+import { useAssetIcon } from '../utils';
+import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 
 const { width } = Dimensions.get('window');
 const statusBarHeight = StatusBar.currentHeight || 0;
@@ -86,6 +88,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const { nodeInfo, networkInfo } = useSelector((state: RootState) => state.node);
   const settings = useSelector((state: RootState) => state.settings);
+  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -104,6 +107,25 @@ export default function DashboardScreen({ navigation }: Props) {
   const [rgbAssets, setRgbAssetsState] = useState<NiaAsset[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
+
+  // Asset Icon Component
+  const AssetIcon = ({ ticker }: { ticker: string }) => {
+    const { iconUrl } = useAssetIcon(ticker);
+    
+    if (iconUrl) {
+      return (
+        <View style={styles.assetIconContainer}>
+          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
+        </View>
+      );
+    }
+    
+    return (
+      <View style={styles.assetIconContainer}>
+        <Ionicons name="diamond" size={20} color={theme.colors.primary[500]} />
+      </View>
+    );
+  };
 
   // Initialize API service
   const initializeApi = useCallback(() => {
@@ -237,8 +259,8 @@ export default function DashboardScreen({ navigation }: Props) {
       refreshData();
     }
 
-    // Set up polling every 15 seconds
-    intervalId = setInterval(refreshData, 15000);
+    // Set up polling every 30 seconds
+    intervalId = setInterval(refreshData, 30000);
 
     return () => {
       if (intervalId) {
@@ -288,12 +310,13 @@ export default function DashboardScreen({ navigation }: Props) {
     setRefreshing(false);
   };
 
+  // Move the hook usage to the component level
   const formatSatoshis = (satoshis: number): string => {
-    return (satoshis / 100000000).toFixed(8);
+    return formatBitcoinAmount(satoshis, bitcoinUnit);
   };
 
   const formatUSD = (satoshis: number): string => {
-    const btc = satoshis / 100000000;
+    const btc = bitcoinUnit === 'BTC' ? satoshis / 100000000 : satoshis;
     const usd = btc * bitcoinPrice;
     return usd.toFixed(2);
   };
@@ -363,7 +386,7 @@ export default function DashboardScreen({ navigation }: Props) {
                 <Text style={styles.balanceAmount}>
                   {formatSatoshis(totalBalance)}
                 </Text>
-                <Text style={styles.balanceCurrency}>BTC</Text>
+                <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
               </View>
               <Text style={styles.balanceUsd}>
                 ${formatUSD(totalBalance)} USD
@@ -456,7 +479,7 @@ export default function DashboardScreen({ navigation }: Props) {
           </LinearGradient>
           <Text style={styles.actionButtonText}>Swap</Text>
         </TouchableOpacity>
-        
+
         {/* Send Button */}
         <TouchableOpacity 
           style={styles.actionButton}
@@ -509,14 +532,23 @@ export default function DashboardScreen({ navigation }: Props) {
           showsHorizontalScrollIndicator={false}
           style={styles.assetsScroll}
         >
+          {/* RGB Assets */}
           {rgbAssets.map((asset, index) => (
             <TouchableOpacity
               key={asset.asset_id}
-              style={[styles.assetCard, index === 0 && styles.firstAssetCard]}
-              onPress={() => navigation.navigate('AssetDetail', { asset })}
+              style={styles.assetCard}
+              onPress={() => navigation.navigate('AssetDetail', { 
+                asset: {
+                  ...asset,
+                  isRGB: true
+                }
+              })}
             >
               <View style={styles.assetHeader}>
-                <Text style={styles.assetTicker}>{asset.ticker}</Text>
+                <View style={styles.assetHeaderLeft}>
+                  <AssetIcon ticker={asset.ticker} />
+                  <Text style={styles.assetTicker}>{asset.ticker}</Text>
+                </View>
                 <Ionicons name="chevron-forward" size={14} color={theme.colors.gray[400]} />
               </View>
               <Text style={styles.assetName}>{asset.name}</Text>
@@ -530,29 +562,164 @@ export default function DashboardScreen({ navigation }: Props) {
     </View>
   );
 
-  const renderQuickStats = () => (
+  const renderChannels = () => (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Network Status</Text>
-      <Card style={styles.statsCard}>
-        <View style={styles.statsGrid}>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Network</Text>
-            <Text style={styles.statValue}>{networkInfo?.network || 'Unknown'}</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Lightning Channels</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Channels')}>
+          <Text style={styles.sectionAction}>View All</Text>
+        </TouchableOpacity>
+      </View>
+
+      {channels.length === 0 ? (
+        <Card style={styles.emptyCard}>
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="flash-outline" size={28} color={theme.colors.gray[400]} />
+            </View>
+            <Text style={styles.emptyTitle}>No channels yet</Text>
+            <Text style={styles.emptyDescription}>
+              Open your first Lightning channel to start transacting
+            </Text>
+            <View style={styles.emptyActions}>
+              <Button
+                title="Open Channel"
+                variant="secondary"
+                size="sm"
+                onPress={() => navigation.navigate('OpenChannel')}
+                style={styles.emptyButton}
+              />
+              <Button
+                title="Buy Channel"
+                variant="primary"
+                size="sm"
+                onPress={() => navigation.navigate('LSP')}
+                style={styles.emptyButton}
+              />
+            </View>
           </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Block Height</Text>
-            <Text style={styles.statValue}>{networkInfo?.height || 0}</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>Channels</Text>
-            <Text style={styles.statValue}>{channels.length}</Text>
-          </View>
-          <View style={styles.statItem}>
-            <Text style={styles.statLabel}>BTC Price</Text>
-            <Text style={styles.statValue}>${bitcoinPrice.toLocaleString()}</Text>
-          </View>
-        </View>
-      </Card>
+        </Card>
+      ) : (
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          style={styles.channelsScroll}
+        >
+          {channels.map((channel, index) => (
+            <TouchableOpacity
+              key={channel.channel_id}
+              style={styles.channelCard}
+              onPress={() => navigation.navigate('ChannelDetail', { channel })}
+            >
+              {/* Status indicator */}
+                             <View style={[
+                 styles.channelStatusDot,
+                 { backgroundColor: channel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
+               ]} />
+              
+              {/* Channel header */}
+              <View style={styles.channelHeader}>
+                <View style={styles.channelPeerInfo}>
+                  <Text style={styles.channelPeerName} numberOfLines={1}>
+                    {channel.peer_alias || channel.peer_pubkey.slice(0, 8)}
+                  </Text>
+                  <View style={styles.channelStatusBadge}>
+                                         <Text style={[
+                       styles.channelStatusText,
+                       { 
+                         color: channel.ready ? theme.colors.success[500] : theme.colors.warning[500],
+                         backgroundColor: channel.ready ? theme.colors.success[50] : theme.colors.warning[50]
+                       }
+                     ]}>
+                      {channel.ready ? 'Open' : 'Pending'}
+                    </Text>
+                    {channel.public ? (
+                      <Ionicons name="globe-outline" size={10} color={theme.colors.gray[400]} />
+                    ) : (
+                      <Ionicons name="lock-closed-outline" size={10} color={theme.colors.gray[400]} />
+                    )}
+                  </View>
+                </View>
+              </View>
+
+              {/* Capacity */}
+              <View style={styles.channelCapacity}>
+                <Text style={styles.channelCapacityLabel}>Capacity</Text>
+                <Text style={styles.channelCapacityValue}>
+                  {formatSatoshis(channel.capacity_sat)} {bitcoinUnit}
+                </Text>
+              </View>
+
+              {/* Bitcoin Liquidity */}
+              <View style={styles.liquiditySection}>
+                                 <View style={styles.liquidityHeader}>
+                   <Ionicons name="logo-bitcoin" size={12} color={theme.colors.warning[500]} />
+                   <Text style={styles.liquidityTitle}>Bitcoin</Text>
+                 </View>
+                 <View style={styles.liquidityValues}>
+                   <View style={styles.liquidityItem}>
+                     <Ionicons name="arrow-up" size={8} color={theme.colors.success[500]} />
+                     <Text style={styles.liquidityAmount}>
+                       {formatSatoshis(channel.outbound_balance_msat / 1000)}
+                     </Text>
+                   </View>
+                   <View style={styles.liquidityItem}>
+                     <Ionicons name="arrow-down" size={8} color={theme.colors.primary[500]} />
+                     <Text style={styles.liquidityAmount}>
+                       {formatSatoshis(channel.inbound_balance_msat / 1000)}
+                     </Text>
+                   </View>
+                 </View>
+                 {/* Simple liquidity bar */}
+                 <View style={styles.liquidityBar}>
+                   <View style={[
+                     styles.liquidityBarFill,
+                     { 
+                       width: `${(channel.outbound_balance_msat + channel.inbound_balance_msat) > 0 ? 
+                         (channel.outbound_balance_msat / (channel.outbound_balance_msat + channel.inbound_balance_msat) * 100) : 0}%`,
+                       backgroundColor: theme.colors.success[500]
+                     }
+                   ]} />
+                 </View>
+              </View>
+
+              {/* RGB Asset Liquidity (if applicable) */}
+              {channel.asset_id && (
+                                 <View style={styles.liquiditySection}>
+                   <View style={styles.liquidityHeader}>
+                     <Ionicons name="diamond" size={12} color={theme.colors.secondary[500]} />
+                     <Text style={styles.liquidityTitle}>RGB Asset</Text>
+                   </View>
+                   <View style={styles.liquidityValues}>
+                     <View style={styles.liquidityItem}>
+                       <Ionicons name="arrow-up" size={8} color={theme.colors.secondary[500]} />
+                       <Text style={styles.liquidityAmount}>
+                         {(channel.asset_local_amount / Math.pow(10, 8)).toFixed(2)}
+                       </Text>
+                     </View>
+                     <View style={styles.liquidityItem}>
+                       <Ionicons name="arrow-down" size={8} color={theme.colors.secondary[600]} />
+                       <Text style={styles.liquidityAmount}>
+                         {(channel.asset_remote_amount / Math.pow(10, 8)).toFixed(2)}
+                       </Text>
+                     </View>
+                   </View>
+                   <View style={styles.liquidityBar}>
+                     <View style={[
+                       styles.liquidityBarFill,
+                       { 
+                         width: `${(channel.asset_local_amount + channel.asset_remote_amount) > 0 ? 
+                           (channel.asset_local_amount / (channel.asset_local_amount + channel.asset_remote_amount) * 100) : 0}%`,
+                         backgroundColor: theme.colors.secondary[500]
+                       }
+                     ]} />
+                   </View>
+                 </View>
+              )}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 
@@ -624,11 +791,13 @@ export default function DashboardScreen({ navigation }: Props) {
         showsVerticalScrollIndicator={false}
       >
         {renderRGBAssets()}
-        {renderQuickStats()}
+        {renderChannels()}
         
         {/* Bottom padding */}
         <View style={styles.bottomPadding} />
       </ScrollView>
+      
+      {/* {renderCompactActions()} */}
     </View>
   );
 }
@@ -958,6 +1127,12 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing[2],
   },
   
+  assetHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  
   assetTicker: {
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '700',
@@ -976,30 +1151,126 @@ const styles = StyleSheet.create({
     color: theme.colors.text.primary,
   },
   
-  statsCard: {
-    padding: theme.spacing[5],
+  channelsScroll: {
+    marginLeft: -theme.spacing[5],
   },
   
-  statsGrid: {
+     channelCard: {
+     width: 280,
+     backgroundColor: theme.colors.surface.primary,
+     borderRadius: theme.borderRadius.xl,
+     padding: theme.spacing[4],
+     marginLeft: theme.spacing[5],
+     borderWidth: 1,
+     borderColor: theme.colors.border.light,
+     ...theme.shadows.sm,
+   },
+  
+  channelStatusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginBottom: theme.spacing[3],
+  },
+  
+  channelHeader: {
+    width: '100%',
+    marginBottom: theme.spacing[3],
+  },
+  
+  channelPeerInfo: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   
-  statItem: {
-    width: '50%',
-    marginBottom: theme.spacing[4],
+  channelPeerName: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    flex: 1,
+    marginRight: theme.spacing[2],
   },
   
-  statLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[1],
+     channelStatusBadge: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     backgroundColor: theme.colors.gray[100],
+     borderRadius: theme.borderRadius.md,
+     paddingHorizontal: theme.spacing[2],
+     paddingVertical: theme.spacing[1],
+   },
+  
+  channelStatusText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '600',
+    marginRight: theme.spacing[1],
   },
   
-  statValue: {
+  channelCapacity: {
+    width: '100%',
+    marginBottom: theme.spacing[3],
+  },
+  
+     channelCapacityLabel: {
+     fontSize: theme.typography.fontSize.sm,
+     color: theme.colors.text.secondary,
+     marginBottom: theme.spacing[1],
+   },
+  
+  channelCapacityValue: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
     color: theme.colors.text.primary,
+  },
+  
+  liquiditySection: {
+    width: '100%',
+    marginBottom: theme.spacing[3],
+  },
+  
+  liquidityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing[1],
+  },
+  
+  liquidityTitle: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginLeft: theme.spacing[2],
+  },
+  
+  liquidityValues: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing[1],
+  },
+  
+  liquidityItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  
+  liquidityAmount: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginLeft: theme.spacing[1],
+  },
+  
+     liquidityBar: {
+     width: '100%',
+     height: 8,
+     backgroundColor: theme.colors.gray[200],
+     borderRadius: 4,
+     marginTop: theme.spacing[1],
+   },
+  
+  liquidityBarFill: {
+    height: '100%',
+    borderRadius: 4,
   },
   
   floatingAIButton: {
@@ -1094,5 +1365,26 @@ const styles = StyleSheet.create({
   
   errorButton: {
     width: '100%',
+  },
+  
+  assetIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing[3],
+  },
+  
+  assetIconImage: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  emptyActions: {
+    flexDirection: 'row',
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[4],
   },
 });

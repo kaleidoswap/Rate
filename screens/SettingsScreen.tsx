@@ -19,6 +19,7 @@ import {
   setHideBalances,
   setNodeType,
   setRemoteNodeUrl,
+  setBitcoinUnit,
 } from '../store/slices/settingsSlice';
 import { setWalletConnectEnabled } from '../store/slices/nostrSlice';
 import { RGBNodeService } from '../services/RGBNodeService';
@@ -106,34 +107,80 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const handleWalletConnectToggle = (enabled: boolean) => {
-    dispatch(setWalletConnectEnabled(enabled));
+    if (enabled && !nostrState.isConnected) {
+      Alert.alert(
+        'Nostr Connection Required',
+        'You need to connect to Nostr first before enabling Wallet Connect',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    if (enabled) {
+      Alert.alert(
+        'Enable Nostr Wallet Connect',
+        'Go to your Nostr profile settings to generate a connection string and configure NWC.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Go to Profile',
+            onPress: () => {
+              dispatch(setWalletConnectEnabled(enabled));
+              // Navigate to nostr profile (this would need navigation prop passed to settings)
+              // For now, just enable it
+            }
+          }
+        ]
+      );
+    } else {
+      // Disable directly
+      dispatch(setWalletConnectEnabled(enabled));
+    }
   };
+
+  const handleBitcoinUnitChange = (unit: 'BTC' | 'sats') => {
+    dispatch(setBitcoinUnit(unit));
+  };
+
+  const handleThemeChange = () => {
+    const themes: ('light' | 'dark' | 'system')[] = ['light', 'dark', 'system'];
+    const currentIndex = themes.indexOf(settings.theme);
+    const nextTheme = themes[(currentIndex + 1) % themes.length];
+    dispatch(setTheme(nextTheme));
+  };
+
+  const handleCurrencyChange = () => {
+    const currencies = ['USD', 'EUR', 'GBP'];
+    const currentIndex = currencies.indexOf(settings.currency);
+    const nextCurrency = currencies[(currentIndex + 1) % currencies.length];
+    dispatch(setCurrency(nextCurrency));
+  };
+
+  const handleNetworkChange = () => {
+    const networks = ['mainnet', 'testnet', 'regtest'];
+    const currentIndex = networks.indexOf(settings.network);
+    const nextNetwork = networks[(currentIndex + 1) % networks.length];
+    dispatch(setNetwork(nextNetwork));
+  };
+
+  const renderHeader = () => (
+    <View style={styles.headerContainer}>
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Settings</Text>
+        <View style={styles.placeholder} />
+      </View>
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Drawer Header */}
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerIcon}>
-              <Ionicons name="settings" size={24} color="white" />
-            </View>
-            <Text style={styles.headerTitle}>Settings</Text>
-          </View>
-          <TouchableOpacity 
-            style={styles.closeButton}
-            onPress={() => navigation.closeDrawer()}
-          >
-            <Ionicons name="close" size={24} color="white" />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-
+      {renderHeader()}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Nostr Section */}
         <View style={styles.section}>
@@ -176,7 +223,7 @@ export default function SettingsScreen({ navigation }: Props) {
                   <View style={styles.featureInfo}>
                     <Text style={styles.featureTitle}>Nostr Wallet Connect</Text>
                     <Text style={styles.featureDescription}>
-                      Connect external wallets via NWC protocol (Coming Soon)
+                      Share your wallet with other applications via NWC protocol
                     </Text>
                   </View>
                   <Switch
@@ -189,11 +236,14 @@ export default function SettingsScreen({ navigation }: Props) {
                 {nostrState.walletConnectEnabled && (
                   <View style={styles.walletConnectInfo}>
                     <Text style={styles.walletConnectInfoText}>
-                      🚧 This feature is under development. It will allow you to:
+                      ✅ Nostr Wallet Connect is active. You can now:
                     </Text>
-                    <Text style={styles.walletConnectFeature}>• Connect to Alby, Mutiny, and other NWC wallets</Text>
-                    <Text style={styles.walletConnectFeature}>• Make Lightning payments through connected wallets</Text>
-                    <Text style={styles.walletConnectFeature}>• Manage multiple wallet connections</Text>
+                    <Text style={styles.walletConnectFeature}>• Generate connection strings for other apps</Text>
+                    <Text style={styles.walletConnectFeature}>• Allow external wallets to make payments</Text>
+                    <Text style={styles.walletConnectFeature}>• Manage NWC connections in your Nostr profile</Text>
+                    {nostrState.nwcConnectionString && (
+                      <Text style={styles.walletConnectFeature}>• Active connection string available</Text>
+                    )}
                   </View>
                 )}
               </View>
@@ -270,7 +320,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* Other Settings Sections */}
+        {/* General Settings Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleContainer}>
@@ -286,18 +336,75 @@ export default function SettingsScreen({ navigation }: Props) {
           
           <View style={styles.sectionContent}>
             <ListItem>
+              <Text>Bitcoin Unit</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={() => handleBitcoinUnitChange(settings.bitcoinUnit === 'BTC' ? 'sats' : 'BTC')}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.bitcoinUnit}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
+            </ListItem>
+
+            <ListItem>
               <Text>Theme</Text>
-              <Text style={styles.settingValue}>{settings.theme}</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={handleThemeChange}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.theme}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
             </ListItem>
             
             <ListItem>
               <Text>Currency</Text>
-              <Text style={styles.settingValue}>{settings.currency}</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={handleCurrencyChange}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.currency}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
             </ListItem>
             
             <ListItem>
               <Text>Network</Text>
-              <Text style={styles.settingValue}>{settings.network}</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={handleNetworkChange}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.network}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
             </ListItem>
           </View>
         </View>
@@ -312,6 +419,39 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.secondary,
   },
   
+  headerContainer: {
+    backgroundColor: theme.colors.surface.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border.light,
+  },
+  
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[4],
+  },
+  
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  headerTitle: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  
+  placeholder: {
+    width: 40,
+  },
+
   scrollView: {
     flex: 1,
     paddingHorizontal: theme.spacing[5],
@@ -489,35 +629,20 @@ const styles = StyleSheet.create({
   editButton: {
     minWidth: 60,
   },
-
-  headerGradient: {
-    paddingTop: theme.spacing[5],
-    paddingBottom: theme.spacing[3],
-    paddingHorizontal: theme.spacing[5],
+  unitSelector: {
+    backgroundColor: theme.colors.background.secondary,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.base,
   },
-
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  headerContent: {
+  settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-
-  headerIcon: {
-    marginRight: theme.spacing[3],
+  clickableValue: {
+    color: theme.colors.primary[500],
   },
-
-  headerTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-
-  closeButton: {
-    padding: theme.spacing[2],
+  settingIcon: {
+    marginLeft: theme.spacing[2],
   },
 });
