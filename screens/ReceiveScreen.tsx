@@ -1,5 +1,5 @@
 // screens/ReceiveScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -78,6 +78,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
   
+
+  
   // Get asset precision for validation (similar to desktop app)
   const getAssetPrecision = (ticker: string): number => {
     if (ticker === 'BTC') {
@@ -108,6 +110,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [maxDepositAmount, setMaxDepositAmount] = useState<number>(0);
+  const [isUserTyping, setIsUserTyping] = useState(false);
 
   const apiService = RGBApiService.getInstance();
   
@@ -209,10 +212,12 @@ export default function ReceiveScreen({ navigation }: Props) {
     })) : [])
   ];
 
-  // Get available assets based on network type
-  const allAssets: Asset[] = networkType === 'lightning' 
-    ? getLightningAssets() 
-    : getOnChainAssets();
+  // Get available assets based on network type (memoized to prevent re-renders)
+  const allAssets: Asset[] = useMemo(() => {
+    return networkType === 'lightning' 
+      ? getLightningAssets() 
+      : getOnChainAssets();
+  }, [networkType, rgbAssets, btcBalance, channels]);
 
   // Enhanced validation function
   const validateAddressOrInvoice = (data: any): string | null => {
@@ -380,7 +385,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         }
       }
     }
-  }, [allAssets, networkType]);
+  }, [allAssets]);
 
   // Auto-generate address when conditions change
   useEffect(() => {
@@ -389,22 +394,42 @@ export default function ReceiveScreen({ navigation }: Props) {
       setError(null);
       
       // Only auto-generate if amount is not required, or if it's valid
-      if (!isAmountRequired() || isAmountValid()) {
-        generateAddress();
-      }
-    }
-  }, [selectedAsset, networkType, channels]);
-
-  // Generate address when amount changes for lightning
-  useEffect(() => {
-    if (networkType === 'lightning' && amount && isAmountValid()) {
+      // Use a small delay to avoid interfering with user input
       const timeoutId = setTimeout(() => {
-        generateAddress();
-      }, 500); // Debounce amount changes
+        if (!isAmountRequired() || isAmountValid()) {
+          generateAddress();
+        }
+      }, 300); // Increased delay to reduce interference
       
       return () => clearTimeout(timeoutId);
     }
-  }, [amount]);
+  }, [selectedAsset, networkType]);
+
+  // Generate address when amount changes for lightning (only when user stops typing)
+  useEffect(() => {
+    if (networkType === 'lightning' && amount && isAmountValid() && !isUserTyping) {
+      const timeoutId = setTimeout(() => {
+        if (!isUserTyping) { // Double check user isn't typing
+          generateAddress();
+        }
+      }, 2000);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [amount, isUserTyping]);
+
+  // Regenerate address when channels change (for lightning network)
+  useEffect(() => {
+    if (networkType === 'lightning' && selectedAsset && channels.length > 0) {
+      const timeoutId = setTimeout(() => {
+        if (!isAmountRequired() || isAmountValid()) {
+          generateAddress();
+        }
+      }, 500);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [channels]);
 
   const copyToClipboard = async () => {
     if (!address) return;
@@ -699,52 +724,44 @@ export default function ReceiveScreen({ navigation }: Props) {
             placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
             value={amount}
             onChangeText={(value) => {
-              // Enhanced input handling similar to desktop app
-              let cleanValue = value.replace(/[^\d.,]/g, ''); // Allow digits, dots, and commas
+              // Set typing flag to prevent interference
+              setIsUserTyping(true);
               
-              // Remove commas for processing
+              // Clear typing flag after user stops typing
+              setTimeout(() => setIsUserTyping(false), 3000);
+              
+              // Simplified input handling to prevent focus issues
+              let cleanValue = value.replace(/[^\d.,]/g, '');
+              
+              // Remove extra commas
               cleanValue = cleanValue.replace(/,/g, '');
               
-              // Handle multiple decimal points - keep only the first one
+              // Handle multiple decimal points
               const parts = cleanValue.split('.');
               if (parts.length > 2) {
                 cleanValue = parts[0] + '.' + parts.slice(1).join('');
               }
               
-              // Get precision for current asset
+              // Basic precision limit
               const precision = getAssetPrecision(selectedAsset.ticker);
-              
-              // Limit decimal places based on asset precision
               const decimalParts = cleanValue.split('.');
               if (decimalParts.length === 2 && decimalParts[1].length > precision) {
-                cleanValue = decimalParts[0] + '.' + decimalParts[1].substring(0, precision);
+                return; // Don't update if exceeds precision
               }
               
-              // Validate against max deposit amount for lightning
+              // Quick max amount check for lightning (without complex formatting)
               if (networkType === 'lightning' && maxDepositAmount > 0) {
                 const numValue = parseFloat(cleanValue);
-                if (!isNaN(numValue) && numValue > 0) {
-                  // Convert to base units and check against max
-                  const baseUnits = selectedAsset.ticker === 'BTC' 
-                    ? (bitcoinUnit === 'BTC' ? numValue * 100000000 : numValue)
-                    : numValue;
-                  const maxBaseUnits = selectedAsset.ticker === 'BTC' 
-                    ? (bitcoinUnit === 'BTC' ? maxDepositAmount / 100000000 : maxDepositAmount)
-                    : maxDepositAmount;
-
-                  if (baseUnits > maxBaseUnits) {
-                    // Don't update if it exceeds the limit
-                    return;
-                  }
+                if (!isNaN(numValue) && numValue > maxDepositAmount) {
+                  return; // Don't update if exceeds max
                 }
               }
 
-              // Format with comma separators for display (only for integer part)
-              const formattedValue = decimalParts.length === 2
-                ? decimalParts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + decimalParts[1]
-                : cleanValue.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-              
-              setAmount(formattedValue);
+              setAmount(cleanValue);
+            }}
+            onFocus={() => setIsUserTyping(true)}
+            onBlur={() => {
+              setTimeout(() => setIsUserTyping(false), 100);
             }}
             keyboardType="decimal-pad"
             variant="outlined"
@@ -753,6 +770,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                 ? { ...styles.amountInput, ...styles.amountInputError }
                 : styles.amountInput
             }
+            autoFocus={false}
           />
           <View style={styles.currencyLabel}>
             <Text style={styles.currencyText}>
@@ -954,6 +972,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         {renderAmountInput()}
         {renderContent()}
