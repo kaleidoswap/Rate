@@ -18,6 +18,7 @@ import {
   setHideBalances,
   setNodeType,
   setRemoteNodeUrl,
+  setBitcoinUnit,
 } from '../store/slices/settingsSlice';
 import { setWalletConnectEnabled } from '../store/slices/nostrSlice';
 import { RGBNodeService } from '../services/RGBNodeService';
@@ -113,6 +114,31 @@ export default function SettingsScreen({ navigation }: Props) {
       // Disable directly
       dispatch(setWalletConnectEnabled(enabled));
     }
+  };
+
+  const handleBitcoinUnitChange = (unit: 'BTC' | 'sats') => {
+    dispatch(setBitcoinUnit(unit));
+  };
+
+  const handleThemeChange = () => {
+    const themes: ('light' | 'dark' | 'system')[] = ['light', 'dark', 'system'];
+    const currentIndex = themes.indexOf(settings.theme);
+    const nextTheme = themes[(currentIndex + 1) % themes.length];
+    dispatch(setTheme(nextTheme));
+  };
+
+  const handleCurrencyChange = () => {
+    const currencies = ['USD', 'EUR', 'GBP'];
+    const currentIndex = currencies.indexOf(settings.currency);
+    const nextCurrency = currencies[(currentIndex + 1) % currencies.length];
+    dispatch(setCurrency(nextCurrency));
+  };
+
+  const handleNetworkChange = () => {
+    const networks = ['mainnet', 'testnet', 'regtest'];
+    const currentIndex = networks.indexOf(settings.network);
+    const nextNetwork = networks[(currentIndex + 1) % networks.length];
+    dispatch(setNetwork(nextNetwork));
   };
 
   const renderHeader = () => (
@@ -272,7 +298,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* Other Settings Sections */}
+        {/* General Settings Section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleContainer}>
@@ -288,18 +314,75 @@ export default function SettingsScreen({ navigation }: Props) {
           
           <View style={styles.sectionContent}>
             <ListItem>
+              <Text>Bitcoin Unit</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={() => handleBitcoinUnitChange(settings.bitcoinUnit === 'BTC' ? 'sats' : 'BTC')}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.bitcoinUnit}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
+            </ListItem>
+
+            <ListItem>
               <Text>Theme</Text>
-              <Text style={styles.settingValue}>{settings.theme}</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={handleThemeChange}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.theme}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
             </ListItem>
             
             <ListItem>
               <Text>Currency</Text>
-              <Text style={styles.settingValue}>{settings.currency}</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={handleCurrencyChange}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.currency}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
             </ListItem>
             
             <ListItem>
               <Text>Network</Text>
-              <Text style={styles.settingValue}>{settings.network}</Text>
+              <TouchableOpacity 
+                style={styles.settingRow}
+                onPress={handleNetworkChange}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {settings.network}
+                </Text>
+                <Ionicons 
+                  name="chevron-forward" 
+                  size={16} 
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
             </ListItem>
           </View>
         </View>
@@ -523,5 +606,21 @@ const styles = StyleSheet.create({
   
   editButton: {
     minWidth: 60,
+  },
+  unitSelector: {
+    backgroundColor: theme.colors.background.secondary,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.base,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  clickableValue: {
+    color: theme.colors.primary[500],
+  },
+  settingIcon: {
+    marginLeft: theme.spacing[2],
   },
 });

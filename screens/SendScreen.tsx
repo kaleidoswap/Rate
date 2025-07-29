@@ -20,6 +20,7 @@ import RGBApiService from '../services/RGBApiService';
 import { theme } from '../theme';
 import { Card, Button, Input } from '../components';
 import { useAssetIcon } from '../utils';
+import { useFormattedBitcoinAmount, parseInputAmount, convertAmountToUnit } from '../utils/bitcoinUnits';
 
 interface Props {
   navigation: any;
@@ -98,6 +99,7 @@ function SendScreen({ navigation, route }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
   const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
+  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
 
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
@@ -184,6 +186,15 @@ function SendScreen({ navigation, route }: Props) {
 
     if (route.params?.isLightning) {
       setAddressType('lightning');
+    }
+
+    // Auto-advance to confirmation if coming from QR scanner with complete data
+    if (route.params?.fromQRScanner && route.params?.prefilledAmount && 
+        (route.params?.decodedInvoice?.amt_msat > 0 || route.params?.decodedRGBInvoice?.amount)) {
+      // Small delay to allow state to settle, then show confirmation
+      setTimeout(() => {
+        setShowConfirmation(true);
+      }, 500);
     }
   }, [route.params]);
 
@@ -330,23 +341,22 @@ function SendScreen({ navigation, route }: Props) {
 
   const validateInputs = (): boolean => {
     if (!address.trim()) {
-      Alert.alert('Error', 'Please enter a recipient address');
+      Alert.alert('Missing Address', 'Please enter a recipient address or scan a QR code.');
       return false;
     }
 
     if (addressType === 'invalid') {
-      Alert.alert('Error', 'Please enter a valid address or invoice');
+      Alert.alert('Invalid Address', 'Please enter a valid Bitcoin address, Lightning invoice, or RGB invoice.');
       return false;
     }
 
     // For invoices with fixed amounts, don't require amount input
-    const requiresAmount = !(
+    const hasFixedAmount = 
       (addressType === 'lightning' && decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) ||
-      (addressType === 'rgb' && decodedRGBInvoice?.amount)
-    );
+      (addressType === 'rgb' && decodedRGBInvoice?.amount);
 
-    if (requiresAmount && (!amount.trim() || parseFloat(amount) <= 0)) {
-      Alert.alert('Error', 'Please enter a valid amount');
+    if (!hasFixedAmount && (!amount.trim() || parseFloat(amount) <= 0)) {
+      Alert.alert('Missing Amount', 'Please enter a valid amount to send.');
       return false;
     }
 
@@ -358,7 +368,10 @@ function SendScreen({ navigation, route }: Props) {
         : (selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8);
 
       if (inputAmount > availableBalance) {
-        Alert.alert('Error', `Insufficient ${selectedAsset.ticker} balance`);
+        Alert.alert(
+          'Insufficient Balance', 
+          `You don't have enough ${selectedAsset.ticker}. Available: ${availableBalance.toFixed(selectedAsset.asset_id === 'BTC' ? 8 : selectedAsset.precision || 8)} ${selectedAsset.ticker}`
+        );
         return false;
       }
     }
@@ -685,41 +698,89 @@ function SendScreen({ navigation, route }: Props) {
   const renderAmountInput = () => {
     // Don't show amount input if invoice specifies the amount
     const invoiceHasAmount = (addressType === 'lightning' && decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) ||
-                            (addressType === 'rgb' && decodedRGBInvoice?.amount);
+                          (addressType === 'rgb' && decodedRGBInvoice?.amount);
     
     if (invoiceHasAmount) {
       return null;
     }
 
+    const maxAmount = getMaxAmount();
+    const maxAmountNum = parseFloat(maxAmount);
+
+    // Calculate quick amount percentages of max
+    const getQuickAmounts = () => {
+      if (selectedAsset.ticker !== 'BTC' || !maxAmountNum) return [];
+      
+      const percentages = [0.25, 0.5, 0.75];
+      return percentages.map(pct => {
+        const amt = maxAmountNum * pct;
+        return bitcoinUnit === 'BTC'
+          ? amt.toFixed(8)
+          : Math.floor(amt).toString();
+      });
+    };
+
     return (
       <View style={styles.section}>
         <View style={styles.amountHeader}>
-          <Text style={styles.sectionTitle}>Amount ({selectedAsset.ticker})</Text>
+          <Text style={styles.sectionTitle}>Amount ({selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker})</Text>
           <TouchableOpacity
             style={styles.maxButton}
-            onPress={() => setAmount(getMaxAmount())}
+            onPress={() => setAmount(maxAmount)}
           >
             <Text style={styles.maxButtonText}>MAX</Text>
           </TouchableOpacity>
         </View>
         
         <Input
-          placeholder="0.00000000"
+          placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
           value={amount}
-          onChangeText={setAmount}
+          onChangeText={(value) => {
+            // Clean and format the input
+            const cleanValue = value.replace(/[^0-9.]/g, '');
+            const parts = cleanValue.split('.');
+            if (parts.length > 2) return; // Only allow one decimal point
+            
+            // Limit decimal places based on unit
+            const maxDecimals = bitcoinUnit === 'BTC' ? 8 : 0;
+            if (parts[1] && parts[1].length > maxDecimals) return;
+            
+            const newAmount = parseInputAmount(cleanValue, bitcoinUnit);
+            // Validate against max amount
+            if (parseFloat(newAmount || '0') > maxAmountNum) {
+              setAmount(maxAmount);
+            } else {
+              setAmount(newAmount);
+            }
+          }}
           keyboardType="decimal-pad"
           variant="outlined"
           size="lg"
           style={styles.amountInput}
         />
         
+        {/* Quick amount buttons */}
+        <View style={styles.quickAmounts}>
+          {getQuickAmounts().map((amt) => (
+            <TouchableOpacity
+              key={amt}
+              style={styles.quickAmountButton}
+              onPress={() => setAmount(amt)}
+            >
+              <Text style={styles.quickAmountText}>
+                {amt} {bitcoinUnit}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        
         <View style={styles.balanceInfo}>
           <Text style={styles.balanceText}>
-            Available: {getMaxAmount()} {selectedAsset.ticker}
+            Available: {useFormattedBitcoinAmount(maxAmount)} {bitcoinUnit}
           </Text>
           {selectedAsset.asset_id === 'BTC' && amount && (
             <Text style={styles.usdValue}>
-              ≈ ${((parseFloat(amount) || 0) * 50000).toLocaleString()} USD
+              ≈ ${((bitcoinUnit === 'sats' ? parseFloat(amount) / 100000000 : parseFloat(amount)) * 50000).toLocaleString()} USD
             </Text>
           )}
         </View>
@@ -784,13 +845,31 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderSendButton = () => {
-    const canSend = address && addressType !== 'invalid' && addressType !== 'unknown' && 
-                   (amount || (decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) || decodedRGBInvoice?.amount);
+    const hasAddress = address && addressType !== 'invalid' && addressType !== 'unknown';
+    const hasFixedAmount = (decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) || decodedRGBInvoice?.amount;
+    const hasAmount = amount || hasFixedAmount;
+    const canSend = hasAddress && hasAmount;
+
+    // Dynamic button text based on state
+    let buttonTitle = 'Send Payment';
+    if (loading) {
+      buttonTitle = 'Sending...';
+    } else if (!hasAddress) {
+      buttonTitle = 'Enter Address';
+    } else if (!hasAmount) {
+      buttonTitle = 'Enter Amount';
+    } else if (addressType === 'lightning') {
+      buttonTitle = 'Pay Lightning Invoice';
+    } else if (addressType === 'rgb') {
+      buttonTitle = 'Send RGB Asset';
+    } else {
+      buttonTitle = 'Send Bitcoin';
+    }
 
     return (
       <View style={styles.sendButtonContainer}>
         <Button
-          title={loading ? 'Sending...' : 'Send Payment'}
+          title={buttonTitle}
           onPress={handleSend}
           disabled={loading || !canSend}
           loading={loading}
@@ -799,6 +878,26 @@ function SendScreen({ navigation, route }: Props) {
           size="lg"
           style={styles.sendButton}
         />
+        
+        {/* Quick actions for better UX */}
+        {!hasAddress && (
+          <View style={styles.quickActionsContainer}>
+            <TouchableOpacity
+              style={styles.quickActionButton}
+              onPress={() => navigation.navigate('QRScanner')}
+            >
+              <Ionicons name="qr-code-outline" size={20} color={theme.colors.primary[500]} />
+              <Text style={styles.quickActionText}>Scan QR</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickActionButton}
+              onPress={handlePasteFromClipboard}
+            >
+              <Ionicons name="clipboard-outline" size={20} color={theme.colors.primary[500]} />
+              <Text style={styles.quickActionText}>Paste</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     );
   };
@@ -827,7 +926,7 @@ function SendScreen({ navigation, route }: Props) {
             <View style={styles.confirmationRow}>
               <Text style={styles.confirmationLabel}>Amount:</Text>
               <Text style={styles.confirmationValue}>
-                {amount || (decodedInvoice?.amt_msat ? (decodedInvoice.amt_msat / 1000 / 100000000).toFixed(8) : '0')} {selectedAsset.ticker}
+                {amount || (decodedInvoice?.amt_msat ? useFormattedBitcoinAmount(decodedInvoice.amt_msat / 1000) : '0')} {bitcoinUnit}
               </Text>
             </View>
             
@@ -1391,6 +1490,56 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.text.inverse,
+  },
+  
+  quickAmounts: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing[3],
+    marginBottom: theme.spacing[4],
+    gap: theme.spacing[2],
+  },
+  
+  quickAmountButton: {
+    flex: 1,
+    backgroundColor: theme.colors.primary[50],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+  },
+  
+  quickAmountText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    fontWeight: '600',
+  },
+
+  quickActionsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: theme.spacing[4],
+    marginTop: theme.spacing[3],
+  },
+
+  quickActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.primary[50],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+    gap: theme.spacing[2],
+  },
+
+  quickActionText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    fontWeight: '500',
   },
 });
 

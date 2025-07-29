@@ -26,6 +26,7 @@ import PriceService from '../services/PriceService';
 import { theme } from '../theme';
 import { Card, Button } from '../components';
 import { useAssetIcon } from '../utils';
+import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 
 const { width } = Dimensions.get('window');
 
@@ -84,6 +85,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const { nodeInfo, networkInfo } = useSelector((state: RootState) => state.node);
   const settings = useSelector((state: RootState) => state.settings);
+  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -305,12 +307,13 @@ export default function DashboardScreen({ navigation }: Props) {
     setRefreshing(false);
   };
 
+  // Move the hook usage to the component level
   const formatSatoshis = (satoshis: number): string => {
-    return (satoshis / 100000000).toFixed(8);
+    return formatBitcoinAmount(satoshis, bitcoinUnit);
   };
 
   const formatUSD = (satoshis: number): string => {
-    const btc = satoshis / 100000000;
+    const btc = bitcoinUnit === 'BTC' ? satoshis / 100000000 : satoshis;
     const usd = btc * bitcoinPrice;
     return usd.toFixed(2);
   };
@@ -374,7 +377,7 @@ export default function DashboardScreen({ navigation }: Props) {
                 <Text style={styles.balanceAmount}>
                   {formatSatoshis(totalBalance)}
                 </Text>
-                <Text style={styles.balanceCurrency}>BTC</Text>
+                <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
               </View>
               <Text style={styles.balanceUsd}>
                 ${formatUSD(totalBalance)} USD
@@ -568,13 +571,22 @@ export default function DashboardScreen({ navigation }: Props) {
             <Text style={styles.emptyDescription}>
               Open your first Lightning channel to start transacting
             </Text>
-            <Button
-              title="Open Channel"
-              variant="secondary"
-              size="sm"
-              onPress={() => navigation.navigate('OpenChannel')}
-              style={styles.emptyButton}
-            />
+            <View style={styles.emptyActions}>
+              <Button
+                title="Open Channel"
+                variant="secondary"
+                size="sm"
+                onPress={() => navigation.navigate('OpenChannel')}
+                style={styles.emptyButton}
+              />
+              <Button
+                title="Buy Channel"
+                variant="primary"
+                size="sm"
+                onPress={() => navigation.navigate('LSP')}
+                style={styles.emptyButton}
+              />
+            </View>
           </View>
         </Card>
       ) : (
@@ -624,7 +636,7 @@ export default function DashboardScreen({ navigation }: Props) {
               <View style={styles.channelCapacity}>
                 <Text style={styles.channelCapacityLabel}>Capacity</Text>
                 <Text style={styles.channelCapacityValue}>
-                  {formatSatoshis(channel.capacity_sat)} BTC
+                  {formatSatoshis(channel.capacity_sat)} {bitcoinUnit}
                 </Text>
               </View>
 
@@ -1370,5 +1382,10 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
+  },
+  emptyActions: {
+    flexDirection: 'row',
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[4],
   },
 });

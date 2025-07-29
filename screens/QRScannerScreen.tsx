@@ -72,25 +72,57 @@ export default function QRScannerScreen({ navigation }: Props) {
     scanLineAnim.stopAnimation();
     
     try {
-      await processScannedData(data);
+      const paymentData = await processScannedData(data);
       setScanSuccess(true);
       successAnim.current?.play();
       
-      // Wait for animation to complete before navigating
+      // Faster transition - reduced from 1500ms to 800ms
       setTimeout(() => {
         setScanSuccess(null);
         setScanned(false);
-      }, 1500);
+        
+        // Smart navigation: skip PaymentConfirmation for complete invoices
+        if (shouldSkipConfirmation(paymentData)) {
+          navigation.navigate('Send', {
+            selectedAsset: paymentData.selectedAsset,
+            prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
+            prefilledAmount: 'amount' in paymentData ? paymentData.amount : undefined,
+            label: 'label' in paymentData ? paymentData.label : undefined,
+            message: 'message' in paymentData ? paymentData.message : undefined,
+            decodedInvoice: 'decodedInvoice' in paymentData ? paymentData.decodedInvoice : undefined,
+            decodedRGBInvoice: 'decodedRGBInvoice' in paymentData ? paymentData.decodedRGBInvoice : undefined,
+            isLightning: paymentData.type === 'lightning',
+            fromQRScanner: true,
+          });
+        } else {
+          navigation.navigate('PaymentConfirmation', { paymentData });
+        }
+      }, 800);
     } catch (error) {
       console.error('Error processing scanned data:', error);
       setScanSuccess(false);
       errorAnim.current?.play();
       
+      // Faster error feedback
       setTimeout(() => {
         setScanSuccess(null);
         setScanned(false);
-        Alert.alert('Error', 'Failed to process scanned code');
-      }, 1500);
+        
+        // Better error messaging
+        const errorMessage = getErrorMessage(error);
+        Alert.alert('Scan Error', errorMessage, [
+          { 
+            text: 'Try Again', 
+            onPress: () => resetScanner(),
+            style: 'default'
+          },
+          { 
+            text: 'Cancel', 
+            onPress: () => navigation.goBack(),
+            style: 'cancel'
+          }
+        ]);
+      }, 800);
     }
   };
 
@@ -131,44 +163,56 @@ export default function QRScannerScreen({ navigation }: Props) {
   };
 
   const processScannedData = async (data: string) => {
-    try {
-      // Determine what type of data was scanned
-      if (data.startsWith('rgb:')) {
-        // RGB Invoice
-        await handleRGBInvoice(data);
-      } else if (data.startsWith('lnbc') || data.startsWith('lnbcrt') || data.startsWith('lntb')) {
-        // Lightning Network Invoice
-        await handleLightningInvoice(data);
-      } else if (data.startsWith('bitcoin:')) {
-        // BIP21 URI
-        await handleBIP21URI(data);
-      } else if (isValidBitcoinAddress(data)) {
-        // Plain Bitcoin Address
-        handleBitcoinAddress(data);
-      } else {
-        // Unknown format
-        Alert.alert(
-          'Unknown Format',
-          'The scanned QR code is not a recognized Bitcoin, Lightning, or RGB format.',
-          [
-            { text: 'Scan Again', onPress: () => setScanned(false) },
-            { text: 'Cancel', onPress: () => navigation.goBack() }
-          ]
-        );
-      }
-    } catch (error) {
-      console.error('Error processing scanned data:', error);
-      Alert.alert('Error', 'Failed to process scanned code');
-      setScanned(false);
+    // Determine what type of data was scanned and return payment data
+    if (data.startsWith('rgb:')) {
+      // RGB Invoice
+      return await handleRGBInvoice(data);
+    } else if (data.startsWith('lnbc') || data.startsWith('lnbcrt') || data.startsWith('lntb')) {
+      // Lightning Network Invoice
+      return await handleLightningInvoice(data);
+    } else if (data.startsWith('bitcoin:')) {
+      // BIP21 URI
+      return await handleBIP21URI(data);
+    } else if (isValidBitcoinAddress(data)) {
+      // Plain Bitcoin Address
+      return handleBitcoinAddress(data);
+    } else {
+      // Unknown format - throw error to be handled by caller
+      throw new Error('The scanned QR code is not a recognized Bitcoin, Lightning, or RGB format.');
     }
+  };
+
+  // Helper function to determine if we should skip confirmation screen
+  const shouldSkipConfirmation = (paymentData: any): boolean => {
+    // Skip confirmation for invoices with fixed amounts (Lightning/RGB with amount)
+    const hasFixedAmount = 
+      (paymentData.type === 'lightning' && paymentData.decodedInvoice?.amt_msat > 0) ||
+      (paymentData.type === 'rgb' && paymentData.decodedRGBInvoice?.amount);
+    
+    return hasFixedAmount;
+  };
+
+  // Better error message handling
+  const getErrorMessage = (error: any): string => {
+    if (error?.message?.includes('decode')) {
+      return 'Invalid QR code format. Please scan a valid Bitcoin address, Lightning invoice, or RGB invoice.';
+    }
+    if (error?.message?.includes('network')) {
+      return 'Network error. Please check your connection and try again.';
+    }
+    if (error?.message?.includes('expired')) {
+      return 'This invoice has expired. Please request a new one.';
+    }
+    if (error?.message?.includes('recognized')) {
+      return error.message;
+    }
+    return 'Unable to process this QR code. Please verify it\'s a valid payment code and try again.';
   };
 
   const handleBIP21URI = async (uri: string) => {
     const parsed = parseBIP21URI(uri);
     if (!parsed) {
-      Alert.alert('Error', 'Invalid BIP21 URI format');
-      setScanned(false);
-      return;
+      throw new Error('Invalid BIP21 URI format');
     }
 
     const { address, amount, label, message } = parsed;
@@ -187,91 +231,80 @@ export default function QRScannerScreen({ navigation }: Props) {
       },
     };
 
-    navigation.navigate('PaymentConfirmation', { paymentData });
+    return paymentData;
   };
 
   const handleRGBInvoice = async (invoice: string) => {
-    try {
-      // Decode RGB invoice
-      const decodedInvoice = await apiService.decodeRGBInvoice({ invoice });
-      
-      // Extract amount from assignment if it's a fungible assignment
-      let invoiceAmount: string | undefined = undefined;
-      if (decodedInvoice.assignment && decodedInvoice.assignment.type === 'Fungible' && decodedInvoice.assignment.value) {
-        invoiceAmount = decodedInvoice.assignment.value.toString();
-      }
-      
-      const paymentData = {
-        type: 'rgb' as const,
-        invoice,
-        amount: invoiceAmount,
-        decodedRGBInvoice: decodedInvoice,
-        selectedAsset: decodedInvoice.asset_id ? {
-          asset_id: decodedInvoice.asset_id,
-          ticker: 'RGB',
-          name: 'RGB Asset',
-          isRGB: true,
-        } : {
-          asset_id: 'BTC',
-          ticker: 'BTC',
-          name: 'Bitcoin',
-          isRGB: false,
-        },
-      };
-
-      navigation.navigate('PaymentConfirmation', { paymentData });
-    } catch (error) {
-      console.error('Failed to decode RGB invoice:', error);
-      Alert.alert('Error', 'Failed to decode RGB invoice. Please check that it is valid.');
-      setScanned(false);
+    // Decode RGB invoice
+    const decodedInvoice = await apiService.decodeRGBInvoice({ invoice });
+    
+    // Extract amount from assignment if it's a fungible assignment
+    let invoiceAmount: string | undefined = undefined;
+    if (decodedInvoice.assignment && decodedInvoice.assignment.type === 'Fungible' && decodedInvoice.assignment.value) {
+      invoiceAmount = decodedInvoice.assignment.value.toString();
     }
+    
+    const paymentData = {
+      type: 'rgb' as const,
+      invoice,
+      amount: invoiceAmount,
+      decodedRGBInvoice: decodedInvoice,
+      selectedAsset: decodedInvoice.asset_id ? {
+        asset_id: decodedInvoice.asset_id,
+        ticker: 'RGB',
+        name: 'RGB Asset',
+        isRGB: true,
+      } : {
+        asset_id: 'BTC',
+        ticker: 'BTC',
+        name: 'Bitcoin',
+        isRGB: false,
+      },
+    };
+
+    return paymentData;
   };
 
   const handleLightningInvoice = async (invoice: string) => {
-    try {
-      // Decode Lightning invoice
-      const decodedInvoice = await apiService.decodeLnInvoice({ invoice });
-      
-      const amountBTC = decodedInvoice.amt_msat / 100000000000; // Convert msat to BTC
-      const hasRGBAsset = decodedInvoice.asset_id && decodedInvoice.asset_amount;
-      
-      let amount: string | undefined = undefined;
-      if (hasRGBAsset) {
-        amount = decodedInvoice.asset_amount?.toString();
-      } else if (decodedInvoice.amt_msat > 0) {
-        amount = amountBTC.toFixed(8);
-      }
-      
-      const paymentData = {
-        type: 'lightning' as const,
-        invoice,
-        amount,
-        decodedInvoice,
-        selectedAsset: hasRGBAsset && decodedInvoice.asset_id ? {
-          asset_id: decodedInvoice.asset_id,
-          ticker: 'RGB',
-          name: 'RGB Asset',
-          isRGB: true,
-        } : {
-          asset_id: 'BTC',
-          ticker: 'BTC',
-          name: 'Bitcoin',
-          isRGB: false,
-        },
-      };
-
-      navigation.navigate('PaymentConfirmation', { paymentData });
-    } catch (error) {
-      console.error('Failed to decode Lightning invoice:', error);
-      Alert.alert('Error', 'Failed to decode Lightning invoice. Please check that it is valid.');
-      setScanned(false);
+    // Decode Lightning invoice
+    const decodedInvoice = await apiService.decodeLnInvoice({ invoice });
+    
+    const amountBTC = decodedInvoice.amt_msat / 100000000000; // Convert msat to BTC
+    const hasRGBAsset = decodedInvoice.asset_id && decodedInvoice.asset_amount;
+    
+    let amount: string | undefined = undefined;
+    if (hasRGBAsset) {
+      amount = decodedInvoice.asset_amount?.toString();
+    } else if (decodedInvoice.amt_msat > 0) {
+      amount = amountBTC.toFixed(8);
     }
+    
+    const paymentData = {
+      type: 'lightning' as const,
+      invoice,
+      amount,
+      decodedInvoice,
+      selectedAsset: hasRGBAsset && decodedInvoice.asset_id ? {
+        asset_id: decodedInvoice.asset_id,
+        ticker: 'RGB',
+        name: 'RGB Asset',
+        isRGB: true,
+      } : {
+        asset_id: 'BTC',
+        ticker: 'BTC',
+        name: 'Bitcoin',
+        isRGB: false,
+      },
+    };
+
+    return paymentData;
   };
 
   const handleBitcoinAddress = (address: string) => {
     const paymentData = {
       type: 'bitcoin' as const,
       address,
+      amount: undefined,
       selectedAsset: {
         asset_id: 'BTC',
         ticker: 'BTC',
@@ -280,7 +313,7 @@ export default function QRScannerScreen({ navigation }: Props) {
       },
     };
 
-    navigation.navigate('PaymentConfirmation', { paymentData });
+    return paymentData;
   };
 
   const isValidBitcoinAddress = (address: string): boolean => {

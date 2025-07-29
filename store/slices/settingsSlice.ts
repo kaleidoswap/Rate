@@ -26,7 +26,7 @@ const initialState: SettingsState = {
   nodeType: 'remote',
   remoteNodeUrl: 'https://node-api.thunderstack.org/c1cb65e0-b071-7027-7994-ecad2c46d5ec/efa615e2a9ad4ca4a3f7e8203d73fce3',
   nodePort: 3000,
-  bitcoinUnit: 'BTC',
+  bitcoinUnit: 'sats',
   theme: 'system',
   language: 'en',
   notifications: true,

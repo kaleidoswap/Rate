@@ -22,6 +22,7 @@ import RGBApiService from '../services/RGBApiService';
 import { theme } from '../theme';
 import { Card, Button, Input } from '../components';
 import { useAssetIcon } from '../utils';
+import { useFormattedBitcoinAmount, parseInputAmount } from '../utils/bitcoinUnits';
 
 interface Props {
   navigation: any;
@@ -48,6 +49,7 @@ interface Asset {
 
 export default function ReceiveScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
+  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   
   // Safe destructuring with fallbacks
   const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
@@ -98,14 +100,14 @@ export default function ReceiveScreen({ navigation }: Props) {
           result = response || null;
         } else {
           // Lightning invoice for BTC
-          const amountMsat = amount ? Math.round(parseFloat(amount) * 100000000 * 1000) : undefined;
+          const amountMsat = amount ? Math.round(parseFloat(amount) * (bitcoinUnit === 'BTC' ? 100000000 * 1000 : 1000)) : undefined;
           if (networkType === 'lightning' && !amountMsat && !amount) {
             throw new Error('Amount is required for Lightning invoices');
           }
           
           const response = await apiService.createLightningInvoice({
             amount_msat: amountMsat,
-            description: `Receive ${amount ? amount + ' ' : ''}${selectedAsset.ticker}`,
+            description: `Receive ${amount ? amount + ' ' : ''}${bitcoinUnit}`,
             duration_seconds: 3600, // 1 hour expiry
           });
           result = response?.invoice || null;
@@ -361,6 +363,31 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     const isRequired = networkType === 'lightning';
 
+    // Quick amount buttons for BTC
+    const renderQuickAmounts = () => {
+      if (selectedAsset.ticker !== 'BTC') return null;
+      
+      const quickAmounts = bitcoinUnit === 'BTC' 
+        ? ['0.001', '0.005', '0.01'] 
+        : ['1000', '5000', '10000'];
+      
+      return (
+        <View style={styles.quickAmounts}>
+          {quickAmounts.map((amt) => (
+            <TouchableOpacity
+              key={amt}
+              style={styles.quickAmountButton}
+              onPress={() => setAmount(amt)}
+            >
+              <Text style={styles.quickAmountText}>
+                {amt} {bitcoinUnit}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      );
+    };
+
     return (
       <View style={styles.amountSection}>
         <Text style={styles.sectionTitle}>
@@ -372,23 +399,44 @@ export default function ReceiveScreen({ navigation }: Props) {
               ? `Enter the amount of ${selectedAsset.ticker} to receive via Lightning`
               : `Specify the amount of ${selectedAsset.ticker} for the RGB invoice`
             : isRequired
-              ? `Enter the amount of ${selectedAsset.ticker} to receive`
+              ? `Enter the amount of ${bitcoinUnit} to receive`
               : 'Leave empty for any amount or specify a fixed amount'
           }
         </Text>
         <View style={styles.inputContainer}>
           <Input
-            placeholder="0.00000000"
+            placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
             value={amount}
-            onChangeText={setAmount}
+            onChangeText={(value) => {
+              // Clean and format the input
+              const cleanValue = value.replace(/[^0-9.]/g, '');
+              const parts = cleanValue.split('.');
+              if (parts.length > 2) return; // Only allow one decimal point
+              
+              // Limit decimal places based on unit
+              const maxDecimals = bitcoinUnit === 'BTC' ? 8 : 0;
+              if (parts[1] && parts[1].length > maxDecimals) return;
+              
+              setAmount(parseInputAmount(cleanValue, bitcoinUnit));
+            }}
             keyboardType="decimal-pad"
             variant="outlined"
             style={styles.amountInput}
           />
           <View style={styles.currencyLabel}>
-            <Text style={styles.currencyText}>{selectedAsset.ticker}</Text>
+            <Text style={styles.currencyText}>
+              {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
+            </Text>
           </View>
         </View>
+        
+        {renderQuickAmounts()}
+        
+        {selectedAsset.ticker === 'BTC' && amount && (
+          <Text style={styles.approximateValue}>
+            ≈ ${((bitcoinUnit === 'sats' ? parseFloat(amount) / 100000000 : parseFloat(amount)) * 50000).toLocaleString()} USD
+          </Text>
+        )}
       </View>
     );
   };
@@ -1015,5 +1063,36 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.inverse,
+  },
+
+  quickAmounts: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing[3],
+    gap: theme.spacing[2],
+  },
+  
+  quickAmountButton: {
+    flex: 1,
+    backgroundColor: theme.colors.primary[50],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+  },
+  
+  quickAmountText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    fontWeight: '600',
+  },
+  
+  approximateValue: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing[2],
+    textAlign: 'right',
   },
 });

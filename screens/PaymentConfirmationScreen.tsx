@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Modal,
+  ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +22,9 @@ import { theme } from '../theme';
 import { Card, Button } from '../components';
 import { useAssetIcon } from '../utils';
 import LottieView from 'lottie-react-native';
+import { useSelector } from 'react-redux';
+import { RootState } from '../store';
+import { useFormattedBitcoinAmount, parseInputAmount } from '../utils/bitcoinUnits';
 
 interface PaymentData {
   type: 'bitcoin' | 'bip21' | 'lightning' | 'rgb';
@@ -54,28 +58,10 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
   const [customAmount, setCustomAmount] = useState(paymentData.amount || '');
   const [showAmountInput, setShowAmountInput] = useState(!paymentData.amount);
   const [amountError, setAmountError] = useState('');
-  const [showConfirmModal, setShowConfirmModal] = useState(false);
   
-  const modalAnim = useRef(new Animated.Value(0)).current;
   const successAnim = useRef<LottieView>(null);
-  const errorAnim = useRef<LottieView>(null);
 
-  useEffect(() => {
-    if (showConfirmModal) {
-      Animated.spring(modalAnim, {
-        toValue: 1,
-        useNativeDriver: true,
-        tension: 50,
-        friction: 7,
-      }).start();
-    } else {
-      Animated.timing(modalAnim, {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [showConfirmModal]);
+  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
 
   const handleAmountChange = (text: string) => {
     // Remove any non-numeric characters except decimal point
@@ -93,7 +79,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
     setAmountError('');
   };
 
-  const validateAmount = () => {
+  const validateAmount = (): boolean => {
     const amount = parseFloat(customAmount);
     if (isNaN(amount) || amount <= 0) {
       setAmountError('Please enter a valid amount');
@@ -103,21 +89,18 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
   };
 
   const handleConfirm = () => {
+    // Validate amount if needed
     if (showAmountInput && !validateAmount()) {
       return;
     }
-    setShowConfirmModal(true);
-  };
-
-  const handleFinalConfirm = () => {
+    
     setLoading(true);
     
-    // Show success animation
+    // Show quick success feedback
     successAnim.current?.play();
     
-    // Navigate to Send screen with all the payment data
+    // Navigate directly to Send screen with faster transition
     setTimeout(() => {
-      setShowConfirmModal(false);
       navigation.navigate('Send', {
         selectedAsset: paymentData.selectedAsset,
         prefilledAddress: paymentData.address || paymentData.invoice,
@@ -127,16 +110,13 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
         decodedInvoice: paymentData.decodedInvoice,
         decodedRGBInvoice: paymentData.decodedRGBInvoice,
         isLightning: paymentData.type === 'lightning',
+        fromPaymentConfirmation: true,
       });
-    }, 1500);
+    }, 800);
   };
 
   const handleCancel = () => {
-    if (showConfirmModal) {
-      setShowConfirmModal(false);
-    } else {
-      navigation.goBack();
-    }
+    navigation.goBack();
   };
 
   const AssetIcon = ({ asset }: { asset?: any }) => {
@@ -250,7 +230,9 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
           <View style={styles.assetDetailContainer}>
             <AssetIcon asset={paymentData.selectedAsset} />
             <View style={styles.assetDetailText}>
-              <Text style={styles.assetDetailTicker}>{paymentData.selectedAsset.ticker}</Text>
+              <Text style={styles.assetDetailTicker}>
+                {paymentData.selectedAsset.ticker === 'BTC' ? bitcoinUnit : paymentData.selectedAsset.ticker}
+              </Text>
               <Text style={styles.assetDetailName}>{paymentData.selectedAsset.name}</Text>
             </View>
           </View>
@@ -263,11 +245,11 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
           <Text style={styles.detailLabel}>Amount</Text>
           <View style={styles.amountContainer}>
             <Text style={styles.amountValue}>
-              {paymentData.amount} {paymentData.selectedAsset?.ticker}
+              {useFormattedBitcoinAmount(paymentData.amount)} {paymentData.selectedAsset?.ticker === 'BTC' ? bitcoinUnit : paymentData.selectedAsset?.ticker}
             </Text>
             {paymentData.selectedAsset?.ticker === 'BTC' && (
               <Text style={styles.amountFiat}>
-                ≈ ${((parseFloat(paymentData.amount) || 0) * 50000).toLocaleString()} USD
+                ≈ ${((bitcoinUnit === 'sats' ? parseFloat(paymentData.amount) / 100000000 : parseFloat(paymentData.amount)) * 50000).toLocaleString()} USD
               </Text>
             )}
           </View>
@@ -341,13 +323,13 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
   const renderActions = () => (
     <View style={styles.actionsContainer}>
       <Button
-        title="Cancel"
-        variant="outline"
+        title="Back"
+        variant="secondary"
         onPress={handleCancel}
         style={styles.cancelButton}
       />
       <Button
-        title={paymentData.amount ? "Confirm Payment" : "Enter Amount"}
+        title={showAmountInput ? "Continue" : "Confirm Payment"}
         variant="primary"
         onPress={handleConfirm}
         loading={loading}
@@ -361,109 +343,79 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
 
     return (
       <Card style={styles.amountInputCard}>
-        <Text style={styles.amountInputLabel}>Enter Amount</Text>
+        <Text style={styles.sectionTitle}>Enter Amount</Text>
+        
         <View style={styles.amountInputContainer}>
           <TextInput
             style={styles.amountInput}
             value={customAmount}
-            onChangeText={handleAmountChange}
+            onChangeText={(value) => {
+              handleAmountChange(parseInputAmount(value, bitcoinUnit));
+            }}
             keyboardType="decimal-pad"
-            placeholder="0.00"
+            placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
             placeholderTextColor={theme.colors.text.muted}
             autoFocus
           />
           <Text style={styles.amountInputCurrency}>
-            {paymentData.selectedAsset?.ticker}
+            {paymentData.selectedAsset?.ticker === 'BTC' ? bitcoinUnit : paymentData.selectedAsset?.ticker}
           </Text>
         </View>
+
+        {/* Quick Amount Buttons */}
+        {paymentData.selectedAsset?.ticker === 'BTC' && (
+          <View style={styles.quickAmounts}>
+            {bitcoinUnit === 'BTC' 
+              ? ['0.001', '0.005', '0.01'].map((amount) => (
+                  <TouchableOpacity
+                    key={amount}
+                    style={styles.quickAmountButton}
+                    onPress={() => setCustomAmount(amount)}
+                  >
+                    <Text style={styles.quickAmountText}>{amount} BTC</Text>
+                  </TouchableOpacity>
+                ))
+              : ['1000', '5000', '10000'].map((amount) => (
+                  <TouchableOpacity
+                    key={amount}
+                    style={styles.quickAmountButton}
+                    onPress={() => setCustomAmount(amount)}
+                  >
+                    <Text style={styles.quickAmountText}>{amount} sats</Text>
+                  </TouchableOpacity>
+                ))
+            }
+          </View>
+        )}
+
         {amountError ? (
           <Text style={styles.amountError}>{amountError}</Text>
         ) : null}
+
         {paymentData.selectedAsset?.ticker === 'BTC' && customAmount ? (
           <Text style={styles.amountFiat}>
-            ≈ ${((parseFloat(customAmount) || 0) * 50000).toLocaleString()} USD
+            ≈ ${((bitcoinUnit === 'sats' ? parseFloat(customAmount) / 100000000 : parseFloat(customAmount)) * 50000).toLocaleString()} USD
           </Text>
         ) : null}
       </Card>
     );
   };
 
-  const renderConfirmationModal = () => (
-    <Modal
-      visible={showConfirmModal}
-      transparent
-      animationType="fade"
-      onRequestClose={handleCancel}
-    >
-      <View style={styles.modalOverlay}>
-        <Animated.View
-          style={[
-            styles.modalContent,
-            {
-              transform: [
-                {
-                  translateY: modalAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [300, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <View style={styles.modalHeader}>
-            <View style={styles.modalIcon}>
-              <Ionicons name="shield-checkmark" size={32} color={theme.colors.primary[500]} />
-            </View>
-            <Text style={styles.modalTitle}>Confirm Payment</Text>
-            <Text style={styles.modalSubtitle}>
-              Please review the payment details
-            </Text>
-          </View>
-
-          <View style={styles.modalDetails}>
-            <View style={styles.modalDetailRow}>
-              <Text style={styles.modalDetailLabel}>Amount</Text>
-              <Text style={styles.modalDetailValue}>
-                {showAmountInput ? customAmount : paymentData.amount}{' '}
-                {paymentData.selectedAsset?.ticker}
-              </Text>
-            </View>
-            <View style={styles.modalDetailRow}>
-              <Text style={styles.modalDetailLabel}>To</Text>
-              <Text style={styles.modalDetailValue} numberOfLines={1}>
-                {paymentData.address || paymentData.invoice?.substring(0, 20) + '...'}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.modalActions}>
-            <Button
-              title="Cancel"
-              variant="outline"
-              onPress={handleCancel}
-              style={styles.modalButton}
-            />
-            <Button
-              title="Confirm"
-              variant="primary"
-              onPress={handleFinalConfirm}
-              loading={loading}
-              style={[styles.modalButton, styles.modalConfirmButton]}
-            />
-          </View>
-
-          <LottieView
-            ref={successAnim}
-            source={require('../assets/animations/success.json')}
-            style={styles.modalAnimation}
-            autoPlay={false}
-            loop={false}
-          />
-        </Animated.View>
+  const renderSuccessAnimation = () => {
+    if (!loading) return null;
+    
+    return (
+      <View style={styles.successOverlay}>
+        <LottieView
+          ref={successAnim}
+          source={require('../assets/animations/success.json')}
+          style={styles.successAnimation}
+          autoPlay={false}
+          loop={false}
+        />
       </View>
-    </Modal>
-  );
+    );
+  };
 
   return (
     <KeyboardAvoidingView 
@@ -485,7 +437,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
         </ScrollView>
 
         {renderActions()}
-        {renderConfirmationModal()}
+        {renderSuccessAnimation()}
       </SafeAreaView>
     </KeyboardAvoidingView>
   );
@@ -494,7 +446,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background.secondary,
+    backgroundColor: theme.colors.background.primary,
   },
   
   headerContainer: {
@@ -674,12 +626,9 @@ const styles = StyleSheet.create({
   
   actionsContainer: {
     flexDirection: 'row',
-    paddingHorizontal: theme.spacing[5],
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing[4],
     paddingVertical: theme.spacing[4],
-    backgroundColor: theme.colors.surface.primary,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border.light,
-    gap: theme.spacing[3],
   },
   
   cancelButton: {
@@ -692,11 +641,6 @@ const styles = StyleSheet.create({
   
   bottomPadding: {
     height: theme.spacing[4],
-  },
-
-  amountInputCard: {
-    padding: theme.spacing[5],
-    marginBottom: theme.spacing[4],
   },
 
   amountInputLabel: {
@@ -802,15 +746,17 @@ const styles = StyleSheet.create({
 
   modalActions: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     gap: theme.spacing[3],
   },
 
   modalButton: {
-    flex: 1,
+    minWidth: 120,
   },
 
   modalConfirmButton: {
-    flex: 2,
+    minWidth: 160,
+    backgroundColor: theme.colors.primary[500],
   },
 
   modalAnimation: {
@@ -822,5 +768,91 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.95)',
     borderTopLeftRadius: theme.borderRadius['2xl'],
     borderTopRightRadius: theme.borderRadius['2xl'],
+  },
+
+  amountModalContent: {
+    backgroundColor: theme.colors.surface.primary,
+    borderTopLeftRadius: theme.borderRadius['2xl'],
+    borderTopRightRadius: theme.borderRadius['2xl'],
+    paddingTop: theme.spacing[4],
+    paddingHorizontal: theme.spacing[5],
+    paddingBottom: Platform.OS === 'ios' ? theme.spacing[8] : theme.spacing[5],
+    minHeight: 400, // Ensure enough space for the keyboard
+  },
+
+  amountModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing[4],
+  },
+
+  amountModalCloseButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.gray[100],
+  },
+
+  amountModalTitle: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+
+  amountInputWrapper: {
+    paddingVertical: theme.spacing[4],
+  },
+
+  quickAmounts: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing[4],
+    gap: theme.spacing[2],
+  },
+
+  quickAmountButton: {
+    flex: 1,
+    backgroundColor: theme.colors.primary[50],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+  },
+
+  quickAmountText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    fontWeight: '600',
+  },
+
+  confirmAmountButton: {
+    marginTop: theme.spacing[6],
+  },
+
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+
+  successAnimation: {
+    width: 150,
+    height: 150,
+  },
+
+  amountInputCard: {
+    padding: theme.spacing[5],
+    marginBottom: theme.spacing[4],
   },
 }); 

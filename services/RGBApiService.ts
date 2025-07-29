@@ -320,6 +320,46 @@ interface ListChannelsResponse {
   channels: Channel[];
 }
 
+interface LSPInfo {
+  lsp_connection_url: string;
+  options: {
+    min_funding_confirms_within_blocks: number;
+    min_required_channel_confirmations: number;
+  };
+  assets: Array<{
+    asset_id: string;
+    ticker: string;
+    name: string;
+    precision: number;
+    min_channel_amount: number;
+    max_channel_amount: number;
+  }>;
+}
+
+interface ChannelOrderPayload {
+  announce_channel: boolean;
+  channel_expiry_blocks: number;
+  client_balance_sat: number;
+  client_pubkey: string;
+  funding_confirms_within_blocks: number;
+  lsp_balance_sat: number;
+  refund_onchain_address: string;
+  required_channel_confirmations: number;
+  asset_id?: string;
+  lsp_asset_amount?: number;
+  client_asset_amount?: number;
+}
+
+interface ChannelOrder {
+  order_id: string;
+  created_at: string;
+  expires_at: string;
+  order_state: string;
+  payment_request: string;
+  payment_address: string;
+  payment_amount_sat: number;
+}
+
 export class RGBApiService {
   private static instance: RGBApiService;
   private api: AxiosInstance | null = null;
@@ -596,11 +636,10 @@ export class RGBApiService {
     try {
       console.log('RGB API Request: POST /lninvoice');
       const response = await this.api!.post<{ invoice: string; payment_hash: string }>('/lninvoice', {
-        amount_msat: params.amount_msat,
+        amt_msat: params.amount_msat,
         asset_id: params.asset_id,
         asset_amount: params.asset_amount,
         expiry_sec: params.duration_seconds || 3600,
-        description: params.description || 'Lightning payment',
       });
       return response.data;
     } catch (error) {
@@ -857,6 +896,72 @@ export class RGBApiService {
       const response = await this.api!.post<{
         status: 'Pending' | 'Succeeded' | 'Failed' | 'Expired';
       }>('/invoicestatus', params);
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Get LSP info
+   */
+  public async getLSPInfo(): Promise<LSPInfo> {
+    try {
+      console.log('RGB API Request: GET /lsp/info');
+      const response = await this.api!.get<LSPInfo>('/lsp/info');
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Connect to a peer
+   */
+  public async connectPeer(connectionUrl: string): Promise<void> {
+    try {
+      console.log('RGB API Request: POST /peers/connect');
+      await this.api!.post('/peers/connect', {
+        peer_pubkey_and_addr: connectionUrl,
+      });
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * List peers
+   */
+  public async listPeers(): Promise<Array<{ pubkey: string }>> {
+    try {
+      console.log('RGB API Request: GET /peers');
+      const response = await this.api!.get<{ peers: Array<{ pubkey: string }> }>('/peers');
+      return response.data.peers || [];
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Create a channel order
+   */
+  public async createChannelOrder(payload: ChannelOrderPayload): Promise<ChannelOrder> {
+    try {
+      console.log('RGB API Request: POST /lsp/orders');
+      const response = await this.api!.post<ChannelOrder>('/lsp/orders', payload);
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Get a channel order
+   */
+  public async getChannelOrder(orderId: string): Promise<ChannelOrder> {
+    try {
+      console.log('RGB API Request: GET /lsp/orders/:orderId');
+      const response = await this.api!.get<ChannelOrder>(`/lsp/orders/${orderId}`);
       return response.data;
     } catch (error) {
       return this.handleError(error);
