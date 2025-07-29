@@ -22,7 +22,7 @@ import RGBApiService from '../services/RGBApiService';
 import { theme } from '../theme';
 import { Card, Button, Input } from '../components';
 import { useAssetIcon } from '../utils';
-import { useFormattedBitcoinAmount, parseInputAmount } from '../utils/bitcoinUnits';
+import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 interface Props {
   navigation: any;
@@ -72,6 +72,7 @@ interface Channel {
 export default function ReceiveScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  const { formatSatoshisToUSD } = useBitcoinConversion();
   
   // Safe destructuring with fallbacks
   const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
@@ -796,7 +797,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         
         {selectedAsset.ticker === 'BTC' && amount && isAmountValid() && (
           <Text style={styles.approximateValue}>
-            ≈ ${((bitcoinUnit === 'sats' ? parseFloat(amount.replace(/,/g, '')) / 100000000 : parseFloat(amount.replace(/,/g, ''))) * 50000).toLocaleString()} USD
+            ≈ ${parseFloat(formatSatoshisToUSD(amount.replace(/,/g, ''))).toLocaleString()} USD
           </Text>
         )}
       </View>

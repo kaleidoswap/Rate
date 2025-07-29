@@ -24,7 +24,7 @@ import { useAssetIcon } from '../utils';
 import LottieView from 'lottie-react-native';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
-import { useFormattedBitcoinAmount, parseInputAmount } from '../utils/bitcoinUnits';
+import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 interface PaymentData {
   type: 'bitcoin' | 'bip21' | 'lightning' | 'rgb';
@@ -62,6 +62,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
   const successAnim = useRef<LottieView>(null);
 
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  const { formatSatoshisToUSD } = useBitcoinConversion();
 
   const handleAmountChange = (text: string) => {
     // Remove any non-numeric characters except decimal point
@@ -249,7 +250,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
             </Text>
             {paymentData.selectedAsset?.ticker === 'BTC' && (
               <Text style={styles.amountFiat}>
-                ≈ ${((bitcoinUnit === 'sats' ? parseFloat(paymentData.amount) / 100000000 : parseFloat(paymentData.amount)) * 50000).toLocaleString()} USD
+                ≈ ${parseFloat(formatSatoshisToUSD(paymentData.amount)).toLocaleString()} USD
               </Text>
             )}
           </View>
@@ -394,7 +395,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
 
         {paymentData.selectedAsset?.ticker === 'BTC' && customAmount ? (
           <Text style={styles.amountFiat}>
-            ≈ ${((bitcoinUnit === 'sats' ? parseFloat(customAmount) / 100000000 : parseFloat(customAmount)) * 50000).toLocaleString()} USD
+            ≈ ${parseFloat(formatSatoshisToUSD(customAmount)).toLocaleString()} USD
           </Text>
         ) : null}
       </Card>
