@@ -1,5 +1,5 @@
 // screens/AIAssistantScreen.tsx
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -88,7 +88,7 @@ interface AIResponse {
   } | null;
 }
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
 export default function AIAssistantScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<Message[]>([
@@ -129,12 +129,22 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const userState = useSelector((state: RootState) => state.user);
   const nostrState = useSelector((state: RootState) => state.nostr);
 
+  // Enhanced scroll to bottom function
+  const scrollToBottom = useCallback((animated: boolean = true) => {
+    if (!scrollViewRef.current) return;
+    
+    // Use requestAnimationFrame for smoother scrolling
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollToEnd({ animated });
+    });
+  }, []);
+
   // Add keyboard handling
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
       () => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
+        scrollToBottom(true);
       }
     );
 
@@ -149,7 +159,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       keyboardDidShowListener.remove();
       keyboardDidHideListener.remove();
     };
-  }, []);
+  }, [scrollToBottom]);
 
   const dismissKeyboard = () => {
     Keyboard.dismiss();
@@ -216,17 +226,25 @@ export default function AIAssistantScreen({ navigation }: Props) {
   }, [isLoading]);
 
   // Animate new messages
-  const animateMessage = (messageId: string) => {
+  const animateMessage = useCallback((messageId: string) => {
     const animation = new Animated.Value(0);
     messageAnimations.set(messageId, animation);
     
     Animated.spring(animation, {
       toValue: 1,
-      tension: 100,
+      tension: 120,
       friction: 8,
       useNativeDriver: true,
     }).start();
-  };
+  }, []);
+
+  // Add message with auto-scroll
+  const addMessage = useCallback((message: Message) => {
+    setMessages(prev => [...prev, message]);
+    animateMessage(message.id);
+    // Scroll after a short delay to ensure the message is rendered
+    setTimeout(() => scrollToBottom(true), 100);
+  }, [animateMessage, scrollToBottom]);
 
   const handleSpeechStart = () => {
     console.log('🎤 Speech recognition started');
@@ -371,14 +389,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         timestamp: new Date(),
       };
       
-      setMessages(prev => [...prev, successMessage]);
-      animateMessage(successMessage.id);
-      
-      // Scroll to bottom
-      setTimeout(() => {
-        scrollViewRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-      
+      addMessage(successMessage);
     } catch (error) {
       Alert.alert('Payment Failed', 'Unable to process payment. Please try again.');
     } finally {
@@ -401,8 +412,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
-    animateMessage(userMessage.id);
+    addMessage(userMessage);
     setIsLoading(true);
 
     try {
@@ -427,7 +437,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
               isUser: false,
               timestamp: new Date(),
             };
-            setMessages(prev => [...prev, errorMessage]);
+            addMessage(errorMessage);
             setIsLoading(false);
             return;
           }
@@ -456,8 +466,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         functionResult: response.functionResult || undefined
       };
 
-      setMessages(prev => [...prev, aiMessage]);
-      animateMessage(aiMessage.id);
+      addMessage(aiMessage);
     } catch (error) {
       console.error('AI response error:', error);
       
@@ -467,16 +476,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
         isUser: false,
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, errorMessage]);
-      animateMessage(errorMessage.id);
+      addMessage(errorMessage);
     }
 
     setIsLoading(false);
-
-    // Scroll to bottom
-    setTimeout(() => {
-      scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
   };
 
   const formatRecordingDuration = (seconds: number): string => {
@@ -591,73 +594,82 @@ export default function AIAssistantScreen({ navigation }: Props) {
     }
   };
 
-  const renderMessage = (message: Message, index: number) => (
-    <Animated.View
-      key={message.id}
-      style={[
-        styles.messageContainer,
-        message.isUser ? styles.userMessage : styles.aiMessage,
-        {
-          opacity: 1,
-          transform: [{
-            translateY: 0
-          }]
-        }
-      ]}
-    >
-      {!message.isUser && (
-        <View style={styles.aiAvatar}>
-          <LinearGradient
-            colors={theme.colors.primary.gradient!}
-            style={styles.avatarGradient}
-          >
-            <Ionicons name="sparkles" size={16} color="white" />
-          </LinearGradient>
-        </View>
-      )}
-      
-      <View style={[
-        styles.messageBubble,
-        message.isUser ? styles.userBubble : styles.aiBubble,
-      ]}>
-        {message.isUser ? (
-          <LinearGradient
-            colors={theme.colors.primary.gradient!}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.userGradient}
-          >
-            <Text style={styles.userMessageText}>{message.text}</Text>
-          </LinearGradient>
-        ) : (
-          <View>
-            <Text style={styles.aiMessageText}>{message.text}</Text>
-            {message.functionCalled && message.functionResult && 
-              renderFunctionResult(message.functionCalled, message.functionResult)
-            }
+  const renderMessage = (message: Message, index: number) => {
+    const animation = messageAnimations.get(message.id) || new Animated.Value(1);
+    
+    return (
+      <Animated.View
+        key={message.id}
+        style={[
+          styles.messageContainer,
+          message.isUser ? styles.userMessage : styles.aiMessage,
+          {
+            opacity: animation,
+            transform: [{
+              translateY: animation.interpolate({
+                inputRange: [0, 1],
+                outputRange: [20, 0],
+              }),
+            }],
+          }
+        ]}
+      >
+        {!message.isUser && (
+          <View style={styles.aiAvatar}>
+            <LinearGradient
+              colors={theme.colors.primary.gradient!}
+              style={styles.avatarGradient}
+            >
+              <Ionicons name="sparkles" size={16} color="white" />
+            </LinearGradient>
           </View>
         )}
         
-        <Text style={[
-          styles.messageTime,
-          message.isUser ? styles.userMessageTime : styles.aiMessageTime
+        <View style={[
+          styles.messageBubble,
+          message.isUser ? styles.userBubble : styles.aiBubble,
         ]}>
-          {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </Text>
-      </View>
-      
-      {message.isUser && (
-        <View style={styles.userAvatar}>
-          <LinearGradient
-            colors={theme.colors.warning.gradient!}
-            style={styles.avatarGradient}
-          >
-            <Ionicons name="person" size={16} color="white" />
-          </LinearGradient>
+          {message.isUser ? (
+            <LinearGradient
+              colors={theme.colors.primary.gradient!}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.userGradient}
+            >
+              <Text style={styles.userMessageText}>{message.text}</Text>
+            </LinearGradient>
+          ) : (
+            <View>
+              <Text style={[styles.aiMessageText, { color: theme.colors.text.primary }]}>
+                {message.text}
+              </Text>
+              {message.functionCalled && message.functionResult && 
+                renderFunctionResult(message.functionCalled, message.functionResult)
+              }
+            </View>
+          )}
+          
+          <Text style={[
+            styles.messageTime,
+            message.isUser ? styles.userMessageTime : styles.aiMessageTime
+          ]}>
+            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </Text>
         </View>
-      )}
-    </Animated.View>
-  );
+        
+        {message.isUser && (
+          <View style={styles.userAvatar}>
+            <LinearGradient
+              colors={theme.colors.warning.gradient!}
+              style={styles.avatarGradient}
+            >
+              <Ionicons name="person" size={16} color="white" />
+            </LinearGradient>
+          </View>
+        )}
+      </Animated.View>
+    );
+  };
 
   const renderTypingIndicator = () => (
     <View style={[styles.messageContainer, styles.aiMessage]}>
@@ -767,7 +779,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
     </ScrollView>
   );
 
-  // Add this function inside the AIAssistantScreen component
+  // Improved clear chat function
   const clearChatHistory = () => {
     Alert.alert(
       'Clear Chat History',
@@ -788,10 +800,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
               timestamp: new Date(),
             };
             setMessages([welcomeMessage]);
-            // Force scroll to top after clearing
-            setTimeout(() => {
-              scrollViewRef.current?.scrollTo({ y: 0, animated: true });
-            }, 100);
+            // Clear message animations
+            messageAnimations.clear();
+            // Scroll to top immediately
+            scrollViewRef.current?.scrollTo({ y: 0, animated: false });
           },
         },
       ],
@@ -860,7 +872,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
         <KeyboardAvoidingView 
           style={styles.content}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
           <TouchableWithoutFeedback onPress={dismissKeyboard}>
@@ -868,108 +880,30 @@ export default function AIAssistantScreen({ navigation }: Props) {
               <ScrollView
                 ref={scrollViewRef}
                 style={styles.messagesContainer}
-                contentContainerStyle={[
-                  styles.messagesContent,
-                  { flexGrow: 1, justifyContent: messages.length === 1 ? 'flex-start' : 'flex-end' }
-                ]}
+                contentContainerStyle={styles.messagesContent}
                 showsVerticalScrollIndicator={true}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="on-drag"
-                bounces={true}
-                overScrollMode="always"
                 scrollEventThrottle={16}
+                alwaysBounceVertical={true}
                 onContentSizeChange={() => {
                   if (messages.length > 1) {
-                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                    scrollToBottom(true);
                   }
                 }}
                 onLayout={() => {
                   if (messages.length > 1) {
-                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                    scrollToBottom(false);
                   }
                 }}
               >
-                {messages.map((message, index) => {
-                  const animation = messageAnimations.get(message.id) || new Animated.Value(1);
-                  return (
-                    <Animated.View
-                      key={message.id}
-                      style={[
-                        styles.messageContainer,
-                        message.isUser ? styles.userMessage : styles.aiMessage,
-                        {
-                          opacity: animation,
-                          transform: [{
-                            translateY: animation.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [20, 0],
-                            }),
-                          }],
-                        }
-                      ]}
-                    >
-                      {!message.isUser && (
-                        <View style={styles.aiAvatar}>
-                          <LinearGradient
-                            colors={theme.colors.primary.gradient!}
-                            style={styles.avatarGradient}
-                          >
-                            <Ionicons name="sparkles" size={16} color="white" />
-                          </LinearGradient>
-                        </View>
-                      )}
-                      
-                      <View style={[
-                        styles.messageBubble,
-                        message.isUser ? styles.userBubble : styles.aiBubble,
-                      ]}>
-                        {message.isUser ? (
-                          <LinearGradient
-                            colors={theme.colors.primary.gradient!}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.userGradient}
-                          >
-                            <Text style={styles.userMessageText}>{message.text}</Text>
-                          </LinearGradient>
-                        ) : (
-                          <View>
-                            <Text style={[styles.aiMessageText, { color: theme.colors.text.primary }]}>
-                              {message.text}
-                            </Text>
-                            {message.functionCalled && message.functionResult && 
-                              renderFunctionResult(message.functionCalled, message.functionResult)
-                            }
-                          </View>
-                        )}
-                        
-                        <Text style={[
-                          styles.messageTime,
-                          message.isUser ? styles.userMessageTime : styles.aiMessageTime
-                        ]}>
-                          {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </Text>
-                      </View>
-                      
-                      {message.isUser && (
-                        <View style={styles.userAvatar}>
-                          <LinearGradient
-                            colors={theme.colors.warning.gradient!}
-                            style={styles.avatarGradient}
-                          >
-                            <Ionicons name="person" size={16} color="white" />
-                          </LinearGradient>
-                        </View>
-                      )}
-                    </Animated.View>
-                  );
-                })}
+                {messages.map((message, index) => renderMessage(message, index))}
                 {isLoading && renderTypingIndicator()}
               </ScrollView>
 
               <View style={styles.inputContainer}>
                 <LinearGradient
-                  colors={['rgba(255,255,255,0.9)', 'rgba(255,255,255,0.95)']}
+                  colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.98)']}
                   style={styles.inputGradient}
                 >
                   {/* Enhanced Quick Actions */}
@@ -1059,7 +993,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                       {
                         opacity: pulseAnim.interpolate({
                           inputRange: [1, 1.3],
-                          outputRange: [0.7, 1],
+                          outputRange: [0.8, 1],
                         }),
                       },
                     ]}>
@@ -1113,10 +1047,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
   );
 }
 
-// Enhanced styles using the theme system
+// Enhanced styles with improved spacing and design
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: 'white',
   },
   background: {
     flex: 1,
@@ -1124,10 +1059,11 @@ const styles = StyleSheet.create({
   header: {
     paddingHorizontal: theme.spacing[5],
     paddingVertical: theme.spacing[4],
-    backgroundColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: 'rgba(255,255,255,0.95)',
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border.light,
     ...theme.shadows.sm,
+    zIndex: 1,
   },
   headerContent: {
     flexDirection: 'row',
@@ -1187,20 +1123,23 @@ const styles = StyleSheet.create({
   },
   contentInner: {
     flex: 1,
+    flexDirection: 'column',
   },
   messagesContainer: {
     flex: 1,
-    paddingHorizontal: theme.spacing[2],
+    width: '100%',
   },
   messagesContent: {
-    padding: theme.spacing[4],
-    paddingBottom: theme.spacing[4],
-    minHeight: '100%',
+    flexGrow: 1,
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[4],
+    width: '100%',
   },
   messageContainer: {
     flexDirection: 'row',
     marginBottom: theme.spacing[4],
     alignItems: 'flex-end',
+    width: '100%',
   },
   userMessage: {
     justifyContent: 'flex-end',
@@ -1209,11 +1148,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
   },
   aiAvatar: {
-    marginRight: theme.spacing[2],
+    marginRight: theme.spacing[3],
     marginBottom: theme.spacing[1],
   },
   userAvatar: {
-    marginLeft: theme.spacing[2],
+    marginLeft: theme.spacing[3],
     marginBottom: theme.spacing[1],
   },
   avatarGradient: {
@@ -1225,19 +1164,16 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     maxWidth: screenWidth * 0.75,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.borderRadius.xl,
     overflow: 'hidden',
-    marginVertical: theme.spacing[1], // Add vertical spacing between messages
   },
   userBubble: {
     alignSelf: 'flex-end',
-    marginLeft: screenWidth * 0.15, // Add some margin to prevent full width
   },
   aiBubble: {
     alignSelf: 'flex-start',
     backgroundColor: theme.colors.surface.primary,
     padding: theme.spacing[4],
-    marginRight: screenWidth * 0.15, // Add some margin to prevent full width
     ...theme.shadows.md,
   },
   userGradient: {
@@ -1245,14 +1181,14 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     fontSize: theme.typography.fontSize.base,
-    lineHeight: 24, // Explicit line height
+    lineHeight: 24,
     color: theme.colors.text.inverse,
     fontWeight: '500',
     letterSpacing: 0.3,
   },
   aiMessageText: {
     fontSize: theme.typography.fontSize.base,
-    lineHeight: 24, // Explicit line height
+    lineHeight: 24,
     color: theme.colors.text.primary,
     fontWeight: '400',
     letterSpacing: 0.3,
@@ -1260,10 +1196,10 @@ const styles = StyleSheet.create({
   messageTime: {
     fontSize: theme.typography.fontSize.xs,
     marginTop: theme.spacing[2],
-    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
+    fontWeight: '500',
   },
   userMessageTime: {
-    color: 'rgba(255,255,255,0.9)', // Increased opacity for better readability
+    color: 'rgba(255,255,255,0.9)',
     textAlign: 'right',
   },
   aiMessageTime: {
@@ -1289,14 +1225,13 @@ const styles = StyleSheet.create({
   },
   // Enhanced quick actions
   quickActionsContainer: {
-    marginBottom: theme.spacing[3],
+    marginBottom: theme.spacing[4],
   },
   quickActionsContent: {
     paddingHorizontal: theme.spacing[1],
-    gap: theme.spacing[2],
   },
   quickActionButton: {
-    marginRight: theme.spacing[3], // Increase spacing between quick actions
+    marginRight: theme.spacing[3],
     borderRadius: theme.borderRadius.lg,
     overflow: 'hidden',
     ...theme.shadows.sm,
@@ -1304,8 +1239,8 @@ const styles = StyleSheet.create({
   quickActionGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
     gap: theme.spacing[2],
   },
   quickActionText: {
@@ -1313,7 +1248,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
     letterSpacing: 0.5,
-    paddingHorizontal: theme.spacing[2], // Add horizontal padding
   },
   inputContainer: {
     borderTopWidth: 1,
@@ -1321,7 +1255,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
   },
   inputGradient: {
-    padding: theme.spacing[5],
+    padding: theme.spacing[4],
+    paddingBottom: Platform.OS === 'ios' ? theme.spacing[6] : theme.spacing[4],
   },
   inputRow: {
     flexDirection: 'row',
@@ -1335,14 +1270,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border.light,
     ...theme.shadows.sm,
-    maxHeight: 120, // Limit the height of input container
+    maxHeight: 120,
   },
   textInput: {
     paddingHorizontal: theme.spacing[4],
     paddingVertical: theme.spacing[3],
     fontSize: theme.typography.fontSize.base,
-    maxHeight: 100, // Limit the height of input
-    minHeight: 44, // Minimum height for comfortable typing
+    maxHeight: 100,
+    minHeight: 44,
     color: theme.colors.text.primary,
     lineHeight: 24,
     letterSpacing: 0.3,
@@ -1387,7 +1322,7 @@ const styles = StyleSheet.create({
   recordingIndicator: {
     marginTop: theme.spacing[4],
     paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[5],
+    paddingHorizontal: theme.spacing[4],
     backgroundColor: 'rgba(255,107,107,0.1)',
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
@@ -1409,7 +1344,7 @@ const styles = StyleSheet.create({
   recordingText: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.error[600],
-    fontWeight: '600', // Changed from theme.typography.fontWeight.semibold
+    fontWeight: '600',
   },
   stopRecordingButton: {
     alignSelf: 'center',
@@ -1421,7 +1356,7 @@ const styles = StyleSheet.create({
   stopRecordingText: {
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.error[600],
-    fontWeight: '600', // Changed from theme.typography.fontWeight.semibold
+    fontWeight: '600',
   },
   voiceTips: {
     flexDirection: 'row',
@@ -1443,7 +1378,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.25,
   },
   
-  // Function result styles (keep existing ones)
+  // Function result styles
   functionResult: {
     marginTop: theme.spacing[4],
     padding: theme.spacing[4],
@@ -1461,14 +1396,14 @@ const styles = StyleSheet.create({
   },
   successText: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.success[700], // Darkened for better contrast
-    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
+    color: theme.colors.success[700],
+    fontWeight: '500',
     marginBottom: theme.spacing[1],
   },
   errorText: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[700], // Darkened for better contrast
-    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
+    color: theme.colors.error[700],
+    fontWeight: '500',
   },
   invoiceText: {
     fontSize: theme.typography.fontSize.base,
@@ -1487,8 +1422,8 @@ const styles = StyleSheet.create({
   },
   copyText: {
     fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.primary[700], // Darkened for better contrast
-    fontWeight: '500', // Changed from theme.typography.fontWeight.medium
+    color: theme.colors.primary[700],
+    fontWeight: '500',
   },
   merchantList: {
     maxHeight: 200,
@@ -1534,9 +1469,9 @@ const styles = StyleSheet.create({
   },
   merchantHours: {
     fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.success[700], // Darkened for better contrast
+    color: theme.colors.success[700],
     marginBottom: theme.spacing[1],
-    fontWeight: '500', // Added for better readability
+    fontWeight: '500',
   },
   clearButton: {
     width: 32,
@@ -1550,6 +1485,6 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
-    opacity: 0.9, // Slightly transparent to look better
+    opacity: 0.9,
   },
 });
