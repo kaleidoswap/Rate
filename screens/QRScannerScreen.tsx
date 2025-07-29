@@ -1,5 +1,5 @@
 // screens/QRScannerScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,16 @@ import {
   TouchableOpacity,
   Alert,
   Dimensions,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import RGBApiService from '../services/RGBApiService';
+import { theme } from '../theme';
+import LottieView from 'lottie-react-native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -23,7 +28,12 @@ export default function QRScannerScreen({ navigation }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
-
+  const [scanSuccess, setScanSuccess] = useState<boolean | null>(null);
+  
+  const scanLineAnim = useRef(new Animated.Value(0)).current;
+  const successAnim = useRef<LottieView>(null);
+  const errorAnim = useRef<LottieView>(null);
+  
   const apiService = RGBApiService.getInstance();
 
   useEffect(() => {
@@ -32,13 +42,120 @@ export default function QRScannerScreen({ navigation }: Props) {
     }
   }, [permission, requestPermission]);
 
+  useEffect(() => {
+    // Start scanning animation
+    const startScanAnimation = () => {
+      scanLineAnim.setValue(0);
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(scanLineAnim, {
+            toValue: 1,
+            duration: 2000,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+    };
+
+    if (!scanned) {
+      startScanAnimation();
+    } else {
+      scanLineAnim.stopAnimation();
+    }
+  }, [scanned]);
+
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
     if (scanned) return;
     
     setScanned(true);
+    scanLineAnim.stopAnimation();
     
     try {
       await processScannedData(data);
+      setScanSuccess(true);
+      successAnim.current?.play();
+      
+      // Wait for animation to complete before navigating
+      setTimeout(() => {
+        setScanSuccess(null);
+        setScanned(false);
+      }, 1500);
+    } catch (error) {
+      console.error('Error processing scanned data:', error);
+      setScanSuccess(false);
+      errorAnim.current?.play();
+      
+      setTimeout(() => {
+        setScanSuccess(null);
+        setScanned(false);
+        Alert.alert('Error', 'Failed to process scanned code');
+      }, 1500);
+    }
+  };
+
+  const parseBIP21URI = (uri: string): { address: string; amount?: number; label?: string; message?: string } | null => {
+    try {
+      // Handle bitcoin: URI format
+      if (!uri.startsWith('bitcoin:')) {
+        return null;
+      }
+
+      const withoutPrefix = uri.substring(8); // Remove 'bitcoin:'
+      const [address, queryString] = withoutPrefix.split('?');
+      
+      if (!address || !isValidBitcoinAddress(address)) {
+        return null;
+      }
+
+      const result: any = { address };
+
+      if (queryString) {
+        const params = new URLSearchParams(queryString);
+        if (params.get('amount')) {
+          result.amount = parseFloat(params.get('amount')!);
+        }
+        if (params.get('label')) {
+          result.label = params.get('label');
+        }
+        if (params.get('message')) {
+          result.message = params.get('message');
+        }
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Error parsing BIP21 URI:', error);
+      return null;
+    }
+  };
+
+  const processScannedData = async (data: string) => {
+    try {
+      // Determine what type of data was scanned
+      if (data.startsWith('rgb:')) {
+        // RGB Invoice
+        await handleRGBInvoice(data);
+      } else if (data.startsWith('lnbc') || data.startsWith('lnbcrt') || data.startsWith('lntb')) {
+        // Lightning Network Invoice
+        await handleLightningInvoice(data);
+      } else if (data.startsWith('bitcoin:')) {
+        // BIP21 URI
+        await handleBIP21URI(data);
+      } else if (isValidBitcoinAddress(data)) {
+        // Plain Bitcoin Address
+        handleBitcoinAddress(data);
+      } else {
+        // Unknown format
+        Alert.alert(
+          'Unknown Format',
+          'The scanned QR code is not a recognized Bitcoin, Lightning, or RGB format.',
+          [
+            { text: 'Scan Again', onPress: () => setScanned(false) },
+            { text: 'Cancel', onPress: () => navigation.goBack() }
+          ]
+        );
+      }
     } catch (error) {
       console.error('Error processing scanned data:', error);
       Alert.alert('Error', 'Failed to process scanned code');
@@ -46,58 +163,66 @@ export default function QRScannerScreen({ navigation }: Props) {
     }
   };
 
-  const processScannedData = async (data: string) => {
-    // Determine what type of data was scanned
-    if (data.startsWith('rgb:')) {
-      // RGB Invoice
-      await handleRGBInvoice(data);
-    } else if (data.startsWith('lnbc') || data.startsWith('lnbcrt') || data.startsWith('lntb')) {
-      // Lightning Network Invoice
-      await handleLightningInvoice(data);
-    } else if (isValidBitcoinAddress(data)) {
-      // Bitcoin Address
-      handleBitcoinAddress(data);
-    } else {
-      // Unknown format
-      Alert.alert(
-        'Unknown Format',
-        'The scanned QR code is not a recognized Bitcoin, Lightning, or RGB format.',
-        [
-          { text: 'Scan Again', onPress: () => setScanned(false) },
-          { text: 'Cancel', onPress: () => navigation.goBack() }
-        ]
-      );
+  const handleBIP21URI = async (uri: string) => {
+    const parsed = parseBIP21URI(uri);
+    if (!parsed) {
+      Alert.alert('Error', 'Invalid BIP21 URI format');
+      setScanned(false);
+      return;
     }
+
+    const { address, amount, label, message } = parsed;
+    
+    const paymentData = {
+      type: 'bip21' as const,
+      address,
+      amount: amount ? amount.toFixed(8) : undefined,
+      label,
+      message,
+      selectedAsset: {
+        asset_id: 'BTC',
+        ticker: 'BTC',
+        name: 'Bitcoin',
+        isRGB: false,
+      },
+    };
+
+    navigation.navigate('PaymentConfirmation', { paymentData });
   };
 
   const handleRGBInvoice = async (invoice: string) => {
     try {
       // Decode RGB invoice
-      const decodedInvoice = await apiService.decodeRgbInvoice({ invoice });
+      const decodedInvoice = await apiService.decodeRGBInvoice({ invoice });
       
-      Alert.alert(
-        'RGB Invoice Detected',
-        `Asset: ${decodedInvoice.asset_id || 'Any'}\nRecipient: ${decodedInvoice.recipient_id}`,
-        [
-          {
-            text: 'Send Assets',
-            onPress: () => {
-              navigation.navigate('SendRGB', {
-                recipientId: decodedInvoice.recipient_id,
-                assetId: decodedInvoice.asset_id,
-                amount: decodedInvoice.amount,
-              });
-            }
-          },
-          {
-            text: 'Cancel',
-            onPress: () => navigation.goBack(),
-            style: 'cancel'
-          }
-        ]
-      );
+      // Extract amount from assignment if it's a fungible assignment
+      let invoiceAmount: string | undefined = undefined;
+      if (decodedInvoice.assignment && decodedInvoice.assignment.type === 'Fungible' && decodedInvoice.assignment.value) {
+        invoiceAmount = decodedInvoice.assignment.value.toString();
+      }
+      
+      const paymentData = {
+        type: 'rgb' as const,
+        invoice,
+        amount: invoiceAmount,
+        decodedRGBInvoice: decodedInvoice,
+        selectedAsset: decodedInvoice.asset_id ? {
+          asset_id: decodedInvoice.asset_id,
+          ticker: 'RGB',
+          name: 'RGB Asset',
+          isRGB: true,
+        } : {
+          asset_id: 'BTC',
+          ticker: 'BTC',
+          name: 'Bitcoin',
+          isRGB: false,
+        },
+      };
+
+      navigation.navigate('PaymentConfirmation', { paymentData });
     } catch (error) {
-      Alert.alert('Error', 'Failed to decode RGB invoice');
+      console.error('Failed to decode RGB invoice:', error);
+      Alert.alert('Error', 'Failed to decode RGB invoice. Please check that it is valid.');
       setScanned(false);
     }
   };
@@ -110,56 +235,52 @@ export default function QRScannerScreen({ navigation }: Props) {
       const amountBTC = decodedInvoice.amt_msat / 100000000000; // Convert msat to BTC
       const hasRGBAsset = decodedInvoice.asset_id && decodedInvoice.asset_amount;
       
-      let message = `Amount: ${amountBTC.toFixed(8)} BTC`;
+      let amount: string | undefined = undefined;
       if (hasRGBAsset) {
-        message += `\nRGB Asset: ${decodedInvoice.asset_id}\nAsset Amount: ${decodedInvoice.asset_amount}`;
+        amount = decodedInvoice.asset_amount?.toString();
+      } else if (decodedInvoice.amt_msat > 0) {
+        amount = amountBTC.toFixed(8);
       }
-      message += `\nPayee: ${decodedInvoice.payee_pubkey}`;
       
-      Alert.alert(
-        'Lightning Invoice Detected',
-        message,
-        [
-          {
-            text: 'Pay Invoice',
-            onPress: () => {
-              navigation.navigate('PayInvoice', {
-                invoice,
-                decodedInvoice,
-              });
-            }
-          },
-          {
-            text: 'Cancel',
-            onPress: () => navigation.goBack(),
-            style: 'cancel'
-          }
-        ]
-      );
+      const paymentData = {
+        type: 'lightning' as const,
+        invoice,
+        amount,
+        decodedInvoice,
+        selectedAsset: hasRGBAsset && decodedInvoice.asset_id ? {
+          asset_id: decodedInvoice.asset_id,
+          ticker: 'RGB',
+          name: 'RGB Asset',
+          isRGB: true,
+        } : {
+          asset_id: 'BTC',
+          ticker: 'BTC',
+          name: 'Bitcoin',
+          isRGB: false,
+        },
+      };
+
+      navigation.navigate('PaymentConfirmation', { paymentData });
     } catch (error) {
-      Alert.alert('Error', 'Failed to decode Lightning invoice');
+      console.error('Failed to decode Lightning invoice:', error);
+      Alert.alert('Error', 'Failed to decode Lightning invoice. Please check that it is valid.');
       setScanned(false);
     }
   };
 
   const handleBitcoinAddress = (address: string) => {
-    Alert.alert(
-      'Bitcoin Address Detected',
-      `Address: ${address}`,
-      [
-        {
-          text: 'Send Bitcoin',
-          onPress: () => {
-            navigation.navigate('SendBTC', { address });
-          }
-        },
-        {
-          text: 'Cancel',
-          onPress: () => navigation.goBack(),
-          style: 'cancel'
-        }
-      ]
-    );
+    const paymentData = {
+      type: 'bitcoin' as const,
+      address,
+      selectedAsset: {
+        asset_id: 'BTC',
+        ticker: 'BTC',
+        name: 'Bitcoin',
+        isRGB: false,
+      },
+    };
+
+    navigation.navigate('PaymentConfirmation', { paymentData });
   };
 
   const isValidBitcoinAddress = (address: string): boolean => {
@@ -182,6 +303,45 @@ export default function QRScannerScreen({ navigation }: Props) {
 
   const resetScanner = () => {
     setScanned(false);
+  };
+
+  const renderScanAnimation = () => (
+    <View style={styles.scanArea}>
+      <View style={[styles.corner, styles.topLeft]} />
+      <View style={[styles.corner, styles.topRight]} />
+      <View style={[styles.corner, styles.bottomLeft]} />
+      <View style={[styles.corner, styles.bottomRight]} />
+      
+      <Animated.View
+        style={[
+          styles.scanLine,
+          {
+            transform: [{
+              translateY: scanLineAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, 250],
+              }),
+            }],
+          },
+        ]}
+      />
+    </View>
+  );
+
+  const renderFeedbackAnimation = () => {
+    if (scanSuccess === null) return null;
+
+    return (
+      <View style={styles.feedbackContainer}>
+        <LottieView
+          ref={scanSuccess ? successAnim : errorAnim}
+          source={scanSuccess ? require('../assets/animations/success.json') : require('../assets/animations/error.json')}
+          style={styles.feedbackAnimation}
+          autoPlay={false}
+          loop={false}
+        />
+      </View>
+    );
   };
 
   if (!permission) {
@@ -211,19 +371,30 @@ export default function QRScannerScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="white" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Scan QR Code</Text>
-        <TouchableOpacity onPress={toggleFlash}>
-          <Ionicons 
-            name={flashEnabled ? "flash" : "flash-off"} 
-            size={24} 
-            color="white" 
-          />
-        </TouchableOpacity>
-      </View>
+      <LinearGradient
+        colors={['rgba(0,0,0,0.8)', 'transparent']}
+        style={styles.headerGradient}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.headerButton} 
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="white" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Scan QR Code</Text>
+          <TouchableOpacity 
+            style={styles.headerButton} 
+            onPress={toggleFlash}
+          >
+            <Ionicons 
+              name={flashEnabled ? "flash" : "flash-off"} 
+              size={24} 
+              color="white" 
+            />
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
 
       <View style={styles.cameraContainer}>
         <CameraView
@@ -236,31 +407,32 @@ export default function QRScannerScreen({ navigation }: Props) {
           enableTorch={flashEnabled}
         />
         
-        {/* Scanner overlay */}
         <View style={styles.overlay}>
-          <View style={styles.scanArea}>
-            <View style={[styles.corner, styles.topLeft]} />
-            <View style={[styles.corner, styles.topRight]} />
-            <View style={[styles.corner, styles.bottomLeft]} />
-            <View style={[styles.corner, styles.bottomRight]} />
-          </View>
+          {renderScanAnimation()}
+          {renderFeedbackAnimation()}
         </View>
 
-        {/* Instructions */}
-        <View style={styles.instructions}>
-          <Text style={styles.instructionText}>
-            Point your camera at a QR code
-          </Text>
-          <Text style={styles.subInstructionText}>
-            Supports Bitcoin addresses, Lightning invoices, and RGB invoices
-          </Text>
-        </View>
+        <LinearGradient
+          colors={['transparent', 'rgba(0,0,0,0.8)']}
+          style={styles.instructionsGradient}
+        >
+          <View style={styles.instructions}>
+            <Text style={styles.instructionText}>
+              Point your camera at a QR code
+            </Text>
+            <Text style={styles.subInstructionText}>
+              Supports Bitcoin addresses, Lightning invoices, and RGB invoices
+            </Text>
+          </View>
+        </LinearGradient>
       </View>
 
-      {/* Bottom controls */}
       <View style={styles.bottomControls}>
         {scanned && (
-          <TouchableOpacity style={styles.scanAgainButton} onPress={resetScanner}>
+          <TouchableOpacity 
+            style={styles.scanAgainButton} 
+            onPress={() => setScanned(false)}
+          >
             <Text style={styles.scanAgainButtonText}>Scan Again</Text>
           </TouchableOpacity>
         )}
@@ -312,12 +484,14 @@ const styles = StyleSheet.create({
     width: 250,
     height: 250,
     position: 'relative',
+    borderRadius: 20,
+    overflow: 'hidden',
   },
   corner: {
     position: 'absolute',
     width: 30,
     height: 30,
-    borderColor: '#007AFF',
+    borderColor: theme.colors.primary[500],
     borderWidth: 3,
   },
   topLeft: {
@@ -396,5 +570,49 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  headerGradient: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1,
+    height: 120,
+  },
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanLine: {
+    height: 2,
+    width: '100%',
+    backgroundColor: theme.colors.primary[500],
+    position: 'absolute',
+    top: 0,
+  },
+  feedbackContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.7)',
+  },
+  feedbackAnimation: {
+    width: 150,
+    height: 150,
+  },
+  instructionsGradient: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 160,
   },
 });

@@ -818,6 +818,52 @@ export class RGBApiService {
   }
 
   /**
+   * Decode a Lightning Network invoice
+   */
+  public async decodeLnInvoice(params: { invoice: string }): Promise<{
+    payment_hash: string;
+    amt_msat: number;
+    description: string;
+    expiry_sec: number;
+    payee_pubkey: string;
+    asset_id?: string;
+    asset_amount?: number;
+  }> {
+    try {
+      console.log('RGB API Request: POST /decodeln');
+      const response = await this.api!.post<{
+        payment_hash: string;
+        amt_msat: number;
+        description: string;
+        expiry_sec: number;
+        payee_pubkey: string;
+        asset_id?: string;
+        asset_amount?: number;
+      }>('/decodeln', params);
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
+   * Get Lightning invoice status
+   */
+  public async getInvoiceStatus(params: { invoice: string }): Promise<{
+    status: 'Pending' | 'Succeeded' | 'Failed' | 'Expired';
+  }> {
+    try {
+      console.log('RGB API Request: POST /invoicestatus');
+      const response = await this.api!.post<{
+        status: 'Pending' | 'Succeeded' | 'Failed' | 'Expired';
+      }>('/invoicestatus', params);
+      return response.data;
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  /**
    * Create a new API instance with the current node configuration
    */
   private createApiInstance(): AxiosInstance {

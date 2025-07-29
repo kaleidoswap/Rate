@@ -149,15 +149,41 @@ function SendScreen({ navigation, route }: Props) {
   ];
 
   useEffect(() => {
-    if (route.params?.address) {
-      setAddress(route.params.address);
-      detectAddressType(route.params.address);
-    }
-    if (route.params?.assetId) {
+    // Handle route parameters from QR scanner or other navigation
+    if (route.params?.selectedAsset) {
+      // If selectedAsset is provided directly, use it
+      setSelectedAsset(route.params.selectedAsset);
+    } else if (route.params?.assetId) {
+      // Legacy support for assetId parameter
       const asset = allAssets.find(a => a.asset_id === route.params.assetId);
       if (asset) {
         setSelectedAsset(asset);
       }
+    }
+
+    if (route.params?.prefilledAddress || route.params?.address) {
+      const addressToSet = route.params.prefilledAddress || route.params.address;
+      setAddress(addressToSet);
+      detectAddressType(addressToSet);
+    }
+
+    if (route.params?.prefilledAmount) {
+      setAmount(route.params.prefilledAmount);
+    }
+
+    // Handle pre-decoded invoices from QR scanner
+    if (route.params?.decodedInvoice) {
+      setDecodedInvoice(route.params.decodedInvoice);
+      setAddressType('lightning');
+    }
+
+    if (route.params?.decodedRGBInvoice) {
+      setDecodedRGBInvoice(route.params.decodedRGBInvoice);
+      setAddressType('rgb');
+    }
+
+    if (route.params?.isLightning) {
+      setAddressType('lightning');
     }
   }, [route.params]);
 
@@ -185,16 +211,8 @@ function SendScreen({ navigation, route }: Props) {
       if (input.startsWith('ln')) {
         // Lightning invoice
         try {
-          // TODO: Implement decodeInvoice in RGBApiService
-          const decoded = await apiService.decodeRGBInvoice({ invoice: input });
-          setDecodedInvoice({
-            payment_hash: decoded.recipient_id,
-            amt_msat: 0, // This should come from the actual decoded invoice
-            description: '',
-            expiry_sec: Math.floor((decoded.expiration_timestamp - Date.now()) / 1000),
-            payee_pubkey: '',
-            asset_id: decoded.asset_id,
-          });
+          const decoded = await apiService.decodeLnInvoice({ invoice: input });
+          setDecodedInvoice(decoded);
           setAddressType('lightning');
           
           // Auto-set asset and amount if specified in invoice
@@ -202,7 +220,18 @@ function SendScreen({ navigation, route }: Props) {
             const asset = allAssets.find(a => a.asset_id === decoded.asset_id);
             if (asset) {
               setSelectedAsset(asset);
-              // Amount handling will need to be implemented based on your needs
+              if (decoded.asset_amount) {
+                setAmount(decoded.asset_amount.toString());
+              }
+            }
+          } else if (decoded.amt_msat > 0) {
+            // BTC Lightning invoice with amount
+            const amountBTC = decoded.amt_msat / 100000000000; // Convert msat to BTC
+            setAmount(amountBTC.toFixed(8));
+            // Ensure BTC is selected for BTC invoices
+            const btcAsset = allAssets.find(a => a.asset_id === 'BTC');
+            if (btcAsset) {
+              setSelectedAsset(btcAsset);
             }
           }
         } catch (error) {
@@ -213,9 +242,16 @@ function SendScreen({ navigation, route }: Props) {
         // RGB invoice
         try {
           const decoded = await apiService.decodeRGBInvoice({ invoice: input });
+          
+          // Extract amount from assignment if it's a fungible assignment
+          let invoiceAmount: number | null = null;
+          if (decoded.assignment && decoded.assignment.type === 'Fungible' && decoded.assignment.value) {
+            invoiceAmount = decoded.assignment.value;
+          }
+          
           const decodedWithAmount: DecodedRGBInvoice = {
             ...decoded,
-            amount: null, // You'll need to implement this based on your needs
+            amount: invoiceAmount,
           };
           setDecodedRGBInvoice(decodedWithAmount);
           setAddressType('rgb');
@@ -225,6 +261,12 @@ function SendScreen({ navigation, route }: Props) {
             const asset = allAssets.find(a => a.asset_id === decoded.asset_id);
             if (asset) {
               setSelectedAsset(asset);
+              // Set amount if specified in invoice
+              if (invoiceAmount) {
+                const precision = asset.precision || 8;
+                const formattedAmount = invoiceAmount / Math.pow(10, precision);
+                setAmount(formattedAmount.toString());
+              }
             } else {
               setValidationError(`You don't have the requested asset: ${decoded.asset_id.substring(0, 8)}...`);
             }

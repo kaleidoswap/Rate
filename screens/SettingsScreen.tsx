@@ -115,8 +115,24 @@ export default function SettingsScreen({ navigation }: Props) {
     }
   };
 
+  const renderHeader = () => (
+    <View style={styles.headerContainer}>
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Settings</Text>
+        <View style={styles.placeholder} />
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
+      {renderHeader()}
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Nostr Section */}
         <View style={styles.section}>
@@ -298,6 +314,39 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.secondary,
   },
   
+  headerContainer: {
+    backgroundColor: theme.colors.surface.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.border.light,
+  },
+  
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[4],
+  },
+  
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  headerTitle: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  
+  placeholder: {
+    width: 40,
+  },
+
   scrollView: {
     flex: 1,
     paddingHorizontal: theme.spacing[5],

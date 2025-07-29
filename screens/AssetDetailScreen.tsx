@@ -210,18 +210,6 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
         </View>
         <Text style={styles.actionText}>Send</Text>
       </TouchableOpacity>
-
-      {!isBTC && (
-        <TouchableOpacity 
-          style={styles.actionButton} 
-          onPress={() => Alert.alert('Feature Coming Soon', 'Asset transfers will be available soon')}
-        >
-          <View style={styles.actionIconContainer}>
-            <Ionicons name="swap-horizontal" size={24} color={theme.colors.secondary[500]} />
-          </View>
-          <Text style={styles.actionText}>Transfer</Text>
-        </TouchableOpacity>
-      )}
     </View>
   );
 

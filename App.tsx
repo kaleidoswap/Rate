@@ -12,6 +12,7 @@ type RootStackParamList = {
   Send: { selectedAsset?: any } | undefined;
   Receive: { selectedAsset?: any } | undefined;
   QRScanner: undefined;
+  PaymentConfirmation: { paymentData: any };
   AIAssistant: undefined;
   Assets: undefined;
   Swap: undefined;
@@ -40,6 +41,7 @@ import ContactsScreen from './screens/ContactsScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrContactsScreen from './screens/NostrContactsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
+import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
 
 type TabBarIconProps = {
   focused: boolean;
@@ -234,6 +236,14 @@ function AppNavigator() {
               fontWeight: '600',
             },
             headerTintColor: theme.colors.text.inverse,
+          }}
+        />
+        <Stack.Screen 
+          name="PaymentConfirmation" 
+          component={PaymentConfirmationScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: false,
           }}
         />
         <Stack.Screen 
