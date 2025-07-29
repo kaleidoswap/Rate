@@ -33,6 +33,7 @@
     "expo-secure-store": "~14.2.3",
     "expo-sqlite": "~15.2.14",
     "expo-status-bar": "~2.2.3",
+    "lottie-react-native": "7.2.2",
     "metro": "^0.82.0",
     "metro-config": "^0.83.1",
     "metro-core": "^0.83.1",
