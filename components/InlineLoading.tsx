@@ -26,29 +26,31 @@ export const InlineLoading: React.FC<InlineLoadingProps> = ({
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
+    // Remove fade delay for immediate display
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 300,
+      duration: 0,
       useNativeDriver: true,
     }).start();
 
-    const pulseAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 0.7,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    pulseAnimation.start();
+    // Remove pulse animation to eliminate delays
+    // const pulseAnimation = Animated.loop(
+    //   Animated.sequence([
+    //     Animated.timing(pulseAnim, {
+    //       toValue: 0.7,
+    //       duration: 800,
+    //       useNativeDriver: true,
+    //     }),
+    //     Animated.timing(pulseAnim, {
+    //       toValue: 1,
+    //       duration: 800,
+    //       useNativeDriver: true,
+    //     }),
+    //   ])
+    // );
+    // pulseAnimation.start();
 
-    return () => pulseAnimation.stop();
+    // return () => pulseAnimation.stop();
   }, []);
 
   const getSizeConfig = () => {
@@ -188,23 +190,26 @@ export const SkeletonLoader: React.FC<{
   const shimmerAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const shimmerAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(shimmerAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(shimmerAnim, {
-          toValue: 0,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    shimmerAnimation.start();
+    // Remove shimmer animation to eliminate delays
+    shimmerAnim.setValue(0.5); // Set to a middle opacity value
+    
+    // const shimmerAnimation = Animated.loop(
+    //   Animated.sequence([
+    //     Animated.timing(shimmerAnim, {
+    //       toValue: 1,
+    //       duration: 1000,
+    //       useNativeDriver: true,
+    //     }),
+    //     Animated.timing(shimmerAnim, {
+    //       toValue: 0,
+    //       duration: 1000,
+    //       useNativeDriver: true,
+    //     }),
+    //   ])
+    // );
+    // shimmerAnimation.start();
 
-    return () => shimmerAnimation.stop();
+    // return () => shimmerAnimation.stop();
   }, []);
 
   return (
