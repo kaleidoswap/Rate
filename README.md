@@ -196,7 +196,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - **Documentation**: See [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md) for detailed setup
 - **Issues**: Report bugs via GitHub Issues
-- **Hackathon Info**: See [HACKATHON.md](HACKATHON.md) for presentation details
 
 ## Roadmap
 

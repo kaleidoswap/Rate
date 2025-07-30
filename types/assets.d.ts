@@ -37,11 +37,3 @@ declare module "*.json" {
   
   module.exports = mergeConfig(defaultConfig, config);
   
-  // If you're using Expo, make sure your app.json includes:
-  // {
-  //   "expo": {
-  //     "assetBundlePatterns": [
-  //       "**/*"
-  //     ]
-  //   }
-  // }

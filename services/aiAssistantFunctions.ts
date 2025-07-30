@@ -7,7 +7,7 @@ import { getStore } from '../store/storeProvider';
 
 // Initialize PremAI client
 const premaiClient = new PremAI({
-  apiKey: 'premKey_s1rKUkWbb0JbVRUU12U6y6bnUZJjaNZa7a3z', // Your existing PremAI key
+  apiKey: '', // Your existing PremAI key
 });
 
 // Location data from Lugano merchants

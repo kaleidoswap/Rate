@@ -24,7 +24,7 @@ interface SettingsState {
 
 const initialState: SettingsState = {
   nodeType: 'remote',
-  remoteNodeUrl: 'https://node-api.thunderstack.org/c1cb65e0-b071-7027-7994-ecad2c46d5ec/efa615e2a9ad4ca4a3f7e8203d73fce3',
+  remoteNodeUrl: '', // thunderstack url
   nodePort: 3000,
   bitcoinUnit: 'sats',
   theme: 'system',
