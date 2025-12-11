@@ -1,6 +1,7 @@
 // services/RGBApiService.ts
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { RGBNodeService } from './RGBNodeService';
+import ErrorHandlingService from './ErrorHandlingService';
 
 interface ErrorResponse {
   error?: string;
@@ -364,13 +365,17 @@ export class RGBApiService {
   private static instance: RGBApiService;
   private api: AxiosInstance | null = null;
   private nodeService: RGBNodeService;
+  private errorHandler: ErrorHandlingService;
   private config: RGBApiConfig | null = null;
   private retryCount: number = 3;
   private retryDelay: number = 1000;
   private isInitialized: boolean = false;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private isHealthy: boolean = false;
 
   private constructor() {
     this.nodeService = RGBNodeService.getInstance();
+    this.errorHandler = ErrorHandlingService.getInstance();
   }
 
   public static getInstance(): RGBApiService {
@@ -389,6 +394,68 @@ export class RGBApiService {
     this.api = this.createApiInstance();
     this.isInitialized = true;
     console.log('RGB API Service initialized with config:', config);
+    
+    // Start health monitoring
+    this.startHealthMonitoring();
+  }
+
+  /**
+   * Start periodic health checks
+   */
+  private startHealthMonitoring(): void {
+    // Clear existing interval if any
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+
+    // Check health every 30 seconds
+    this.healthCheckInterval = setInterval(async () => {
+      try {
+        await this.checkHealth();
+        this.isHealthy = true;
+      } catch (error) {
+        this.isHealthy = false;
+        console.warn('Health check failed:', error);
+      }
+    }, 30000);
+
+    // Initial health check
+    this.checkHealth().then(() => {
+      this.isHealthy = true;
+    }).catch((error) => {
+      this.isHealthy = false;
+      console.warn('Initial health check failed:', error);
+    });
+  }
+
+  /**
+   * Stop health monitoring
+   */
+  public stopHealthMonitoring(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+  }
+
+  /**
+   * Check if node is healthy
+   */
+  public async checkHealth(): Promise<boolean> {
+    try {
+      // Try to get node info as a health check
+      await this.getNodeInfo();
+      return true;
+    } catch (error) {
+      throw this.errorHandler.parseError(error, 'Health Check');
+    }
+  }
+
+  /**
+   * Get health status
+   */
+  public getHealthStatus(): boolean {
+    return this.isHealthy;
   }
 
   private ensureInitialized(): void {
@@ -397,24 +464,20 @@ export class RGBApiService {
     }
   }
 
-  private async retryRequest<T>(request: () => Promise<T>): Promise<T> {
+  private async retryRequest<T>(request: () => Promise<T>, context?: string): Promise<T> {
     this.ensureInitialized();
-    let lastError: Error | null = null;
     
-    for (let i = 0; i < this.retryCount; i++) {
-      try {
-        return await request();
-      } catch (error) {
-        lastError = error as Error;
-        console.warn(`Request failed (attempt ${i + 1}/${this.retryCount}):`, error);
-        
-        if (i < this.retryCount - 1) {
-          await new Promise(resolve => setTimeout(resolve, this.retryDelay * Math.pow(2, i)));
-        }
-      }
+    try {
+      return await this.errorHandler.handleErrorWithRetry(
+        request,
+        this.retryCount,
+        this.retryDelay,
+        context || 'RGB API Request'
+      );
+    } catch (error) {
+      // Parse and throw enhanced error
+      throw this.errorHandler.parseError(error, context);
     }
-    
-    throw lastError || new Error('Request failed after retries');
   }
 
   private handleError(error: unknown): never {

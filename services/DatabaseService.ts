@@ -416,6 +416,61 @@ export class DatabaseService {
     );
   }
 
+  async getTransaction(txid: string): Promise<TransactionRecord | null> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const result = await this.db.getFirstAsync<TransactionRecord>(
+      'SELECT * FROM transactions WHERE txid = ?',
+      [txid]
+    );
+
+    return result || null;
+  }
+
+  async getTransactionsByStatus(walletId: number, status: 'pending' | 'confirmed' | 'failed'): Promise<TransactionRecord[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const results = await this.db.getAllAsync<TransactionRecord>(
+      'SELECT * FROM transactions WHERE wallet_id = ? AND status = ? ORDER BY timestamp DESC',
+      [walletId, status]
+    );
+
+    return results;
+  }
+
+  async getTransactionsByAsset(walletId: number, assetId: string): Promise<TransactionRecord[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const results = await this.db.getAllAsync<TransactionRecord>(
+      'SELECT * FROM transactions WHERE wallet_id = ? AND asset_id = ? ORDER BY timestamp DESC',
+      [walletId, assetId]
+    );
+
+    return results;
+  }
+
+  async deleteTransaction(txid: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    await this.db.runAsync(
+      'DELETE FROM transactions WHERE txid = ?',
+      [txid]
+    );
+  }
+
+  async getRecentTransactions(walletId: number, days: number = 30): Promise<TransactionRecord[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const timestampCutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+    
+    const results = await this.db.getAllAsync<TransactionRecord>(
+      'SELECT * FROM transactions WHERE wallet_id = ? AND timestamp >= ? ORDER BY timestamp DESC',
+      [walletId, timestampCutoff]
+    );
+
+    return results;
+  }
+
   // Settings operations
   async setSetting(key: string, value: string, encrypted: boolean = false): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');

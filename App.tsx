@@ -12,12 +12,16 @@ import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAr
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemeProvider } from '@react-navigation/native';
 import { LoadingScreen } from './components/LoadingScreen';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastContainer } from './components/Toast';
+import NetworkService from './services/NetworkService';
 
 import { store, persistor } from './store';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
+import WalletRestoreScreen from './screens/WalletRestoreScreen';
 import WalletListScreen from './screens/WalletListScreen';
 import AddWalletScreen from './screens/AddWalletScreen';
 import WalletSettingsScreen from './screens/WalletSettingsScreen';
@@ -40,6 +44,7 @@ import HistoryScreen from './screens/HistoryScreen';
 type RootStackParamList = {
   InitialLoad: undefined;
   WalletSetup: undefined;
+  WalletRestore: undefined;
   WalletList: undefined;
   AddWallet: undefined;
   WalletSettings: { walletId: number };
@@ -196,6 +201,7 @@ function AppNavigator() {
       >
         <Stack.Screen name="InitialLoad" component={InitialLoadScreen} />
         <Stack.Screen name="WalletSetup" component={WalletSetupScreen} />
+        <Stack.Screen name="WalletRestore" component={WalletRestoreScreen} />
         <Stack.Screen name="WalletList" component={WalletListScreen} />
         <Stack.Screen name="AddWallet" component={AddWalletScreen} />
         <Stack.Screen name="WalletSettings" component={WalletSettingsScreen} />
@@ -307,17 +313,32 @@ function AppLoadingScreen() {
 export default function App() {
   const navigationTheme = createNavigationTheme();
 
+  React.useEffect(() => {
+    // Initialize network monitoring
+    const networkService = NetworkService.getInstance();
+    networkService.initialize().catch(error => {
+      console.error('Failed to initialize network monitoring:', error);
+    });
+
+    return () => {
+      networkService.cleanup();
+    };
+  }, []);
+
   return (
-    <Provider store={store}>
-      <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
-        <AppThemeProvider>
-          <ThemeProvider value={navigationTheme}>
-            <StatusBar style="light" backgroundColor="transparent" translucent={true} />
-            <AppNavigator />
-          </ThemeProvider>
-        </AppThemeProvider>
-      </PersistGate>
-    </Provider>
+    <ErrorBoundary>
+      <Provider store={store}>
+        <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
+          <AppThemeProvider>
+            <ThemeProvider value={navigationTheme}>
+              <StatusBar style="light" backgroundColor="transparent" translucent={true} />
+              <AppNavigator />
+              <ToastContainer />
+            </ThemeProvider>
+          </AppThemeProvider>
+        </PersistGate>
+      </Provider>
+    </ErrorBoundary>
   );
 }
 

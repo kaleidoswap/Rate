@@ -13,6 +13,7 @@ import {
   Keyboard,
   Platform,
   KeyboardAvoidingView,
+  Clipboard,
 } from 'react-native';
 import { useDispatch } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,13 +28,16 @@ interface Props {
   navigation: any;
 }
 
-type SetupStep = 'welcome' | 'networks' | 'creating' | 'success';
+type SetupStep = 'welcome' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
 
 export default function WalletSetupScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const [step, setStep] = useState<SetupStep>('welcome');
   const [name, setName] = useState('');
   const [createdWalletId, setCreatedWalletId] = useState<number | null>(null);
+  const [generatedMnemonic, setGeneratedMnemonic] = useState<string>('');
+  const [backupConfirmed, setBackupConfirmed] = useState(false);
+  const [mnemonicCopied, setMnemonicCopied] = useState(false);
 
   // Network selection state
   const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
@@ -116,21 +120,37 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const handleCreate = async () => {
-    animateTransition('creating');
-
     try {
       // Generate mnemonic
       const bip39 = require('bip39');
       const mnemonic = bip39.generateMnemonic(); // 12 words default
-
-      // TODO: Show mnemonic to user for backup before proceeding? 
-      // For now, we assume this is "creating" step but we might want to insert a step to show it.
-      // But the requested task is to "build modular scheme", not perfect UX flow yet, though "follow UX guidelines" was mentioned.
-      // The UX guide says "Handle and manage multiple wallets" but backup flow is implicit.
-      // I will log it for now or rely on the fact that we can view it later (if implemented).
-      // Ideally, we should show it.
+      
+      setGeneratedMnemonic(mnemonic);
       console.log('Generated Mnemonic:', mnemonic);
+      
+      // Show backup screen first
+      animateTransition('backup');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to generate wallet');
+    }
+  };
 
+  const handleProceedWithBackup = () => {
+    animateTransition('confirmBackup');
+  };
+
+  const handleConfirmBackup = async () => {
+    if (!backupConfirmed) {
+      Alert.alert(
+        'Backup Required', 
+        'Please confirm that you have safely stored your recovery phrase before continuing.'
+      );
+      return;
+    }
+
+    animateTransition('creating');
+
+    try {
       const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [];
 
       if (networks.spark) {
@@ -153,7 +173,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
       // @ts-ignore
       const resultAction = await dispatch(createNewWallet({
         name,
-        mnemonic,
+        mnemonic: generatedMnemonic,
         networks: selectedNetworks
       }));
 
@@ -173,7 +193,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to create wallet');
-      animateTransition('networks');
+      animateTransition('confirmBackup');
     }
   };
 
@@ -435,6 +455,122 @@ export default function WalletSetupScreen({ navigation }: Props) {
     </View>
   );
 
+  const renderBackupStep = () => {
+    const words = generatedMnemonic.split(' ');
+
+    return (
+      <ScrollView
+        style={styles.stepContent}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={styles.iconHeader}>
+          <View style={[styles.welcomeIconContainer, { backgroundColor: theme.colors.warning[50] }]}>
+            <Ionicons name="shield-checkmark-outline" size={32} color={theme.colors.warning[500]} />
+          </View>
+        </View>
+
+        <Text style={styles.stepTitle}>Backup Recovery Phrase</Text>
+        <Text style={styles.stepDescription}>
+          Write down these 12 words in order. You'll need them to restore your wallet if you lose access.
+        </Text>
+
+        <View style={styles.warningBox}>
+          <Ionicons name="warning" size={20} color={theme.colors.warning[600]} />
+          <Text style={styles.warningText}>
+            Never share your recovery phrase. Anyone with these words can access your funds.
+          </Text>
+        </View>
+
+        <Card style={styles.mnemonicCard}>
+          <View style={styles.mnemonicGrid}>
+            {words.map((word, index) => (
+              <View key={index} style={styles.mnemonicItem}>
+                <Text style={styles.mnemonicNumber}>{index + 1}.</Text>
+                <Text style={styles.mnemonicWord}>{word}</Text>
+              </View>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={styles.copyButton}
+            onPress={() => {
+              Clipboard.setString(generatedMnemonic);
+              setMnemonicCopied(true);
+              Alert.alert('Copied!', 'Recovery phrase copied to clipboard. Make sure to store it safely!');
+            }}
+          >
+            <Ionicons 
+              name={mnemonicCopied ? 'checkmark-circle' : 'copy-outline'} 
+              size={18} 
+              color={mnemonicCopied ? theme.colors.success[500] : theme.colors.primary[500]} 
+            />
+            <Text style={[styles.copyButtonText, mnemonicCopied && styles.copyButtonTextSuccess]}>
+              {mnemonicCopied ? 'Copied' : 'Copy to Clipboard'}
+            </Text>
+          </TouchableOpacity>
+        </Card>
+
+        <View style={styles.tipContainer}>
+          <View style={styles.tipIcon}>
+            <Ionicons name="bulb-outline" size={18} color={theme.colors.info[500]} />
+          </View>
+          <Text style={styles.tipText}>
+            Tip: Write these words on paper and store them in a safe place. Don't save them digitally.
+          </Text>
+        </View>
+      </ScrollView>
+    );
+  };
+
+  const renderConfirmBackupStep = () => (
+    <ScrollView
+      style={styles.stepContent}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.scrollContent}
+    >
+      <View style={styles.iconHeader}>
+        <View style={[styles.welcomeIconContainer, { backgroundColor: theme.colors.success[50] }]}>
+          <Ionicons name="checkbox-outline" size={32} color={theme.colors.success[500]} />
+        </View>
+      </View>
+
+      <Text style={styles.stepTitle}>Confirm Backup</Text>
+      <Text style={styles.stepDescription}>
+        Please confirm that you have safely stored your recovery phrase.
+      </Text>
+
+      <Card style={styles.confirmCard}>
+        <TouchableOpacity
+          style={styles.checkboxRow}
+          onPress={() => setBackupConfirmed(!backupConfirmed)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.checkbox, backupConfirmed && styles.checkboxChecked]}>
+            {backupConfirmed && (
+              <Ionicons name="checkmark" size={18} color="white" />
+            )}
+          </View>
+          <Text style={styles.checkboxText}>
+            I have written down my 12-word recovery phrase and stored it in a safe place
+          </Text>
+        </TouchableOpacity>
+      </Card>
+
+      <View style={styles.reminderBox}>
+        <Ionicons name="information-circle" size={24} color={theme.colors.info[500]} />
+        <View style={styles.reminderContent}>
+          <Text style={styles.reminderTitle}>Important Reminder</Text>
+          <Text style={styles.reminderText}>
+            • Your recovery phrase is the ONLY way to restore your wallet{'\n'}
+            • Rate cannot recover your wallet if you lose this phrase{'\n'}
+            • Keep it private and secure at all times
+          </Text>
+        </View>
+      </View>
+    </ScrollView>
+  );
+
   const renderSuccessStep = () => (
     <View style={styles.centerContent}>
       <Animated.View style={[
@@ -482,7 +618,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
 
   const getButtonTitle = () => {
     if (step === 'welcome') return 'Continue';
-    if (step === 'networks') return 'Create Wallet';
+    if (step === 'networks') return 'Generate Wallet';
+    if (step === 'backup') return 'I\'ve Backed It Up';
+    if (step === 'confirmBackup') return 'Create Wallet';
     return '';
   };
 
@@ -533,16 +671,23 @@ export default function WalletSetupScreen({ navigation }: Props) {
           <View style={styles.animatedContent}>
             {step === 'welcome' && renderWelcomeStep()}
             {step === 'networks' && renderNetworksStep()}
+            {step === 'backup' && renderBackupStep()}
+            {step === 'confirmBackup' && renderConfirmBackupStep()}
             {step === 'creating' && renderCreatingStep()}
             {step === 'success' && renderSuccessStep()}
           </View>
         </Animated.View>
 
-        {(step === 'welcome' || step === 'networks') && (
+        {(step === 'welcome' || step === 'networks' || step === 'backup' || step === 'confirmBackup') && (
           <View style={styles.footer}>
             <Button
               title={getButtonTitle()}
-              onPress={handleNext}
+              onPress={
+                step === 'backup' ? handleProceedWithBackup :
+                step === 'confirmBackup' ? handleConfirmBackup :
+                handleNext
+              }
+              disabled={step === 'confirmBackup' && !backupConfirmed}
               style={styles.nextButton}
             />
           </View>
@@ -910,5 +1055,119 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+  },
+  warningBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: theme.colors.warning[50],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    marginBottom: theme.spacing[4],
+    gap: theme.spacing[3],
+  },
+  warningText: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.warning[700] || theme.colors.warning[600],
+    lineHeight: 20,
+  },
+  mnemonicCard: {
+    padding: theme.spacing[5],
+    marginBottom: theme.spacing[4],
+  },
+  mnemonicGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginBottom: theme.spacing[4],
+  },
+  mnemonicItem: {
+    width: '50%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+  },
+  mnemonicNumber: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.tertiary,
+    width: 24,
+  },
+  mnemonicWord: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '500',
+    color: theme.colors.text.primary,
+    flex: 1,
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[200],
+  },
+  copyButtonText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.primary[600],
+  },
+  copyButtonTextSuccess: {
+    color: theme.colors.success[600],
+  },
+  confirmCard: {
+    padding: theme.spacing[4],
+    marginBottom: theme.spacing[4],
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing[3],
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: theme.colors.border.medium,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[500],
+  },
+  checkboxText: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.primary,
+    lineHeight: 24,
+  },
+  reminderBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: theme.colors.info[50],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    gap: theme.spacing[3],
+  },
+  reminderContent: {
+    flex: 1,
+  },
+  reminderTitle: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing[2],
+  },
+  reminderText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    lineHeight: 20,
   },
 });

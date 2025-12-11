@@ -101,19 +101,24 @@ export const Button: React.FC<ButtonProps> = ({
     <>
       {loading && (
         <ActivityIndicator 
+          testID="button-loading"
           size="small" 
           color={variant === 'secondary' || variant === 'ghost' ? theme.colors.primary[500] : theme.colors.text.inverse}
           style={styles.loadingIcon}
         />
       )}
       {icon && !loading && <>{icon}</>}
-      <Text style={finalTextStyle}>{title}</Text>
+      {!loading && <Text style={finalTextStyle}>{title}</Text>}
     </>
   );
 
   if (gradient && (variant === 'primary' || variant === 'success' || variant === 'warning' || variant === 'error')) {
     return (
       <TouchableOpacity
+        testID="button-touchable"
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityState={{ disabled: disabled || loading }}
         style={[disabled && styles.disabled, style]}
         onPress={onPress}
         disabled={disabled || loading}
@@ -133,6 +138,10 @@ export const Button: React.FC<ButtonProps> = ({
 
   return (
     <TouchableOpacity
+      testID="button-touchable"
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: disabled || loading }}
       style={[buttonStyle, disabled && styles.disabled, style]}
       onPress={onPress}
       disabled={disabled || loading}

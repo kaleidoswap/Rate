@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { theme } from '../theme';
 import { Button } from '../components';
+import SecurityService from '../services/SecurityService';
 
 interface Props {
   navigation: any;
@@ -164,11 +165,35 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
     }
   };
 
-  const handleSaveAndComplete = () => {
-    // TODO: Save PIN and biometric preferences to secure storage
-    // For now, just show completion
-    setStep('complete');
-    animateComplete();
+  const handleSaveAndComplete = async () => {
+    try {
+      const securityService = SecurityService.getInstance();
+      
+      // Save PIN if enabled
+      if (enablePin && pin) {
+        const pinSaved = await securityService.savePin(pin);
+        if (!pinSaved) {
+          Alert.alert('Error', 'Failed to save PIN. Please try again.');
+          return;
+        }
+      }
+      
+      // Save biometric preference if enabled
+      if (enableBiometric) {
+        const biometricSaved = await securityService.setBiometricEnabled(true);
+        if (!biometricSaved) {
+          console.warn('Failed to save biometric preference');
+          // Don't block on biometric save failure, continue anyway
+        }
+      }
+      
+      console.log('Security settings saved successfully');
+      setStep('complete');
+      animateComplete();
+    } catch (error) {
+      console.error('Error saving security settings:', error);
+      Alert.alert('Error', 'Failed to save security settings. Please try again.');
+    }
   };
 
   const handleBack = () => {

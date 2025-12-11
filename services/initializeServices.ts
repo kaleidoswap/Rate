@@ -7,65 +7,147 @@ import NostrService from './NostrService';
 import NWCService from './NWCService';
 import { restoreNostrConnection, loadKeysSecurely } from '../store/slices/nostrSlice';
 import DatabaseService, { NetworkConfig } from './DatabaseService';
+import ErrorHandlingService from './ErrorHandlingService';
+import NodeConfigValidator from './NodeConfigValidator';
 
 const DEFAULT_TIMEOUT = 30000;
 
-export function initializeRGBApiService() {
+export interface InitializationResult {
+  success: boolean;
+  service: string;
+  error?: string;
+  canContinue: boolean;
+}
+
+export async function initializeRGBApiService(): Promise<InitializationResult> {
   console.log('Initializing RGB API Service...');
+  
+  const errorHandler = ErrorHandlingService.getInstance();
+  const validator = NodeConfigValidator.getInstance();
 
-  // Check if we already have an instance and it's initialized
-  const apiService = RGBApiService.getInstance();
-  if (apiService.isApiInitialized()) {
-    console.log('Using existing initialized RGB API Service instance');
-    return apiService;
-  }
-
-  // Try to get URL from active wallet's RLN config
   try {
-    const state = getStore().getState();
-    const activeWallet = state.wallet?.activeWallet;
-
-    if (activeWallet) {
-      const rlnConfig = activeWallet.networks?.find((n: NetworkConfig) => n.type === 'rln' && n.enabled);
-      if (rlnConfig && rlnConfig.config) {
-        try {
-          const config = JSON.parse(rlnConfig.config);
-          let apiUrl = '';
-
-          if (config.type === 'remote' && config.url) {
-            apiUrl = config.url;
-          } else if (config.type === 'local') {
-            apiUrl = 'http://127.0.0.1:3000';
-          }
-
-          if (apiUrl) {
-            console.log('Initializing RGB API Service with wallet RLN config:', apiUrl);
-            apiService.initialize({
-              baseURL: apiUrl,
-              timeout: DEFAULT_TIMEOUT,
-            });
-
-            // Initialize node service
-            const nodeService = RGBNodeService.getInstance();
-            nodeService.initializeNode();
-
-            if (apiService.isApiInitialized()) {
-              return apiService;
-            }
-          }
-        } catch (e) {
-          console.error('Failed to parse RLN config:', e);
+    // Check if we already have an instance and it's initialized
+    const apiService = RGBApiService.getInstance();
+    if (apiService.isApiInitialized()) {
+      console.log('Using existing initialized RGB API Service instance');
+      
+      // Verify it's still healthy
+      try {
+        const isHealthy = await apiService.checkHealth();
+        if (isHealthy) {
+          return {
+            success: true,
+            service: 'RGB API',
+            canContinue: true,
+          };
         }
+      } catch (error) {
+        console.warn('Existing API service is not healthy, reinitializing...');
       }
     }
 
-    // Fallback: Try to get from database if not in Redux (async, but we can't await here)
-    // This will be handled by the caller or by InitialLoadScreen
-    console.warn('No RLN config found in Redux state. API service should be initialized during app startup.');
-    return null;
-  } catch (error) {
-    console.error('Failed to initialize RGB API Service:', error);
-    return null;
+    // Try to get URL from active wallet's RLN config
+    const state = getStore().getState();
+    const activeWallet = state.wallet?.activeWallet;
+
+    if (!activeWallet) {
+      return {
+        success: false,
+        service: 'RGB API',
+        error: 'No active wallet found. Please create or select a wallet first.',
+        canContinue: true, // Can continue without node for wallet creation
+      };
+    }
+
+    const rlnConfig = activeWallet.networks?.find((n: NetworkConfig) => n.type === 'rln' && n.enabled);
+    
+    if (!rlnConfig || !rlnConfig.config) {
+      return {
+        success: false,
+        service: 'RGB API',
+        error: 'RGB node not configured. Please configure node in wallet settings.',
+        canContinue: true,
+      };
+    }
+
+    // Parse and validate configuration
+    const config = JSON.parse(rlnConfig.config);
+    const nodeConfig = {
+      type: config.type,
+      url: config.type === 'remote' ? config.url : 'http://127.0.0.1:3000',
+      timeout: DEFAULT_TIMEOUT,
+    };
+
+    // Validate configuration
+    const validation = await validator.validateConfig(nodeConfig);
+    
+    if (!validation.valid) {
+      console.error('Node configuration validation failed:', validation.errors);
+      return {
+        success: false,
+        service: 'RGB API',
+        error: validation.errors[0] || 'Invalid node configuration',
+        canContinue: false,
+      };
+    }
+
+    // Log warnings if any
+    if (validation.warnings.length > 0) {
+      console.warn('Node configuration warnings:', validation.warnings);
+    }
+
+    // Initialize API service with validated config
+    console.log('Initializing RGB API Service with validated config:', nodeConfig.url);
+    apiService.initialize({
+      baseURL: nodeConfig.url!,
+      timeout: DEFAULT_TIMEOUT,
+    });
+
+    // Initialize node service
+    const nodeService = RGBNodeService.getInstance();
+    await nodeService.initializeNode();
+
+    // Verify initialization
+    if (apiService.isApiInitialized()) {
+      // Test connection
+      try {
+        await apiService.checkHealth();
+        console.log('RGB API Service initialized and healthy');
+        
+        return {
+          success: true,
+          service: 'RGB API',
+          canContinue: true,
+        };
+      } catch (error) {
+        const appError = errorHandler.parseError(error, 'RGB API Health Check');
+        console.warn('API initialized but health check failed:', appError.message);
+        
+        return {
+          success: false,
+          service: 'RGB API',
+          error: appError.userMessage,
+          canContinue: true, // Can continue with degraded functionality
+        };
+      }
+    }
+
+    return {
+      success: false,
+      service: 'RGB API',
+      error: 'Failed to initialize API service',
+      canContinue: false,
+    };
+  } catch (error: any) {
+    const appError = errorHandler.parseError(error, 'RGB API Initialization');
+    console.error('Failed to initialize RGB API Service:', appError);
+    
+    return {
+      success: false,
+      service: 'RGB API',
+      error: appError.userMessage,
+      canContinue: true, // Allow app to continue for wallet management
+    };
   }
 }
 
