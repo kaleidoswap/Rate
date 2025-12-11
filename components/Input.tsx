@@ -45,10 +45,6 @@ export const Input: React.FC<InputProps> = ({
       ...styles[size],
     };
     
-    if (isFocused) {
-      return { ...baseStyle, ...styles.focused };
-    }
-    
     if (error) {
       return { ...baseStyle, ...styles.error };
     }
@@ -60,7 +56,11 @@ export const Input: React.FC<InputProps> = ({
     <View style={[style]}>
       {label && <Text style={styles.label}>{label}</Text>}
       
-      <View style={[getContainerStyle(), isFocused && styles.containerFocused, error && styles.containerError]}>
+      <View style={[
+        getContainerStyle(), 
+        isFocused && styles.containerFocused, 
+        error && styles.containerError
+      ]}>
         {leftIcon && <View style={styles.leftIcon}>{leftIcon}</View>}
         
         <TextInput
@@ -68,6 +68,7 @@ export const Input: React.FC<InputProps> = ({
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           placeholderTextColor={theme.colors.text.muted}
+          editable={true}
           {...props}
         />
         
@@ -86,6 +87,7 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
     borderWidth: 1,
     borderColor: theme.colors.border.light,
+    overflow: 'hidden',
   },
   
   containerFocused: {
@@ -117,6 +119,8 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.primary,
     fontWeight: theme.typography.fontWeight.normal,
+    height: '100%',
+    padding: 0,
   },
   
   focused: {
@@ -132,18 +136,21 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[2],
     paddingHorizontal: theme.spacing[3],
     fontSize: theme.typography.fontSize.sm,
+    minHeight: 40,
   },
   
   md: {
-    paddingVertical: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
     paddingHorizontal: theme.spacing[4],
     fontSize: theme.typography.fontSize.base,
+    minHeight: 48,
   },
   
   lg: {
-    paddingVertical: theme.spacing[5],
+    paddingVertical: theme.spacing[4],
     paddingHorizontal: theme.spacing[5],
     fontSize: theme.typography.fontSize.lg,
+    minHeight: 56,
   },
   
   label: {
@@ -168,4 +175,4 @@ const styles = StyleSheet.create({
     marginLeft: theme.spacing[2],
     marginRight: theme.spacing[3],
   },
-}); 
+});

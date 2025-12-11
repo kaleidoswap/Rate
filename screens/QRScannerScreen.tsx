@@ -10,6 +10,7 @@ import {
   Animated,
   Easing,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -26,15 +27,16 @@ interface Props {
 }
 
 export default function QRScannerScreen({ navigation }: Props) {
+  const [processing, setProcessing] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const [scanSuccess, setScanSuccess] = useState<boolean | null>(null);
-  
+
   const scanLineAnim = useRef(new Animated.Value(0)).current;
   const successAnim = useRef<LottieView>(null);
   const errorAnim = useRef<LottieView>(null);
-  
+
   const apiService = RGBApiService.getInstance();
 
   useEffect(() => {
@@ -59,29 +61,34 @@ export default function QRScannerScreen({ navigation }: Props) {
       ).start();
     };
 
-    if (!scanned) {
+    if (!scanned && !processing) {
       startScanAnimation();
     } else {
       scanLineAnim.stopAnimation();
     }
-  }, [scanned]);
+  }, [scanned, processing]);
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
-    if (scanned) return;
-    
+    if (scanned || processing) return;
+
     setScanned(true);
+    setProcessing(true);
     scanLineAnim.stopAnimation();
-    
+
+    // Haptic feedback
+
     try {
       const paymentData = await processScannedData(data);
+      setProcessing(false);
       setScanSuccess(true);
       successAnim.current?.play();
-      
+
       // Always go directly to Send screen - no PaymentConfirmation
       setTimeout(() => {
         setScanSuccess(null);
         setScanned(false);
-        
+        setProcessing(false);
+
         navigation.navigate('Send', {
           selectedAsset: paymentData.selectedAsset,
           prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
@@ -94,30 +101,31 @@ export default function QRScannerScreen({ navigation }: Props) {
           fromQRScanner: true,
           paymentType: paymentData.type,
         });
-      }, 600); // Faster transition
+      }, 1000); // Slightly longer to show success animation
     } catch (error) {
       console.error('Error processing scanned data:', error);
+      setProcessing(false);
       setScanSuccess(false);
       errorAnim.current?.play();
-      
+
       setTimeout(() => {
         setScanSuccess(null);
         setScanned(false);
-        
+
         const errorMessage = getErrorMessage(error);
         Alert.alert('Scan Error', errorMessage, [
-          { 
-            text: 'Try Again', 
+          {
+            text: 'Try Again',
             onPress: () => resetScanner(),
             style: 'default'
           },
-          { 
-            text: 'Cancel', 
+          {
+            text: 'Cancel',
             onPress: () => navigation.goBack(),
             style: 'cancel'
           }
         ]);
-      }, 600);
+      }, 1000);
     }
   };
 
@@ -130,7 +138,7 @@ export default function QRScannerScreen({ navigation }: Props) {
 
       const withoutPrefix = uri.substring(8); // Remove 'bitcoin:'
       const [address, queryString] = withoutPrefix.split('?');
-      
+
       if (!address || !isValidBitcoinAddress(address)) {
         return null;
       }
@@ -201,7 +209,7 @@ export default function QRScannerScreen({ navigation }: Props) {
     }
 
     const { address, amount, label, message } = parsed;
-    
+
     const paymentData = {
       type: 'bip21' as const,
       address,
@@ -222,13 +230,13 @@ export default function QRScannerScreen({ navigation }: Props) {
   const handleRGBInvoice = async (invoice: string) => {
     // Decode RGB invoice
     const decodedInvoice = await apiService.decodeRGBInvoice({ invoice });
-    
+
     // Extract amount from assignment if it's a fungible assignment
     let invoiceAmount: string | undefined = undefined;
     if (decodedInvoice.assignment && decodedInvoice.assignment.type === 'Fungible' && decodedInvoice.assignment.value) {
       invoiceAmount = decodedInvoice.assignment.value.toString();
     }
-    
+
     const paymentData = {
       type: 'rgb' as const,
       invoice,
@@ -253,17 +261,17 @@ export default function QRScannerScreen({ navigation }: Props) {
   const handleLightningInvoice = async (invoice: string) => {
     // Decode Lightning invoice
     const decodedInvoice = await apiService.decodeLnInvoice({ invoice });
-    
+
     const amountBTC = decodedInvoice.amt_msat / 100000000000; // Convert msat to BTC
     const hasRGBAsset = decodedInvoice.asset_id && decodedInvoice.asset_amount;
-    
+
     let amount: string | undefined = undefined;
     if (hasRGBAsset) {
       amount = decodedInvoice.asset_amount?.toString();
     } else if (decodedInvoice.amt_msat > 0) {
       amount = amountBTC.toFixed(8);
     }
-    
+
     const paymentData = {
       type: 'lightning' as const,
       invoice,
@@ -311,7 +319,7 @@ export default function QRScannerScreen({ navigation }: Props) {
       /^tb1[a-z0-9]{39,59}$/, // Testnet Bech32
       /^bcrt1[a-z0-9]{39,59}$/, // Regtest
     ];
-    
+
     return regexes.some(regex => regex.test(address));
   };
 
@@ -323,72 +331,75 @@ export default function QRScannerScreen({ navigation }: Props) {
     setScanned(false);
   };
 
-  const renderScanAnimation = () => (
-    <View style={styles.scanArea}>
-      <View style={[styles.corner, styles.topLeft]} />
-      <View style={[styles.corner, styles.topRight]} />
-      <View style={[styles.corner, styles.bottomLeft]} />
-      <View style={[styles.corner, styles.bottomRight]} />
-      
-      <Animated.View
-        style={[
-          styles.scanLine,
-          {
-            transform: [{
-              translateY: scanLineAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, 280],
-              }),
-            }],
-          },
-        ]}
-      />
+  const renderScanOverlay = () => (
+    <View style={styles.overlayContainer}>
+      {/* Darkened Backgrounds */}
+      <View style={styles.overlayTop} />
+      <View style={styles.overlayCenter}>
+        <View style={styles.overlaySide} />
+        <View style={styles.scanWindow}>
+          <View style={[styles.corner, styles.topLeft]} />
+          <View style={[styles.corner, styles.topRight]} />
+          <View style={[styles.corner, styles.bottomLeft]} />
+          <View style={[styles.corner, styles.bottomRight]} />
+
+          {!processing && !scanSuccess && (
+            <Animated.View
+              style={[
+                styles.scanLine,
+                {
+                  transform: [{
+                    translateY: scanLineAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, 260],
+                    }),
+                  }],
+                },
+              ]}
+            />
+          )}
+        </View>
+        <View style={styles.overlaySide} />
+      </View>
+      <View style={styles.overlayBottom} />
     </View>
   );
 
-  const renderFeedbackAnimation = () => {
-    if (scanSuccess === null) return null;
+  const renderFeedback = () => {
+    if (processing) {
+      return (
+        <View style={styles.feedbackContainer}>
+          <View style={styles.processingBadge}>
+            <ActivityIndicator color="white" size="small" />
+            <Text style={styles.processingText}>Decoding...</Text>
+          </View>
+        </View>
+      );
+    }
 
-    return (
-      <View style={styles.feedbackContainer}>
-        <LottieView
-          ref={scanSuccess ? successAnim : errorAnim}
-          source={scanSuccess ? require('../assets/animations/success.json') : require('../assets/animations/error.json')}
-          style={styles.feedbackAnimation}
-          autoPlay={false}
-          loop={false}
-        />
-      </View>
-    );
+    if (scanSuccess !== null) {
+      return (
+        <View style={styles.feedbackContainer}>
+          <LottieView
+            ref={scanSuccess ? successAnim : errorAnim}
+            source={scanSuccess ? require('../assets/animations/success.json') : require('../assets/animations/error.json')}
+            style={styles.feedbackAnimation}
+            autoPlay={false}
+            loop={false}
+          />
+        </View>
+      );
+    }
+
+    return null;
   };
-
-  const renderScanInstructions = () => (
-    <View style={styles.scanInstructions}>
-      <View style={styles.instructionItem}>
-        <Ionicons name="qr-code" size={24} color="white" />
-        <Text style={styles.instructionText}>QR Codes</Text>
-      </View>
-      <View style={styles.instructionItem}>
-        <Ionicons name="flash" size={24} color="#FFD700" />
-        <Text style={styles.instructionText}>Lightning</Text>
-      </View>
-      <View style={styles.instructionItem}>
-        <Ionicons name="diamond" size={24} color="#10b981" />
-        <Text style={styles.instructionText}>RGB Assets</Text>
-      </View>
-      <View style={styles.instructionItem}>
-        <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
-        <Text style={styles.instructionText}>Bitcoin</Text>
-      </View>
-    </View>
-  );
 
   if (!permission) {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
         <SafeAreaView style={styles.centerContent}>
-          <Text style={styles.permissionText}>Requesting camera permission...</Text>
+          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
         </SafeAreaView>
       </View>
     );
@@ -413,7 +424,7 @@ export default function QRScannerScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      
+
       <View style={styles.cameraContainer}>
         <CameraView
           style={styles.camera}
@@ -423,69 +434,41 @@ export default function QRScannerScreen({ navigation }: Props) {
           }}
           onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
           enableTorch={flashEnabled}
-          ratio="16:9"
         />
-        
-        <View style={styles.overlay}>
-          {renderScanAnimation()}
-          {renderFeedbackAnimation()}
-          {renderScanInstructions()}
-        </View>
 
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.8)']}
-          style={styles.instructionsGradient}
-        >
-          <View style={styles.instructions}>
-            <Text style={styles.instructionText}>
-              Point your camera at a QR code
-            </Text>
-            <Text style={styles.subInstructionText}>
-              Supports Bitcoin addresses, Lightning invoices, and RGB invoices
-            </Text>
-          </View>
-        </LinearGradient>
+        {renderScanOverlay()}
+        {renderFeedback()}
+
+        <View style={styles.bottomInstructionContainer}>
+          <Text style={styles.instructionText}>
+            Align QR code within the frame
+          </Text>
+          <Text style={styles.subInstructionText}>
+            Bitcoin • Lightning • RGB Assets
+          </Text>
+        </View>
       </View>
 
-      {/* Compact header overlay */}
+      {/* Header Controls */}
       <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
-        <LinearGradient
-          colors={['rgba(0,0,0,0.9)', 'rgba(0,0,0,0.7)', 'transparent']}
-          style={styles.headerGradient}
-        >
-          <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.headerButton} 
-              onPress={() => navigation.goBack()}
-            >
-              <Ionicons name="arrow-back" size={20} color="white" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Scan QR Code</Text>
-            <TouchableOpacity 
-              style={styles.headerButton} 
-              onPress={toggleFlash}
-            >
-              <Ionicons 
-                name={flashEnabled ? "flash" : "flash-off"} 
-                size={20} 
-                color="white" 
-              />
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
-      </SafeAreaView>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="close" size={24} color="white" />
+          </TouchableOpacity>
 
-      {/* Bottom controls with SafeAreaView */}
-      <SafeAreaView style={styles.bottomSafeArea} edges={['bottom']}>
-        <View style={styles.bottomControls}>
-          {scanned && (
-            <TouchableOpacity 
-              style={styles.scanAgainButton} 
-              onPress={() => setScanned(false)}
-            >
-              <Text style={styles.scanAgainButtonText}>Scan Again</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={toggleFlash}
+          >
+            <Ionicons
+              name={flashEnabled ? "flash" : "flash-off"}
+              size={24}
+              color={flashEnabled ? "#FFD700" : "white"}
+            />
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     </View>
@@ -503,31 +486,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    minHeight: 44,
-  },
-  headerTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: 'white',
-  },
   cameraContainer: {
     flex: 1,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
   camera: {
     flex: 1,
   },
-  overlay: {
+
+  // Overlay Mask
+  overlayContainer: {
     position: 'absolute',
     top: 0,
     left: 0,
@@ -536,19 +503,39 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  scanArea: {
+  overlayTop: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  overlayCenter: {
+    flexDirection: 'row',
+    height: 280,
+  },
+  overlaySide: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  overlayBottom: {
+    flex: 1,
+    width: '100%',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+
+  scanWindow: {
     width: 280,
     height: 280,
+    backgroundColor: 'transparent',
     position: 'relative',
-    borderRadius: 24,
-    overflow: 'hidden',
   },
+
   corner: {
     position: 'absolute',
     width: 40,
     height: 40,
-    borderColor: '#00ff88',
+    borderColor: theme.colors.primary[400],
     borderWidth: 4,
+    borderRadius: 4,
   },
   topLeft: {
     top: 0,
@@ -574,77 +561,20 @@ const styles = StyleSheet.create({
     borderTopWidth: 0,
     borderLeftWidth: 0,
   },
-  instructions: {
-    position: 'absolute',
-    bottom: 100,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  instructionText: {
-    fontSize: 18,
-    color: 'white',
-    textAlign: 'center',
-    marginBottom: 8,
-    fontWeight: '600',
-  },
-  subInstructionText: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.8)',
-    textAlign: 'center',
-  },
-  bottomControls: {
-    padding: 20,
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-  },
-  scanAgainButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 12,
-    paddingHorizontal: 30,
-    borderRadius: 25,
-  },
-  scanAgainButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  permissionText: {
-    fontSize: 16,
-    color: 'white',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  permissionButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 10,
-  },
-  permissionButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerGradient: {
-    paddingBottom: 12,
-  },
-  headerButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+
   scanLine: {
     height: 2,
     width: '100%',
     backgroundColor: theme.colors.primary[500],
     position: 'absolute',
     top: 0,
+    shadowColor: theme.colors.primary[500],
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
   },
+
+  // Feedback & Processing
   feedbackContainer: {
     position: 'absolute',
     top: 0,
@@ -653,48 +583,94 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    zIndex: 20,
   },
   feedbackAnimation: {
-    width: 150,
-    height: 150,
+    width: 200,
+    height: 200,
   },
-  instructionsGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 160,
-  },
-  
-  scanInstructions: {
-    position: 'absolute',
-    top: '15%',
-    left: 0,
-    right: 0,
+  processingBadge: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    paddingVertical: 12,
-  },
-  
-  instructionItem: {
     alignItems: 'center',
-    gap: 4,
+    backgroundColor: 'rgba(30, 41, 59, 0.9)',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 30,
+    gap: 12,
   },
+  processingText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // Header & Controls
   headerSafeArea: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 10,
+    zIndex: 30,
   },
-  bottomSafeArea: {
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  iconButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  bottomInstructionContainer: {
     position: 'absolute',
-    bottom: 0,
+    bottom: 50,
     left: 0,
     right: 0,
-    zIndex: 10,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 20,
+  },
+  instructionText: {
+    fontSize: 16,
+    color: 'white',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  subInstructionText: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.8)',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.75)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+
+  // Permissions
+  permissionText: {
+    fontSize: 16,
+    color: 'white',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  permissionButton: {
+    backgroundColor: theme.colors.primary[600],
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+  },
+  permissionButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

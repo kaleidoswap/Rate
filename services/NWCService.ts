@@ -8,7 +8,6 @@ import NDK, {
   NostrEvent
 } from '@nostr-dev-kit/ndk';
 import { nip04, getPublicKey, utils } from 'nostr-tools';
-import NostrService from './NostrService';
 import RGBApiService from './RGBApiService';
 import { getApiInstance } from './apiInstance';
 
@@ -89,7 +88,6 @@ export interface NWCConnectionString {
 
 export class NWCService {
   private static instance: NWCService;
-  private nostrService: NostrService;
   private rgbApiService: RGBApiService | null = null;
   private ndk: NDK | null = null;
   private walletSigner: NDKPrivateKeySigner | null = null;
@@ -113,9 +111,7 @@ export class NWCService {
     NWC_NOTIFICATIONS.PAYMENT_SENT,
   ];
 
-  private constructor() {
-    this.nostrService = NostrService.getInstance();
-  }
+  private constructor() {}
 
   public static getInstance(): NWCService {
     if (!NWCService.instance) {

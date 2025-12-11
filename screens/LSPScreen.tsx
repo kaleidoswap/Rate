@@ -106,7 +106,19 @@ export default function LSPScreen({ navigation }: Props) {
       const nodeInfo = await apiService.getNodeInfo();
       const address = await apiService.getNewAddress();
 
-      const payload = {
+      const payload: {
+        announce_channel: boolean;
+        channel_expiry_blocks: number;
+        client_balance_sat: number;
+        client_pubkey: string;
+        funding_confirms_within_blocks: number;
+        lsp_balance_sat: number;
+        refund_onchain_address: string;
+        required_channel_confirmations: number;
+        asset_id?: string;
+        lsp_asset_amount?: number;
+        client_asset_amount?: number;
+      } = {
         announce_channel: true,
         channel_expiry_blocks: parseInt(formData.channelExpireBlocks),
         client_balance_sat: parseInt(formData.clientBalanceSat),

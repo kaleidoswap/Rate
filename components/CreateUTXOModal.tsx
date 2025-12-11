@@ -100,6 +100,7 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
         num: numUtxos,
         size: utxoSize,
         skip_sync: false,
+        up_to: false,
       });
 
       Alert.alert('Success', 'UTXOs created successfully');

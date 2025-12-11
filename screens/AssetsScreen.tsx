@@ -60,7 +60,7 @@ export default function AssetsScreen({ navigation }: Props) {
   }, [activeWallet]);
 
   const loadAssetData = async () => {
-    if (!activeWallet) return;
+    if (!activeWallet?.id) return;
     try {
       await dispatch(loadAssets(activeWallet.id));
     } catch (error) {
@@ -70,7 +70,7 @@ export default function AssetsScreen({ navigation }: Props) {
   };
 
   const handleRefresh = async () => {
-    if (!activeWallet) return;
+    if (!activeWallet?.id) return;
     setRefreshing(true);
     try {
       await dispatch(syncAssets(activeWallet.id));

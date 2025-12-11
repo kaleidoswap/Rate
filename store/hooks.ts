@@ -1,8 +1,26 @@
-
-
 // store/hooks.ts
 import { useDispatch, useSelector, TypedUseSelectorHook } from 'react-redux';
 import type { RootState, AppDispatch } from './index';
+
+// Import async thunks at the top
+import { 
+  initializeWallet, 
+  unlockWallet, 
+  loadBtcBalance, 
+  fetchBitcoinPrice, 
+  syncWallet 
+} from './slices/walletSlice';
+
+import { 
+  startNode, 
+  stopNode,
+} from './slices/nodeSlice';
+
+import { 
+  loadAssets, 
+  syncAssets, 
+  issueNiaAsset 
+} from './slices/assetsSlice';
 
 // Use throughout your app instead of plain `useDispatch` and `useSelector`
 export const useAppDispatch = () => useDispatch<AppDispatch>();
@@ -41,28 +59,28 @@ export const useComputedSelectors = () => {
 
   return {
     // Total BTC balance in satoshis
-    totalBtcBalance: wallet.btcBalance 
+    totalBtcBalance: wallet?.btcBalance 
       ? wallet.btcBalance.vanilla.spendable + wallet.btcBalance.colored.spendable
       : 0,
     
     // Total BTC balance in USD
-    totalBtcBalanceUSD: wallet.btcBalance && wallet.btcPriceUSD
+    totalBtcBalanceUSD: wallet?.btcBalance && wallet?.btcPriceUSD
       ? ((wallet.btcBalance.vanilla.spendable + wallet.btcBalance.colored.spendable) / 100000000) * wallet.btcPriceUSD
       : 0,
     
     // Total number of assets
-    totalAssets: assets.rgbAssets.length,
+    totalAssets: assets?.rgbAssets?.length ?? 0,
     
     // Assets with balance > 0
-    assetsWithBalance: assets.rgbAssets.filter(asset => asset.balance > 0),
+    assetsWithBalance: assets?.rgbAssets?.filter(asset => asset.balance > 0) ?? [],
     
     // Is wallet ready for use
-    isWalletReady: wallet.isUnlocked && wallet.activeWallet && !wallet.isLoading,
+    isWalletReady: wallet?.isUnlocked && wallet?.activeWallet && !wallet?.isLoading,
     
     // Current network display name
-    networkDisplayName: settings.network === 'regtest' ? 'Regtest' :
-                       settings.network === 'testnet' ? 'Testnet' :
-                       settings.network === 'signet' ? 'Signet' : 'Mainnet',
+    networkDisplayName: settings?.network === 'regtest' ? 'Regtest' :
+                       settings?.network === 'testnet' ? 'Testnet' :
+                       settings?.network === 'signet' ? 'Signet' : 'Mainnet',
   };
 };
 
@@ -71,8 +89,8 @@ export const useWalletActions = () => {
   const dispatch = useAppDispatch();
   
   return {
-    initializeWallet: (password: string, walletName: string) =>
-      dispatch(initializeWallet({ password, walletName })),
+    initializeWallet: (password: string, walletName: string, networks: any[]) =>
+      dispatch(initializeWallet({ password, walletName, networks })),
     
     unlockWallet: (params: any) =>
       dispatch(unlockWallet(params)),
@@ -94,8 +112,6 @@ export const useNodeActions = () => {
   return {
     startNode: () => dispatch(startNode()),
     stopNode: () => dispatch(stopNode()),
-    loadNodeInfo: () => dispatch(loadNodeInfo()),
-    performHealthCheck: () => dispatch(performHealthCheck()),
   };
 };
 
@@ -108,27 +124,3 @@ export const useAssetActions = () => {
     issueNiaAsset: (params: any) => dispatch(issueNiaAsset(params)),
   };
 };
-
-// Import async thunks
-import { 
-  initializeWallet, 
-  unlockWallet, 
-  loadBtcBalance, 
-  fetchBitcoinPrice, 
-  syncWallet 
-} from './slices/walletSlice';
-
-import { 
-  startNode, 
-  stopNode, 
-  loadNodeInfo, 
-  performHealthCheck 
-} from './slices/nodeSlice';
-
-import { 
-  loadAssets, 
-  syncAssets, 
-  issueNiaAsset 
-} from './slices/assetsSlice';
-
-import { loadTransactions } from './slices/transactionsSlice';

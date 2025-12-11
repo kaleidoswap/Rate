@@ -33,11 +33,7 @@ interface RGBAsset {
   asset_id: string;
   ticker: string;
   name: string;
-  balance: {
-    settled: number;
-    future: number;
-    spendable: number;
-  };
+  balance: number;
   precision: number;
 }
 
@@ -97,7 +93,8 @@ interface DecodedRGBInvoice extends BaseRGBInvoiceResponse {
 
 function SendScreen({ navigation, route }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
-  const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
+  const assetsState = useSelector((state: RootState) => state.assets);
+  const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD } = useBitcoinConversion();
@@ -147,7 +144,7 @@ function SendScreen({ navigation, route }: Props) {
       ticker: asset.ticker,
       name: asset.name,
       isRGB: true,
-      balance: asset.balance?.spendable || 0,
+      balance: asset.balance || 0,
       precision: asset.precision,
     })) : [])
   ];

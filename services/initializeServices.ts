@@ -6,44 +6,63 @@ import { RGBNodeService } from './RGBNodeService';
 import NostrService from './NostrService';
 import NWCService from './NWCService';
 import { restoreNostrConnection, loadKeysSecurely } from '../store/slices/nostrSlice';
+import DatabaseService, { NetworkConfig } from './DatabaseService';
 
 const DEFAULT_TIMEOUT = 30000;
 
 export function initializeRGBApiService() {
-  const settings = getStore().getState().settings;
-  console.log('Initializing RGB API Service with settings:', settings);
+  console.log('Initializing RGB API Service...');
 
   // Check if we already have an instance and it's initialized
-  const existingInstance = getApiInstance();
-  if (existingInstance && existingInstance.isApiInitialized()) {
+  const apiService = RGBApiService.getInstance();
+  if (apiService.isApiInitialized()) {
     console.log('Using existing initialized RGB API Service instance');
-    return existingInstance;
+    return apiService;
   }
 
-  // Initialize node service first
-  const nodeService = RGBNodeService.getInstance();
-  nodeService.initializeNode();
-
-  // If settings are not available, we can't initialize the API service yet
-  if (!settings?.remoteNodeUrl) {
-    console.warn('Settings not available yet, deferring API service initialization');
-    return null;
-  }
-
-  const config = {
-    baseURL: settings.remoteNodeUrl.trim(),
-    timeout: DEFAULT_TIMEOUT,
-  };
-
-  console.log('Creating RGB API Service with config:', config);
-  
+  // Try to get URL from active wallet's RLN config
   try {
-    const instance = createApiInstance(config);
-    if (!instance.isApiInitialized()) {
-      console.warn('RGB API Service initialization incomplete');
-      return null;
+    const state = getStore().getState();
+    const activeWallet = state.wallet?.activeWallet;
+
+    if (activeWallet) {
+      const rlnConfig = activeWallet.networks?.find((n: NetworkConfig) => n.type === 'rln' && n.enabled);
+      if (rlnConfig && rlnConfig.config) {
+        try {
+          const config = JSON.parse(rlnConfig.config);
+          let apiUrl = '';
+
+          if (config.type === 'remote' && config.url) {
+            apiUrl = config.url;
+          } else if (config.type === 'local') {
+            apiUrl = 'http://127.0.0.1:3000';
+          }
+
+          if (apiUrl) {
+            console.log('Initializing RGB API Service with wallet RLN config:', apiUrl);
+            apiService.initialize({
+              baseURL: apiUrl,
+              timeout: DEFAULT_TIMEOUT,
+            });
+
+            // Initialize node service
+            const nodeService = RGBNodeService.getInstance();
+            nodeService.initializeNode();
+
+            if (apiService.isApiInitialized()) {
+              return apiService;
+            }
+          }
+        } catch (e) {
+          console.error('Failed to parse RLN config:', e);
+        }
+      }
     }
-    return instance;
+
+    // Fallback: Try to get from database if not in Redux (async, but we can't await here)
+    // This will be handled by the caller or by InitialLoadScreen
+    console.warn('No RLN config found in Redux state. API service should be initialized during app startup.');
+    return null;
   } catch (error) {
     console.error('Failed to initialize RGB API Service:', error);
     return null;
@@ -66,7 +85,7 @@ export function updateRGBApiConfig() {
   };
 
   console.log('Updating RGB API Service with config:', config);
-  
+
   try {
     const instance = createApiInstance(config);
     if (!instance.isApiInitialized()) {
@@ -83,37 +102,34 @@ export function updateRGBApiConfig() {
 export async function initializeNostrWalletConnect() {
   try {
     console.log('Initializing Nostr Wallet Connect...');
-    
+
     const nostrService = NostrService.getInstance();
     const nwcService = NWCService.getInstance();
-    
-    // Set up NWC service in NostrService
-    nostrService.setNWCService(nwcService);
-    
+
     // Initialize NostrService first (if not already done)
     const settings = getStore().getState().settings;
     if (!nostrService.connected) {
       await nostrService.initialize({
-        relays: settings?.nostrRelays || [
+        relays: [
           'wss://relay.damus.io',
           'wss://relay.snort.social',
           'wss://nos.lol',
         ],
       });
     }
-    
+
     // Initialize NWC service
-    const success = await nostrService.initializeNWC(settings?.nostrRelays);
-    
+    const success = await nostrService.initializeNWC();
+
     if (success) {
       console.log('Nostr Wallet Connect initialized successfully');
-      
+
       // Optionally generate a connection string for testing
       const connectionString = await nostrService.getWalletConnectInfo(
         ['pay_invoice', 'make_invoice', 'get_balance', 'get_info'],
-        settings?.lud16
+        undefined
       );
-      
+
       if (connectionString) {
         console.log('NWC Connection String:', connectionString);
         // You might want to store this or make it available to the UI
@@ -121,7 +137,7 @@ export async function initializeNostrWalletConnect() {
     } else {
       console.error('Failed to initialize Nostr Wallet Connect');
     }
-    
+
     return success;
   } catch (error) {
     console.error('Error initializing Nostr Wallet Connect:', error);
@@ -142,23 +158,23 @@ export async function getNostrWalletConnectStatus() {
 export async function autoRestoreNostrConnection() {
   try {
     console.log('Attempting to auto-restore Nostr connection...');
-    
+
     const state = getStore().getState();
-    
+
     // Check if we have stored keys indicator
     if (!state.nostr.hasStoredKeys) {
       console.log('No stored keys found, skipping auto-restore');
       return false;
     }
-    
+
     // Try to restore the connection
-    const result = await getStore().dispatch(restoreNostrConnection());
-    
+    const result = await getStore().dispatch(restoreNostrConnection() as any);
+
     if (restoreNostrConnection.fulfilled.match(result)) {
       console.log('Nostr connection restored successfully');
       return true;
     } else {
-      console.log('Failed to restore Nostr connection:', result.error?.message);
+      console.log('Failed to restore Nostr connection:', (result as any).error?.message);
       return false;
     }
   } catch (error) {

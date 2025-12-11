@@ -50,13 +50,17 @@ export const startNode = createAsyncThunk(
         throw new Error('Failed to initialize RGB node binary');
       }
       
-      // Start the node
-      const status = await nodeService.startNode();
+      // Get node status (remote node is always "running" after init)
+      const status = nodeService.getNodeStatus();
       if (!status.isRunning) {
-        throw new Error(status.error || 'Failed to start RGB node');
+        throw new Error('Failed to start RGB node');
       }
       
-      return status;
+      return {
+        isRunning: status.isRunning,
+        port: status.daemonPort,
+        lightningPort: 9738,
+      };
     } catch (error: any) {
       return rejectWithValue(error.message);
     }
@@ -68,11 +72,9 @@ export const stopNode = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const nodeService = RGBNodeService.getInstance();
-      const success = await nodeService.stopNode();
-      if (!success) {
-        throw new Error('Failed to stop RGB node');
-      }
-      return success;
+      // For remote nodes, we just update the status
+      nodeService.setNodeStatus({ isRunning: false });
+      return true;
     } catch (error: any) {
       return rejectWithValue(error.message);
     }

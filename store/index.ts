@@ -19,20 +19,7 @@ import nostrReducer from './slices/nostrSlice';
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
 import { setStore } from './storeProvider';
 
-// Redux persist configuration
-const persistConfig: PersistConfig<any> = {
-  key: 'root',
-  storage: AsyncStorage,
-  whitelist: ['settings', 'ui', 'contacts', 'nostr'], // Added nostr to persist non-sensitive nostr data
-  blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 1,
-  migrate: (state: any) => {
-    // Handle migrations if needed
-    return Promise.resolve(state);
-  },
-};
-
-// Combine all reducers
+// Combine all reducers first to get proper types
 const rootReducer = combineReducers({
   wallet: walletReducer,
   node: nodeReducer,
@@ -44,6 +31,22 @@ const rootReducer = combineReducers({
   swap: swapReducer,
   nostr: nostrReducer,
 });
+
+// Get the actual state type from the root reducer
+type RootReducerState = ReturnType<typeof rootReducer>;
+
+// Redux persist configuration
+const persistConfig: PersistConfig<RootReducerState> = {
+  key: 'root',
+  storage: AsyncStorage,
+  whitelist: ['settings', 'ui', 'contacts', 'nostr'], // Added nostr to persist non-sensitive nostr data
+  blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
+  version: 1,
+  migrate: (state: any) => {
+    // Handle migrations if needed
+    return Promise.resolve(state);
+  },
+};
 
 // Create persisted reducer
 const persistedReducer = persistReducer(persistConfig, rootReducer);
@@ -86,8 +89,12 @@ export const resetStore = async () => {
   await persistor.persist(); // Start persisting again
 };
 
-// Export types
-export type RootState = ReturnType<typeof store.getState>;
+// Export proper RootState type without undefined for slices
+// This is the actual state shape when the store is hydrated
+export type RootState = RootReducerState & {
+  _persist: { version: number; rehydrated: boolean };
+};
+
 export type AppDispatch = typeof store.dispatch;
 
 // Typed hooks

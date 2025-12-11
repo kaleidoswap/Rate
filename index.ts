@@ -7,13 +7,16 @@ if (typeof global !== 'undefined') {
   global.Buffer = Buffer;
 }
 
-// Polyfill crypto.getRandomValues if not available
-if (typeof crypto !== 'undefined' && !crypto.getRandomValues) {
-  const { getRandomValues } = require('react-native-get-random-values');
-  crypto.getRandomValues = getRandomValues;
+// Polyfill crypto.getRandomValues
+import * as Crypto from 'expo-crypto';
+if (typeof crypto === 'undefined') {
+  global.crypto = {} as any;
+}
+if (!global.crypto.getRandomValues) {
+  global.crypto.getRandomValues = Crypto.getRandomValues as any;
 }
 
-import {registerRootComponent} from 'expo';
+import { registerRootComponent } from 'expo';
 
 import App from './App';
 

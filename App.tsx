@@ -5,7 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createDrawerNavigator } from '@react-navigation/drawer';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +18,9 @@ import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
+import WalletListScreen from './screens/WalletListScreen';
+import AddWalletScreen from './screens/AddWalletScreen';
+import WalletSettingsScreen from './screens/WalletSettingsScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import SendScreen from './screens/SendScreen';
 import ReceiveScreen from './screens/ReceiveScreen';
@@ -32,11 +34,18 @@ import SwapScreen from './screens/SwapScreen';
 import NostrContactsScreen from './screens/NostrContactsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
+import SecuritySetupScreen from './screens/SecuritySetupScreen';
+import HistoryScreen from './screens/HistoryScreen';
 
 type RootStackParamList = {
   InitialLoad: undefined;
   WalletSetup: undefined;
+  WalletList: undefined;
+  AddWallet: undefined;
+  WalletSettings: { walletId: number };
+  SecuritySetup: { walletId?: number; isInitialSetup?: boolean };
   Dashboard: undefined;
+  Settings: undefined;
   Send: { selectedAsset?: any } | undefined;
   Receive: { selectedAsset?: any } | undefined;
   QRScanner: undefined;
@@ -46,6 +55,7 @@ type RootStackParamList = {
   Swap: undefined;
   NostrContacts: undefined;
   AssetDetail: { asset: any };
+  History: undefined;
 };
 
 type TabBarIconProps = {
@@ -56,64 +66,62 @@ type TabBarIconProps = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
-const Drawer = createDrawerNavigator();
 
 function DashboardTabs() {
   const theme = useAppTheme();
-  
+
   return (
     <Tab.Navigator
       screenOptions={{
-        tabBarActiveTintColor: theme.colors.primary[500],
+        tabBarActiveTintColor: theme.colors.primary[600],
         tabBarInactiveTintColor: theme.colors.gray[400],
         tabBarStyle: {
           backgroundColor: theme.colors.surface.primary,
-          borderTopColor: theme.colors.border.light,
-          borderTopWidth: 1,
-          paddingTop: Platform.OS === 'ios' ? 8 : 4,
-          paddingBottom: Platform.OS === 'ios' ? 25 : 8,
-          height: Platform.OS === 'ios' ? 85 : 65,
+          borderTopWidth: 0,
           elevation: 0,
-          shadowColor: theme.colors.gray[900],
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.1,
-          shadowRadius: 8,
+          height: Platform.OS === 'ios' ? 88 : 68,
+          paddingTop: Platform.OS === 'ios' ? 8 : 8,
+          paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+          shadowColor: theme.shadows.lg.shadowColor,
+          shadowOffset: theme.shadows.lg.shadowOffset,
+          shadowOpacity: theme.shadows.lg.shadowOpacity,
+          shadowRadius: theme.shadows.lg.shadowRadius,
         },
         tabBarLabelStyle: {
           fontSize: theme.typography.fontSize.xs,
-          fontWeight: '500',
+          fontWeight: '600',
           marginTop: 4,
         },
         tabBarIconStyle: {
-          marginTop: 4,
+          marginTop: 0,
         },
         headerShown: false,
       }}
     >
-      <Tab.Screen 
+      <Tab.Screen
         name="DashboardTab"
         component={DashboardScreen}
         options={{
           tabBarLabel: 'Home',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons 
-              name={focused ? 'home' : 'home-outline'} 
-              size={focused ? size + 2 : size} 
-              color={color} 
+            <Ionicons
+              name={focused ? 'home' : 'home-outline'}
+              size={24}
+              color={color}
             />
           ),
         }}
       />
-      <Tab.Screen 
-        name="Contacts" 
+      <Tab.Screen
+        name="Contacts"
         component={ContactsScreen}
         options={{
           tabBarLabel: 'Contacts',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons 
-              name={focused ? 'people' : 'people-outline'} 
-              size={focused ? size + 2 : size} 
-              color={color} 
+            <Ionicons
+              name={focused ? 'people' : 'people-outline'}
+              size={24}
+              color={color}
             />
           ),
         }}
@@ -129,66 +137,46 @@ function DashboardTabs() {
               onPress={() => navigation.navigate('QRScanner')}
             >
               <LinearGradient
-                colors={['#4338ca', '#7c3aed']}
+                colors={theme.colors.primary.gradient as [string, string]}
                 style={styles.scanButtonGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
               >
-                <Ionicons name="qr-code" size={24} color="white" />
+                <Ionicons name="qr-code" size={28} color="white" />
               </LinearGradient>
             </TouchableOpacity>
           ),
         })}
       />
-      <Tab.Screen 
-        name="Map" 
+      <Tab.Screen
+        name="Map"
         component={MapScreen}
         options={{
           tabBarLabel: 'Map',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons 
-              name={focused ? 'map' : 'map-outline'} 
-              size={focused ? size + 2 : size} 
-              color={color} 
+            <Ionicons
+              name={focused ? 'map' : 'map-outline'}
+              size={24}
+              color={color}
             />
           ),
         }}
       />
-      <Tab.Screen 
-        name="ChatBot" 
+      <Tab.Screen
+        name="ChatBot"
         component={AIAssistantScreen}
         options={{
           tabBarLabel: 'ChatBot',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons 
-              name={focused ? 'chatbubble' : 'chatbubble-outline'} 
-              size={size} 
-              color={color} 
+            <Ionicons
+              name={focused ? 'chatbubble' : 'chatbubble-outline'}
+              size={24}
+              color={color}
             />
           ),
         }}
       />
-      </Tab.Navigator>
-  );
-}
-
-function DrawerNavigator() {
-  const theme = useAppTheme();
-  return (
-    <Drawer.Navigator
-      screenOptions={{
-        headerShown: false,
-        drawerPosition: 'left',
-        drawerType: 'slide',
-        drawerStyle: {
-          backgroundColor: theme.colors.surface.primary,
-          width: "100%",
-        },
-        swipeEnabled: true,
-        swipeEdgeWidth: 100,
-      }}
-      drawerContent={(props: any) => <SettingsScreen {...props} />}
-    >
-      <Drawer.Screen name="Main" component={DashboardTabs} />
-    </Drawer.Navigator>
+    </Tab.Navigator>
   );
 }
 
@@ -203,20 +191,33 @@ function AppNavigator() {
         screenOptions={{
           headerShown: false,
           gestureEnabled: false,
+          contentStyle: { backgroundColor: theme.colors.background.secondary },
         }}
       >
         <Stack.Screen name="InitialLoad" component={InitialLoadScreen} />
         <Stack.Screen name="WalletSetup" component={WalletSetupScreen} />
-        <Stack.Screen name="Dashboard" component={DrawerNavigator} />
-        <Stack.Screen 
-          name="Send" 
+        <Stack.Screen name="WalletList" component={WalletListScreen} />
+        <Stack.Screen name="AddWallet" component={AddWalletScreen} />
+        <Stack.Screen name="WalletSettings" component={WalletSettingsScreen} />
+        <Stack.Screen name="SecuritySetup" component={SecuritySetupScreen} />
+        <Stack.Screen name="Dashboard" component={DashboardTabs} />
+        <Stack.Screen
+          name="Settings"
+          component={SettingsScreen}
+          options={{
+            presentation: 'modal',
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="Send"
           component={SendScreen}
           options={{
             presentation: 'modal',
             headerShown: true,
             headerTitle: 'Send Payment',
             headerStyle: {
-              backgroundColor: '#4338ca',
+              backgroundColor: theme.colors.primary[600],
             },
             headerTitleStyle: {
               color: theme.colors.text.inverse,
@@ -225,15 +226,15 @@ function AppNavigator() {
             headerTintColor: theme.colors.text.inverse,
           }}
         />
-        <Stack.Screen 
-          name="Receive" 
+        <Stack.Screen
+          name="Receive"
           component={ReceiveScreen}
           options={{
             presentation: 'modal',
             headerShown: true,
             headerTitle: 'Receive Payment',
             headerStyle: {
-              backgroundColor: '#4338ca',
+              backgroundColor: theme.colors.primary[600],
             },
             headerTitleStyle: {
               color: theme.colors.text.inverse,
@@ -245,15 +246,15 @@ function AppNavigator() {
         <Stack.Screen name="QRScanner" component={QRScannerScreen} />
         <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
-        <Stack.Screen 
-          name="Assets" 
+        <Stack.Screen
+          name="Assets"
           component={AssetsScreen}
           options={{
             presentation: 'modal',
             headerShown: true,
             headerTitle: 'Assets',
             headerStyle: {
-              backgroundColor: '#4338ca',
+              backgroundColor: theme.colors.primary[600],
             },
             headerTitleStyle: {
               color: theme.colors.text.inverse,
@@ -262,27 +263,35 @@ function AppNavigator() {
             headerTintColor: theme.colors.text.inverse,
           }}
         />
-        <Stack.Screen 
-          name="Swap" 
+        <Stack.Screen
+          name="Swap"
           component={SwapScreen}
           options={{
             presentation: 'modal',
             headerShown: false,
           }}
         />
-        <Stack.Screen 
-          name="NostrContacts" 
+        <Stack.Screen
+          name="NostrContacts"
           component={NostrContactsScreen}
           options={{
             presentation: 'modal',
             headerShown: false,
           }}
         />
-        <Stack.Screen 
-          name="AssetDetail" 
+        <Stack.Screen
+          name="AssetDetail"
           component={AssetDetailScreen}
           options={{
             presentation: 'modal',
+            headerShown: false,
+          }}
+        />
+        <Stack.Screen
+          name="History"
+          component={HistoryScreen}
+          options={{
+            presentation: 'card',
             headerShown: false,
           }}
         />

@@ -25,6 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { theme } from '../theme';
+import { MainHeader } from '../components';
 import SpeechToText, { SpeechToTextRef } from '../components/SpeechToText';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
@@ -112,15 +113,15 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const [partialText, setPartialText] = useState('');
   const [recordingDuration, setRecordingDuration] = useState(0);
   const [baseInputText, setBaseInputText] = useState('');
-  
+
   // Payment confirmation state
   const [showPaymentConfirmation, setShowPaymentConfirmation] = useState(false);
   const [pendingPayment, setPendingPayment] = useState<PaymentDetails | null>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
-  
+
   // Nostr contacts state
   const [showContactsSelector, setShowContactsSelector] = useState(false);
-  
+
   const scrollViewRef = useRef<ScrollView>(null);
   const speechToTextRef = useRef<SpeechToTextRef>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -130,15 +131,14 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // Initialize Enhanced AI Assistant
   const aiAssistant = useRef(new EnhancedAIAssistant()).current;
-  
-  // Get user state for better personalization
-  const userState = useSelector((state: RootState) => state.user);
+
+  // Get nostr state for better personalization  
   const nostrState = useSelector((state: RootState) => state.nostr);
 
   // Enhanced scroll to bottom function
   const scrollToBottom = useCallback((animated: boolean = true) => {
     if (!scrollViewRef.current) return;
-    
+
     // Use requestAnimationFrame for smoother scrolling
     requestAnimationFrame(() => {
       scrollViewRef.current?.scrollToEnd({ animated });
@@ -235,7 +235,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const animateMessage = useCallback((messageId: string) => {
     const animation = new Animated.Value(0);
     messageAnimations.set(messageId, animation);
-    
+
     Animated.spring(animation, {
       toValue: 1,
       tension: 120,
@@ -271,11 +271,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const handleSpeechResult = (text: string) => {
     console.log('✅ Final speech result:', text);
     if (!text.trim()) return;
-    
+
     setInputText(prevText => {
       const cleanBaseText = baseInputText.trim();
       const cleanNewText = text.trim();
-      
+
       if (cleanBaseText && cleanNewText) {
         return `${cleanBaseText} ${cleanNewText}`;
       } else if (cleanNewText) {
@@ -284,7 +284,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         return cleanBaseText;
       }
     });
-    
+
     setPartialText('');
   };
 
@@ -298,9 +298,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
     setIsListening(false);
     setPartialText('');
     setBaseInputText('');
-    
+
     let errorMessage = 'Speech recognition failed. Please try again.';
-    
+
     if (error.includes('not-allowed')) {
       errorMessage = 'Microphone access denied. Please enable microphone permissions.';
       setIsVoiceAvailable(false);
@@ -312,7 +312,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       errorMessage = 'Speech recognition is not supported on this device.';
       setIsVoiceAvailable(false);
     }
-    
+
     Alert.alert('Voice Recognition Error', errorMessage);
   };
 
@@ -346,7 +346,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   };
 
   const openLink = (url: string) => {
-    Linking.openURL(url).catch(err => 
+    Linking.openURL(url).catch(err =>
       Alert.alert('Error', 'Could not open link')
     );
   };
@@ -361,7 +361,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
     // Pre-fill input with contact payment
     setInputText(`Pay to ${contact.name} (${contact.lightning_address})`);
     setShowContactsSelector(false);
-    
+
     // Optionally auto-send the message
     setTimeout(() => {
       sendMessage(`Pay to ${contact.name} (${contact.lightning_address})`);
@@ -376,17 +376,17 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   const handlePaymentConfirm = async () => {
     if (!pendingPayment) return;
-    
+
     setPaymentLoading(true);
-    
+
     try {
       // Here you would call the actual payment function
       // For now, we'll simulate the payment
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
       setShowPaymentConfirmation(false);
       setPendingPayment(null);
-      
+
       // Add success message
       const successMessage: Message = {
         id: Date.now().toString(),
@@ -394,7 +394,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         isUser: false,
         timestamp: new Date(),
       };
-      
+
       addMessage(successMessage);
     } catch (error) {
       Alert.alert('Payment Failed', 'Unable to process payment. Please try again.');
@@ -428,12 +428,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
       }));
 
       const response = await aiAssistant.processMessage(messageText, conversationHistory) as AIResponse;
-      
+
       // Check if this is a payment request and needs confirmation
       if ((response.functionCalled === 'pay_lightning_invoice' || response.functionCalled === 'pay_nostr_contact') && response.functionResult) {
         const amountMatch = messageText.match(/(\d+)\s*(sats?|satoshis?)/i);
         const addressMatch = messageText.match(/([a-zA-Z0-9]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})|((lnbc|lntb)[a-zA-Z0-9]+)/i);
-        
+
         // Handle Nostr contact payments
         if (response.functionCalled === 'pay_nostr_contact' && response.functionResult.contact) {
           const contact = response.functionResult.contact;
@@ -447,12 +447,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
             lightningAddress: contact.lightning_address,
             isNostrContact: true,
           };
-          
+
           confirmPayment(paymentDetails);
           setIsLoading(false);
           return;
         }
-        
+
         // Handle regular Lightning payments
         if (response.functionCalled === 'pay_lightning_invoice' && addressMatch) {
           // For Lightning addresses, we need the amount
@@ -476,13 +476,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
             description: 'Payment via AI Assistant',
             lightningAddress: addressMatch[0].includes('@') ? addressMatch[0] : undefined,
           };
-          
+
           confirmPayment(paymentDetails);
           setIsLoading(false);
           return;
         }
       }
-      
+
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: response.text || 'Sorry, I could not process your request.',
@@ -495,7 +495,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       addMessage(aiMessage);
     } catch (error) {
       console.error('AI response error:', error);
-      
+
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         text: "I'm having trouble processing your request right now. This might be due to network connectivity or service availability. Please check your connection and try again. 🔧",
@@ -525,7 +525,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             {functionResult.success ? (
               <View>
                 <Text style={styles.successText}>✅ Payment successful!</Text>
-                <TouchableOpacity 
+                <TouchableOpacity
                   onPress={() => copyToClipboard(functionResult.payment_hash)}
                   style={styles.copyButton}
                 >
@@ -622,7 +622,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   const renderMessage = (message: Message, index: number) => {
     const animation = messageAnimations.get(message.id) || new Animated.Value(1);
-    
+
     return (
       <Animated.View
         key={message.id}
@@ -650,7 +650,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             </LinearGradient>
           </View>
         )}
-        
+
         <View style={[
           styles.messageBubble,
           message.isUser ? styles.userBubble : styles.aiBubble,
@@ -669,12 +669,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
               <Text style={[styles.aiMessageText, { color: theme.colors.text.primary }]}>
                 {message.text}
               </Text>
-              {message.functionCalled && message.functionResult && 
+              {message.functionCalled && message.functionResult &&
                 renderFunctionResult(message.functionCalled, message.functionResult)
               }
             </View>
           )}
-          
+
           <Text style={[
             styles.messageTime,
             message.isUser ? styles.userMessageTime : styles.aiMessageTime
@@ -682,7 +682,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </Text>
         </View>
-        
+
         {message.isUser && (
           <View style={styles.userAvatar}>
             <LinearGradient
@@ -707,7 +707,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
           <Ionicons name="sparkles" size={16} color="white" />
         </LinearGradient>
       </View>
-      
+
       <View style={[styles.messageBubble, styles.aiBubble]}>
         <View style={styles.typingContainer}>
           <Animated.View style={[
@@ -745,8 +745,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // Enhanced quick action buttons with better design
   const renderQuickActions = () => (
-    <ScrollView 
-      horizontal 
+    <ScrollView
+      horizontal
       showsHorizontalScrollIndicator={false}
       style={styles.quickActionsContainer}
       contentContainerStyle={styles.quickActionsContent}
@@ -763,7 +763,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
           <Text style={styles.quickActionText}>Invoice</Text>
         </LinearGradient>
       </TouchableOpacity>
-      
+
       <TouchableOpacity
         style={styles.quickActionButton}
         onPress={() => setShowContactsSelector(true)}
@@ -776,7 +776,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
           <Text style={styles.quickActionText}>Contacts</Text>
         </LinearGradient>
       </TouchableOpacity>
-      
+
       <TouchableOpacity
         style={styles.quickActionButton}
         onPress={() => setInputText('Find restaurants in Lugano')}
@@ -789,7 +789,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
           <Text style={styles.quickActionText}>Restaurants</Text>
         </LinearGradient>
       </TouchableOpacity>
-      
+
       <TouchableOpacity
         style={styles.quickActionButton}
         onPress={() => setInputText('Find shops in Lugano')}
@@ -837,230 +837,208 @@ export default function AIAssistantScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <LinearGradient
-        colors={['#f8f9ff', '#e8f4f8']}
-        style={styles.background}
-      >
-        {/* Hidden Speech-to-Text Component */}
-        <SpeechToText
-          ref={speechToTextRef}
-          onStart={handleSpeechStart}
-          onEnd={handleSpeechEnd}
-          onResult={handleSpeechResult}
-          onPartialResult={handlePartialResult}
-          onError={handleSpeechError}
-        />
-
-        {/* Enhanced Header */}
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerIcon}>
-              <LinearGradient
-                colors={theme.colors.primary.gradient!}
-                style={styles.headerIconGradient}
-              >
-                <Ionicons name="sparkles" size={24} color="white" />
-              </LinearGradient>
-            </View>
-            <View style={styles.headerText}>
-              <Text style={styles.headerTitle}>AI Assistant</Text>
-              <Text style={styles.headerSubtitle}>Bitcoin & Lightning Expert</Text>
-            </View>
-            <View style={styles.headerActions}>
-              {nostrState.isConnected && (
-                <View style={styles.nostrIndicator}>
-                  <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />
-                  <Text style={styles.nostrText}>Nostr</Text>
-                </View>
-              )}
-              <View style={styles.voiceIndicator}>
-                <Ionicons 
-                  name="mic" 
-                  size={16} 
-                  color={isVoiceAvailable ? (isListening ? "#ff6b6b" : "#28a745") : "#ccc"} 
-                />
+    <View style={styles.container}>
+      <MainHeader
+        title="AI Assistant"
+        subtitle="Your Bitcoin Companion"
+        icon="chatbubble-ellipses"
+        rightAction={
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {nostrState.isConnected && (
+              <View style={styles.nostrIndicator}>
+                <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />
               </View>
-              <TouchableOpacity 
-                style={styles.clearButton}
-                onPress={clearChatHistory}
-              >
-                <LinearGradient
-                  colors={['#ff6b6b', '#ee5253']}
-                  style={styles.clearButtonGradient}
-                >
-                  <Ionicons name="trash-outline" size={16} color="white" />
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-        <KeyboardAvoidingView 
-          style={styles.content}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        >
-          <View style={styles.contentInner}>
-            <ScrollView
-              ref={scrollViewRef}
-              style={styles.messagesContainer}
-              contentContainerStyle={styles.messagesContent}
-              showsVerticalScrollIndicator={true}
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
-              scrollEventThrottle={16}
-              alwaysBounceVertical={false}
-              bounces={true}
-              onContentSizeChange={() => {
-                if (messages.length > 1) {
-                  scrollToBottom(true);
-                }
-              }}
-              onLayout={() => {
-                if (messages.length > 1) {
-                  scrollToBottom(false);
-                }
-              }}
+            )}
+            <TouchableOpacity
+              style={styles.clearButton}
+              onPress={clearChatHistory}
             >
-              {messages.map((message, index) => renderMessage(message, index))}
-              {isLoading && renderTypingIndicator()}
-            </ScrollView>
+              <Ionicons name="trash-outline" size={20} color="white" />
+            </TouchableOpacity>
+          </View>
+        }
+      />
+      <View style={styles.chatContainer}>
+        <LinearGradient
+          colors={['#f8f9ff', '#e8f4f8']}
+          style={styles.background}
+        >
+          {/* Hidden Speech-to-Text Component */}
+          <SpeechToText
+            ref={speechToTextRef}
+            onStart={handleSpeechStart}
+            onEnd={handleSpeechEnd}
+            onResult={handleSpeechResult}
+            onPartialResult={handlePartialResult}
+            onError={handleSpeechError}
+          />
 
-            <TouchableWithoutFeedback onPress={dismissKeyboard}>
-              <View style={styles.inputContainer}>
-                <LinearGradient
-                  colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.98)']}
-                  style={styles.inputGradient}
-                >
-                  {/* Enhanced Quick Actions */}
-                  {renderQuickActions()}
-                  
-                  <View style={styles.inputRow}>
-                    <View style={styles.textInputContainer}>
-                      <TextInput
-                        style={styles.textInput}
-                        value={inputText}
-                        onChangeText={(text) => {
-                          setInputText(text);
-                          if (!isListening) {
-                            setBaseInputText(text);
-                          }
-                        }}
-                        placeholder={isListening ? "Listening... speak now" : "Ask me about Bitcoin or payments"}
-                        placeholderTextColor={theme.colors.gray[400]}
-                        multiline
-                        maxLength={500}
-                        returnKeyType="send"
-                        onSubmitEditing={() => {
-                          if (inputText.trim()) {
-                            sendMessage(inputText.trim());
-                            dismissKeyboard();
-                          }
-                        }}
-                        blurOnSubmit={true}
-                        editable={!isListening}
-                      />
-                      
-                      {/* Show partial speech results */}
-                      {isListening && partialText && (
-                        <View style={styles.partialTextContainer}>
-                          <Text style={styles.partialText}>
-                            "{partialText}"
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-                    
-                    {/* Voice input button */}
-                    <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+          <KeyboardAvoidingView
+            style={styles.content}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          >
+            <View style={styles.contentInner}>
+              <ScrollView
+                ref={scrollViewRef}
+                style={styles.messagesContainer}
+                contentContainerStyle={styles.messagesContent}
+                showsVerticalScrollIndicator={true}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                scrollEventThrottle={16}
+                alwaysBounceVertical={false}
+                bounces={true}
+                onContentSizeChange={() => {
+                  if (messages.length > 1) {
+                    scrollToBottom(true);
+                  }
+                }}
+                onLayout={() => {
+                  if (messages.length > 1) {
+                    scrollToBottom(false);
+                  }
+                }}
+              >
+                {messages.map((message, index) => renderMessage(message, index))}
+                {isLoading && renderTypingIndicator()}
+              </ScrollView>
+
+              <TouchableWithoutFeedback onPress={dismissKeyboard}>
+                <View style={styles.inputContainer}>
+                  <LinearGradient
+                    colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.98)']}
+                    style={styles.inputGradient}
+                  >
+                    {/* Enhanced Quick Actions */}
+                    {renderQuickActions()}
+
+                    <View style={styles.inputRow}>
+                      <View style={styles.textInputContainer}>
+                        <TextInput
+                          style={styles.textInput}
+                          value={inputText}
+                          onChangeText={(text) => {
+                            setInputText(text);
+                            if (!isListening) {
+                              setBaseInputText(text);
+                            }
+                          }}
+                          placeholder={isListening ? "Listening... speak now" : "Ask me about Bitcoin or payments"}
+                          placeholderTextColor={theme.colors.gray[400]}
+                          multiline
+                          maxLength={500}
+                          returnKeyType="send"
+                          onSubmitEditing={() => {
+                            if (inputText.trim()) {
+                              sendMessage(inputText.trim());
+                              dismissKeyboard();
+                            }
+                          }}
+                          blurOnSubmit={true}
+                          editable={!isListening}
+                        />
+
+                        {/* Show partial speech results */}
+                        {isListening && partialText && (
+                          <View style={styles.partialTextContainer}>
+                            <Text style={styles.partialText}>
+                              "{partialText}"
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Voice input button */}
+                      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                        <TouchableOpacity
+                          style={[
+                            styles.voiceButton,
+                            isListening && styles.voiceButtonActive,
+                            !isVoiceAvailable && styles.disabledButton
+                          ]}
+                          onPress={startListening}
+                          disabled={!isVoiceAvailable || isLoading}
+                        >
+                          <LinearGradient
+                            colors={isListening ? theme.colors.error.gradient! : ['#00d2d3', '#54a0ff']}
+                            style={styles.buttonGradient}
+                          >
+                            <Ionicons
+                              name={isListening ? "stop" : "mic"}
+                              size={20}
+                              color="white"
+                            />
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </Animated.View>
+
                       <TouchableOpacity
-                        style={[
-                          styles.voiceButton,
-                          isListening && styles.voiceButtonActive,
-                          !isVoiceAvailable && styles.disabledButton
-                        ]}
-                        onPress={startListening}
-                        disabled={!isVoiceAvailable || isLoading}
+                        style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
+                        onPress={() => sendMessage(inputText)}
+                        disabled={!inputText.trim() || isLoading || isListening}
                       >
                         <LinearGradient
-                          colors={isListening ? theme.colors.error.gradient! : ['#00d2d3', '#54a0ff']}
+                          colors={inputText.trim() ? theme.colors.primary.gradient! : ['#E5E5EA', '#E5E5EA']}
                           style={styles.buttonGradient}
                         >
-                          <Ionicons 
-                            name={isListening ? "stop" : "mic"} 
-                            size={20} 
-                            color="white" 
+                          <Ionicons
+                            name="send"
+                            size={20}
+                            color={inputText.trim() ? "white" : theme.colors.gray[400]}
                           />
                         </LinearGradient>
                       </TouchableOpacity>
-                    </Animated.View>
+                    </View>
 
-                    <TouchableOpacity
-                      style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
-                      onPress={() => sendMessage(inputText)}
-                      disabled={!inputText.trim() || isLoading || isListening}
-                    >
-                      <LinearGradient
-                        colors={inputText.trim() ? theme.colors.primary.gradient! : ['#E5E5EA', '#E5E5EA']}
-                        style={styles.buttonGradient}
-                      >
-                        <Ionicons 
-                          name="send" 
-                          size={20} 
-                          color={inputText.trim() ? "white" : theme.colors.gray[400]} 
-                        />
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                  
-                  {isListening && (
-                    <Animated.View style={[
-                      styles.recordingIndicator,
-                      {
-                        opacity: pulseAnim.interpolate({
-                          inputRange: [1, 1.3],
-                          outputRange: [0.8, 1],
-                        }),
-                      },
-                    ]}>
-                      <View style={styles.recordingInfo}>
-                        <View style={styles.recordingDot} />
-                        <Text style={styles.recordingText}>
-                          Listening... {formatRecordingDuration(recordingDuration)}
-                        </Text>
-                      </View>
-                      <TouchableOpacity 
-                        style={styles.stopRecordingButton}
-                        onPress={stopListening}
-                      >
-                        <Text style={styles.stopRecordingText}>Tap to stop</Text>
-                      </TouchableOpacity>
-                    </Animated.View>
-                  )}
-                </LinearGradient>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </KeyboardAvoidingView>
+                    {isListening && (
+                      <Animated.View style={[
+                        styles.recordingIndicator,
+                        {
+                          opacity: pulseAnim.interpolate({
+                            inputRange: [1, 1.3],
+                            outputRange: [0.8, 1],
+                          }),
+                        },
+                      ]}>
+                        <View style={styles.recordingInfo}>
+                          <View style={styles.recordingDot} />
+                          <Text style={styles.recordingText}>
+                            Listening... {formatRecordingDuration(recordingDuration)}
+                          </Text>
+                        </View>
+                        <TouchableOpacity
+                          style={styles.stopRecordingButton}
+                          onPress={stopListening}
+                        >
+                          <Text style={styles.stopRecordingText}>Tap to stop</Text>
+                        </TouchableOpacity>
+                      </Animated.View>
+                    )}
+                  </LinearGradient>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </KeyboardAvoidingView>
 
-        {/* Payment Confirmation Modal */}
-        <PaymentConfirmationModal
-          visible={showPaymentConfirmation}
-          paymentDetails={pendingPayment}
-          onConfirm={handlePaymentConfirm}
-          onCancel={() => setShowPaymentConfirmation(false)}
-          loading={paymentLoading}
-        />
+          {/* Payment Confirmation Modal */}
+          <PaymentConfirmationModal
+            visible={showPaymentConfirmation}
+            paymentDetails={pendingPayment}
+            onConfirm={handlePaymentConfirm}
+            onCancel={() => setShowPaymentConfirmation(false)}
+            loading={paymentLoading}
+          />
 
-        {/* Nostr Contacts Selector */}
-        <NostrContactsSelector
-          visible={showContactsSelector}
-          onSelectContact={handleContactSelection}
-          onClose={() => setShowContactsSelector(false)}
-        />
-      </LinearGradient>
-    </SafeAreaView>
+          {/* Nostr Contacts Selector */}
+          <NostrContactsSelector
+            visible={showContactsSelector}
+            onSelectContact={handleContactSelection}
+            onClose={() => setShowContactsSelector(false)}
+          />
+        </LinearGradient>
+      </View>
+    </View>
   );
 }
 
@@ -1070,70 +1048,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'white',
   },
+  chatContainer: {
+    flex: 1,
+  },
   background: {
     flex: 1,
-  },
-  header: {
-    paddingHorizontal: theme.spacing[5],
-    paddingVertical: theme.spacing[4],
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-    ...theme.shadows.sm,
-    zIndex: 1,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerIcon: {
-    marginRight: theme.spacing[3],
-  },
-  headerIconGradient: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  headerText: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[1],
-    letterSpacing: 0.5,
-  },
-  headerSubtitle: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    fontWeight: '500',
-    letterSpacing: 0.25,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-  },
-  nostrIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.success[50],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.sm,
-    gap: theme.spacing[1],
-  },
-  nostrText: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.success[600],
-    fontWeight: '500',
-  },
-  voiceIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   content: {
     flex: 1,
@@ -1255,12 +1174,12 @@ const styles = StyleSheet.create({
   quickActionGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
     gap: theme.spacing[2],
   },
   quickActionText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: 'white',
     fontWeight: '600',
     letterSpacing: 0.5,
@@ -1271,59 +1190,59 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
   },
   inputGradient: {
-    padding: theme.spacing[4],
-    paddingBottom: Platform.OS === 'ios' ? theme.spacing[6] : theme.spacing[4],
+    padding: theme.spacing[3],
+    paddingBottom: Platform.OS === 'ios' ? theme.spacing[5] : theme.spacing[3],
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: theme.spacing[3],
+    gap: theme.spacing[2],
   },
   textInputContainer: {
     flex: 1,
     backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: theme.borderRadius.full,
     borderWidth: 1,
     borderColor: theme.colors.border.light,
     ...theme.shadows.sm,
-    maxHeight: 120,
+    maxHeight: 100,
   },
   textInput: {
     paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
     fontSize: theme.typography.fontSize.base,
-    maxHeight: 100,
-    minHeight: 44,
+    maxHeight: 80,
+    minHeight: 40,
     color: theme.colors.text.primary,
-    lineHeight: 24,
+    lineHeight: 20,
     letterSpacing: 0.3,
   },
   partialTextContainer: {
     paddingHorizontal: theme.spacing[4],
-    paddingBottom: theme.spacing[3],
+    paddingBottom: theme.spacing[2],
     borderTopWidth: 1,
     borderTopColor: theme.colors.primary[100],
     backgroundColor: theme.colors.primary[50],
   },
   partialText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.primary[600],
     fontStyle: 'italic',
     lineHeight: theme.typography.lineHeight.snug,
   },
   voiceButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   voiceButtonActive: {
     // Additional styling handled by gradient colors
   },
   sendButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   buttonGradient: {
@@ -1336,9 +1255,9 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   recordingIndicator: {
-    marginTop: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
     backgroundColor: 'rgba(255,107,107,0.1)',
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
@@ -1348,24 +1267,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
   },
   recordingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     backgroundColor: theme.colors.error[500],
     marginRight: theme.spacing[2],
   },
   recordingText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.error[600],
     fontWeight: '600',
   },
   stopRecordingButton: {
     alignSelf: 'center',
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
     backgroundColor: 'rgba(255,107,107,0.2)',
     borderRadius: theme.borderRadius.md,
   },
@@ -1377,61 +1296,61 @@ const styles = StyleSheet.create({
   voiceTips: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginTop: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
+    marginTop: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
     backgroundColor: theme.colors.primary[50],
     borderRadius: theme.borderRadius.md,
     borderWidth: 1,
     borderColor: theme.colors.primary[100],
   },
   voiceTipsText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.primary[600],
     marginLeft: theme.spacing[2],
     flex: 1,
-    lineHeight: 20,
+    lineHeight: 18,
     letterSpacing: 0.25,
   },
-  
+
   // Function result styles
   functionResult: {
-    marginTop: theme.spacing[4],
-    padding: theme.spacing[4],
+    marginTop: theme.spacing[3],
+    padding: theme.spacing[3],
     backgroundColor: theme.colors.primary[50],
     borderRadius: theme.borderRadius.md,
     borderLeftWidth: 3,
     borderLeftColor: theme.colors.primary[500],
   },
   functionTitle: {
-    fontSize: theme.typography.fontSize.base,
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.primary[700],
-    marginBottom: theme.spacing[3],
+    marginBottom: theme.spacing[2],
     letterSpacing: 0.5,
   },
   successText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.success[700],
     fontWeight: '500',
     marginBottom: theme.spacing[1],
   },
   errorText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.error[700],
     fontWeight: '500',
   },
   invoiceText: {
-    fontSize: theme.typography.fontSize.base,
-    lineHeight: 22,
+    fontSize: theme.typography.fontSize.sm,
+    lineHeight: 20,
     color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[3],
+    marginBottom: theme.spacing[2],
     letterSpacing: 0.3,
   },
   copyButton: {
     alignSelf: 'flex-start',
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[2],
     backgroundColor: theme.colors.primary[100],
     borderRadius: theme.borderRadius.sm,
     marginTop: theme.spacing[1],
@@ -1442,10 +1361,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   merchantList: {
-    maxHeight: 200,
+    maxHeight: 180,
   },
   merchantItem: {
-    padding: theme.spacing[3],
+    padding: theme.spacing[2],
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
     borderRadius: theme.borderRadius.sm,
     marginBottom: theme.spacing[2],
@@ -1453,35 +1372,35 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.primary[100],
   },
   merchantName: {
-    fontSize: theme.typography.fontSize.base,
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
     letterSpacing: 0.3,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   merchantAddress: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
     letterSpacing: 0.25,
-    lineHeight: 20,
+    lineHeight: 16,
   },
   merchantPhone: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.primary[700],
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
     fontWeight: '500',
     letterSpacing: 0.25,
-    lineHeight: 20,
+    lineHeight: 16,
   },
   merchantWebsite: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.primary[700],
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
     fontWeight: '500',
     letterSpacing: 0.25,
-    lineHeight: 20,
+    lineHeight: 16,
   },
   merchantHours: {
     fontSize: theme.typography.fontSize.xs,
@@ -1489,18 +1408,14 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing[1],
     fontWeight: '500',
   },
-  clearButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginLeft: theme.spacing[2],
+  nostrIndicator: {
+    padding: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 12,
   },
-  clearButtonGradient: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    opacity: 0.9,
+  clearButton: {
+    padding: 4,
+    backgroundColor: 'rgba(255, 59, 48, 0.8)',
+    borderRadius: 12,
   },
 });

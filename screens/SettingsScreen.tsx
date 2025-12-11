@@ -5,10 +5,10 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
-import { 
-  setTheme, 
-  setCurrency, 
-  setLanguage, 
+import {
+  setTheme,
+  setCurrency,
+  setLanguage,
   setNetwork,
   setBiometricEnabled,
   setPinEnabled,
@@ -23,7 +23,7 @@ import {
 } from '../store/slices/settingsSlice';
 import { setWalletConnectEnabled } from '../store/slices/nostrSlice';
 import { RGBNodeService } from '../services/RGBNodeService';
-import { Button, ListItem, Input } from '../components';
+import { Button, ListItem, Input, MainHeader } from '../components';
 import NostrProfileManager from '../components/NostrProfileManager';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme';
@@ -42,10 +42,10 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const handleNodeTypeChange = async (useRemoteNode: boolean) => {
     const newType = useRemoteNode ? 'remote' : 'local';
-    
+
     try {
       dispatch(setNodeType(newType));
-      
+
       // TODO: Implement node configuration update when available
       Alert.alert(
         'Node Type Changed',
@@ -115,14 +115,14 @@ export default function SettingsScreen({ navigation }: Props) {
       );
       return;
     }
-    
+
     if (enabled) {
       Alert.alert(
         'Enable Nostr Wallet Connect',
         'Go to your Nostr profile settings to generate a connection string and configure NWC.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { 
+          {
             text: 'Go to Profile',
             onPress: () => {
               dispatch(setWalletConnectEnabled(enabled));
@@ -163,36 +163,24 @@ export default function SettingsScreen({ navigation }: Props) {
     dispatch(setNetwork(nextNetwork));
   };
 
-  const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
-        <View style={styles.placeholder} />
-      </View>
-    </View>
-  );
-
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
+    <View style={styles.container}>
+      <MainHeader
+        title="Settings"
+        onBack={() => navigation.goBack()}
+      />
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Nostr Section */}
         <View style={styles.section}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.sectionHeader}
             onPress={() => setShowNostrSection(!showNostrSection)}
           >
             <View style={styles.sectionTitleContainer}>
-              <Ionicons 
-                name="planet-outline" 
-                size={24} 
-                color={theme.colors.primary[500]} 
+              <Ionicons
+                name="planet-outline"
+                size={24}
+                color={theme.colors.primary[500]}
                 style={styles.sectionIcon}
               />
               <Text style={styles.sectionTitle}>Nostr</Text>
@@ -206,17 +194,17 @@ export default function SettingsScreen({ navigation }: Props) {
                 </Text>
               </View>
             </View>
-            <Ionicons 
-              name={showNostrSection ? "chevron-up" : "chevron-down"} 
-              size={20} 
-              color={theme.colors.text.secondary} 
+            <Ionicons
+              name={showNostrSection ? "chevron-up" : "chevron-down"}
+              size={20}
+              color={theme.colors.text.secondary}
             />
           </TouchableOpacity>
-          
+
           {showNostrSection && (
             <View style={styles.sectionContent}>
               <NostrProfileManager navigation={navigation} />
-              
+
               {/* Nostr Wallet Connect */}
               <View style={styles.walletConnectSection}>
                 <View style={styles.featureHeader}>
@@ -232,7 +220,7 @@ export default function SettingsScreen({ navigation }: Props) {
                     disabled={!nostrState.isConnected}
                   />
                 </View>
-                
+
                 {nostrState.walletConnectEnabled && (
                   <View style={styles.walletConnectInfo}>
                     <Text style={styles.walletConnectInfoText}>
@@ -255,16 +243,16 @@ export default function SettingsScreen({ navigation }: Props) {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleContainer}>
-              <Ionicons 
-                name="server-outline" 
-                size={24} 
-                color={theme.colors.primary[500]} 
+              <Ionicons
+                name="server-outline"
+                size={24}
+                color={theme.colors.primary[500]}
                 style={styles.sectionIcon}
               />
               <Text style={styles.sectionTitle}>RGB Node Settings</Text>
             </View>
           </View>
-          
+
           <View style={styles.sectionContent}>
             <ListItem>
               <Text>Use Remote Node</Text>
@@ -324,29 +312,29 @@ export default function SettingsScreen({ navigation }: Props) {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <View style={styles.sectionTitleContainer}>
-              <Ionicons 
-                name="settings-outline" 
-                size={24} 
-                color={theme.colors.primary[500]} 
+              <Ionicons
+                name="settings-outline"
+                size={24}
+                color={theme.colors.primary[500]}
                 style={styles.sectionIcon}
               />
               <Text style={styles.sectionTitle}>General Settings</Text>
             </View>
           </View>
-          
+
           <View style={styles.sectionContent}>
             <ListItem>
               <Text>Bitcoin Unit</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.settingRow}
                 onPress={() => handleBitcoinUnitChange(settings.bitcoinUnit === 'BTC' ? 'sats' : 'BTC')}
               >
                 <Text style={[styles.settingValue, styles.clickableValue]}>
                   {settings.bitcoinUnit}
                 </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
                   color={theme.colors.text.secondary}
                   style={styles.settingIcon}
                 />
@@ -355,52 +343,52 @@ export default function SettingsScreen({ navigation }: Props) {
 
             <ListItem>
               <Text>Theme</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.settingRow}
                 onPress={handleThemeChange}
               >
                 <Text style={[styles.settingValue, styles.clickableValue]}>
                   {settings.theme}
                 </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
                   color={theme.colors.text.secondary}
                   style={styles.settingIcon}
                 />
               </TouchableOpacity>
             </ListItem>
-            
+
             <ListItem>
               <Text>Currency</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.settingRow}
                 onPress={handleCurrencyChange}
               >
                 <Text style={[styles.settingValue, styles.clickableValue]}>
                   {settings.currency}
                 </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
                   color={theme.colors.text.secondary}
                   style={styles.settingIcon}
                 />
               </TouchableOpacity>
             </ListItem>
-            
+
             <ListItem>
               <Text>Network</Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.settingRow}
                 onPress={handleNetworkChange}
               >
                 <Text style={[styles.settingValue, styles.clickableValue]}>
                   {settings.network}
                 </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
                   color={theme.colors.text.secondary}
                   style={styles.settingIcon}
                 />
@@ -409,7 +397,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -418,13 +406,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background.secondary,
   },
-  
+
   headerContainer: {
     backgroundColor: theme.colors.surface.primary,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border.light,
   },
-  
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -432,7 +420,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing[5],
     paddingVertical: theme.spacing[4],
   },
-  
+
   backButton: {
     width: 40,
     height: 40,
@@ -441,13 +429,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
+
   headerTitle: {
     fontSize: theme.typography.fontSize.xl,
     fontWeight: '700',
     color: theme.colors.text.primary,
   },
-  
+
   placeholder: {
     width: 40,
   },
@@ -456,7 +444,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: theme.spacing[5],
   },
-  
+
   section: {
     marginBottom: theme.spacing[4],
     backgroundColor: theme.colors.surface.primary,
@@ -471,7 +459,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  
+
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -480,24 +468,24 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border.light,
   },
-  
+
   sectionTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  
+
   sectionIcon: {
     marginRight: theme.spacing[3],
   },
-  
+
   sectionTitle: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
     color: theme.colors.text.primary,
     flex: 1,
   },
-  
+
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -507,24 +495,24 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.base,
     marginLeft: theme.spacing[2],
   },
-  
+
   statusDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
     marginRight: theme.spacing[2],
   },
-  
+
   statusText: {
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.secondary,
     fontWeight: '500',
   },
-  
+
   sectionContent: {
     padding: theme.spacing[4],
   },
-  
+
   walletConnectSection: {
     marginTop: theme.spacing[4],
     padding: theme.spacing[4],
@@ -533,99 +521,99 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.primary[100],
   },
-  
+
   featureHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: theme.spacing[3],
   },
-  
+
   featureInfo: {
     flex: 1,
     marginRight: theme.spacing[4],
   },
-  
+
   featureTitle: {
     fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.primary[700],
     marginBottom: theme.spacing[1],
   },
-  
+
   featureDescription: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.primary[600],
     lineHeight: 18,
   },
-  
-     walletConnectInfo: {
-     marginTop: theme.spacing[3],
-     paddingTop: theme.spacing[3],
-     borderTopWidth: 1,
-     borderTopColor: theme.colors.primary[100],
-   },
-  
+
+  walletConnectInfo: {
+    marginTop: theme.spacing[3],
+    paddingTop: theme.spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.primary[100],
+  },
+
   walletConnectInfoText: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.primary[700],
     marginBottom: theme.spacing[2],
     fontWeight: '500',
   },
-  
+
   walletConnectFeature: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.primary[600],
     marginBottom: theme.spacing[1],
     lineHeight: 18,
   },
-  
+
   settingValue: {
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.secondary,
     textTransform: 'capitalize',
   },
-  
+
   nodeUrlContainer: {
     flex: 1,
   },
-  
+
   urlEditContainer: {
     marginTop: theme.spacing[2],
   },
-  
+
   urlInput: {
     marginVertical: theme.spacing[2],
   },
-  
+
   urlButtons: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: theme.spacing[2],
   },
-  
+
   urlButton: {
     minWidth: 80,
   },
-  
-     cancelButton: {
-     backgroundColor: theme.colors.gray[400],
-     minWidth: 80,
-   },
-  
+
+  cancelButton: {
+    backgroundColor: theme.colors.gray[400],
+    minWidth: 80,
+  },
+
   urlViewContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: theme.spacing[2],
   },
-  
+
   urlText: {
     flex: 1,
     marginRight: theme.spacing[2],
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
   },
-  
+
   editButton: {
     minWidth: 60,
   },

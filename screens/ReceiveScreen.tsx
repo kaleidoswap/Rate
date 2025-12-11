@@ -33,11 +33,7 @@ interface RGBAsset {
   ticker: string;
   name: string;
   precision?: number;
-  balance: {
-    settled: number;
-    future: number;
-    spendable: number;
-  };
+  balance: number;
 }
 
 interface Asset {
@@ -71,11 +67,12 @@ interface Channel {
 
 export default function ReceiveScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
+  const assetsState = useSelector((state: RootState) => state.assets);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD } = useBitcoinConversion();
   
   // Safe destructuring with fallbacks
-  const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
+  const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
   
 
@@ -181,7 +178,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           ticker: rgbAsset.ticker,
           name: rgbAsset.name,
           isRGB: true,
-          balance: rgbAsset.balance?.spendable || 0,
+          balance: rgbAsset.balance || 0,
         } : null;
       })
       .filter(asset => asset !== null) as Asset[];
@@ -208,7 +205,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       ticker: asset.ticker,
       name: asset.name,
       isRGB: true,
-      balance: asset.balance?.spendable || 0,
+      balance: asset.balance || 0,
     })) : [])
   ];
 

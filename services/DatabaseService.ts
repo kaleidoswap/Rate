@@ -3,15 +3,27 @@ import * as SQLite from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import CryptoJS from 'crypto-js';
 
+export type NetworkType = 'spark' | 'arkade' | 'rln' | 'liquid';
+export type RlnNodeType = 'local' | 'remote';
+
+export interface NetworkConfig {
+  id?: number;
+  wallet_id: number;
+  type: NetworkType;
+  enabled: boolean;
+  config: string; // JSON string for specific config (e.g. RLN node type, remote URL)
+}
+
 export interface WalletRecord {
   id?: number;
   name: string;
-  network: 'mainnet' | 'testnet' | 'regtest' | 'signet';
+  // network: 'mainnet' | 'testnet' | 'regtest' | 'signet'; // Deprecated in favor of wallet_networks
   derivation_path?: string;
   created_at: number;
   is_active: boolean;
-  node_pubkey?: string;
+  // node_pubkey?: string; // Moved to network config if specific to network
   encrypted_mnemonic?: string;
+  networks?: NetworkConfig[];
 }
 
 export interface AssetRecord {
@@ -59,7 +71,7 @@ export class DatabaseService {
     return DatabaseService.instance;
   }
 
-  private constructor() {}
+  private constructor() { }
 
   /**
    * Initialize the database with encryption
@@ -99,12 +111,21 @@ export class DatabaseService {
       `CREATE TABLE IF NOT EXISTS wallets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        network TEXT NOT NULL CHECK(network IN ('mainnet', 'testnet', 'regtest', 'signet')),
         derivation_path TEXT,
         created_at INTEGER NOT NULL,
         is_active BOOLEAN DEFAULT FALSE,
-        node_pubkey TEXT,
         encrypted_mnemonic TEXT
+      )`,
+
+      // Wallet Networks table
+      `CREATE TABLE IF NOT EXISTS wallet_networks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        wallet_id INTEGER NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('spark', 'arkade', 'rln', 'liquid')),
+        enabled BOOLEAN DEFAULT FALSE,
+        config TEXT,
+        FOREIGN KEY (wallet_id) REFERENCES wallets(id) ON DELETE CASCADE,
+        UNIQUE(wallet_id, type)
       )`,
 
       // RGB Assets table
@@ -147,6 +168,7 @@ export class DatabaseService {
 
       // Create indexes for better performance
       `CREATE INDEX IF NOT EXISTS idx_wallets_active ON wallets(is_active)`,
+      `CREATE INDEX IF NOT EXISTS idx_wallet_networks_wallet_id ON wallet_networks(wallet_id)`,
       `CREATE INDEX IF NOT EXISTS idx_assets_wallet_id ON rgb_assets(wallet_id)`,
       `CREATE INDEX IF NOT EXISTS idx_assets_asset_id ON rgb_assets(asset_id)`,
       `CREATE INDEX IF NOT EXISTS idx_transactions_wallet_id ON transactions(wallet_id)`,
@@ -161,7 +183,7 @@ export class DatabaseService {
   }
 
   // Wallet operations
-  async createWallet(wallet: Omit<WalletRecord, 'id'>): Promise<number> {
+  async createWallet(wallet: Omit<WalletRecord, 'id' | 'networks'>, initialNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[]): Promise<number> {
     if (!this.db) throw new Error('Database not initialized');
 
     // Deactivate other wallets if this one is active
@@ -170,40 +192,70 @@ export class DatabaseService {
     }
 
     const result = await this.db.runAsync(
-      `INSERT INTO wallets (name, network, derivation_path, created_at, is_active, node_pubkey, encrypted_mnemonic)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO wallets (name, derivation_path, created_at, is_active, encrypted_mnemonic)
+       VALUES (?, ?, ?, ?, ?)`,
       [
         wallet.name,
-        wallet.network,
         wallet.derivation_path || null,
         wallet.created_at,
         wallet.is_active ? 1 : 0,
-        wallet.node_pubkey || null,
         wallet.encrypted_mnemonic || null
       ]
     );
 
-    return result.lastInsertRowId;
+    const walletId = result.lastInsertRowId;
+
+    // Add initial networks
+    for (const network of initialNetworks) {
+      await this.addNetworkToWallet(walletId, network);
+    }
+
+    return walletId;
   }
 
   async getActiveWallet(): Promise<WalletRecord | null> {
     if (!this.db) throw new Error('Database not initialized');
 
-    const result = await this.db.getFirstAsync<WalletRecord>(
+    const wallet = await this.db.getFirstAsync<WalletRecord>(
       'SELECT * FROM wallets WHERE is_active = TRUE'
     );
 
-    return result || null;
+    if (wallet) {
+      wallet.networks = await this.getWalletNetworks(wallet.id!);
+      return wallet;
+    }
+
+    return null;
+  }
+
+  async getWallet(id: number): Promise<WalletRecord | null> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const wallet = await this.db.getFirstAsync<WalletRecord>(
+      'SELECT * FROM wallets WHERE id = ?',
+      [id]
+    );
+
+    if (wallet) {
+      wallet.networks = await this.getWalletNetworks(wallet.id!);
+      return wallet;
+    }
+
+    return null;
   }
 
   async getAllWallets(): Promise<WalletRecord[]> {
     if (!this.db) throw new Error('Database not initialized');
 
-    const results = await this.db.getAllAsync<WalletRecord>(
+    const wallets = await this.db.getAllAsync<WalletRecord>(
       'SELECT * FROM wallets ORDER BY created_at DESC'
     );
 
-    return results;
+    for (const wallet of wallets) {
+      wallet.networks = await this.getWalletNetworks(wallet.id!);
+    }
+
+    return wallets;
   }
 
   async setActiveWallet(walletId: number): Promise<void> {
@@ -218,6 +270,64 @@ export class DatabaseService {
       await this.db.runAsync('ROLLBACK');
       throw error;
     }
+  }
+
+  async deleteWallet(walletId: number): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+    await this.db.runAsync('DELETE FROM wallets WHERE id = ?', [walletId]);
+  }
+
+  // Network operations
+  async addNetworkToWallet(walletId: number, network: Omit<NetworkConfig, 'id' | 'wallet_id'>): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    await this.db.runAsync(
+      `INSERT INTO wallet_networks (wallet_id, type, enabled, config)
+       VALUES (?, ?, ?, ?)`,
+      [
+        walletId,
+        network.type,
+        network.enabled ? 1 : 0,
+        network.config
+      ]
+    );
+  }
+
+  async getWalletNetworks(walletId: number): Promise<NetworkConfig[]> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const results = await this.db.getAllAsync<NetworkConfig>(
+      'SELECT * FROM wallet_networks WHERE wallet_id = ?',
+      [walletId]
+    );
+
+    return results;
+  }
+
+  async updateNetworkConfig(walletId: number, type: NetworkType, config: Partial<NetworkConfig>): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (config.enabled !== undefined) {
+      updates.push('enabled = ?');
+      values.push(config.enabled ? 1 : 0);
+    }
+    if (config.config !== undefined) {
+      updates.push('config = ?');
+      values.push(config.config);
+    }
+
+    if (updates.length === 0) return;
+
+    values.push(walletId);
+    values.push(type);
+
+    await this.db.runAsync(
+      `UPDATE wallet_networks SET ${updates.join(', ')} WHERE wallet_id = ? AND type = ?`,
+      values
+    );
   }
 
   // RGB Asset operations
@@ -343,8 +453,9 @@ export class DatabaseService {
     // Get or create salt
     let salt = await SecureStore.getItemAsync('db_salt');
     if (!salt) {
-      salt = CryptoJS.lib.WordArray.random(16).toString();
-      await SecureStore.setItemAsync('db_salt', salt);
+      const newSalt = CryptoJS.lib.WordArray.random(16).toString();
+      await SecureStore.setItemAsync('db_salt', newSalt);
+      salt = newSalt;
     }
 
     // Derive key using PBKDF2
@@ -358,14 +469,14 @@ export class DatabaseService {
 
   private encrypt(text: string): string {
     if (!this.encryptionKey) throw new Error('Encryption key not set');
-    
+
     const encrypted = CryptoJS.AES.encrypt(text, this.encryptionKey);
     return encrypted.toString();
   }
 
   private decrypt(encryptedText: string): string {
     if (!this.encryptionKey) throw new Error('Encryption key not set');
-    
+
     const decrypted = CryptoJS.AES.decrypt(encryptedText, this.encryptionKey);
     return decrypted.toString(CryptoJS.enc.Utf8);
   }

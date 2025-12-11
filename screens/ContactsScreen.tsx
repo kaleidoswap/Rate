@@ -17,21 +17,21 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
-import { 
-  Contact, 
-  addContact, 
-  deleteContact, 
-  toggleFavorite, 
-  setSearchQuery, 
-  setSelectedContact 
+import {
+  Contact,
+  addContact,
+  deleteContact,
+  toggleFavorite,
+  setSearchQuery,
+  setSelectedContact
 } from '../store/slices/contactsSlice';
-import { 
+import {
   loadContactList,
-  setShowContactSync 
+  setShowContactSync
 } from '../store/slices/nostrSlice';
 import { Image } from 'react-native';
 import { theme } from '../theme';
-import { Card, Button } from '../components';
+import { Card, Button, MainHeader } from '../components';
 import { NostrContact } from '../services/NostrService';
 import { nip19 } from 'nostr-tools';
 
@@ -56,11 +56,11 @@ export default function ContactsScreen({ navigation }: Props) {
 
   // Convert Nostr contacts to Contact format
   const convertNostrContact = (nostrContact: NostrContact): Contact => {
-    const displayName = nostrContact.profile?.display_name || 
-                       nostrContact.profile?.name || 
-                       nostrContact.petname || 
-                       'Anonymous';
-    
+    const displayName = nostrContact.profile?.display_name ||
+      nostrContact.profile?.name ||
+      nostrContact.petname ||
+      'Anonymous';
+
     return {
       id: `nostr_${nostrContact.pubkey}`,
       name: displayName,
@@ -80,7 +80,7 @@ export default function ContactsScreen({ navigation }: Props) {
   const getAvatarColor = (name: string) => {
     const colors = [
       theme.colors.primary[50],
-      theme.colors.success[50], 
+      theme.colors.success[50],
       '#FEF3C7', // yellow light
       '#E1E7FF', // blue light
       '#FFE1E7', // pink light
@@ -94,7 +94,7 @@ export default function ContactsScreen({ navigation }: Props) {
   const getAvatarTextColor = (name: string) => {
     const colors = [
       theme.colors.primary[600],
-      theme.colors.success[600], 
+      theme.colors.success[600],
       '#D97706', // yellow dark
       '#3B4FE6', // blue dark
       '#E63B5A', // pink dark
@@ -106,12 +106,12 @@ export default function ContactsScreen({ navigation }: Props) {
   };
 
   // Combine local and Nostr contacts
-  const nostrContacts = nostrState.isConnected ? 
+  const nostrContacts = nostrState.isConnected ?
     nostrState.contacts.map(convertNostrContact) : [];
-  
+
   const allContacts = contactSource === 'local' ? contacts :
-                     contactSource === 'nostr' ? nostrContacts :
-                     [...contacts, ...nostrContacts];
+    contactSource === 'nostr' ? nostrContacts :
+      [...contacts, ...nostrContacts];
 
   // Filter contacts based on search query
   const filteredContacts = allContacts.filter((contact: Contact) =>
@@ -133,7 +133,7 @@ export default function ContactsScreen({ navigation }: Props) {
       Alert.alert('Not Connected', 'Please connect to Nostr first in Settings');
       return;
     }
-    
+
     try {
       await dispatch(loadContactList() as any);
       Alert.alert('Success', 'Nostr contacts synced successfully');
@@ -219,42 +219,13 @@ export default function ContactsScreen({ navigation }: Props) {
 
   const handleContactPress = (contact: Contact) => {
     dispatch(setSelectedContact(contact));
-    navigation.navigate('Send', { 
+    navigation.navigate('Send', {
       address: contact.lightning_address || contact.node_pubkey,
-      contactName: contact.name 
+      contactName: contact.name
     });
   };
 
-  const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <SafeAreaView style={styles.headerSafeArea}>
-          <View style={styles.header}>
-            <View style={styles.headerLeft}>
-              <View style={styles.headerIcon}>
-                <Ionicons name="people" size={24} color="white" />
-              </View>
-              <View style={styles.headerText}>
-                <Text style={styles.headerTitle}>Contacts</Text>
-                <Text style={styles.headerSubtitle}>Lightning Network Connections</Text>
-              </View>
-            </View>
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => setShowAddForm(!showAddForm)}
-            >
-              <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
-    </View>
-  );
+
 
   const renderSearchBar = () => (
     <View style={styles.searchContainer}>
@@ -346,7 +317,7 @@ export default function ContactsScreen({ navigation }: Props) {
     return (
       <Card style={styles.addFormCard}>
         <Text style={styles.addFormTitle}>Add New Contact</Text>
-        
+
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Name *</Text>
           <TextInput
@@ -425,7 +396,7 @@ export default function ContactsScreen({ navigation }: Props) {
       >
         <View style={styles.contactHeader}>
           <View style={[
-            styles.contactAvatar, 
+            styles.contactAvatar,
             { backgroundColor: getAvatarColor(contact.name) }
           ]}>
             {contact.avatar_url ? (
@@ -453,7 +424,7 @@ export default function ContactsScreen({ navigation }: Props) {
                 )}
               </View>
             </View>
-            
+
             {/* Only show lightning address if available */}
             {contact.lightning_address && (
               <View style={styles.contactDetailRow}>
@@ -463,7 +434,7 @@ export default function ContactsScreen({ navigation }: Props) {
                 </Text>
               </View>
             )}
-            
+
             {/* Show Nostr pubkey for Nostr contacts */}
             {contact.isNostrContact && contact.npub && (
               <View style={styles.contactDetailRow}>
@@ -475,16 +446,16 @@ export default function ContactsScreen({ navigation }: Props) {
             )}
           </View>
         </View>
-        
+
         <View style={styles.contactActions}>
           <TouchableOpacity
             style={styles.contactActionButton}
             onPress={() => handleToggleFavorite(contact.id)}
           >
-            <Ionicons 
-              name={contact.is_favorite ? "star" : "star-outline"} 
-              size={20} 
-              color={contact.is_favorite ? "#f59e0b" : theme.colors.text.secondary} 
+            <Ionicons
+              name={contact.is_favorite ? "star" : "star-outline"}
+              size={20}
+              color={contact.is_favorite ? "#f59e0b" : theme.colors.text.secondary}
             />
           </TouchableOpacity>
           <TouchableOpacity
@@ -521,17 +492,29 @@ export default function ContactsScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      {renderHeader()}
+      <MainHeader
+        title="Contacts"
+        subtitle="Lightning Network Connections"
+        icon="people"
+        rightAction={
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() => setShowAddForm(!showAddForm)}
+          >
+            <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
+          </TouchableOpacity>
+        }
+      />
       {renderSearchBar()}
       {renderContactControls()}
-      
-      <ScrollView 
+
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
         {renderAddContactForm()}
-        
+
         {sortedContacts.length === 0 && !showAddForm ? (
           renderEmptyState()
         ) : (
@@ -555,22 +538,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background.secondary,
   },
-  
+
   headerContainer: {
     marginBottom: theme.spacing[4],
   },
-  
+
   headerGradient: {
     paddingTop: Platform.OS === 'android' ? statusBarHeight : 0,
     paddingBottom: theme.spacing[6],
     borderBottomLeftRadius: theme.borderRadius['2xl'],
     borderBottomRightRadius: theme.borderRadius['2xl'],
   },
-  
+
   headerSafeArea: {
     backgroundColor: 'transparent',
   },
-  
+
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -578,34 +561,34 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing[5],
     paddingVertical: theme.spacing[4],
   },
-  
+
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  
+
   headerIcon: {
     marginRight: theme.spacing[3],
   },
-  
+
   headerText: {
     flex: 1,
   },
-  
+
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
     color: theme.colors.text.inverse,
     marginBottom: 2,
   },
-  
+
   headerSubtitle: {
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
     fontWeight: '500',
   },
-  
+
   addButton: {
     width: 40,
     height: 40,
@@ -614,12 +597,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
+
   searchContainer: {
     paddingHorizontal: theme.spacing[5],
     marginBottom: theme.spacing[4],
   },
-  
+
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -631,45 +614,45 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: theme.colors.border.light,
   },
-  
+
   searchInput: {
     flex: 1,
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.primary,
   },
-  
+
   scrollView: {
     flex: 1,
   },
-  
+
   scrollContent: {
     paddingHorizontal: theme.spacing[5],
     paddingBottom: theme.spacing[6],
   },
-  
+
   addFormCard: {
     marginBottom: theme.spacing[4],
     padding: theme.spacing[5],
   },
-  
+
   addFormTitle: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.text.primary,
     marginBottom: theme.spacing[4],
   },
-  
+
   inputGroup: {
     marginBottom: theme.spacing[4],
   },
-  
+
   inputLabel: {
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
     marginBottom: theme.spacing[2],
   },
-  
+
   input: {
     backgroundColor: theme.colors.background.secondary,
     borderWidth: 1,
@@ -680,26 +663,26 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.primary,
   },
-  
+
   textArea: {
     height: 80,
     textAlignVertical: 'top',
   },
-  
+
   formActions: {
     flexDirection: 'row',
     gap: theme.spacing[3],
     marginTop: theme.spacing[2],
   },
-  
+
   formActionButton: {
     flex: 1,
   },
-  
+
   contactsList: {
     gap: theme.spacing[3],
   },
-  
+
   contactCard: {
     marginBottom: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
@@ -744,7 +727,7 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
   },
-    
+
   contactInfo: {
     flex: 1,
     marginRight: theme.spacing[2],
@@ -800,15 +783,15 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.base,
     backgroundColor: theme.colors.gray[50],
   },
-  
+
   emptyCard: {
     paddingVertical: theme.spacing[8],
   },
-  
+
   emptyState: {
     alignItems: 'center',
   },
-  
+
   emptyIcon: {
     width: 80,
     height: 80,
@@ -818,21 +801,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: theme.spacing[4],
   },
-  
+
   emptyTitle: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '600',
     color: theme.colors.text.primary,
     marginBottom: theme.spacing[2],
   },
-  
+
   emptyDescription: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     textAlign: 'center',
     marginBottom: theme.spacing[5],
   },
-  
+
   emptyButton: {
     paddingHorizontal: theme.spacing[6],
   },

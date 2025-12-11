@@ -64,7 +64,10 @@
         {
           "ios": {
             "deploymentTarget": "15.1",
-            "backgroundModes": ["fetch", "processing"]
+            "backgroundModes": [
+              "fetch",
+              "processing"
+            ]
           },
           "android": {
             "compileSdkVersion": 34,
@@ -72,7 +75,10 @@
             "buildToolsVersion": "34.0.0"
           }
         }
-      ]
+      ],
+      "expo-background-task",
+      "expo-sqlite",
+      "expo-font"
     ],
     "extra": {
       "eas": {
