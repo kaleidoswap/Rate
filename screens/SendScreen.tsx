@@ -18,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import RGBApiService from '../services/RGBApiService';
 import { theme } from '../theme';
-import { Card, Button, Input } from '../components';
+import { Card, Button, Input, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
 import { useFormattedBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
 
@@ -464,38 +464,18 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => {
-              if (paymentStep === 'review') {
-                setPaymentStep('input');
-              } else {
-                navigation.goBack();
-              }
-            }}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
-          </Text>
-          <TouchableOpacity
-            style={styles.helpButton}
-            onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
-          >
-            <Ionicons name="help-circle-outline" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-    </View>
+    <ScreenHeader
+      title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
+      showBack={true}
+      rightAction={
+        <TouchableOpacity
+          onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
+          style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)' }}
+        >
+          <Ionicons name="help-circle-outline" size={22} color={theme.colors.text.inverse} />
+        </TouchableOpacity>
+      }
+    />
   );
 
   const renderAddressInput = () => (
@@ -997,7 +977,7 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       {renderHeader()}
       
       <ScrollView 

@@ -19,7 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../theme';
-import { Card, Button } from '../components';
+import { Card, Button, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
 import LottieView from 'lottie-react-native';
 import { useSelector } from 'react-redux';
@@ -192,23 +192,11 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
 
   const renderHeader = () => (
     <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
+      <ScreenHeader
+        title="Confirm Payment"
+        showBack={true}
+        rightAction={<View style={styles.placeholder} />}
       >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={handleCancel}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Confirm Payment</Text>
-          <View style={styles.placeholder} />
-        </View>
-
         <View style={styles.paymentTypeContainer}>
           <View style={[styles.paymentTypeIcon, { backgroundColor: typeInfo.color + '20' }]}>
             <Ionicons name={typeInfo.icon as any} size={32} color={typeInfo.color} />
@@ -216,7 +204,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
           <Text style={styles.paymentTypeTitle}>{typeInfo.title}</Text>
           <Text style={styles.paymentTypeSubtitle}>{typeInfo.subtitle}</Text>
         </View>
-      </LinearGradient>
+      </ScreenHeader>
     </View>
   );
 

@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { theme } from '../theme';
-import { Button } from '../components';
+import { Button, ScreenHeader } from '../components';
 import SecurityService from '../services/SecurityService';
 
 interface Props {
@@ -473,28 +473,10 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <SafeAreaView edges={['top']} style={styles.safeArea}>
-          <View style={styles.header}>
-            {step !== 'complete' ? (
-              <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-                <Ionicons name="arrow-back" size={22} color="white" />
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.placeholder} />
-            )}
-            <Text style={styles.headerTitle}>
-              {step === 'complete' ? 'Complete' : 'Security Setup'}
-            </Text>
-            <View style={styles.placeholder} />
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
+      <ScreenHeader
+        title={step === 'complete' ? 'Complete' : 'Security Setup'}
+        showBack={step !== 'complete'}
+      />
 
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
         {step === 'options' && renderOptionsStep()}

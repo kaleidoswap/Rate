@@ -77,3 +77,5 @@ export const resetAssetIdCounter = () => {
   assetIdCounter = 1;
 };
 
+
+

@@ -20,7 +20,7 @@ import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
 import { useAssetIcon } from '../utils';
 import { theme } from '../theme';
-import { Card, Button } from '../components';
+import { Card, Button, ScreenHeader } from '../components';
 import { IssueAssetModal } from '../components/IssueAssetModal';
 
 interface Props {
@@ -89,28 +89,18 @@ export default function AssetsScreen({ navigation }: Props) {
 
   const renderHeader = () => (
     <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>RGB Assets</Text>
+      <ScreenHeader
+        title="RGB Assets"
+        showBack={true}
+        rightAction={
           <TouchableOpacity
             style={styles.issueHeaderButton}
             onPress={() => setShowIssueModal(true)}
           >
             <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
           </TouchableOpacity>
-        </View>
-
+        }
+      >
         <View style={styles.headerStats}>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{rgbAssets?.length || 0}</Text>
@@ -124,7 +114,7 @@ export default function AssetsScreen({ navigation }: Props) {
             <Text style={styles.statLabel}>Total Tokens</Text>
           </View>
         </View>
-      </LinearGradient>
+      </ScreenHeader>
     </View>
   );
 

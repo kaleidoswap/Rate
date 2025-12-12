@@ -21,7 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
-import { Button, Card, Input } from '../components';
+import { Button, Card, Input, ScreenHeader } from '../components';
 
 interface Props {
   navigation: any;
@@ -398,31 +398,10 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <SafeAreaView edges={['top']} style={styles.safeArea}>
-          <View style={styles.header}>
-            {step !== 'restoring' && step !== 'success' ? (
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={handleBack}
-              >
-                <Ionicons name="arrow-back" size={22} color="white" />
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.placeholder} />
-            )}
-            <Text style={styles.headerTitle}>
-              {step === 'success' ? 'Success' : 'Restore Wallet'}
-            </Text>
-            <View style={styles.placeholder} />
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
+      <ScreenHeader
+        title={step === 'success' ? 'Success' : 'Restore Wallet'}
+        showBack={step !== 'restoring' && step !== 'success'}
+      />
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -749,4 +728,5 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
 });
+
 

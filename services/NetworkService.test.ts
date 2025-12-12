@@ -14,241 +14,409 @@ describe('NetworkService', () => {
     jest.clearAllMocks();
   });
 
-  describe('isOnline', () => {
-    it('should return true when connected', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+  describe('isConnected', () => {
+    it('should return true when connected', () => {
+      // Set up the service with connected status
+      networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
         type: 'wifi',
         details: null,
-      } as any);
+      };
 
-      const isOnline = await networkService.isOnline();
+      const isConnected = networkService.isConnected();
 
-      expect(isOnline).toBe(true);
-      expect(mockedNetInfo.fetch).toHaveBeenCalled();
+      expect(isConnected).toBe(true);
     });
 
-    it('should return false when not connected', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+    it('should return false when not connected', () => {
+      networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
         type: 'none',
         details: null,
-      } as any);
+      };
 
-      const isOnline = await networkService.isOnline();
+      const isConnected = networkService.isConnected();
 
-      expect(isOnline).toBe(false);
+      expect(isConnected).toBe(false);
     });
 
-    it('should return false when connected but internet not reachable', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+    it('should return false when status is null', () => {
+      networkService['currentStatus'] = null;
+
+      const isConnected = networkService.isConnected();
+
+      expect(isConnected).toBe(false);
+    });
+  });
+
+  describe('isInternetReachable', () => {
+    it('should return true when internet is reachable', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: null,
+      };
+
+      const reachable = networkService.isInternetReachable();
+
+      expect(reachable).toBe(true);
+    });
+
+    it('should return false when internet is not reachable', () => {
+      networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: false,
         type: 'wifi',
         details: null,
-      } as any);
+      };
 
-      const isOnline = await networkService.isOnline();
+      const reachable = networkService.isInternetReachable();
 
-      expect(isOnline).toBe(false);
+      expect(reachable).toBe(false);
     });
 
-    it('should handle null connectivity state', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
-        isConnected: null,
-        isInternetReachable: null,
-        type: 'unknown',
-        details: null,
-      } as any);
+    it('should return false when status is null', () => {
+      networkService['currentStatus'] = null;
 
-      const isOnline = await networkService.isOnline();
+      const reachable = networkService.isInternetReachable();
 
-      expect(isOnline).toBe(false);
+      expect(reachable).toBe(false);
     });
   });
 
-  describe('getNetworkState', () => {
-    it('should return complete network state', async () => {
-      const mockState = {
+  describe('getStatus', () => {
+    it('should return current network status', () => {
+      const mockStatus = {
         isConnected: true,
         isInternetReachable: true,
         type: 'wifi' as const,
-        details: {
-          isConnectionExpensive: false,
-        },
+        details: {},
       };
 
-      mockedNetInfo.fetch.mockResolvedValue(mockState as any);
+      networkService['currentStatus'] = mockStatus;
 
-      const state = await networkService.getNetworkState();
+      const status = networkService.getStatus();
 
-      expect(state).toEqual(mockState);
+      expect(status).toEqual(mockStatus);
     });
 
-    it('should handle cellular connection', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
-        isConnected: true,
-        isInternetReachable: true,
-        type: 'cellular',
-        details: {
-          isConnectionExpensive: true,
-          cellularGeneration: '4g',
-        },
-      } as any);
+    it('should return null when no status available', () => {
+      networkService['currentStatus'] = null;
 
-      const state = await networkService.getNetworkState();
+      const status = networkService.getStatus();
 
-      expect(state.type).toBe('cellular');
-      expect(state.details?.isConnectionExpensive).toBe(true);
+      expect(status).toBeNull();
     });
   });
 
-  describe('addConnectionListener', () => {
-    it('should call listener when network state changes', () => {
-      const listener = jest.fn();
-      const unsubscribe = jest.fn();
+  describe('getConnectionType', () => {
+    it('should return connection type', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: null,
+      };
 
-      mockedNetInfo.addEventListener.mockReturnValue(unsubscribe);
+      const type = networkService.getConnectionType();
 
-      const removeListener = networkService.addConnectionListener(listener);
-
-      expect(mockedNetInfo.addEventListener).toHaveBeenCalled();
-      expect(removeListener).toBe(unsubscribe);
+      expect(type).toBe('wifi');
     });
 
-    it('should handle multiple listeners', () => {
-      const listener1 = jest.fn();
-      const listener2 = jest.fn();
+    it('should return null when no status', () => {
+      networkService['currentStatus'] = null;
 
-      mockedNetInfo.addEventListener.mockReturnValue(jest.fn());
+      const type = networkService.getConnectionType();
 
-      networkService.addConnectionListener(listener1);
-      networkService.addConnectionListener(listener2);
+      expect(type).toBeNull();
+    });
 
-      expect(mockedNetInfo.addEventListener).toHaveBeenCalledTimes(2);
+    it('should handle cellular connection', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'cellular',
+        details: { cellularGeneration: '4g' },
+      };
+
+      const type = networkService.getConnectionType();
+
+      expect(type).toBe('cellular');
+    });
+  });
+
+  describe('isWiFi', () => {
+    it('should return true when on WiFi', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: null,
+      };
+
+      expect(networkService.isWiFi()).toBe(true);
+    });
+
+    it('should return false when not on WiFi', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'cellular',
+        details: null,
+      };
+
+      expect(networkService.isWiFi()).toBe(false);
+    });
+  });
+
+  describe('isCellular', () => {
+    it('should return true when on cellular', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'cellular',
+        details: null,
+      };
+
+      expect(networkService.isCellular()).toBe(true);
+    });
+
+    it('should return false when not on cellular', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: null,
+      };
+
+      expect(networkService.isCellular()).toBe(false);
+    });
+  });
+
+  describe('subscribe', () => {
+    it('should call listener with current status immediately', () => {
+      const listener = jest.fn();
+      const mockStatus = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi' as const,
+        details: null,
+      };
+
+      networkService['currentStatus'] = mockStatus;
+
+      networkService.subscribe(listener);
+
+      expect(listener).toHaveBeenCalledWith(mockStatus);
+    });
+
+    it('should not call listener if no current status', () => {
+      const listener = jest.fn();
+      networkService['currentStatus'] = null;
+
+      networkService.subscribe(listener);
+
+      expect(listener).not.toHaveBeenCalled();
+    });
+
+    it('should return unsubscribe function', () => {
+      const listener = jest.fn();
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: null,
+      };
+
+      const unsubscribe = networkService.subscribe(listener);
+
+      expect(typeof unsubscribe).toBe('function');
+
+      // Call unsubscribe
+      unsubscribe();
+
+      // Verify listener was removed
+      expect(networkService['listeners'].has(listener)).toBe(false);
     });
   });
 
   describe('waitForConnection', () => {
     it('should resolve immediately if already online', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+      networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
         type: 'wifi',
         details: null,
-      } as any);
+      };
 
       const startTime = Date.now();
-      await networkService.waitForConnection(5000);
+      const connected = await networkService.waitForConnection(5000);
       const elapsed = Date.now() - startTime;
 
+      expect(connected).toBe(true);
       expect(elapsed).toBeLessThan(1000);
     });
 
-    it('should wait for connection', async () => {
-      let callCount = 0;
-      mockedNetInfo.fetch.mockImplementation(() => {
-        callCount++;
-        return Promise.resolve({
-          isConnected: callCount > 2,
-          isInternetReachable: callCount > 2,
-          type: callCount > 2 ? 'wifi' : 'none',
-          details: null,
-        } as any);
-      });
-
-      const connected = await networkService.waitForConnection(3000);
-
-      expect(connected).toBe(true);
-    });
-
     it('should timeout if connection not established', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+      networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
         type: 'none',
         details: null,
-      } as any);
+      };
 
-      const connected = await networkService.waitForConnection(1000);
+      const connected = await networkService.waitForConnection(100);
 
       expect(connected).toBe(false);
     });
   });
 
-  describe('getConnectionType', () => {
-    it('should return connection type', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
-        isConnected: true,
-        isInternetReachable: true,
-        type: 'wifi',
-        details: null,
-      } as any);
-
-      const type = await networkService.getConnectionType();
-
-      expect(type).toBe('wifi');
-    });
-
-    it('should return none when disconnected', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+  describe('getConnectionQuality', () => {
+    it('should return offline when not connected', () => {
+      networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
         type: 'none',
         details: null,
-      } as any);
+      };
 
-      const type = await networkService.getConnectionType();
+      const quality = networkService.getConnectionQuality();
 
-      expect(type).toBe('none');
-    });
-  });
-
-  describe('isConnectionExpensive', () => {
-    it('should return true for expensive connections', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
-        isConnected: true,
-        isInternetReachable: true,
-        type: 'cellular',
-        details: {
-          isConnectionExpensive: true,
-        },
-      } as any);
-
-      const isExpensive = await networkService.isConnectionExpensive();
-
-      expect(isExpensive).toBe(true);
+      expect(quality).toBe('offline');
     });
 
-    it('should return false for wifi', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+    it('should return poor when connected but no internet', () => {
+      networkService['currentStatus'] = {
         isConnected: true,
-        isInternetReachable: true,
+        isInternetReachable: false,
         type: 'wifi',
-        details: {
-          isConnectionExpensive: false,
-        },
-      } as any);
+        details: null,
+      };
 
-      const isExpensive = await networkService.isConnectionExpensive();
+      const quality = networkService.getConnectionQuality();
 
-      expect(isExpensive).toBe(false);
+      expect(quality).toBe('poor');
     });
 
-    it('should return false when no details available', async () => {
-      mockedNetInfo.fetch.mockResolvedValue({
+    it('should return excellent for WiFi', () => {
+      networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
         type: 'wifi',
         details: null,
-      } as any);
+      };
 
-      const isExpensive = await networkService.isConnectionExpensive();
+      const quality = networkService.getConnectionQuality();
 
-      expect(isExpensive).toBe(false);
+      expect(quality).toBe('excellent');
+    });
+
+    it('should return good for cellular', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'cellular',
+        details: null,
+      };
+
+      const quality = networkService.getConnectionQuality();
+
+      expect(quality).toBe('good');
+    });
+  });
+
+  describe('getStats', () => {
+    it('should return network statistics', () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: null,
+      };
+
+      const stats = networkService.getStats();
+
+      expect(stats).toEqual({
+        isConnected: true,
+        type: 'wifi',
+        quality: 'excellent',
+        hasInternet: true,
+      });
+    });
+
+    it('should handle offline state', () => {
+      networkService['currentStatus'] = {
+        isConnected: false,
+        isInternetReachable: false,
+        type: 'none',
+        details: null,
+      };
+
+      const stats = networkService.getStats();
+
+      expect(stats).toEqual({
+        isConnected: false,
+        type: 'none',
+        quality: 'offline',
+        hasInternet: false,
+      });
+    });
+  });
+
+  describe('refresh', () => {
+    it('should fetch and update network status', async () => {
+      const mockState = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi' as const,
+        details: {},
+      };
+
+      mockedNetInfo.fetch.mockResolvedValue(mockState as any);
+
+      const status = await networkService.refresh();
+
+      expect(status.isConnected).toBe(true);
+      expect(status.type).toBe('wifi');
+      expect(mockedNetInfo.fetch).toHaveBeenCalled();
+    });
+  });
+
+  describe('executeWhenOnline', () => {
+    it('should execute function when online', async () => {
+      networkService['currentStatus'] = {
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'wifi',
+        details: null,
+      };
+
+      const mockFn = jest.fn().mockResolvedValue('result');
+
+      const result = await networkService.executeWhenOnline(mockFn);
+
+      expect(result).toBe('result');
+      expect(mockFn).toHaveBeenCalled();
+    });
+
+    it('should throw error when offline and timeout', async () => {
+      networkService['currentStatus'] = {
+        isConnected: false,
+        isInternetReachable: false,
+        type: 'none',
+        details: null,
+      };
+
+      const mockFn = jest.fn().mockResolvedValue('result');
+
+      await expect(
+        networkService.executeWhenOnline(mockFn, 100)
+      ).rejects.toThrow('No network connection available');
+
+      expect(mockFn).not.toHaveBeenCalled();
     });
   });
 });
-

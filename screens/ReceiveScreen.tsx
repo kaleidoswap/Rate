@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import RGBApiService from '../services/RGBApiService';
 import { theme } from '../theme';
-import { Card, Button, Input } from '../components';
+import { Card, Button, Input, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
 import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
@@ -474,97 +474,85 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
-  const renderHeader = () => {
-    return (
-      <View style={styles.headerContainer}>
-        <LinearGradient
-          colors={['#4338ca', '#7c3aed'] as [string, string]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerGradient}
+  const renderHeader = () => (
+    <View style={styles.headerContainer}>
+      <ScreenHeader
+        title="Receive"
+        showBack={true}
+        rightAction={
+          <TouchableOpacity
+            style={styles.helpButton}
+            onPress={() => Alert.alert('Help', 'Generate addresses and invoices to receive payments')}
+          >
+            <Ionicons name="help-circle-outline" size={24} color={theme.colors.text.inverse} />
+          </TouchableOpacity>
+        }
+      />
+
+      {/* Asset Selector */}
+      {selectedAsset && (
+        <TouchableOpacity 
+          style={styles.assetSelector}
+          onPress={() => setShowAssetSelector(!showAssetSelector)}
+          activeOpacity={0.8}
         >
-          <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.backButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Receive</Text>
-            <TouchableOpacity
-              style={styles.helpButton}
-              onPress={() => Alert.alert('Help', 'Generate addresses and invoices to receive payments')}
-            >
-              <Ionicons name="help-circle-outline" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
+          <AssetIcon asset={selectedAsset} />
+          <View style={styles.assetInfo}>
+            <Text style={styles.assetTicker}>{selectedAsset.ticker}</Text>
+            <Text style={styles.assetName}>{selectedAsset.name}</Text>
+            {typeof selectedAsset.balance === 'number' && (
+              <Text style={styles.assetBalance}>
+                Balance: {selectedAsset.balance.toLocaleString()}
+              </Text>
+            )}
           </View>
-          
-          {/* Asset Selector */}
-          {selectedAsset && (
-            <TouchableOpacity 
-              style={styles.assetSelector}
-              onPress={() => setShowAssetSelector(!showAssetSelector)}
-              activeOpacity={0.8}
-            >
-              <AssetIcon asset={selectedAsset} />
-              <View style={styles.assetInfo}>
-                <Text style={styles.assetTicker}>{selectedAsset.ticker}</Text>
-                <Text style={styles.assetName}>{selectedAsset.name}</Text>
-                {typeof selectedAsset.balance === 'number' && (
-                  <Text style={styles.assetBalance}>
-                    Balance: {selectedAsset.balance.toLocaleString()}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.chevronContainer}>
-                <Ionicons 
-                  name={showAssetSelector ? "chevron-up" : "chevron-down"} 
-                  size={20} 
-                  color="rgba(255, 255, 255, 0.8)" 
-                />
-              </View>
-            </TouchableOpacity>
-          )}
-        </LinearGradient>
-        
-        {/* Asset Dropdown */}
-        {showAssetSelector && allAssets.length > 0 && (
-          <View style={styles.assetDropdown}>
-            <ScrollView style={styles.assetDropdownScroll} nestedScrollEnabled>
-              {allAssets.map((asset) => (
-                <TouchableOpacity
-                  key={asset.asset_id}
-                  style={[
-                    styles.assetOption,
-                    selectedAsset.asset_id === asset.asset_id && styles.assetOptionSelected
-                  ]}
-                  onPress={() => {
-                    setSelectedAsset(asset);
-                    setShowAssetSelector(false);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <AssetIcon asset={asset} />
-                  <View style={styles.assetOptionInfo}>
-                    <Text style={styles.assetOptionTicker}>{asset.ticker}</Text>
-                    <Text style={styles.assetOptionName}>{asset.name}</Text>
-                    {typeof asset.balance === 'number' && (
-                      <Text style={styles.assetOptionBalance}>
-                        Balance: {asset.balance.toLocaleString()}
-                      </Text>
-                    )}
-                  </View>
-                  {selectedAsset.asset_id === asset.asset_id && (
-                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
+          <View style={styles.chevronContainer}>
+            <Ionicons 
+              name={showAssetSelector ? "chevron-up" : "chevron-down"} 
+              size={20} 
+              color="rgba(255, 255, 255, 0.8)" 
+            />
+          </View>
+        </TouchableOpacity>
+      )}
+      
+      {/* Asset Dropdown */}
+      {showAssetSelector && allAssets.length > 0 && (
+        <View style={styles.assetDropdown}>
+          <ScrollView style={styles.assetDropdownScroll} nestedScrollEnabled>
+            {allAssets.map((asset) => (
+              <TouchableOpacity
+                key={asset.asset_id}
+                style={[
+                  styles.assetOption,
+                  selectedAsset.asset_id === asset.asset_id && styles.assetOptionSelected
+                ]}
+                onPress={() => {
+                  setSelectedAsset(asset);
+                  setShowAssetSelector(false);
+                }}
+                activeOpacity={0.7}
+              >
+                <AssetIcon asset={asset} />
+                <View style={styles.assetOptionInfo}>
+                  <Text style={styles.assetOptionTicker}>{asset.ticker}</Text>
+                  <Text style={styles.assetOptionName}>{asset.name}</Text>
+                  {typeof asset.balance === 'number' && (
+                    <Text style={styles.assetOptionBalance}>
+                      Balance: {asset.balance.toLocaleString()}
+                    </Text>
                   )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-      </View>
-    );
-  };
+                </View>
+                {selectedAsset.asset_id === asset.asset_id && (
+                  <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  );
 
   const renderNetworkTabs = () => {
     const onChainAssets = getOnChainAssets();
@@ -961,7 +949,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       {renderHeader()}
       {renderNetworkTabs()}
       
