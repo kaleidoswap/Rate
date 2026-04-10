@@ -1,4 +1,5 @@
 // theme/index.ts
+import { colors as k } from '@kaleidorg/kaleido-ui/tokens'
 
 // Define types for nested color objects
 type ColorGradient = [string, string];
@@ -203,71 +204,71 @@ export { ColorGradient }
 export const theme: ThemeType = {
   dark: false,
   colors: {
-    // Primary: Deep Indigo/Violet - Modern, Trustworthy, Tech-forward
+    // Primary: KaleidoSwap Green — Brand identity
     primary: {
-      50: '#EEF2FF',
-      100: '#E0E7FF',
-      200: '#C7D2FE',
-      300: '#A5B4FC',
-      400: '#818CF8',
-      500: '#6366F1',
-      600: '#4F46E5',
-      700: '#4338CA',
-      800: '#3730A3',
-      900: '#312E81',
-      950: '#1E1B4B',
-      gradient: ['#6366F1', '#8B5CF6'], // Indigo to Violet
-    },
-
-    // Secondary: Vibrant Teal/Emerald - Growth, Success, Energy
-    secondary: {
       50: '#ECFDF5',
       100: '#D1FAE5',
       200: '#A7F3D0',
       300: '#6EE7B7',
       400: '#34D399',
-      500: '#10B981',
-      600: '#059669',
-      700: '#047857',
-      800: '#065F46',
-      900: '#064E3B',
-      950: '#022C22',
-      gradient: ['#10B981', '#34D399'],
+      500: k.primary,      // #2BEE79
+      600: k.primaryDark,  // #1FA855
+      700: '#15803D',
+      800: '#166534',
+      900: '#14532D',
+      950: k.primaryFg,    // #102217
+      gradient: [k.primary, k.primaryDark] as [string, string],
     },
 
-    // Accent: Hot Pink/Rose - Highlights, Actions, Excitement
+    // Secondary: Deep Green Surfaces
+    secondary: {
+      50: '#F0FDF4',
+      100: '#DCFCE7',
+      200: '#BBF7D0',
+      300: '#86EFAC',
+      400: '#4ADE80',
+      500: k.textSecondary, // #92C9A8
+      600: k.surfaceHighlight, // #243E30
+      700: k.surfaceDark,  // #162E21
+      800: k.bgDark,       // #102217
+      900: k.surfaceDarker, // #0B1810
+      950: '#052E16',
+      gradient: [k.primary, '#4ADE80'] as [string, string],
+    },
+
+    // Accent: KaleidoSwap Info Blue
     accent: {
-      50: '#FDF2F8',
-      100: '#FCE7F3',
-      200: '#FBCFE8',
-      300: '#F9A8D4',
-      400: '#F472B6',
-      500: '#EC4899',
-      600: '#DB2777',
-      700: '#BE185D',
-      800: '#9D174D',
-      900: '#831843',
-      950: '#500724',
-      gradient: ['#EC4899', '#F472B6'],
+      50: '#EFF6FF',
+      100: '#DBEAFE',
+      200: '#BFDBFE',
+      300: '#93C5FD',
+      400: '#60A5FA',
+      500: k.info,         // #4290FF
+      600: '#2563EB',
+      700: '#1D4ED8',
+      800: '#1E40AF',
+      900: '#1E3A8A',
+      950: '#172554',
+      gradient: [k.info, '#60A5FA'] as [string, string],
     },
 
-    // Status Colors
+    // Status Colors — from kaleido-ui tokens
     success: {
       50: '#F0FDF4',
       100: '#DCFCE7',
-      500: '#22C55E',
-      600: '#16A34A',
+      500: k.success,      // #2BEE79
+      600: k.primaryDark,  // #1FA855
       700: '#15803D',
-      gradient: ['#22C55E', '#4ADE80'],
+      gradient: [k.success, '#4ADE80'] as [string, string],
     },
 
     warning: {
       50: '#FFFBEB',
       100: '#FEF3C7',
-      500: '#F59E0B',
+      500: k.warning,      // #F59E0B
       600: '#D97706',
       700: '#B45309',
-      gradient: ['#F59E0B', '#FBBF24'],
+      gradient: [k.warning, '#FBBF24'] as [string, string],
     },
 
     error: {
@@ -276,19 +277,19 @@ export const theme: ThemeType = {
       200: '#FECACA',
       300: '#FCA5A5',
       400: '#F87171',
-      500: '#EF4444',
+      500: k.error,        // #F94040
       600: '#DC2626',
       700: '#B91C1C',
-      gradient: ['#EF4444', '#F87171'],
+      gradient: [k.error, '#F87171'] as [string, string],
     },
 
     info: {
       50: '#EFF6FF',
       100: '#DBEAFE',
-      500: '#3B82F6',
+      500: k.info,         // #4290FF
       600: '#2563EB',
       700: '#1D4ED8',
-      gradient: ['#3B82F6', '#60A5FA'],
+      gradient: [k.info, '#60A5FA'] as [string, string],
     },
 
     // Neutrals - Cool Grays for a modern tech feel
@@ -306,41 +307,41 @@ export const theme: ThemeType = {
       950: '#020617',
     },
 
-    // Backgrounds
+    // Backgrounds — KaleidoSwap light theme
     background: {
-      primary: '#FFFFFF',
-      secondary: '#F8FAFC', // Very light gray/blue
-      tertiary: '#F1F5F9',
+      primary: k.bgLight,   // #F6F8F7
+      secondary: '#F0F5F2',
+      tertiary: '#E8F0EB',
       modal: '#FFFFFF',
-      backdrop: 'rgba(15, 23, 42, 0.6)', // Slate 900 with opacity
+      backdrop: 'rgba(16, 34, 23, 0.6)',
     },
 
     // Text
     text: {
-      primary: '#0F172A', // Slate 900
-      secondary: '#475569', // Slate 600
-      tertiary: '#94A3B8', // Slate 400
+      primary: k.primaryFg, // #102217
+      secondary: '#3D5A4A',
+      tertiary: '#6B8F7A',
       inverse: '#FFFFFF',
       inverseSecondary: '#E2E8F0',
-      disabled: '#CBD5E1',
-      link: '#4F46E5', // Indigo 600
+      disabled: '#A3B8AC',
+      link: k.primaryDark,   // #1FA855
     },
 
     // Surfaces
     surface: {
       primary: '#FFFFFF',
-      secondary: '#F8FAFC',
-      tertiary: '#F1F5F9',
+      secondary: k.bgLight, // #F6F8F7
+      tertiary: '#F0F5F2',
       elevated: '#FFFFFF',
-      highlight: '#EEF2FF', // Indigo 50
+      highlight: '#ECFDF5',  // Green 50
     },
 
     // Borders
     border: {
-      light: '#F1F5F9', // Slate 100
-      medium: '#E2E8F0', // Slate 200
-      dark: '#CBD5E1', // Slate 300
-      focus: '#6366F1', // Indigo 500
+      light: '#E8F0EB',
+      medium: '#D1E0D8',
+      dark: '#A3B8AC',
+      focus: k.primary,      // #2BEE79
     },
   },
 
@@ -505,18 +506,18 @@ export const theme: ThemeType = {
   components: {
     button: {
       primary: {
-        backgroundColor: '#4F46E5', // Indigo 600
+        backgroundColor: k.primary, // #2BEE79
         borderRadius: 14,
         paddingVertical: 16,
         paddingHorizontal: 24,
       },
       secondary: {
-        backgroundColor: '#F1F5F9', // Slate 100
+        backgroundColor: '#F0F5F2',
         borderRadius: 14,
         paddingVertical: 16,
         paddingHorizontal: 24,
         borderWidth: 1,
-        borderColor: '#E2E8F0', // Slate 200
+        borderColor: '#D1E0D8',
       },
       ghost: {
         backgroundColor: 'transparent',
@@ -551,16 +552,16 @@ export const theme: ThemeType = {
 
     input: {
       default: {
-        backgroundColor: '#F8FAFC', // Slate 50
+        backgroundColor: '#F0F5F2',
         borderRadius: 14,
         paddingVertical: 16,
         paddingHorizontal: 16,
         borderWidth: 1,
-        borderColor: '#E2E8F0', // Slate 200
+        borderColor: '#D1E0D8',
         fontSize: 16,
       },
       focused: {
-        borderColor: '#6366F1', // Indigo 500
+        borderColor: k.primary, // #2BEE79
         backgroundColor: '#FFFFFF',
       },
     },

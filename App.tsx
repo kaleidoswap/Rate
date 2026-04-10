@@ -19,6 +19,7 @@ import NetworkService from './services/NetworkService';
 import { store, persistor } from './store';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
+import { KaleidoThemeProvider } from '@kaleidorg/kaleido-ui/native';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
 import WalletRestoreScreen from './screens/WalletRestoreScreen';
@@ -330,11 +331,13 @@ export default function App() {
       <Provider store={store}>
         <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
           <AppThemeProvider>
-            <ThemeProvider value={navigationTheme}>
-              <StatusBar style="light" backgroundColor="transparent" translucent={true} />
-              <AppNavigator />
-              <ToastContainer />
-            </ThemeProvider>
+            <KaleidoThemeProvider>
+              <ThemeProvider value={navigationTheme}>
+                <StatusBar style="light" backgroundColor="transparent" translucent={true} />
+                <AppNavigator />
+                <ToastContainer />
+              </ThemeProvider>
+            </KaleidoThemeProvider>
           </AppThemeProvider>
         </PersistGate>
       </Provider>
