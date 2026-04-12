@@ -16,7 +16,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import RGBApiService from '../services/RGBApiService';
+import { protocolManager } from '../services/protocols';
+import { classifyWithdrawDestination } from '../utils/account-routing';
 import { theme } from '../theme';
 import LottieView from 'lottie-react-native';
 
@@ -37,7 +38,7 @@ export default function QRScannerScreen({ navigation }: Props) {
   const successAnim = useRef<LottieView>(null);
   const errorAnim = useRef<LottieView>(null);
 
-  const apiService = RGBApiService.getInstance();
+  const rgbAdapter = protocolManager.getAdapter('RGB');
 
   useEffect(() => {
     if (!permission) {
@@ -229,7 +230,7 @@ export default function QRScannerScreen({ navigation }: Props) {
 
   const handleRGBInvoice = async (invoice: string) => {
     // Decode RGB invoice
-    const decodedInvoice = await apiService.decodeRGBInvoice({ invoice });
+    const decodedInvoice = await rgbAdapter.decodeRgbInvoice!({ invoice });
 
     // Extract amount from assignment if it's a fungible assignment
     let invoiceAmount: string | undefined = undefined;
@@ -260,15 +261,15 @@ export default function QRScannerScreen({ navigation }: Props) {
 
   const handleLightningInvoice = async (invoice: string) => {
     // Decode Lightning invoice
-    const decodedInvoice = await apiService.decodeLnInvoice({ invoice });
+    const decodedInvoice = await rgbAdapter.decodeInvoice(invoice);
 
-    const amountBTC = decodedInvoice.amt_msat / 100000000000; // Convert msat to BTC
+    const amountBTC = ((decodedInvoice as any).amt_msat ?? decodedInvoice.amountMsat ?? 0) / 100000000000; // Convert msat to BTC
     const hasRGBAsset = decodedInvoice.asset_id && decodedInvoice.asset_amount;
 
     let amount: string | undefined = undefined;
     if (hasRGBAsset) {
       amount = decodedInvoice.asset_amount?.toString();
-    } else if (decodedInvoice.amt_msat > 0) {
+    } else if (((decodedInvoice as any).amt_msat ?? decodedInvoice.amountMsat ?? 0) > 0) {
       amount = amountBTC.toFixed(8);
     }
 

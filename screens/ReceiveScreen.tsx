@@ -18,10 +18,18 @@ import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
-import RGBApiService from '../services/RGBApiService';
+// RGBApiService removed — all operations via protocolManager
+import { protocolManager } from '../services/protocols';
+import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
+import {
+  getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
+  type AccountId, type NetworkType as ProtocolNetworkType,
+} from '../utils/account-routing';
 import { theme } from '../theme';
 import { Card, Button, Input, ScreenHeader } from '../components';
-import { useAssetIcon } from '../utils';
+import { AssetIcon } from '../components/AssetIcon';
+import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
+import { NetworkIcon } from '../components/NetworkIcon';
 import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 interface Props {
@@ -92,13 +100,25 @@ export default function ReceiveScreen({ navigation }: Props) {
     return amount.toFixed(precision);
   };
   
+  // Must call hooks first before any other code
+  const getProtocolStatus = useRefreshableProtocolStatus();
+
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
     ticker: 'BTC',
     name: 'Bitcoin',
     isRGB: false,
   });
-  const [networkType, setNetworkType] = useState<'on-chain' | 'lightning'>('on-chain');
+
+  // Default to first available network based on connected protocols
+  const getDefaultNetwork = (): ProtocolNetworkType => {
+    const status = getProtocolStatus();
+    if (status.SPARK) return 'spark';
+    if (status.RGB) return 'onchain';
+    if (status.ARKADE) return 'arkade';
+    return 'onchain';
+  };
+  const [networkType, setNetworkType] = useState<ProtocolNetworkType>(getDefaultNetwork());
   const [address, setAddress] = useState('');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
@@ -108,8 +128,29 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [maxDepositAmount, setMaxDepositAmount] = useState<number>(0);
   const [isUserTyping, setIsUserTyping] = useState(false);
+  const [arkadeSubMode, setArkadeSubMode] = useState<'ark' | 'boarding'>('ark');
 
-  const apiService = RGBApiService.getInstance();
+  // Determine available network types based on connected protocols and selected asset
+  const availableNetworkTypes = useMemo((): ProtocolNetworkType[] => {
+    const status = getProtocolStatus();
+    const family = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
+    const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
+
+    const networks = new Set<ProtocolNetworkType>();
+    for (const account of accounts) {
+      for (const net of getNetworkTypesForAccount(account, family)) {
+        networks.add(net);
+      }
+    }
+
+    // Always include on-chain and lightning if RGB is connected (legacy compatibility)
+    if (status.RGB) {
+      networks.add('onchain');
+      networks.add('lightning');
+    }
+
+    return Array.from(networks);
+  }, [selectedAsset, getProtocolStatus]);
   
   // Constants for HTLC calculations (from desktop app)
   const MSATS_PER_SAT = 1000;
@@ -121,8 +162,9 @@ export default function ReceiveScreen({ navigation }: Props) {
     
     try {
       setChannelsLoading(true);
-      const channelsResponse = await apiService.listChannels();
-      const channelsList = channelsResponse.channels || [];
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const channelsResponse = rgbAdapter?.isConnected() ? await rgbAdapter.listChannels() : { channels: [] };
+      const channelsList = Array.isArray(channelsResponse) ? channelsResponse : channelsResponse.channels || [];
       setChannels(channelsList);
     } catch (error) {
       console.error('Failed to load channels:', error);
@@ -244,76 +286,140 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   const generateAddress = async () => {
     if (!selectedAsset) return;
-    
-    // Clear previous error
+
     setError(null);
-    
-    // Validate amount if required
+
     if (isAmountRequired() && !isAmountValid()) {
-      setError('Please enter a valid amount for Lightning invoices');
+      setError('Please enter a valid amount');
       return;
     }
-    
+
     setLoading(true);
     try {
       let result: any = null;
-      
-              if (selectedAsset.asset_id === 'BTC') {
-          if (networkType === 'on-chain') {
-            // BTC on-chain address
-            const response = await apiService.getNewAddress();
-            result = (response as any)?.address || response;
+
+      // ── Spark network ──
+      if (networkType === 'spark') {
+        try {
+          const sparkAdapter = protocolManager.getAdapter('SPARK');
+          if (amount && isAmountValid()) {
+            const cleanAmount = amount.replace(/,/g, '');
+            const numericAmount = parseFloat(cleanAmount);
+            const amountSats = bitcoinUnit === 'BTC'
+              ? Math.round(numericAmount * 1e8)
+              : Math.round(numericAmount);
+            const invoice = await sparkAdapter.createInvoice({
+              amount: amountSats,
+              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              expirySeconds: 3600,
+            });
+            result = invoice.invoice;
+          } else {
+            const addr = await sparkAdapter.getReceiveAddress();
+            result = addr.address;
+          }
+        } catch (err: any) {
+          throw new Error(`Spark: ${err.message || 'Failed to generate address'}`);
+        }
+      }
+      // ── Arkade network ──
+      else if (networkType === 'arkade') {
+        try {
+          const arkadeAdapter = protocolManager.getAdapter('ARKADE');
+          if (arkadeSubMode === 'boarding') {
+            const addr = await arkadeAdapter.getReceiveAddress('boarding');
+            result = addr.address;
+          } else {
+            const addr = await arkadeAdapter.getReceiveAddress();
+            result = addr.address;
+          }
+        } catch (err: any) {
+          throw new Error(`Arkade: ${err.message || 'Failed to generate address'}`);
+        }
+      }
+      // ── RGB / Legacy: on-chain + lightning ──
+      else if (selectedAsset.asset_id === 'BTC') {
+        if (networkType === 'onchain') {
+          // Use whichever adapter is connected for on-chain address
+          const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
+          if (rgbAdapter?.isConnected()) {
+            const addr = await rgbAdapter.getReceiveAddress();
+            result = addr.address;
+          } else if (sparkAdapter?.isConnected()) {
+            // Spark can provide a single-use deposit address for on-chain BTC
+            const addr = await sparkAdapter.getReceiveAddress('onchain');
+            result = addr.address;
+          } else {
+            throw new Error('No wallet connected for on-chain deposit');
+          }
         } else {
           // Lightning invoice for BTC
           if (!amount || !isAmountValid()) {
             throw new Error('Amount is required for Lightning invoices');
           }
-          
-          // Clean amount and convert to msat
           const cleanAmount = amount.replace(/,/g, '');
           const numericAmount = parseFloat(cleanAmount);
-          const amountMsat = bitcoinUnit === 'BTC' 
-            ? Math.round(numericAmount * 100000000 * 1000)
-            : Math.round(numericAmount * 1000);
-          
-          const response = await apiService.createLightningInvoice({
-            amount_msat: amountMsat,
-            description: `Receive ${cleanAmount} ${bitcoinUnit}`,
-            duration_seconds: 3600, // 1 hour expiry
-          });
-          result = response?.invoice;
+          const amountSats = bitcoinUnit === 'BTC'
+            ? Math.round(numericAmount * 1e8)
+            : Math.round(numericAmount);
+
+          // Try RGB first (Lightning), then Spark (also supports Lightning)
+          const rgbLn = protocolManager.getAdapterIfAvailable('RGB');
+          const sparkLn = protocolManager.getAdapterIfAvailable('SPARK');
+          if (rgbLn?.isConnected()) {
+            const invoice = await rgbLn.createInvoice({
+              amount: amountSats,
+              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              expirySeconds: 3600,
+            });
+            result = invoice.invoice;
+          } else if (sparkLn?.isConnected()) {
+            const invoice = await sparkLn.createInvoice({
+              amount: amountSats,
+              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              expirySeconds: 3600,
+            });
+            result = invoice.invoice;
+          } else {
+            throw new Error('No wallet connected for Lightning invoice');
+          }
         }
       } else {
-        // For RGB assets
-        if (networkType === 'on-chain') {
-          // Create RGB invoice for on-chain transfer (similar to desktop app)
-          const response = await apiService.getRGBInvoice({
+        // RGB assets (require RGB adapter)
+        if (networkType === 'onchain') {
+          const rgbAssetAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          if (!rgbAssetAdapter?.isConnected()) {
+            throw new Error('RGB node required for on-chain RGB asset deposits. Please configure in Settings.');
+          }
+          const rgbInvoice = await rgbAssetAdapter.createRgbInvoice?.({
             asset_id: selectedAsset.asset_id,
             min_confirmations: 1,
-            duration_seconds: 3600, // 1 hour
+            duration_seconds: 3600,
           });
-          result = response?.invoice;
+          result = rgbInvoice?.invoice;
         } else {
           // Lightning invoice for RGB asset
           if (!amount || !isAmountValid()) {
             throw new Error('Amount is required for RGB Lightning invoices');
           }
-          
-          // Clean amount and parse with proper precision
           const cleanAmount = amount.replace(/,/g, '');
           const assetAmount = parseFloat(cleanAmount);
 
-          const response = await apiService.createLightningInvoice({
-            asset_id: selectedAsset.asset_id,
-            asset_amount: assetAmount,
+          const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          if (!rgbAssetLnAdapter?.isConnected()) {
+            throw new Error('RGB node required for RGB Lightning deposits. Please configure in Settings.');
+          }
+          const assetInvoice = await rgbAssetLnAdapter.createInvoice({
+            asset: selectedAsset.asset_id,
+            assetAmount,
             description: `Receive ${cleanAmount} ${selectedAsset.ticker}`,
-            duration_seconds: 3600, // 1 hour expiry
+            expirySeconds: 3600,
           });
-          result = response?.invoice;
+          result = assetInvoice.invoice;
         }
       }
 
-      // Enhanced validation with better error handling
       const validatedResult = validateAddressOrInvoice(result);
       if (validatedResult) {
         setAddress(validatedResult);
@@ -323,27 +429,13 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
     } catch (error) {
       console.error('Failed to generate address:', error);
-      
-      // Handle UTXO-related errors (similar to desktop app)
-      if (error && typeof error === 'object' && error !== null && 'data' in error) {
-        const errorData = (error as any).data;
-        if (errorData && typeof errorData === 'object' && 'error' in errorData) {
-          const errorMessage = String(errorData.error);
-          if (errorMessage.includes('No uncolored UTXOs are available')) {
-            setError('No uncolored UTXOs available. Please create UTXOs first or try a different network.');
-          } else {
-            setError(errorMessage);
-          }
-        } else {
-          const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
-          setError(errorMessage);
-        }
+      const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
+      if (errorMessage.includes('No uncolored UTXOs')) {
+        setError('No uncolored UTXOs available. Please create UTXOs first or try a different network.');
       } else {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
         setError(errorMessage);
       }
-      
-      setAddress(''); // Reset address on error
+      setAddress('');
     } finally {
       setLoading(false);
     }
@@ -446,192 +538,163 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   };
 
-  const AssetIcon = ({ asset }: { asset: Asset }) => {
-    const { iconUrl } = useAssetIcon(asset?.ticker || '');
-    
-    if (!asset) return null;
-    
-    if (asset.ticker === 'BTC') {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
-        </View>
-      );
-    }
-    
-    if (iconUrl) {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
-        </View>
-      );
-    }
-    
-    return (
-      <View style={styles.assetIconContainer}>
-        <Ionicons name="diamond" size={24} color={theme.colors.primary[500]} />
-      </View>
-    );
-  };
+  // AssetIcon is now imported from components/AssetIcon
 
   const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <ScreenHeader
-        title="Receive"
-        showBack={true}
-        rightAction={
-          <TouchableOpacity
-            style={styles.helpButton}
-            onPress={() => Alert.alert('Help', 'Generate addresses and invoices to receive payments')}
-          >
-            <Ionicons name="help-circle-outline" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-        }
-      />
+    <View>
+      <ScreenHeader title="Receive" showBack={true} />
 
-      {/* Asset Selector */}
-      {selectedAsset && (
-        <TouchableOpacity 
-          style={styles.assetSelector}
-          onPress={() => setShowAssetSelector(!showAssetSelector)}
-          activeOpacity={0.8}
-        >
-          <AssetIcon asset={selectedAsset} />
-          <View style={styles.assetInfo}>
-            <Text style={styles.assetTicker}>{selectedAsset.ticker}</Text>
-            <Text style={styles.assetName}>{selectedAsset.name}</Text>
-            {typeof selectedAsset.balance === 'number' && (
-              <Text style={styles.assetBalance}>
-                Balance: {selectedAsset.balance.toLocaleString()}
-              </Text>
-            )}
-          </View>
-          <View style={styles.chevronContainer}>
-            <Ionicons 
-              name={showAssetSelector ? "chevron-up" : "chevron-down"} 
-              size={20} 
-              color="rgba(255, 255, 255, 0.8)" 
-            />
-          </View>
-        </TouchableOpacity>
-      )}
-      
-      {/* Asset Dropdown */}
-      {showAssetSelector && allAssets.length > 0 && (
-        <View style={styles.assetDropdown}>
-          <ScrollView style={styles.assetDropdownScroll} nestedScrollEnabled>
-            {allAssets.map((asset) => (
-              <TouchableOpacity
-                key={asset.asset_id}
-                style={[
-                  styles.assetOption,
-                  selectedAsset.asset_id === asset.asset_id && styles.assetOptionSelected
-                ]}
-                onPress={() => {
-                  setSelectedAsset(asset);
-                  setShowAssetSelector(false);
-                }}
-                activeOpacity={0.7}
-              >
-                <AssetIcon asset={asset} />
-                <View style={styles.assetOptionInfo}>
-                  <Text style={styles.assetOptionTicker}>{asset.ticker}</Text>
-                  <Text style={styles.assetOptionName}>{asset.name}</Text>
-                  {typeof asset.balance === 'number' && (
-                    <Text style={styles.assetOptionBalance}>
-                      Balance: {asset.balance.toLocaleString()}
-                    </Text>
-                  )}
-                </View>
-                {selectedAsset.asset_id === asset.asset_id && (
-                  <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+      {/* Asset Selector — below header, above network tabs */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>
+        {selectedAsset && (
+          <TouchableOpacity
+            onPress={() => setShowAssetSelector(true)}
+            activeOpacity={0.7}
+            style={{
+              flexDirection: 'row', alignItems: 'center',
+              backgroundColor: theme.colors.surface.primary,
+              borderRadius: 14, padding: 12,
+              shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+            }}
+          >
+            <AssetIcon ticker={selectedAsset.ticker} protocol={selectedAsset.isRGB ? 'RGB' : undefined} size={36} showBadge={false} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '600', color: theme.colors.text.primary }}>{selectedAsset.ticker}</Text>
+              <Text style={{ fontSize: 12, color: theme.colors.text.tertiary }}>{selectedAsset.name}</Text>
+            </View>
+            <Ionicons name="chevron-down" size={18} color={theme.colors.gray[400]} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Asset Selector Modal */}
+      <AssetSelector
+        visible={showAssetSelector}
+        onClose={() => setShowAssetSelector(false)}
+        onSelect={(asset) => {
+          setSelectedAsset({
+            asset_id: asset.asset_id,
+            ticker: asset.ticker,
+            name: asset.name,
+            isRGB: asset.isRGB || asset.protocol === 'RGB',
+            balance: asset.balance,
+          });
+        }}
+        assets={allAssets.map(a => ({
+          asset_id: a.asset_id,
+          ticker: a.ticker,
+          name: a.name,
+          balance: a.balance,
+          isRGB: a.isRGB,
+          protocol: a.isRGB ? 'RGB' as const : undefined,
+        }))}
+        selectedAssetId={selectedAsset?.asset_id}
+        title="Select Asset"
+      />
     </View>
   );
+
+  // Network color coding (matches rate-extension)
+  const NETWORK_COLORS: Record<string, string> = {
+    'onchain': '#F7931A', // Bitcoin orange
+    'lightning': '#FACC15', // Lightning yellow
+    'spark': '#60A5FA',     // Spark blue
+    'arkade': '#A855F7',    // Arkade purple
+  };
+
+  const NETWORK_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+    'onchain': 'link',
+    'lightning': 'flash',
+    'spark': 'sparkles',
+    'arkade': 'shield-checkmark',
+  };
+
+  const NETWORK_LABELS: Record<string, string> = {
+    'onchain': 'On-chain',
+    'lightning': 'Lightning',
+    'spark': 'Spark',
+    'arkade': 'Arkade',
+  };
 
   const renderNetworkTabs = () => {
     const onChainAssets = getOnChainAssets();
     const lightningAssets = getLightningAssets();
-    
+
+    // Build list of available networks with metadata
+    // Only show networks that are actually available (based on connected protocols)
+    const allNetworks: Array<{ id: ProtocolNetworkType; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; subtitle: string; available: boolean }> = [
+      ...(availableNetworkTypes.includes('onchain') ? [{ id: 'onchain' as ProtocolNetworkType, label: 'On-chain', icon: 'link' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['onchain'], subtitle: onChainAssets.length === 1 ? '1 asset' : `${onChainAssets.length} assets`, available: true }] : []),
+      ...(availableNetworkTypes.includes('lightning') ? [{ id: 'lightning' as ProtocolNetworkType, label: 'Lightning', icon: 'flash' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['lightning'], subtitle: lightningAssets.length === 0 ? 'no channels' : lightningAssets.length === 1 ? '1 asset' : `${lightningAssets.length} assets`, available: lightningAssets.length > 0 }] : []),
+      ...(availableNetworkTypes.includes('spark') ? [{ id: 'spark' as ProtocolNetworkType, label: 'Spark', icon: 'sparkles' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['spark'], subtitle: 'instant', available: true }] : []),
+      ...(availableNetworkTypes.includes('arkade') ? [{ id: 'arkade' as ProtocolNetworkType, label: 'Arkade', icon: 'shield-checkmark' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['arkade'], subtitle: arkadeSubMode === 'boarding' ? 'boarding' : 'off-chain', available: true }] : []),
+    ];
+
     return (
       <View style={styles.networkTabsContainer}>
-        <View style={styles.networkTabs}>
-          <TouchableOpacity
-            style={[
-              styles.networkTab,
-              networkType === 'on-chain' && styles.networkTabActive
-            ]}
-            onPress={() => setNetworkType('on-chain')}
-            activeOpacity={0.8}
-          >
-            <Ionicons 
-              name="link" 
-              size={18} 
-              color={networkType === 'on-chain' ? theme.colors.primary[500] : theme.colors.text.secondary} 
-            />
-            <View style={styles.networkTabContent}>
-              <Text style={[
-                styles.networkTabText,
-                networkType === 'on-chain' && styles.networkTabTextActive
-              ]}>
-                On-chain
-              </Text>
-              <Text style={[
-                styles.networkTabSubtext,
-                networkType === 'on-chain' && styles.networkTabSubtextActive
-              ]}>
-                {onChainAssets.length} assets
-              </Text>
-            </View>
-          </TouchableOpacity>
+        {/* Account chips — horizontal scrollable */}
+        <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, paddingHorizontal: 4 }}>
+          Destination Network
+        </Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {allNetworks.map((net) => {
+              const isActive = networkType === net.id;
+              return (
+                <TouchableOpacity
+                  key={net.id}
+                  onPress={() => setNetworkType(net.id)}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    borderRadius: 12,
+                    backgroundColor: isActive ? net.color + '20' : theme.colors.background.secondary,
+                    borderWidth: isActive ? 1.5 : 1,
+                    borderColor: isActive ? net.color : theme.colors.background.tertiary || 'rgba(255,255,255,0.08)',
+                    opacity: net.available ? 1 : 0.4,
+                  }}
+                >
+                  <NetworkIcon network={net.id} size={18} color={isActive ? net.color : theme.colors.text.secondary} />
+                  <View style={{ marginLeft: 8 }}>
+                    <Text style={{ fontSize: 13, fontWeight: isActive ? '600' : '500', color: isActive ? net.color : theme.colors.text.primary }}>
+                      {net.label}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: isActive ? net.color + 'AA' : theme.colors.text.tertiary, marginTop: 1 }}>
+                      {net.subtitle}
+                    </Text>
+                  </View>
+                  {isActive && (
+                    <View style={{ marginLeft: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: net.color }} />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
 
+        {/* Arkade sub-mode toggle */}
+        {networkType === 'arkade' && (
           <TouchableOpacity
-            style={[
-              styles.networkTab,
-              networkType === 'lightning' && styles.networkTabActive,
-              lightningAssets.length === 1 && styles.networkTabDisabled // Only BTC available
-            ]}
-            onPress={() => setNetworkType('lightning')}
-            activeOpacity={lightningAssets.length > 1 ? 0.8 : 0.5}
+            onPress={() => setArkadeSubMode(arkadeSubMode === 'ark' ? 'boarding' : 'ark')}
+            style={{
+              flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 10, marginBottom: 12,
+              backgroundColor: NETWORK_COLORS['arkade'] + '15',
+              borderWidth: 1, borderColor: NETWORK_COLORS['arkade'] + '30',
+            }}
           >
-            <Ionicons 
-              name="flash" 
-              size={18} 
-              color={networkType === 'lightning' ? theme.colors.primary[500] : theme.colors.text.secondary} 
-            />
-            <View style={styles.networkTabContent}>
-              <Text style={[
-                styles.networkTabText,
-                networkType === 'lightning' && styles.networkTabTextActive
-              ]}>
-                Lightning
-              </Text>
-              <Text style={[
-                styles.networkTabSubtext,
-                networkType === 'lightning' && styles.networkTabSubtextActive
-              ]}>
-                {lightningAssets.length} assets
-              </Text>
-            </View>
-            {channelsLoading && (
-              <ActivityIndicator 
-                size="small" 
-                color={theme.colors.text.secondary} 
-                style={styles.networkTabLoader}
-              />
-            )}
+            <Ionicons name="swap-horizontal" size={16} color={NETWORK_COLORS['arkade']} />
+            <Text style={{ marginLeft: 8, fontSize: 13, color: NETWORK_COLORS['arkade'], fontWeight: '500' }}>
+              {arkadeSubMode === 'ark' ? 'Switch to Boarding (on-chain deposit)' : 'Switch to Ark (off-chain receive)'}
+            </Text>
           </TouchableOpacity>
-        </View>
-        
+        )}
+
         {/* Warning for Lightning with limited assets */}
         {networkType === 'lightning' && lightningAssets.length === 1 && (
           <View style={styles.networkWarning}>
-            <Ionicons name="information-circle" size={16} color={theme.colors.warning[500]} />
+            <Ionicons name="information-circle" size={16} color={theme.colors.warning?.[500] || '#EAB308'} />
             <Text style={styles.networkWarningText}>
               Only Bitcoin available. Open RGB Lightning channels to receive RGB assets.
             </Text>
@@ -869,12 +932,12 @@ export default function ReceiveScreen({ navigation }: Props) {
       );
     }
 
-    // Render QR code
-    const qrTitle = selectedAsset.isRGB 
-      ? 'RGB Asset Invoice'
-      : selectedAsset.asset_id === 'BTC' && networkType === 'lightning' 
-      ? 'Lightning Invoice'
-      : 'Bitcoin Address';
+    // Render QR code with network-aware title
+    const qrTitle = networkType === 'spark' ? 'Spark Address'
+      : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+      : networkType === 'lightning' ? 'Lightning Invoice'
+      : selectedAsset.isRGB ? 'RGB Invoice'
+      : 'On-chain Address';
 
     return (
       <View style={styles.qrSection}>
@@ -890,25 +953,58 @@ export default function ReceiveScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.qrContainer}>
-          <View style={styles.qrCodeWrapper}>
+          <View style={[styles.qrCodeWrapper, {
+            borderColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
+            borderWidth: 2,
+            shadowColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.3,
+            shadowRadius: 12,
+            elevation: 6,
+          }]}>
             <QRCode
               value={address}
-              size={220}
-              backgroundColor={theme.colors.surface.primary || '#FFFFFF'}
-              color={theme.colors.text.primary || '#000000'}
-              logoSize={40}
-              logoMargin={8}
-              logoBorderRadius={8}
+              size={170}
+              backgroundColor="#FFFFFF"
+              color="#000000"
+              logoSize={30}
+              logoMargin={4}
+              logoBorderRadius={6}
             />
+            {/* Network badge overlay */}
+            <View style={{
+              position: 'absolute', top: -1, right: -1,
+              flexDirection: 'row', alignItems: 'center',
+              backgroundColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
+              paddingHorizontal: 8, paddingVertical: 4,
+              borderBottomLeftRadius: 8, borderTopRightRadius: 12,
+            }}>
+              <NetworkIcon network={networkType} size={14} color="#fff" />
+              <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff', marginLeft: 4 }}>
+                {NETWORK_LABELS[networkType] || networkType}
+              </Text>
+            </View>
           </View>
         </View>
 
-        <View style={styles.addressContainer}>
-          <Text style={styles.addressLabel}>Address/Invoice</Text>
-          <Text style={styles.addressText} numberOfLines={4} selectable>
-            {address}
+        {/* Address card with left border accent */}
+        <TouchableOpacity style={[styles.addressContainer, {
+          borderLeftWidth: 3,
+          borderLeftColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
+        }]} onPress={copyToClipboard} activeOpacity={0.7}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+            <NetworkIcon network={networkType} size={16} color={NETWORK_COLORS[networkType] || theme.colors.primary[500]} />
+            <Text style={[styles.addressLabel, { marginLeft: 6, marginBottom: 0 }]}>
+              {networkType === 'lightning' ? 'Lightning Invoice'
+                : networkType === 'spark' ? 'Spark Address'
+                : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+                : 'Deposit Address'}
+            </Text>
+          </View>
+          <Text style={[styles.addressText, { fontFamily: 'monospace' }]} numberOfLines={3} selectable>
+            {address.length > 50 ? `${address.slice(0, 20)}...${address.slice(-16)}` : address}
           </Text>
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.qrActions}>
           <TouchableOpacity 

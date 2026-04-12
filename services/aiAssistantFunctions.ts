@@ -1,5 +1,5 @@
 // aiAssistantFunctions.ts
-import { RGBApiService } from '../services/RGBApiService';
+import { protocolManager } from './protocols';
 import NostrService from '../services/NostrService';
 import PremAI from 'premai';
 import { LightningAddress, Invoice } from '@getalby/lightning-tools';
@@ -202,12 +202,14 @@ export const AI_FUNCTIONS = [
 
 // Function implementations
 export class AIAssistantFunctions {
-  private rgbApi: RGBApiService;
   private nostrService: NostrService;
 
   constructor() {
-    this.rgbApi = RGBApiService.getInstance();
     this.nostrService = NostrService.getInstance();
+  }
+
+  private getRgbAdapter() {
+    return protocolManager.getAdapter('RGB');
   }
 
   /**
@@ -307,7 +309,7 @@ export class AIAssistantFunctions {
 
       // Pay the invoice using RGB Lightning Node
       console.log('⚡ Attempting payment...');
-      const result = await this.rgbApi.payLightningInvoice({
+      const result = await this.getRgbAdapter().sendPayment({
         invoice: invoice_or_address
       });
 
@@ -315,7 +317,7 @@ export class AIAssistantFunctions {
 
       return {
         success: true,
-        payment_hash: result.payment_hash,
+        payment_hash: result.paymentHash,
         status: result.status,
         amount_sats: amount_sats,
         recipient: invoice_or_address.includes('@') ? invoice_or_address : 'Lightning invoice',
@@ -736,7 +738,13 @@ export class AIAssistantFunctions {
         })
       };
 
-      const result = await this.rgbApi.createLightningInvoice(invoiceParams);
+      const result = await this.getRgbAdapter().createInvoice({
+        amount: invoiceParams.amount_msat ? Math.floor(invoiceParams.amount_msat / 1000) : undefined,
+        asset: invoiceParams.asset_id,
+        assetAmount: invoiceParams.asset_amount,
+        description: invoiceParams.description,
+        expirySeconds: invoiceParams.duration_seconds,
+      });
 
       console.log('✅ Invoice generated successfully');
 
@@ -762,7 +770,7 @@ _The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sur
       return {
         success: true,
         invoice: result.invoice,
-        payment_hash: result.payment_hash,
+        payment_hash: result.paymentHash,
         amount_sats,
         description,
         expiry_seconds,

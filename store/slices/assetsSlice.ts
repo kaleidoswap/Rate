@@ -1,7 +1,7 @@
 // store/slices/assetsSlice.ts
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { AssetRecord } from '../../services/DatabaseService';
-import RGBApiService from '../../services/RGBApiService';
+import { protocolManager } from '../../services/protocols';
 import DatabaseService from '../../services/DatabaseService';
 
 // Define NiaAsset interface locally since it's not exported from RGBApiService
@@ -66,14 +66,33 @@ export const syncAssets = createAsyncThunk<
 >(
   'assets/sync',
   async (walletId: number) => {
-    const apiService = RGBApiService.getInstance();
     const dbService = DatabaseService.getInstance();
-    
-    // Get assets from RGB node
-    const assetsResponse = await apiService.listAssets();
-    
+
+    // Try protocolManager first
+    let niaAssets: any[] = [];
+    const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+    for (const proto of protocols) {
+      const adapter = protocolManager.getAdapterIfAvailable(proto);
+      if (adapter?.isConnected()) {
+        try {
+          const unifiedAssets = await adapter.listAssets();
+          const mapped = unifiedAssets
+            .filter((a: any) => a.id !== 'BTC')
+            .map((a: any) => ({
+              asset_id: a.id,
+              ticker: a.ticker,
+              name: a.name,
+              precision: a.precision,
+              issued_supply: a.metadata?.issued_supply || 0,
+              balance: { settled: a.balance.total, future: a.balance.pending, spendable: a.balance.available },
+            }));
+          niaAssets.push(...mapped);
+        } catch { /* skip */ }
+      }
+    }
+
     // Update database with latest asset info
-    for (const asset of assetsResponse.nia) {
+    for (const asset of niaAssets) {
       await dbService.upsertAsset({
         wallet_id: walletId,
         asset_id: asset.asset_id,
@@ -81,7 +100,7 @@ export const syncAssets = createAsyncThunk<
         name: asset.name,
         precision: asset.precision,
         issued_supply: asset.issued_supply,
-        balance: asset.balance.settled,
+        balance: asset.balance?.settled || asset.balance?.total || 0,
         last_updated: Date.now(),
       });
     }
@@ -104,16 +123,19 @@ export const issueNiaAsset = createAsyncThunk<
 >(
   'assets/issueNia',
   async (params) => {
-    const apiService = RGBApiService.getInstance();
     const dbService = DatabaseService.getInstance();
-    
-    // Issue asset via API
-    const result = await apiService.issueNiaAsset(
-      params.amounts,
-      params.ticker,
-      params.name,
-      params.precision
-    );
+
+    // Issue asset via protocolManager
+    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+    if (!rgbAdapter?.isConnected() || !rgbAdapter.executeProtocolOperation) {
+      throw new Error('RGB protocol not connected');
+    }
+    const result = await rgbAdapter.executeProtocolOperation('issueAssetNIA', {
+      amounts: params.amounts,
+      ticker: params.ticker,
+      name: params.name,
+      precision: params.precision,
+    });
     
     // Add to database
     await dbService.upsertAsset({

@@ -14,8 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
-import RGBApiService from '../services/RGBApiService';
-import { initializeRGBApiService } from '../services/initializeServices';
+import { protocolManager } from '../services/protocols';
 
 interface CreateUTXOModalProps {
   visible: boolean;
@@ -90,12 +89,12 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
     setIsLoading(true);
 
     try {
-      const apiService = initializeRGBApiService();
-      if (!apiService) {
-        throw new Error('API service not available');
+      const rgbAdapter = protocolManager.getAdapter('RGB');
+      if (!rgbAdapter) {
+        throw new Error('RGB adapter not available');
       }
 
-      await apiService.createUtxos({
+      await rgbAdapter.executeProtocolOperation!('createUtxos', {
         fee_rate: feeRate,
         num: numUtxos,
         size: utxoSize,

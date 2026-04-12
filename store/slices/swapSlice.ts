@@ -1,6 +1,8 @@
 // store/slices/swapSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 
+export type SwapVenue = 'kaleidoswap' | 'flashnet';
+
 export interface SwapQuote {
   rfq_id: string;
   from_asset: string;
@@ -11,6 +13,7 @@ export interface SwapQuote {
   exchange_rate: number;
   expiry_timestamp: number;
   maker_pubkey: string;
+  venue?: SwapVenue;
 }
 
 export interface SwapExecution {
@@ -42,9 +45,13 @@ interface SwapState {
   // Available assets for swapping
   availableAssets: string[];
   
+  // Venue & progress
+  venue: SwapVenue | null;
+  swapProgress: 'idle' | 'init' | 'taker' | 'execute' | 'done';
+
   // Error handling
   error: string | null;
-  
+
   // UI state
   step: 'select' | 'quote' | 'confirm' | 'executing' | 'completed';
   showQuoteModal: boolean;
@@ -62,6 +69,8 @@ const initialState: SwapState = {
   fromAmount: '',
   toAmount: '',
   availableAssets: [],
+  venue: null,
+  swapProgress: 'idle',
   error: null,
   step: 'select',
   showQuoteModal: false,
@@ -154,6 +163,14 @@ const swapSlice = createSlice({
       state.availableAssets = action.payload;
     },
     
+    // Venue & progress
+    setVenue: (state, action: PayloadAction<SwapVenue | null>) => {
+      state.venue = action.payload;
+    },
+    setSwapProgress: (state, action: PayloadAction<SwapState['swapProgress']>) => {
+      state.swapProgress = action.payload;
+    },
+
     // Step navigation
     setStep: (state, action: PayloadAction<SwapState['step']>) => {
       state.step = action.payload;
@@ -198,6 +215,8 @@ const swapSlice = createSlice({
       state.fromAmount = '';
       state.toAmount = '';
       state.step = 'select';
+      state.venue = null;
+      state.swapProgress = 'idle';
       state.error = null;
       state.showQuoteModal = false;
       state.showConfirmModal = false;
@@ -227,6 +246,8 @@ export const {
   updateExecutionStatus,
   addToHistory,
   setAvailableAssets,
+  setVenue,
+  setSwapProgress,
   setStep,
   nextStep,
   setShowQuoteModal,

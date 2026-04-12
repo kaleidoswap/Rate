@@ -1,15 +1,12 @@
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useDispatch } from 'react-redux';
-import { RGBNodeService } from '../services/RGBNodeService';
 import DatabaseService, { NetworkConfig } from '../services/DatabaseService';
-import RGBApiService from '../services/RGBApiService';
 import { setUnlocked, setInitialized, setActiveWallet } from '../store/slices/walletSlice';
-import { autoRestoreNostrConnection } from '../services/initializeServices';
+import { autoRestoreNostrConnection, initializeProtocolServices } from '../services/initializeServices';
 
 export default function InitialLoadScreen({ navigation }: { navigation: any }) {
   const dispatch = useDispatch();
-  const nodeService = RGBNodeService.getInstance();
 
   useEffect(() => {
     initializeApp();
@@ -37,33 +34,11 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
         // Set active wallet in Redux
         dispatch(setActiveWallet(activeWallet));
 
-        // Initialize RLN if enabled
-        const rlnConfig = activeWallet.networks?.find((n: NetworkConfig) => n.type === 'rln' && n.enabled);
-        if (rlnConfig && rlnConfig.config) {
-          try {
-            const config = JSON.parse(rlnConfig.config);
-            let apiUrl = '';
-
-            if (config.type === 'remote' && config.url) {
-              apiUrl = config.url;
-            } else if (config.type === 'local') {
-              apiUrl = 'http://127.0.0.1:3000'; // Default local URL
-            }
-
-            if (apiUrl) {
-              // Initialize API service with wallet's node URL
-              const apiService = RGBApiService.getInstance();
-              apiService.initialize({
-                baseURL: apiUrl,
-                timeout: 30000,
-              });
-
-              // Initialize node service (sets status to running)
-              await nodeService.initializeNode();
-            }
-          } catch (e) {
-            console.error('Failed to parse/init RLN config:', e);
-          }
+        // Initialize protocol services for all enabled networks
+        try {
+          await initializeProtocolServices();
+        } catch (e) {
+          console.error('Failed to initialize protocol services:', e);
         }
 
         dispatch(setInitialized(true));

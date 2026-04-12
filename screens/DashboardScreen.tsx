@@ -18,10 +18,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { RootState } from '../store';
-import { initializeRGBApiService } from '../services/initializeServices';
+import { initializeProtocolServices } from '../services/initializeServices';
+import { protocolManager } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
-import RGBApiService from '../services/RGBApiService';
 
 import { theme } from '../theme';
 import {
@@ -87,7 +87,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [apiService, setApiService] = useState<RGBApiService | null>(null);
+  const [protocolsReady, setProtocolsReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { formatSatoshisToUSD } = useBitcoinConversion();
   const [loading, setLoading] = useState(true);
@@ -106,16 +106,58 @@ export default function DashboardScreen({ navigation }: Props) {
   const [channelModalVisible, setChannelModalVisible] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
-  // Initialize API service
-  const initializeApi = useCallback(() => {
+  // Initialize protocol services (only once)
+  const initializeApi = useCallback(async () => {
+    if (protocolsReady) return true; // Already initialized
+
     try {
-      console.log('Initializing API service...');
-      const service = initializeRGBApiService();
-      setApiService(service);
-      return service;
+      console.log('Initializing protocol services...');
+      const { results } = await initializeProtocolServices();
+
+      const anyConnected = Array.from(results.values()).some(r => r.success);
+
+      // Report which protocols failed (non-blocking)
+      const failed: string[] = [];
+      for (const [proto, result] of results) {
+        if (!result.success) {
+          failed.push(`${proto}: ${result.error || 'failed'}`);
+        }
+      }
+      if (failed.length > 0) {
+        console.warn('[Dashboard] Protocol failures:', failed.join(', '));
+      }
+
+      if (anyConnected) {
+        setProtocolsReady(true);
+        // Show warning toast if some protocols failed but at least one connected
+        if (failed.length > 0) {
+          const connected = Array.from(results.entries()).filter(([, r]) => r.success).map(([p]) => p);
+          setConnectionError(null); // Clear any previous hard error
+          console.log(`[Dashboard] Connected: ${connected.join(', ')} | Failed: ${failed.join(', ')}`);
+        }
+        return true;
+      }
+
+      // Check if any adapter is already connected from a previous init
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      for (const proto of protocols) {
+        const adapter = protocolManager.getAdapterIfAvailable(proto);
+        if (adapter?.isConnected()) {
+          setProtocolsReady(true);
+          return true;
+        }
+      }
+
+      // Nothing connected — show error with details
+      if (failed.length > 0) {
+        setConnectionError(`Failed to connect:\n${failed.join('\n')}`);
+      } else {
+        setConnectionError('No wallet protocols connected. Please configure a wallet.');
+      }
+      return null;
     } catch (error) {
-      console.error('Failed to initialize API service:', error);
-      setConnectionError(error instanceof Error ? error.message : 'Failed to initialize API service');
+      console.error('Failed to initialize protocol services:', error);
+      setConnectionError(error instanceof Error ? error.message : 'Failed to initialize');
       return null;
     }
   }, []);
@@ -125,15 +167,25 @@ export default function DashboardScreen({ navigation }: Props) {
       setIsConnecting(true);
       setConnectionError(null);
 
-      const service = apiService || initializeApi();
-      if (!service) {
-        throw new Error('Could not initialize API service');
+      if (!protocolsReady) {
+        await initializeApi();
       }
 
-      console.log('Checking node status...');
-      const info = await service.getNodeInfo();
-      console.log('Node info received:', info);
+      // Try any connected adapter
+      let info: any = null;
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      for (const proto of protocols) {
+        try {
+          const adapter = protocolManager.getAdapterIfAvailable(proto);
+          if (adapter?.isConnected()) {
+            info = await adapter.getNodeInfo();
+            break;
+          }
+        } catch { /* try next */ }
+      }
 
+      if (!info) throw new Error('No wallet connected');
+      console.log('Node info received:', info);
       setIsNodeUnlocked(true);
       return true;
     } catch (error) {
@@ -147,8 +199,8 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const loadDashboardData = async (showLoadingIndicator = true) => {
-    if (!apiService || isUpdating) {
-      console.log('Skipping update: Service not ready or update in progress');
+    if (!protocolsReady || isUpdating) {
+      console.log('Skipping update: Protocols not ready or update in progress');
       return;
     }
 
@@ -159,38 +211,87 @@ export default function DashboardScreen({ navigation }: Props) {
       }
       console.log('Loading dashboard data...');
 
-      // Load BTC balance
+      // Load via protocolManager (multi-protocol)
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
+      const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
+
+      // Load BTC balance (aggregate from all connected adapters with per-protocol breakdown)
       console.log('Fetching BTC balance...');
-      const balance = await apiService.getBtcBalance();
-      console.log('BTC balance received:', balance);
+      let totalConfirmed = 0, totalUnconfirmed = 0;
+      const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
+      const adapterProtoMap: Array<[any, string]> = [
+        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
+      ];
+      for (const [adapter, proto] of adapterProtoMap) {
+        if (adapter?.isConnected()) {
+          try {
+            const btc = await adapter.getBtcBalance();
+            totalConfirmed += btc.confirmed;
+            totalUnconfirmed += btc.unconfirmed;
+            byProtocol[proto] = btc;
+          } catch (e) { console.warn('Balance fetch error:', e); }
+        }
+      }
+      const balance = {
+        vanilla: { settled: totalConfirmed, future: totalConfirmed + totalUnconfirmed, spendable: totalConfirmed },
+        colored: { settled: 0, future: 0, spendable: 0 },
+        byProtocol,
+      };
       setBtcBalanceState(balance);
       dispatch(setBtcBalance(balance));
 
-      // Load RGB assets
-      console.log('Fetching RGB assets...');
-      const assetsResponse = await apiService.listAssets();
-      const assets = assetsResponse.nia || [];
-      console.log('RGB assets received:', assets);
+      // Load assets from all connected adapters (with protocol tag)
+      console.log('Fetching assets...');
+      let assets: any[] = [];
+      const adapterMap: Array<[any, 'RGB' | 'SPARK' | 'ARKADE']> = [
+        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
+      ];
+      for (const [adapter, proto] of adapterMap) {
+        if (adapter?.isConnected()) {
+          try {
+            const unifiedAssets = await adapter.listAssets();
+            const mapped = unifiedAssets
+              .filter((a: any) => a.id !== 'BTC')
+              .map((a: any) => ({
+                asset_id: a.id,
+                ticker: a.ticker,
+                name: a.name,
+                precision: a.precision,
+                issued_supply: a.metadata?.issued_supply || 0,
+                protocol: proto,
+                balance: {
+                  settled: a.balance.total,
+                  future: a.balance.pending,
+                  spendable: a.balance.available,
+                  offchain_outbound: a.balance.locked || 0,
+                  offchain_inbound: 0,
+                },
+              }));
+            assets.push(...mapped);
+          } catch (e) { console.warn('Asset fetch error:', e); }
+        }
+      }
       setRgbAssetsState(assets);
 
-      // Convert NiaAsset to AssetRecord before dispatching
-      const assetRecords = assets.map(asset => ({
+      const assetRecords = assets.map((asset: any) => ({
         wallet_id: 1,
         asset_id: asset.asset_id,
         ticker: asset.ticker,
         name: asset.name,
         precision: asset.precision,
         issued_supply: asset.issued_supply,
-        balance: asset.balance.spendable,
+        balance: asset.balance?.spendable || asset.balance?.available || 0,
         last_updated: Date.now()
       }));
       dispatch(setRgbAssets(assetRecords));
 
-      // Load Lightning channels
+      // Load Lightning channels (RGB only)
       console.log('Fetching Lightning channels...');
-      const channelsResponse = await apiService.listChannels();
-      const channelsList = channelsResponse.channels || [];
-      console.log('Channels received:', channelsList);
+      let channelsList: any[] = [];
+      if (rgbAdapter?.isConnected()) {
+        try { channelsList = await rgbAdapter.listChannels(); } catch { /* no channels */ }
+      }
       setChannels(channelsList);
 
     } catch (error) {
@@ -209,22 +310,22 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   };
 
-  // Add this useEffect for auto-refresh of wallet data
+  // Auto-refresh wallet data (only when protocols are ready)
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
 
+    if (!protocolsReady) return;
+
     const refreshData = async () => {
-      if (isNodeUnlocked && !isConnecting && !isUpdating) {
-        await loadDashboardData(false); // Don't show loading indicator for background updates
+      if (!isUpdating) {
+        await loadDashboardData(false);
       }
     };
 
     // Initial load
-    if (isNodeUnlocked && !isConnecting) {
-      refreshData();
-    }
+    refreshData();
 
-    // Set up polling every 30 seconds
+    // Poll every 30 seconds
     intervalId = setInterval(refreshData, 30000);
 
     return () => {
@@ -454,6 +555,13 @@ export default function DashboardScreen({ navigation }: Props) {
         <MainHeader
           greeting={getGreeting()}
           title="Rate Wallet"
+          subtitle={(() => {
+            const connected: string[] = [];
+            if (protocolManager.getAdapterIfAvailable('SPARK')?.isConnected()) connected.push('Spark');
+            if (protocolManager.getAdapterIfAvailable('RGB')?.isConnected()) connected.push('RLN');
+            if (protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected()) connected.push('Arkade');
+            return connected.length > 0 ? connected.join(' · ') : undefined;
+          })()}
           showNotification
           showSettings
         >
@@ -466,39 +574,40 @@ export default function DashboardScreen({ navigation }: Props) {
             formatUSD={formatUSD}
             onChainBalance={getTotalBtcBalance()}
             lightningBalance={offChainBalance}
+            byProtocol={(btcBalance as any)?.byProtocol}
           />
         </MainHeader>
 
         <ActionButtons
-          onSend={() => navigation.navigate('Send')}
-          onReceive={() => navigation.navigate('Receive')}
-          onSwap={() => navigation.navigate('Swap')}
-          onHistory={() => navigation.navigate('History')}
+          onSend={() => navigation.getParent()?.navigate('Send')}
+          onReceive={() => navigation.getParent()?.navigate('Receive')}
+          onSwap={() => navigation.getParent()?.navigate('Swap')}
+          onHistory={() => navigation.getParent()?.navigate('History')}
         />
 
         <AssetList
           assets={rgbAssets}
-          onViewAll={() => navigation.navigate('Assets')}
-          onAssetPress={(asset) => navigation.navigate('AssetDetail', {
+          onViewAll={() => navigation.getParent()?.navigate('Assets')}
+          onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
             asset: {
               ...asset,
               isRGB: true
             }
           })}
-          onIssueAsset={() => navigation.navigate('IssueAsset')}
+          onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
           formatSatoshis={formatSatoshis}
-          onViewAll={() => navigation.navigate('Channels')}
+          onViewAll={() => navigation.getParent()?.navigate('Channels')}
           onChannelPress={(channel) => {
             setSelectedChannel(channel);
             setChannelModalVisible(true);
           }}
-          onOpenChannel={() => navigation.navigate('OpenChannel')}
-          onBuyChannel={() => navigation.navigate('LSP')}
+          onOpenChannel={() => navigation.getParent()?.navigate('OpenChannel')}
+          onBuyChannel={() => navigation.getParent()?.navigate('LSP')}
         />
       </ScrollView>
 

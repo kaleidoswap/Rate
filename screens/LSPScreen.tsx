@@ -16,7 +16,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { theme } from '../theme';
 import { Card, Button } from '../components';
 import { RootState } from '../store';
-import RGBApiService from '../services/RGBApiService';
+import { protocolManager } from '../services/protocols';
 
 interface Props {
   navigation: any;
@@ -54,7 +54,7 @@ export default function LSPScreen({ navigation }: Props) {
   });
 
   const settings = useSelector((state: RootState) => state.settings);
-  const apiService = RGBApiService.getInstance();
+  const rgbAdapter = protocolManager.getAdapter('RGB');
 
   useEffect(() => {
     fetchLSPInfo();
@@ -64,7 +64,7 @@ export default function LSPScreen({ navigation }: Props) {
     try {
       setIsLoading(true);
       setError(null);
-      const info = await apiService.getLSPInfo();
+      const info = await rgbAdapter.executeProtocolOperation!('getLspInfo', {});
       setLspInfo(info);
       setConnectionUrl(info.lsp_connection_url);
       await checkConnection(info.lsp_connection_url);
@@ -79,8 +79,8 @@ export default function LSPScreen({ navigation }: Props) {
   const checkConnection = async (url: string) => {
     try {
       const pubkey = url.split('@')[0];
-      const peers = await apiService.listPeers();
-      setIsConnected(peers.some(peer => peer.pubkey === pubkey));
+      const peers = await rgbAdapter.executeProtocolOperation!('listPeers', {});
+      setIsConnected(peers.some((peer: any) => peer.pubkey === pubkey));
     } catch (err) {
       console.error('Failed to check peer connection:', err);
     }
@@ -89,7 +89,7 @@ export default function LSPScreen({ navigation }: Props) {
   const handleConnect = async () => {
     try {
       setIsLoading(true);
-      await apiService.connectPeer(connectionUrl);
+      await rgbAdapter.executeProtocolOperation!('connectPeer', { peerAddr: connectionUrl });
       setIsConnected(true);
       Alert.alert('Success', 'Connected to LSP successfully');
       setStep(2);
@@ -103,8 +103,8 @@ export default function LSPScreen({ navigation }: Props) {
   const handleCreateOrder = async () => {
     try {
       setIsLoading(true);
-      const nodeInfo = await apiService.getNodeInfo();
-      const address = await apiService.getNewAddress();
+      const nodeInfo = await rgbAdapter.getNodeInfo();
+      const addressResult = await rgbAdapter.getReceiveAddress();
 
       const payload: {
         announce_channel: boolean;
@@ -125,7 +125,7 @@ export default function LSPScreen({ navigation }: Props) {
         client_pubkey: nodeInfo.pubkey,
         funding_confirms_within_blocks: lspInfo?.options.min_funding_confirms_within_blocks || 1,
         lsp_balance_sat: parseInt(formData.capacitySat) - parseInt(formData.clientBalanceSat),
-        refund_onchain_address: address,
+        refund_onchain_address: typeof addressResult === 'string' ? addressResult : addressResult.address,
         required_channel_confirmations: lspInfo?.options.min_required_channel_confirmations || 3,
       };
 
@@ -135,7 +135,7 @@ export default function LSPScreen({ navigation }: Props) {
         payload.client_asset_amount = 0;
       }
 
-      const order = await apiService.createChannelOrder(payload);
+      const order = await rgbAdapter.executeProtocolOperation!('createLspOrder', payload);
       setStep(3);
       // Navigate to payment screen with order details
       navigation.navigate('PaymentConfirmation', { order });

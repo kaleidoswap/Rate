@@ -1,9 +1,15 @@
 // store/slices/walletSlice.ts
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { WalletRecord, NetworkConfig, NetworkType } from '../../services/DatabaseService';
-import RGBApiService from '../../services/RGBApiService';
 import DatabaseService from '../../services/DatabaseService';
-import { RGBNodeService } from '../../services/RGBNodeService';
+import { protocolManager } from '../../services/protocols';
+import type { ProtocolType } from '../../services/protocols';
+
+export interface ProtocolBalance {
+  confirmed: number;
+  unconfirmed: number;
+  total: number;
+}
 
 export interface BtcBalance {
   vanilla: {
@@ -16,6 +22,11 @@ export interface BtcBalance {
     future: number;
     spendable: number;
   };
+  byProtocol?: {
+    RGB?: ProtocolBalance;
+    SPARK?: ProtocolBalance;
+    ARKADE?: ProtocolBalance;
+  };
 }
 
 interface WalletState {
@@ -24,6 +35,9 @@ interface WalletState {
   wallets: WalletRecord[];
   isUnlocked: boolean;
   isInitialized: boolean;
+
+  // Protocol state
+  activeProtocol: ProtocolType | null;
 
   // Balances
   btcBalance: BtcBalance | null;
@@ -44,6 +58,7 @@ const initialState: WalletState = {
   wallets: [],
   isUnlocked: false,
   isInitialized: false,
+  activeProtocol: null,
   btcBalance: null,
   btcPriceUSD: 0,
   isLoading: false,
@@ -206,11 +221,14 @@ export const updateNetwork = createAsyncThunk(
             }
 
             if (apiUrl) {
-              const apiService = RGBApiService.getInstance();
-              apiService.initialize({
-                baseURL: apiUrl,
-                timeout: 30000,
-              });
+              try {
+                await protocolManager.connect('RGB', {
+                  protocol: 'RGB',
+                  nodeUrl: apiUrl,
+                } as any);
+              } catch (e) {
+                console.warn('Failed to connect RGB protocol:', e);
+              }
             }
           } catch (e) {
             console.error('Failed to re-init API on network update:', e);
@@ -234,19 +252,21 @@ export const unlockWallet = createAsyncThunk(
     proxyEndpoint: string;
   }, { rejectWithValue }) => {
     try {
-      const apiService = RGBApiService.getInstance();
       const dbService = DatabaseService.getInstance();
 
-      // Unlock wallet via API
-      await apiService.unlockNode({
-        password: params.password,
-        bitcoind_rpc_username: params.bitcoindConfig.username,
-        bitcoind_rpc_password: params.bitcoindConfig.password,
-        bitcoind_rpc_host: params.bitcoindConfig.host,
-        bitcoind_rpc_port: params.bitcoindConfig.port,
-        indexer_url: params.indexerUrl,
-        proxy_endpoint: params.proxyEndpoint,
-      });
+      // Unlock RGB node via protocolManager
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      if (rgbAdapter?.isConnected() && rgbAdapter.executeProtocolOperation) {
+        await rgbAdapter.executeProtocolOperation('unlockNode', {
+          password: params.password,
+          bitcoind_rpc_username: params.bitcoindConfig.username,
+          bitcoind_rpc_password: params.bitcoindConfig.password,
+          bitcoind_rpc_host: params.bitcoindConfig.host,
+          bitcoind_rpc_port: params.bitcoindConfig.port,
+          indexer_url: params.indexerUrl,
+          proxy_endpoint: params.proxyEndpoint,
+        });
+      }
 
       const wallet = await dbService.getActiveWallet();
       return wallet;
@@ -260,9 +280,25 @@ export const loadBtcBalance = createAsyncThunk(
   'wallet/loadBtcBalance',
   async (_, { rejectWithValue }) => {
     try {
-      const apiService = RGBApiService.getInstance();
-      const balance = await apiService.getBtcBalance();
-      return balance;
+      let totalConfirmed = 0, totalUnconfirmed = 0;
+      const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      for (const proto of protocols) {
+        const adapter = protocolManager.getAdapterIfAvailable(proto);
+        if (adapter?.isConnected()) {
+          try {
+            const btc = await adapter.getBtcBalance();
+            totalConfirmed += btc.confirmed;
+            totalUnconfirmed += btc.unconfirmed;
+            byProtocol[proto] = btc;
+          } catch { /* skip */ }
+        }
+      }
+      return {
+        vanilla: { settled: totalConfirmed, future: totalConfirmed + totalUnconfirmed, spendable: totalConfirmed },
+        colored: { settled: 0, future: 0, spendable: 0 },
+        byProtocol,
+      };
     } catch (error: any) {
       return rejectWithValue(error.message);
     }
@@ -288,8 +324,10 @@ export const syncWallet = createAsyncThunk(
   'wallet/sync',
   async (_, { rejectWithValue }) => {
     try {
-      const apiService = RGBApiService.getInstance();
-      await apiService.sync();
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      if (rgbAdapter?.isConnected() && rgbAdapter.executeProtocolOperation) {
+        await rgbAdapter.executeProtocolOperation('sync', {});
+      }
       return Date.now();
     } catch (error: any) {
       return rejectWithValue(error.message);
@@ -312,6 +350,9 @@ const walletSlice = createSlice({
     },
     setInitialized: (state, action: PayloadAction<boolean>) => {
       state.isInitialized = action.payload;
+    },
+    setActiveProtocol: (state, action: PayloadAction<ProtocolType | null>) => {
+      state.activeProtocol = action.payload;
     },
     setBtcBalance: (state, action: PayloadAction<BtcBalance>) => {
       state.btcBalance = action.payload;
@@ -455,6 +496,7 @@ const walletSlice = createSlice({
 
 export const {
   setActiveWallet,
+  setActiveProtocol,
   setWallets,
   setUnlocked,
   setInitialized,

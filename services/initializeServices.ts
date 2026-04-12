@@ -1,183 +1,49 @@
 // services/initializeServices.ts
 import { getStore } from '../store/storeProvider';
-import { createApiInstance, getApiInstance } from './apiInstance';
-import RGBApiService from './RGBApiService';
-import { RGBNodeService } from './RGBNodeService';
 import NostrService from './NostrService';
 import NWCService from './NWCService';
-import { restoreNostrConnection, loadKeysSecurely } from '../store/slices/nostrSlice';
-import DatabaseService, { NetworkConfig } from './DatabaseService';
-import ErrorHandlingService from './ErrorHandlingService';
-import NodeConfigValidator from './NodeConfigValidator';
+import { restoreNostrConnection } from '../store/slices/nostrSlice';
+import type { NetworkConfig } from './DatabaseService';
+import { protocolManager, initializeProtocols } from './protocols';
+import type { ProtocolType } from './protocols';
 
-const DEFAULT_TIMEOUT = 30000;
-
-export interface InitializationResult {
-  success: boolean;
-  service: string;
-  error?: string;
+/**
+ * Initialize all wallet protocols via the shared ProtocolManager.
+ * Reads active wallet networks from Redux state and connects each enabled protocol.
+ */
+export async function initializeProtocolServices(): Promise<{
+  results: Map<ProtocolType, { success: boolean; error?: string }>;
   canContinue: boolean;
-}
-
-export async function initializeRGBApiService(): Promise<InitializationResult> {
-  console.log('Initializing RGB API Service...');
-  
-  const errorHandler = ErrorHandlingService.getInstance();
-  const validator = NodeConfigValidator.getInstance();
+}> {
+  console.log('Initializing Protocol Services...');
 
   try {
-    // Check if we already have an instance and it's initialized
-    const apiService = RGBApiService.getInstance();
-    if (apiService.isApiInitialized()) {
-      console.log('Using existing initialized RGB API Service instance');
-      
-      // Verify it's still healthy
-      try {
-        const isHealthy = await apiService.checkHealth();
-        if (isHealthy) {
-          return {
-            success: true,
-            service: 'RGB API',
-            canContinue: true,
-          };
-        }
-      } catch (error) {
-        console.warn('Existing API service is not healthy, reinitializing...');
-      }
-    }
-
-    // Try to get URL from active wallet's RLN config
     const state = getStore().getState();
     const activeWallet = state.wallet?.activeWallet;
 
     if (!activeWallet) {
-      return {
-        success: false,
-        service: 'RGB API',
-        error: 'No active wallet found. Please create or select a wallet first.',
-        canContinue: true, // Can continue without node for wallet creation
-      };
+      console.warn('No active wallet found, skipping protocol initialization');
+      return { results: new Map(), canContinue: true };
     }
 
-    const rlnConfig = activeWallet.networks?.find((n: NetworkConfig) => n.type === 'rln' && n.enabled);
-    
-    if (!rlnConfig || !rlnConfig.config) {
-      return {
-        success: false,
-        service: 'RGB API',
-        error: 'RGB node not configured. Please configure node in wallet settings.',
-        canContinue: true,
-      };
+    // Mnemonic is stored in encrypted_mnemonic field (or mnemonic for compat)
+    const mnemonic = (activeWallet as any).encrypted_mnemonic || (activeWallet as any).mnemonic || '';
+    const networks = activeWallet.networks || [];
+
+    if (!mnemonic) {
+      console.warn('No mnemonic available, skipping protocol initialization');
+      return { results: new Map(), canContinue: true };
     }
 
-    // Parse and validate configuration
-    const config = JSON.parse(rlnConfig.config);
-    const nodeConfig = {
-      type: config.type,
-      url: config.type === 'remote' ? config.url : 'http://127.0.0.1:3000',
-      timeout: DEFAULT_TIMEOUT,
-    };
+    const results = await initializeProtocols(mnemonic, networks);
 
-    // Validate configuration
-    const validation = await validator.validateConfig(nodeConfig);
-    
-    if (!validation.valid) {
-      console.error('Node configuration validation failed:', validation.errors);
-      return {
-        success: false,
-        service: 'RGB API',
-        error: validation.errors[0] || 'Invalid node configuration',
-        canContinue: false,
-      };
-    }
+    const anyConnected = Array.from(results.values()).some(r => r.success);
+    console.log(`Protocol initialization complete: ${results.size} attempted, ${anyConnected ? 'at least one connected' : 'none connected'}`);
 
-    // Log warnings if any
-    if (validation.warnings.length > 0) {
-      console.warn('Node configuration warnings:', validation.warnings);
-    }
-
-    // Initialize API service with validated config
-    console.log('Initializing RGB API Service with validated config:', nodeConfig.url);
-    apiService.initialize({
-      baseURL: nodeConfig.url!,
-      timeout: DEFAULT_TIMEOUT,
-    });
-
-    // Initialize node service
-    const nodeService = RGBNodeService.getInstance();
-    await nodeService.initializeNode();
-
-    // Verify initialization
-    if (apiService.isApiInitialized()) {
-      // Test connection
-      try {
-        await apiService.checkHealth();
-        console.log('RGB API Service initialized and healthy');
-        
-        return {
-          success: true,
-          service: 'RGB API',
-          canContinue: true,
-        };
-      } catch (error) {
-        const appError = errorHandler.parseError(error, 'RGB API Health Check');
-        console.warn('API initialized but health check failed:', appError.message);
-        
-        return {
-          success: false,
-          service: 'RGB API',
-          error: appError.userMessage,
-          canContinue: true, // Can continue with degraded functionality
-        };
-      }
-    }
-
-    return {
-      success: false,
-      service: 'RGB API',
-      error: 'Failed to initialize API service',
-      canContinue: false,
-    };
+    return { results, canContinue: true };
   } catch (error: any) {
-    const appError = errorHandler.parseError(error, 'RGB API Initialization');
-    console.error('Failed to initialize RGB API Service:', appError);
-    
-    return {
-      success: false,
-      service: 'RGB API',
-      error: appError.userMessage,
-      canContinue: true, // Allow app to continue for wallet management
-    };
-  }
-}
-
-export function updateRGBApiConfig() {
-  const settings = getStore().getState().settings;
-  console.log('Updating RGB API config with settings:', settings);
-
-  // If settings are not available, we can't update the API service yet
-  if (!settings?.remoteNodeUrl) {
-    console.warn('Settings not available yet, deferring API service config update');
-    return null;
-  }
-
-  const config = {
-    baseURL: settings.remoteNodeUrl.trim(),
-    timeout: DEFAULT_TIMEOUT,
-  };
-
-  console.log('Updating RGB API Service with config:', config);
-
-  try {
-    const instance = createApiInstance(config);
-    if (!instance.isApiInitialized()) {
-      console.warn('RGB API Service initialization incomplete after config update');
-      return null;
-    }
-    return instance;
-  } catch (error) {
-    console.error('Failed to update RGB API Service config:', error);
-    return null;
+    console.error('Failed to initialize protocol services:', error);
+    return { results: new Map(), canContinue: true };
   }
 }
 
@@ -186,9 +52,7 @@ export async function initializeNostrWalletConnect() {
     console.log('Initializing Nostr Wallet Connect...');
 
     const nostrService = NostrService.getInstance();
-    const nwcService = NWCService.getInstance();
 
-    // Initialize NostrService first (if not already done)
     const settings = getStore().getState().settings;
     if (!nostrService.connected) {
       await nostrService.initialize({
@@ -200,21 +64,16 @@ export async function initializeNostrWalletConnect() {
       });
     }
 
-    // Initialize NWC service
     const success = await nostrService.initializeNWC();
 
     if (success) {
       console.log('Nostr Wallet Connect initialized successfully');
-
-      // Optionally generate a connection string for testing
       const connectionString = await nostrService.getWalletConnectInfo(
         ['pay_invoice', 'make_invoice', 'get_balance', 'get_info'],
         undefined
       );
-
       if (connectionString) {
         console.log('NWC Connection String:', connectionString);
-        // You might want to store this or make it available to the UI
       }
     } else {
       console.error('Failed to initialize Nostr Wallet Connect');
@@ -243,13 +102,11 @@ export async function autoRestoreNostrConnection() {
 
     const state = getStore().getState();
 
-    // Check if we have stored keys indicator
     if (!state.nostr.hasStoredKeys) {
       console.log('No stored keys found, skipping auto-restore');
       return false;
     }
 
-    // Try to restore the connection
     const result = await getStore().dispatch(restoreNostrConnection() as any);
 
     if (restoreNostrConnection.fulfilled.match(result)) {

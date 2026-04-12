@@ -39,12 +39,12 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const [backupConfirmed, setBackupConfirmed] = useState(false);
   const [mnemonicCopied, setMnemonicCopied] = useState(false);
 
-  // Network selection state
+  // Network selection state — enable all protocols by default (matching extension)
   const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
     spark: true,
     liquid: false,
-    arkade: false,
-    rln: false,
+    arkade: true,
+    rln: true,
   });
 
   // RLN Config

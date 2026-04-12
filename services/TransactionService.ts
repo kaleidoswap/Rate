@@ -1,6 +1,6 @@
 // services/TransactionService.ts
 import DatabaseService, { TransactionRecord } from './DatabaseService';
-import RGBApiService from './RGBApiService';
+import { protocolManager } from './protocols';
 import ErrorHandlingService, { ErrorType } from './ErrorHandlingService';
 
 export interface PaymentRequest {
@@ -35,14 +35,16 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
 export class TransactionService {
   private static instance: TransactionService;
   private dbService: DatabaseService;
-  private rgbApiService: RGBApiService;
   private errorHandler: ErrorHandlingService;
   private pendingRetries: Map<string, RetryConfig> = new Map();
 
   private constructor() {
     this.dbService = DatabaseService.getInstance();
-    this.rgbApiService = RGBApiService.getInstance();
     this.errorHandler = ErrorHandlingService.getInstance();
+  }
+
+  private getRgbAdapter() {
+    return protocolManager.getAdapter('RGB');
   }
 
   public static getInstance(): TransactionService {
@@ -167,14 +169,14 @@ export class TransactionService {
   private async executePayment(request: PaymentRequest): Promise<{ txid: string }> {
     if (request.invoice) {
       // Lightning invoice payment
-      const response = await this.rgbApiService.sendPayment({
+      const response = await this.getRgbAdapter().sendPayment({
         invoice: request.invoice,
       });
       
-      return { txid: response.payment_hash || 'pending' };
+      return { txid: response.paymentHash || 'pending' };
     } else if (request.isRGB && request.assetId && request.address) {
       // RGB asset payment
-      const response = await this.rgbApiService.sendAsset({
+      const response = await this.getRgbAdapter().sendAsset!({
         asset_id: request.assetId,
         assignment: {
           type: 'Fungible',

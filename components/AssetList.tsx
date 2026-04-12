@@ -1,10 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
-import { useAssetIcon } from '../utils';
 import { Card } from './Card';
-import { Button } from './Button';
+import { AssetIcon } from './AssetIcon';
 
 interface NiaAsset {
     asset_id: string;
@@ -14,7 +13,14 @@ interface NiaAsset {
     balance: {
         spendable: number;
     };
+    protocol?: 'RGB' | 'SPARK' | 'ARKADE';
 }
+
+const PROTOCOL_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
+    RGB: { bg: '#2BEE7920', text: '#2BEE79' },
+    SPARK: { bg: '#60A5FA20', text: '#60A5FA' },
+    ARKADE: { bg: '#A855F720', text: '#A855F7' },
+};
 
 interface AssetListProps {
     assets: NiaAsset[];
@@ -23,23 +29,7 @@ interface AssetListProps {
     onIssueAsset: () => void;
 }
 
-const AssetIcon = ({ ticker }: { ticker: string }) => {
-    const { iconUrl } = useAssetIcon(ticker);
-
-    if (iconUrl) {
-        return (
-            <View style={styles.assetIconContainer}>
-                <Image source={{ uri: iconUrl }} style={styles.assetIconImage} resizeMode="contain" />
-            </View>
-        );
-    }
-
-    return (
-        <View style={styles.assetIconContainer}>
-            <Ionicons name="diamond" size={20} color={theme.colors.primary[500]} />
-        </View>
-    );
-};
+// AssetIcon imported from ./AssetIcon
 
 export const AssetList: React.FC<AssetListProps> = ({
     assets,
@@ -50,7 +40,7 @@ export const AssetList: React.FC<AssetListProps> = ({
     return (
         <View style={styles.section}>
             <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>RGB Assets</Text>
+                <Text style={styles.sectionTitle}>Assets</Text>
                 <TouchableOpacity onPress={onViewAll}>
                     <Text style={styles.sectionAction}>View All</Text>
                 </TouchableOpacity>
@@ -60,19 +50,12 @@ export const AssetList: React.FC<AssetListProps> = ({
                 <Card style={styles.emptyCard}>
                     <View style={styles.emptyState}>
                         <View style={styles.emptyIcon}>
-                            <Ionicons name="diamond-outline" size={28} color={theme.colors.gray[400]} />
+                            <Ionicons name="layers-outline" size={28} color={theme.colors.gray[400]} />
                         </View>
-                        <Text style={styles.emptyTitle}>No RGB assets yet</Text>
+                        <Text style={styles.emptyTitle}>No assets yet</Text>
                         <Text style={styles.emptyDescription}>
-                            Issue your first RGB asset to get started
+                            Your tokens and assets will appear here
                         </Text>
-                        <Button
-                            title="Issue Asset"
-                            variant="secondary"
-                            size="sm"
-                            onPress={onIssueAsset}
-                            style={styles.emptyButton}
-                        />
                     </View>
                 </Card>
             ) : (
@@ -85,9 +68,24 @@ export const AssetList: React.FC<AssetListProps> = ({
                         >
                             <View style={styles.assetVerticalContent}>
                                 <View style={styles.assetVerticalLeft}>
-                                    <AssetIcon ticker={asset.ticker} />
+                                    <AssetIcon ticker={asset.ticker} protocol={asset.protocol} size={36} />
                                     <View style={styles.assetVerticalInfo}>
-                                        <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                            <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
+                                            {asset.protocol && (
+                                                <View style={{
+                                                    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
+                                                    backgroundColor: PROTOCOL_BADGE_COLORS[asset.protocol]?.bg || '#ffffff10',
+                                                }}>
+                                                    <Text style={{
+                                                        fontSize: 9, fontWeight: '700', letterSpacing: 0.3,
+                                                        color: PROTOCOL_BADGE_COLORS[asset.protocol]?.text || '#999',
+                                                    }}>
+                                                        {asset.protocol}
+                                                    </Text>
+                                                </View>
+                                            )}
+                                        </View>
                                         <Text style={styles.assetVerticalName}>{asset.name}</Text>
                                     </View>
                                 </View>

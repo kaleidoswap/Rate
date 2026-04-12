@@ -8,7 +8,7 @@ import { createNewWallet } from '../store/slices/walletSlice';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Input } from '../components';
-import { RGBApiService } from '../services/RGBApiService';
+import { protocolManager } from '../services/protocols';
 
 interface Props {
     navigation: any;
@@ -39,7 +39,6 @@ export default function AddWalletScreen({ navigation }: Props) {
     const handleGenerateMnemonic = async () => {
         setIsGenerating(true);
         try {
-            const apiService = RGBApiService.getInstance();
             // Placeholder for mnemonic generation
             const mockMnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
             setMnemonic(mockMnemonic);

@@ -33,10 +33,17 @@ import {
   SwapQuote,
   SwapExecution
 } from '../store/slices/swapSlice';
-import KaleidoswapApiService from '../services/KaleidoswapApiService';
-import RGBApiService from '../services/RGBApiService';
+import { protocolManager } from '../services/protocols';
+import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
+import {
+  SwapPair, SwapVenueFilter, SwapProgress,
+  findPair, allTickers, tradableTickers, findPairAsset,
+  getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair,
+  normalizeMakerPairs, buildFlashnetPairs,
+  QUOTE_DEBOUNCE_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
+} from '../utils/swap-model';
 import { theme } from '../theme';
-import { Card, Button, Input, MainHeader } from '../components';
+import { Card, Button, Input, MainHeader, AssetIcon } from '../components';
 
 interface Props {
   navigation: any;
@@ -62,52 +69,16 @@ export default function SwapScreen({ navigation }: Props) {
   const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
+  const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
+  const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
+  const [pairsLoading, setPairsLoading] = useState(false);
 
-  const kaleidoswapApi = KaleidoswapApiService.getInstance();
-  const rgbApi = RGBApiService.getInstance();
-
-  // Mock Assets with Logos
-  const mockAssets: Asset[] = [
-    {
-      asset_id: 'BTC',
-      ticker: 'BTC',
-      name: 'Bitcoin',
-      balance: 1.24,
-      icon: 'https://cryptologos.cc/logos/bitcoin-btc-logo.png',
-      precision: 8
-    },
-    {
-      asset_id: 'USDT',
-      ticker: 'USDT',
-      name: 'Tether USD',
-      balance: 1250.50,
-      icon: 'https://cryptologos.cc/logos/tether-usdt-logo.png',
-      precision: 6
-    },
-    {
-      asset_id: 'L-BTC',
-      ticker: 'L-BTC',
-      name: 'Liquid Bitcoin',
-      balance: 0.05,
-      icon: 'https://upload.wikimedia.org/wikipedia/commons/4/42/Blue_Bitcoin_Logo.png',
-      precision: 8
-    },
-    {
-      asset_id: 'RGB',
-      ticker: 'RGB',
-      name: 'RGB Asset',
-      balance: 500,
-      icon: 'https://avatars.githubusercontent.com/u/80262078?s=200&v=4',
-      precision: 2
-    }
-  ];
-
-  // Load available assets
+  // Load trading pairs and assets on mount
   useEffect(() => {
-    // In a real app, merge mock assets with real balances
-    setAvailableAssets(mockAssets);
+    loadTradingPairs();
+    loadAvailableAssets();
 
-    // Set default selection
     if (!swapState.fromAsset) dispatch(setFromAsset('BTC'));
     if (!swapState.toAsset) dispatch(setToAsset('USDT'));
   }, []);
@@ -137,15 +108,54 @@ export default function SwapScreen({ navigation }: Props) {
     return () => clearTimeout(timer);
   }, [swapState.fromAmount, swapState.fromAsset, swapState.toAsset]);
 
+  const loadTradingPairs = async () => {
+    setPairsLoading(true);
+    try {
+      let makerPairs: SwapPair[] = [];
+      let flashnetPairs: SwapPair[] = [];
+
+      // Load Kaleidoswap pairs (via RGB adapter / kaleido-sdk maker)
+      try {
+        const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+        if (rgbAdapter?.isConnected()) {
+          const client = kaleidoClientManager.getClient();
+          const rawPairs = await client.maker.listPairs();
+          makerPairs = normalizeMakerPairs((rawPairs as any)?.pairs || rawPairs || []);
+          console.log(`[SwapScreen] Loaded ${makerPairs.length} Kaleidoswap pairs`);
+        }
+      } catch (err) {
+        console.warn('[SwapScreen] Failed to load Kaleidoswap pairs:', err);
+      }
+
+      // Load Flashnet pools (via Spark → Flashnet)
+      try {
+        if (flashnetClientManager.isInitialized()) {
+          const pools = await flashnetClientManager.getClient().listPools({ sort: 'TVL_DESC' });
+          const poolArray = Array.isArray(pools) ? pools : (pools as any)?.pools || [];
+          flashnetPairs = buildFlashnetPairs(poolArray);
+          console.log(`[SwapScreen] Loaded ${flashnetPairs.length} Flashnet pairs`);
+        }
+      } catch (err) {
+        console.warn('[SwapScreen] Failed to load Flashnet pools:', err);
+      }
+
+      setTradingPairs([...makerPairs, ...flashnetPairs]);
+    } catch (error) {
+      console.error('[SwapScreen] Failed to load trading pairs:', error);
+    } finally {
+      setPairsLoading(false);
+    }
+  };
+
   const loadAvailableAssets = async () => {
     try {
-      // Combine BTC with RGB assets
       const assets: Asset[] = [
         {
           asset_id: 'BTC',
           ticker: 'BTC',
           name: 'Bitcoin',
           balance: (walletState?.btcBalance?.vanilla?.spendable || 0) / 100000000,
+          precision: 8,
         },
         ...rgbAssets.map((asset: any) => ({
           asset_id: asset.asset_id,
@@ -155,12 +165,17 @@ export default function SwapScreen({ navigation }: Props) {
           precision: asset.precision,
         }))
       ];
-
-      // setAvailableAssets(assets); // Original line, now replaced by mockAssets
+      setAvailableAssets(assets);
     } catch (error) {
       console.error('Failed to load available assets:', error);
     }
   };
+
+  // Get filtered pairs based on venue selection
+  const filteredPairs = tradingPairs.filter(p => {
+    if (venueFilter === 'all') return true;
+    return p.venue === venueFilter;
+  });
 
   const getQuote = async () => {
     try {
@@ -169,41 +184,95 @@ export default function SwapScreen({ navigation }: Props) {
       dispatch(setQuoteLoading(true));
       dispatch(clearError());
 
-      // MOCK API DELAY & RESULT
-      await new Promise(resolve => setTimeout(resolve, 600));
-
       const fromAmount = parseFloat(swapState.fromAmount);
-      const isSellingBTC = swapState.fromAsset === 'BTC' || swapState.fromAsset === 'L-BTC';
-      const price = isSellingBTC ? 95000 : 1 / 95000;
+      const fromTicker = swapState.fromAsset || 'BTC';
+      const toTicker = swapState.toAsset || 'USDT';
 
-      // Add some random fluctuation
-      const rate = price * (1 + (Math.random() * 0.001 - 0.0005));
-      const toAmount = fromAmount * rate;
-      const fee = fromAmount * 0.001; // 0.1% fee
+      // Find the matching pair
+      const pair = findPair(filteredPairs, fromTicker, toTicker);
 
-      const quote: SwapQuote = {
-        rfq_id: 'mock-rfq-' + Date.now(),
-        from_asset: swapState.fromAsset || 'BTC',
-        to_asset: swapState.toAsset || 'USDT',
-        from_amount: fromAmount,
-        to_amount: parseFloat(toAmount.toFixed(6)),
-        fee_amount: parseFloat(fee.toFixed(8)),
-        // expiration: Date.now() + 60000, // Removed to fix type error
-        exchange_rate: rate,
-        expiry_timestamp: Date.now() + 60000,
-        maker_pubkey: 'mock-pubkey'
-      };
+      if (!pair) {
+        dispatch(setError(`No trading pair found for ${fromTicker}/${toTicker}`));
+        return;
+      }
 
-      dispatch(setCurrentQuote(quote));
-      // NOTE: In Redux slice you might need an action to set 'toAmount' specifically if it's separate from quote
-      // Assuming 'setCurrentQuote' or similar updates the UI's "To" value, 
-      // BUT if the UI reads 'toAmount' from state, we might need to dispatch that too.
-      // Based on previous code, the UI uses `swapState.toAmount`.
-      // Let's assume we need to dispatch a manual set for the UI
-      // dispatch(setToAmount(toAmount.toFixed(6))); -> This action might not exist, 
-      // so we rely on the UI displaying quote.to_amount if available, or we check if there's a SET_TO_AMOUNT action.
-      // Looking at imports: `setFromAmount` exists. `setCurrentQuote` exists. 
+      if (isFlashnetPair(pair)) {
+        // Flashnet: simulate quote from pool reserves (client-side)
+        try {
+          const client = flashnetClientManager.getClient();
+          const poolId = pair.poolId || flashnetClientManager.getPoolId();
+          // Use simulateSwap if available, otherwise build a simple estimate
+          const fromAssetId = getAssetId(pair.base.ticker === fromTicker ? pair.base : pair.quote);
+          const toAssetId = getAssetId(pair.base.ticker === toTicker ? pair.base : pair.quote);
+          const fromPrecision = (pair.base.ticker === fromTicker ? pair.base : pair.quote).precision;
+          const rawAmount = isBtcTicker(fromTicker) ? Math.round(fromAmount * 1e8) : Math.round(fromAmount * Math.pow(10, fromPrecision));
 
+          const quote: SwapQuote = {
+            rfq_id: `flashnet-${Date.now()}`,
+            from_asset: fromTicker,
+            to_asset: toTicker,
+            from_amount: fromAmount,
+            to_amount: 0, // Will be filled by execution
+            fee_amount: 0,
+            exchange_rate: 0,
+            expiry_timestamp: Date.now() + 60000,
+            maker_pubkey: poolId || '',
+          };
+
+          dispatch(setCurrentQuote(quote));
+        } catch (err) {
+          console.error('[SwapScreen] Flashnet quote failed:', err);
+          dispatch(setError('Failed to get Flashnet quote'));
+        }
+      } else {
+        // Kaleidoswap: real quote via maker API (requires RGB node)
+        try {
+          if (!kaleidoClientManager.isInitialized()) {
+            dispatch(setError('KaleidoSwap requires an RGB node connection. Please configure in Settings.'));
+            return;
+          }
+          const rgbAdapter = protocolManager.getAdapter('RGB');
+          const fromAsset = pair.base.ticker === fromTicker ? pair.base : pair.quote;
+          const toAsset = pair.base.ticker === toTicker ? pair.base : pair.quote;
+          const fromAssetId = getAssetId(fromAsset);
+          const toAssetId = getAssetId(toAsset);
+          const fromPrecision = fromAsset.precision;
+          const rawFromAmount = isBtcTicker(fromTicker)
+            ? Math.round(fromAmount * 1e8 * 1000) // msats
+            : Math.round(fromAmount * Math.pow(10, fromPrecision));
+
+          const { fromLayer, toLayer } = getQuoteLayers(pair, fromAssetId, toAssetId);
+
+          const client = kaleidoClientManager.getClient();
+          const quoteResponse = await client.maker.getQuote({
+            from_asset: { asset_id: fromAssetId, layer: fromLayer as any, amount: rawFromAmount },
+            to_asset: { asset_id: toAssetId, layer: toLayer as any },
+          }) as any;
+
+          const toAmount = Number(quoteResponse.to_asset?.amount || 0);
+          const toPrecision = toAsset.precision;
+          const displayToAmount = isBtcTicker(toTicker)
+            ? toAmount / 1000 / 1e8 // msats → BTC
+            : toAmount / Math.pow(10, toPrecision);
+
+          const quote: SwapQuote = {
+            rfq_id: quoteResponse.rfq_id || `kaleido-${Date.now()}`,
+            from_asset: fromTicker,
+            to_asset: toTicker,
+            from_amount: fromAmount,
+            to_amount: parseFloat(displayToAmount.toFixed(toPrecision)),
+            fee_amount: quoteResponse.fee?.final_fee || 0,
+            exchange_rate: quoteResponse.price || 0,
+            expiry_timestamp: quoteResponse.expires_at ? quoteResponse.expires_at * 1000 : Date.now() + 60000,
+            maker_pubkey: quoteResponse.maker_pubkey || '',
+          };
+
+          dispatch(setCurrentQuote(quote));
+        } catch (err: any) {
+          console.error('[SwapScreen] Kaleidoswap quote failed:', err);
+          dispatch(setError(err?.message || 'Failed to get quote'));
+        }
+      }
     } catch (error) {
       console.error('Failed to get quote:', error);
       dispatch(setError('Failed to fetch quote'));
@@ -214,140 +283,221 @@ export default function SwapScreen({ navigation }: Props) {
 
   const executeSwap = async () => {
     if (!swapState.currentQuote) return;
+    const quote = swapState.currentQuote;
 
     try {
       dispatch(setExecuting(true));
-      // setShowConfirmModal(false); // Keep modal open to show executing state
 
-      // Step 1: Initialize swap
-      // Mock initSwap
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API call
-      const initResponse = { swap_string: 'mock-swap-string-' + Date.now() };
+      // Detect venue from the pair
+      const pair = findPair(filteredPairs, quote.from_asset, quote.to_asset);
 
-      const execution: SwapExecution = {
-        rfq_id: swapState.currentQuote.rfq_id,
-        swap_string: initResponse.swap_string,
-        status: 'pending',
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      };
+      if (pair && isFlashnetPair(pair)) {
+        // ── Flashnet execution (single step) ──
+        setSwapProgress('execute');
+        const client = flashnetClientManager.getClient();
+        const poolId = pair.poolId || flashnetClientManager.getPoolId();
+        const fromAssetId = getAssetId(pair.base.ticker === quote.from_asset ? pair.base : pair.quote);
+        const toAssetId = getAssetId(pair.base.ticker === quote.to_asset ? pair.base : pair.quote);
+        const fromPrecision = (pair.base.ticker === quote.from_asset ? pair.base : pair.quote).precision;
+        const rawAmount = isBtcTicker(quote.from_asset)
+          ? Math.round(quote.from_amount * 1e8)
+          : Math.round(quote.from_amount * Math.pow(10, fromPrecision));
 
-      dispatch(setCurrentExecution(execution));
+        const result = await client.executeSwap({
+          poolId,
+          assetInAddress: fromAssetId,
+          assetOutAddress: toAssetId,
+          amountIn: String(rawAmount),
+          minAmountOut: '0', // TODO: calculate from slippage
+          maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
+        });
 
-      // Step 2: Whitelist trade
-      // Mock whitelistTrade
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
-
-      dispatch(updateExecutionStatus({
-        rfq_id: swapState.currentQuote.rfq_id,
-        status: 'whitelisted',
-      }));
-
-      // Step 3: Execute swap
-      // Mock executeSwap
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API call
-      const executeResponse = { success: true, txid: 'mock-txid-' + Date.now() };
-
-      if (executeResponse.success) {
+        setSwapProgress('done');
         dispatch(updateExecutionStatus({
-          rfq_id: swapState.currentQuote.rfq_id,
-          status: 'executing',
-          txid: executeResponse.txid,
+          rfq_id: quote.rfq_id,
+          status: 'completed',
+          txid: result?.outboundTransferId || '',
         }));
-
-        // Start polling for swap status
-        startStatusPolling(swapState.currentQuote.rfq_id);
+        dispatch(setExecuting(false));
+        setShowConfirmModal(false);
+        loadAvailableAssets();
       } else {
-        throw new Error('Swap execution failed');
-      }
+        // ── Kaleidoswap execution (3-step: init → taker → execute) ──
+        if (!kaleidoClientManager.isInitialized()) {
+          throw new Error('KaleidoSwap requires an RGB node connection.');
+        }
+        const client = kaleidoClientManager.getClient();
+        const fromAsset = pair ? (pair.base.ticker === quote.from_asset ? pair.base : pair.quote) : null;
+        const toAsset = pair ? (pair.base.ticker === quote.to_asset ? pair.base : pair.quote) : null;
+        const fromAssetId = fromAsset ? getAssetId(fromAsset) : quote.from_asset;
+        const toAssetId = toAsset ? getAssetId(toAsset) : quote.to_asset;
+        const fromPrecision = fromAsset?.precision || 8;
+        const toPrecision = toAsset?.precision || 8;
+        const rawFromAmount = isBtcTicker(quote.from_asset)
+          ? Math.round(quote.from_amount * 1e8 * 1000)
+          : Math.round(quote.from_amount * Math.pow(10, fromPrecision));
+        const rawToAmount = isBtcTicker(quote.to_asset)
+          ? Math.round(quote.to_amount * 1e8 * 1000)
+          : Math.round(quote.to_amount * Math.pow(10, toPrecision));
 
+        // Step 1: Init swap
+        setSwapProgress('init');
+        const initResult = await client.maker.initSwap({
+          rfq_id: quote.rfq_id,
+          from_asset: { asset_id: fromAssetId, amount: rawFromAmount, layer: 'RGB_LN' },
+          to_asset: { asset_id: toAssetId, amount: rawToAmount, layer: 'RGB_LN' },
+        } as any) as any;
+
+        const swapstring = initResult?.swapstring || initResult?.swap_string || '';
+        const paymentHash = initResult?.payment_hash || '';
+
+        const execution: SwapExecution = {
+          rfq_id: quote.rfq_id,
+          swap_string: swapstring,
+          status: 'pending',
+          created_at: Date.now(),
+          updated_at: Date.now(),
+        };
+        dispatch(setCurrentExecution(execution));
+
+        // Step 2: Taker whitelist
+        setSwapProgress('taker');
+        await client.rln.whitelistSwap(swapstring);
+        dispatch(updateExecutionStatus({ rfq_id: quote.rfq_id, status: 'whitelisted' }));
+
+        // Step 3: Confirm swap
+        setSwapProgress('execute');
+        const takerPubkey = await client.rln.getTakerPubkey();
+        await client.maker.executeSwap({
+          swapstring,
+          taker_pubkey: takerPubkey,
+          payment_hash: paymentHash,
+        } as any);
+
+        dispatch(updateExecutionStatus({ rfq_id: quote.rfq_id, status: 'executing' }));
+        setSwapProgress('done');
+
+        // Start polling for final status
+        startStatusPolling(quote.rfq_id);
+      }
     } catch (error) {
       console.error('Swap execution failed:', error);
+      setSwapProgress('idle');
       dispatch(updateExecutionStatus({
-        rfq_id: swapState.currentQuote?.rfq_id || '',
+        rfq_id: quote.rfq_id,
         status: 'failed',
         error_message: error instanceof Error ? error.message : 'Swap execution failed',
       }));
-    } finally {
-      // dispatch(setExecuting(false)); // Keep executing state until polling finishes
+      dispatch(setExecuting(false));
     }
   };
 
   const startStatusPolling = (rfqId: string) => {
     let pollCount = 0;
-    const maxPolls = 5; // Simulate a few polls before completion/failure
+    const maxPolls = 20;
 
     const interval = setInterval(async () => {
       try {
         pollCount++;
-        let swapStatus = 'executing';
-        let txid = swapState.currentExecution?.txid;
-        let errorMessage = undefined;
 
-        if (pollCount >= maxPolls) {
-          // Simulate completion or failure
-          if (Math.random() > 0.2) { // 80% chance of success
-            swapStatus = 'completed';
-          } else {
-            swapStatus = 'failed';
-            errorMessage = 'Simulated swap failure';
-          }
+        // Poll via kaleido-sdk maker API
+        const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+        if (!rgbAdapter?.isConnected()) {
+          console.warn('[SwapScreen] RGB adapter not connected, stopping poll');
+          clearInterval(interval);
+          return;
         }
 
-        const swap = {
-          status: swapStatus,
-          txid: txid,
-          error: errorMessage,
-        };
+        let status: any;
+        try {
+          status = await rgbAdapter.getSwapStatus?.(rfqId);
+        } catch {
+          // Swap status not available yet
+          if (pollCount >= maxPolls) {
+            dispatch(updateExecutionStatus({ rfq_id: rfqId, status: 'failed', error_message: 'Swap timed out' }));
+            clearInterval(interval);
+            setPollingInterval(null);
+            setShowConfirmModal(false);
+            dispatch(setExecuting(false));
+          }
+          return;
+        }
 
-        if (swap.status === 'completed' || swap.status === 'failed') {
+        const swapStatus = status?.status || 'pending';
+
+        if (swapStatus === 'confirmed' || swapStatus === 'completed' || swapStatus === 'failed') {
           dispatch(updateExecutionStatus({
             rfq_id: rfqId,
-            status: swap.status,
-            txid: swap.txid,
-            error_message: swap.error,
+            status: swapStatus === 'failed' ? 'failed' : 'completed',
+            error_message: swapStatus === 'failed' ? 'Swap failed' : undefined,
           }));
 
-          // Add to history and stop polling
           if (swapState.currentExecution) {
             dispatch(addToHistory({
               ...swapState.currentExecution,
-              status: swap.status,
-              txid: swap.txid,
-              error_message: swap.error,
+              status: swapStatus === 'failed' ? 'failed' : 'completed',
             }));
           }
 
           clearInterval(interval);
           setPollingInterval(null);
-          setShowConfirmModal(false); // Close modal after final status
-          dispatch(setExecuting(false)); // Reset executing state
-
-          // Refresh wallet data
+          setShowConfirmModal(false);
+          dispatch(setExecuting(false));
           loadAvailableAssets();
         }
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
       }
-    }, 3000); // Poll every 3 seconds
+    }, 3000);
 
     setPollingInterval(interval);
   };
 
   const getAssetIcon = (ticker: string) => {
-    const asset = mockAssets.find(a => a.ticker === ticker);
-    if (asset?.icon) {
-      return <Image source={{ uri: asset.icon }} style={{ width: 24, height: 24, borderRadius: 12 }} />;
-    }
-    if (ticker === 'BTC') return <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />;
-    if (ticker === 'USDT') return <Ionicons name="cash" size={24} color="#26A17B" />;
-    return <Ionicons name="diamond" size={24} color={theme.colors.primary[500]} />;
+    return <AssetIcon ticker={ticker} size={28} showBadge={false} />;
   };
 
 
 
+  const rgbConnected = protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false;
+  const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
+
+  const renderVenueFilter = () => {
+    const venues: Array<{ id: SwapVenueFilter; label: string; available: boolean }> = [
+      { id: 'all', label: 'All', available: true },
+      { id: 'kaleidoswap', label: 'KaleidoSwap', available: rgbConnected },
+      { id: 'flashnet', label: 'Flashnet', available: sparkConnected },
+    ];
+
+    return (
+      <View style={{ flexDirection: 'row', marginBottom: 12, borderRadius: 10, backgroundColor: theme.colors.background.secondary, padding: 3 }}>
+        {venues.map(venue => (
+          <TouchableOpacity
+            key={venue.id}
+            onPress={() => venue.available && setVenueFilter(venue.id)}
+            style={{
+              flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+              backgroundColor: venueFilter === venue.id ? theme.colors.primary[500] : 'transparent',
+              opacity: venue.available ? 1 : 0.35,
+            }}
+          >
+            <Text style={{
+              fontSize: 13, fontWeight: venueFilter === venue.id ? '600' : '400',
+              color: venueFilter === venue.id ? '#fff' : theme.colors.text.secondary,
+            }}>
+              {venue.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    );
+  };
+
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
+      {/* Venue filter tabs */}
+      {renderVenueFilter()}
+
       {/* From Section */}
       <View style={styles.swapInputContainer}>
         <View style={styles.swapInputHeader}>

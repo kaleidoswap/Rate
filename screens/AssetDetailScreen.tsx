@@ -16,7 +16,7 @@ import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
-import RGBApiService from '../services/RGBApiService';
+import { protocolManager } from '../services/protocols';
 import { theme } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
@@ -64,7 +64,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const [assetDetails, setAssetDetails] = useState(asset);
   const [refreshing, setRefreshing] = useState(false);
   
-  const apiService = RGBApiService.getInstance();
+  const rgbAdapter = protocolManager.getAdapter('RGB');
   const isBTC = asset.asset_id === 'BTC';
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   }, []);
 
   const loadAssetDetails = async () => {
-    if (isBTC || !apiService) return;
+    if (isBTC || !rgbAdapter) return;
     
     try {
       setLoading(true);

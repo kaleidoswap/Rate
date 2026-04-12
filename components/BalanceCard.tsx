@@ -2,6 +2,13 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { NetworkIcon } from './NetworkIcon';
+
+interface ProtocolBalance {
+    confirmed: number;
+    unconfirmed: number;
+    total: number;
+}
 
 interface BalanceCardProps {
     totalBalance: number;
@@ -12,7 +19,18 @@ interface BalanceCardProps {
     formatUSD: (amount: number) => string;
     onChainBalance: number;
     lightningBalance: number;
+    byProtocol?: {
+        RGB?: ProtocolBalance;
+        SPARK?: ProtocolBalance;
+        ARKADE?: ProtocolBalance;
+    };
 }
+
+const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
+    { key: 'RGB', label: 'RLN', color: '#2BEE79' },
+    { key: 'SPARK', label: 'Spark', color: '#60A5FA' },
+    { key: 'ARKADE', label: 'Arkade', color: '#A855F7' },
+];
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({
     totalBalance,
@@ -21,13 +39,18 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     refreshing,
     formatSatoshis,
     formatUSD,
-    onChainBalance,
-    lightningBalance,
+    byProtocol,
 }) => {
+    // Filter to only protocols with balance data
+    const activeProtocols = byProtocol
+        ? PROTOCOL_DISPLAY.filter(p => byProtocol[p.key as keyof typeof byProtocol])
+        : [];
+
     return (
         <View style={styles.container}>
+            {/* Total balance */}
             <View style={styles.totalBalanceContainer}>
-                <Text style={styles.balanceLabel}>Total Portfolio</Text>
+                <Text style={styles.balanceLabel}>Total Balance</Text>
                 <View style={styles.balanceRow}>
                     <Text style={styles.balanceAmount}>
                         {formatSatoshis(totalBalance)}
@@ -35,16 +58,11 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
                 </View>
                 <Text style={styles.balanceUsd}>
-                    ${formatUSD(totalBalance)} USD
+                    {formatUSD(totalBalance) !== '0.00' ? `$${formatUSD(totalBalance)} USD` : ''}
                 </Text>
-
-                {/* Price Change Indicator - Mocked for now */}
-                <View style={styles.priceChangeContainer}>
-                    <Ionicons name="trending-up" size={12} color={theme.colors.success[500]} />
-                    <Text style={styles.priceChange}>+2.4% today</Text>
-                </View>
             </View>
 
+            {/* Refresh button */}
             <TouchableOpacity
                 style={styles.refreshButton}
                 onPress={onRefresh}
@@ -53,108 +71,92 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                 <Ionicons
                     name="refresh"
                     size={16}
-                    color={theme.colors.text.inverse}
+                    color="rgba(255,255,255,0.8)"
                     style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
                 />
             </TouchableOpacity>
 
-            {/* Balance Breakdown */}
-            <View style={styles.balanceBreakdown}>
-                <View style={styles.breakdownItem}>
-                    <View style={styles.breakdownIcon}>
-                        <Ionicons name="wallet" size={14} color={theme.colors.success[500]} />
-                    </View>
-                    <View style={styles.breakdownText}>
-                        <Text style={styles.breakdownLabel}>On-chain</Text>
-                        <Text style={styles.breakdownValue}>
-                            {formatSatoshis(onChainBalance)}
-                        </Text>
-                    </View>
+            {/* Per-protocol breakdown (only show protocols with data) */}
+            {activeProtocols.length > 0 && (
+                <View style={styles.balanceBreakdown}>
+                    {activeProtocols.map((proto, idx) => {
+                        const bal = (byProtocol as any)[proto.key] as ProtocolBalance;
+                        return (
+                            <React.Fragment key={proto.key}>
+                                {idx > 0 && <View style={styles.breakdownDivider} />}
+                                <View style={styles.breakdownItem}>
+                                    <View style={[styles.breakdownIcon, { backgroundColor: proto.color + '25' }]}>
+                                        <NetworkIcon network={proto.key} size={16} color={proto.color} />
+                                    </View>
+                                    <View style={styles.breakdownText}>
+                                        <Text style={styles.breakdownLabel}>{proto.label}</Text>
+                                        <Text style={styles.breakdownValue}>
+                                            {formatSatoshis(bal.total)} <Text style={styles.breakdownUnit}>{bitcoinUnit}</Text>
+                                        </Text>
+                                    </View>
+                                </View>
+                            </React.Fragment>
+                        );
+                    })}
                 </View>
-
-                <View style={styles.breakdownDivider} />
-
-                <View style={styles.breakdownItem}>
-                    <View style={styles.breakdownIcon}>
-                        <Ionicons name="flash" size={14} color={theme.colors.warning[500]} />
-                    </View>
-                    <View style={styles.breakdownText}>
-                        <Text style={styles.breakdownLabel}>Lightning</Text>
-                        <Text style={styles.breakdownValue}>
-                            {formatSatoshis(lightningBalance)}
-                        </Text>
-                    </View>
-                </View>
-            </View>
+            )}
         </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: {
-        padding: theme.spacing[4],
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 16,
     },
     totalBalanceContainer: {
         alignItems: 'center',
-        marginBottom: theme.spacing[6],
+        marginBottom: 16,
     },
     balanceLabel: {
-        fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.text.inverse,
-        opacity: 0.8,
-        marginBottom: theme.spacing[1],
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.7)',
+        marginBottom: 4,
     },
     balanceRow: {
         flexDirection: 'row',
         alignItems: 'baseline',
-        marginBottom: theme.spacing[1],
+        marginBottom: 4,
     },
     balanceAmount: {
-        fontSize: theme.typography.fontSize['4xl'],
-        fontWeight: '700',
-        color: theme.colors.text.inverse,
-        marginRight: theme.spacing[2],
+        fontSize: 36,
+        fontWeight: '800',
+        color: '#fff',
+        marginRight: 8,
     },
     balanceCurrency: {
-        fontSize: theme.typography.fontSize.xl,
+        fontSize: 18,
         fontWeight: '500',
-        color: theme.colors.text.inverse,
-        opacity: 0.9,
+        color: 'rgba(255,255,255,0.85)',
     },
     balanceUsd: {
-        fontSize: theme.typography.fontSize.base,
-        color: theme.colors.text.inverse,
-        opacity: 0.8,
-        marginBottom: theme.spacing[2],
-    },
-    priceChangeContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        paddingHorizontal: theme.spacing[2],
-        paddingVertical: theme.spacing[1],
-        borderRadius: theme.borderRadius.full,
-    },
-    priceChange: {
-        fontSize: theme.typography.fontSize.xs,
-        color: theme.colors.success[500], // Using success color for positive change
-        marginLeft: theme.spacing[1],
-        fontWeight: '500',
+        fontSize: 14,
+        color: 'rgba(255,255,255,0.65)',
+        minHeight: 18,
     },
     refreshButton: {
         position: 'absolute',
-        top: theme.spacing[4],
-        right: theme.spacing[4],
-        padding: theme.spacing[2],
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        borderRadius: theme.borderRadius.full,
+        top: 8,
+        right: 16,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     balanceBreakdown: {
         flexDirection: 'row',
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        borderRadius: theme.borderRadius.xl,
-        padding: theme.spacing[4],
-        marginTop: theme.spacing[2],
+        backgroundColor: 'rgba(255,255,255,0.1)',
+        borderRadius: 14,
+        paddingVertical: 12,
+        paddingHorizontal: 8,
     },
     breakdownItem: {
         flex: 1,
@@ -163,31 +165,34 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     breakdownIcon: {
-        width: 32,
-        height: 32,
-        borderRadius: theme.borderRadius.full,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        width: 30,
+        height: 30,
+        borderRadius: 15,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: theme.spacing[3],
+        marginRight: 8,
     },
     breakdownText: {
         justifyContent: 'center',
     },
     breakdownLabel: {
-        fontSize: theme.typography.fontSize.xs,
-        color: theme.colors.text.inverse,
-        opacity: 0.7,
-        marginBottom: 2,
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.6)',
+        marginBottom: 1,
     },
     breakdownValue: {
-        fontSize: theme.typography.fontSize.sm,
+        fontSize: 13,
         fontWeight: '600',
-        color: theme.colors.text.inverse,
+        color: '#fff',
+    },
+    breakdownUnit: {
+        fontSize: 10,
+        fontWeight: '400',
+        color: 'rgba(255,255,255,0.5)',
     },
     breakdownDivider: {
         width: 1,
-        backgroundColor: 'rgba(255, 255, 255, 0.1)',
-        marginHorizontal: theme.spacing[2],
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        marginHorizontal: 4,
     },
 });

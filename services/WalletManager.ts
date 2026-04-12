@@ -1,21 +1,21 @@
-import { WalletAdapter, WalletType, WalletManagerConfig } from './wallet/types';
-import { SparkWalletAdapter } from './wallet/SparkWalletAdapter';
-import { ArkWalletAdapter } from './wallet/ArkWalletAdapter';
-import { LiquidWalletAdapter } from './wallet/LiquidWalletAdapter';
-import DatabaseService from './DatabaseService';
+/**
+ * WalletManager — DEPRECATED
+ * Thin facade over ProtocolManager for backward compatibility.
+ * New code should use protocolManager from './protocols' directly.
+ */
+import { protocolManager, initializeProtocols } from './protocols';
+
+export enum WalletType {
+    SPARK = 'spark',
+    LIQUID = 'liquid',
+    ARKADE = 'arkade',
+}
 
 export class WalletManager {
     private static instance: WalletManager;
-    private adapters: Map<WalletType, WalletAdapter> = new Map();
-    private activeMnemonic: string | null = null;
     private initialized = false;
 
-    private constructor() {
-        // Register adapters
-        this.adapters.set(WalletType.SPARK, new SparkWalletAdapter());
-        this.adapters.set(WalletType.ARKADE, new ArkWalletAdapter());
-        this.adapters.set(WalletType.LIQUID, new LiquidWalletAdapter());
-    }
+    private constructor() {}
 
     public static getInstance(): WalletManager {
         if (!WalletManager.instance) {
@@ -24,54 +24,36 @@ export class WalletManager {
         return WalletManager.instance;
     }
 
-    /**
-     * Initialize all enabled wallets with the master mnemonic
-     */
+    /** @deprecated Use initializeProtocols() from './protocols' */
     async initialize(mnemonic: string, networks: { type: WalletType; enabled: boolean; config?: any }[]): Promise<void> {
-        this.activeMnemonic = mnemonic;
+        const networkConfigs = networks.map(n => ({
+            type: n.type,
+            enabled: n.enabled,
+            config: n.config ? JSON.stringify(n.config) : undefined,
+        }));
 
-        const promises = networks
-            .filter(n => n.enabled)
-            .map(async (n) => {
-                const adapter = this.adapters.get(n.type);
-                if (adapter) {
-                    try {
-                        await adapter.initialize(mnemonic, n.config);
-                    } catch (e) {
-                        console.error(`Failed to initialize ${n.type} wallet:`, e);
-                    }
-                }
-            });
-
-        await Promise.all(promises);
+        await initializeProtocols(mnemonic, networkConfigs);
         this.initialized = true;
     }
 
-    getAdapter(type: WalletType): WalletAdapter | undefined {
-        return this.adapters.get(type);
-    }
-
-    async getBalances(): Promise<Record<WalletType, any>> {
-        const balances: Record<string, any> = {};
-
-        for (const [type, adapter] of this.adapters.entries()) {
-            try {
-                // Only call if initialized (check adapter specific flag or catch error)
-                // We really should expose isInitialized in adapter
-                balances[type] = await adapter.getBalance();
-            } catch (e) {
-                // Ignore not initialized
-                // console.warn(`Skipping balance for ${type} (not initialized)`);
-            }
+    /** @deprecated Use protocolManager.getAdapter() */
+    getAdapter(type: WalletType): any {
+        const protocolMap: Record<string, string> = {
+            spark: 'SPARK',
+            arkade: 'ARKADE',
+            liquid: 'RGB', // No liquid adapter, fallback to RGB
+        };
+        try {
+            return protocolManager.getAdapter(protocolMap[type] as any);
+        } catch {
+            return undefined;
         }
-        return balances;
     }
 
+    /** @deprecated Use protocolManager.disconnectAll() */
     async disconnectAll(): Promise<void> {
-        const promises = Array.from(this.adapters.values()).map(a => a.disconnect());
-        await Promise.all(promises);
+        await protocolManager.disconnectAll();
         this.initialized = false;
-        this.activeMnemonic = null;
     }
 }
 

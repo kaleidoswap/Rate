@@ -11,82 +11,41 @@ interface ActionButtonsProps {
     onHistory: () => void;
 }
 
-export const ActionButtons: React.FC<ActionButtonsProps> = ({
-    onSend,
-    onReceive,
-    onSwap,
-    onHistory,
-}) => {
+const ACTION_ITEMS: Array<{
+    key: string;
+    label: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    colors: [string, string];
+    action: keyof ActionButtonsProps;
+}> = [
+    { key: 'send', label: 'Send', icon: 'arrow-up', colors: ['#F94040', '#E03535'], action: 'onSend' },
+    { key: 'receive', label: 'Receive', icon: 'arrow-down', colors: ['#2BEE79', '#1FA855'], action: 'onReceive' },
+    { key: 'swap', label: 'Swap', icon: 'swap-horizontal', colors: ['#F59E0B', '#D97706'], action: 'onSwap' },
+    { key: 'history', label: 'Activity', icon: 'time', colors: ['#4290FF', '#2563EB'], action: 'onHistory' },
+];
+
+export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
     return (
         <View style={styles.container}>
             <View style={styles.actionButtons}>
-                {/* Receive Button */}
-                <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={onReceive}
-                    activeOpacity={0.7}
-                >
-                    <LinearGradient
-                        colors={theme.colors.success.gradient as [string, string]}
-                        style={styles.actionButtonGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
+                {ACTION_ITEMS.map(item => (
+                    <TouchableOpacity
+                        key={item.key}
+                        style={styles.actionButton}
+                        onPress={props[item.action]}
+                        activeOpacity={0.7}
                     >
-                        <Ionicons name="arrow-down" size={24} color="white" />
-                    </LinearGradient>
-                    <Text style={styles.actionButtonText}>Receive</Text>
-                </TouchableOpacity>
-
-                {/* Swap Button */}
-                <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={onSwap}
-                    activeOpacity={0.7}
-                >
-                    <LinearGradient
-                        colors={theme.colors.warning.gradient as [string, string]}
-                        style={styles.actionButtonGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                    >
-                        <Ionicons name="swap-horizontal" size={24} color="white" />
-                    </LinearGradient>
-                    <Text style={styles.actionButtonText}>Swap</Text>
-                </TouchableOpacity>
-
-                {/* Send Button */}
-                <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={onSend}
-                    activeOpacity={0.7}
-                >
-                    <LinearGradient
-                        colors={theme.colors.error.gradient as [string, string]}
-                        style={styles.actionButtonGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                    >
-                        <Ionicons name="arrow-up" size={24} color="white" />
-                    </LinearGradient>
-                    <Text style={styles.actionButtonText}>Send</Text>
-                </TouchableOpacity>
-
-                {/* History Button */}
-                <TouchableOpacity
-                    style={styles.actionButton}
-                    onPress={onHistory}
-                    activeOpacity={0.7}
-                >
-                    <LinearGradient
-                        colors={theme.colors.primary.gradient as [string, string]}
-                        style={styles.actionButtonGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                    >
-                        <Ionicons name="time" size={24} color="white" />
-                    </LinearGradient>
-                    <Text style={styles.actionButtonText}>History</Text>
-                </TouchableOpacity>
+                        <LinearGradient
+                            colors={item.colors}
+                            style={styles.actionButtonGradient}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                        >
+                            <Ionicons name={item.icon} size={22} color="white" />
+                        </LinearGradient>
+                        <Text style={styles.actionButtonText}>{item.label}</Text>
+                    </TouchableOpacity>
+                ))}
             </View>
         </View>
     );
@@ -94,37 +53,37 @@ export const ActionButtons: React.FC<ActionButtonsProps> = ({
 
 const styles = StyleSheet.create({
     container: {
-        paddingHorizontal: theme.spacing[4],
-        marginTop: -theme.spacing[8], // Overlap with header
-        marginBottom: theme.spacing[4],
+        paddingHorizontal: 16,
+        marginTop: -20,
+        marginBottom: 16,
     },
     actionButtons: {
         flexDirection: 'row',
         justifyContent: 'space-around',
         backgroundColor: theme.colors.surface.primary,
-        borderRadius: theme.borderRadius.xl,
-        padding: theme.spacing[4],
-        ...theme.shadows.lg,
+        borderRadius: 20,
+        paddingVertical: 16,
+        paddingHorizontal: 8,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 12,
+        elevation: 4,
     },
     actionButton: {
         alignItems: 'center',
-        justifyContent: 'center',
+        flex: 1,
     },
     actionButtonGradient: {
-        width: 56,
-        height: 56,
-        borderRadius: theme.borderRadius.full,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: theme.spacing[2],
-        shadowColor: theme.shadows.md.shadowColor,
-        shadowOffset: theme.shadows.md.shadowOffset,
-        shadowOpacity: theme.shadows.md.shadowOpacity,
-        shadowRadius: theme.shadows.md.shadowRadius,
-        elevation: theme.shadows.md.elevation,
+        marginBottom: 6,
     },
     actionButtonText: {
-        fontSize: theme.typography.fontSize.sm,
+        fontSize: 12,
         fontWeight: '600',
         color: theme.colors.text.primary,
     },

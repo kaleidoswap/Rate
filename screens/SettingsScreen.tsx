@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { View, ScrollView, StyleSheet, Switch, TextInput, Alert, Text, TouchableOpacity } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
+import { NetworkIcon } from '../components/NetworkIcon';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import {
@@ -22,7 +23,7 @@ import {
   setBitcoinUnit,
 } from '../store/slices/settingsSlice';
 import { setWalletConnectEnabled } from '../store/slices/nostrSlice';
-import { RGBNodeService } from '../services/RGBNodeService';
+import { setActiveWallet } from '../store/slices/walletSlice';
 import { Button, ListItem, Input, MainHeader } from '../components';
 import NostrProfileManager from '../components/NostrProfileManager';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -394,6 +395,98 @@ export default function SettingsScreen({ navigation }: Props) {
                 />
               </TouchableOpacity>
             </ListItem>
+          </View>
+        </View>
+
+        {/* Wallet Protocols */}
+        <View style={{ marginTop: 24, paddingHorizontal: 16 }}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
+            Wallet Protocols
+          </Text>
+          <View style={{ backgroundColor: theme.colors.background.primary, borderRadius: 12, padding: 14 }}>
+            {(['RGB', 'SPARK', 'ARKADE'] as const).map((proto, idx) => {
+              const { protocolManager: pm } = require('../services/protocols');
+              const adapter = pm.getAdapterIfAvailable(proto);
+              const connected = adapter?.isConnected() ?? false;
+              const colors: Record<string, string> = { RGB: '#2BEE79', SPARK: '#60A5FA', ARKADE: '#A855F7' };
+              const labels: Record<string, string> = { RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade' };
+              const descs: Record<string, string> = {
+                RGB: 'On-chain, Lightning, RGB assets',
+                SPARK: 'Spark L2 Bitcoin + tokens',
+                ARKADE: 'Off-chain Bitcoin (VTXOs)',
+              };
+              return (
+                <View key={proto} style={{
+                  flexDirection: 'row', alignItems: 'center', paddingVertical: 12,
+                  borderTopWidth: idx > 0 ? StyleSheet.hairlineWidth : 0,
+                  borderTopColor: theme.colors.gray[200],
+                }}>
+                  <View style={{ marginRight: 12, opacity: connected ? 1 : 0.3 }}>
+                    <NetworkIcon network={proto} size={22} color={colors[proto]} />
+                  </View>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text.primary }}>{labels[proto]}</Text>
+                    <Text style={{ fontSize: 12, color: theme.colors.text.tertiary, marginTop: 2 }} numberOfLines={1}>{descs[proto]}</Text>
+                  </View>
+                  <Text style={{
+                    fontSize: 12, fontWeight: '600',
+                    color: connected ? colors[proto] : theme.colors.gray[400],
+                  }}>
+                    {connected ? 'Connected' : 'Offline'}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Danger Zone */}
+        <View style={{ marginTop: 24, paddingHorizontal: 16, marginBottom: 40 }}>
+          <Text style={{ fontSize: 13, fontWeight: '600', color: theme.colors.error[500], textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 }}>
+            Danger Zone
+          </Text>
+          <View style={{ backgroundColor: theme.colors.background.primary, borderRadius: 12, overflow: 'hidden' }}>
+            <TouchableOpacity
+              style={[styles.settingRow, { paddingVertical: 14 }]}
+              onPress={() => {
+                Alert.alert(
+                  'Remove Wallet',
+                  'This will delete your wallet data from this device. Make sure you have backed up your mnemonic phrase before proceeding.\n\nThis action cannot be undone.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'Remove Wallet',
+                      style: 'destructive',
+                      onPress: async () => {
+                        try {
+                          const { protocolManager } = require('../services/protocols');
+                          await protocolManager.disconnectAll();
+                          const DatabaseService = require('../services/DatabaseService').default;
+                          const db = DatabaseService.getInstance();
+                          const activeWallet = await db.getActiveWallet();
+                          if (activeWallet?.id) {
+                            await db.deleteWallet(activeWallet.id);
+                          }
+                          dispatch(setActiveWallet(null as any));
+                          Alert.alert('Wallet Removed', 'You can now create or import a new wallet.');
+                          navigation.reset({ index: 0, routes: [{ name: 'InitialLoad' as any }] });
+                        } catch (err: any) {
+                          Alert.alert('Error', err.message || 'Failed to remove wallet');
+                        }
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="trash-outline" size={20} color={theme.colors.error[500]} style={{ marginRight: 12 }} />
+                <Text style={{ color: theme.colors.error[500], fontSize: 16, fontWeight: '600' }}>Remove Wallet</Text>
+              </View>
+              <Text style={{ color: theme.colors.text.tertiary, fontSize: 12, marginTop: 4 }}>
+                Delete wallet and start fresh
+              </Text>
+            </TouchableOpacity>
           </View>
         </View>
       </ScrollView>

@@ -1,6 +1,6 @@
 // store/slices/nodeSlice.ts
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { RGBNodeService } from '../../services/RGBNodeService';
+import { protocolManager } from '../../services/protocols';
 
 interface NodeState {
   status: {
@@ -37,30 +37,26 @@ const initialState: NodeState = {
   startupError: null,
 };
 
-// Async thunks
 export const startNode = createAsyncThunk(
   'node/start',
   async (_, { rejectWithValue }) => {
     try {
-      const nodeService = RGBNodeService.getInstance();
-      
-      // Initialize binary if needed
-      const initialized = await nodeService.initializeNode();
-      if (!initialized) {
-        throw new Error('Failed to initialize RGB node binary');
+      // Check if any protocol is connected
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      if (rgbAdapter?.isConnected()) {
+        return { isRunning: true, port: 3008, lightningPort: 9738 };
       }
-      
-      // Get node status (remote node is always "running" after init)
-      const status = nodeService.getNodeStatus();
-      if (!status.isRunning) {
-        throw new Error('Failed to start RGB node');
+
+      // Try to get connection info from any adapter
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      for (const proto of protocols) {
+        const adapter = protocolManager.getAdapterIfAvailable(proto);
+        if (adapter?.isConnected()) {
+          return { isRunning: true, port: 0, lightningPort: 0 };
+        }
       }
-      
-      return {
-        isRunning: status.isRunning,
-        port: status.daemonPort,
-        lightningPort: 9738,
-      };
+
+      throw new Error('No wallet protocols connected');
     } catch (error: any) {
       return rejectWithValue(error.message);
     }
@@ -71,9 +67,7 @@ export const stopNode = createAsyncThunk(
   'node/stop',
   async (_, { rejectWithValue }) => {
     try {
-      const nodeService = RGBNodeService.getInstance();
-      // For remote nodes, we just update the status
-      nodeService.setNodeStatus({ isRunning: false });
+      await protocolManager.disconnectAll();
       return true;
     } catch (error: any) {
       return rejectWithValue(error.message);
@@ -85,21 +79,17 @@ const nodeSlice = createSlice({
   name: 'node',
   initialState,
   reducers: {
-    setNodeStatus(state, action) {
-      state.status = action.payload;
+    setNodeInfo: (state, action) => {
+      state.nodeInfo = action.payload;
     },
-    setError(state, action) {
+    setNetworkInfo: (state, action) => {
+      state.networkInfo = action.payload;
+    },
+    setError: (state, action) => {
       state.error = action.payload;
     },
-    clearError(state) {
+    clearError: (state) => {
       state.error = null;
-    },
-    updateHealthCheck(state, action) {
-      state.lastHealthCheck = action.payload;
-      state.consecutiveFailures = 0;
-    },
-    incrementFailures(state) {
-      state.consecutiveFailures += 1;
     },
   },
   extraReducers: (builder) => {
@@ -110,7 +100,11 @@ const nodeSlice = createSlice({
       })
       .addCase(startNode.fulfilled, (state, action) => {
         state.isStarting = false;
-        state.status = action.payload;
+        state.status = {
+          isRunning: action.payload.isRunning,
+          port: action.payload.port,
+          lightningPort: action.payload.lightningPort,
+        };
       })
       .addCase(startNode.rejected, (state, action) => {
         state.isStarting = false;
@@ -122,6 +116,7 @@ const nodeSlice = createSlice({
       .addCase(stopNode.fulfilled, (state) => {
         state.isStopping = false;
         state.status.isRunning = false;
+        state.nodeInfo = null;
       })
       .addCase(stopNode.rejected, (state, action) => {
         state.isStopping = false;
@@ -130,12 +125,5 @@ const nodeSlice = createSlice({
   },
 });
 
-export const {
-  setNodeStatus,
-  setError,
-  clearError,
-  updateHealthCheck,
-  incrementFailures,
-} = nodeSlice.actions;
-
+export const { setNodeInfo, setNetworkInfo, setError, clearError } = nodeSlice.actions;
 export default nodeSlice.reducer;

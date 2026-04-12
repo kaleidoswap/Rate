@@ -41,6 +41,7 @@ import AssetDetailScreen from './screens/AssetDetailScreen';
 import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
+import LSPScreen from './screens/LSPScreen';
 
 type RootStackParamList = {
   InitialLoad: undefined;
@@ -62,6 +63,10 @@ type RootStackParamList = {
   NostrContacts: undefined;
   AssetDetail: { asset: any };
   History: undefined;
+  LSP: undefined;
+  OpenChannel: undefined;
+  IssueAsset: undefined;
+  Channels: undefined;
 };
 
 type TabBarIconProps = {
@@ -216,60 +221,12 @@ function AppNavigator() {
             headerShown: false,
           }}
         />
-        <Stack.Screen
-          name="Send"
-          component={SendScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: true,
-            headerTitle: 'Send Payment',
-            headerStyle: {
-              backgroundColor: theme.colors.primary[600],
-            },
-            headerTitleStyle: {
-              color: theme.colors.text.inverse,
-              fontWeight: '600',
-            },
-            headerTintColor: theme.colors.text.inverse,
-          }}
-        />
-        <Stack.Screen
-          name="Receive"
-          component={ReceiveScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: true,
-            headerTitle: 'Receive Payment',
-            headerStyle: {
-              backgroundColor: theme.colors.primary[600],
-            },
-            headerTitleStyle: {
-              color: theme.colors.text.inverse,
-              fontWeight: '600',
-            },
-            headerTintColor: theme.colors.text.inverse,
-          }}
-        />
+        <Stack.Screen name="Send" component={SendScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="Receive" component={ReceiveScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="QRScanner" component={QRScannerScreen} />
         <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
-        <Stack.Screen
-          name="Assets"
-          component={AssetsScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: true,
-            headerTitle: 'Assets',
-            headerStyle: {
-              backgroundColor: theme.colors.primary[600],
-            },
-            headerTitleStyle: {
-              color: theme.colors.text.inverse,
-              fontWeight: '600',
-            },
-            headerTintColor: theme.colors.text.inverse,
-          }}
-        />
+        <Stack.Screen name="Assets" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
           name="Swap"
           component={SwapScreen}
@@ -302,6 +259,10 @@ function AppNavigator() {
             headerShown: false,
           }}
         />
+        <Stack.Screen name="LSP" component={LSPScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="OpenChannel" component={LSPScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="Channels" component={LSPScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="IssueAsset" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

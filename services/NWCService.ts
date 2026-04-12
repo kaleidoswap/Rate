@@ -8,8 +8,7 @@ import NDK, {
   NostrEvent
 } from '@nostr-dev-kit/ndk';
 import { nip04, getPublicKey, utils } from 'nostr-tools';
-import RGBApiService from './RGBApiService';
-import { getApiInstance } from './apiInstance';
+import { protocolManager } from './protocols';
 
 // NIP-47 Event Kinds
 export const NWC_KINDS = {
@@ -88,7 +87,7 @@ export interface NWCConnectionString {
 
 export class NWCService {
   private static instance: NWCService;
-  private rgbApiService: RGBApiService | null = null;
+  private rgbApiService: import('./protocols').IProtocolAdapter | null = null;
   private ndk: NDK | null = null;
   private walletSigner: NDKPrivateKeySigner | null = null;
   private subscriptions: Map<string, NDKSubscription> = new Map();
@@ -125,12 +124,13 @@ export class NWCService {
    */
   public async initialize(relays?: string[]): Promise<boolean> {
     try {
-      // Get RGB API service instance
-      this.rgbApiService = getApiInstance();
-      if (!this.rgbApiService) {
-        console.warn('NWCService: RGB API Service not available');
+      // Get RGB adapter from ProtocolManager
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      if (!rgbAdapter?.isConnected()) {
+        console.warn('NWCService: RGB adapter not connected');
         return false;
       }
+      this.rgbApiService = rgbAdapter;
 
       // Initialize NDK for NWC
       const defaultRelays = relays || [
@@ -466,12 +466,12 @@ export class NWCService {
         throw new Error('Invoice is required');
       }
 
-      const result = await this.rgbApiService.payLightningInvoice({ invoice });
+      const result = await this.rgbApiService.sendPayment({ invoice });
 
       return {
         result_type: NWC_METHODS.PAY_INVOICE,
         result: {
-          preimage: result.payment_hash, // Note: RGB API might return different field names
+          preimage: result.paymentHash,
         },
       };
     } catch (error) {
@@ -500,10 +500,10 @@ export class NWCService {
         throw new Error('Amount is required');
       }
 
-      const result = await this.rgbApiService.createLightningInvoice({
-        amount_msat: amount,
+      const result = await this.rgbApiService.createInvoice({
+        amount: amount ? Math.floor(amount / 1000) : undefined, // msat to sats
         description: description || '',
-        duration_seconds: expiry || 3600,
+        expirySeconds: expiry || 3600,
       });
 
       return {
@@ -511,7 +511,7 @@ export class NWCService {
         result: {
           type: 'incoming',
           invoice: result.invoice,
-          payment_hash: result.payment_hash,
+          payment_hash: result.paymentHash,
           amount: amount,
           created_at: Math.floor(Date.now() / 1000),
           expires_at: Math.floor(Date.now() / 1000) + (expiry || 3600),
@@ -606,7 +606,7 @@ export class NWCService {
       return {
         result_type: NWC_METHODS.GET_BALANCE,
         result: {
-          balance: balance.vanilla.spendable, // Return spendable balance in msats
+          balance: balance.confirmed, // Return confirmed balance in sats
         },
       };
     } catch (error) {
