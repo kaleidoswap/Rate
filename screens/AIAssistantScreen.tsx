@@ -31,7 +31,9 @@ import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import InvoiceQRCode from '../components/InvoiceQRCode';
 import { EnhancedAIAssistant } from '../services/aiAssistantFunctions';
-
+import * as Haptics from 'expo-haptics';
+import Markdown from 'react-native-markdown-display';
+import { BlurView } from 'expo-blur';
 // Temporary interface to fix import issue
 interface AIAssistantInterface {
   processMessage(message: string, history?: any[]): Promise<{
@@ -94,6 +96,24 @@ interface AIResponse {
     };
   } | null;
 }
+
+const markdownStyles = {
+  body: {
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.fontSize.base,
+    lineHeight: 24,
+  },
+  code_inline: {
+    backgroundColor: theme.colors.primary[50],
+    color: theme.colors.primary[700],
+    borderRadius: 4,
+    paddingHorizontal: 4,
+  },
+  link: {
+    color: theme.colors.primary[600],
+    textDecorationLine: 'underline',
+  },
+};
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -407,6 +427,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
     const messageText = text || inputText.trim();
     if (!messageText) return;
 
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
     // Clear input immediately after getting the message text
     setInputText('');
     setPartialText('');
@@ -493,8 +515,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
       };
 
       addMessage(aiMessage);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('AI response error:', error);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -666,9 +690,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
             </LinearGradient>
           ) : (
             <View>
-              <Text style={[styles.aiMessageText, { color: theme.colors.text.primary }]}>
+              <Markdown style={markdownStyles}>
                 {message.text}
-              </Text>
+              </Markdown>
               {message.functionCalled && message.functionResult &&
                 renderFunctionResult(message.functionCalled, message.functionResult)
               }
@@ -906,8 +930,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
               <TouchableWithoutFeedback onPress={dismissKeyboard}>
                 <View style={styles.inputContainer}>
-                  <LinearGradient
-                    colors={['rgba(255,255,255,0.95)', 'rgba(255,255,255,0.98)']}
+                  <BlurView
+                    intensity={80}
+                    tint="light"
                     style={styles.inputGradient}
                   >
                     {/* Enhanced Quick Actions */}
@@ -1015,7 +1040,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                         </TouchableOpacity>
                       </Animated.View>
                     )}
-                  </LinearGradient>
+                  </BlurView>
                 </View>
               </TouchableWithoutFeedback>
             </View>
@@ -1186,8 +1211,8 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     borderTopWidth: 1,
-    borderTopColor: theme.colors.border.light,
-    backgroundColor: 'white',
+    borderTopColor: 'rgba(0,0,0,0.05)',
+    backgroundColor: 'transparent',
   },
   inputGradient: {
     padding: theme.spacing[3],
