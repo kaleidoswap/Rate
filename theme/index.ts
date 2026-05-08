@@ -212,12 +212,12 @@ export const theme: ThemeType = {
       300: '#6EE7B7',
       400: '#34D399',
       500: k.primary,      // #2BEE79
-      600: k.primaryDark,  // #1FA855
+      600: '#1FA855',  // #1FA855
       700: '#15803D',
       800: '#166534',
       900: '#14532D',
       950: k.primaryFg,    // #102217
-      gradient: [k.primary, k.primaryDark] as [string, string],
+      gradient: [k.primary, '#1FA855'] as [string, string],
     },
 
     // Secondary: Deep Green Surfaces
@@ -228,10 +228,10 @@ export const theme: ThemeType = {
       300: '#86EFAC',
       400: '#4ADE80',
       500: k.textSecondary, // #92C9A8
-      600: k.surfaceHighlight, // #243E30
-      700: k.surfaceDark,  // #162E21
-      800: k.bgDark,       // #102217
-      900: k.surfaceDarker, // #0B1810
+      600: '#243E30', // #243E30
+      700: '#162E21',  // #162E21
+      800: '#102217',       // #102217
+      900: '#0B1810', // #0B1810
       950: '#052E16',
       gradient: [k.primary, '#4ADE80'] as [string, string],
     },
@@ -257,7 +257,7 @@ export const theme: ThemeType = {
       50: '#F0FDF4',
       100: '#DCFCE7',
       500: k.success,      // #2BEE79
-      600: k.primaryDark,  // #1FA855
+      600: '#1FA855',  // #1FA855
       700: '#15803D',
       gradient: [k.success, '#4ADE80'] as [string, string],
     },
@@ -309,7 +309,7 @@ export const theme: ThemeType = {
 
     // Backgrounds — KaleidoSwap light theme
     background: {
-      primary: k.bgLight,   // #F6F8F7
+      primary: '#F6F8F7',   // #F6F8F7
       secondary: '#F0F5F2',
       tertiary: '#E8F0EB',
       modal: '#FFFFFF',
@@ -324,13 +324,13 @@ export const theme: ThemeType = {
       inverse: '#FFFFFF',
       inverseSecondary: '#E2E8F0',
       disabled: '#A3B8AC',
-      link: k.primaryDark,   // #1FA855
+      link: '#1FA855',   // #1FA855
     },
 
     // Surfaces
     surface: {
       primary: '#FFFFFF',
-      secondary: k.bgLight, // #F6F8F7
+      secondary: '#F6F8F7', // #F6F8F7
       tertiary: '#F0F5F2',
       elevated: '#FFFFFF',
       highlight: '#ECFDF5',  // Green 50

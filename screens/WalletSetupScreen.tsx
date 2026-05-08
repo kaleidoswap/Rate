@@ -23,6 +23,7 @@ import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/wa
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
+import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 
 interface Props {
   navigation: any;
@@ -557,17 +558,17 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </TouchableOpacity>
       </Card>
 
-      <View style={styles.reminderBox}>
-        <Ionicons name="information-circle" size={24} color={theme.colors.info[500]} />
+      <AlertBanner variant="warning" style={styles.reminderBox}>
+        <Ionicons name="information-circle" size={24} color={theme.colors.warning[500]} />
         <View style={styles.reminderContent}>
           <Text style={styles.reminderTitle}>Important Reminder</Text>
           <Text style={styles.reminderText}>
             • Your recovery phrase is the ONLY way to restore your wallet{'\n'}
-            • Rate cannot recover your wallet if you lose this phrase{'\n'}
+            • KaleidoSwap cannot recover your wallet if you lose this phrase{'\n'}
             • Keep it private and secure at all times
           </Text>
         </View>
-      </View>
+      </AlertBanner>
     </ScrollView>
   );
 

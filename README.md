@@ -1,10 +1,10 @@
-# Rate - Smart RGB Lightning Wallet
+# KaleidoSwap Wallet — Smart RGB Lightning Wallet
 
 A next-generation non-custodial mobile wallet that integrates RGB assets, Lightning Network, AI assistance, and social features into a unified Bitcoin experience.
 
 ## Overview
 
-Rate is a React Native mobile application that provides a complete self-custodial wallet solution for Bitcoin and RGB assets. The wallet features an embedded RGB Lightning Node, AI-powered natural language interface, Nostr social integration, and local business discovery through BTC Map integration.
+KaleidoSwap is a React Native mobile application that provides a complete self-custodial wallet solution for Bitcoin and RGB assets. The wallet features an embedded RGB Lightning Node, AI-powered natural language interface, Nostr social integration, and local business discovery through BTC Map integration.
 
 ## Key Features
 
@@ -69,7 +69,7 @@ Rate is a React Native mobile application that provides a complete self-custodia
 
 ```bash
 git clone https://github.com/kaleidoswap/rate.git
-cd Rate
+cd rate
 npm install
 npx expo start
 ```
@@ -155,7 +155,7 @@ Integrates with BTC Map to discover local Bitcoin-accepting merchants and enable
 
 ### Project Structure
 ```
-Rate/
+rate/
 ├── screens/          # React Native screens
 ├── services/         # Business logic and API integrations
 ├── store/           # Redux state management
@@ -210,4 +210,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-*Rate: Making Bitcoin and RGB assets accessible through conversational AI and social integration.*
+*KaleidoSwap Wallet: Making Bitcoin and RGB assets accessible through conversational AI and social integration.*

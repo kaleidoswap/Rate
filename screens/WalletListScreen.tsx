@@ -124,7 +124,7 @@ export default function WalletListScreen({ navigation }: Props) {
                         <View style={styles.welcomeIcon}>
                             <Ionicons name="wallet-outline" size={64} color={theme.colors.primary[500]} />
                         </View>
-                        <Text style={styles.welcomeTitle}>Welcome to Rate</Text>
+                        <Text style={styles.welcomeTitle}>Welcome to KaleidoSwap</Text>
                         <Text style={styles.welcomeSubtitle}>
                             Your secure gateway to the Lightning Network and RGB assets.
                         </Text>

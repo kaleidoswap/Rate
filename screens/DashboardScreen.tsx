@@ -554,7 +554,7 @@ export default function DashboardScreen({ navigation }: Props) {
       >
         <MainHeader
           greeting={getGreeting()}
-          title="Rate Wallet"
+          title="KaleidoSwap Wallet"
           subtitle={(() => {
             const connected: string[] = [];
             if (protocolManager.getAdapterIfAvailable('SPARK')?.isConnected()) connected.push('Spark');

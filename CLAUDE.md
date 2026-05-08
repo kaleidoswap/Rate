@@ -23,7 +23,7 @@ Coverage thresholds: 70% statements/lines/functions, 60% branches (enforced by j
 
 ## Architecture
 
-**Rate** is a non-custodial Bitcoin & RGB asset wallet built with React Native (Expo). It supports Lightning Network, atomic swaps (Kaleidoswap), Nostr social features, and an AI assistant.
+**KaleidoSwap Wallet** (codename `rate`) is a non-custodial Bitcoin & RGB asset wallet built with React Native (Expo). It supports Lightning Network, atomic swaps (Kaleidoswap), Nostr social features, and an AI assistant.
 
 ### Entry Flow
 

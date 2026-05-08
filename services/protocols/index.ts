@@ -1,7 +1,7 @@
 /**
- * Protocol Layer — Rate App Entry Point
+ * Protocol Layer — KaleidoSwap App Entry Point
  * Re-exports from @kaleidorg/wallet-protocols shared library
- * and provides Rate-specific initialization with Expo platform providers.
+ * and provides KaleidoSwap-specific initialization with Expo platform providers.
  */
 
 import {

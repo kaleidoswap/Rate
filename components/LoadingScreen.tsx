@@ -211,10 +211,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             ]}
           >
             <View style={styles.appLogo}>
-              <Text style={styles.logoText}>R</Text>
+              <Text style={styles.logoText}>K</Text>
             </View>
-            <Text style={styles.appName}>Rate Wallet</Text>
-            <Text style={styles.tagline}>RGB Lightning Network</Text>
+            <Text style={styles.appName}>KaleidoSwap Wallet</Text>
+            <Text style={styles.tagline}>Bitcoin · Lightning · RGB</Text>
           </Animated.View>
 
           {/* Loading Section */}

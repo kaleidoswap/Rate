@@ -18,10 +18,10 @@ export const darkTheme: ThemeType = {
 
     // KaleidoSwap dark green surfaces
     background: {
-      primary: k.bgDark,         // #102217
-      secondary: k.surfaceDark,  // #162E21
-      tertiary: k.surfaceHighlight, // #243E30
-      modal: k.surfaceDark,
+      primary: '#102217',         // #102217
+      secondary: '#162E21',  // #162E21
+      tertiary: '#243E30', // #243E30
+      modal: '#162E21',
       backdrop: 'rgba(0, 0, 0, 0.7)',
     },
 
@@ -30,22 +30,22 @@ export const darkTheme: ThemeType = {
       secondary: k.textSecondary, // #92C9A8
       tertiary: '#6B8F7A',
       inverse: k.primaryFg,      // #102217
-      inverseSecondary: k.surfaceHighlight,
+      inverseSecondary: '#243E30',
       disabled: '#3D5A4A',
       link: k.primary,           // #2BEE79
     },
 
     surface: {
-      primary: k.surfaceDark,    // #162E21
-      secondary: k.surfaceHighlight, // #243E30
-      tertiary: k.surfaceBorder, // #244A35
-      elevated: k.surfaceHighlight,
+      primary: '#162E21',    // #162E21
+      secondary: '#243E30', // #243E30
+      tertiary: '#244A35', // #244A35
+      elevated: '#243E30',
       highlight: '#1A3D28',
     },
 
     border: {
-      light: k.surfaceHighlight, // #243E30
-      medium: k.surfaceBorder,   // #244A35
+      light: '#243E30', // #243E30
+      medium: '#244A35',   // #244A35
       dark: '#3D5A4A',
       focus: k.primary,          // #2BEE79
     },
@@ -66,8 +66,8 @@ export const darkTheme: ThemeType = {
       ...lightTheme.components.button,
       secondary: {
         ...lightTheme.components.button.secondary,
-        backgroundColor: k.surfaceHighlight, // #243E30
-        borderColor: k.surfaceBorder,        // #244A35
+        backgroundColor: '#243E30', // #243E30
+        borderColor: '#244A35',        // #244A35
       },
       ghost: {
         ...lightTheme.components.button.ghost,
@@ -77,13 +77,13 @@ export const darkTheme: ThemeType = {
     card: {
       default: {
         ...lightTheme.components.card.default,
-        backgroundColor: k.surfaceDark,  // #162E21
+        backgroundColor: '#162E21',  // #162E21
         shadowColor: '#000000',
         shadowOpacity: 0.3,
       },
       elevated: {
         ...lightTheme.components.card.elevated,
-        backgroundColor: k.surfaceHighlight, // #243E30
+        backgroundColor: '#243E30', // #243E30
         shadowColor: '#000000',
         shadowOpacity: 0.4,
       },
@@ -91,12 +91,12 @@ export const darkTheme: ThemeType = {
     input: {
       default: {
         ...lightTheme.components.input.default,
-        backgroundColor: k.surfaceHighlight, // #243E30
-        borderColor: k.surfaceBorder,        // #244A35
+        backgroundColor: '#243E30', // #243E30
+        borderColor: '#244A35',        // #244A35
       },
       focused: {
         borderColor: k.primary,   // #2BEE79
-        backgroundColor: k.surfaceDark, // #162E21
+        backgroundColor: '#162E21', // #162E21
       },
     },
   },

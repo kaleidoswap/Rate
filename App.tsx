@@ -269,7 +269,7 @@ function AppNavigator() {
 }
 
 function AppLoadingScreen() {
-  return <LoadingScreen variant="app" title="Loading Rate Wallet" />;
+  return <LoadingScreen variant="app" title="Loading KaleidoSwap Wallet" />;
 }
 
 export default function App() {

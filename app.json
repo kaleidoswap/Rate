@@ -1,22 +1,22 @@
 {
   "expo": {
-    "name": "Rate",
-    "slug": "rate-rgb-wallet",
+    "name": "KaleidoSwap",
+    "slug": "kaleidoswap-wallet",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/rate.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
-      "image": "./assets/rate.png",
+      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#102217"
     },
     "assetBundlePatterns": [
       "**/*"
     ],
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.rate.rgbwallet",
+      "bundleIdentifier": "com.kaleidoswap.wallet",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",
         "NSFaceIDUsageDescription": "Use Face ID to unlock your wallet securely.",
@@ -32,11 +32,11 @@
       }
     },
     "android": {
-      "package": "com.rate.rgbwallet",
+      "package": "com.kaleidoswap.wallet",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#102217"
       },
       "permissions": [
         "CAMERA",
@@ -49,13 +49,13 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Rate to access your camera to scan QR codes."
+          "cameraPermission": "Allow KaleidoSwap to access your camera to scan QR codes."
         }
       ],
       [
         "expo-local-authentication",
         {
-          "faceIDPermission": "Allow Rate to use Face ID for secure wallet access."
+          "faceIDPermission": "Allow KaleidoSwap to use Face ID for secure wallet access."
         }
       ],
       "expo-secure-store",
