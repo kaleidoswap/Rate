@@ -111,7 +111,7 @@ const markdownStyles = {
   },
   link: {
     color: theme.colors.primary[600],
-    textDecorationLine: 'underline',
+    textDecorationLine: 'underline' as const,
   },
 };
 

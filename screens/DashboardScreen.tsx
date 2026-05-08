@@ -603,7 +603,9 @@ export default function DashboardScreen({ navigation }: Props) {
           formatSatoshis={formatSatoshis}
           onViewAll={() => navigation.getParent()?.navigate('Channels')}
           onChannelPress={(channel) => {
-            setSelectedChannel(channel);
+            // ChannelList narrows Channel to a UI subset; the runtime object
+            // carries the full shape, so widen back to DashboardScreen's Channel.
+            setSelectedChannel(channel as unknown as Channel);
             setChannelModalVisible(true);
           }}
           onOpenChannel={() => navigation.getParent()?.navigate('OpenChannel')}

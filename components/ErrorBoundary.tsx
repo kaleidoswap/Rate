@@ -9,6 +9,8 @@ import ErrorHandlingService from '../services/ErrorHandlingService';
 interface Props {
   children: ReactNode;
   fallback?: (error: Error, errorInfo: ErrorInfo, reset: () => void) => ReactNode;
+  /** Optional callback invoked after the boundary is reset (e.g. for analytics or store cleanup). */
+  onReset?: () => void;
 }
 
 interface State {
@@ -57,6 +59,7 @@ export class ErrorBoundary extends Component<Props, State> {
       error: null,
       errorInfo: null,
     });
+    this.props.onReset?.();
   };
 
   render() {

@@ -41,6 +41,7 @@ interface Colors {
     primary: string;
     secondary: string;
     tertiary: string;
+    muted: string;
     inverse: string;
     inverseSecondary: string;
     disabled: string;
@@ -321,6 +322,7 @@ export const theme: ThemeType = {
       primary: k.primaryFg, // #102217
       secondary: '#3D5A4A',
       tertiary: '#6B8F7A',
+      muted: '#6B8F7A',
       inverse: '#FFFFFF',
       inverseSecondary: '#E2E8F0',
       disabled: '#A3B8AC',

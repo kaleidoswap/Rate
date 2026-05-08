@@ -22,6 +22,7 @@ import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/wa
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
+import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 
 interface Props {
   navigation: any;
@@ -311,12 +312,12 @@ export default function WalletRestoreScreen({ navigation }: Props) {
         </View>
       )}
 
-      <View style={styles.warningBox}>
+      <AlertBanner variant="info" style={styles.warningBox}>
         <Ionicons name="shield-checkmark" size={20} color={theme.colors.info[600]} />
         <Text style={styles.warningText}>
           Your recovery phrase is never sent to our servers. It's used only on your device to restore your wallet.
         </Text>
-      </View>
+      </AlertBanner>
     </ScrollView>
   );
 

@@ -7,7 +7,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { RootState } from '../store';
 import { MainHeader, Card } from '../components';
+import { StatusBadge, type StatusType } from '@kaleidorg/kaleido-ui/native';
 import { theme } from '../theme';
+
+// Map domain transaction statuses to kaleido-ui StatusBadge types
+const toBadgeStatus = (s: Transaction['status']): StatusType => {
+    if (s === 'completed') return 'completed';
+    if (s === 'failed') return 'failed';
+    return 'pending'; // 'whitelisted' | 'executing' | 'pending'
+};
 
 // Define transaction types
 type TransactionType = 'deposit' | 'withdraw' | 'swap';
@@ -125,9 +133,7 @@ export default function HistoryScreen() {
                     <Text style={[styles.amountText, { color: item.type === 'deposit' ? theme.colors.success[500] : theme.colors.text.primary }]}>
                         {item.type === 'deposit' ? '+' : '-'}{item.amount > 0 ? item.amount : '?'} {item.asset}
                     </Text>
-                    <Text style={[styles.statusText, { color: item.status === 'completed' ? theme.colors.success[500] : theme.colors.text.secondary }]}>
-                        {item.status}
-                    </Text>
+                    <StatusBadge status={toBadgeStatus(item.status)} style={styles.statusText} />
                 </View>
             </View>
         </Card>

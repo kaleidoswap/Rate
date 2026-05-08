@@ -4,9 +4,15 @@ import { View, StyleSheet, Animated, ViewStyle } from 'react-native';
 import { theme } from '../theme';
 
 interface SkeletonProps {
-  width?: number | string;
+  width?: number | `${number}%` | 'auto';
   height?: number;
   borderRadius?: number;
+  /** Visual preset (e.g. 'text', 'circle', 'card'). Currently informational; reserved for future use. */
+  variant?: 'text' | 'circle' | 'card' | 'rect';
+  /** Number of skeleton rows to render. Defaults to 1. */
+  count?: number;
+  /** Vertical gap between rows when count > 1. Defaults to 8. */
+  spacing?: number;
   style?: ViewStyle;
 }
 
@@ -14,6 +20,9 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   width = '100%',
   height = 20,
   borderRadius = 4,
+  variant: _variant,
+  count = 1,
+  spacing = 8,
   style,
 }) => {
   const opacity = useRef(new Animated.Value(0.3)).current;
@@ -39,23 +48,28 @@ export const Skeleton: React.FC<SkeletonProps> = ({
     return () => animation.stop();
   }, []);
 
-  return (
+  const row = (key?: number) => (
     <Animated.View
+      key={key}
       testID="loading-skeleton"
       accessibilityLabel="Loading"
       accessibilityState={{ busy: true }}
       style={[
         styles.skeleton,
         {
-          width,
+          width: width as any,
           height,
           borderRadius,
           opacity,
+          marginBottom: count > 1 && key !== count - 1 ? spacing : 0,
         },
         style,
       ]}
     />
   );
+
+  if (count <= 1) return row();
+  return <View>{Array.from({ length: count }).map((_, i) => row(i))}</View>;
 };
 
 export const CardSkeleton: React.FC = () => (

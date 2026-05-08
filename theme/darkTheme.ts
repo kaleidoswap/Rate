@@ -29,6 +29,7 @@ export const darkTheme: ThemeType = {
       primary: k.textPrimary,    // #FFFFFF
       secondary: k.textSecondary, // #92C9A8
       tertiary: '#6B8F7A',
+      muted: k.textMuted ?? '#6B8F7A',
       inverse: k.primaryFg,      // #102217
       inverseSecondary: '#243E30',
       disabled: '#3D5A4A',
