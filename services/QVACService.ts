@@ -27,6 +27,20 @@ export interface QVACTool {
   description: string;
   parameters: z.ZodObject<any>;
   handler: (args: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * When true the tool is NOT auto-executed by `chat()`. Instead it is returned
+   * with `pending: true` so the UI can ask the user to confirm (e.g. payments)
+   * before invoking the handler explicitly.
+   */
+  requiresConfirmation?: boolean;
+}
+
+export interface QVACToolCall {
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  /** True when the tool needs user confirmation before its handler runs. */
+  pending?: boolean;
 }
 
 type StateListener = (state: QVACState) => void;
@@ -96,7 +110,7 @@ class QVACService {
         modelType: 'llamacpp-completion',
         modelConfig: {
           device: 'gpu',
-          ctx_size: 2048,
+          ctx_size: 4096,
           tools: true,
           verbosity: VERBOSITY.ERROR,
         },
@@ -154,41 +168,58 @@ class QVACService {
   async chat(params: {
     messages: Array<{ role: string; content: string }>;
     tools?: QVACTool[];
-    stream?: boolean;
-  }): Promise<{ text: string; toolCalls: Array<{ name: string; arguments: Record<string, unknown>; result?: unknown }> }> {
+    /** Called for every token as it streams in. Presence enables streaming. */
+    onToken?: (token: string) => void;
+  }): Promise<{ text: string; toolCalls: QVACToolCall[] }> {
     if (!this.llmModelId) {
       throw new Error('LLM model not loaded');
     }
 
-    const toolDefs = params.tools?.map(t => ({
+    const tools = params.tools ?? [];
+    const toolsByName = new Map(tools.map(t => [t.name, t]));
+    const toolDefs = tools.map(t => ({
       name: t.name,
       description: t.description,
       parameters: t.parameters,
       handler: t.handler,
     }));
 
+    const stream = !!params.onToken;
     const result = completion({
       modelId: this.llmModelId,
       history: params.messages,
-      stream: params.stream ?? false,
-      tools: toolDefs,
+      stream,
+      tools: toolDefs.length ? toolDefs : undefined,
     });
 
-    // Collect the full text
+    // Collect the full text (streaming token-by-token when a callback is set)
     let fullText = '';
-    if (params.stream) {
+    if (stream) {
       for await (const token of result.tokenStream) {
         fullText += token;
+        params.onToken!(token);
       }
     } else {
       fullText = await result.text;
     }
 
-    // Collect tool calls
+    // Resolve tool calls. Financial tools (requiresConfirmation) are returned
+    // as `pending` instead of being auto-invoked, so the UI can confirm first.
     const toolCalls = await result.toolCalls;
-    const executedCalls: Array<{ name: string; arguments: Record<string, unknown>; result?: unknown }> = [];
+    const executedCalls: QVACToolCall[] = [];
 
     for (const call of toolCalls) {
+      const def = toolsByName.get(call.name);
+
+      if (def?.requiresConfirmation) {
+        executedCalls.push({
+          name: call.name,
+          arguments: call.arguments,
+          pending: true,
+        });
+        continue;
+      }
+
       let callResult: unknown;
       if (call.invoke) {
         try {

@@ -992,6 +992,92 @@ _The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sur
       .slice(0, limit)
       .map(result => result.name);
   }
+
+  /**
+   * Read-only: current on-chain/Lightning BTC balance plus RGB asset balances.
+   */
+  async getWalletBalance() {
+    try {
+      const adapter = this.getRgbAdapter();
+      const [btc, assets] = await Promise.all([
+        adapter.getBtcBalance(),
+        adapter.listAssets().catch(() => []),
+      ]);
+
+      const rgbAssets = (assets || [])
+        .filter((a: any) => a?.ticker && a.ticker !== 'BTC')
+        .map((a: any) => ({
+          ticker: a.ticker,
+          name: a.name,
+          balance: a.balance?.availableDisplay ?? String(a.balance?.available ?? 0),
+        }));
+
+      return {
+        success: true,
+        btc_sats: btc.total,
+        btc_confirmed_sats: btc.confirmed,
+        btc_pending_sats: btc.unconfirmed,
+        assets: rgbAssets,
+        message: `Balance: ${btc.total.toLocaleString()} sats` +
+          (rgbAssets.length ? ` · ${rgbAssets.map(a => `${a.balance} ${a.ticker}`).join(', ')}` : ''),
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to read balance';
+      return { success: false, error: errorMessage, message: `❌ ${errorMessage}`, timestamp: new Date().toISOString() };
+    }
+  }
+
+  /**
+   * Read-only: a fresh on-chain BTC address to receive funds.
+   */
+  async getReceiveAddress({ asset_id }: { asset_id?: string } = {}) {
+    try {
+      const address = await this.getRgbAdapter().getReceiveAddress(asset_id);
+      return {
+        success: true,
+        address: address.address,
+        format: address.format,
+        message: `Here is your receive address:\n\n\`${address.address}\``,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to get address';
+      return { success: false, error: errorMessage, message: `❌ ${errorMessage}`, timestamp: new Date().toISOString() };
+    }
+  }
+
+  /**
+   * Read-only: most recent Lightning payments (sent + received).
+   */
+  async listRecentTransactions({ limit = 5 }: { limit?: number } = {}) {
+    try {
+      const adapter: any = this.getRgbAdapter();
+      const raw = await adapter.listPayments();
+      const payments: any[] = Array.isArray(raw) ? raw : (raw?.payments || []);
+      const capped = Math.max(1, Math.min(limit, 20));
+
+      const recent = payments.slice(0, capped).map((p: any) => ({
+        amount_sats: p.amt_msat ? Math.floor(p.amt_msat / 1000) : (p.amount_sats ?? p.amount ?? 0),
+        direction: p.inbound === true || p.direction === 'inbound' ? 'received' : 'sent',
+        status: p.status,
+        hash: p.payment_hash ?? p.hash,
+      }));
+
+      return {
+        success: true,
+        count: recent.length,
+        transactions: recent,
+        message: recent.length
+          ? `Your last ${recent.length} transactions:`
+          : 'No recent transactions found.',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to list transactions';
+      return { success: false, error: errorMessage, message: `❌ ${errorMessage}`, timestamp: new Date().toISOString() };
+    }
+  }
 }
 
 /**

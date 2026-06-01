@@ -1,5 +1,5 @@
 // screens/AIAssistantScreen.tsx
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -26,11 +26,13 @@ import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { theme } from '../theme';
 import { MainHeader } from '../components';
-import SpeechToText, { SpeechToTextRef } from '../components/SpeechToText';
+import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import InvoiceQRCode from '../components/InvoiceQRCode';
-import { EnhancedAIAssistant } from '../services/aiAssistantFunctions';
+import { AIAssistantFunctions } from '../services/aiAssistantFunctions';
+import { createQVACTools } from '../services/qvacTools';
+import { useQVAC } from '../hooks/useQVAC';
 import * as Haptics from 'expo-haptics';
 import Markdown from 'react-native-markdown-display';
 import { BlurView } from 'expo-blur';
@@ -54,6 +56,7 @@ interface Message {
   timestamp: Date;
   functionCalled?: string;
   functionResult?: any;
+  streaming?: boolean;
 }
 
 interface PaymentDetails {
@@ -117,15 +120,27 @@ const markdownStyles = {
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
+const WELCOME_TEXT =
+  'Hi! I\'m your on-device AI assistant for Bitcoin, Lightning and RGB assets. Everything runs privately on your phone — nothing leaves the device.\n\nI can help you:\n\n💸 Pay Lightning invoices or addresses\n🧾 Generate invoices to receive payments\n💰 Check your balance & recent transactions\n📥 Get a receive address\n🏪 Find Bitcoin-accepting merchants in Lugano\n👥 Pay friends from your Nostr contacts\n\nTry: "What\'s my balance?", "Generate an invoice for 5000 sats", or "Pay 1000 sats to alice@getalby.com".';
+
+const SYSTEM_PROMPT = {
+  role: 'system',
+  content:
+    'You are KaleidoSwap, a concise, privacy-first assistant running fully on-device inside a non-custodial Bitcoin, Lightning and RGB wallet. ' +
+    'Use the provided tools to take actions: pay invoices/addresses, generate invoices, check balance, get a receive address, list recent transactions, find Lugano merchants, or pay Nostr contacts. ' +
+    'Never invent balances, addresses or transaction data — always call the relevant tool and report what it returns. All BTC amounts are in satoshis. ' +
+    'Keep replies short and friendly.',
+};
+
+const createWelcomeMessage = (): Message => ({
+  id: Date.now().toString(),
+  text: WELCOME_TEXT,
+  isUser: false,
+  timestamp: new Date(),
+});
+
 export default function AIAssistantScreen({ navigation }: Props) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: 'Hello! I\'m your AI assistant specialized in Bitcoin, Lightning Network, and RGB assets. I can help you:\n\n💸 Pay Lightning invoices or addresses\n🧾 Generate invoices to receive payments\n🏪 Find Bitcoin-accepting merchants in Lugano\n📍 Get detailed merchant information\n👥 Pay friends from your Nostr contacts\n\nHow can I assist you today? 🚀\n\n💡 Tip: Try saying "Pay 1000 sats to alice@example.com", "Generate invoice for 5000 sats", or tap the contacts button to pay a friend!',
-      isUser: false,
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([createWelcomeMessage()]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -143,14 +158,19 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const [showContactsSelector, setShowContactsSelector] = useState(false);
 
   const scrollViewRef = useRef<ScrollView>(null);
-  const speechToTextRef = useRef<SpeechToTextRef>(null);
+  const voiceInputRef = useRef<VoiceInputRef>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const typingAnim = useRef(new Animated.Value(0)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
   const messageAnimations = useRef(new Map()).current;
 
-  // Initialize Enhanced AI Assistant
-  const aiAssistant = useRef(new EnhancedAIAssistant()).current;
+  // On-device QVAC: model lifecycle + wallet tools
+  const qvac = useQVAC();
+  const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
+  const tools = useMemo(() => createQVACTools(aiFunctions), [aiFunctions]);
+
+  // Raw tool call awaiting user confirmation (e.g. a payment)
+  const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
 
   // Get nostr state for better personalization  
   const nostrState = useSelector((state: RootState) => state.nostr);
@@ -272,6 +292,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
     setTimeout(() => scrollToBottom(true), 100);
   }, [animateMessage, scrollToBottom]);
 
+  // Patch an existing message in place (used for streaming tokens)
+  const updateMessage = useCallback((id: string, patch: (m: Message) => Partial<Message>) => {
+    setMessages(prev => prev.map(m => (m.id === id ? { ...m, ...patch(m) } : m)));
+  }, []);
+
   const handleSpeechStart = () => {
     console.log('🎤 Speech recognition started');
     setIsListening(true);
@@ -352,12 +377,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
     }
 
     console.log('🎤 Starting speech recognition...');
-    speechToTextRef.current?.startListening();
+    voiceInputRef.current?.startListening();
   };
 
   const stopListening = () => {
     console.log('🛑 Stopping speech recognition...');
-    speechToTextRef.current?.stopListening();
+    voiceInputRef.current?.stopListening();
   };
 
   const copyToClipboard = (text: string) => {
@@ -394,37 +419,78 @@ export default function AIAssistantScreen({ navigation }: Props) {
     setShowPaymentConfirmation(true);
   };
 
+  const cancelPayment = () => {
+    setShowPaymentConfirmation(false);
+    setPendingPayment(null);
+    setPendingToolCall(null);
+  };
+
+  // Build display details for the confirmation modal from a raw tool call
+  const buildPaymentDetails = (call: { name: string; arguments: any }): PaymentDetails => {
+    const args = call.arguments || {};
+    if (call.name === 'pay_nostr_contact') {
+      return {
+        type: 'nostr_contact',
+        recipient: args.contact_name || args.contact_npub || 'Nostr contact',
+        amount: Number(args.amount_sats) || 0,
+        description: args.description || 'Payment to Nostr contact',
+        recipientName: args.contact_name,
+        isNostrContact: true,
+      };
+    }
+    const target = String(args.invoice_or_address || '');
+    const isAddress = target.includes('@');
+    return {
+      type: isAddress ? 'lightning_address' : 'lightning_invoice',
+      recipient: target,
+      amount: Number(args.amount_sats) || 0,
+      description: args.description || 'Payment via AI Assistant',
+      lightningAddress: isAddress ? target : undefined,
+    };
+  };
+
+  // Actually execute the payment once the user confirms in the modal
   const handlePaymentConfirm = async () => {
-    if (!pendingPayment) return;
+    if (!pendingToolCall) {
+      setShowPaymentConfirmation(false);
+      return;
+    }
 
     setPaymentLoading(true);
-
     try {
-      // Here you would call the actual payment function
-      // For now, we'll simulate the payment
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      const result: any =
+        pendingToolCall.name === 'pay_nostr_contact'
+          ? await aiFunctions.payNostrContact(pendingToolCall.arguments)
+          : await aiFunctions.payLightningInvoice(pendingToolCall.arguments);
 
+      const toolName = pendingToolCall.name;
       setShowPaymentConfirmation(false);
       setPendingPayment(null);
+      setPendingToolCall(null);
 
-      // Add success message
-      const successMessage: Message = {
+      addMessage({
         id: Date.now().toString(),
-        text: '✅ Payment sent successfully! Your transaction has been broadcasted to the Lightning Network.',
+        text: result?.message || (result?.success ? '✅ Payment sent successfully.' : '❌ Payment failed.'),
         isUser: false,
         timestamp: new Date(),
-      };
+        functionCalled: toolName,
+        functionResult: result,
+      });
 
-      addMessage(successMessage);
+      Haptics.notificationAsync(
+        result?.success
+          ? Haptics.NotificationFeedbackType.Success
+          : Haptics.NotificationFeedbackType.Error
+      );
     } catch (error) {
-      Alert.alert('Payment Failed', 'Unable to process payment. Please try again.');
+      Alert.alert('Payment Failed', error instanceof Error ? error.message : 'Unable to process payment. Please try again.');
     } finally {
       setPaymentLoading(false);
     }
   };
 
   const sendMessage = async (text: string) => {
-    const messageText = text || inputText.trim();
+    const messageText = (text || inputText).trim();
     if (!messageText) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -433,100 +499,82 @@ export default function AIAssistantScreen({ navigation }: Props) {
     setInputText('');
     setPartialText('');
 
-    const userMessage: Message = {
+    addMessage({
       id: Date.now().toString(),
       text: messageText,
       isUser: true,
       timestamp: new Date(),
-    };
+    });
 
-    addMessage(userMessage);
+    // Guard: on-device model not ready yet
+    if (!qvac.isReady) {
+      addMessage({
+        id: (Date.now() + 1).toString(),
+        text:
+          qvac.llmStatus === 'error'
+            ? `⚠️ The on-device AI failed to load: ${qvac.error || 'unknown error'}. Tap retry in the banner above.`
+            : `⏳ The on-device AI is still getting ready (${qvac.combinedProgress}%). Give it a moment and try again.`,
+        isUser: false,
+        timestamp: new Date(),
+      });
+      return;
+    }
+
     setIsLoading(true);
 
+    // Streaming assistant placeholder we fill in as tokens arrive
+    const assistantId = (Date.now() + 1).toString();
+    addMessage({ id: assistantId, text: '', isUser: false, timestamp: new Date(), streaming: true });
+
     try {
-      const conversationHistory = messages.map(msg => ({
-        role: msg.isUser ? 'user' as const : 'assistant' as const,
-        content: msg.text
-      }));
+      const history = messages
+        .filter(m => !m.streaming)
+        .map(m => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }));
+      const chatMessages = [SYSTEM_PROMPT, ...history, { role: 'user', content: messageText }];
 
-      const response = await aiAssistant.processMessage(messageText, conversationHistory) as AIResponse;
+      const res = await qvac.service.chat({
+        messages: chatMessages,
+        tools,
+        onToken: (token) => {
+          updateMessage(assistantId, (m) => ({ text: m.text + token }));
+          scrollToBottom(true);
+        },
+      });
 
-      // Check if this is a payment request and needs confirmation
-      if ((response.functionCalled === 'pay_lightning_invoice' || response.functionCalled === 'pay_nostr_contact') && response.functionResult) {
-        const amountMatch = messageText.match(/(\d+)\s*(sats?|satoshis?)/i);
-        const addressMatch = messageText.match(/([a-zA-Z0-9]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})|((lnbc|lntb)[a-zA-Z0-9]+)/i);
-
-        // Handle Nostr contact payments
-        if (response.functionCalled === 'pay_nostr_contact' && response.functionResult.contact) {
-          const contact = response.functionResult.contact;
-          const paymentDetails: PaymentDetails = {
-            type: 'nostr_contact',
-            recipient: contact.lightning_address || contact.name || contact.npub || 'Unknown contact',
-            amount: amountMatch ? parseInt(amountMatch[1]) : 0,
-            description: 'Payment to Nostr contact',
-            recipientName: contact.name,
-            recipientAvatar: contact.avatar_url,
-            lightningAddress: contact.lightning_address,
-            isNostrContact: true,
-          };
-
-          confirmPayment(paymentDetails);
-          setIsLoading(false);
-          return;
-        }
-
-        // Handle regular Lightning payments
-        if (response.functionCalled === 'pay_lightning_invoice' && addressMatch) {
-          // For Lightning addresses, we need the amount
-          if (addressMatch[0].includes('@') && !amountMatch) {
-            const errorMessage: Message = {
-              id: (Date.now() + 1).toString(),
-              text: "Please specify the amount in sats you want to send to this Lightning address.",
-              isUser: false,
-              timestamp: new Date(),
-            };
-            addMessage(errorMessage);
-            setIsLoading(false);
-            return;
-          }
-
-          // Show payment confirmation dialog
-          const paymentDetails: PaymentDetails = {
-            type: addressMatch[0].includes('@') ? 'lightning_address' : 'lightning_invoice',
-            recipient: addressMatch[0],
-            amount: amountMatch ? parseInt(amountMatch[1]) : 0,
-            description: 'Payment via AI Assistant',
-            lightningAddress: addressMatch[0].includes('@') ? addressMatch[0] : undefined,
-          };
-
-          confirmPayment(paymentDetails);
-          setIsLoading(false);
-          return;
-        }
+      // A payment is awaiting explicit user confirmation
+      const pending = res.toolCalls.find(c => c.pending);
+      if (pending) {
+        setPendingToolCall({ name: pending.name, arguments: pending.arguments });
+        confirmPayment(buildPaymentDetails(pending));
+        updateMessage(assistantId, () => ({
+          text: res.text?.trim() || 'Please review and confirm the payment below. 👇',
+          streaming: false,
+        }));
+        setIsLoading(false);
+        return;
       }
 
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: response.text || 'Sorry, I could not process your request.',
-        isUser: false,
-        timestamp: new Date(),
-        functionCalled: response.functionCalled || undefined,
-        functionResult: response.functionResult || undefined
-      };
+      // A read/action tool that already executed (balance, address, invoice, …)
+      const executed = res.toolCalls.find(c => c.result !== undefined);
+      const result: any = executed?.result;
+      let finalText = res.text?.trim();
+      if (!finalText && result?.message) finalText = result.message;
+      if (!finalText) finalText = executed ? '' : 'Done.';
 
-      addMessage(aiMessage);
+      updateMessage(assistantId, () => ({
+        text: finalText as string,
+        streaming: false,
+        functionCalled: executed?.name,
+        functionResult: result,
+      }));
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      console.error('AI response error:', error);
+      console.error('QVAC chat error:', error);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: "I'm having trouble processing your request right now. This might be due to network connectivity or service availability. Please check your connection and try again. 🔧",
-        isUser: false,
-        timestamp: new Date(),
-      };
-      addMessage(errorMessage);
+      updateMessage(assistantId, () => ({
+        text: "I couldn't process that on-device just now. Please try again. 🔧",
+        streaming: false,
+      }));
     }
 
     setIsLoading(false);
@@ -639,6 +687,75 @@ export default function AIAssistantScreen({ navigation }: Props) {
           </View>
         );
 
+      case 'get_wallet_balance':
+        return functionResult.success ? (
+          <View style={styles.functionResult}>
+            <Text style={styles.functionTitle}>💰 Wallet Balance</Text>
+            <Text style={styles.balanceAmount}>
+              {Number(functionResult.btc_sats || 0).toLocaleString()} sats
+            </Text>
+            {functionResult.btc_pending_sats > 0 && (
+              <Text style={styles.balanceSub}>
+                {Number(functionResult.btc_pending_sats).toLocaleString()} sats pending
+              </Text>
+            )}
+            {Array.isArray(functionResult.assets) && functionResult.assets.length > 0 && (
+              <View style={styles.assetRows}>
+                {functionResult.assets.map((a: any, i: number) => (
+                  <View key={`${a.ticker}-${i}`} style={styles.assetRow}>
+                    <Text style={styles.assetTicker}>{a.ticker}</Text>
+                    <Text style={styles.assetBalance}>{a.balance}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ) : (
+          <View style={styles.functionResult}>
+            <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          </View>
+        );
+
+      case 'get_receive_address':
+        return functionResult.success ? (
+          <View style={styles.functionResult}>
+            <Text style={styles.functionTitle}>📥 Receive Address</Text>
+            <TouchableOpacity onPress={() => copyToClipboard(functionResult.address)}>
+              <Text style={styles.addressText}>{functionResult.address}</Text>
+              <Text style={styles.copyText}>📋 Tap to copy</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.functionResult}>
+            <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          </View>
+        );
+
+      case 'list_recent_transactions':
+        return functionResult.success ? (
+          <View style={styles.functionResult}>
+            <Text style={styles.functionTitle}>📜 Recent Transactions</Text>
+            {(functionResult.transactions || []).length === 0 ? (
+              <Text style={styles.invoiceText}>No recent transactions.</Text>
+            ) : (
+              functionResult.transactions.map((t: any, i: number) => (
+                <View key={i} style={styles.txRow}>
+                  <Text style={styles.txDirection}>
+                    {t.direction === 'received' ? '↓ Received' : '↑ Sent'}
+                  </Text>
+                  <Text style={styles.txAmount}>
+                    {Number(t.amount_sats || 0).toLocaleString()} sats
+                  </Text>
+                </View>
+              ))
+            )}
+          </View>
+        ) : (
+          <View style={styles.functionResult}>
+            <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          </View>
+        );
+
       default:
         return null;
     }
@@ -690,9 +807,17 @@ export default function AIAssistantScreen({ navigation }: Props) {
             </LinearGradient>
           ) : (
             <View>
-              <Markdown style={markdownStyles}>
-                {message.text}
-              </Markdown>
+              {message.streaming && !message.text.trim() ? (
+                <View style={styles.typingContainer}>
+                  <Animated.View style={[styles.typingDot, { opacity: typingAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.3, 1, 0.3] }) }]} />
+                  <Animated.View style={[styles.typingDot, { opacity: typingAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.3, 1] }) }]} />
+                  <Animated.View style={[styles.typingDot, { opacity: typingAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.3, 1, 0.3] }) }]} />
+                </View>
+              ) : (
+                <Markdown style={markdownStyles}>
+                  {message.text}
+                </Markdown>
+              )}
               {message.functionCalled && message.functionResult &&
                 renderFunctionResult(message.functionCalled, message.functionResult)
               }
@@ -766,6 +891,43 @@ export default function AIAssistantScreen({ navigation }: Props) {
       </View>
     </View>
   );
+
+  // On-device model status banner (download / load / error)
+  const renderModelStatus = () => {
+    if (qvac.isReady) return null;
+
+    const isError = qvac.llmStatus === 'error';
+    const label = isError
+      ? 'On-device AI failed to load'
+      : qvac.isDownloading
+        ? `Downloading on-device AI… ${qvac.combinedProgress}%`
+        : 'Loading on-device AI…';
+
+    return (
+      <View style={[styles.modelBanner, isError && styles.modelBannerError]}>
+        <View style={styles.modelBannerRow}>
+          {isError ? (
+            <Ionicons name="alert-circle" size={18} color={theme.colors.error[600]} />
+          ) : (
+            <ActivityIndicator size="small" color={theme.colors.primary[600]} />
+          )}
+          <Text style={[styles.modelBannerText, isError && styles.modelBannerTextError]}>
+            {label}
+          </Text>
+          {isError && (
+            <TouchableOpacity onPress={qvac.initialize} style={styles.modelRetry}>
+              <Text style={styles.modelRetryText}>Retry</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+        {!isError && qvac.isDownloading && (
+          <View style={styles.modelProgressTrack}>
+            <View style={[styles.modelProgressFill, { width: `${qvac.combinedProgress}%` }]} />
+          </View>
+        )}
+      </View>
+    );
+  };
 
   // Enhanced quick action buttons with better design
   const renderQuickActions = () => (
@@ -843,13 +1005,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
           text: 'Clear',
           style: 'destructive',
           onPress: () => {
-            const welcomeMessage = {
-              id: Date.now().toString(),
-              text: 'Hello! I\'m your AI assistant specialized in Bitcoin, Lightning Network, and RGB assets. I can help you:\n\n💸 Pay Lightning invoices or addresses\n🧾 Generate invoices to receive payments\n🏪 Find Bitcoin-accepting merchants in Lugano\n📍 Get detailed merchant information\n👥 Pay friends from your Nostr contacts\n\nHow can I assist you today? 🚀\n\n💡 Tip: Try saying "Pay 1000 sats to alice@example.com", "Generate invoice for 5000 sats", or tap the contacts button to pay a friend!',
-              isUser: false,
-              timestamp: new Date(),
-            };
-            setMessages([welcomeMessage]);
+            setMessages([createWelcomeMessage()]);
             // Clear message animations
             messageAnimations.clear();
             // Scroll to top immediately
@@ -884,12 +1040,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
       />
       <View style={styles.chatContainer}>
         <LinearGradient
-          colors={['#f8f9ff', '#e8f4f8']}
+          colors={[theme.colors.background.primary, theme.colors.background.tertiary]}
           style={styles.background}
         >
-          {/* Hidden Speech-to-Text Component */}
-          <SpeechToText
-            ref={speechToTextRef}
+          {/* Hidden on-device voice input (QVAC Whisper) */}
+          <VoiceInput
+            ref={voiceInputRef}
             onStart={handleSpeechStart}
             onEnd={handleSpeechEnd}
             onResult={handleSpeechResult}
@@ -903,6 +1059,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           >
             <View style={styles.contentInner}>
+              {renderModelStatus()}
               <ScrollView
                 ref={scrollViewRef}
                 style={styles.messagesContainer}
@@ -925,7 +1082,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 }}
               >
                 {messages.map((message, index) => renderMessage(message, index))}
-                {isLoading && renderTypingIndicator()}
+                {isLoading && !messages.some(m => m.streaming) && renderTypingIndicator()}
               </ScrollView>
 
               <TouchableWithoutFeedback onPress={dismissKeyboard}>
@@ -986,7 +1143,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                           disabled={!isVoiceAvailable || isLoading}
                         >
                           <LinearGradient
-                            colors={isListening ? theme.colors.error.gradient! : ['#00d2d3', '#54a0ff']}
+                            colors={isListening ? theme.colors.error.gradient! : theme.colors.accent.gradient!}
                             style={styles.buttonGradient}
                           >
                             <Ionicons
@@ -1051,7 +1208,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             visible={showPaymentConfirmation}
             paymentDetails={pendingPayment}
             onConfirm={handlePaymentConfirm}
-            onCancel={() => setShowPaymentConfirmation(false)}
+            onCancel={cancelPayment}
             loading={paymentLoading}
           />
 
@@ -1442,5 +1599,116 @@ const styles = StyleSheet.create({
     padding: 4,
     backgroundColor: 'rgba(255, 59, 48, 0.8)',
     borderRadius: 12,
+  },
+
+  // On-device model status banner
+  modelBanner: {
+    marginHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[3],
+    padding: theme.spacing[3],
+    backgroundColor: theme.colors.primary[50],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[100],
+  },
+  modelBannerError: {
+    backgroundColor: theme.colors.error[50],
+    borderColor: theme.colors.error[100],
+  },
+  modelBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+  },
+  modelBannerText: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.primary[700],
+    fontWeight: '600',
+  },
+  modelBannerTextError: {
+    color: theme.colors.error[700],
+  },
+  modelRetry: {
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    backgroundColor: theme.colors.error[600],
+    borderRadius: theme.borderRadius.sm,
+  },
+  modelRetryText: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.inverse,
+    fontWeight: '700',
+  },
+  modelProgressTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: theme.colors.primary[100],
+    marginTop: theme.spacing[2],
+    overflow: 'hidden',
+  },
+  modelProgressFill: {
+    height: '100%',
+    borderRadius: 2,
+    backgroundColor: theme.colors.primary[500],
+  },
+
+  // Balance result
+  balanceAmount: {
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: '700',
+    color: theme.colors.primary[700],
+  },
+  balanceSub: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+    marginTop: theme.spacing[1],
+  },
+  assetRows: {
+    marginTop: theme.spacing[2],
+    gap: theme.spacing[1],
+  },
+  assetRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: theme.spacing[1],
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.primary[100],
+  },
+  assetTicker: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  assetBalance: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+  },
+
+  // Address result
+  addressText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    fontWeight: '500',
+    marginBottom: theme.spacing[1],
+  },
+
+  // Transaction rows
+  txRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: theme.spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.primary[100],
+  },
+  txDirection: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    fontWeight: '500',
+  },
+  txAmount: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    fontWeight: '600',
   },
 });
