@@ -1,5 +1,7 @@
 // hooks/useQVAC.ts
 import { useEffect, useMemo, useState } from 'react';
+import { AppState } from 'react-native';
+import { resume, suspend } from '@qvac/sdk';
 import QVACService, { QVACState } from '../services/QVACService';
 
 export interface UseQVACResult extends QVACState {
@@ -44,6 +46,20 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   useEffect(() => {
     if (autoInit) initialize();
   }, [autoInit, initialize]);
+
+  // Suspend the QVAC runtime (Hyperswarm / Corestore networking) while the app
+  // is backgrounded and resume it on return, per the SDK lifecycle API. Both
+  // are safe to call from any state, so we just guard with try/catch.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'background' || next === 'inactive') {
+        void suspend().catch(() => {});
+      } else if (next === 'active') {
+        void resume().catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   const isReady = state.llmStatus === 'ready';
   const isWhisperReady = state.whisperStatus === 'ready';

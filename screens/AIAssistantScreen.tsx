@@ -172,6 +172,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
 
+  // requestId of the in-flight completion, used to cancel via the stop button
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+
   // Get nostr state for better personalization  
   const nostrState = useSelector((state: RootState) => state.nostr);
 
@@ -535,6 +538,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       const res = await qvac.service.chat({
         messages: chatMessages,
         tools,
+        onStart: (requestId) => setActiveRequestId(requestId),
         onToken: (token) => {
           updateMessage(assistantId, (m) => ({ text: m.text + token }));
           scrollToBottom(true);
@@ -550,6 +554,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
           text: res.text?.trim() || 'Please review and confirm the payment below. 👇',
           streaming: false,
         }));
+        setActiveRequestId(null);
         setIsLoading(false);
         return;
       }
@@ -577,8 +582,17 @@ export default function AIAssistantScreen({ navigation }: Props) {
       }));
     }
 
+    setActiveRequestId(null);
     setIsLoading(false);
   };
+
+  // Stop an in-flight on-device generation
+  const stopGeneration = useCallback(() => {
+    if (activeRequestId) {
+      qvac.service.cancelRequest(activeRequestId);
+      setActiveRequestId(null);
+    }
+  }, [activeRequestId, qvac.service]);
 
   const formatRecordingDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);
@@ -1155,22 +1169,37 @@ export default function AIAssistantScreen({ navigation }: Props) {
                         </TouchableOpacity>
                       </Animated.View>
 
-                      <TouchableOpacity
-                        style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
-                        onPress={() => sendMessage(inputText)}
-                        disabled={!inputText.trim() || isLoading || isListening}
-                      >
-                        <LinearGradient
-                          colors={inputText.trim() ? theme.colors.primary.gradient! : ['#E5E5EA', '#E5E5EA']}
-                          style={styles.buttonGradient}
+                      {isLoading ? (
+                        <TouchableOpacity
+                          style={styles.sendButton}
+                          onPress={stopGeneration}
+                          accessibilityLabel="Stop generating"
                         >
-                          <Ionicons
-                            name="send"
-                            size={20}
-                            color={inputText.trim() ? "white" : theme.colors.gray[400]}
-                          />
-                        </LinearGradient>
-                      </TouchableOpacity>
+                          <LinearGradient
+                            colors={theme.colors.error.gradient!}
+                            style={styles.buttonGradient}
+                          >
+                            <Ionicons name="stop" size={20} color="white" />
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={[styles.sendButton, !inputText.trim() && styles.disabledButton]}
+                          onPress={() => sendMessage(inputText)}
+                          disabled={!inputText.trim() || isListening}
+                        >
+                          <LinearGradient
+                            colors={inputText.trim() ? theme.colors.primary.gradient! : ['#E5E5EA', '#E5E5EA']}
+                            style={styles.buttonGradient}
+                          >
+                            <Ionicons
+                              name="send"
+                              size={20}
+                              color={inputText.trim() ? "white" : theme.colors.gray[400]}
+                            />
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      )}
                     </View>
 
                     {isListening && (

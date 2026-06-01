@@ -5,6 +5,7 @@ import {
   transcribe,
   unloadModel,
   downloadAsset,
+  cancel,
   QWEN3_600M_INST_Q4,
   WHISPER_TINY,
   VERBOSITY,
@@ -168,9 +169,14 @@ class QVACService {
   async chat(params: {
     messages: Array<{ role: string; content: string }>;
     tools?: QVACTool[];
-    /** Called for every token as it streams in. Presence enables streaming. */
+    /** Called for every visible content token as it streams in. */
     onToken?: (token: string) => void;
-  }): Promise<{ text: string; toolCalls: QVACToolCall[] }> {
+    /**
+     * Called synchronously with the run's requestId the moment generation
+     * starts, so the UI can cancel it mid-stream via `cancelRequest()`.
+     */
+    onStart?: (requestId: string) => void;
+  }): Promise<{ text: string; toolCalls: QVACToolCall[]; requestId: string }> {
     if (!this.llmModelId) {
       throw new Error('LLM model not loaded');
     }
@@ -184,31 +190,35 @@ class QVACService {
       handler: t.handler,
     }));
 
-    const stream = !!params.onToken;
-    const result = completion({
+    // Canonical completion API (QVAC v0.12): a typed `events` stream plus an
+    // aggregated `final` promise. `requestId` is available synchronously.
+    const run = completion({
       modelId: this.llmModelId,
       history: params.messages,
-      stream,
+      stream: true,
       tools: toolDefs.length ? toolDefs : undefined,
     });
 
-    // Collect the full text (streaming token-by-token when a callback is set)
-    let fullText = '';
-    if (stream) {
-      for await (const token of result.tokenStream) {
-        fullText += token;
-        params.onToken!(token);
+    params.onStart?.(run.requestId);
+
+    // Stream visible content tokens. `contentDelta` excludes <think> reasoning
+    // (use `thinkingDelta` if you ever want to surface the model's reasoning).
+    let streamed = '';
+    for await (const event of run.events) {
+      if (event.type === 'contentDelta') {
+        streamed += event.text;
+        params.onToken?.(event.text);
       }
-    } else {
-      fullText = await result.text;
     }
+
+    const final = await run.final;
+    const text = (final.contentText || streamed).trim();
 
     // Resolve tool calls. Financial tools (requiresConfirmation) are returned
     // as `pending` instead of being auto-invoked, so the UI can confirm first.
-    const toolCalls = await result.toolCalls;
     const executedCalls: QVACToolCall[] = [];
 
-    for (const call of toolCalls) {
+    for (const call of final.toolCalls) {
       const def = toolsByName.get(call.name);
 
       if (def?.requiresConfirmation) {
@@ -235,7 +245,16 @@ class QVACService {
       });
     }
 
-    return { text: fullText, toolCalls: executedCalls };
+    return { text, toolCalls: executedCalls, requestId: run.requestId };
+  }
+
+  /** Cancel an in-flight completion by its requestId (for a stop button). */
+  async cancelRequest(requestId: string): Promise<void> {
+    try {
+      await cancel({ requestId });
+    } catch (err) {
+      console.warn('QVAC cancel failed:', err);
+    }
   }
 
   // --- Transcription ---
