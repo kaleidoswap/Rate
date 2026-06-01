@@ -20,7 +20,7 @@
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",
         "NSFaceIDUsageDescription": "Use Face ID to unlock your wallet securely.",
-        "NSMicrophoneUsageDescription": "This app does not use the microphone.",
+        "NSMicrophoneUsageDescription": "Allow KaleidoSwap to use the microphone for on-device voice commands to the AI assistant.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "fetch",
@@ -63,19 +63,21 @@
         "expo-build-properties",
         {
           "ios": {
-            "deploymentTarget": "15.1",
+            "deploymentTarget": "17.0",
             "backgroundModes": [
               "fetch",
               "processing"
             ]
           },
           "android": {
+            "minSdkVersion": 29,
             "compileSdkVersion": 34,
             "targetSdkVersion": 34,
             "buildToolsVersion": "34.0.0"
           }
         }
       ],
+      "@qvac/sdk/expo-plugin",
       "expo-background-task",
       "expo-sqlite",
       "expo-font"
