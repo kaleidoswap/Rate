@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleId": "cb7ef235aace4e0a233e6a2d97e986823bfcd3a411b95719a7a64545b23c3f79",
+  "bundleId": "47f6a1f943cc4f53a8b740dd7c64c01dc514aa3d11466dd854147d53519c370a",
   "addons": [
     "@qvac/llm-llamacpp",
     "@qvac/transcription-whispercpp",
