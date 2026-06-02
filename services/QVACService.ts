@@ -4,14 +4,34 @@ import {
   completion,
   transcribe,
   unloadModel,
-  downloadAsset,
   cancel,
-  QWEN3_600M_INST_Q4,
-  WHISPER_TINY,
   VERBOSITY,
 } from '@qvac/sdk';
-import type { ModelProgressUpdate } from '@qvac/sdk';
+import { File, Directory, Paths } from 'expo-file-system';
 import { z } from 'zod';
+
+/**
+ * We download model weights over plain HTTPS with React Native's own
+ * networking (expo-file-system) instead of QVAC's `downloadAsset`, whose
+ * `registry://` source pulls over a Hyperswarm/DHT P2P transport that crashes
+ * the bare worklet on iOS. Once the file is on disk we hand the local path to
+ * `loadModel`, which mmaps it directly (no worklet networking involved).
+ *
+ * URLs + sizes are derived from the SDK's QWEN3_600M_INST_Q4 / WHISPER_TINY
+ * descriptors (registry blob → Hugging Face `resolve` URL).
+ */
+const MODELS = {
+  llm: {
+    url: 'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/50968a4468ef4233ed78cd7c3de230dd1d61a56b/Qwen3-0.6B-Q4_0.gguf',
+    name: 'Qwen3-0.6B-Q4_0.gguf',
+    size: 382156480,
+  },
+  whisper: {
+    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin',
+    name: 'ggml-tiny.bin',
+    size: 77691713,
+  },
+} as const;
 
 export type ModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error';
 
@@ -87,6 +107,57 @@ class QVACService {
     }
   }
 
+  /**
+   * Download a model over HTTPS (if not already on disk) and return an
+   * absolute filesystem path suitable for `loadModel({ modelSrc })`.
+   */
+  private async ensureLocalModel(
+    model: { url: string; name: string; size: number },
+    onProgress: (pct: number) => void
+  ): Promise<string> {
+    const dir = new Directory(Paths.document, 'qvac-models');
+    try {
+      if (!dir.exists) dir.create({ intermediates: true } as any);
+    } catch {
+      // directory may already exist
+    }
+
+    const file = new File(dir, model.name);
+
+    // Reuse a previously-downloaded, complete file
+    if (file.exists) {
+      let size = 0;
+      try { size = file.info().size ?? 0; } catch { /* ignore */ }
+      if (size === model.size) {
+        onProgress(100);
+        return file.uri.replace('file://', '');
+      }
+      try { file.delete(); } catch { /* ignore */ }
+    }
+
+    // Poll the partial file for rough download progress (the new
+    // expo-file-system download API has no progress callback).
+    const poll = setInterval(() => {
+      try {
+        if (file.exists) {
+          const written = file.info().size ?? 0;
+          const pct = Math.min(99, Math.round((written / model.size) * 100));
+          onProgress(pct);
+        }
+      } catch { /* ignore */ }
+    }, 1000);
+
+    try {
+      console.log(`[QVAC] downloading ${model.name} via https…`);
+      const downloaded = await File.downloadFileAsync(model.url, dir, { idempotent: true } as any);
+      onProgress(100);
+      console.log(`[QVAC] downloaded ${model.name}`);
+      return downloaded.uri.replace('file://', '');
+    } finally {
+      clearInterval(poll);
+    }
+  }
+
   // --- LLM lifecycle ---
 
   async initializeLLM(): Promise<void> {
@@ -97,21 +168,21 @@ class QVACService {
     try {
       this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
 
-      await downloadAsset({
-        assetSrc: QWEN3_600M_INST_Q4,
-        onProgress: (progress: ModelProgressUpdate) => {
-          this.setState({ llmDownloadProgress: Math.round(progress.percentage) });
-        },
-      });
+      const modelPath = await this.ensureLocalModel(MODELS.llm, (pct) =>
+        this.setState({ llmDownloadProgress: pct })
+      );
 
+      console.log('[QVAC] LLM: loadModel start', modelPath);
       this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
 
       this.llmModelId = await loadModel({
-        modelSrc: QWEN3_600M_INST_Q4,
+        modelSrc: modelPath,
         modelType: 'llamacpp-completion',
         modelConfig: {
-          device: 'gpu',
-          ctx_size: 4096,
+          // NOTE: 'gpu' (Metal) crashed the worklet on load on this device;
+          // 'cpu' is the safe path. Revisit GPU once the Metal path is verified.
+          device: 'cpu',
+          ctx_size: 2048,
           tools: true,
           verbosity: VERBOSITY.ERROR,
         },
@@ -136,17 +207,15 @@ class QVACService {
     try {
       this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
 
-      await downloadAsset({
-        assetSrc: WHISPER_TINY,
-        onProgress: (progress: ModelProgressUpdate) => {
-          this.setState({ whisperDownloadProgress: Math.round(progress.percentage) });
-        },
-      });
+      const modelPath = await this.ensureLocalModel(MODELS.whisper, (pct) =>
+        this.setState({ whisperDownloadProgress: pct })
+      );
 
+      console.log('[QVAC] Whisper: loadModel start', modelPath);
       this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100 });
 
       this.whisperModelId = await loadModel({
-        modelSrc: WHISPER_TINY,
+        modelSrc: modelPath,
         modelType: 'whispercpp-transcription',
         modelConfig: {
           language: 'en',

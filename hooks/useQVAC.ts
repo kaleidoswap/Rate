@@ -36,9 +36,11 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   useEffect(() => service.subscribe(setState), [service]);
 
   const initialize = useMemo(
-    () => () => {
-      void service.initializeLLM();
-      void service.initializeWhisper();
+    () => async () => {
+      // Load sequentially — kicking off two concurrent loadModel calls into a
+      // freshly-started bare worklet can crash the native runtime.
+      await service.initializeLLM();
+      await service.initializeWhisper();
     },
     [service]
   );
