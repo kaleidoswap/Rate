@@ -1,8 +1,9 @@
 // hooks/useQVAC.ts
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState } from 'react-native';
 import { resume, suspend } from '@qvac/sdk';
-import QVACService, { QVACState } from '../services/QVACService';
+import QVACService, { QVACState, QVACConfig } from '../services/QVACService';
+import { QVAC_MODELS, type QVACModel } from '../services/qvacModels';
 
 export interface UseQVACResult extends QVACState {
   service: QVACService;
@@ -18,11 +19,19 @@ export interface UseQVACResult extends QVACState {
   combinedProgress: number;
   /** Manually (re)trigger model initialization, e.g. after an error. */
   initialize: () => void;
+  /** Available chat models. */
+  catalog: QVACModel[];
+  /** Current config (selected model + delegation). */
+  config: QVACConfig;
+  /** Switch the active chat model (downloads/loads it). */
+  setModel: (id: string) => Promise<void>;
+  /** Configure P2P delegation to a remote provider. */
+  setDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => Promise<void>;
 }
 
 /**
  * Subscribe to on-device QVAC model state and (optionally) kick off the
- * download + load of the LLM and Whisper models on mount.
+ * download + load of the LLM model on mount.
  *
  * Models are loaded lazily on first use of the AI assistant. We intentionally
  * do NOT unload on background — reloading a ~600MB model on every foreground is
@@ -32,15 +41,30 @@ export interface UseQVACResult extends QVACState {
 export function useQVAC(autoInit: boolean = true): UseQVACResult {
   const service = useMemo(() => QVACService.getInstance(), []);
   const [state, setState] = useState<QVACState>(() => service.getState());
+  const [config, setConfig] = useState<QVACConfig>(() => service.getConfig());
 
   useEffect(() => service.subscribe(setState), [service]);
 
+  // Load persisted config once on mount
+  useEffect(() => {
+    let active = true;
+    service.loadConfig().then((c) => { if (active) setConfig(c); });
+    return () => { active = false; };
+  }, [service]);
+
+  const setModel = useCallback(async (id: string) => {
+    await service.setModelId(id);
+    setConfig(service.getConfig());
+  }, [service]);
+
+  const setDelegate = useCallback(async (opts: { enabled: boolean; providerPublicKey: string }) => {
+    await service.setDelegate(opts);
+    setConfig(service.getConfig());
+  }, [service]);
+
   const initialize = useMemo(
     () => async () => {
-      // Load sequentially — kicking off two concurrent loadModel calls into a
-      // freshly-started bare worklet can crash the native runtime.
       await service.initializeLLM();
-      await service.initializeWhisper();
     },
     [service]
   );
@@ -70,10 +94,7 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   const isPreparing =
     isDownloading || state.llmStatus === 'loading' || state.whisperStatus === 'loading';
 
-  // LLM is the bulk of the download (~400MB) vs Whisper (~40MB); weight it.
-  const combinedProgress = Math.round(
-    state.llmDownloadProgress * 0.9 + state.whisperDownloadProgress * 0.1
-  );
+  const combinedProgress = state.llmStatus === 'ready' ? 100 : state.llmDownloadProgress;
 
   return {
     ...state,
@@ -84,6 +105,10 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     isPreparing,
     combinedProgress,
     initialize,
+    catalog: QVAC_MODELS,
+    config,
+    setModel,
+    setDelegate,
   };
 }
 

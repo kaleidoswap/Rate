@@ -8,30 +8,49 @@ import {
   VERBOSITY,
 } from '@qvac/sdk';
 import { File, Directory, Paths } from 'expo-file-system';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { z } from 'zod';
+import {
+  QVAC_MODELS,
+  DEFAULT_MODEL_ID,
+  getModelById,
+  hfUrlFromDescriptor,
+  type QVACModel,
+} from './qvacModels';
 
 /**
- * We download model weights over plain HTTPS with React Native's own
- * networking (expo-file-system) instead of QVAC's `downloadAsset`, whose
+ * On a phone we download model weights over plain HTTPS with React Native's
+ * own networking (expo-file-system) instead of QVAC's `downloadAsset`, whose
  * `registry://` source pulls over a Hyperswarm/DHT P2P transport that crashes
  * the bare worklet on iOS. Once the file is on disk we hand the local path to
  * `loadModel`, which mmaps it directly (no worklet networking involved).
  *
- * URLs + sizes are derived from the SDK's QWEN3_600M_INST_Q4 / WHISPER_TINY
- * descriptors (registry blob → Hugging Face `resolve` URL).
+ * In DELEGATED mode the model is loaded/run on a remote P2P provider (e.g. a
+ * Mac), so the phone never downloads the weights — we pass the SDK descriptor
+ * plus a `delegate` config to `loadModel`.
  */
-const MODELS = {
-  llm: {
-    url: 'https://huggingface.co/unsloth/Qwen3-0.6B-GGUF/resolve/50968a4468ef4233ed78cd7c3de230dd1d61a56b/Qwen3-0.6B-Q4_0.gguf',
-    name: 'Qwen3-0.6B-Q4_0.gguf',
-    size: 382156480,
-  },
-  whisper: {
-    url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin',
-    name: 'ggml-tiny.bin',
-    size: 77691713,
-  },
-} as const;
+const WHISPER_MODEL = {
+  url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin',
+  name: 'ggml-tiny.bin',
+  size: 77691713,
+};
+
+const CONFIG_KEY = 'qvac.config.v1';
+
+export interface QVACConfig {
+  /** Selected chat model id (see qvacModels.ts). */
+  modelId: string;
+  /** Route inference to a remote P2P provider instead of running on-device. */
+  delegateEnabled: boolean;
+  /** Public key of the QVAC provider to delegate to (from `startQVACProvider`). */
+  providerPublicKey: string;
+}
+
+const DEFAULT_CONFIG: QVACConfig = {
+  modelId: DEFAULT_MODEL_ID,
+  delegateEnabled: false,
+  providerPublicKey: '',
+};
 
 export type ModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error';
 
@@ -72,6 +91,9 @@ class QVACService {
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
 
+  private config: QVACConfig = { ...DEFAULT_CONFIG };
+  private configLoaded = false;
+
   private state: QVACState = {
     llmStatus: 'not_downloaded',
     whisperStatus: 'not_downloaded',
@@ -105,6 +127,63 @@ class QVACService {
     for (const listener of this.listeners) {
       listener(this.getState());
     }
+  }
+
+  // --- Config (selected model + P2P delegation) ---
+
+  /** Available chat models (the catalog). */
+  getCatalog(): QVACModel[] {
+    return QVAC_MODELS;
+  }
+
+  getConfig(): QVACConfig {
+    return { ...this.config };
+  }
+
+  async loadConfig(): Promise<QVACConfig> {
+    if (this.configLoaded) return this.getConfig();
+    try {
+      const raw = await AsyncStorage.getItem(CONFIG_KEY);
+      if (raw) this.config = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+    } catch {
+      /* use defaults */
+    }
+    this.configLoaded = true;
+    return this.getConfig();
+  }
+
+  private async saveConfig() {
+    try {
+      await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(this.config));
+    } catch {
+      /* ignore persistence errors */
+    }
+  }
+
+  /** Switch the active chat model and reload it. */
+  async setModelId(id: string): Promise<void> {
+    if (id === this.config.modelId) return;
+    this.config = { ...this.config, modelId: id };
+    await this.saveConfig();
+    await this.reloadLLM();
+  }
+
+  /** Configure P2P delegation (run inference on a remote provider) and reload. */
+  async setDelegate(opts: { enabled: boolean; providerPublicKey: string }): Promise<void> {
+    this.config = {
+      ...this.config,
+      delegateEnabled: opts.enabled,
+      providerPublicKey: opts.providerPublicKey.trim(),
+    };
+    await this.saveConfig();
+    await this.reloadLLM();
+  }
+
+  /** Unload + re-initialize the LLM (after a model/delegation change). */
+  private async reloadLLM(): Promise<void> {
+    await this.unloadLLM().catch(() => {});
+    this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, error: null });
+    await this.initializeLLM();
   }
 
   /**
@@ -166,27 +245,53 @@ class QVACService {
     }
 
     try {
-      this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
+      await this.loadConfig();
+      const model = getModelById(this.config.modelId);
+      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
 
-      const modelPath = await this.ensureLocalModel(MODELS.llm, (pct) =>
-        this.setState({ llmDownloadProgress: pct })
-      );
-
-      console.log('[QVAC] LLM: loadModel start', modelPath);
-      this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+      let modelSrc: any;
+      if (delegating) {
+        // Weights are resolved/loaded on the remote provider — pass the SDK
+        // descriptor; the phone downloads nothing.
+        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+        modelSrc = model.descriptor;
+        console.log('[QVAC] LLM: delegating', model.id, '→', this.config.providerPublicKey.slice(0, 12) + '…');
+      } else {
+        if (!model.localCapable) {
+          throw new Error(
+            `${model.label} has no direct download — enable P2P delegation or pick a downloadable model.`
+          );
+        }
+        this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
+        const url = hfUrlFromDescriptor(model.descriptor)!;
+        modelSrc = await this.ensureLocalModel(
+          { url, name: model.descriptor.modelId, size: model.descriptor.expectedSize },
+          (pct) => this.setState({ llmDownloadProgress: pct })
+        );
+        console.log('[QVAC] LLM: loadModel start', modelSrc);
+        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+      }
 
       this.llmModelId = await loadModel({
-        modelSrc: modelPath,
+        modelSrc,
         modelType: 'llamacpp-completion',
         modelConfig: {
-          // NOTE: 'gpu' (Metal) crashed the worklet on load on this device;
-          // 'cpu' is the safe path. Revisit GPU once the Metal path is verified.
-          device: 'cpu',
+          // Local on iPhone: 'cpu' (Metal failed to init the llamacpp context in
+          // the bare worklet). Delegated: the provider (e.g. a Mac) can use GPU.
+          device: delegating ? 'gpu' : 'cpu',
           ctx_size: 2048,
           tools: true,
           verbosity: VERBOSITY.ERROR,
         },
-      });
+        ...(delegating
+          ? {
+              delegate: {
+                providerPublicKey: this.config.providerPublicKey,
+                fallbackToLocal: false,
+              },
+            }
+          : {}),
+      } as any);
 
       this.setState({ llmStatus: 'ready' });
       console.log('QVAC LLM ready:', this.llmModelId);
@@ -207,7 +312,7 @@ class QVACService {
     try {
       this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
 
-      const modelPath = await this.ensureLocalModel(MODELS.whisper, (pct) =>
+      const modelPath = await this.ensureLocalModel(WHISPER_MODEL, (pct) =>
         this.setState({ whisperDownloadProgress: pct })
       );
 

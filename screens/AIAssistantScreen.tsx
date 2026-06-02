@@ -29,6 +29,7 @@ import { MainHeader } from '../components';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
+import QVACSettingsSheet from '../components/QVACSettingsSheet';
 import InvoiceQRCode from '../components/InvoiceQRCode';
 import { AIAssistantFunctions } from '../services/aiAssistantFunctions';
 import { createQVACTools } from '../services/qvacTools';
@@ -174,6 +175,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // requestId of the in-flight completion, used to cancel via the stop button
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
+
+  // AI settings sheet (model selection + P2P delegation)
+  const [showSettings, setShowSettings] = useState(false);
 
   // Get nostr state for better personalization  
   const nostrState = useSelector((state: RootState) => state.nostr);
@@ -1045,6 +1049,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
             )}
             <TouchableOpacity
               style={styles.clearButton}
+              onPress={() => setShowSettings(true)}
+              accessibilityLabel="AI settings"
+            >
+              <Ionicons name="settings-outline" size={20} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.clearButton}
               onPress={clearChatHistory}
             >
               <Ionicons name="trash-outline" size={20} color="white" />
@@ -1151,10 +1162,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
                           style={[
                             styles.voiceButton,
                             isListening && styles.voiceButtonActive,
-                            !isVoiceAvailable && styles.disabledButton
+                            (!isVoiceAvailable || !qvac.isReady) && styles.disabledButton
                           ]}
                           onPress={startListening}
-                          disabled={!isVoiceAvailable || isLoading}
+                          disabled={!isVoiceAvailable || isLoading || !qvac.isReady}
                         >
                           <LinearGradient
                             colors={isListening ? theme.colors.error.gradient! : theme.colors.accent.gradient!}
@@ -1246,6 +1257,18 @@ export default function AIAssistantScreen({ navigation }: Props) {
             visible={showContactsSelector}
             onSelectContact={handleContactSelection}
             onClose={() => setShowContactsSelector(false)}
+          />
+
+          {/* AI settings: model selection + P2P delegation */}
+          <QVACSettingsSheet
+            visible={showSettings}
+            onClose={() => setShowSettings(false)}
+            catalog={qvac.catalog}
+            config={qvac.config}
+            llmStatus={qvac.llmStatus}
+            combinedProgress={qvac.combinedProgress}
+            onSelectModel={(id) => qvac.setModel(id)}
+            onSetDelegate={(opts) => qvac.setDelegate(opts)}
           />
         </LinearGradient>
       </View>
