@@ -65,14 +65,26 @@ KaleidoSwap is a React Native mobile application that provides a complete self-c
 
 ## Quick Start
 
-### Installation
+### Prerequisites
+
+- **Node.js** ≥ 20 and **pnpm** ≥ 10 (`npm i -g pnpm`). This repo uses pnpm; mixing in `npm install` is not supported.
+- **Watchman** (recommended): `brew install watchman`.
+- **For iOS:** macOS with **Xcode 16+** (iOS 18 SDK) and **CocoaPods** (`brew install cocoapods`). A **UTF-8 locale** is required (CocoaPods on Ruby 3.4 crashes otherwise).
+- **For Android:** **Android Studio** + SDK (API 34+), a configured emulator or a connected device, and **JDK 17**.
+
+> The app uses the **New Architecture** (default on Expo SDK 54) — required by the native `lwk-rn` (Liquid) module.
+
+### Install dependencies
 
 ```bash
 git clone https://github.com/kaleidoswap/rate.git
 cd rate
-npm install
-npx expo start
+pnpm install        # also runs setup:native → fetches the lwk-rn native artifacts
 ```
+
+`pnpm install` resolves the WDK protocol stack (Spark, RLN/RGB, Liquid, Arkade) — several of these are local `file:` siblings (`../wallet-protocols`, `../wdk-wallet-*`, `../arkade-wdk`), so keep those checked out next to this repo.
+
+> ⚠️ **Do not symlink `node_modules`** (e.g. `ln -s` into another checkout). A self-referencing link causes `ELOOP: too many symbolic links`. If you hit it: `rm node_modules && pnpm install`.
 
 ### Native setup (lwk-rn artifacts)
 
@@ -92,6 +104,44 @@ your package manager skipped postinstall), fetch the artifacts manually:
 
 ```bash
 pnpm run setup:native
+```
+
+### Run on iOS
+
+```bash
+# CocoaPods (Ruby 3.4) needs a UTF-8 locale — export it for the session:
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+# Build + install + launch on a simulator (runs prebuild + pod install + xcodebuild):
+npx expo run:ios
+
+# …or pick a specific simulator / device:
+npx expo run:ios --device "iPhone 16 Pro"
+```
+
+Notes:
+- The **first build is slow** — it compiles the native modules, including `lwk-rn` (Liquid) and the Spark/RGB SDKs.
+- `lwk-rn` pins the pod `uniffi-bindgen-react-native` to `0.28.3-3` (already in `package.json`); don't bump it independently or `pod install` will fail with a version conflict.
+- If `pod install` crashes with a Ruby `Unicode Normalization … ASCII-8BIT` error, you forgot the `LANG=en_US.UTF-8` export above.
+- The **QVAC AI assistant requires a physical device** (no simulator support); the wallet itself runs fine on a simulator.
+
+### Run on Android
+
+```bash
+# Have an emulator running (or a device connected — check with `adb devices`), then:
+npx expo run:android
+```
+
+Notes:
+- `lwk-rn` ships prebuilt Android `jniLibs` (arm64-v8a, etc.), fetched automatically during `pnpm install`.
+- First build compiles the native modules + Gradle — allow several minutes.
+
+### Run the dev server (after a native build is installed)
+
+Once the app is installed on a simulator/device/emulator, you only need Metro for JS changes:
+
+```bash
+npx expo start --dev-client    # then press `i` for iOS or `a` for Android
 ```
 
 ### Development Setup
@@ -188,17 +238,33 @@ rate/
 
 ### Building
 
+This is a **prebuilt** Expo project (it has `ios/` and `android/` directories), so use `expo run:*`, not `expo start --ios/--android`.
+
 #### Development
 ```bash
-npx expo start --android  # Android
-npx expo start --ios      # iOS
+# First build (compiles native code) — see "Run on iOS" / "Run on Android" above:
+npx expo run:ios          # iOS simulator/device
+npx expo run:android      # Android emulator/device
+
+# Subsequent JS-only changes just need Metro:
+npx expo start --dev-client
 ```
 
 #### Production
 ```bash
-eas build --platform android
 eas build --platform ios
+eas build --platform android
 ```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `ELOOP: too many symbolic links … node_modules` | A self-referencing `node_modules` symlink. `rm node_modules && pnpm install`. |
+| iOS `pod install` → `Unicode Normalization … ASCII-8BIT` | `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` before running. |
+| iOS build: missing `LwkRnFramework.xcframework` | `pnpm run setup:native` (re-fetches lwk-rn artifacts). |
+| `pod install`: `uniffi-bindgen-react-native` version conflict | Keep it pinned to `0.28.3-3` (lwk-rn's podspec requires that exact version). |
+| `npx expo` prompts to install a different Expo version | `node_modules` is broken — reinstall so the local `expo` is used. |
 
 ## Contributing
 
