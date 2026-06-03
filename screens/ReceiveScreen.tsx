@@ -463,12 +463,14 @@ export default function ReceiveScreen({ navigation }: Props) {
     const rgb = protocolManager.getAdapterIfAvailable('RGB');
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
     const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
+    const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
 
     const methods: string[] = [];
     let btcAddress: string | undefined;
     let lightningInvoice: string | undefined;
     let sparkAddress: string | undefined;
     let arkadeAddress: string | undefined;
+    let liquidAddress: string | undefined;
 
     // Optional amount (in sats) for the Lightning leg / BIP21 amount.
     let amountSats = 0;
@@ -482,7 +484,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
     }
 
-    // 1) BTC on-chain address (required universal fallback).
+    // 1) BTC on-chain address — the universal BIP321/BIP21 fallback (optional under BIP321).
     //    Prefer RGB, then Spark single-use deposit, then Arkade boarding.
     if (rgb?.isConnected()) {
       try {
@@ -541,13 +543,25 @@ export default function ReceiveScreen({ navigation }: Props) {
       } catch (e) { console.warn('Unified: Arkade address failed', e); }
     }
 
-    // Without a BTC on-chain address there is no valid BIP21 fallback.
-    if (!btcAddress) {
-      setUnifiedError('No on-chain Bitcoin address available. Connect a wallet (RGB, Spark, or Arkade) to use unified receive.');
+    // 5) Liquid (L-BTC / USDt) address.
+    if (liquid?.isConnected()) {
+      try {
+        const addr = await liquid.getReceiveAddress();
+        if (addr?.address) {
+          liquidAddress = addr.address;
+          methods.push('Liquid');
+        }
+      } catch (e) { console.warn('Unified: Liquid address failed', e); }
+    }
+
+    // BIP321 allows an address-less URI (bitcoin:?lightning=...&liquid=...), so we only
+    // need at least ONE receive method, not necessarily an on-chain address.
+    if (!btcAddress && !lightningInvoice && !sparkAddress && !arkadeAddress && !liquidAddress) {
+      setUnifiedError('No receive method available. Connect a wallet (RGB, Spark, Arkade, or Liquid) to use unified receive.');
       setUnifiedLoading(false);
       return;
     }
-    methods.unshift('On-chain');
+    if (btcAddress) methods.unshift('On-chain');
 
     try {
       const uri = buildUnifiedReceiveURI({
@@ -555,6 +569,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         lightningInvoice,
         sparkAddress,
         arkadeAddress,
+        liquidAddress,
         amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
         label: 'KaleidoSwap',
       });
