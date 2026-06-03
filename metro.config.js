@@ -6,15 +6,15 @@ const path = require('path');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// Allow Metro to resolve local packages (symlinked via file:)
+// Allow Metro to resolve local packages still linked via file:
+// (@kaleidorg/wallet-protocols now comes from npm — no sibling watchFolder needed).
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
-const walletProtocolsRoot = path.resolve(__dirname, '../wallet-protocols');
 // @kaleidorg/mind — the shared agentic engine, also published to npm as
 // @kaleidorg/mind. Linked via file: for fast local dev (pure JS dist/, no
 // native deps). To consume the published version instead, set its dep to
 // `^0.0.1` and drop this watchFolder.
 const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
-config.watchFolders = [kaleidoUiRoot, walletProtocolsRoot, kaleidoMindRoot];
+config.watchFolders = [kaleidoUiRoot, kaleidoMindRoot];
 config.resolver.nodeModulesPaths = [
   path.resolve(__dirname, 'node_modules'),
   path.resolve(kaleidoUiRoot, 'node_modules'),
