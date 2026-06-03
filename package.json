@@ -26,6 +26,7 @@
     "@kaleidorg/wdk-wallet-liquid": "file:../wdk-wallet-liquid",
     "@kaleidorg/wdk-wallet-rln": "file:../wdk-wallet-rln",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "file:../wdk-protocol-swap-kaleidoswap",
+    "sodium-javascript": "^0.8.0",
     "@nostr-dev-kit/ndk": "^2.18.1",
     "@qvac/sdk": "^0.11.0",
     "@react-native-async-storage/async-storage": "2.2.0",
