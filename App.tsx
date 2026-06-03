@@ -12,6 +12,7 @@ import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAr
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemeProvider } from '@react-navigation/native';
 import { LoadingScreen } from './components/LoadingScreen';
+import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import NetworkService from './services/NetworkService';
@@ -281,6 +282,7 @@ function AppLoadingScreen() {
 
 export default function App() {
   const navigationTheme = createNavigationTheme();
+  const [introDone, setIntroDone] = React.useState(false);
 
   React.useEffect(() => {
     // Initialize network monitoring
@@ -309,6 +311,7 @@ export default function App() {
           </AppThemeProvider>
         </PersistGate>
       </Provider>
+      {!introDone && <BrandIntro onFinish={() => setIntroDone(true)} />}
     </ErrorBoundary>
   );
 }
