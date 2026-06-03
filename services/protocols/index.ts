@@ -126,12 +126,12 @@ try {
 let _protocolManager: ProtocolManager | null = null
 
 /**
- * Wallet engine selector. Set EXPO_PUBLIC_WALLET_ENGINE=wdk to route the app
- * through the WDK-backed adapters (./wdk.ts). Defaults to the native adapters,
- * so this is a no-op unless explicitly enabled.
+ * Wallet engine selector. The WDK-backed adapters (./wdk.ts) are the DEFAULT.
+ * Set EXPO_PUBLIC_WALLET_ENGINE=native to fall back to the legacy native adapters
+ * (escape hatch for debugging / regressions).
  */
 export const WALLET_ENGINE: 'native' | 'wdk' =
-  process.env.EXPO_PUBLIC_WALLET_ENGINE === 'wdk' ? 'wdk' : 'native'
+  process.env.EXPO_PUBLIC_WALLET_ENGINE === 'native' ? 'native' : 'wdk'
 
 export function getProtocolManager(): ProtocolManager {
   if (WALLET_ENGINE === 'wdk') return getWdkProtocolManager()
