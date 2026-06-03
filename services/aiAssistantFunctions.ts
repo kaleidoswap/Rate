@@ -1,5 +1,5 @@
 // aiAssistantFunctions.ts
-import { protocolManager } from './protocols';
+import { protocolManager, type ProtocolType } from './protocols';
 import NostrService from '../services/NostrService';
 import PremAI from 'premai';
 import { LightningAddress, Invoice } from '@getalby/lightning-tools';
@@ -208,8 +208,43 @@ export class AIAssistantFunctions {
     this.nostrService = NostrService.getInstance();
   }
 
-  private getRgbAdapter() {
-    return protocolManager.getAdapter('RGB');
+  // Adapter resolution for AI wallet tools. Spark is the primary wallet; RGB is
+  // OPTIONAL (only present when a node URL is configured); Arkade is a fallback.
+  // These resolvers never throw just because RGB is missing.
+  private static readonly ADAPTER_PRIORITY: ProtocolType[] = ['SPARK', 'RGB', 'ARKADE'];
+
+  /** All currently-connected adapters in priority order (for aggregation). */
+  private getConnectedAdapters(): Array<{ proto: ProtocolType; adapter: any }> {
+    const out: Array<{ proto: ProtocolType; adapter: any }> = [];
+    for (const proto of AIAssistantFunctions.ADAPTER_PRIORITY) {
+      const adapter = protocolManager.getAdapterIfAvailable(proto);
+      if (adapter?.isConnected()) out.push({ proto, adapter });
+    }
+    return out;
+  }
+
+  /** First connected adapter in priority order. Throws a friendly error if none. */
+  private getPreferredAdapter(): any {
+    const connected = this.getConnectedAdapters();
+    if (connected.length === 0) {
+      throw new Error('No wallet is connected yet. Open the wallet and try again.');
+    }
+    return connected[0].adapter;
+  }
+
+  /** Lightning-capable adapter (Spark or RGB — Arkade has no Lightning). */
+  private getLightningAdapter(): any {
+    for (const proto of ['SPARK', 'RGB'] as ProtocolType[]) {
+      const adapter = protocolManager.getAdapterIfAvailable(proto);
+      if (adapter?.isConnected()) return adapter;
+    }
+    throw new Error('No Lightning-capable wallet is connected (need Spark or RGB).');
+  }
+
+  /** The RGB adapter only if connected, else undefined (RGB is optional). */
+  private getRgbAdapterOptional(): any | undefined {
+    const a = protocolManager.getAdapterIfAvailable('RGB');
+    return a?.isConnected() ? a : undefined;
   }
 
   /**
@@ -307,9 +342,9 @@ export class AIAssistantFunctions {
         // Continue with payment attempt as validation might fail for valid invoices
       }
 
-      // Pay the invoice using RGB Lightning Node
+      // Pay the invoice via a Lightning-capable adapter (Spark preferred, RGB fallback).
       console.log('⚡ Attempting payment...');
-      const result = await this.getRgbAdapter().sendPayment({
+      const result = await this.getLightningAdapter().sendPayment({
         invoice: invoice_or_address
       });
 
@@ -738,7 +773,18 @@ export class AIAssistantFunctions {
         })
       };
 
-      const result = await this.getRgbAdapter().createInvoice({
+      // RGB-asset invoices can only be issued by the RGB adapter; plain BTC
+      // Lightning invoices prefer Spark (falling back to RGB).
+      let invoiceAdapter: any;
+      if (invoiceParams.asset_id) {
+        const rgb = this.getRgbAdapterOptional();
+        if (!rgb) throw new Error('Issuing an invoice for that asset needs an RGB node connected.');
+        invoiceAdapter = rgb;
+      } else {
+        invoiceAdapter = this.getLightningAdapter();
+      }
+
+      const result = await invoiceAdapter.createInvoice({
         amount: invoiceParams.amount_msat ? Math.floor(invoiceParams.amount_msat / 1000) : undefined,
         asset: invoiceParams.asset_id,
         assetAmount: invoiceParams.asset_amount,
@@ -998,28 +1044,56 @@ _The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sur
    */
   async getWalletBalance() {
     try {
-      const adapter = this.getRgbAdapter();
-      const [btc, assets] = await Promise.all([
-        adapter.getBtcBalance(),
-        adapter.listAssets().catch(() => []),
-      ]);
+      const connected = this.getConnectedAdapters();
+      if (connected.length === 0) {
+        throw new Error('No wallet is connected yet. Open the wallet and try again.');
+      }
 
-      const rgbAssets = (assets || [])
-        .filter((a: any) => a?.ticker && a.ticker !== 'BTC')
-        .map((a: any) => ({
-          ticker: a.ticker,
-          name: a.name,
-          balance: a.balance?.availableDisplay ?? String(a.balance?.available ?? 0),
-        }));
+      // Sum BTC across every connected adapter (Spark + Arkade + RGB if present)
+      // and collect any non-BTC assets.
+      let totalSats = 0;
+      let confirmedSats = 0;
+      let pendingSats = 0;
+      const assets: Array<{ ticker: string; name?: string; balance: string }> = [];
+      const sources: string[] = [];
+
+      for (const { proto, adapter } of connected) {
+        try {
+          const btc = await adapter.getBtcBalance();
+          totalSats += btc?.total ?? 0;
+          confirmedSats += btc?.confirmed ?? 0;
+          pendingSats += btc?.unconfirmed ?? 0;
+          sources.push(proto);
+        } catch {
+          /* skip a source that can't report balance */
+        }
+        try {
+          const list = await adapter.listAssets();
+          for (const a of list || []) {
+            if (a?.ticker && a.ticker !== 'BTC') {
+              assets.push({
+                ticker: a.ticker,
+                name: a.name,
+                balance: a.balance?.availableDisplay ?? String(a.balance?.available ?? 0),
+              });
+            }
+          }
+        } catch {
+          /* adapter without assets */
+        }
+      }
 
       return {
         success: true,
-        btc_sats: btc.total,
-        btc_confirmed_sats: btc.confirmed,
-        btc_pending_sats: btc.unconfirmed,
-        assets: rgbAssets,
-        message: `Balance: ${btc.total.toLocaleString()} sats` +
-          (rgbAssets.length ? ` · ${rgbAssets.map(a => `${a.balance} ${a.ticker}`).join(', ')}` : ''),
+        btc_sats: totalSats,
+        btc_confirmed_sats: confirmedSats,
+        btc_pending_sats: pendingSats,
+        assets,
+        sources,
+        message:
+          `Balance: ${totalSats.toLocaleString()} sats` +
+          (assets.length ? ` · ${assets.map((a) => `${a.balance} ${a.ticker}`).join(', ')}` : '') +
+          (sources.length ? ` (via ${sources.join(', ')})` : ''),
         timestamp: new Date().toISOString(),
       };
     } catch (error) {
@@ -1033,7 +1107,17 @@ _The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sur
    */
   async getReceiveAddress({ asset_id }: { asset_id?: string } = {}) {
     try {
-      const address = await this.getRgbAdapter().getReceiveAddress(asset_id);
+      // RGB-asset addresses need the RGB adapter; plain BTC uses the preferred
+      // connected wallet (Spark first).
+      let adapter: any;
+      if (asset_id) {
+        const rgb = this.getRgbAdapterOptional();
+        if (!rgb) throw new Error('Receiving that asset needs an RGB node connected.');
+        adapter = rgb;
+      } else {
+        adapter = this.getPreferredAdapter();
+      }
+      const address = await adapter.getReceiveAddress(asset_id);
       return {
         success: true,
         address: address.address,
@@ -1052,9 +1136,22 @@ _The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sur
    */
   async listRecentTransactions({ limit = 5 }: { limit?: number } = {}) {
     try {
-      const adapter: any = this.getRgbAdapter();
-      const raw = await adapter.listPayments();
-      const payments: any[] = Array.isArray(raw) ? raw : (raw?.payments || []);
+      const connected = this.getConnectedAdapters();
+      if (connected.length === 0) {
+        throw new Error('No wallet is connected yet. Open the wallet and try again.');
+      }
+
+      // Merge payment history from every connected adapter.
+      const payments: any[] = [];
+      for (const { adapter } of connected) {
+        try {
+          const raw = await adapter.listPayments();
+          const list: any[] = Array.isArray(raw) ? raw : raw?.payments || [];
+          payments.push(...list);
+        } catch {
+          /* skip an adapter that can't list payments */
+        }
+      }
       const capped = Math.max(1, Math.min(limit, 20));
 
       const recent = payments.slice(0, capped).map((p: any) => ({

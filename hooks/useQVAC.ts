@@ -27,6 +27,8 @@ export interface UseQVACResult extends QVACState {
   setModel: (id: string) => Promise<void>;
   /** Configure P2P delegation to a remote provider. */
   setDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => Promise<void>;
+  /** Re-read the persisted config into React state (e.g. after pairing elsewhere). */
+  reloadConfig: () => void;
 }
 
 /**
@@ -59,6 +61,12 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
 
   const setDelegate = useCallback(async (opts: { enabled: boolean; providerPublicKey: string }) => {
     await service.setDelegate(opts);
+    setConfig(service.getConfig());
+  }, [service]);
+
+  // Pulls the singleton's current config into local state. Used when another
+  // screen (e.g. PairDesktopScreen) changed delegation via the service directly.
+  const reloadConfig = useCallback(() => {
     setConfig(service.getConfig());
   }, [service]);
 
@@ -109,6 +117,7 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     config,
     setModel,
     setDelegate,
+    reloadConfig,
   };
 }
 

@@ -103,11 +103,17 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         onPartialResult('Transcribing...');
 
         const qvac = QVACService.getInstance();
-        const state = qvac.getState();
+        let state = qvac.getState();
 
         if (state.whisperStatus !== 'ready') {
-          onError('Whisper model not loaded yet. Please wait for the model to finish downloading.');
-          return;
+          onPartialResult('Preparing voice model...');
+          await qvac.initializeWhisper();
+          state = qvac.getState();
+
+          if (state.whisperStatus !== 'ready') {
+            onError(`Whisper model failed to load: ${state.error || 'unknown error'}`);
+            return;
+          }
         }
 
         const transcription = await qvac.transcribeAudio(uri);
