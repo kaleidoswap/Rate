@@ -26,6 +26,7 @@
     "@kaleidorg/wdk-wallet-liquid": "file:../wdk-wallet-liquid",
     "@kaleidorg/wdk-wallet-rln": "file:../wdk-wallet-rln",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "file:../wdk-protocol-swap-kaleidoswap",
+    "@arkade-os/wdk": "file:../arkade-wdk",
     "sodium-javascript": "^0.8.0",
     "lwk-rn": "^0.9.0-2.0.3",
     "@nostr-dev-kit/ndk": "^2.18.1",

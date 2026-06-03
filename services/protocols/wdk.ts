@@ -39,10 +39,13 @@ import type {
  *   `react-native` condition of @kaleidorg/wdk-wallet-liquid's `#lwk` map. The adapter loads
  *   lazily (only when a Liquid network connects), and `lwk-rn` needs a native build
  *   (expo prebuild / pod-install). Disable with EXPO_PUBLIC_WDK_LIQUID=0.
- * - Arkade: opt-in via EXPO_PUBLIC_WDK_ARKADE=1 (module @arkade-os/wdk not yet vendored).
+ * - Arkade: ON by default. Uses @arkade-os/wdk over @arkade-os/sdk (RN-compatible; the
+ *   manager defaults to in-memory VTXO repositories — no IndexedDB). Persistent VTXO
+ *   state needs SQLite repos injected via arkadeConfig.storage (follow-up). Lightning
+ *   (Boltz) needs swapProviderUrl. Disable with EXPO_PUBLIC_WDK_ARKADE=0.
  */
 const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID !== '0'
-const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE === '1'
+const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
 
 /**
  * Register static-require loaders for each enabled WDK package (Metro can't follow
