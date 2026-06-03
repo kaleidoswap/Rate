@@ -21,6 +21,7 @@ import {
   RlnWdkAdapter,
   ArkadeWdkAdapter,
   networkTypeToProtocol,
+  kaleidoClientManager,
 } from '@kaleidorg/wallet-protocols'
 import type {
   ProtocolType,
@@ -157,6 +158,28 @@ export async function initializeWdkProtocols(
       await manager.connect(protocol, config)
       results.set(protocol, { success: true })
       console.log(`[initializeWdkProtocols] ${protocol} connected`)
+
+      // Restore the maker/RLN HTTP client for the swap UI (screens/SwapScreen.tsx uses
+      // kaleidoClientManager.getClient().maker/.rln directly). Pure HTTP — no SparkWallet.
+      // NOTE: flashnet (Spark DEX) still needs the SparkWallet exposed from the WDK Spark
+      // adapter — tracked gap; AMM swaps stay disabled until then.
+      if (protocol === 'RGB') {
+        const makerBaseUrl = parsed.makerUrl || parsed.baseUrl
+        if (makerBaseUrl) {
+          try {
+            kaleidoClientManager.initialize({
+              baseUrl: makerBaseUrl,
+              nodeUrl: (config as RlnAdapterConfig).nodeUrl,
+              apiKey: parsed.apiKey,
+            })
+            console.log('[initializeWdkProtocols] maker client initialized for swaps')
+          } catch (e) {
+            console.warn('[initializeWdkProtocols] maker client init failed:', e)
+          }
+        } else {
+          console.log('[initializeWdkProtocols] no makerUrl configured → maker swaps disabled')
+        }
+      }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error)
       console.error(`[initializeWdkProtocols] ${protocol} failed:`, msg)
