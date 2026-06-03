@@ -33,14 +33,15 @@ import type {
 } from '@kaleidorg/wallet-protocols'
 
 /**
- * Mobile rollout gates. Spark + RLN + the (pure-JS) swap module need NO WASM and
- * use SDKs the app already ships — they're on by default. Liquid (lwk WASM/native)
- * and Arkade are opt-in: leaving their `require()` out of the default build means
- * Metro never bundles lwk_wasm/lwk_node, so a Spark+RLN wallet is WASM-free end to end.
- * Enable per-protocol once their on-device story is validated:
- *   EXPO_PUBLIC_WDK_LIQUID=1   EXPO_PUBLIC_WDK_ARKADE=1
+ * Mobile rollout gates.
+ * - Spark + RLN + the (pure-JS) swap module: no WASM, SDKs the app already ships — always on.
+ * - Liquid: ON by default. Uses the native `lwk-rn` binding (UniFFI→JSI, no WASM) via the
+ *   `react-native` condition of @kaleidorg/wdk-wallet-liquid's `#lwk` map. The adapter loads
+ *   lazily (only when a Liquid network connects), and `lwk-rn` needs a native build
+ *   (expo prebuild / pod-install). Disable with EXPO_PUBLIC_WDK_LIQUID=0.
+ * - Arkade: opt-in via EXPO_PUBLIC_WDK_ARKADE=1 (module @arkade-os/wdk not yet vendored).
  */
-const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID === '1'
+const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID !== '0'
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE === '1'
 
 /**
