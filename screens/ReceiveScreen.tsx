@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
-import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-protocols';
+import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-protocols';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
   getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
@@ -128,6 +128,9 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [unifiedLoading, setUnifiedLoading] = useState(false);
   const [unifiedError, setUnifiedError] = useState<string | null>(null);
   const [unifiedMethods, setUnifiedMethods] = useState<string[]>([]);
+  // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
+  // embedding the USD-receiving methods (Liquid USDt, RGB USDT invoice, Spark).
+  const [unifiedAsset, setUnifiedAsset] = useState<'BTC' | 'USD'>('BTC');
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
@@ -450,7 +453,69 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   // ──────────────────────────────────────────────────────────────────────
-  // Unified receive: build ONE BIP21 QR embedding every available method.
+  // USD unified receive: a BIP321 QR (address-less) embedding the ways to receive
+  // USD (USDt) across protocols — Liquid USDt, an RGB USDT invoice (RGB-LN or
+  // RGB-L1), and the Spark address. Caller has already reset loading/error state.
+  const generateUsdUnifiedUri = async () => {
+    const rgb = protocolManager.getAdapterIfAvailable('RGB');
+    const spark = protocolManager.getAdapterIfAvailable('SPARK');
+    const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
+
+    const methods: string[] = [];
+    let sparkAddress: string | undefined;
+    let liquidAddress: string | undefined;
+    let rgbInvoice: string | undefined;
+
+    // The RGB USDT asset (from the loaded RGB assets), for an RGB invoice.
+    const usdtRgb = rgbAssets.find((a) => /usdt/i.test(a.ticker));
+
+    try {
+      // 1) Liquid USDt — assets ride on the same confidential address.
+      if (liquid?.isConnected()) {
+        try {
+          const addr = await liquid.getReceiveAddress();
+          if (addr?.address) { liquidAddress = addr.address; methods.push('Liquid USDt'); }
+        } catch (e) { console.warn('USD: Liquid address failed', e); }
+      }
+      // 2) RGB USDT invoice (covers RGB-LN and RGB on-chain L1).
+      if (rgb?.isConnected() && usdtRgb?.asset_id && rgb.createRgbInvoice) {
+        try {
+          const inv: any = await rgb.createRgbInvoice({ assetId: usdtRgb.asset_id });
+          const invoice = inv?.invoice ?? inv?.recipient_id;
+          if (invoice) { rgbInvoice = invoice; methods.push('RGB USDT'); }
+        } catch (e) { console.warn('USD: RGB invoice failed', e); }
+      }
+      // 3) Spark address (for a Spark USD token transfer).
+      if (spark?.isConnected()) {
+        try {
+          const addr = await spark.getReceiveAddress();
+          if (addr?.address) { sparkAddress = addr.address; methods.push('Spark'); }
+        } catch (e) { console.warn('USD: Spark address failed', e); }
+      }
+
+      if (!sparkAddress && !liquidAddress && !rgbInvoice) {
+        setUnifiedError('No USD receive method available. Connect Liquid, an RGB node, or Spark.');
+        return;
+      }
+
+      const uri = buildUnifiedReceiveURI({
+        sparkAddress,
+        liquidAddress,
+        rgbInvoice,
+        assetId: LITE_USD.assetId, // Liquid USDt asset id
+        label: 'KaleidoSwap USD',
+      });
+      setUnifiedUri(uri);
+      setUnifiedMethods(methods);
+    } catch (e: any) {
+      console.error('USD: unified receive failed', e);
+      setUnifiedError(e?.message || 'Failed to build USD receive code.');
+    } finally {
+      setUnifiedLoading(false);
+    }
+  };
+
+  // Unified receive: build ONE BIP321 QR embedding every available method.
   // Defensive — each adapter call is wrapped so a missing/disconnected
   // protocol is silently skipped rather than failing the whole QR.
   // ──────────────────────────────────────────────────────────────────────
@@ -459,6 +524,11 @@ export default function ReceiveScreen({ navigation }: Props) {
     setUnifiedLoading(true);
     setUnifiedUri('');
     setUnifiedMethods([]);
+
+    if (unifiedAsset === 'USD') {
+      await generateUsdUnifiedUri();
+      return;
+    }
 
     const rgb = protocolManager.getAdapterIfAvailable('RGB');
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
@@ -596,7 +666,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       generateUnifiedUri();
     }, 300);
     return () => clearTimeout(timeoutId);
-  }, [networkType, amount]);
+  }, [networkType, amount, unifiedAsset]);
 
   // Load channels when component mounts or network type changes
   useEffect(() => {
@@ -1041,10 +1111,37 @@ export default function ReceiveScreen({ navigation }: Props) {
     return validateAddressOrInvoice(data) !== null;
   };
 
-  // Unified single-QR receive view.
+  // Unified single-QR receive view (wraps the body with a BTC/USD asset selector).
   const renderUnifiedContent = () => {
     const accent = NETWORK_COLORS['unified'];
+    return (
+      <>
+        <View style={styles.assetTabs}>
+          {(['BTC', 'USD'] as const).map((a) => {
+            const active = unifiedAsset === a;
+            return (
+              <TouchableOpacity
+                key={a}
+                style={[
+                  styles.assetTab,
+                  active && { borderColor: accent, backgroundColor: accent + '15' },
+                ]}
+                onPress={() => setUnifiedAsset(a)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.assetTabText, active && { color: accent, fontWeight: '700' }]}>
+                  {a}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        {renderUnifiedBody(accent)}
+      </>
+    );
+  };
 
+  const renderUnifiedBody = (accent: string) => {
     if (unifiedLoading) {
       return (
         <View style={styles.loadingSection}>
@@ -1850,6 +1947,25 @@ const styles = StyleSheet.create({
   },
   
   // QR Section
+  assetTabs: {
+    flexDirection: 'row',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[4],
+  },
+  assetTab: {
+    flex: 1,
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.medium,
+    backgroundColor: theme.colors.surface.primary,
+    alignItems: 'center',
+  },
+  assetTabText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.secondary,
+  },
   qrSection: {
     backgroundColor: theme.colors.surface.primary,
     borderRadius: theme.borderRadius.xl,
