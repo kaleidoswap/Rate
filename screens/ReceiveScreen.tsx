@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
+import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-protocols';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
   getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
@@ -118,8 +119,15 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (status.ARKADE) return 'arkade';
     return 'onchain';
   };
-  const [networkType, setNetworkType] = useState<ProtocolNetworkType>(getDefaultNetwork());
+  // Network selection allows the per-protocol types plus a 'unified' single-QR mode.
+  type ReceiveMode = ProtocolNetworkType | 'unified';
+  const [networkType, setNetworkType] = useState<ReceiveMode>(getDefaultNetwork());
   const [address, setAddress] = useState('');
+  // Unified receive (single BIP21 QR embedding all available methods)
+  const [unifiedUri, setUnifiedUri] = useState('');
+  const [unifiedLoading, setUnifiedLoading] = useState(false);
+  const [unifiedError, setUnifiedError] = useState<string | null>(null);
+  const [unifiedMethods, setUnifiedMethods] = useState<string[]>([]);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
@@ -441,6 +449,155 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   };
 
+  // ──────────────────────────────────────────────────────────────────────
+  // Unified receive: build ONE BIP21 QR embedding every available method.
+  // Defensive — each adapter call is wrapped so a missing/disconnected
+  // protocol is silently skipped rather than failing the whole QR.
+  // ──────────────────────────────────────────────────────────────────────
+  const generateUnifiedUri = async () => {
+    setUnifiedError(null);
+    setUnifiedLoading(true);
+    setUnifiedUri('');
+    setUnifiedMethods([]);
+
+    const rgb = protocolManager.getAdapterIfAvailable('RGB');
+    const spark = protocolManager.getAdapterIfAvailable('SPARK');
+    const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
+    const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
+
+    const methods: string[] = [];
+    let btcAddress: string | undefined;
+    let lightningInvoice: string | undefined;
+    let sparkAddress: string | undefined;
+    let arkadeAddress: string | undefined;
+    let liquidAddress: string | undefined;
+
+    // Optional amount (in sats) for the Lightning leg / BIP21 amount.
+    let amountSats = 0;
+    if (amount && isAmountValid()) {
+      const cleanAmount = amount.replace(/,/g, '');
+      const numericAmount = parseFloat(cleanAmount);
+      if (!isNaN(numericAmount) && numericAmount > 0) {
+        amountSats = bitcoinUnit === 'BTC'
+          ? Math.round(numericAmount * 1e8)
+          : Math.round(numericAmount);
+      }
+    }
+
+    // 1) BTC on-chain address — the universal BIP321/BIP21 fallback (optional under BIP321).
+    //    Prefer RGB, then Spark single-use deposit, then Arkade boarding.
+    if (rgb?.isConnected()) {
+      try {
+        const addr = await rgb.getReceiveAddress();
+        if (addr?.address) btcAddress = addr.address;
+      } catch (e) { console.warn('Unified: RGB on-chain address failed', e); }
+    }
+    if (!btcAddress && spark?.isConnected()) {
+      try {
+        const addr = await spark.getReceiveAddress('onchain');
+        if (addr?.address) btcAddress = addr.address;
+      } catch (e) { console.warn('Unified: Spark on-chain address failed', e); }
+    }
+    if (!btcAddress && arkade?.isConnected()) {
+      try {
+        const addr = await arkade.getReceiveAddress('boarding');
+        if (addr?.address) btcAddress = addr.address;
+      } catch (e) { console.warn('Unified: Arkade boarding address failed', e); }
+    }
+
+    // 2) Lightning invoice (RGB node first, then Spark). Best-effort.
+    const lnAdapter = rgb?.isConnected() ? rgb : spark?.isConnected() ? spark : undefined;
+    if (lnAdapter) {
+      try {
+        const invoice = await lnAdapter.createInvoice({
+          amount: amountSats > 0 ? amountSats : undefined,
+          description: 'Unified receive',
+          expirySeconds: 3600,
+        });
+        if (invoice?.invoice) {
+          lightningInvoice = invoice.invoice;
+          methods.push('Lightning');
+        }
+      } catch (e) { console.warn('Unified: Lightning invoice failed', e); }
+    }
+
+    // 3) Spark native address.
+    if (spark?.isConnected()) {
+      try {
+        const addr = await spark.getReceiveAddress();
+        if (addr?.address) {
+          sparkAddress = addr.address;
+          methods.push('Spark');
+        }
+      } catch (e) { console.warn('Unified: Spark address failed', e); }
+    }
+
+    // 4) Arkade native (ark) address.
+    if (arkade?.isConnected()) {
+      try {
+        const addr = await arkade.getReceiveAddress();
+        if (addr?.address) {
+          arkadeAddress = addr.address;
+          methods.push('Arkade');
+        }
+      } catch (e) { console.warn('Unified: Arkade address failed', e); }
+    }
+
+    // 5) Liquid (L-BTC / USDt) address.
+    if (liquid?.isConnected()) {
+      try {
+        const addr = await liquid.getReceiveAddress();
+        if (addr?.address) {
+          liquidAddress = addr.address;
+          methods.push('Liquid');
+        }
+      } catch (e) { console.warn('Unified: Liquid address failed', e); }
+    }
+
+    // BIP321 allows an address-less URI (bitcoin:?lightning=...&liquid=...), so we only
+    // need at least ONE receive method, not necessarily an on-chain address.
+    if (!btcAddress && !lightningInvoice && !sparkAddress && !arkadeAddress && !liquidAddress) {
+      setUnifiedError('No receive method available. Connect a wallet (RGB, Spark, Arkade, or Liquid) to use unified receive.');
+      setUnifiedLoading(false);
+      return;
+    }
+    if (btcAddress) methods.unshift('On-chain');
+
+    try {
+      const uri = buildUnifiedReceiveURI({
+        btcAddress,
+        lightningInvoice,
+        sparkAddress,
+        arkadeAddress,
+        liquidAddress,
+        amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
+        label: 'KaleidoSwap',
+      });
+      setUnifiedUri(uri);
+      setUnifiedMethods(methods);
+    } catch (e: any) {
+      console.error('Unified: buildUnifiedReceiveURI failed', e);
+      setUnifiedError(e?.message || 'Failed to build unified receive code.');
+    } finally {
+      setUnifiedLoading(false);
+    }
+  };
+
+  const copyUnifiedUri = async () => {
+    if (!unifiedUri) return;
+    await Clipboard.setString(unifiedUri);
+    Alert.alert('Copied', 'Unified receive URI copied to clipboard');
+  };
+
+  // Generate the unified URI when that mode is selected, or amount changes.
+  useEffect(() => {
+    if (networkType !== 'unified') return;
+    const timeoutId = setTimeout(() => {
+      generateUnifiedUri();
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [networkType, amount]);
+
   // Load channels when component mounts or network type changes
   useEffect(() => {
     if (networkType === 'lightning') {
@@ -478,10 +635,11 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Auto-generate address when conditions change
   useEffect(() => {
+    if (networkType === 'unified') return; // unified has its own generator
     if (selectedAsset) {
       setAddress('');
       setError(null);
-      
+
       // Only auto-generate if amount is not required, or if it's valid
       // Use a small delay to avoid interfering with user input
       const timeoutId = setTimeout(() => {
@@ -600,6 +758,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     'lightning': '#FACC15', // Lightning yellow
     'spark': '#60A5FA',     // Spark blue
     'arkade': '#A855F7',    // Arkade purple
+    'unified': '#10B981',   // Unified / all-networks green
   };
 
   const NETWORK_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -622,7 +781,10 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     // Build list of available networks with metadata
     // Only show networks that are actually available (based on connected protocols)
-    const allNetworks: Array<{ id: ProtocolNetworkType; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; subtitle: string; available: boolean }> = [
+    // The 'unified' chip is always offered first — it produces a single QR
+    // embedding every method the connected adapters can provide.
+    const allNetworks: Array<{ id: ReceiveMode; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; subtitle: string; available: boolean }> = [
+      { id: 'unified' as ReceiveMode, label: 'All networks', icon: 'apps' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['unified'], subtitle: 'one QR', available: true },
       ...(availableNetworkTypes.includes('onchain') ? [{ id: 'onchain' as ProtocolNetworkType, label: 'On-chain', icon: 'link' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['onchain'], subtitle: onChainAssets.length === 1 ? '1 asset' : `${onChainAssets.length} assets`, available: true }] : []),
       ...(availableNetworkTypes.includes('lightning') ? [{ id: 'lightning' as ProtocolNetworkType, label: 'Lightning', icon: 'flash' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['lightning'], subtitle: lightningAssets.length === 0 ? 'no channels' : lightningAssets.length === 1 ? '1 asset' : `${lightningAssets.length} assets`, available: lightningAssets.length > 0 }] : []),
       ...(availableNetworkTypes.includes('spark') ? [{ id: 'spark' as ProtocolNetworkType, label: 'Spark', icon: 'sparkles' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['spark'], subtitle: 'instant', available: true }] : []),
@@ -656,7 +818,11 @@ export default function ReceiveScreen({ navigation }: Props) {
                     opacity: net.available ? 1 : 0.4,
                   }}
                 >
-                  <NetworkIcon network={net.id} size={18} color={isActive ? net.color : theme.colors.text.secondary} />
+                  {net.id === 'unified' ? (
+                    <Ionicons name={net.icon} size={18} color={isActive ? net.color : theme.colors.text.secondary} />
+                  ) : (
+                    <NetworkIcon network={net.id} size={18} color={isActive ? net.color : theme.colors.text.secondary} />
+                  )}
                   <View style={{ marginLeft: 8 }}>
                     <Text style={{ fontSize: 13, fontWeight: isActive ? '600' : '500', color: isActive ? net.color : theme.colors.text.primary }}>
                       {net.label}
@@ -707,7 +873,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const renderAmountInput = () => {
     if (!selectedAsset) return null;
     
-    const showAmount = isAmountRequired() || selectedAsset.isRGB;
+    const showAmount = isAmountRequired() || selectedAsset.isRGB || networkType === 'unified';
     if (!showAmount) return null;
 
     const isRequired = isAmountRequired();
@@ -875,7 +1041,136 @@ export default function ReceiveScreen({ navigation }: Props) {
     return validateAddressOrInvoice(data) !== null;
   };
 
+  // Unified single-QR receive view.
+  const renderUnifiedContent = () => {
+    const accent = NETWORK_COLORS['unified'];
+
+    if (unifiedLoading) {
+      return (
+        <View style={styles.loadingSection}>
+          <ActivityIndicator size="large" color={accent} />
+          <Text style={styles.loadingText}>Building unified receive code...</Text>
+        </View>
+      );
+    }
+
+    if (unifiedError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={48} color={theme.colors.error[500]} />
+          <Text style={styles.errorText}>{unifiedError}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={generateUnifiedUri} activeOpacity={0.7}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (!unifiedUri) {
+      return (
+        <View style={styles.promptContainer}>
+          <Ionicons name="apps-outline" size={48} color={accent} />
+          <Text style={styles.promptText}>
+            Generate a single QR that any wallet can pay — on-chain, Lightning, Spark and Arkade combined.
+          </Text>
+          <TouchableOpacity style={[styles.generateButton, { backgroundColor: accent }]} onPress={generateUnifiedUri} activeOpacity={0.7}>
+            <Text style={styles.generateButtonText}>Generate</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.qrSection}>
+        <View style={styles.qrHeader}>
+          <Text style={styles.qrTitle}>All networks</Text>
+          <View style={[styles.qrAmountContainer, { backgroundColor: accent + '20' }]}>
+            <Text style={[styles.qrAmount, { color: accent }]}>
+              {unifiedMethods.length > 0 ? unifiedMethods.join(' · ') : 'BIP21'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.qrContainer}>
+          <View style={[styles.qrCodeWrapper, {
+            borderColor: accent,
+            borderWidth: 2,
+            shadowColor: accent,
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: 0.3,
+            shadowRadius: 12,
+            elevation: 6,
+          }]}>
+            <QRCode
+              value={unifiedUri}
+              size={170}
+              backgroundColor="#FFFFFF"
+              color="#000000"
+            />
+            <View style={{
+              position: 'absolute', top: -1, right: -1,
+              flexDirection: 'row', alignItems: 'center',
+              backgroundColor: accent,
+              paddingHorizontal: 8, paddingVertical: 4,
+              borderBottomLeftRadius: 8, borderTopRightRadius: 12,
+            }}>
+              <Ionicons name="apps" size={14} color="#fff" />
+              <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff', marginLeft: 4 }}>All</Text>
+            </View>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.addressContainer, { borderLeftWidth: 3, borderLeftColor: accent }]}
+          onPress={copyUnifiedUri}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+            <Ionicons name="apps" size={16} color={accent} />
+            <Text style={[styles.addressLabel, { marginLeft: 6, marginBottom: 0 }]}>Unified Receive URI</Text>
+          </View>
+          <Text style={[styles.addressText, { fontFamily: 'monospace' }]} numberOfLines={3} selectable>
+            {unifiedUri.length > 50 ? `${unifiedUri.slice(0, 24)}...${unifiedUri.slice(-16)}` : unifiedUri}
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.qrActions}>
+          <TouchableOpacity style={styles.qrActionButton} onPress={copyUnifiedUri} activeOpacity={0.7}>
+            <View style={styles.qrActionIcon}>
+              <Ionicons name="copy" size={18} color={theme.colors.primary[500]} />
+            </View>
+            <Text style={styles.qrActionText}>Copy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.qrActionButton}
+            onPress={async () => {
+              try {
+                await Share.share({ message: unifiedUri, title: 'Unified Receive' });
+              } catch (e) { console.error('Failed to share unified URI:', e); }
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.qrActionIcon}>
+              <Ionicons name="share" size={18} color={theme.colors.primary[500]} />
+            </View>
+            <Text style={styles.qrActionText}>Share</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.qrActionButton} onPress={generateUnifiedUri} activeOpacity={0.7}>
+            <View style={styles.qrActionIcon}>
+              <Ionicons name="refresh" size={18} color={theme.colors.primary[500]} />
+            </View>
+            <Text style={styles.qrActionText}>New</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderContent = () => {
+    if (networkType === 'unified') {
+      return renderUnifiedContent();
+    }
+
     if (loading) {
       return (
         <View style={styles.loadingSection}>
