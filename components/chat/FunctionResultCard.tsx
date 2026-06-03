@@ -1,0 +1,341 @@
+// components/chat/FunctionResultCard.tsx
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
+import InvoiceQRCode from '../InvoiceQRCode';
+import { useAppTheme } from '../../theme/ThemeProvider';
+import type { Theme } from '../../theme';
+
+interface FunctionResultCardProps {
+  functionCalled: string;
+  functionResult: any;
+  /** Copy a string and surface a toast. */
+  onCopy: (text: string, label?: string) => void;
+  /** Open an external URL. */
+  onOpenLink: (url: string) => void;
+}
+
+/**
+ * Renders the structured result of an assistant tool call (balance, invoice,
+ * receive address, merchants, transactions). Extracted from AIAssistantScreen's
+ * inline renderFunctionResult so each card is theme-aware and reusable.
+ */
+const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
+  functionCalled,
+  functionResult,
+  onCopy,
+  onOpenLink,
+}) => {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
+
+  if (!functionResult) return null;
+
+  switch (functionCalled) {
+    case 'pay_lightning_invoice':
+      return (
+        <View style={styles.card}>
+          <Text style={styles.title}>💸 Payment Result</Text>
+          {functionResult.success ? (
+            <View>
+              <Text style={styles.successText}>✅ Payment successful!</Text>
+              <TouchableOpacity
+                onPress={() => onCopy(functionResult.payment_hash, 'Payment hash')}
+                style={styles.copyButton}
+                accessibilityRole="button"
+                accessibilityLabel="Copy payment hash"
+              >
+                <Text style={styles.copyText}>📋 Copy Payment Hash</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          )}
+        </View>
+      );
+
+    case 'generate_invoice':
+      return functionResult.success ? (
+        <InvoiceQRCode
+          invoice={functionResult.invoice}
+          amount={functionResult.amount_sats}
+          description={functionResult.description}
+          onCopy={() => onCopy(functionResult.invoice, 'Invoice')}
+          onShare={() => {}}
+        />
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.title}>🧾 Invoice Generation Failed</Text>
+          <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+        </View>
+      );
+
+    case 'find_merchant_locations':
+      return (
+        <View style={styles.card}>
+          <Text style={styles.title}>🏪 Merchants Found</Text>
+          {functionResult.success ? (
+            <ScrollView style={styles.merchantList} nestedScrollEnabled>
+              {functionResult.merchants.map((merchant: any) => (
+                <View key={merchant.id} style={styles.merchantItem}>
+                  <Text style={styles.merchantName}>{merchant.name}</Text>
+                  <Text style={styles.merchantAddress}>{merchant.address}</Text>
+                  {merchant.phone && (
+                    <TouchableOpacity onPress={() => Linking.openURL(`tel:${merchant.phone}`)}>
+                      <Text style={styles.merchantLink}>📞 {merchant.phone}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {merchant.website && (
+                    <TouchableOpacity onPress={() => onOpenLink(merchant.website)}>
+                      <Text style={styles.merchantLink}>🌐 Website</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              ))}
+            </ScrollView>
+          ) : (
+            <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          )}
+        </View>
+      );
+
+    case 'get_merchant_info':
+      return (
+        <View style={styles.card}>
+          <Text style={styles.title}>📍 Merchant Info</Text>
+          {functionResult.success ? (
+            <View style={styles.merchantItem}>
+              <Text style={styles.merchantName}>{functionResult.merchant.name}</Text>
+              <Text style={styles.merchantAddress}>{functionResult.merchant.address}</Text>
+              {functionResult.merchant.opening_hours && (
+                <Text style={styles.merchantHours}>🕒 {functionResult.merchant.opening_hours}</Text>
+              )}
+              {functionResult.merchant.phone && (
+                <TouchableOpacity onPress={() => Linking.openURL(`tel:${functionResult.merchant.phone}`)}>
+                  <Text style={styles.merchantLink}>📞 {functionResult.merchant.phone}</Text>
+                </TouchableOpacity>
+              )}
+              {functionResult.merchant.website && (
+                <TouchableOpacity onPress={() => onOpenLink(functionResult.merchant.website)}>
+                  <Text style={styles.merchantLink}>🌐 Website</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          )}
+        </View>
+      );
+
+    case 'get_wallet_balance':
+      return functionResult.success ? (
+        <View style={styles.card}>
+          <Text style={styles.title}>💰 Wallet Balance</Text>
+          <Text style={styles.balanceAmount}>
+            {Number(functionResult.btc_sats || 0).toLocaleString()} sats
+          </Text>
+          {functionResult.btc_pending_sats > 0 && (
+            <Text style={styles.balanceSub}>
+              {Number(functionResult.btc_pending_sats).toLocaleString()} sats pending
+            </Text>
+          )}
+          {Array.isArray(functionResult.assets) && functionResult.assets.length > 0 && (
+            <View style={styles.assetRows}>
+              {functionResult.assets.map((a: any, i: number) => (
+                <View key={`${a.ticker}-${i}`} style={styles.assetRow}>
+                  <Text style={styles.assetTicker}>{a.ticker}</Text>
+                  <Text style={styles.assetBalance}>{a.balance}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+        </View>
+      );
+
+    case 'get_receive_address':
+      return functionResult.success ? (
+        <View style={styles.card}>
+          <Text style={styles.title}>📥 Receive Address</Text>
+          <TouchableOpacity
+            onPress={() => onCopy(functionResult.address, 'Address')}
+            accessibilityRole="button"
+            accessibilityLabel="Copy receive address"
+          >
+            <Text style={styles.addressText}>{functionResult.address}</Text>
+            <Text style={styles.copyText}>📋 Tap to copy</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+        </View>
+      );
+
+    case 'list_recent_transactions':
+      return functionResult.success ? (
+        <View style={styles.card}>
+          <Text style={styles.title}>📜 Recent Transactions</Text>
+          {(functionResult.transactions || []).length === 0 ? (
+            <Text style={styles.invoiceText}>No recent transactions.</Text>
+          ) : (
+            functionResult.transactions.map((t: any, i: number) => (
+              <View key={i} style={styles.txRow}>
+                <Text style={styles.txDirection}>
+                  {t.direction === 'received' ? '↓ Received' : '↑ Sent'}
+                </Text>
+                <Text style={styles.txAmount}>
+                  {Number(t.amount_sats || 0).toLocaleString()} sats
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+      ) : (
+        <View style={styles.card}>
+          <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+        </View>
+      );
+
+    default:
+      return null;
+  }
+};
+
+const makeStyles = (theme: Theme) =>
+  StyleSheet.create({
+    card: {
+      marginTop: theme.spacing[3],
+      padding: theme.spacing[3],
+      backgroundColor: theme.colors.surface.highlight,
+      borderRadius: theme.borderRadius.md,
+      borderLeftWidth: 3,
+      borderLeftColor: theme.colors.primary[500],
+    },
+    title: {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: '600',
+      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      marginBottom: theme.spacing[2],
+      letterSpacing: 0.5,
+    },
+    successText: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.success[700] ?? theme.colors.success[600],
+      fontWeight: '500',
+      marginBottom: theme.spacing[1],
+    },
+    errorText: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.error[700] ?? theme.colors.error[600],
+      fontWeight: '500',
+    },
+    invoiceText: {
+      fontSize: theme.typography.fontSize.sm,
+      lineHeight: 20,
+      color: theme.colors.text.secondary,
+      marginBottom: theme.spacing[2],
+    },
+    copyButton: {
+      alignSelf: 'flex-start',
+      paddingVertical: theme.spacing[1],
+      paddingHorizontal: theme.spacing[2],
+      backgroundColor: theme.colors.primary[100] ?? theme.colors.surface.secondary,
+      borderRadius: theme.borderRadius.sm,
+      marginTop: theme.spacing[1],
+    },
+    copyText: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      fontWeight: '500',
+    },
+    merchantList: { maxHeight: 180 },
+    merchantItem: {
+      padding: theme.spacing[2],
+      backgroundColor: theme.colors.surface.primary,
+      borderRadius: theme.borderRadius.sm,
+      marginBottom: theme.spacing[2],
+      borderWidth: 1,
+      borderColor: theme.colors.border.light,
+    },
+    merchantName: {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: '600',
+      color: theme.colors.text.primary,
+      marginBottom: theme.spacing[1],
+      lineHeight: 20,
+    },
+    merchantAddress: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+      marginBottom: theme.spacing[1],
+      lineHeight: 16,
+    },
+    merchantLink: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      marginBottom: theme.spacing[1],
+      fontWeight: '500',
+      lineHeight: 16,
+    },
+    merchantHours: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.success[700] ?? theme.colors.success[600],
+      marginBottom: theme.spacing[1],
+      fontWeight: '500',
+    },
+    balanceAmount: {
+      fontSize: theme.typography.fontSize.xl,
+      fontWeight: '700',
+      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+    },
+    balanceSub: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.tertiary,
+      marginTop: theme.spacing[1],
+    },
+    assetRows: { marginTop: theme.spacing[2], gap: theme.spacing[1] },
+    assetRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: theme.spacing[1],
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border.light,
+    },
+    assetTicker: {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: '600',
+      color: theme.colors.text.primary,
+    },
+    assetBalance: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.secondary,
+    },
+    addressText: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.primary,
+      fontWeight: '500',
+      marginBottom: theme.spacing[1],
+    },
+    txRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      paddingVertical: theme.spacing[2],
+      borderTopWidth: 1,
+      borderTopColor: theme.colors.border.light,
+    },
+    txDirection: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.secondary,
+      fontWeight: '500',
+    },
+    txAmount: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.primary,
+      fontWeight: '600',
+    },
+  });
+
+export default FunctionResultCard;

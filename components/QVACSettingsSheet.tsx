@@ -1,12 +1,11 @@
 // components/QVACSettingsSheet.tsx
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   Modal,
   View,
   Text,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   Switch,
   StyleSheet,
   ActivityIndicator,
@@ -26,6 +25,10 @@ interface Props {
   combinedProgress: number;
   onSelectModel: (id: string) => void;
   onSetDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => void;
+  /** Open the QR scanner to pair with a desktop provider. */
+  onScanQR: () => void;
+  /** Friendly name of the currently-paired desktop, if any. */
+  providerName?: string | null;
 }
 
 const TIER_LABEL: Record<string, string> = {
@@ -43,25 +46,15 @@ export default function QVACSettingsSheet({
   combinedProgress,
   onSelectModel,
   onSetDelegate,
+  onScanQR,
+  providerName,
 }: Props) {
-  const [delegateEnabled, setDelegateEnabled] = useState(config.delegateEnabled);
-  const [providerKey, setProviderKey] = useState(config.providerPublicKey);
-
-  // Re-sync local form when the sheet (re)opens or config changes
-  useEffect(() => {
-    setDelegateEnabled(config.delegateEnabled);
-    setProviderKey(config.providerPublicKey);
-  }, [config.delegateEnabled, config.providerPublicKey, visible]);
-
-  const delegateDirty =
-    delegateEnabled !== config.delegateEnabled ||
-    providerKey.trim() !== config.providerPublicKey;
-
-  const applyDelegate = () => {
-    onSetDelegate({ enabled: delegateEnabled, providerPublicKey: providerKey });
-  };
-
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
+  const hasProvider = !!config.providerPublicKey;
+
+  const shortKey = hasProvider
+    ? `${config.providerPublicKey.slice(0, 10)}…${config.providerPublicKey.slice(-6)}`
+    : '';
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -83,7 +76,7 @@ export default function QVACSettingsSheet({
         )}
 
         <ScrollView contentContainerStyle={styles.content}>
-          {/* ---- Model selection ---- */}
+          {/* ---- On-device model ---- */}
           <Text style={styles.sectionTitle}>On-device model</Text>
           <Text style={styles.sectionHint}>
             Smaller models run on a phone; larger ones need a Mac or P2P delegation.
@@ -121,45 +114,53 @@ export default function QVACSettingsSheet({
           })}
 
           {/* ---- P2P delegation ---- */}
-          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>P2P delegation</Text>
+          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Desktop brain (P2P)</Text>
           <Text style={styles.sectionHint}>
-            Run inference on a remote QVAC provider (e.g. your Mac) instead of on this device.
-            Start a provider there and paste its public key here.
+            Run inference on a desktop running KaleidoMind instead of on this device.
           </Text>
 
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Delegate to a provider</Text>
-            <Switch
-              value={delegateEnabled}
-              onValueChange={setDelegateEnabled}
-              trackColor={{ true: theme.colors.primary[500], false: theme.colors.border.medium }}
-            />
-          </View>
+          {hasProvider ? (
+            <>
+              <View style={styles.providerChip}>
+                <View style={[styles.dot, config.delegateEnabled ? styles.dotOn : styles.dotOff]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.providerName} numberOfLines={1}>
+                    {providerName || 'Desktop provider'}
+                  </Text>
+                  <Text style={styles.providerKey}>{shortKey}</Text>
+                </View>
+                {config.delegateEnabled && (
+                  <View style={styles.activePill}>
+                    <Text style={styles.activePillText}>Active</Text>
+                  </View>
+                )}
+              </View>
 
-          {delegateEnabled && (
-            <TextInput
-              style={styles.input}
-              value={providerKey}
-              onChangeText={setProviderKey}
-              placeholder="Provider public key (hex)"
-              placeholderTextColor={theme.colors.text.tertiary}
-              autoCapitalize="none"
-              autoCorrect={false}
-              multiline
-            />
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Delegate to this desktop</Text>
+                <Switch
+                  value={config.delegateEnabled}
+                  onValueChange={(v) =>
+                    onSetDelegate({ enabled: v, providerPublicKey: config.providerPublicKey })
+                  }
+                  trackColor={{ true: theme.colors.primary[500], false: theme.colors.border.medium }}
+                />
+              </View>
+
+              <TouchableOpacity style={styles.scanButtonGhost} onPress={onScanQR}>
+                <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[600]} />
+                <Text style={styles.scanGhostText}>Scan a different desktop</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.scanButtonPrimary} onPress={onScanQR}>
+              <Ionicons name="qr-code-outline" size={20} color={theme.colors.text.inverse} />
+              <Text style={styles.scanPrimaryText}>Scan QR from desktop</Text>
+            </TouchableOpacity>
           )}
 
-          <TouchableOpacity
-            style={[styles.applyButton, (!delegateDirty || (delegateEnabled && !providerKey.trim())) && styles.applyDisabled]}
-            onPress={applyDelegate}
-            disabled={!delegateDirty || (delegateEnabled && !providerKey.trim())}
-          >
-            <Text style={styles.applyText}>Apply & reload model</Text>
-          </TouchableOpacity>
-
           <Text style={styles.note}>
-            On a Mac, run a QVAC provider (see scripts/qvac-provider.mjs) — it prints a public key.
-            With delegation on, this device won’t download the weights.
+            On your Mac, open KaleidoMind → Pair and scan the QR shown there. No typing needed.
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -207,6 +208,32 @@ const styles = StyleSheet.create({
   modelInfo: { flex: 1, paddingRight: theme.spacing[2] },
   modelLabel: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
   modelMeta: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
+
+  // Provider chip
+  providerChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    backgroundColor: theme.colors.surface.primary,
+    marginBottom: theme.spacing[2],
+  },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  dotOn: { backgroundColor: theme.colors.success[500] },
+  dotOff: { backgroundColor: theme.colors.border.medium },
+  providerName: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
+  providerKey: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2, fontFamily: 'Courier' },
+  activePill: {
+    backgroundColor: theme.colors.success[500],
+    borderRadius: 999,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+  },
+  activePillText: { color: theme.colors.text.inverse, fontSize: 11, fontWeight: '700' },
+
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -214,25 +241,30 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[2],
   },
   toggleLabel: { fontSize: theme.typography.fontSize.base, color: theme.colors.text.primary, fontWeight: '500' },
-  input: {
-    borderWidth: 1,
-    borderColor: theme.colors.border.medium,
-    borderRadius: theme.borderRadius.md,
-    padding: theme.spacing[3],
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    backgroundColor: theme.colors.surface.primary,
-    minHeight: 56,
-    marginVertical: theme.spacing[2],
-  },
-  applyButton: {
+
+  // Scan buttons
+  scanButtonPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
     backgroundColor: theme.colors.primary[600],
     borderRadius: theme.borderRadius.md,
     paddingVertical: theme.spacing[3],
-    alignItems: 'center',
-    marginTop: theme.spacing[2],
+    marginTop: theme.spacing[1],
   },
-  applyDisabled: { opacity: 0.5 },
-  applyText: { color: theme.colors.text.inverse, fontWeight: '700', fontSize: theme.typography.fontSize.base },
+  scanPrimaryText: { color: theme.colors.text.inverse, fontWeight: '700', fontSize: theme.typography.fontSize.base },
+  scanButtonGhost: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.primary[500],
+    paddingVertical: theme.spacing[3],
+    marginTop: theme.spacing[1],
+  },
+  scanGhostText: { color: theme.colors.primary[600], fontWeight: '600', fontSize: theme.typography.fontSize.sm },
   note: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: theme.spacing[3], lineHeight: 18 },
 });

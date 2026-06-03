@@ -42,6 +42,7 @@ import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
+import PairDesktopScreen from './screens/PairDesktopScreen';
 
 type RootStackParamList = {
   InitialLoad: undefined;
@@ -67,6 +68,7 @@ type RootStackParamList = {
   OpenChannel: undefined;
   IssueAsset: undefined;
   Channels: undefined;
+  PairDesktop: undefined;
 };
 
 type TabBarIconProps = {
@@ -224,6 +226,11 @@ function AppNavigator() {
         <Stack.Screen name="Send" component={SendScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={ReceiveScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+        <Stack.Screen
+          name="PairDesktop"
+          component={PairDesktopScreen}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
         <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
         <Stack.Screen name="Assets" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />

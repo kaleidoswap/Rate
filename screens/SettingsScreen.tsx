@@ -1,5 +1,5 @@
 // screens/SettingsScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Switch, TextInput, Alert, Text, TouchableOpacity } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +28,7 @@ import { Button, ListItem, Input, MainHeader } from '../components';
 import NostrProfileManager from '../components/NostrProfileManager';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme';
+import { PairingService, type DesktopPairing } from '../services/PairingService';
 
 interface Props {
   navigation: any;
@@ -40,6 +41,21 @@ export default function SettingsScreen({ navigation }: Props) {
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [tempNodeUrl, setTempNodeUrl] = useState(settings.remoteNodeUrl);
   const [showNostrSection, setShowNostrSection] = useState(false);
+
+  // KaleidoMind — active desktop pairing (refreshed on focus)
+  const [activePairing, setActivePairing] = useState<DesktopPairing | null>(null);
+  useEffect(() => {
+    const refresh = async () => {
+      try {
+        setActivePairing(await PairingService.getActive());
+      } catch {
+        setActivePairing(null);
+      }
+    };
+    refresh();
+    const unsubscribe = navigation.addListener?.('focus', refresh);
+    return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
+  }, [navigation]);
 
   const handleNodeTypeChange = async (useRemoteNode: boolean) => {
     const newType = useRemoteNode ? 'remote' : 'local';
@@ -304,6 +320,48 @@ export default function SettingsScreen({ navigation }: Props) {
                     </View>
                   )}
                 </View>
+              </ListItem>
+            )}
+          </View>
+        </View>
+
+        {/* KaleidoMind Section */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionTitleContainer}>
+              <Ionicons
+                name="sparkles-outline"
+                size={24}
+                color={theme.colors.primary[500]}
+                style={styles.sectionIcon}
+              />
+              <Text style={styles.sectionTitle}>KaleidoMind</Text>
+            </View>
+          </View>
+
+          <View style={styles.sectionContent}>
+            <ListItem>
+              <Text>Desktop brain</Text>
+              <TouchableOpacity
+                style={styles.settingRow}
+                onPress={() => navigation.navigate('PairDesktop')}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {activePairing ? activePairing.name : 'Connect to desktop'}
+                </Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
+            </ListItem>
+
+            {activePairing && (
+              <ListItem>
+                <Text>Active model</Text>
+                <Text style={styles.settingValue}>{activePairing.model}</Text>
               </ListItem>
             )}
           </View>

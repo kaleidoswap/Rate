@@ -17,6 +17,7 @@ import {
   hfUrlFromDescriptor,
   type QVACModel,
 } from './qvacModels';
+import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
 
 /**
  * On a phone we download model weights over plain HTTPS with React Native's
@@ -422,6 +423,189 @@ class QVACService {
     return { text, toolCalls: executedCalls, requestId: run.requestId };
   }
 
+  /**
+   * Multi-turn agentic chat. Unlike `chat()` (single-shot), this feeds tool
+   * results back to the model so it produces a natural-language answer and can
+   * chain tool calls (e.g. get_balance → reason → pay). Follows the QVAC SDK
+   * multi-turn pattern: push the raw assistant frame + `{role:'tool'}` results
+   * to history, loop until the model stops calling tools.
+   *
+   * Money tools (requiresConfirmation) pause for `onConfirm` — the UI shows a
+   * confirmation sheet and resolves the promise. The handler always runs on
+   * THIS device (the phone), even when inference is delegated to a desktop
+   * provider — keys never leave the device.
+   */
+  async chatAgentic(params: {
+    messages: Array<{ role: string; content: string }>;
+    tools?: QVACTool[];
+    /** Max reasoning↔tool rounds before forcing a stop. Default 5. */
+    maxTurns?: number;
+    /** Visible content tokens as they stream, tagged with the current turn. */
+    onToken?: (token: string, turn: number) => void;
+    /** The live requestId for the current turn (so a stop button can cancel it). */
+    onStart?: (requestId: string, turn: number) => void;
+    /** Fired when the model requests a tool, before it executes. */
+    onToolCall?: (call: { name: string; arguments: Record<string, unknown> }, turn: number) => void;
+    /** Human-in-the-loop gate for money tools. Resolve to approve/decline. */
+    onConfirm?: (call: {
+      name: string;
+      arguments: Record<string, unknown>;
+    }) => Promise<{ approved: boolean; reason?: string }>;
+  }): Promise<{ text: string; turns: number; toolCalls: QVACToolCall[]; requestId: string }> {
+    if (!this.llmModelId) {
+      throw new Error('LLM model not loaded');
+    }
+
+    const tools = params.tools ?? [];
+    const toolsByName = new Map(tools.map((t) => [t.name, t]));
+    const toolDefs = tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+      handler: t.handler,
+    }));
+    const maxTurns = params.maxTurns ?? 5;
+
+    // Work on a copy — we append assistant/tool frames per the SDK pattern.
+    const history: Array<{ role: string; content: string }> = [...params.messages];
+    const executedCalls: QVACToolCall[] = [];
+    let lastRequestId = '';
+    let finalText = '';
+    let turns = 0;
+
+    for (let turn = 1; turn <= maxTurns; turn++) {
+      turns = turn;
+
+      const run = completion({
+        modelId: this.llmModelId,
+        history,
+        stream: true,
+        tools: toolDefs.length ? toolDefs : undefined,
+      });
+      lastRequestId = run.requestId;
+      params.onStart?.(run.requestId, turn);
+
+      let streamed = '';
+      for await (const event of run.events) {
+        if (event.type === 'contentDelta') {
+          streamed += event.text;
+          params.onToken?.(event.text, turn);
+        }
+      }
+
+      const final = await run.final;
+      finalText = (final.contentText || streamed).trim();
+
+      // No tool calls → the model produced its final answer.
+      if (!final.toolCalls || final.toolCalls.length === 0) {
+        break;
+      }
+
+      // Anchor the next turn with the RAW assistant frame (not the cleaned
+      // text) — the model needs its own tool-call framing to continue.
+      history.push({ role: 'assistant', content: final.raw?.fullText ?? finalText });
+
+      for (const call of final.toolCalls) {
+        const def = toolsByName.get(call.name);
+        params.onToolCall?.({ name: call.name, arguments: call.arguments }, turn);
+
+        let result: unknown;
+
+        if (def?.requiresConfirmation) {
+          // Human-in-the-loop for anything that moves money.
+          const decision = params.onConfirm
+            ? await params.onConfirm({ name: call.name, arguments: call.arguments })
+            : { approved: false, reason: 'no confirmation handler available' };
+
+          if (decision.approved) {
+            try {
+              result = call.invoke ? await call.invoke() : await def.handler(call.arguments);
+            } catch (err) {
+              result = { error: err instanceof Error ? err.message : String(err) };
+            }
+          } else {
+            result = { declined: true, reason: decision.reason ?? 'user declined' };
+          }
+        } else {
+          // Read / safe-write tools auto-execute on this device.
+          try {
+            result = call.invoke ? await call.invoke() : await def?.handler(call.arguments);
+          } catch (err) {
+            result = { error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        executedCalls.push({ name: call.name, arguments: call.arguments, result });
+        history.push({
+          role: 'tool',
+          content: typeof result === 'string' ? result : JSON.stringify(result),
+        });
+      }
+
+      if (turn === maxTurns && !finalText) {
+        finalText = 'I had to stop after several steps — please try a more specific request.';
+      }
+    }
+
+    return { text: finalText, turns, toolCalls: executedCalls, requestId: lastRequestId };
+  }
+
+  /**
+   * One completion turn in the shape the shared @kaleido/mind Engine expects.
+   * The Engine owns the agentic loop + tool execution; this just runs a single
+   * round and returns the assistant text, the raw frame (for history push-back)
+   * and any tool calls the model requested. Tools are passed as schemas only —
+   * the Engine executes them via its ToolSources (so wallet signing stays here
+   * on-device even when inference is delegated).
+   */
+  async runProviderTurn(input: TurnInput): Promise<TurnOutput> {
+    if (!this.llmModelId) {
+      throw new Error('LLM model not loaded');
+    }
+
+    const history = input.system
+      ? [{ role: 'system', content: input.system }, ...input.messages]
+      : input.messages;
+
+    const toolDefs = input.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    }));
+
+    const run = completion({
+      modelId: this.llmModelId,
+      history,
+      stream: true,
+      tools: toolDefs.length ? (toolDefs as any) : undefined,
+    });
+
+    let streamed = '';
+    for await (const event of run.events) {
+      if (event.type === 'contentDelta') {
+        streamed += event.text;
+        input.onToken?.(event.text);
+      }
+    }
+
+    const final = await run.final;
+    // Strip <think>…</think> reasoning from the user-visible text; keep the raw
+    // frame (with framing) for the engine's history push-back.
+    const rawText = final.contentText || streamed;
+    const text = rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+
+    return {
+      text,
+      rawContent: final.raw?.fullText ?? rawText,
+      toolCalls: (final.toolCalls || []).map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        arguments: c.arguments ?? {},
+      })),
+      requestId: run.requestId,
+    };
+  }
+
   /** Cancel an in-flight completion by its requestId (for a stop button). */
   async cancelRequest(requestId: string): Promise<void> {
     try {
@@ -438,9 +622,14 @@ class QVACService {
       throw new Error('Whisper model not loaded');
     }
 
+    // The QVAC SDK's native file reader expects a plain filesystem path, not a
+    // `file://` URI — same as the model-loading paths above. Passing the raw
+    // URI causes AUDIO_FILE_NOT_FOUND even though the file exists.
+    const audioPath = audioUri.replace('file://', '');
+
     return await transcribe({
       modelId: this.whisperModelId,
-      audioChunk: audioUri,
+      audioChunk: audioPath,
     });
   }
 
