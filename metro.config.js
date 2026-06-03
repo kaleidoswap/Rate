@@ -1,5 +1,6 @@
 // Learn more https://docs.expo.io/guides/customizing-metro
 const { getDefaultConfig } = require('expo/metro-config');
+const exclusionList = require('metro-config/private/defaults/exclusionList').default;
 const path = require('path');
 
 /** @type {import('expo/metro-config').MetroConfig} */
@@ -8,16 +9,44 @@ const config = getDefaultConfig(__dirname);
 // Allow Metro to resolve local packages (symlinked via file:)
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 const walletProtocolsRoot = path.resolve(__dirname, '../wallet-protocols');
-config.watchFolders = [kaleidoUiRoot, walletProtocolsRoot];
+// @kaleidorg/mind — the shared agentic engine, also published to npm as
+// @kaleidorg/mind. Linked via file: for fast local dev (pure JS dist/, no
+// native deps). To consume the published version instead, set its dep to
+// `^0.0.1` and drop this watchFolder.
+const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
+config.watchFolders = [kaleidoUiRoot, walletProtocolsRoot, kaleidoMindRoot];
 config.resolver.nodeModulesPaths = [
   path.resolve(__dirname, 'node_modules'),
   path.resolve(kaleidoUiRoot, 'node_modules'),
 ];
 
+const escapePath = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const singleCopyNativeModules = [
+  'react',
+  'react-native',
+  'react-native-svg',
+  'react-native-safe-area-context',
+  'react-native-gesture-handler',
+  'react-native-reanimated',
+  'react-native-screens',
+];
+const blockedLinkedModules = singleCopyNativeModules.map(
+  (name) =>
+    new RegExp(
+      `${escapePath(kaleidoUiRoot)}\\/node_modules\\/(?:\\.pnpm\\/[^/]+\\/node_modules\\/)?${name}\\/.*`
+    )
+);
+config.resolver.blockList = exclusionList(blockedLinkedModules);
+
 // Force all shared deps to resolve from rate's node_modules (single copy, correct platform entries)
 config.resolver.extraNodeModules = {
   react: path.resolve(__dirname, 'node_modules/react'),
   'react-native': path.resolve(__dirname, 'node_modules/react-native'),
+  'react-native-svg': path.resolve(__dirname, 'node_modules/react-native-svg'),
+  'react-native-safe-area-context': path.resolve(__dirname, 'node_modules/react-native-safe-area-context'),
+  'react-native-gesture-handler': path.resolve(__dirname, 'node_modules/react-native-gesture-handler'),
+  'react-native-reanimated': path.resolve(__dirname, 'node_modules/react-native-reanimated'),
+  'react-native-screens': path.resolve(__dirname, 'node_modules/react-native-screens'),
   'kaleido-sdk': path.resolve(__dirname, 'node_modules/kaleido-sdk'),
   '@buildonspark/spark-sdk': path.resolve(__dirname, 'node_modules/@buildonspark/spark-sdk'),
   '@arkade-os/sdk': path.resolve(__dirname, 'node_modules/@arkade-os/sdk'),
@@ -30,7 +59,49 @@ config.resolver.alias = {
   crypto: 'react-native-get-random-values',
   stream: 'readable-stream',
   buffer: 'buffer',
+  // Spark's WDK module pulls `sodium-universal` → `sodium-native` (a native addon
+  // with no React Native support). Map it to the pure-JS implementation. This is the
+  // same substitution `sodium-universal`'s own `browser` field makes (confirmed via
+  // the MV3 bundle spike); the explicit alias makes it deterministic under Metro/Hermes.
+  'sodium-native': 'sodium-javascript',
 };
+
+// --- WDK engine resolution (active when EXPO_PUBLIC_WALLET_ENGINE=wdk) --------
+// The WDK wallet modules are file: siblings; let Metro watch + single-copy them so
+// they (and their shared @tetherto/wdk-wallet base) resolve to one instance. The
+// modules expose a `main` entry, so this needs no app-wide package-exports change.
+const wdkRoots = {
+  '@tetherto/wdk-wallet-spark': path.resolve(__dirname, '../wdk-wallet-spark'),
+  '@kaleidorg/wdk-wallet-liquid': path.resolve(__dirname, '../wdk-wallet-liquid'),
+  '@kaleidorg/wdk-wallet-rln': path.resolve(__dirname, '../wdk-wallet-rln'),
+  '@kaleidorg/wdk-protocol-swap-kaleidoswap': path.resolve(
+    __dirname,
+    '../wdk-protocol-swap-kaleidoswap'
+  ),
+  '@arkade-os/wdk': path.resolve(__dirname, '../arkade-wdk'),
+};
+config.watchFolders.push(...Object.values(wdkRoots));
+Object.assign(config.resolver.extraNodeModules, wdkRoots, {
+  '@tetherto/wdk-wallet': path.resolve(__dirname, 'node_modules/@tetherto/wdk-wallet'),
+});
+
+// Resolve the `react-native` export/imports condition deterministically. This is what
+// makes (a) @kaleidorg/wdk-wallet-liquid's `#lwk` map pick the native `lwk-rn` binding
+// (src/lwk-native.js) instead of the wasm `default`, and (b) @buildonspark/spark-sdk
+// resolve its React Native build.
+//
+// IMPORTANT: do NOT include 'import' here. @babel/runtime's exports map has an `import`
+// condition that returns the ESM helper (`export default _inherits`); RN core require()s
+// those helpers as CJS and calls them directly, so an ESM `{default: fn}` breaks with
+// "_inherits is not a function (it is Object)". Dropping 'import' makes helpers fall back
+// to 'default' (CJS function). ESM-only packages still resolve via their own 'default'.
+config.resolver.unstable_conditionNames = ['react-native', 'require'];
+
+// Liquid now uses the native `lwk-rn` (UniFFI→JSI) binding — no WASM. The .wasm assetExt
+// below is retained only for the browser/lwk_wasm path used by other targets; harmless on RN.
+if (!config.resolver.assetExts.includes('wasm')) {
+  config.resolver.assetExts.push('wasm');
+}
 
 // Add Node.js polyfills to resolver platforms
 config.resolver.platforms = ['ios', 'android', 'native', 'web'];
