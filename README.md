@@ -74,6 +74,26 @@ npm install
 npx expo start
 ```
 
+### Native setup (lwk-rn artifacts)
+
+The Liquid protocol uses the `lwk-rn` native module, whose prebuilt native artifacts
+(iOS `LwkRnFramework.xcframework` + Android `jniLibs`) are **excluded** from its npm
+tarball and normally downloaded by its own `postinstall`. Because pnpm skips
+dependency postinstall scripts, a fresh `pnpm install` leaves these artifacts missing,
+and the iOS `pod install` / native build then fails on a missing
+`LwkRnFramework.xcframework`.
+
+This repo fetches them automatically via `scripts/fetch-lwk-artifacts.sh`, wired into
+its own `postinstall`. The step is idempotent (skips when the artifacts already exist)
+and non-fatal (warns and continues when offline).
+
+If the iOS build complains about a missing `LwkRnFramework.xcframework` (e.g. because
+your package manager skipped postinstall), fetch the artifacts manually:
+
+```bash
+pnpm run setup:native
+```
+
 ### Development Setup
 
 For detailed development setup including RGB node compilation and Bitcoin node configuration, see [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md).

@@ -9,7 +9,9 @@
     "web": "expo start --web",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "setup:native": "bash scripts/fetch-lwk-artifacts.sh",
+    "postinstall": "bash scripts/fetch-lwk-artifacts.sh"
   },
   "dependencies": {
     "@arkade-os/sdk": "^0.4.14",
