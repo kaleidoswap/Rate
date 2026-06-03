@@ -10,7 +10,7 @@
  *     Each require is guarded so missing modules just disable that protocol.
  *  2. Config shapes: builds each adapter's config from the wallet's NetworkConfig.
  *
- * Enabled via EXPO_PUBLIC_WALLET_ENGINE=wdk (see ./index.ts). Default stays native.
+ * This is the sole wallet engine on mobile (native adapters removed from ./index.ts).
  */
 
 import {
