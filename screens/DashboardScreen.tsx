@@ -22,6 +22,8 @@ import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
+import { selectDisclosureLevel } from '../store/slices/settingsSlice';
+import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
 
 import { theme } from '../theme';
 import {
@@ -84,6 +86,9 @@ export default function DashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  const disclosureLevel = useSelector(selectDisclosureLevel);
+  const policy = policyFor(disclosureLevel);
+  const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -375,6 +380,43 @@ export default function DashboardScreen({ navigation }: Props) {
 
   const totalBalance = offChainBalance + getTotalBtcBalance();
 
+  // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
+  // which network each lives on. BTC is filtered out of `rgbAssets` upstream, so
+  // its true total comes from `totalBalance` (on-chain + Lightning). USDt assets
+  // bucket into `usd`; everything else stays in `other`.
+  const liteAssets = rgbAssets.map((asset) => ({
+    id: asset.asset_id,
+    ticker: asset.ticker,
+    balance: {
+      total:
+        asset.balance.settled +
+        (asset.balance.offchain_inbound ?? 0) +
+        (asset.balance.offchain_outbound ?? 0),
+    },
+  })) as any;
+  const lite = aggregateForLite(liteAssets);
+  // The aggregated USD figure is in base units; convert each contributing asset
+  // to its human value using its own precision so the display reads as dollars.
+  const liteUsdAssetIds = new Set(
+    liteAssets
+      .filter((a: any) => !lite.other.some((o: any) => o.id === a.id))
+      .map((a: any) => a.id)
+  );
+  const liteUsdDisplay = rgbAssets
+    .filter((asset) => liteUsdAssetIds.has(asset.asset_id))
+    .reduce((sum, asset) => {
+      const total =
+        asset.balance.settled +
+        (asset.balance.offchain_inbound ?? 0) +
+        (asset.balance.offchain_outbound ?? 0);
+      return sum + total / Math.pow(10, asset.precision ?? 0);
+    }, 0);
+  // Assets the AssetList should show in lite mode: drop USDt (folded into the USD
+  // figure) and keep the original rgbAssets shape the list already renders.
+  const liteOtherAssets = rgbAssets.filter((asset) =>
+    lite.other.some((o: any) => o.id === asset.asset_id)
+  );
+
   // Get current hour to determine greeting
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -556,6 +598,8 @@ export default function DashboardScreen({ navigation }: Props) {
           greeting={getGreeting()}
           title="KaleidoSwap Wallet"
           subtitle={(() => {
+            // Network/protocol attribution is an "advanced" detail — hide it in lite mode.
+            if (!policy.showNetworks) return undefined;
             const connected: string[] = [];
             if (protocolManager.getAdapterIfAvailable('SPARK')?.isConnected()) connected.push('Spark');
             if (protocolManager.getAdapterIfAvailable('RGB')?.isConnected()) connected.push('RLN');
@@ -574,7 +618,8 @@ export default function DashboardScreen({ navigation }: Props) {
             formatUSD={formatUSD}
             onChainBalance={getTotalBtcBalance()}
             lightningBalance={offChainBalance}
-            byProtocol={(btcBalance as any)?.byProtocol}
+            // Per-protocol balance breakdown is a network detail — only in advanced mode.
+            byProtocol={policy.showNetworks ? (btcBalance as any)?.byProtocol : undefined}
           />
         </MainHeader>
 
@@ -585,8 +630,24 @@ export default function DashboardScreen({ navigation }: Props) {
           onHistory={() => navigation.getParent()?.navigate('History')}
         />
 
+        {isLite && liteUsdDisplay > 0 && (
+          <View style={styles.liteUsdCard}>
+            <View style={styles.liteUsdLeft}>
+              <View style={styles.liteUsdIcon}>
+                <Ionicons name="cash-outline" size={20} color={theme.colors.success[600]} />
+              </View>
+              <Text style={styles.liteUsdLabel}>USD</Text>
+            </View>
+            <Text style={styles.liteUsdValue}>${liteUsdDisplay.toFixed(2)}</Text>
+          </View>
+        )}
+
         <AssetList
-          assets={rgbAssets}
+          // In lite mode, hide USDt (it's folded into the USD figure above) and
+          // strip the per-asset protocol badge (a network detail).
+          assets={isLite
+            ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
+            : rgbAssets}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
           onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
             asset: {
@@ -597,6 +658,7 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
+        {policy.showNetworks && (
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
@@ -611,6 +673,7 @@ export default function DashboardScreen({ navigation }: Props) {
           onOpenChannel={() => navigation.getParent()?.navigate('OpenChannel')}
           onBuyChannel={() => navigation.getParent()?.navigate('LSP')}
         />
+        )}
       </ScrollView>
 
       {renderChannelModal()}
@@ -625,6 +688,41 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: theme.spacing[24],
+  },
+  liteUsdCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing[6],
+    marginHorizontal: theme.spacing[4],
+    padding: theme.spacing[4],
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+  },
+  liteUsdLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+  },
+  liteUsdIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.colors.success[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liteUsdLabel: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  liteUsdValue: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
   },
   headerContainer: {
     marginBottom: theme.spacing[4],

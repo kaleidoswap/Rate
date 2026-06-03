@@ -20,6 +20,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
+import { setDisclosureLevel } from '../store/slices/settingsSlice';
+import type { DisclosureLevel } from '@kaleidorg/wallet-protocols';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
@@ -29,7 +31,7 @@ interface Props {
   navigation: any;
 }
 
-type SetupStep = 'welcome' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
+type SetupStep = 'welcome' | 'mode' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
 
 export default function WalletSetupScreen({ navigation }: Props) {
   const dispatch = useDispatch();
@@ -39,6 +41,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const [generatedMnemonic, setGeneratedMnemonic] = useState<string>('');
   const [backupConfirmed, setBackupConfirmed] = useState(false);
   const [mnemonicCopied, setMnemonicCopied] = useState(false);
+
+  // Disclosure level chosen at creation (default 'lite', reversible in Settings).
+  const [mode, setMode] = useState<DisclosureLevel>('lite');
 
   // Network selection state — enable all protocols by default (matching extension)
   const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
@@ -105,6 +110,10 @@ export default function WalletSetupScreen({ navigation }: Props) {
         Alert.alert('Wallet Name Required', 'Please give your wallet a name to continue.');
         return;
       }
+      animateTransition('mode');
+    } else if (step === 'mode') {
+      // Persist the chosen disclosure level; reversible later in Settings.
+      dispatch(setDisclosureLevel(mode));
       animateTransition('networks');
     } else if (step === 'networks') {
       handleCreate();
@@ -114,6 +123,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const handleBack = () => {
     Keyboard.dismiss();
     if (step === 'networks') {
+      animateTransition('mode');
+    } else if (step === 'mode') {
       animateTransition('welcome');
     } else if (step === 'welcome') {
       navigation.goBack();
@@ -207,7 +218,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const renderStepIndicator = () => {
-    const steps: SetupStep[] = ['welcome', 'networks'];
+    const steps: SetupStep[] = ['welcome', 'mode', 'networks'];
     const currentIdx = steps.indexOf(step);
 
     if (step === 'creating' || step === 'success') return null;
@@ -280,6 +291,79 @@ export default function WalletSetupScreen({ navigation }: Props) {
       </View>
     </ScrollView>
   );
+
+  const renderModeStep = () => {
+    const options: Array<{
+      value: DisclosureLevel;
+      title: string;
+      recommended?: boolean;
+      icon: keyof typeof Ionicons.glyphMap;
+      desc: string;
+    }> = [
+      {
+        value: 'lite',
+        title: 'Lite',
+        recommended: true,
+        icon: 'sparkles-outline',
+        desc: 'Simple view — just BTC, USD and your assets. No networks or channels to manage.',
+      },
+      {
+        value: 'advanced',
+        title: 'Advanced',
+        icon: 'options-outline',
+        desc: 'Full control — see every network, pick send routes and manage Lightning channels.',
+      },
+    ];
+
+    return (
+      <ScrollView
+        style={styles.stepContent}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
+        <View style={styles.iconHeader}>
+          <View style={[styles.welcomeIconContainer, { backgroundColor: theme.colors.primary[50] }]}>
+            <Ionicons name="contrast-outline" size={32} color={theme.colors.primary[500]} />
+          </View>
+        </View>
+
+        <Text style={styles.stepTitle}>Choose Your Experience</Text>
+        <Text style={styles.stepDescription}>
+          Pick how much detail you want to see. You can change this anytime in Settings.
+        </Text>
+
+        {options.map((option) => {
+          const selected = mode === option.value;
+          return (
+            <TouchableOpacity
+              key={option.value}
+              style={[styles.modeOption, selected && styles.modeOptionActive]}
+              onPress={() => setMode(option.value)}
+              activeOpacity={0.7}
+            >
+              <View style={[styles.iconContainer, { backgroundColor: theme.colors.primary[50] }]}>
+                <Ionicons name={option.icon} size={22} color={theme.colors.primary[500]} />
+              </View>
+              <View style={styles.modeTextContainer}>
+                <View style={styles.modeTitleRow}>
+                  <Text style={styles.networkName}>{option.title}</Text>
+                  {option.recommended && (
+                    <View style={styles.recommendedBadge}>
+                      <Text style={styles.recommendedText}>Recommended</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.networkDesc}>{option.desc}</Text>
+              </View>
+              <View style={[styles.modeRadio, selected && styles.modeRadioActive]}>
+                {selected && <Ionicons name="checkmark" size={14} color="white" />}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    );
+  };
 
   const renderNetworksStep = () => (
     <ScrollView
@@ -619,6 +703,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
 
   const getButtonTitle = () => {
     if (step === 'welcome') return 'Continue';
+    if (step === 'mode') return 'Continue';
     if (step === 'networks') return 'Generate Wallet';
     if (step === 'backup') return 'I\'ve Backed It Up';
     if (step === 'confirmBackup') return 'Create Wallet';
@@ -650,6 +735,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         >
           <View style={styles.animatedContent}>
             {step === 'welcome' && renderWelcomeStep()}
+            {step === 'mode' && renderModeStep()}
             {step === 'networks' && renderNetworksStep()}
             {step === 'backup' && renderBackupStep()}
             {step === 'confirmBackup' && renderConfirmBackupStep()}
@@ -658,7 +744,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           </View>
         </Animated.View>
 
-        {(step === 'welcome' || step === 'networks' || step === 'backup' || step === 'confirmBackup') && (
+        {(step === 'welcome' || step === 'mode' || step === 'networks' || step === 'backup' || step === 'confirmBackup') && (
           <View style={styles.footer}>
             <Button
               title={getButtonTitle()}
@@ -827,6 +913,54 @@ const styles = StyleSheet.create({
   networkCard: {
     padding: 0,
     overflow: 'hidden',
+  },
+  modeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.light,
+    backgroundColor: theme.colors.surface.primary,
+    marginBottom: theme.spacing[3],
+  },
+  modeOptionActive: {
+    borderColor: theme.colors.primary[500],
+    backgroundColor: theme.colors.primary[50],
+  },
+  modeTextContainer: {
+    flex: 1,
+    marginRight: theme.spacing[2],
+  },
+  modeTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    marginBottom: 2,
+  },
+  recommendedBadge: {
+    backgroundColor: theme.colors.primary[100],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+  },
+  recommendedText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '600',
+    color: theme.colors.primary[600],
+  },
+  modeRadio: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: theme.colors.border.medium,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeRadioActive: {
+    backgroundColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[500],
   },
   networkItem: {
     flexDirection: 'row',

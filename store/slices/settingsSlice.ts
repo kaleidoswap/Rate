@@ -2,6 +2,8 @@
 
 // store/slices/settingsSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import type { DisclosureLevel } from '@kaleidorg/wallet-protocols';
+import type { RootState } from '../index';
 
 interface SettingsState {
   nodeType: 'remote' | 'local';
@@ -20,6 +22,9 @@ interface SettingsState {
   currency: string;
   network: string;
   needsApiConfigUpdate: boolean;
+  // 'lite' shows BTC/USD/assets only; 'advanced' reveals networks/routes/channels.
+  // Chosen at wallet creation, reversible in settings.
+  disclosureLevel: DisclosureLevel;
 }
 
 const initialState: SettingsState = {
@@ -38,7 +43,8 @@ const initialState: SettingsState = {
   autoLockTimeout: 5,
   currency: 'USD',
   network: 'regtest',
-  needsApiConfigUpdate: false
+  needsApiConfigUpdate: false,
+  disclosureLevel: 'lite'
 };
 
 const settingsSlice = createSlice({
@@ -89,6 +95,9 @@ const settingsSlice = createSlice({
     setNetwork: (state, action: PayloadAction<string>) => {
       state.network = action.payload;
     },
+    setDisclosureLevel: (state, action: PayloadAction<DisclosureLevel>) => {
+      state.disclosureLevel = action.payload;
+    },
     clearApiConfigUpdateFlag: (state) => {
       state.needsApiConfigUpdate = false;
     }
@@ -110,7 +119,13 @@ export const {
   setAutoLockTimeout,
   setCurrency,
   setNetwork,
+  setDisclosureLevel,
   clearApiConfigUpdateFlag
 } = settingsSlice.actions;
+
+// Selector for the current disclosure level ('lite' | 'advanced').
+// Falls back to 'lite' for state persisted before this field existed.
+export const selectDisclosureLevel = (state: RootState): DisclosureLevel =>
+  state.settings.disclosureLevel ?? 'lite';
 
 export default settingsSlice.reducer;
