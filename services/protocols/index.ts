@@ -14,6 +14,7 @@ import {
   networkTypeToProtocol,
 } from '@kaleidorg/wallet-protocols'
 import type { ProtocolType, SparkConfig, ArkadeConfig, RgbConfig } from '@kaleidorg/wallet-protocols'
+import { getWdkProtocolManager, initializeWdkProtocols } from './wdk'
 
 // Configure Spark with SDK factory (avoids dynamic import from wallet-protocols)
 try {
@@ -124,7 +125,16 @@ try {
 // Singleton ProtocolManager
 let _protocolManager: ProtocolManager | null = null
 
+/**
+ * Wallet engine selector. Set EXPO_PUBLIC_WALLET_ENGINE=wdk to route the app
+ * through the WDK-backed adapters (./wdk.ts). Defaults to the native adapters,
+ * so this is a no-op unless explicitly enabled.
+ */
+export const WALLET_ENGINE: 'native' | 'wdk' =
+  process.env.EXPO_PUBLIC_WALLET_ENGINE === 'wdk' ? 'wdk' : 'native'
+
 export function getProtocolManager(): ProtocolManager {
+  if (WALLET_ENGINE === 'wdk') return getWdkProtocolManager()
   if (!_protocolManager) {
     _protocolManager = new ProtocolManager()
     _protocolManager.registerAdapter(new SparkAdapter())
@@ -143,6 +153,7 @@ export async function initializeProtocols(
   mnemonic: string,
   networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>,
 ): Promise<Map<ProtocolType, { success: boolean; error?: string }>> {
+  if (WALLET_ENGINE === 'wdk') return initializeWdkProtocols(mnemonic, networkConfigs)
   const manager = getProtocolManager()
   const results = new Map<ProtocolType, { success: boolean; error?: string }>()
 
@@ -182,15 +193,31 @@ export async function initializeProtocols(
           } as ArkadeConfig
           break
 
-        case 'RGB':
+        case 'RGB': {
+          // RGB / RLN is OPTIONAL. Only attempt a connection when a usable node
+          // URL is configured. A remote network with no URL set would otherwise
+          // throw "Node URL is required" inside the adapter and spam errors on
+          // every startup. Skipping keeps Spark + Arkade working without RGB.
+          const rgbNodeUrl =
+            parsedConfig.type === 'remote'
+              ? parsedConfig.url
+              : parsedConfig.nodeUrl || 'http://127.0.0.1:3000'
+
+          if (!rgbNodeUrl) {
+            console.log('[initializeProtocols] RGB skipped: no node URL configured')
+            results.set(protocol, { success: false, error: 'skipped: no node URL configured' })
+            continue
+          }
+
           protocolConfig = {
             protocol: 'RGB',
-            nodeUrl: parsedConfig.type === 'remote' ? parsedConfig.url : 'http://127.0.0.1:3000',
+            nodeUrl: rgbNodeUrl,
             makerUrl: parsedConfig.makerUrl,
             apiKey: parsedConfig.apiKey,
             network: parsedConfig.network || 'regtest',
           } as RgbConfig
           break
+        }
 
         default:
           continue
