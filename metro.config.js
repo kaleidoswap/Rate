@@ -6,15 +6,15 @@ const path = require('path');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// Allow Metro to resolve local packages (symlinked via file:)
+// Allow Metro to resolve local packages still linked via file:
+// (@kaleidorg/wallet-protocols now comes from npm — no sibling watchFolder needed).
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
-const walletProtocolsRoot = path.resolve(__dirname, '../wallet-protocols');
 // @kaleidorg/mind — the shared agentic engine, also published to npm as
 // @kaleidorg/mind. Linked via file: for fast local dev (pure JS dist/, no
 // native deps). To consume the published version instead, set its dep to
 // `^0.0.1` and drop this watchFolder.
 const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
-config.watchFolders = [kaleidoUiRoot, walletProtocolsRoot, kaleidoMindRoot];
+config.watchFolders = [kaleidoUiRoot, kaleidoMindRoot];
 config.resolver.nodeModulesPaths = [
   path.resolve(__dirname, 'node_modules'),
   path.resolve(kaleidoUiRoot, 'node_modules'),
@@ -66,24 +66,15 @@ config.resolver.alias = {
   'sodium-native': 'sodium-javascript',
 };
 
-// --- WDK engine resolution (active when EXPO_PUBLIC_WALLET_ENGINE=wdk) --------
-// The WDK wallet modules are file: siblings; let Metro watch + single-copy them so
-// they (and their shared @tetherto/wdk-wallet base) resolve to one instance. The
-// modules expose a `main` entry, so this needs no app-wide package-exports change.
-const wdkRoots = {
-  '@tetherto/wdk-wallet-spark': path.resolve(__dirname, '../wdk-wallet-spark'),
-  '@kaleidorg/wdk-wallet-liquid': path.resolve(__dirname, '../wdk-wallet-liquid'),
-  '@kaleidorg/wdk-wallet-rln': path.resolve(__dirname, '../wdk-wallet-rln'),
-  '@kaleidorg/wdk-protocol-swap-kaleidoswap': path.resolve(
-    __dirname,
-    '../wdk-protocol-swap-kaleidoswap'
-  ),
-  '@arkade-os/wdk': path.resolve(__dirname, '../arkade-wdk'),
-};
-config.watchFolders.push(...Object.values(wdkRoots));
-Object.assign(config.resolver.extraNodeModules, wdkRoots, {
-  '@tetherto/wdk-wallet': path.resolve(__dirname, 'node_modules/@tetherto/wdk-wallet'),
-});
+// --- WDK engine resolution -----------------------------------------------------
+// The WDK wallet modules now come from npm (published versions) / a github dep, so
+// they resolve from node_modules normally — no sibling watchFolders needed. Keep the
+// shared @tetherto/wdk-wallet base as a single copy to avoid duplicate instances
+// (only @kaleidorg/wallet-protocols remains a file: sibling, watched above).
+config.resolver.extraNodeModules['@tetherto/wdk-wallet'] = path.resolve(
+  __dirname,
+  'node_modules/@tetherto/wdk-wallet'
+);
 
 // Resolve the `react-native` export/imports condition deterministically. This is what
 // makes (a) @kaleidorg/wdk-wallet-liquid's `#lwk` map pick the native `lwk-rn` binding
