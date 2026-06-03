@@ -31,27 +31,34 @@ import type {
 } from '@kaleidorg/wallet-protocols'
 
 /**
- * Register static-require loaders for each WDK package that's installed.
- * Adapters fall back to dynamic import if a loader is missing (works off-device).
+ * Mobile rollout gates. Spark + RLN + the (pure-JS) swap module need NO WASM and
+ * use SDKs the app already ships — they're on by default. Liquid (lwk WASM/native)
+ * and Arkade are opt-in: leaving their `require()` out of the default build means
+ * Metro never bundles lwk_wasm/lwk_node, so a Spark+RLN wallet is WASM-free end to end.
+ * Enable per-protocol once their on-device story is validated:
+ *   EXPO_PUBLIC_WDK_LIQUID=1   EXPO_PUBLIC_WDK_ARKADE=1
+ */
+const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID === '1'
+const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE === '1'
+
+/**
+ * Register static-require loaders for each enabled WDK package (Metro can't follow
+ * dynamic import of these). Loaders are LAZY: the require() runs only when an adapter
+ * connects. A missing/unresolvable module surfaces as a connect() error for just that
+ * protocol (caught per-protocol in initializeWdkProtocols).
  */
 function registerWdkModuleLoaders(): void {
-  const tryRegister = (pkg: string, load: () => any) => {
-    try {
-      // Probe once so we only register loaders for installed packages.
-      load()
-      registerWdkModule(pkg, load)
-      console.log(`[wdk] module available: ${pkg}`)
-    } catch (e) {
-      console.warn(`[wdk] module NOT installed: ${pkg}`)
-    }
-  }
-  tryRegister('@tetherto/wdk-wallet-spark', () => require('@tetherto/wdk-wallet-spark'))
-  tryRegister('@kaleidorg/wdk-wallet-liquid', () => require('@kaleidorg/wdk-wallet-liquid'))
-  tryRegister('@kaleidorg/wdk-wallet-rln', () => require('@kaleidorg/wdk-wallet-rln'))
-  tryRegister('@arkade-os/wdk', () => require('@arkade-os/wdk'))
-  tryRegister('@kaleidorg/wdk-protocol-swap-kaleidoswap', () =>
+  registerWdkModule('@tetherto/wdk-wallet-spark', () => require('@tetherto/wdk-wallet-spark'))
+  registerWdkModule('@kaleidorg/wdk-wallet-rln', () => require('@kaleidorg/wdk-wallet-rln'))
+  registerWdkModule('@kaleidorg/wdk-protocol-swap-kaleidoswap', () =>
     require('@kaleidorg/wdk-protocol-swap-kaleidoswap'),
   )
+  if (LIQUID_ENABLED) {
+    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => require('@kaleidorg/wdk-wallet-liquid'))
+  }
+  if (ARKADE_ENABLED) {
+    registerWdkModule('@arkade-os/wdk', () => require('@arkade-os/wdk'))
+  }
 }
 
 let _wdkManager: ProtocolManager | null = null
@@ -60,10 +67,12 @@ export function getWdkProtocolManager(): ProtocolManager {
   if (!_wdkManager) {
     registerWdkModuleLoaders()
     _wdkManager = new ProtocolManager()
+    // Spark + RLN: no WASM, SDKs already shipped — always on.
     _wdkManager.registerAdapter(new SparkWdkAdapter())
-    _wdkManager.registerAdapter(new LiquidWdkAdapter())
     _wdkManager.registerAdapter(new RlnWdkAdapter())
-    _wdkManager.registerAdapter(new ArkadeWdkAdapter())
+    // Liquid / Arkade: opt-in (see flags above) so the default build stays WASM-free.
+    if (LIQUID_ENABLED) _wdkManager.registerAdapter(new LiquidWdkAdapter())
+    if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())
   }
   return _wdkManager
 }
