@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { BrandMark } from './brand/BrandMark';
 
 const { width, height } = Dimensions.get('window');
 const statusBarHeight = StatusBar.currentHeight || 0;
@@ -211,7 +212,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             ]}
           >
             <View style={styles.appLogo}>
-              <Text style={styles.logoText}>K</Text>
+              <BrandMark size={64} />
             </View>
             <Text style={styles.appName}>KaleidoSwap Wallet</Text>
             <Text style={styles.tagline}>Bitcoin · Lightning · RGB</Text>
