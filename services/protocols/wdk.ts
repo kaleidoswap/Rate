@@ -31,6 +31,7 @@ import type {
   RlnAdapterConfig,
   ArkadeAdapterConfig,
 } from '@kaleidorg/wallet-protocols'
+import { buildArkadeStorage } from './arkadeStorage'
 
 /**
  * Mobile rollout gates.
@@ -127,18 +128,30 @@ export async function initializeWdkProtocols(
           } as LiquidAdapterConfig
           break
 
-        case 'ARKADE':
+        case 'ARKADE': {
+          const arkadeNetwork = parsed.network || 'signet'
+          // Persist VTXO state across restarts via SQLite; falls back to in-memory
+          // (storage left unset) if SQLite/expo-sqlite are unavailable.
+          const arkadeStorage = buildArkadeStorage({
+            network: arkadeNetwork,
+            accountIndex: parsed.accountIndex,
+          })
+          console.log(
+            `[initializeWdkProtocols] ARKADE storage: ${arkadeStorage ? 'persistent (SQLite)' : 'in-memory'}`,
+          )
           config = {
             protocol: 'ARKADE',
             mnemonic,
-            network: parsed.network || 'signet',
+            network: arkadeNetwork,
             arkadeConfig: {
               arkServerUrl: parsed.arkServerUrl || 'https://signet.arkade.sh',
               esploraUrl: parsed.esploraUrl,
               ...(parsed.arkadeConfig || {}),
+              ...(arkadeStorage ? { storage: arkadeStorage } : {}),
             },
           } as ArkadeAdapterConfig
           break
+        }
 
         case 'RGB': {
           const nodeUrl =
