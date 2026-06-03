@@ -17,11 +17,13 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kaleidoswap.wallet",
-      "buildNumber": "2",
+      "buildNumber": "3",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",
         "NSFaceIDUsageDescription": "Use Face ID to unlock your wallet securely.",
         "NSMicrophoneUsageDescription": "Allow KaleidoSwap to use the microphone for on-device voice commands to the AI assistant.",
+        "NSPhotoLibraryUsageDescription": "Allow KaleidoSwap to access your photo library to scan QR codes from saved images.",
+        "NSPhotoLibraryAddUsageDescription": "Allow KaleidoSwap to save QR codes and receipts to your photo library.",
         "NSLocalNetworkUsageDescription": "KaleidoSwap uses the local network to download and sync the on-device AI models peer-to-peer.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
