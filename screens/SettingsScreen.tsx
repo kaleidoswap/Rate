@@ -21,6 +21,8 @@ import {
   setNodeType,
   setRemoteNodeUrl,
   setBitcoinUnit,
+  setDisclosureLevel,
+  selectDisclosureLevel,
 } from '../store/slices/settingsSlice';
 import { setWalletConnectEnabled } from '../store/slices/nostrSlice';
 import { setActiveWallet } from '../store/slices/walletSlice';
@@ -38,6 +40,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const settings = useSelector((state: RootState) => state.settings);
   const nostrState = useSelector((state: RootState) => state.nostr);
+  const disclosureLevel = useSelector(selectDisclosureLevel);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [tempNodeUrl, setTempNodeUrl] = useState(settings.remoteNodeUrl);
   const [showNostrSection, setShowNostrSection] = useState(false);
@@ -171,6 +174,10 @@ export default function SettingsScreen({ navigation }: Props) {
     const currentIndex = currencies.indexOf(settings.currency);
     const nextCurrency = currencies[(currentIndex + 1) % currencies.length];
     dispatch(setCurrency(nextCurrency));
+  };
+
+  const handleDisclosureLevelToggle = () => {
+    dispatch(setDisclosureLevel(disclosureLevel === 'lite' ? 'advanced' : 'lite'));
   };
 
   const handleNetworkChange = () => {
@@ -382,6 +389,24 @@ export default function SettingsScreen({ navigation }: Props) {
           </View>
 
           <View style={styles.sectionContent}>
+            <ListItem>
+              <Text>Display Mode</Text>
+              <TouchableOpacity
+                style={styles.settingRow}
+                onPress={handleDisclosureLevelToggle}
+              >
+                <Text style={[styles.settingValue, styles.clickableValue]}>
+                  {disclosureLevel === 'lite' ? 'Lite' : 'Advanced'}
+                </Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color={theme.colors.text.secondary}
+                  style={styles.settingIcon}
+                />
+              </TouchableOpacity>
+            </ListItem>
+
             <ListItem>
               <Text>Bitcoin Unit</Text>
               <TouchableOpacity
