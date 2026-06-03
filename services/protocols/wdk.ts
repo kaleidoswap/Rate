@@ -22,6 +22,7 @@ import {
   ArkadeWdkAdapter,
   networkTypeToProtocol,
   kaleidoClientManager,
+  flashnetClientManager,
 } from '@kaleidorg/wallet-protocols'
 import type {
   ProtocolType,
@@ -178,6 +179,23 @@ export async function initializeWdkProtocols(
           }
         } else {
           console.log('[initializeWdkProtocols] no makerUrl configured → maker swaps disabled')
+        }
+      }
+
+      // Restore flashnet (Spark DEX / AMM) by feeding it the SparkWallet the WDK Spark
+      // adapter already holds. SwapScreen skips flashnet gracefully if this isn't set.
+      if (protocol === 'SPARK') {
+        try {
+          const sparkAdapter = manager.getAdapterIfAvailable('SPARK') as any
+          const sparkWallet = sparkAdapter?.getUnderlyingSparkWallet?.()
+          if (sparkWallet) {
+            await flashnetClientManager.initialize(sparkWallet, parsed.network || 'MAINNET')
+            console.log('[initializeWdkProtocols] flashnet (Spark DEX) initialized')
+          } else {
+            console.log('[initializeWdkProtocols] no SparkWallet exposed → flashnet disabled')
+          }
+        } catch (e) {
+          console.warn('[initializeWdkProtocols] flashnet init failed:', e)
         }
       }
     } catch (error: unknown) {
