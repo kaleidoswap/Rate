@@ -317,26 +317,53 @@ class QVACService {
         this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
       }
 
-      this.llmModelId = await loadModel({
-        modelSrc,
-        modelType: 'llamacpp-completion',
-        modelConfig: {
-          // Local on iPhone: 'cpu' (Metal failed to init the llamacpp context in
-          // the bare worklet). Delegated: the provider (e.g. a Mac) can use GPU.
-          device: delegating ? 'gpu' : 'cpu',
-          ctx_size: 2048,
-          tools: true,
-          verbosity: VERBOSITY.ERROR,
-        },
-        ...(delegating
-          ? {
-              delegate: {
-                providerPublicKey: this.config.providerPublicKey,
-                fallbackToLocal: false,
-              },
-            }
-          : {}),
-      } as any);
+      try {
+        this.llmModelId = await loadModel({
+          modelSrc,
+          modelType: 'llamacpp-completion',
+          modelConfig: {
+            // Local on iPhone: 'cpu' (Metal failed to init the llamacpp context in
+            // the bare worklet). Delegated: the provider (e.g. a Mac) can use GPU.
+            device: delegating ? 'gpu' : 'cpu',
+            ctx_size: 2048,
+            tools: true,
+            verbosity: VERBOSITY.ERROR,
+          },
+          ...(delegating
+            ? {
+                delegate: {
+                  providerPublicKey: this.config.providerPublicKey,
+                  fallbackToLocal: false,
+                },
+              }
+            : {}),
+        } as any);
+      } catch (loadErr) {
+        if (!delegating) throw loadErr;
+        // Delegation failed (provider unreachable / RPC error, e.g. a stale
+        // "GPT_OSS_20B + delegate" config left over from desktop testing).
+        // Un-stick the phone: disable delegation, persist it, and load a local
+        // hardware-appropriate model instead of staying stuck on the provider.
+        console.warn(
+          '[QVAC] delegation failed; falling back to a local model:',
+          loadErr instanceof Error ? loadErr.message : String(loadErr)
+        );
+        const local = recommendLocalModel(await this.getDeviceMemoryBytes());
+        this.config = { ...this.config, modelId: local.id, delegateEnabled: false };
+        await this.saveConfig();
+        this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
+        const localUrl = hfUrlFromDescriptor(local.descriptor)!;
+        const localSrc = await this.ensureLocalModel(
+          { url: localUrl, name: local.descriptor.modelId, size: local.descriptor.expectedSize },
+          (pct) => this.setState({ llmDownloadProgress: pct })
+        );
+        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+        this.llmModelId = await loadModel({
+          modelSrc: localSrc,
+          modelType: 'llamacpp-completion',
+          modelConfig: { device: 'cpu', ctx_size: 2048, tools: true, verbosity: VERBOSITY.ERROR },
+        } as any);
+      }
 
       this.setState({ llmStatus: 'ready' });
       console.log('QVAC LLM ready:', this.llmModelId);
