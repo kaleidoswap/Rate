@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemeProvider } from '@react-navigation/native';
-import { LoadingScreen } from './components/LoadingScreen';
+import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
@@ -292,7 +292,8 @@ function QVACEnabledSync() {
 }
 
 function AppLoadingScreen() {
-  return <LoadingScreen variant="app" title="Loading KaleidoSwap Wallet" />;
+  // Same branded loader the BrandIntro fades into — keeps startup seamless.
+  return <BrandLoading />;
 }
 
 export default function App() {

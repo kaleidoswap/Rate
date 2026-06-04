@@ -14,17 +14,18 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import { BrandMark } from './BrandMark';
+import { BRAND_BG } from './BrandLoading';
 
 export interface BrandIntroProps {
   /** Called once the outro fade completes. */
   onFinish?: () => void;
-  /** Total time on screen before the fade-out begins (ms). Default 1900. */
+  /** Total time on screen before the fade-out begins (ms). Default 1300. */
   duration?: number;
   /** Size of the mark (px). Default 132. */
   markSize?: number;
 }
 
-const FADE_MS = 440;
+const FADE_MS = 360;
 
 /**
  * Full-screen branded launch animation: the kaleidoscope mark twists + blooms
@@ -33,7 +34,7 @@ const FADE_MS = 440;
  */
 export const BrandIntro: React.FC<BrandIntroProps> = ({
   onFinish,
-  duration = 1900,
+  duration = 1300,
   markSize = 132,
 }) => {
   const markScale = useSharedValue(0.55);
@@ -45,21 +46,21 @@ export const BrandIntro: React.FC<BrandIntroProps> = ({
   const screen = useSharedValue(1);
 
   useEffect(() => {
-    // Mark: kaleidoscope twist + bloom.
-    markOpacity.value = withTiming(1, { duration: 480, easing: Easing.out(Easing.cubic) });
-    markRotate.value = withSpring(0, { damping: 11, stiffness: 90, mass: 0.9 });
+    // Mark: kaleidoscope twist + bloom (snappier so the short intro feels crisp).
+    markOpacity.value = withTiming(1, { duration: 320, easing: Easing.out(Easing.cubic) });
+    markRotate.value = withSpring(0, { damping: 12, stiffness: 110, mass: 0.8 });
     markScale.value = withSequence(
-      withSpring(1.06, { damping: 9, stiffness: 95, mass: 0.9 }),
-      withSpring(1, { damping: 14, stiffness: 120 })
+      withSpring(1.05, { damping: 9, stiffness: 110, mass: 0.8 }),
+      withSpring(1, { damping: 15, stiffness: 130 })
     );
     // Glow: gentle breathing pulse behind the mark.
     glow.value = withDelay(
-      180,
-      withRepeat(withTiming(1, { duration: 1300, easing: Easing.inOut(Easing.quad) }), -1, true)
+      120,
+      withRepeat(withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.quad) }), -1, true)
     );
-    // Wordmark rises in after the mark settles.
-    wordOpacity.value = withDelay(640, withTiming(1, { duration: 520 }));
-    wordShift.value = withDelay(640, withSpring(0, { damping: 15, stiffness: 130 }));
+    // Wordmark rises in shortly after the mark settles — finishes before fade.
+    wordOpacity.value = withDelay(420, withTiming(1, { duration: 320 }));
+    wordShift.value = withDelay(420, withSpring(0, { damping: 16, stiffness: 150 }));
     // Outro fade.
     screen.value = withDelay(
       Math.max(0, duration - FADE_MS),
@@ -86,7 +87,7 @@ export const BrandIntro: React.FC<BrandIntroProps> = ({
   return (
     <Animated.View style={[StyleSheet.absoluteFill, styles.root, screenStyle]} pointerEvents="none">
       <LinearGradient
-        colors={['#0B2416', '#08200F', '#05160D']}
+        colors={BRAND_BG}
         start={{ x: 0.2, y: 0 }}
         end={{ x: 0.85, y: 1 }}
         style={StyleSheet.absoluteFill}
