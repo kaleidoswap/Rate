@@ -26,6 +26,8 @@ import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
 
 import { theme } from '../theme';
+import { VoiceAgentFAB } from '../components/voice-agent/VoiceAgentFAB';
+import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
 import {
   BalanceCard,
   ActionButtons,
@@ -91,6 +93,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
+  const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [protocolsReady, setProtocolsReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -675,6 +678,9 @@ export default function DashboardScreen({ navigation }: Props) {
         />
         )}
       </ScrollView>
+
+      <VoiceAgentFAB onPress={() => setVoiceAgentOpen(true)} />
+      <VoiceAgentOverlay visible={voiceAgentOpen} onClose={() => setVoiceAgentOpen(false)} />
 
       {renderChannelModal()}
     </View>
