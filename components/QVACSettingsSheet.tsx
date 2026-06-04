@@ -34,6 +34,10 @@ interface Props {
   deviceMemGb?: number;
   /** Model id recommended for this device — badged in the list. */
   recommendedModelId?: string;
+  /** Whether on-device AI (KaleidoMind) is enabled. Off by default. */
+  aiEnabled: boolean;
+  /** Toggle on-device AI on/off. Off keeps the QVAC worklet from starting. */
+  onSetAiEnabled: (enabled: boolean) => void;
 }
 
 /** Extract a 64–66 char hex provider key from pasted text (QR payload or raw). */
@@ -61,6 +65,8 @@ export default function QVACSettingsSheet({
   providerName,
   deviceMemGb,
   recommendedModelId,
+  aiEnabled,
+  onSetAiEnabled,
 }: Props) {
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const hasProvider = !!config.providerPublicKey;
@@ -95,6 +101,29 @@ export default function QVACSettingsSheet({
         )}
 
         <ScrollView contentContainerStyle={styles.content}>
+          {/* ---- Enable / disable on-device AI ---- */}
+          <View style={styles.enableRow}>
+            <View style={styles.enableInfo}>
+              <Text style={styles.enableTitle}>Enable on-device AI</Text>
+              <Text style={styles.enableHint}>
+                Runs KaleidoMind locally on your device. Off by default — the model
+                only downloads and loads after you turn this on.
+              </Text>
+            </View>
+            <Switch
+              value={aiEnabled}
+              onValueChange={onSetAiEnabled}
+              trackColor={{ false: theme.colors.border.medium, true: theme.colors.primary[500] }}
+              thumbColor={theme.colors.background.primary}
+            />
+          </View>
+
+          {!aiEnabled && (
+            <Text style={styles.disabledNote}>
+              On-device AI is off. The rest of these settings apply once it's enabled.
+            </Text>
+          )}
+
           {/* ---- On-device model ---- */}
           <Text style={styles.sectionTitle}>On-device model</Text>
           <Text style={styles.sectionHint}>
@@ -266,6 +295,22 @@ const styles = StyleSheet.create({
   },
   busyText: { color: theme.colors.primary[700], fontSize: theme.typography.fontSize.sm, fontWeight: '600' },
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10] },
+  enableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: theme.spacing[3],
+    backgroundColor: theme.colors.background.secondary,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border.medium,
+    padding: theme.spacing[3],
+    marginBottom: theme.spacing[3],
+  },
+  enableInfo: { flex: 1 },
+  enableTitle: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
+  enableHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, lineHeight: 18 },
+  disabledNote: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontStyle: 'italic', marginBottom: theme.spacing[4] },
   sectionTitle: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
   sectionHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginBottom: theme.spacing[3], lineHeight: 18 },
   modelRow: {

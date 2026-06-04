@@ -20,8 +20,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
+import { selectAiEnabled, setAiEnabled } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { MainHeader } from '../components';
@@ -129,8 +130,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // On-device QVAC: model lifecycle + wallet tools
-  const qvac = useQVAC();
+  // On-device QVAC: model lifecycle + wallet tools.
+  // Only auto-start the Bare worklet when the user has explicitly enabled AI
+  // (off by default) — starting it on a native/JS mismatch hard-crashes the app.
+  const aiEnabled = useSelector(selectAiEnabled);
+  const dispatch = useDispatch();
+  const qvac = useQVAC(aiEnabled);
   const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
   const tools = useMemo(() => createQVACTools(aiFunctions), [aiFunctions]);
 
@@ -572,6 +577,26 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // ---- On-device model status banner ----
   const renderModelStatus = () => {
+    // AI is opt-in (off by default) so the on-device worklet never auto-starts.
+    if (!aiEnabled) {
+      return (
+        <View style={styles.modelBanner}>
+          <View style={styles.modelBannerRow}>
+            <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary[600]} />
+            <Text style={styles.modelBannerText}>
+              KaleidoMind (on-device AI) is off. Enable to download and run it locally.
+            </Text>
+            <TouchableOpacity
+              onPress={() => dispatch(setAiEnabled(true))}
+              style={styles.modelRetry}
+              accessibilityLabel="Enable on-device AI"
+            >
+              <Text style={styles.modelRetryText}>Enable</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
     if (qvac.isReady) return null;
     const isError = qvac.llmStatus === 'error';
     const label = isError
@@ -670,9 +695,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <MainHeader
-        title="AI Assistant"
-        subtitle={headerSubtitle}
-        icon="chatbubble-ellipses"
+        title="KaleidoMind"
+        subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
+        icon="sparkles"
         rightAction={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {nostrState.isConnected && (
@@ -906,6 +931,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
             providerName={providerName}
             deviceMemGb={qvac.deviceMemGb}
             recommendedModelId={qvac.recommendedModelId}
+            aiEnabled={aiEnabled}
+            onSetAiEnabled={(enabled) => dispatch(setAiEnabled(enabled))}
           />
         </LinearGradient>
       </View>

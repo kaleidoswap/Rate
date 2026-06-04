@@ -177,13 +177,13 @@ function DashboardTabs() {
         }}
       />
       <Tab.Screen
-        name="ChatBot"
+        name="Mind"
         component={AIAssistantScreen}
         options={{
-          tabBarLabel: 'ChatBot',
+          tabBarLabel: 'Mind',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons
-              name={focused ? 'chatbubble' : 'chatbubble-outline'}
+              name={focused ? 'sparkles' : 'sparkles-outline'}
               size={24}
               color={color}
             />

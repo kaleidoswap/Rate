@@ -22,7 +22,7 @@ import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
-import { selectDisclosureLevel } from '../store/slices/settingsSlice';
+import { selectDisclosureLevel, selectAiEnabled } from '../store/slices/settingsSlice';
 import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
 
 import { theme } from '../theme';
@@ -89,6 +89,9 @@ export default function DashboardScreen({ navigation }: Props) {
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const disclosureLevel = useSelector(selectDisclosureLevel);
+  // On-device AI is opt-in; only surface the voice agent FAB once it's enabled
+  // so the QVAC Bare worklet can't be started (and crash) before a native rebuild.
+  const aiEnabled = useSelector(selectAiEnabled);
   const policy = policyFor(disclosureLevel);
   const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
@@ -679,8 +682,12 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
       </ScrollView>
 
-      <VoiceAgentFAB onPress={() => setVoiceAgentOpen(true)} />
-      <VoiceAgentOverlay visible={voiceAgentOpen} onClose={() => setVoiceAgentOpen(false)} />
+      {aiEnabled && (
+        <>
+          <VoiceAgentFAB onPress={() => setVoiceAgentOpen(true)} />
+          <VoiceAgentOverlay visible={voiceAgentOpen} onClose={() => setVoiceAgentOpen(false)} />
+        </>
+      )}
 
       {renderChannelModal()}
     </View>

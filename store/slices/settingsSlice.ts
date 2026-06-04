@@ -25,6 +25,9 @@ interface SettingsState {
   // 'lite' shows BTC/USD/assets only; 'advanced' reveals networks/routes/channels.
   // Chosen at wallet creation, reversible in settings.
   disclosureLevel: DisclosureLevel;
+  // On-device AI (KaleidoMind) is OFF by default — starting the QVAC Bare worklet
+  // before the native modules match crashes the app, so it's strictly opt-in.
+  aiEnabled: boolean;
 }
 
 const initialState: SettingsState = {
@@ -44,7 +47,8 @@ const initialState: SettingsState = {
   currency: 'USD',
   network: 'regtest',
   needsApiConfigUpdate: false,
-  disclosureLevel: 'lite'
+  disclosureLevel: 'lite',
+  aiEnabled: false,
 };
 
 const settingsSlice = createSlice({
@@ -98,6 +102,9 @@ const settingsSlice = createSlice({
     setDisclosureLevel: (state, action: PayloadAction<DisclosureLevel>) => {
       state.disclosureLevel = action.payload;
     },
+    setAiEnabled: (state, action: PayloadAction<boolean>) => {
+      state.aiEnabled = action.payload;
+    },
     clearApiConfigUpdateFlag: (state) => {
       state.needsApiConfigUpdate = false;
     }
@@ -120,6 +127,7 @@ export const {
   setCurrency,
   setNetwork,
   setDisclosureLevel,
+  setAiEnabled,
   clearApiConfigUpdateFlag
 } = settingsSlice.actions;
 
@@ -127,5 +135,10 @@ export const {
 // Falls back to 'lite' for state persisted before this field existed.
 export const selectDisclosureLevel = (state: RootState): DisclosureLevel =>
   state.settings.disclosureLevel ?? 'lite';
+
+// On-device AI (KaleidoMind) opt-in. Defaults OFF so the QVAC worklet never
+// auto-starts (which can crash the app on a native/JS mismatch).
+export const selectAiEnabled = (state: RootState): boolean =>
+  state.settings.aiEnabled ?? false;
 
 export default settingsSlice.reducer;
