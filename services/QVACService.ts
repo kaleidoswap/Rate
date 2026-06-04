@@ -136,12 +136,26 @@ class QVACService {
     return this.enabled;
   }
 
-  // Cached, SYNCHRONOUS "can the Bare worklet even run here?" check. The iOS
-  // Simulator has no bare-abort framework, so starting the worklet there aborts
-  // the whole process (an unhandled rejection JS can't catch). We must decide
-  // this WITHOUT booting the worklet — isEmulatorSync() does exactly that.
+  // BUILD-LEVEL KILL SWITCH for the QVAC Bare worklet.
+  //
+  // The worklet bundle imports the `bare-abort` native addon at startup, but
+  // that framework is NOT linked into the app binary in the current build — on
+  // BOTH the iOS Simulator AND a physical device it aborts with:
+  //   AddonError: ADDON_NOT_FOUND … bare-abort.2.0.13.framework
+  // That aborts the whole process (an unhandled rejection in a separate runtime
+  // that JS can't catch), so on-device AI is completely non-functional until the
+  // native packaging is fixed (embed bare-abort.*.framework via react-native-
+  // bare-kit). Until then we must NEVER boot the worklet.
+  //
+  // Flip to true ONLY after a native build that actually links the bare-abort
+  // framework (verify the worklet starts without ADDON_NOT_FOUND).
+  private static readonly NATIVE_RUNTIME_AVAILABLE = false;
+
+  // Cached, SYNCHRONOUS "can the Bare worklet even run here?" check — decided
+  // WITHOUT booting the worklet (booting an unsupported build aborts the process).
   private _runtimeOk: boolean | null = null;
   private runtimeOkSync(): boolean {
+    if (!QVACService.NATIVE_RUNTIME_AVAILABLE) return false;
     if (this._runtimeOk == null) {
       try {
         this._runtimeOk = !DeviceInfo.isEmulatorSync();
