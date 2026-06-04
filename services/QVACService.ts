@@ -5,6 +5,8 @@ import {
   transcribe,
   unloadModel,
   cancel,
+  resume,
+  suspend,
   VERBOSITY,
 } from '@qvac/sdk';
 import { File, Directory, Paths } from 'expo-file-system';
@@ -134,6 +136,50 @@ class QVACService {
     return this.enabled;
   }
 
+  // Cached, SYNCHRONOUS "can the Bare worklet even run here?" check. The iOS
+  // Simulator has no bare-abort framework, so starting the worklet there aborts
+  // the whole process (an unhandled rejection JS can't catch). We must decide
+  // this WITHOUT booting the worklet — isEmulatorSync() does exactly that.
+  private _runtimeOk: boolean | null = null;
+  private runtimeOkSync(): boolean {
+    if (this._runtimeOk == null) {
+      try {
+        this._runtimeOk = !DeviceInfo.isEmulatorSync();
+      } catch {
+        this._runtimeOk = true; // unknown → assume a real device build
+      }
+    }
+    return this._runtimeOk;
+  }
+
+  /**
+   * The single gate every worklet-touching method checks. Returns true when it
+   * is NOT safe to touch the QVAC runtime (disabled, or unsupported target).
+   */
+  private workletBlocked(): boolean {
+    return !this.enabled || !this.runtimeOkSync();
+  }
+
+  /** Resume QVAC runtime networking — guarded so it never boots the worklet here. */
+  async resumeRuntime(): Promise<void> {
+    if (this.workletBlocked()) return;
+    try {
+      await resume();
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  /** Suspend QVAC runtime networking — guarded so it never boots the worklet here. */
+  async suspendRuntime(): Promise<void> {
+    if (this.workletBlocked()) return;
+    try {
+      await suspend();
+    } catch {
+      /* non-fatal */
+    }
+  }
+
   subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -178,8 +224,6 @@ class QVACService {
     return recommendLocalModelId(await this.getDeviceMemoryBytes());
   }
 
-  private runtimeAvailable: boolean | null = null;
-
   /**
    * Whether the QVAC Bare worklet can run here AT ALL — checked WITHOUT booting
    * it (booting on an unsupported target aborts the process natively, which JS
@@ -192,19 +236,12 @@ class QVACService {
     localCapable: boolean;
     deviceMemGb: number;
   }> {
-    if (this.runtimeAvailable == null) {
-      try {
-        this.runtimeAvailable = !(await DeviceInfo.isEmulator());
-      } catch {
-        // If we can't tell, assume a real device build (don't block real users).
-        this.runtimeAvailable = true;
-      }
-    }
+    const runtimeAvailable = this.runtimeOkSync();
     const mem = await this.getDeviceMemoryBytes();
     // Any real phone runs the smallest model; below ~3 GB we recommend delegating.
-    const localCapable = this.runtimeAvailable && mem >= 3 * 1024 * 1024 * 1024;
+    const localCapable = runtimeAvailable && mem >= 3 * 1024 * 1024 * 1024;
     return {
-      runtimeAvailable: this.runtimeAvailable,
+      runtimeAvailable,
       localCapable,
       deviceMemGb: Math.round((mem / (1024 * 1024 * 1024)) * 10) / 10,
     };
@@ -323,15 +360,15 @@ class QVACService {
   // --- LLM lifecycle ---
 
   async initializeLLM(): Promise<void> {
-    // Hard gate: never start the Bare worklet unless AI is explicitly enabled.
+    // Hard gate: never start the Bare worklet unless AI is enabled AND the
+    // runtime can actually run here. On an unsupported target (e.g. the iOS
+    // Simulator) booting the worklet aborts the process, so we refuse and
+    // surface a clear, actionable error instead.
     if (!this.enabled) {
       console.log('[QVAC] LLM init skipped — on-device AI is disabled');
       return;
     }
-    // Hard gate: never boot the worklet where it can't run (e.g. the Simulator).
-    // Surface a clear, actionable error instead of aborting the process.
-    const { runtimeAvailable } = await this.getAvailability();
-    if (!runtimeAvailable) {
+    if (!this.runtimeOkSync()) {
       console.warn('[QVAC] LLM init skipped — worklet runtime unavailable on this device');
       this.setState({
         llmStatus: 'error',
@@ -442,14 +479,9 @@ class QVACService {
 
   async initializeWhisper(): Promise<void> {
     // Hard gate: Whisper also runs in the Bare worklet — never start it unless
-    // on-device AI is explicitly enabled and the runtime can actually run here.
-    if (!this.enabled) {
-      console.log('[QVAC] Whisper init skipped — on-device AI is disabled');
-      return;
-    }
-    const { runtimeAvailable } = await this.getAvailability();
-    if (!runtimeAvailable) {
-      console.warn('[QVAC] Whisper init skipped — worklet runtime unavailable on this device');
+    // on-device AI is enabled and the runtime can actually run here.
+    if (this.workletBlocked()) {
+      console.warn('[QVAC] Whisper init skipped — disabled or runtime unavailable');
       return;
     }
     if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
@@ -764,7 +796,7 @@ class QVACService {
   // --- Transcription ---
 
   async transcribeAudio(audioUri: string): Promise<string> {
-    if (!this.whisperModelId) {
+    if (this.workletBlocked() || !this.whisperModelId) {
       throw new Error('Whisper model not loaded');
     }
 

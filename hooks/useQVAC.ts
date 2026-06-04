@@ -1,7 +1,6 @@
 // hooks/useQVAC.ts
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState } from 'react-native';
-import { resume, suspend } from '@qvac/sdk';
 import QVACService, { QVACState, QVACConfig } from '../services/QVACService';
 import { QVAC_MODELS, type QVACModel } from '../services/qvacModels';
 
@@ -106,18 +105,22 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   }, [autoInit, initialize]);
 
   // Suspend the QVAC runtime (Hyperswarm / Corestore networking) while the app
-  // is backgrounded and resume it on return, per the SDK lifecycle API. Both
-  // are safe to call from any state, so we just guard with try/catch.
+  // is backgrounded and resume it on return, per the SDK lifecycle API. Only
+  // wire this up when AI is actually enabled: resume() boots the Bare worklet,
+  // which aborts the process on an unsupported target (e.g. the Simulator). The
+  // service methods are themselves guarded, but skipping the listener entirely
+  // when disabled avoids ever calling into the SDK.
   useEffect(() => {
+    if (!autoInit) return;
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'background' || next === 'inactive') {
-        void suspend().catch(() => {});
+        void service.suspendRuntime();
       } else if (next === 'active') {
-        void resume().catch(() => {});
+        void service.resumeRuntime();
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [autoInit, service]);
 
   const isReady = state.llmStatus === 'ready';
   const isWhisperReady = state.whisperStatus === 'ready';
