@@ -50,7 +50,14 @@ interface VoiceAgentOverlayProps {
   onClose: () => void;
 }
 
-export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, onClose }) => {
+/**
+ * Wrapper: only mount the session (and its QVAC/audio init) once opened, so the
+ * dashboard stays light and nothing audio-related runs until the user taps the mic.
+ */
+export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, onClose }) =>
+  visible ? <VoiceAgentSession onClose={onClose} /> : null;
+
+const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const qvac = useQVAC();
   const tools = useMemo(() => createQVACTools(new AIAssistantFunctions()), []);
   const voiceRef = useRef<VoiceInputRef>(null);
@@ -79,17 +86,14 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
     }
   }, [phase]);
 
-  // Reset + clean up when closed.
-  useEffect(() => {
-    if (!visible) {
+  // Clean up audio when the session unmounts (i.e. the overlay is closed).
+  useEffect(
+    () => () => {
       Speech.stop();
       voiceRef.current?.stopListening?.();
-      setPhase('idle');
-      setBubbles([]);
-      setConfirm(null);
-      setError(null);
-    }
-  }, [visible]);
+    },
+    []
+  );
 
   const appendBubble = (role: Bubble['role'], text: string) => {
     const id = nextId();
@@ -199,7 +203,7 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
     phase === 'thinking' ? theme.colors.secondary?.[500] ?? '#6F32FF' : theme.colors.primary[500];
 
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
+    <Modal visible animationType="fade" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           {/* Header */}
