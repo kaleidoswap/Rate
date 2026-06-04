@@ -41,10 +41,18 @@ import {
   Engine,
   ToolRegistry,
   InProcessToolSource,
+  createL402ToolSource,
+  SkillRegistry,
+  skillsFromBundle,
   type LLMProvider,
   type InProcessTool,
+  type SkillBundle,
   type Message as MindMessage,
 } from '@kaleidorg/mind';
+import { protocolManager } from '../services/protocols';
+// Skills authored as SKILL.md under ./skills, bundled to JSON at build time
+// (`npm run bundle-skills`). Same authoring + loader the desktop uses.
+import skillBundle from '../skills.bundle.json';
 import * as Haptics from 'expo-haptics';
 
 interface Props {
@@ -138,13 +146,46 @@ export default function AIAssistantScreen({ navigation }: Props) {
       cancel: (id) => qvac.service.cancelRequest(id),
     };
     const walletSource = new InProcessToolSource('wallet', tools as unknown as InProcessTool[]);
+
+    // Shared wallet payment path — used by every "agent spends sats" source
+    // (L402, Bitrefill, …). Pays a BOLT11 with the on-device Lightning wallet
+    // (Spark preferred, RLN fallback) so keys never leave the device.
+    const payInvoice = async (invoice: string) => {
+      const spark = protocolManager.getAdapterIfAvailable('SPARK');
+      const rln = protocolManager.getAdapterIfAvailable('RGB');
+      const adapter: any = spark?.isConnected() ? spark : rln?.isConnected() ? rln : null;
+      if (!adapter) throw new Error('No Lightning wallet connected to pay the invoice');
+      const r: any = await adapter.sendPayment({ invoice });
+      return { preimage: r?.preimage ?? r?.paymentPreimage ?? r?.payment_preimage ?? '' };
+    };
+
+    // L402: buy paywalled HTTP resources in sats. The invoice amount is only
+    // known during the 402 challenge, so rather than a broken pre-execution
+    // payment modal we auto-pay small amounts (≤ cap). Larger ones are declined.
+    const l402Source = createL402ToolSource({
+      payInvoice,
+      maxAutoPaySats: 1000,
+      requiresConfirmation: false,
+      log: (m: string) => console.log('[L402]', m),
+    });
+
     return new Engine({
       provider,
-      tools: new ToolRegistry([walletSource]),
+      tools: new ToolRegistry([walletSource, l402Source]),
       defaultMaxTurns: 5,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tools, qvac.service]);
+
+  // Skills route a query to a focused playbook + a curated tool subset
+  // (progressive disclosure — the small mobile model never sees every tool at
+  // once). No match → the full toolset is used. Authored as SKILL.md under
+  // ./skills and bundled to skills.bundle.json; add a skill by dropping a new
+  // folder there and re-running `npm run bundle-skills`.
+  const skills = useMemo(
+    () => new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle)),
+    [],
+  );
 
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
@@ -437,9 +478,23 @@ export default function AIAssistantScreen({ navigation }: Props) {
       const history = messages
         .filter((m) => !m.streaming)
         .map((m) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }));
-      const chatMessages = [SYSTEM_PROMPT, ...history, { role: 'user', content: messageText }];
+
+      // Enter the most relevant skill: compose its playbook into the system
+      // prompt and expose only its tools (progressive disclosure). No match →
+      // the base prompt + full toolset.
+      const skill = skills.select(messageText);
+      const { system: skillSystem, allowedTools } = skills.compose(
+        String(SYSTEM_PROMPT.content),
+        skill,
+      );
+      const chatMessages = [
+        { role: 'system', content: skillSystem },
+        ...history,
+        { role: 'user', content: messageText },
+      ];
 
       const res = await engine.runAgentic(chatMessages as MindMessage[], {
+        allowedTools,
         onStart: (requestId) => setActiveRequestId(requestId),
         onToken: (token, turn) => {
           updateMessage(assistantId, (m) => {
