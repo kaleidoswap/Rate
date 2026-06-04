@@ -12,7 +12,8 @@
     "test:coverage": "jest --coverage",
     "setup:native": "bash scripts/fetch-lwk-artifacts.sh",
     "bundle-skills": "node node_modules/@kaleidorg/mind/scripts/bundle-skills.mjs --out skills.bundle.json skills",
-    "postinstall": "bash scripts/fetch-lwk-artifacts.sh"
+    "sync-qvac-bundle": "node scripts/sync-qvac-bundle.js",
+    "postinstall": "bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js"
   },
   "dependencies": {
     "@arkade-os/sdk": "^0.4.14",
