@@ -22,7 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, setAiEnabled } from '../store/slices/settingsSlice';
+import { selectAiEnabled, setAiEnabled, setAiMode } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { MainHeader } from '../components';
@@ -599,6 +599,33 @@ export default function AIAssistantScreen({ navigation }: Props) {
     }
     if (qvac.isReady) return null;
     const isError = qvac.llmStatus === 'error';
+
+    // Runtime can't run here (e.g. Simulator / no native worklet). Don't show a
+    // scary failure — offer to delegate to a desktop instead.
+    const isUnavailable = isError && (qvac.error ?? '').startsWith('unavailable:');
+    if (isUnavailable) {
+      return (
+        <View style={[styles.modelBanner, styles.modelBannerError]}>
+          <View style={styles.modelBannerRow}>
+            <Ionicons name="desktop-outline" size={18} color={theme.colors.warning[600]} />
+            <Text style={styles.modelBannerText}>
+              On-device AI isn’t available on this device. Connect a desktop to run KaleidoMind.
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                dispatch(setAiMode('delegate'));
+                navigation.navigate('PairDesktop');
+              }}
+              style={styles.modelRetry}
+              accessibilityLabel="Connect a desktop"
+            >
+              <Text style={styles.modelRetryText}>Connect</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     const label = isError
       ? 'On-device AI failed to load'
       : qvac.isDownloading

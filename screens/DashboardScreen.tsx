@@ -22,7 +22,15 @@ import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
-import { selectDisclosureLevel, selectAiEnabled, setAiEnabled } from '../store/slices/settingsSlice';
+import {
+  selectDisclosureLevel,
+  selectAiEnabled,
+  selectAiOnboarded,
+  setAiMode,
+  setAiOnboarded,
+} from '../store/slices/settingsSlice';
+import QVACService from '../services/QVACService';
+import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
 import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
 
 import { theme } from '../theme';
@@ -92,11 +100,15 @@ export default function DashboardScreen({ navigation }: Props) {
   // On-device AI is opt-in; only surface the voice agent FAB once it's enabled
   // so the QVAC Bare worklet can't be started (and crash) before a native rebuild.
   const aiEnabled = useSelector(selectAiEnabled);
+  const aiOnboarded = useSelector(selectAiOnboarded);
   const policy = policyFor(disclosureLevel);
   const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
+  // One-time KaleidoMind onboarding (lets the user pick local / delegate / off).
+  const [mindOnboardingOpen, setMindOnboardingOpen] = useState(false);
+  const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [protocolsReady, setProtocolsReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -116,6 +128,49 @@ export default function DashboardScreen({ navigation }: Props) {
   // Modal state for channel details
   const [channelModalVisible, setChannelModalVisible] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
+
+  // First run: probe whether KaleidoMind can run here, then show the one-time
+  // setup so the user decides once (local / delegate / off). Never boots the
+  // worklet — getAvailability() only reads device capability.
+  useEffect(() => {
+    if (aiOnboarded) return;
+    let active = true;
+    QVACService.getInstance()
+      .getAvailability()
+      .then((a) => {
+        if (active) {
+          setMindAvailability(a);
+          setMindOnboardingOpen(true);
+        }
+      })
+      .catch(() => {
+        if (active) setMindOnboardingOpen(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [aiOnboarded]);
+
+  const finishMindOnboarding = useCallback(() => {
+    dispatch(setAiOnboarded(true));
+    setMindOnboardingOpen(false);
+  }, [dispatch]);
+
+  const handleMindLocal = useCallback(() => {
+    dispatch(setAiMode('local'));
+    finishMindOnboarding();
+  }, [dispatch, finishMindOnboarding]);
+
+  const handleMindDelegate = useCallback(() => {
+    dispatch(setAiMode('delegate'));
+    finishMindOnboarding();
+    navigation.getParent()?.navigate('PairDesktop');
+  }, [dispatch, finishMindOnboarding, navigation]);
+
+  const handleMindSkip = useCallback(() => {
+    dispatch(setAiMode('off'));
+    finishMindOnboarding();
+  }, [dispatch, finishMindOnboarding]);
 
   // Initialize protocol services (only once)
   const initializeApi = useCallback(async () => {
@@ -688,25 +743,24 @@ export default function DashboardScreen({ navigation }: Props) {
             setVoiceAgentOpen(true);
             return;
           }
-          // AI is opt-in (off by default) so the on-device worklet never starts
-          // unprompted. Ask before enabling — that's what spins up KaleidoMind.
-          Alert.alert(
-            'Enable KaleidoMind?',
-            'The voice assistant runs an AI model on your device. Turn on on-device AI to start talking to it.',
-            [
-              { text: 'Not now', style: 'cancel' },
-              {
-                text: 'Enable',
-                onPress: () => {
-                  dispatch(setAiEnabled(true));
-                  setVoiceAgentOpen(true);
-                },
-              },
-            ]
-          );
+          // AI is opt-in (off by default). Re-open the one-time setup so the user
+          // can pick how KaleidoMind runs — nothing starts the worklet unprompted.
+          QVACService.getInstance()
+            .getAvailability()
+            .then((a) => setMindAvailability(a))
+            .catch(() => {})
+            .finally(() => setMindOnboardingOpen(true));
         }}
       />
       <VoiceAgentOverlay visible={voiceAgentOpen} onClose={() => setVoiceAgentOpen(false)} />
+
+      <KaleidoMindOnboarding
+        visible={mindOnboardingOpen}
+        availability={mindAvailability}
+        onSelectLocal={handleMindLocal}
+        onSelectDelegate={handleMindDelegate}
+        onSkip={handleMindSkip}
+      />
 
       {renderChannelModal()}
     </View>

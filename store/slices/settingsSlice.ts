@@ -5,6 +5,13 @@ import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import type { DisclosureLevel } from '@kaleidorg/wallet-protocols';
 import type { RootState } from '../index';
 
+// KaleidoMind (on-device AI) mode. Chosen once in onboarding, changeable in
+// settings:
+//   'off'      AI disabled (the QVAC Bare worklet never starts)
+//   'local'    run the model on this device
+//   'delegate' run it on a paired desktop; the phone relays
+export type AiMode = 'off' | 'local' | 'delegate';
+
 interface SettingsState {
   nodeType: 'remote' | 'local';
   remoteNodeUrl: string;
@@ -25,9 +32,11 @@ interface SettingsState {
   // 'lite' shows BTC/USD/assets only; 'advanced' reveals networks/routes/channels.
   // Chosen at wallet creation, reversible in settings.
   disclosureLevel: DisclosureLevel;
-  // On-device AI (KaleidoMind) is OFF by default — starting the QVAC Bare worklet
-  // before the native modules match crashes the app, so it's strictly opt-in.
-  aiEnabled: boolean;
+  // KaleidoMind mode — defaults 'off' so the QVAC Bare worklet never starts
+  // unprompted (which can crash on a native/JS mismatch or the iOS Simulator).
+  aiMode: AiMode;
+  // Whether the user has been through the one-time KaleidoMind onboarding.
+  aiOnboarded: boolean;
 }
 
 const initialState: SettingsState = {
@@ -48,7 +57,8 @@ const initialState: SettingsState = {
   network: 'regtest',
   needsApiConfigUpdate: false,
   disclosureLevel: 'lite',
-  aiEnabled: false,
+  aiMode: 'off',
+  aiOnboarded: false,
 };
 
 const settingsSlice = createSlice({
@@ -102,8 +112,19 @@ const settingsSlice = createSlice({
     setDisclosureLevel: (state, action: PayloadAction<DisclosureLevel>) => {
       state.disclosureLevel = action.payload;
     },
+    setAiMode: (state, action: PayloadAction<AiMode>) => {
+      state.aiMode = action.payload;
+    },
+    setAiOnboarded: (state, action: PayloadAction<boolean>) => {
+      state.aiOnboarded = action.payload;
+    },
+    // Convenience on/off toggle that preserves a chosen 'delegate' setup.
     setAiEnabled: (state, action: PayloadAction<boolean>) => {
-      state.aiEnabled = action.payload;
+      if (action.payload) {
+        if (state.aiMode === 'off') state.aiMode = 'local';
+      } else {
+        state.aiMode = 'off';
+      }
     },
     clearApiConfigUpdateFlag: (state) => {
       state.needsApiConfigUpdate = false;
@@ -127,6 +148,8 @@ export const {
   setCurrency,
   setNetwork,
   setDisclosureLevel,
+  setAiMode,
+  setAiOnboarded,
   setAiEnabled,
   clearApiConfigUpdateFlag
 } = settingsSlice.actions;
@@ -136,9 +159,16 @@ export const {
 export const selectDisclosureLevel = (state: RootState): DisclosureLevel =>
   state.settings.disclosureLevel ?? 'lite';
 
-// On-device AI (KaleidoMind) opt-in. Defaults OFF so the QVAC worklet never
-// auto-starts (which can crash the app on a native/JS mismatch).
+// KaleidoMind mode. Defaults 'off' so the QVAC worklet never auto-starts.
+export const selectAiMode = (state: RootState): AiMode =>
+  state.settings.aiMode ?? 'off';
+
+// Derived on/off used by the worklet kill switch and AI entry points.
 export const selectAiEnabled = (state: RootState): boolean =>
-  state.settings.aiEnabled ?? false;
+  (state.settings.aiMode ?? 'off') !== 'off';
+
+// Whether the user has completed the one-time KaleidoMind onboarding.
+export const selectAiOnboarded = (state: RootState): boolean =>
+  state.settings.aiOnboarded ?? false;
 
 export default settingsSlice.reducer;

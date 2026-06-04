@@ -279,7 +279,7 @@ function AppNavigator() {
 }
 
 /**
- * Mirrors the persisted `settings.aiEnabled` flag into the QVACService master
+ * Mirrors the persisted KaleidoMind mode (settings.aiMode) into the QVACService master
  * kill switch, so the on-device AI worklet can never start unless the user has
  * explicitly opted in. Rendered inside the Redux Provider + PersistGate.
  */

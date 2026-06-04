@@ -112,7 +112,7 @@ class QVACService {
   // Master kill switch for on-device AI. Defaults OFF: starting the QVAC Bare
   // worklet on a native/JS mismatch (or on the iOS Simulator, which has no
   // bare-abort framework) aborts the process natively — an error JS can't catch.
-  // App.tsx syncs this from the persisted `settings.aiEnabled` flag, so the
+  // App.tsx syncs this from the persisted KaleidoMind mode (settings.aiMode), so the
   // worklet can never start until the user explicitly opts in.
   private enabled = false;
 
@@ -176,6 +176,38 @@ class QVACService {
   /** The model recommended for this device's RAM (for the picker UI). */
   async getRecommendedModelId(): Promise<string> {
     return recommendLocalModelId(await this.getDeviceMemoryBytes());
+  }
+
+  private runtimeAvailable: boolean | null = null;
+
+  /**
+   * Whether the QVAC Bare worklet can run here AT ALL — checked WITHOUT booting
+   * it (booting on an unsupported target aborts the process natively, which JS
+   * can't catch). The iOS Simulator has no bare-abort framework, so the worklet
+   * can't start there; both on-device and delegate modes need it. Used by the
+   * KaleidoMind onboarding to steer users and to refuse init instead of crashing.
+   */
+  async getAvailability(): Promise<{
+    runtimeAvailable: boolean;
+    localCapable: boolean;
+    deviceMemGb: number;
+  }> {
+    if (this.runtimeAvailable == null) {
+      try {
+        this.runtimeAvailable = !(await DeviceInfo.isEmulator());
+      } catch {
+        // If we can't tell, assume a real device build (don't block real users).
+        this.runtimeAvailable = true;
+      }
+    }
+    const mem = await this.getDeviceMemoryBytes();
+    // Any real phone runs the smallest model; below ~3 GB we recommend delegating.
+    const localCapable = this.runtimeAvailable && mem >= 3 * 1024 * 1024 * 1024;
+    return {
+      runtimeAvailable: this.runtimeAvailable,
+      localCapable,
+      deviceMemGb: Math.round((mem / (1024 * 1024 * 1024)) * 10) / 10,
+    };
   }
 
   async loadConfig(): Promise<QVACConfig> {
@@ -296,6 +328,17 @@ class QVACService {
       console.log('[QVAC] LLM init skipped — on-device AI is disabled');
       return;
     }
+    // Hard gate: never boot the worklet where it can't run (e.g. the Simulator).
+    // Surface a clear, actionable error instead of aborting the process.
+    const { runtimeAvailable } = await this.getAvailability();
+    if (!runtimeAvailable) {
+      console.warn('[QVAC] LLM init skipped — worklet runtime unavailable on this device');
+      this.setState({
+        llmStatus: 'error',
+        error: 'unavailable: KaleidoMind needs a physical device. Connect a desktop to delegate.',
+      });
+      return;
+    }
     if (this.state.llmStatus === 'ready' || this.state.llmStatus === 'downloading' || this.state.llmStatus === 'loading') {
       return;
     }
@@ -399,9 +442,14 @@ class QVACService {
 
   async initializeWhisper(): Promise<void> {
     // Hard gate: Whisper also runs in the Bare worklet — never start it unless
-    // on-device AI is explicitly enabled.
+    // on-device AI is explicitly enabled and the runtime can actually run here.
     if (!this.enabled) {
       console.log('[QVAC] Whisper init skipped — on-device AI is disabled');
+      return;
+    }
+    const { runtimeAvailable } = await this.getAvailability();
+    if (!runtimeAvailable) {
+      console.warn('[QVAC] Whisper init skipped — worklet runtime unavailable on this device');
       return;
     }
     if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
