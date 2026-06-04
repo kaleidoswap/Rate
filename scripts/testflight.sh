@@ -45,7 +45,11 @@ TEAM_ID="${TEAM_ID:-644JA45Z2S}"
 # altool/xcodebuild discover the key from these well-known dirs.
 KEY_DEST_DIR="$HOME/.appstoreconnect/private_keys"
 mkdir -p "$KEY_DEST_DIR"
-cp "$ASC_KEY_P8" "$KEY_DEST_DIR/AuthKey_${ASC_KEY_ID}.p8"
+KEY_DEST="$KEY_DEST_DIR/AuthKey_${ASC_KEY_ID}.p8"
+# Skip the copy when the key is already at the destination (cp would error on an identical file).
+if [ ! "$ASC_KEY_P8" -ef "$KEY_DEST" ]; then
+  cp "$ASC_KEY_P8" "$KEY_DEST"
+fi
 
 # --- Install CocoaPods deps ---------------------------------------------------
 echo "==> pod install"

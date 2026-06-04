@@ -38,7 +38,11 @@ try {
 
   const dest = path.join(sdkDir, 'dist', 'worker.mobile.bundle.js');
   if (fs.existsSync(dest)) {
-    process.exit(0); // already present, nothing to do
+    const current = fs.readFileSync(dest);
+    const expected = fs.readFileSync(src);
+    if (current.equals(expected)) {
+      process.exit(0); // already current, nothing to do
+    }
   }
 
   fs.mkdirSync(path.dirname(dest), { recursive: true });

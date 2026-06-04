@@ -24,6 +24,22 @@ if (!global.crypto.getRandomValues) {
   global.crypto.getRandomValues = Crypto.getRandomValues as any;
 }
 
+// Global unhandled-promise-rejection guard.
+// Defense-in-depth so a stray rejection (e.g. from the on-device AI / QVAC
+// pipeline) is logged instead of bubbling up as a red-screen crash. NOTE: a
+// Bare worklet that aborts natively (AddonError) runs in a separate runtime and
+// CANNOT be caught here — that's why on-device AI is opt-in (off by default).
+const globalAny = global as any;
+if (globalAny?.HermesInternal?.hasPromise?.() && globalAny.HermesInternal.enablePromiseRejectionTracker) {
+  globalAny.HermesInternal.enablePromiseRejectionTracker({
+    allRejections: true,
+    onUnhandled: (id: number, error: unknown) => {
+      console.warn('[unhandledRejection]', id, error);
+    },
+    onHandled: () => {},
+  });
+}
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';

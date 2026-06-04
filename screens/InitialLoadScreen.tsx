@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useDispatch } from 'react-redux';
 import DatabaseService, { NetworkConfig } from '../services/DatabaseService';
 import { setUnlocked, setInitialized, setActiveWallet } from '../store/slices/walletSlice';
 import { autoRestoreNostrConnection, initializeProtocolServices } from '../services/initializeServices';
+import { BrandLoading } from '../components/brand/BrandLoading';
 
 export default function InitialLoadScreen({ navigation }: { navigation: any }) {
   const dispatch = useDispatch();
@@ -63,18 +63,8 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color="#007AFF" />
-    </View>
-  );
+  // Branded loader that visually continues the BrandIntro (same dark
+  // kaleidoscope background) so the launch feels like one seamless moment
+  // instead of flashing a white screen with a blue spinner.
+  return <BrandLoading />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-});

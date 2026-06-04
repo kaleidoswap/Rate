@@ -11,6 +11,7 @@ import {
   Clipboard,
   ActivityIndicator,
   Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -21,6 +22,7 @@ import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
 import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-protocols';
+import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
   getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
@@ -128,9 +130,19 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [unifiedLoading, setUnifiedLoading] = useState(false);
   const [unifiedError, setUnifiedError] = useState<string | null>(null);
   const [unifiedMethods, setUnifiedMethods] = useState<string[]>([]);
+  // Per-method address breakdown for the Pro/advanced address list.
+  const [unifiedAddresses, setUnifiedAddresses] = useState<
+    Array<{ key: string; label: string; value: string }>
+  >([]);
+  const [showAddressInfo, setShowAddressInfo] = useState(false);
   // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
   // embedding the USD-receiving methods (Liquid USDt, RGB USDT invoice, Spark).
   const [unifiedAsset, setUnifiedAsset] = useState<'BTC' | 'USD'>('BTC');
+  // Lite mode: a single private BIP321 QR (BTC/$ toggle) with the advanced
+  // network picker hidden behind "Show all networks".
+  const disclosureLevel = useSelector(selectDisclosureLevel);
+  const isLite = disclosureLevel === 'lite';
+  const [showAllNetworks, setShowAllNetworks] = useState(false);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
@@ -498,6 +510,14 @@ export default function ReceiveScreen({ navigation }: Props) {
         return;
       }
 
+      setUnifiedAddresses(
+        [
+          liquidAddress && { key: 'liquid', label: 'Liquid USDt', value: liquidAddress },
+          rgbInvoice && { key: 'rgb', label: 'RGB USDT invoice', value: rgbInvoice },
+          sparkAddress && { key: 'spark', label: 'Spark', value: sparkAddress },
+        ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
+      );
+
       const uri = buildUnifiedReceiveURI({
         sparkAddress,
         liquidAddress,
@@ -524,6 +544,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     setUnifiedLoading(true);
     setUnifiedUri('');
     setUnifiedMethods([]);
+    setUnifiedAddresses([]);
 
     if (unifiedAsset === 'USD') {
       await generateUsdUnifiedUri();
@@ -633,6 +654,16 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
     if (btcAddress) methods.unshift('On-chain');
 
+    setUnifiedAddresses(
+      [
+        btcAddress && { key: 'onchain', label: 'Bitcoin on-chain', value: btcAddress },
+        lightningInvoice && { key: 'lightning', label: 'Lightning invoice', value: lightningInvoice },
+        sparkAddress && { key: 'spark', label: 'Spark', value: sparkAddress },
+        arkadeAddress && { key: 'arkade', label: 'Arkade', value: arkadeAddress },
+        liquidAddress && { key: 'liquid', label: 'Liquid', value: liquidAddress },
+      ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
+    );
+
     try {
       const uri = buildUnifiedReceiveURI({
         btcAddress,
@@ -667,6 +698,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     }, 300);
     return () => clearTimeout(timeoutId);
   }, [networkType, amount, unifiedAsset]);
+
+  // Lite mode receives via the single unified BIP321 QR — force that mode.
+  useEffect(() => {
+    if (isLite && !showAllNetworks && networkType !== 'unified') {
+      setNetworkType('unified');
+    }
+  }, [isLite, showAllNetworks, networkType]);
 
   // Load channels when component mounts or network type changes
   useEffect(() => {
@@ -1112,6 +1150,74 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   // Unified single-QR receive view (wraps the body with a BTC/USD asset selector).
+  // Pro/extension-style list of every address embedded in the unified QR. Each
+  // row copies its address; a collapsible panel explains them; "Add RGB address"
+  // jumps to the advanced asset picker.
+  const renderUnifiedAddressList = () => {
+    if (!unifiedAddresses.length) return null;
+    const colorFor = (key: string): string =>
+      (NETWORK_COLORS as Record<string, string>)[key] ?? theme.colors.primary[500];
+    const trunc = (v: string) => (v.length > 30 ? `${v.slice(0, 16)}…${v.slice(-10)}` : v);
+    return (
+      <View style={styles.addrListSection}>
+        <Text style={styles.addrListTitle}>Addresses</Text>
+        {unifiedAddresses.map((a) => (
+          <TouchableOpacity
+            key={a.key}
+            style={styles.addrRow}
+            activeOpacity={0.7}
+            onPress={async () => {
+              await Clipboard.setString(a.value);
+              Alert.alert('Copied', `${a.label} copied to clipboard`);
+            }}
+          >
+            <View style={[styles.addrDot, { backgroundColor: colorFor(a.key) }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.addrLabel}>{a.label}</Text>
+              <Text style={styles.addrValue} numberOfLines={1}>
+                {trunc(a.value)}
+              </Text>
+            </View>
+            <Ionicons name="copy-outline" size={18} color={theme.colors.text.tertiary} />
+          </TouchableOpacity>
+        ))}
+
+        <TouchableOpacity
+          style={styles.addrInfoToggle}
+          onPress={() => setShowAddressInfo((v) => !v)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="information-circle-outline" size={16} color={theme.colors.text.tertiary} />
+          <Text style={styles.addrInfoToggleText}>What are these addresses?</Text>
+          <Ionicons
+            name={showAddressInfo ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={theme.colors.text.tertiary}
+          />
+        </TouchableOpacity>
+        {showAddressInfo && (
+          <Text style={styles.addrInfoBody}>
+            The single QR above carries several ways to be paid — a sender's wallet automatically picks
+            whichever it supports: Bitcoin on-chain, Lightning (instant, low fee), Spark, Arkade or
+            Liquid. You can also copy any individual address above.
+          </Text>
+        )}
+
+        <TouchableOpacity
+          style={styles.addRgbBtn}
+          activeOpacity={0.7}
+          onPress={() => {
+            setShowAllNetworks(true);
+            setShowAssetSelector(true);
+          }}
+        >
+          <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
+          <Text style={styles.addRgbText}>Add RGB address</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   const renderUnifiedContent = () => {
     const accent = NETWORK_COLORS['unified'];
     return (
@@ -1137,6 +1243,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           })}
         </View>
         {renderUnifiedBody(accent)}
+        {(!isLite || showAllNetworks) && renderUnifiedAddressList()}
       </>
     );
   };
@@ -1338,7 +1445,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           {amount && selectedAsset.ticker && (
             <View style={styles.qrAmountContainer}>
               <Text style={styles.qrAmount}>
-                {amount} {selectedAsset.ticker}
+                {amount} {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
               </Text>
             </View>
           )}
@@ -1435,6 +1542,42 @@ export default function ReceiveScreen({ navigation }: Props) {
       </View>
     );
   };
+
+  // --- Lite mode: one private BIP321 QR (BTC / $ toggle), networks hidden ----
+  if (isLite && !showAllNetworks) {
+    return (
+      <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+        <ScreenHeader title="Receive" showBack={true} />
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+            {renderUnifiedContent()}
+            {renderAmountInput()}
+            <TouchableOpacity
+              onPress={() => setShowAllNetworks(true)}
+              activeOpacity={0.7}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                marginTop: 20,
+                paddingVertical: 12,
+              }}
+            >
+              <Text style={{ color: theme.colors.text.secondary, fontSize: 14, fontWeight: '600' }}>
+                Show all networks
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -1965,6 +2108,86 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.text.secondary,
+  },
+  addrListSection: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    padding: 12,
+  },
+  addrListTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: theme.colors.text.tertiary,
+    marginBottom: 6,
+    paddingHorizontal: 4,
+  },
+  addrRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border.light,
+  },
+  addrDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  addrLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  addrValue: {
+    fontSize: 12,
+    color: theme.colors.text.muted,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop: 1,
+  },
+  addrInfoToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  addrInfoToggleText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.text.tertiary,
+  },
+  addrInfoBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.colors.text.muted,
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+  },
+  addRgbBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border.medium,
+    borderStyle: 'dashed',
+  },
+  addRgbText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.colors.primary[500],
   },
   qrSection: {
     backgroundColor: theme.colors.surface.primary,

@@ -20,8 +20,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { useSelector } from 'react-redux';
+import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
+import { selectAiEnabled, selectAiMode, setAiMode } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { MainHeader } from '../components';
@@ -41,10 +42,18 @@ import {
   Engine,
   ToolRegistry,
   InProcessToolSource,
+  createL402ToolSource,
+  SkillRegistry,
+  skillsFromBundle,
   type LLMProvider,
   type InProcessTool,
+  type SkillBundle,
   type Message as MindMessage,
 } from '@kaleidorg/mind';
+import { protocolManager } from '../services/protocols';
+// Skills authored as SKILL.md under ./skills, bundled to JSON at build time
+// (`npm run bundle-skills`). Same authoring + loader the desktop uses.
+import skillBundle from '../skills.bundle.json';
 import * as Haptics from 'expo-haptics';
 
 interface Props {
@@ -121,8 +130,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // On-device QVAC: model lifecycle + wallet tools
-  const qvac = useQVAC();
+  // On-device QVAC: model lifecycle + wallet tools.
+  // Only auto-start the Bare worklet when the user has explicitly enabled AI
+  // (off by default) — starting it on a native/JS mismatch hard-crashes the app.
+  const aiEnabled = useSelector(selectAiEnabled);
+  const aiMode = useSelector(selectAiMode);
+  const dispatch = useDispatch();
+  const qvac = useQVAC(aiEnabled);
   const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
   const tools = useMemo(() => createQVACTools(aiFunctions), [aiFunctions]);
 
@@ -138,13 +152,46 @@ export default function AIAssistantScreen({ navigation }: Props) {
       cancel: (id) => qvac.service.cancelRequest(id),
     };
     const walletSource = new InProcessToolSource('wallet', tools as unknown as InProcessTool[]);
+
+    // Shared wallet payment path — used by every "agent spends sats" source
+    // (L402, Bitrefill, …). Pays a BOLT11 with the on-device Lightning wallet
+    // (Spark preferred, RLN fallback) so keys never leave the device.
+    const payInvoice = async (invoice: string) => {
+      const spark = protocolManager.getAdapterIfAvailable('SPARK');
+      const rln = protocolManager.getAdapterIfAvailable('RGB');
+      const adapter: any = spark?.isConnected() ? spark : rln?.isConnected() ? rln : null;
+      if (!adapter) throw new Error('No Lightning wallet connected to pay the invoice');
+      const r: any = await adapter.sendPayment({ invoice });
+      return { preimage: r?.preimage ?? r?.paymentPreimage ?? r?.payment_preimage ?? '' };
+    };
+
+    // L402: buy paywalled HTTP resources in sats. The invoice amount is only
+    // known during the 402 challenge, so rather than a broken pre-execution
+    // payment modal we auto-pay small amounts (≤ cap). Larger ones are declined.
+    const l402Source = createL402ToolSource({
+      payInvoice,
+      maxAutoPaySats: 1000,
+      requiresConfirmation: false,
+      log: (m: string) => console.log('[L402]', m),
+    });
+
     return new Engine({
       provider,
-      tools: new ToolRegistry([walletSource]),
+      tools: new ToolRegistry([walletSource, l402Source]),
       defaultMaxTurns: 5,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tools, qvac.service]);
+
+  // Skills route a query to a focused playbook + a curated tool subset
+  // (progressive disclosure — the small mobile model never sees every tool at
+  // once). No match → the full toolset is used. Authored as SKILL.md under
+  // ./skills and bundled to skills.bundle.json; add a skill by dropping a new
+  // folder there and re-running `npm run bundle-skills`.
+  const skills = useMemo(
+    () => new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle)),
+    [],
+  );
 
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
@@ -437,9 +484,23 @@ export default function AIAssistantScreen({ navigation }: Props) {
       const history = messages
         .filter((m) => !m.streaming)
         .map((m) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }));
-      const chatMessages = [SYSTEM_PROMPT, ...history, { role: 'user', content: messageText }];
+
+      // Enter the most relevant skill: compose its playbook into the system
+      // prompt and expose only its tools (progressive disclosure). No match →
+      // the base prompt + full toolset.
+      const skill = skills.select(messageText);
+      const { system: skillSystem, allowedTools } = skills.compose(
+        String(SYSTEM_PROMPT.content),
+        skill,
+      );
+      const chatMessages = [
+        { role: 'system', content: skillSystem },
+        ...history,
+        { role: 'user', content: messageText },
+      ];
 
       const res = await engine.runAgentic(chatMessages as MindMessage[], {
+        allowedTools,
         onStart: (requestId) => setActiveRequestId(requestId),
         onToken: (token, turn) => {
           updateMessage(assistantId, (m) => {
@@ -517,8 +578,59 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // ---- On-device model status banner ----
   const renderModelStatus = () => {
+    // AI is opt-in (off by default) so the on-device worklet never auto-starts.
+    if (!aiEnabled) {
+      return (
+        <View style={styles.modelBanner}>
+          <View style={styles.modelBannerRow}>
+            <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary[600]} />
+            <Text style={styles.modelBannerText}>
+              KaleidoMind (on-device AI) is off. Enable to download and run it locally.
+            </Text>
+            <TouchableOpacity
+              onPress={() => dispatch(setAiMode('local'))}
+              style={styles.modelRetry}
+              accessibilityLabel="Enable on-device AI"
+            >
+              <Text style={styles.modelRetryText}>Enable</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
     if (qvac.isReady) return null;
     const isError = qvac.llmStatus === 'error';
+
+    // Runtime can't run here (e.g. Simulator / no native worklet). Don't show a
+    // scary failure — offer to delegate to a desktop instead.
+    const isUnavailable = isError && (qvac.error ?? '').startsWith('unavailable:');
+    if (isUnavailable) {
+      return (
+        <View style={[styles.modelBanner, styles.modelBannerError]}>
+          <View style={styles.modelBannerRow}>
+            <Ionicons name="desktop-outline" size={18} color={theme.colors.warning[600]} />
+            <Text style={styles.modelBannerText}>
+              On-device AI isn’t available on this device. Connect a desktop to run KaleidoMind.
+            </Text>
+            <TouchableOpacity
+              onPress={() => dispatch(setAiMode('off'))}
+              style={[styles.modelRetry, styles.modelRetryGhost]}
+              accessibilityLabel="Turn off KaleidoMind"
+            >
+              <Text style={styles.modelRetryText}>Off</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PairDesktop')}
+              style={styles.modelRetry}
+              accessibilityLabel="Connect a desktop"
+            >
+              <Text style={styles.modelRetryText}>Connect</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     const label = isError
       ? 'On-device AI failed to load'
       : qvac.isDownloading
@@ -615,9 +727,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <MainHeader
-        title="AI Assistant"
-        subtitle={headerSubtitle}
-        icon="chatbubble-ellipses"
+        title="KaleidoMind"
+        subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
+        icon="sparkles"
         rightAction={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {nostrState.isConnected && (
@@ -849,6 +961,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSetDelegate={(opts) => qvac.setDelegate(opts)}
             onScanQR={openScanner}
             providerName={providerName}
+            deviceMemGb={qvac.deviceMemGb}
+            recommendedModelId={qvac.recommendedModelId}
+            aiMode={aiMode}
+            onSetAiMode={(mode) => dispatch(setAiMode(mode))}
           />
         </LinearGradient>
       </View>
@@ -1030,6 +1146,12 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: theme.spacing[3],
       backgroundColor: theme.colors.error[600],
       borderRadius: theme.borderRadius.sm,
+    },
+    modelRetryGhost: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: theme.colors.border.medium,
+      marginRight: theme.spacing[2],
     },
     modelRetryText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.inverse, fontWeight: '700' },
     modelProgressTrack: {

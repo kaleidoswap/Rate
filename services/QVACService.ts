@@ -5,19 +5,32 @@ import {
   transcribe,
   unloadModel,
   cancel,
+  resume,
+  suspend,
   VERBOSITY,
 } from '@qvac/sdk';
 import { File, Directory, Paths } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { z } from 'zod';
+import DeviceInfo from 'react-native-device-info';
 import {
   QVAC_MODELS,
   DEFAULT_MODEL_ID,
   getModelById,
   hfUrlFromDescriptor,
+  recommendLocalModel,
+  recommendLocalModelId,
   type QVACModel,
 } from './qvacModels';
 import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
+
+const LOCAL_LLM_CONFIG = {
+  device: 'cpu',
+  gpu_layers: 0,
+  ctx_size: 2048,
+  tools: true,
+  verbosity: VERBOSITY.ERROR,
+} as const;
 
 /**
  * On a phone we download model weights over plain HTTPS with React Native's
@@ -94,6 +107,7 @@ class QVACService {
 
   private config: QVACConfig = { ...DEFAULT_CONFIG };
   private configLoaded = false;
+  private deviceMemBytes: number | null = null;
 
   private state: QVACState = {
     llmStatus: 'not_downloaded',
@@ -105,6 +119,13 @@ class QVACService {
 
   private listeners = new Set<StateListener>();
 
+  // Master kill switch for on-device AI. Defaults OFF: starting the QVAC Bare
+  // worklet on a native/JS mismatch (or on the iOS Simulator, which has no
+  // bare-abort framework) aborts the process natively — an error JS can't catch.
+  // App.tsx syncs this from the persisted KaleidoMind mode (settings.aiMode), so the
+  // worklet can never start until the user explicitly opts in.
+  private enabled = false;
+
   private constructor() {}
 
   static getInstance(): QVACService {
@@ -112,6 +133,77 @@ class QVACService {
       QVACService.instance = new QVACService();
     }
     return QVACService.instance;
+  }
+
+  /** Enable/disable on-device AI. When disabled, all model init is a no-op. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  // BUILD-LEVEL KILL SWITCH for the QVAC Bare worklet.
+  //
+  // The worklet bundle imports the `bare-abort` native addon at startup, but
+  // that framework is NOT linked into the app binary in the current build — on
+  // BOTH the iOS Simulator AND a physical device it aborts with:
+  //   AddonError: ADDON_NOT_FOUND … bare-abort.2.0.13.framework
+  // That aborts the whole process (an unhandled rejection in a separate runtime
+  // that JS can't catch), so on-device AI is completely non-functional until the
+  // native packaging is fixed (embed bare-abort.*.framework via react-native-
+  // bare-kit). Until then we must NEVER boot the worklet.
+  //
+  // Enabled now that the Bare addon xcframeworks (bare-abort + the full set in
+  // qvac/addons.manifest.json) are linked into the iOS app via the bare-kit
+  // pod's prepare_command (`node ios/link.mjs`). Requires a fresh native build
+  // (`npx expo run:ios --device`) so the frameworks are embedded. If the worklet
+  // ever aborts with ADDON_NOT_FOUND again, the addons weren't linked — re-run
+  // the link step + pod install (see scripts/link-bare-addons.sh).
+  private static readonly NATIVE_RUNTIME_AVAILABLE = true;
+
+  // Cached, SYNCHRONOUS "can the Bare worklet even run here?" check — decided
+  // WITHOUT booting the worklet (booting an unsupported build aborts the process).
+  private _runtimeOk: boolean | null = null;
+  private runtimeOkSync(): boolean {
+    if (!QVACService.NATIVE_RUNTIME_AVAILABLE) return false;
+    if (this._runtimeOk == null) {
+      try {
+        this._runtimeOk = !DeviceInfo.isEmulatorSync();
+      } catch {
+        this._runtimeOk = true; // unknown → assume a real device build
+      }
+    }
+    return this._runtimeOk;
+  }
+
+  /**
+   * The single gate every worklet-touching method checks. Returns true when it
+   * is NOT safe to touch the QVAC runtime (disabled, or unsupported target).
+   */
+  private workletBlocked(): boolean {
+    return !this.enabled || !this.runtimeOkSync();
+  }
+
+  /** Resume QVAC runtime networking — guarded so it never boots the worklet here. */
+  async resumeRuntime(): Promise<void> {
+    if (this.workletBlocked()) return;
+    try {
+      await resume();
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  /** Suspend QVAC runtime networking — guarded so it never boots the worklet here. */
+  async suspendRuntime(): Promise<void> {
+    if (this.workletBlocked()) return;
+    try {
+      await suspend();
+    } catch {
+      /* non-fatal */
+    }
   }
 
   subscribe(listener: StateListener): () => void {
@@ -141,13 +233,66 @@ class QVACService {
     return { ...this.config };
   }
 
+  /** Total device RAM in bytes (cached). Falls back to a modest 3 GB estimate. */
+  async getDeviceMemoryBytes(): Promise<number> {
+    if (this.deviceMemBytes != null) return this.deviceMemBytes;
+    try {
+      const mem = await DeviceInfo.getTotalMemory();
+      this.deviceMemBytes = mem && mem > 0 ? mem : 3 * 1024 * 1024 * 1024;
+    } catch {
+      this.deviceMemBytes = 3 * 1024 * 1024 * 1024;
+    }
+    return this.deviceMemBytes;
+  }
+
+  /** The model recommended for this device's RAM (for the picker UI). */
+  async getRecommendedModelId(): Promise<string> {
+    return recommendLocalModelId(await this.getDeviceMemoryBytes());
+  }
+
+  /**
+   * Whether the QVAC Bare worklet can run here AT ALL — checked WITHOUT booting
+   * it (booting on an unsupported target aborts the process natively, which JS
+   * can't catch). The iOS Simulator has no bare-abort framework, so the worklet
+   * can't start there; both on-device and delegate modes need it. Used by the
+   * KaleidoMind onboarding to steer users and to refuse init instead of crashing.
+   */
+  async getAvailability(): Promise<{
+    runtimeAvailable: boolean;
+    localCapable: boolean;
+    deviceMemGb: number;
+  }> {
+    const runtimeAvailable = this.runtimeOkSync();
+    const mem = await this.getDeviceMemoryBytes();
+    // Any real phone runs the smallest model; below ~3 GB we recommend delegating.
+    const localCapable = runtimeAvailable && mem >= 3 * 1024 * 1024 * 1024;
+    return {
+      runtimeAvailable,
+      localCapable,
+      deviceMemGb: Math.round((mem / (1024 * 1024 * 1024)) * 10) / 10,
+    };
+  }
+
   async loadConfig(): Promise<QVACConfig> {
     if (this.configLoaded) return this.getConfig();
+    let hadSaved = false;
     try {
       const raw = await AsyncStorage.getItem(CONFIG_KEY);
-      if (raw) this.config = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+      if (raw) {
+        this.config = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+        hadSaved = true;
+      }
     } catch {
       /* use defaults */
+    }
+    // First run (no saved choice): pick a model that fits this device's RAM
+    // instead of always defaulting to the same one.
+    if (!hadSaved) {
+      try {
+        this.config = { ...this.config, modelId: await this.getRecommendedModelId() };
+      } catch {
+        /* keep DEFAULT_MODEL_ID */
+      }
     }
     this.configLoaded = true;
     return this.getConfig();
@@ -241,14 +386,45 @@ class QVACService {
   // --- LLM lifecycle ---
 
   async initializeLLM(): Promise<void> {
+    // Hard gate: never start the Bare worklet unless AI is enabled AND the
+    // runtime can actually run here. On an unsupported target (e.g. the iOS
+    // Simulator) booting the worklet aborts the process, so we refuse and
+    // surface a clear, actionable error instead.
+    if (!this.enabled) {
+      console.log('[QVAC] LLM init skipped — on-device AI is disabled');
+      return;
+    }
+    if (!this.runtimeOkSync()) {
+      console.warn('[QVAC] LLM init skipped — worklet runtime unavailable on this device');
+      this.setState({
+        llmStatus: 'error',
+        error: 'unavailable: KaleidoMind needs a physical device. Connect a desktop to delegate.',
+      });
+      return;
+    }
     if (this.state.llmStatus === 'ready' || this.state.llmStatus === 'downloading' || this.state.llmStatus === 'loading') {
       return;
     }
 
     try {
       await this.loadConfig();
-      const model = getModelById(this.config.modelId);
+      let model = getModelById(this.config.modelId);
       const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
+
+      // Guard: if we're running on-device but the selected model can't be
+      // downloaded here (P2P-only, e.g. Qwen3 4B, or oversized for this phone),
+      // fall back to a hardware-appropriate local model instead of failing to
+      // load. This is the common cause of "on-device AI failed to load" after a
+      // bigger model was selected during desktop/delegated testing.
+      if (!delegating && (!model.localCapable || model.tier !== 'phone')) {
+        const fallback = recommendLocalModel(await this.getDeviceMemoryBytes());
+        console.warn(
+          `[QVAC] '${model.label}' isn't enabled for stable on-device iPhone loading; falling back to '${fallback.label}'`
+        );
+        model = fallback;
+        this.config = { ...this.config, modelId: fallback.id };
+        await this.saveConfig();
+      }
 
       let modelSrc: any;
       if (delegating) {
@@ -258,11 +434,6 @@ class QVACService {
         modelSrc = model.descriptor;
         console.log('[QVAC] LLM: delegating', model.id, '→', this.config.providerPublicKey.slice(0, 12) + '…');
       } else {
-        if (!model.localCapable) {
-          throw new Error(
-            `${model.label} has no direct download — enable P2P delegation or pick a downloadable model.`
-          );
-        }
         this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
         const url = hfUrlFromDescriptor(model.descriptor)!;
         modelSrc = await this.ensureLocalModel(
@@ -273,26 +444,54 @@ class QVACService {
         this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
       }
 
-      this.llmModelId = await loadModel({
-        modelSrc,
-        modelType: 'llamacpp-completion',
-        modelConfig: {
-          // Local on iPhone: 'cpu' (Metal failed to init the llamacpp context in
-          // the bare worklet). Delegated: the provider (e.g. a Mac) can use GPU.
-          device: delegating ? 'gpu' : 'cpu',
-          ctx_size: 2048,
-          tools: true,
-          verbosity: VERBOSITY.ERROR,
-        },
-        ...(delegating
-          ? {
-              delegate: {
-                providerPublicKey: this.config.providerPublicKey,
-                fallbackToLocal: false,
-              },
-            }
-          : {}),
-      } as any);
+      try {
+        this.llmModelId = await loadModel({
+          modelSrc,
+          modelType: 'llamacpp-completion',
+          modelConfig: {
+            // Local on iPhone: 'cpu' (Metal failed to init the llamacpp context in
+            // the bare worklet). Delegated: the provider (e.g. a Mac) can use GPU.
+            device: delegating ? 'gpu' : LOCAL_LLM_CONFIG.device,
+            gpu_layers: delegating ? 99 : LOCAL_LLM_CONFIG.gpu_layers,
+            ctx_size: 2048,
+            tools: true,
+            verbosity: VERBOSITY.ERROR,
+          },
+          ...(delegating
+            ? {
+                delegate: {
+                  providerPublicKey: this.config.providerPublicKey,
+                  fallbackToLocal: false,
+                },
+              }
+            : {}),
+        } as any);
+      } catch (loadErr) {
+        if (!delegating) throw loadErr;
+        // Delegation failed (provider unreachable / RPC error, e.g. a stale
+        // "GPT_OSS_20B + delegate" config left over from desktop testing).
+        // Un-stick the phone: disable delegation, persist it, and load a local
+        // hardware-appropriate model instead of staying stuck on the provider.
+        console.warn(
+          '[QVAC] delegation failed; falling back to a local model:',
+          loadErr instanceof Error ? loadErr.message : String(loadErr)
+        );
+        const local = recommendLocalModel(await this.getDeviceMemoryBytes());
+        this.config = { ...this.config, modelId: local.id, delegateEnabled: false };
+        await this.saveConfig();
+        this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
+        const localUrl = hfUrlFromDescriptor(local.descriptor)!;
+        const localSrc = await this.ensureLocalModel(
+          { url: localUrl, name: local.descriptor.modelId, size: local.descriptor.expectedSize },
+          (pct) => this.setState({ llmDownloadProgress: pct })
+        );
+        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+        this.llmModelId = await loadModel({
+          modelSrc: localSrc,
+          modelType: 'llamacpp-completion',
+          modelConfig: LOCAL_LLM_CONFIG,
+        } as any);
+      }
 
       this.setState({ llmStatus: 'ready' });
       console.log('QVAC LLM ready:', this.llmModelId);
@@ -306,6 +505,12 @@ class QVACService {
   // --- Whisper lifecycle ---
 
   async initializeWhisper(): Promise<void> {
+    // Hard gate: Whisper also runs in the Bare worklet — never start it unless
+    // on-device AI is enabled and the runtime can actually run here.
+    if (this.workletBlocked()) {
+      console.warn('[QVAC] Whisper init skipped — disabled or runtime unavailable');
+      return;
+    }
     if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
       return;
     }
@@ -618,7 +823,7 @@ class QVACService {
   // --- Transcription ---
 
   async transcribeAudio(audioUri: string): Promise<string> {
-    if (!this.whisperModelId) {
+    if (this.workletBlocked() || !this.whisperModelId) {
       throw new Error('Whisper model not loaded');
     }
 

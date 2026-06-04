@@ -1,15 +1,16 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, StatusBar } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { theme } from '../theme';
+import { BrandMark } from './BrandMark';
 
 interface MainHeaderProps {
   title?: string;
   subtitle?: string;
   greeting?: string;
+  /** Show the KaleidoSwap mark before the title (defaults on when a greeting is set). */
   showLogo?: boolean;
   showNotification?: boolean;
   showSettings?: boolean;
@@ -23,6 +24,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   title,
   subtitle,
   greeting,
+  showLogo,
   showNotification,
   showSettings,
   rightAction,
@@ -32,29 +34,36 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
 }) => {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  const withLogo = showLogo ?? !!greeting;
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <LinearGradient
-        colors={theme.colors.primary.gradient as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.gradient, { paddingTop: insets.top + 8 }]}
-      >
+      <View style={[styles.bar, { paddingTop: insets.top + 10 }]}>
         <View style={styles.content}>
           <View style={styles.row}>
             {onBack && (
-              <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Ionicons name="arrow-back" size={22} color="#fff" />
+              <TouchableOpacity
+                onPress={onBack}
+                style={styles.iconBtn}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="arrow-back" size={20} color={theme.colors.text.primary} />
               </TouchableOpacity>
             )}
 
             <View style={styles.titleArea}>
               {greeting && <Text style={styles.greeting}>{greeting}</Text>}
               <View style={styles.titleRow}>
-                {icon && <Ionicons name={icon} size={22} color="#fff" style={{ marginRight: 8, opacity: 0.9 }} />}
-                {title && <Text style={styles.title} numberOfLines={1}>{title}</Text>}
+                {withLogo && <BrandMark size={24} />}
+                {icon && !withLogo && (
+                  <Ionicons name={icon} size={20} color={theme.colors.text.primary} style={{ marginRight: 8, opacity: 0.9 }} />
+                )}
+                {title && (
+                  <Text style={styles.title} numberOfLines={1}>
+                    {title}
+                  </Text>
+                )}
               </View>
               {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
             </View>
@@ -62,14 +71,14 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
             <View style={styles.actions}>
               {rightAction}
               {showNotification && (
-                <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('Notifications')}>
-                  <Ionicons name="notifications-outline" size={18} color="#fff" />
+                <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Notifications')}>
+                  <Ionicons name="notifications-outline" size={18} color={theme.colors.text.secondary} />
                   <View style={styles.dot} />
                 </TouchableOpacity>
               )}
               {showSettings && (
-                <TouchableOpacity style={styles.actionBtn} onPress={() => navigation.navigate('Settings')}>
-                  <Ionicons name="ellipsis-horizontal" size={18} color="#fff" />
+                <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Settings')}>
+                  <Ionicons name="ellipsis-horizontal" size={18} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
               )}
             </View>
@@ -77,19 +86,20 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
 
           {children && <View style={styles.childrenArea}>{children}</View>}
         </View>
-      </LinearGradient>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    overflow: 'hidden',
+    backgroundColor: theme.colors.background.primary,
   },
-  gradient: {
-    paddingBottom: 20,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
+  bar: {
+    paddingBottom: 16,
+    backgroundColor: theme.colors.background.primary,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border.light,
   },
   content: {
     paddingHorizontal: 16,
@@ -98,63 +108,60 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 44,
-  },
-  backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
+    gap: 12,
   },
   titleArea: {
     flex: 1,
   },
   greeting: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
-    marginBottom: 2,
+    color: theme.colors.text.secondary,
+    marginBottom: 3,
+    fontWeight: '500',
   },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 9,
   },
   title: {
-    fontSize: 22,
+    fontSize: 21,
     fontWeight: '700',
-    color: '#fff',
+    letterSpacing: -0.3,
+    color: theme.colors.text.primary,
   },
   subtitle: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
-    marginTop: 2,
+    fontSize: 12,
+    color: theme.colors.text.secondary,
+    marginTop: 3,
     fontWeight: '500',
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginLeft: 12,
   },
-  actionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.12)',
+  iconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 0,
   },
   dot: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 9,
+    right: 9,
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: '#ef4444',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: theme.colors.error[500],
+    borderWidth: 1.5,
+    borderColor: theme.colors.background.primary,
   },
   childrenArea: {
     marginTop: 16,

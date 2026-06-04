@@ -1,7 +1,6 @@
 // hooks/useQVAC.ts
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState } from 'react-native';
-import { resume, suspend } from '@qvac/sdk';
 import QVACService, { QVACState, QVACConfig } from '../services/QVACService';
 import { QVAC_MODELS, type QVACModel } from '../services/qvacModels';
 
@@ -29,6 +28,10 @@ export interface UseQVACResult extends QVACState {
   setDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => Promise<void>;
   /** Re-read the persisted config into React state (e.g. after pairing elsewhere). */
   reloadConfig: () => void;
+  /** Total device RAM in GB (for the model picker), once detected. */
+  deviceMemGb?: number;
+  /** Model id recommended for this device's RAM. */
+  recommendedModelId?: string;
 }
 
 /**
@@ -70,6 +73,26 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     setConfig(service.getConfig());
   }, [service]);
 
+  // Device RAM + the model recommended for it (for the picker UI).
+  const [deviceMemGb, setDeviceMemGb] = useState<number | undefined>(undefined);
+  const [recommendedModelId, setRecommendedModelId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let active = true;
+    service.getDeviceMemoryBytes().then((b) => {
+      if (active) setDeviceMemGb(Math.round((b / (1024 * 1024 * 1024)) * 10) / 10);
+    });
+    service.getRecommendedModelId().then((id) => {
+      if (active) setRecommendedModelId(id);
+    });
+    return () => { active = false; };
+  }, [service]);
+
+  // Keep the local config in sync after the service mutates it itself — e.g.
+  // an auto-fallback to a loadable model during initializeLLM().
+  useEffect(() => {
+    setConfig(service.getConfig());
+  }, [service, state.llmStatus]);
+
   const initialize = useMemo(
     () => async () => {
       await service.initializeLLM();
@@ -82,18 +105,22 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   }, [autoInit, initialize]);
 
   // Suspend the QVAC runtime (Hyperswarm / Corestore networking) while the app
-  // is backgrounded and resume it on return, per the SDK lifecycle API. Both
-  // are safe to call from any state, so we just guard with try/catch.
+  // is backgrounded and resume it on return, per the SDK lifecycle API. Only
+  // wire this up when AI is actually enabled: resume() boots the Bare worklet,
+  // which aborts the process on an unsupported target (e.g. the Simulator). The
+  // service methods are themselves guarded, but skipping the listener entirely
+  // when disabled avoids ever calling into the SDK.
   useEffect(() => {
+    if (!autoInit) return;
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'background' || next === 'inactive') {
-        void suspend().catch(() => {});
+        void service.suspendRuntime();
       } else if (next === 'active') {
-        void resume().catch(() => {});
+        void service.resumeRuntime();
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [autoInit, service]);
 
   const isReady = state.llmStatus === 'ready';
   const isWhisperReady = state.whisperStatus === 'ready';
@@ -118,6 +145,8 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     setModel,
     setDelegate,
     reloadConfig,
+    deviceMemGb,
+    recommendedModelId,
   };
 }
 
