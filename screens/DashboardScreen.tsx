@@ -162,10 +162,12 @@ export default function DashboardScreen({ navigation }: Props) {
   }, [dispatch, finishMindOnboarding]);
 
   const handleMindDelegate = useCallback(() => {
-    dispatch(setAiMode('delegate'));
+    // Don't commit to 'delegate' until pairing actually succeeds — otherwise
+    // backing out of the scanner would strand the user in a desktop mode with no
+    // connection. PairDesktopScreen sets aiMode='delegate' on a successful pair.
     finishMindOnboarding();
     navigation.getParent()?.navigate('PairDesktop');
-  }, [dispatch, finishMindOnboarding, navigation]);
+  }, [finishMindOnboarding, navigation]);
 
   const handleMindSkip = useCallback(() => {
     dispatch(setAiMode('off'));

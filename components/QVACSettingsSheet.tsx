@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import type { QVACModel } from '../services/qvacModels';
 import type { QVACConfig, ModelStatus } from '../services/QVACService';
+import type { AiMode } from '../store/slices/settingsSlice';
 
 interface Props {
   visible: boolean;
@@ -34,10 +35,10 @@ interface Props {
   deviceMemGb?: number;
   /** Model id recommended for this device — badged in the list. */
   recommendedModelId?: string;
-  /** Whether on-device AI (KaleidoMind) is enabled. Off by default. */
-  aiEnabled: boolean;
-  /** Toggle on-device AI on/off. Off keeps the QVAC worklet from starting. */
-  onSetAiEnabled: (enabled: boolean) => void;
+  /** Current KaleidoMind mode: off | local | delegate. */
+  aiMode: AiMode;
+  /** Switch the KaleidoMind mode. 'off' keeps the QVAC worklet from starting. */
+  onSetAiMode: (mode: AiMode) => void;
 }
 
 /** Extract a 64–66 char hex provider key from pasted text (QR payload or raw). */
@@ -65,8 +66,8 @@ export default function QVACSettingsSheet({
   providerName,
   deviceMemGb,
   recommendedModelId,
-  aiEnabled,
-  onSetAiEnabled,
+  aiMode,
+  onSetAiMode,
 }: Props) {
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const hasProvider = !!config.providerPublicKey;
@@ -101,26 +102,50 @@ export default function QVACSettingsSheet({
         )}
 
         <ScrollView contentContainerStyle={styles.content}>
-          {/* ---- Enable / disable on-device AI ---- */}
-          <View style={styles.enableRow}>
-            <View style={styles.enableInfo}>
-              <Text style={styles.enableTitle}>Enable on-device AI</Text>
-              <Text style={styles.enableHint}>
-                Runs KaleidoMind locally on your device. Off by default — the model
-                only downloads and loads after you turn this on.
-              </Text>
-            </View>
-            <Switch
-              value={aiEnabled}
-              onValueChange={onSetAiEnabled}
-              trackColor={{ false: theme.colors.border.medium, true: theme.colors.primary[500] }}
-              thumbColor={theme.colors.background.primary}
-            />
+          {/* ---- KaleidoMind mode ---- */}
+          <Text style={styles.sectionTitle}>KaleidoMind</Text>
+          <Text style={styles.sectionHint}>
+            Choose how the assistant runs. You can change this anytime.
+          </Text>
+          <View style={styles.modeGroup}>
+            {([
+              { key: 'off', icon: 'moon-outline', label: 'Off' },
+              { key: 'local', icon: 'phone-portrait-outline', label: 'On this device' },
+              { key: 'delegate', icon: 'desktop-outline', label: 'Desktop' },
+            ] as { key: AiMode; icon: keyof typeof Ionicons.glyphMap; label: string }[]).map((m) => {
+              const active = aiMode === m.key;
+              return (
+                <TouchableOpacity
+                  key={m.key}
+                  style={[styles.modeBtn, active && styles.modeBtnActive]}
+                  onPress={() => {
+                    onSetAiMode(m.key);
+                    // Picking Desktop with nobody paired yet → jump straight to pairing.
+                    if (m.key === 'delegate' && !hasProvider) onScanQR();
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name={m.icon}
+                    size={20}
+                    color={active ? theme.colors.text.inverse : theme.colors.text.secondary}
+                  />
+                  <Text style={[styles.modeBtnLabel, active && styles.modeBtnLabelActive]}>{m.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          {!aiEnabled && (
+          {aiMode === 'off' && (
             <Text style={styles.disabledNote}>
-              On-device AI is off. The rest of these settings apply once it's enabled.
+              KaleidoMind is off. Pick “On this device” or “Desktop” to use it.
+            </Text>
+          )}
+          {aiMode === 'delegate' && (
+            <Text style={styles.disabledNote}>
+              {hasProvider
+                ? `Delegating to ${providerName || 'your desktop'}. Switch to “Off” to disconnect.`
+                : 'No desktop connected yet — scan the pairing QR, or switch to “Off”.'}
             </Text>
           )}
 
@@ -295,22 +320,26 @@ const styles = StyleSheet.create({
   },
   busyText: { color: theme.colors.primary[700], fontSize: theme.typography.fontSize.sm, fontWeight: '600' },
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10] },
-  enableRow: {
+  modeGroup: {
     flexDirection: 'row',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[2],
+  },
+  modeBtn: {
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: theme.spacing[3],
-    backgroundColor: theme.colors.background.secondary,
+    gap: theme.spacing[1],
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[1],
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1,
     borderColor: theme.colors.border.medium,
-    padding: theme.spacing[3],
-    marginBottom: theme.spacing[3],
+    backgroundColor: theme.colors.background.secondary,
   },
-  enableInfo: { flex: 1 },
-  enableTitle: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
-  enableHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, lineHeight: 18 },
-  disabledNote: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontStyle: 'italic', marginBottom: theme.spacing[4] },
+  modeBtnActive: { borderColor: theme.colors.primary[500], backgroundColor: theme.colors.primary[500] },
+  modeBtnLabel: { fontSize: theme.typography.fontSize.xs, fontWeight: '600', color: theme.colors.text.secondary, textAlign: 'center' },
+  modeBtnLabelActive: { color: theme.colors.text.inverse },
+  disabledNote: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontStyle: 'italic', marginTop: theme.spacing[1], marginBottom: theme.spacing[4] },
   sectionTitle: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
   sectionHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginBottom: theme.spacing[3], lineHeight: 18 },
   modelRow: {

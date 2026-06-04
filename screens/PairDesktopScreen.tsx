@@ -18,6 +18,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
+import { useDispatch } from 'react-redux';
+import { setAiMode } from '../store/slices/settingsSlice';
 import { theme } from '../theme';
 import {
   PairingError,
@@ -42,6 +44,7 @@ type Stage =
   | { kind: 'error'; message: string };
 
 export default function PairDesktopScreen({ navigation }: Props) {
+  const dispatch = useDispatch();
   const [permission, requestPermission] = useCameraPermissions();
   const [flash, setFlash] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'scanning' });
@@ -96,6 +99,11 @@ export default function PairDesktopScreen({ navigation }: Props) {
       void QVACService.getInstance()
         .setDelegate({ enabled: true, providerPublicKey: payload.publicKey })
         .catch(() => {});
+
+      // Now that a desktop is actually connected, commit KaleidoMind to delegate
+      // mode. (We deliberately don't set this earlier, so cancelling pairing
+      // never strands the user in a desktop mode with no connection.)
+      dispatch(setAiMode('delegate'));
 
       ToastService.getInstance().success(`Connected to ${saved.name}`);
       setStage({ kind: 'paired', name: saved.name });

@@ -22,7 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, setAiEnabled, setAiMode } from '../store/slices/settingsSlice';
+import { selectAiEnabled, selectAiMode, setAiMode } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { MainHeader } from '../components';
@@ -134,6 +134,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // Only auto-start the Bare worklet when the user has explicitly enabled AI
   // (off by default) — starting it on a native/JS mismatch hard-crashes the app.
   const aiEnabled = useSelector(selectAiEnabled);
+  const aiMode = useSelector(selectAiMode);
   const dispatch = useDispatch();
   const qvac = useQVAC(aiEnabled);
   const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
@@ -587,7 +588,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
               KaleidoMind (on-device AI) is off. Enable to download and run it locally.
             </Text>
             <TouchableOpacity
-              onPress={() => dispatch(setAiEnabled(true))}
+              onPress={() => dispatch(setAiMode('local'))}
               style={styles.modelRetry}
               accessibilityLabel="Enable on-device AI"
             >
@@ -612,10 +613,14 @@ export default function AIAssistantScreen({ navigation }: Props) {
               On-device AI isn’t available on this device. Connect a desktop to run KaleidoMind.
             </Text>
             <TouchableOpacity
-              onPress={() => {
-                dispatch(setAiMode('delegate'));
-                navigation.navigate('PairDesktop');
-              }}
+              onPress={() => dispatch(setAiMode('off'))}
+              style={[styles.modelRetry, styles.modelRetryGhost]}
+              accessibilityLabel="Turn off KaleidoMind"
+            >
+              <Text style={styles.modelRetryText}>Off</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PairDesktop')}
               style={styles.modelRetry}
               accessibilityLabel="Connect a desktop"
             >
@@ -958,8 +963,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
             providerName={providerName}
             deviceMemGb={qvac.deviceMemGb}
             recommendedModelId={qvac.recommendedModelId}
-            aiEnabled={aiEnabled}
-            onSetAiEnabled={(enabled) => dispatch(setAiEnabled(enabled))}
+            aiMode={aiMode}
+            onSetAiMode={(mode) => dispatch(setAiMode(mode))}
           />
         </LinearGradient>
       </View>
@@ -1141,6 +1146,12 @@ const makeStyles = (theme: Theme) =>
       paddingHorizontal: theme.spacing[3],
       backgroundColor: theme.colors.error[600],
       borderRadius: theme.borderRadius.sm,
+    },
+    modelRetryGhost: {
+      backgroundColor: 'transparent',
+      borderWidth: 1,
+      borderColor: theme.colors.border.medium,
+      marginRight: theme.spacing[2],
     },
     modelRetryText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.inverse, fontWeight: '700' },
     modelProgressTrack: {
