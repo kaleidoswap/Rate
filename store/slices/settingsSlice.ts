@@ -32,7 +32,7 @@ const initialState: SettingsState = {
   remoteNodeUrl: '', // thunderstack url
   nodePort: 3000,
   bitcoinUnit: 'sats',
-  theme: 'system',
+  theme: 'dark',
   language: 'en',
   notifications: true,
   transactionNotifications: true,

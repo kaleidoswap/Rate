@@ -202,7 +202,7 @@ export interface ThemeType {
 
 export { ColorGradient }
 
-export const theme: ThemeType = {
+export const lightTheme: ThemeType = {
   dark: false,
   colors: {
     // Primary: KaleidoSwap Green — Brand identity
@@ -569,6 +569,82 @@ export const theme: ThemeType = {
     },
   },
 };
+
+/**
+ * Dark theme — KaleidoSwap's brand-default. Built from the light theme with
+ * dark-green surfaces, white-on-dark text and darker shadows/components.
+ */
+export const darkTheme: ThemeType = {
+  ...lightTheme,
+  dark: true,
+  colors: {
+    ...lightTheme.colors,
+    background: {
+      primary: '#0D1813',
+      secondary: '#0F1C15',
+      tertiary: '#16241B',
+      modal: '#121C16',
+      backdrop: 'rgba(0, 0, 0, 0.7)',
+    },
+    text: {
+      primary: '#FFFFFF',
+      secondary: 'rgba(255, 255, 255, 0.64)',
+      tertiary: 'rgba(255, 255, 255, 0.45)',
+      muted: 'rgba(255, 255, 255, 0.42)',
+      inverse: '#0D1813',
+      inverseSecondary: '#16241B',
+      disabled: 'rgba(255, 255, 255, 0.26)',
+      link: k.primary,
+    },
+    surface: {
+      primary: '#121C16',
+      secondary: '#16241B',
+      tertiary: '#1B2C21',
+      elevated: '#17231C',
+      highlight: '#16301F',
+    },
+    border: {
+      light: 'rgba(255, 255, 255, 0.06)',
+      medium: 'rgba(255, 255, 255, 0.10)',
+      dark: 'rgba(255, 255, 255, 0.16)',
+      focus: k.primary,
+    },
+  },
+  shadows: {
+    ...lightTheme.shadows,
+    sm: { ...lightTheme.shadows.sm, shadowColor: '#000000', shadowOpacity: 0.3 },
+    base: { ...lightTheme.shadows.base, shadowColor: '#000000', shadowOpacity: 0.4 },
+    md: { ...lightTheme.shadows.md, shadowColor: '#000000', shadowOpacity: 0.4 },
+    lg: { ...lightTheme.shadows.lg, shadowColor: '#000000', shadowOpacity: 0.5 },
+    xl: { ...lightTheme.shadows.xl, shadowColor: '#000000', shadowOpacity: 0.5 },
+    '2xl': { ...lightTheme.shadows['2xl'], shadowColor: '#000000', shadowOpacity: 0.6 },
+  },
+  components: {
+    ...lightTheme.components,
+    button: {
+      ...lightTheme.components.button,
+      secondary: { ...lightTheme.components.button.secondary, backgroundColor: '#1B2C21', borderColor: 'rgba(255,255,255,0.10)' },
+      ghost: { ...lightTheme.components.button.ghost, backgroundColor: 'transparent' },
+    },
+    card: {
+      ...lightTheme.components.card,
+      default: { ...lightTheme.components.card.default, backgroundColor: '#121C16', shadowColor: '#000000', shadowOpacity: 0.3 },
+      elevated: { ...lightTheme.components.card.elevated, backgroundColor: '#17231C', shadowColor: '#000000', shadowOpacity: 0.4 },
+    },
+    input: {
+      ...lightTheme.components.input,
+      default: { ...lightTheme.components.input.default, backgroundColor: '#16241B', borderColor: 'rgba(255,255,255,0.10)' },
+      focused: { borderColor: k.primary, backgroundColor: '#121C16' },
+    },
+  },
+};
+
+/**
+ * The active app theme. Dark is the brand default ("dark backgrounds anchor
+ * everything"). The 43 screens that import `theme` statically pick this up.
+ * Light mode is available as `lightTheme` for the hook-based toggle path.
+ */
+export const theme: ThemeType = darkTheme;
 
 // Convert our theme to @react-navigation/native theme format
 export function createNavigationTheme() {

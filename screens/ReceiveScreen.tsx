@@ -1338,7 +1338,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           {amount && selectedAsset.ticker && (
             <View style={styles.qrAmountContainer}>
               <Text style={styles.qrAmount}>
-                {amount} {selectedAsset.ticker}
+                {amount} {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
               </Text>
             </View>
           )}

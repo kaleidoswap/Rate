@@ -1,6 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, StatusBar } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -36,12 +35,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <LinearGradient
-        colors={theme.colors.primary.gradient as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.gradient, { paddingTop: insets.top + 8 }]}
-      >
+      <View style={[styles.gradient, { paddingTop: insets.top + 8, backgroundColor: theme.colors.background.primary }]}>
         <View style={styles.content}>
           <View style={styles.row}>
             {onBack && (
@@ -77,7 +71,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
 
           {children && <View style={styles.childrenArea}>{children}</View>}
         </View>
-      </LinearGradient>
+      </View>
     </View>
   );
 };
