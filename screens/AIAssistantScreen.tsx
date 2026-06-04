@@ -904,6 +904,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSetDelegate={(opts) => qvac.setDelegate(opts)}
             onScanQR={openScanner}
             providerName={providerName}
+            deviceMemGb={qvac.deviceMemGb}
+            recommendedModelId={qvac.recommendedModelId}
           />
         </LinearGradient>
       </View>

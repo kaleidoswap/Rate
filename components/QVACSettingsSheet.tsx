@@ -1,5 +1,5 @@
 // components/QVACSettingsSheet.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   View,
@@ -9,6 +9,7 @@ import {
   Switch,
   StyleSheet,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,6 +30,16 @@ interface Props {
   onScanQR: () => void;
   /** Friendly name of the currently-paired desktop, if any. */
   providerName?: string | null;
+  /** Total device RAM in GB (shown next to the model list). */
+  deviceMemGb?: number;
+  /** Model id recommended for this device — badged in the list. */
+  recommendedModelId?: string;
+}
+
+/** Extract a 64–66 char hex provider key from pasted text (QR payload or raw). */
+function parsePubkey(raw: string): string | null {
+  const m = raw.trim().match(/[0-9a-fA-F]{64,66}/);
+  return m ? m[0].toLowerCase() : null;
 }
 
 const TIER_LABEL: Record<string, string> = {
@@ -48,9 +59,17 @@ export default function QVACSettingsSheet({
   onSetDelegate,
   onScanQR,
   providerName,
+  deviceMemGb,
+  recommendedModelId,
 }: Props) {
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const hasProvider = !!config.providerPublicKey;
+
+  // Paste-a-pubkey delegation (alternative to scanning the QR).
+  const [showPaste, setShowPaste] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const pastedKey = parsePubkey(pasteText);
+  const pasteInvalid = pasteText.trim().length > 0 && !pastedKey;
 
   const shortKey = hasProvider
     ? `${config.providerPublicKey.slice(0, 10)}…${config.providerPublicKey.slice(-6)}`
@@ -79,13 +98,17 @@ export default function QVACSettingsSheet({
           {/* ---- On-device model ---- */}
           <Text style={styles.sectionTitle}>On-device model</Text>
           <Text style={styles.sectionHint}>
-            Smaller models run on a phone; larger ones need a Mac or P2P delegation.
+            {deviceMemGb
+              ? `Your device has ~${deviceMemGb} GB RAM. The recommended model fits it best; `
+              : 'Smaller models run on a phone; '}
+            larger ones need a Mac or P2P delegation.
           </Text>
 
           {catalog.map((m) => {
             const selected = m.id === config.modelId;
             const delegateOnly = !m.localCapable;
             const disabled = delegateOnly && !config.delegateEnabled;
+            const recommended = m.id === recommendedModelId;
             return (
               <TouchableOpacity
                 key={m.id}
@@ -94,10 +117,17 @@ export default function QVACSettingsSheet({
                 disabled={disabled}
               >
                 <View style={styles.modelInfo}>
-                  <Text style={styles.modelLabel}>
-                    {m.label}
-                    {m.supportsTools ? '  🛠' : ''}
-                  </Text>
+                  <View style={styles.modelLabelRow}>
+                    <Text style={styles.modelLabel}>
+                      {m.label}
+                      {m.supportsTools ? '  🛠' : ''}
+                    </Text>
+                    {recommended && (
+                      <View style={styles.recPill}>
+                        <Text style={styles.recPillText}>Recommended</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={styles.modelMeta}>
                     {m.params} · {(m.sizeMB / 1024).toFixed(m.sizeMB < 1024 ? 0 : 1)}
                     {m.sizeMB < 1024 ? ` MB` : ` GB`} · {TIER_LABEL[m.tier]}
@@ -159,8 +189,54 @@ export default function QVACSettingsSheet({
             </TouchableOpacity>
           )}
 
+          {/* Paste a public key instead of scanning */}
+          <TouchableOpacity
+            style={styles.pasteToggle}
+            onPress={() => setShowPaste((v) => !v)}
+            hitSlop={8}
+          >
+            <Ionicons
+              name={showPaste ? 'chevron-down' : 'chevron-forward'}
+              size={16}
+              color={theme.colors.text.secondary}
+            />
+            <Text style={styles.pasteToggleText}>Or paste the desktop public key</Text>
+          </TouchableOpacity>
+
+          {showPaste && (
+            <View>
+              <TextInput
+                style={[styles.pasteInput, pasteInvalid && styles.pasteInputError]}
+                value={pasteText}
+                onChangeText={setPasteText}
+                placeholder="Paste the 64-char hex public key"
+                placeholderTextColor={theme.colors.text.tertiary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                multiline
+              />
+              {pasteInvalid && (
+                <Text style={styles.pasteError}>That doesn't look like a public key (need 64 hex chars).</Text>
+              )}
+              <TouchableOpacity
+                style={[styles.useKeyButton, !pastedKey && styles.useKeyButtonDisabled]}
+                disabled={!pastedKey}
+                onPress={() => {
+                  if (!pastedKey) return;
+                  onSetDelegate({ enabled: true, providerPublicKey: pastedKey });
+                  setPasteText('');
+                  setShowPaste(false);
+                }}
+              >
+                <Ionicons name="link-outline" size={18} color={theme.colors.text.inverse} />
+                <Text style={styles.useKeyText}>Use this key &amp; delegate</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           <Text style={styles.note}>
-            On your Mac, open KaleidoMind → Pair and scan the QR shown there. No typing needed.
+            On your Mac, open KaleidoMind → Pair to show the QR (or copy the public key).
+            Scan it, or paste the key above.
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -206,8 +282,16 @@ const styles = StyleSheet.create({
   modelRowSelected: { borderColor: theme.colors.primary[500], backgroundColor: theme.colors.primary[50] },
   modelRowDisabled: { opacity: 0.45 },
   modelInfo: { flex: 1, paddingRight: theme.spacing[2] },
+  modelLabelRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], flexWrap: 'wrap' },
   modelLabel: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
   modelMeta: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
+  recPill: {
+    backgroundColor: theme.colors.primary[500],
+    borderRadius: 999,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 1,
+  },
+  recPillText: { color: theme.colors.text.inverse, fontSize: 10, fontWeight: '700' },
 
   // Provider chip
   providerChip: {
@@ -266,5 +350,42 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing[1],
   },
   scanGhostText: { color: theme.colors.primary[600], fontWeight: '600', fontSize: theme.typography.fontSize.sm },
+
+  // Paste-pubkey
+  pasteToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[1],
+    marginTop: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+  },
+  pasteToggleText: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, fontWeight: '600' },
+  pasteInput: {
+    borderWidth: 1,
+    borderColor: theme.colors.border.medium,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[3],
+    marginTop: theme.spacing[2],
+    minHeight: 56,
+    color: theme.colors.text.primary,
+    fontFamily: 'Courier',
+    fontSize: theme.typography.fontSize.xs,
+    backgroundColor: theme.colors.surface.primary,
+  },
+  pasteInputError: { borderColor: theme.colors.error[500] },
+  pasteError: { color: theme.colors.error[500], fontSize: theme.typography.fontSize.xs, marginTop: theme.spacing[1] },
+  useKeyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    backgroundColor: theme.colors.primary[600],
+    borderRadius: theme.borderRadius.md,
+    paddingVertical: theme.spacing[3],
+    marginTop: theme.spacing[2],
+  },
+  useKeyButtonDisabled: { opacity: 0.4 },
+  useKeyText: { color: theme.colors.text.inverse, fontWeight: '700', fontSize: theme.typography.fontSize.base },
+
   note: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: theme.spacing[3], lineHeight: 18 },
 });

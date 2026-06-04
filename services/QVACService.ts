@@ -10,11 +10,14 @@ import {
 import { File, Directory, Paths } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { z } from 'zod';
+import DeviceInfo from 'react-native-device-info';
 import {
   QVAC_MODELS,
   DEFAULT_MODEL_ID,
   getModelById,
   hfUrlFromDescriptor,
+  recommendLocalModel,
+  recommendLocalModelId,
   type QVACModel,
 } from './qvacModels';
 import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
@@ -94,6 +97,7 @@ class QVACService {
 
   private config: QVACConfig = { ...DEFAULT_CONFIG };
   private configLoaded = false;
+  private deviceMemBytes: number | null = null;
 
   private state: QVACState = {
     llmStatus: 'not_downloaded',
@@ -141,13 +145,43 @@ class QVACService {
     return { ...this.config };
   }
 
+  /** Total device RAM in bytes (cached). Falls back to a modest 3 GB estimate. */
+  async getDeviceMemoryBytes(): Promise<number> {
+    if (this.deviceMemBytes != null) return this.deviceMemBytes;
+    try {
+      const mem = await DeviceInfo.getTotalMemory();
+      this.deviceMemBytes = mem && mem > 0 ? mem : 3 * 1024 * 1024 * 1024;
+    } catch {
+      this.deviceMemBytes = 3 * 1024 * 1024 * 1024;
+    }
+    return this.deviceMemBytes;
+  }
+
+  /** The model recommended for this device's RAM (for the picker UI). */
+  async getRecommendedModelId(): Promise<string> {
+    return recommendLocalModelId(await this.getDeviceMemoryBytes());
+  }
+
   async loadConfig(): Promise<QVACConfig> {
     if (this.configLoaded) return this.getConfig();
+    let hadSaved = false;
     try {
       const raw = await AsyncStorage.getItem(CONFIG_KEY);
-      if (raw) this.config = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+      if (raw) {
+        this.config = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+        hadSaved = true;
+      }
     } catch {
       /* use defaults */
+    }
+    // First run (no saved choice): pick a model that fits this device's RAM
+    // instead of always defaulting to the same one.
+    if (!hadSaved) {
+      try {
+        this.config = { ...this.config, modelId: await this.getRecommendedModelId() };
+      } catch {
+        /* keep DEFAULT_MODEL_ID */
+      }
     }
     this.configLoaded = true;
     return this.getConfig();
@@ -247,8 +281,23 @@ class QVACService {
 
     try {
       await this.loadConfig();
-      const model = getModelById(this.config.modelId);
+      let model = getModelById(this.config.modelId);
       const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
+
+      // Guard: if we're running on-device but the selected model can't be
+      // downloaded here (P2P-only, e.g. Qwen3 4B, or oversized for this phone),
+      // fall back to a hardware-appropriate local model instead of failing to
+      // load. This is the common cause of "on-device AI failed to load" after a
+      // bigger model was selected during desktop/delegated testing.
+      if (!delegating && !model.localCapable) {
+        const fallback = recommendLocalModel(await this.getDeviceMemoryBytes());
+        console.warn(
+          `[QVAC] '${model.label}' can't run on-device; falling back to '${fallback.label}'`
+        );
+        model = fallback;
+        this.config = { ...this.config, modelId: fallback.id };
+        await this.saveConfig();
+      }
 
       let modelSrc: any;
       if (delegating) {
@@ -258,11 +307,6 @@ class QVACService {
         modelSrc = model.descriptor;
         console.log('[QVAC] LLM: delegating', model.id, '→', this.config.providerPublicKey.slice(0, 12) + '…');
       } else {
-        if (!model.localCapable) {
-          throw new Error(
-            `${model.label} has no direct download — enable P2P delegation or pick a downloadable model.`
-          );
-        }
         this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
         const url = hfUrlFromDescriptor(model.descriptor)!;
         modelSrc = await this.ensureLocalModel(

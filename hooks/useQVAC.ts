@@ -29,6 +29,10 @@ export interface UseQVACResult extends QVACState {
   setDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => Promise<void>;
   /** Re-read the persisted config into React state (e.g. after pairing elsewhere). */
   reloadConfig: () => void;
+  /** Total device RAM in GB (for the model picker), once detected. */
+  deviceMemGb?: number;
+  /** Model id recommended for this device's RAM. */
+  recommendedModelId?: string;
 }
 
 /**
@@ -69,6 +73,26 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   const reloadConfig = useCallback(() => {
     setConfig(service.getConfig());
   }, [service]);
+
+  // Device RAM + the model recommended for it (for the picker UI).
+  const [deviceMemGb, setDeviceMemGb] = useState<number | undefined>(undefined);
+  const [recommendedModelId, setRecommendedModelId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    let active = true;
+    service.getDeviceMemoryBytes().then((b) => {
+      if (active) setDeviceMemGb(Math.round((b / (1024 * 1024 * 1024)) * 10) / 10);
+    });
+    service.getRecommendedModelId().then((id) => {
+      if (active) setRecommendedModelId(id);
+    });
+    return () => { active = false; };
+  }, [service]);
+
+  // Keep the local config in sync after the service mutates it itself — e.g.
+  // an auto-fallback to a loadable model during initializeLLM().
+  useEffect(() => {
+    setConfig(service.getConfig());
+  }, [service, state.llmStatus]);
 
   const initialize = useMemo(
     () => async () => {
@@ -118,6 +142,8 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     setModel,
     setDelegate,
     reloadConfig,
+    deviceMemGb,
+    recommendedModelId,
   };
 }
 
