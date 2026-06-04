@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
+import { speakBest, stopSpeaking } from '../../services/speech';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -131,11 +132,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         });
         const finalText = (res.text || streamed || 'Done.').trim();
         patchBubble(assistantId, finalText);
-        // Speak the reply.
+        // Speak the reply with the best available system voice.
         setPhase('speaking');
-        Speech.stop();
-        Speech.speak(finalText, {
-          rate: 1.0,
+        stopSpeaking();
+        void speakBest(finalText, {
           onDone: () => setPhase('idle'),
           onStopped: () => setPhase('idle'),
           onError: () => setPhase('idle'),

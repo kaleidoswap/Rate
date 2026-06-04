@@ -20,6 +20,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
 import { selectAiEnabled, selectAiMode, setAiMode } from '../store/slices/settingsSlice';
@@ -129,6 +130,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const voiceInputRef = useRef<VoiceInputRef>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // MainHeader sits above the KeyboardAvoidingView; its height (safe-area top +
+  // ~70 of bar padding/content) is the vertical offset the keyboard must clear
+  // so the input + typed text stay visible. The old hardcoded 90 was wrong on
+  // notched devices, hiding the input behind the keyboard.
+  const insets = useSafeAreaInsets();
+  const headerOffset = insets.top + 70;
 
   // On-device QVAC: model lifecycle + wallet tools.
   // Only auto-start the Bare worklet when the user has explicitly enabled AI
@@ -481,8 +489,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
     let streamingTurn = 0;
 
     try {
+      // Keep only the most recent turns so the prompt (system + skill + tools +
+      // history) stays within the model's context window. Small on-device /
+      // delegated models overflow quickly; the last few exchanges are enough.
+      const MAX_HISTORY_MESSAGES = 8;
       const history = messages
-        .filter((m) => !m.streaming)
+        .filter((m) => !m.streaming && m.text.trim().length > 0)
+        .slice(-MAX_HISTORY_MESSAGES)
         .map((m) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }));
 
       // Enter the most relevant skill: compose its playbook into the system
@@ -773,8 +786,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
           <KeyboardAvoidingView
             style={styles.content}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? headerOffset : 0}
           >
             <View style={styles.contentInner}>
               {renderModelStatus()}
@@ -814,7 +827,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 </ScrollView>
               )}
 
-              <View style={styles.inputContainer}>
+              <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
                 <BlurView intensity={80} tint={theme.dark ? 'dark' : 'light'} style={styles.inputGradient}>
                   {showActions && renderQuickActions()}
 
