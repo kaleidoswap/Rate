@@ -87,7 +87,7 @@ const GiB = 1024 * 1024 * 1024;
 
 /** Coarse device class from total RAM (phones only — Macs run via delegation). */
 export function classifyDeviceTier(totalMemBytes: number): DeviceTier {
-  return totalMemBytes >= 5.5 * GiB ? 'pro' : 'phone';
+  return 'phone';
 }
 
 /**
@@ -101,8 +101,7 @@ export function recommendLocalModel(totalMemBytes: number): QVACModel {
   const gb = totalMemBytes / GiB;
   let pick: QVACModel | undefined;
   if (gb < 3) pick = byDescriptor(QWEN3_600M_INST_Q4);              // tiny, low-end
-  else if (gb < 5.5) pick = byDescriptor(LLAMA_TOOL_CALLING_1B_INST_Q4_K); // small + good tools
-  else pick = byDescriptor(QWEN3_1_7B_INST_Q4);                      // roomy phone
+  else pick = byDescriptor(QWEN3_600M_INST_Q4);                      // stable iPhone path
   // Fall back to any local-capable model (then the first model) if a descriptor
   // is missing or somehow not downloadable.
   return (

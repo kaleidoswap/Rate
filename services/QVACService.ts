@@ -24,6 +24,14 @@ import {
 } from './qvacModels';
 import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
 
+const LOCAL_LLM_CONFIG = {
+  device: 'cpu',
+  gpu_layers: 0,
+  ctx_size: 2048,
+  tools: true,
+  verbosity: VERBOSITY.ERROR,
+} as const;
+
 /**
  * On a phone we download model weights over plain HTTPS with React Native's
  * own networking (expo-file-system) instead of QVAC's `downloadAsset`, whose
@@ -408,10 +416,10 @@ class QVACService {
       // fall back to a hardware-appropriate local model instead of failing to
       // load. This is the common cause of "on-device AI failed to load" after a
       // bigger model was selected during desktop/delegated testing.
-      if (!delegating && !model.localCapable) {
+      if (!delegating && (!model.localCapable || model.tier !== 'phone')) {
         const fallback = recommendLocalModel(await this.getDeviceMemoryBytes());
         console.warn(
-          `[QVAC] '${model.label}' can't run on-device; falling back to '${fallback.label}'`
+          `[QVAC] '${model.label}' isn't enabled for stable on-device iPhone loading; falling back to '${fallback.label}'`
         );
         model = fallback;
         this.config = { ...this.config, modelId: fallback.id };
@@ -443,7 +451,8 @@ class QVACService {
           modelConfig: {
             // Local on iPhone: 'cpu' (Metal failed to init the llamacpp context in
             // the bare worklet). Delegated: the provider (e.g. a Mac) can use GPU.
-            device: delegating ? 'gpu' : 'cpu',
+            device: delegating ? 'gpu' : LOCAL_LLM_CONFIG.device,
+            gpu_layers: delegating ? 99 : LOCAL_LLM_CONFIG.gpu_layers,
             ctx_size: 2048,
             tools: true,
             verbosity: VERBOSITY.ERROR,
@@ -480,7 +489,7 @@ class QVACService {
         this.llmModelId = await loadModel({
           modelSrc: localSrc,
           modelType: 'llamacpp-completion',
-          modelConfig: { device: 'cpu', ctx_size: 2048, tools: true, verbosity: VERBOSITY.ERROR },
+          modelConfig: LOCAL_LLM_CONFIG,
         } as any);
       }
 
