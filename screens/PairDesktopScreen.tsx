@@ -204,13 +204,22 @@ export default function PairDesktopScreen({ navigation }: Props) {
             </View>
           </View>
 
-          {/* Bottom prompt */}
+          {/* Bottom prompt + always-available exit */}
           <View style={styles.bottomBar}>
             <Text style={styles.subtitle}>
               {stage.kind === 'scanning'
-                ? 'Aim at the QR shown in desktop-app → /mind/pair'
+                ? 'Aim at the QR shown in desktop-app → Pairing'
                 : ''}
             </Text>
+            <View pointerEvents="auto">
+              <TouchableOpacity
+                onPress={() => navigation.goBack()}
+                style={styles.cancelBtn}
+                accessibilityLabel="Cancel pairing"
+              >
+                <Text style={styles.cancelBtnLabel}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </SafeAreaView>
       </View>
@@ -257,11 +266,25 @@ export default function PairDesktopScreen({ navigation }: Props) {
       )}
 
       {stage.kind === 'error' && (
-        <View pointerEvents="none" style={styles.modalRoot}>
+        <View pointerEvents="box-none" style={styles.modalRoot}>
           <View style={[styles.card, styles.cardError]}>
             <Ionicons name="alert-circle" size={42} color="#F87171" />
             <Text style={styles.cardTitle}>Pairing failed</Text>
             <Text style={styles.cardMeta}>{stage.message}</Text>
+            <View style={styles.cardActions}>
+              <TouchableOpacity
+                style={[styles.cardBtn, styles.cardBtnSecondary]}
+                onPress={() => navigation.goBack()}
+              >
+                <Text style={styles.cardBtnSecondaryLabel}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.cardBtn, styles.cardBtnPrimary]}
+                onPress={() => setStage({ kind: 'scanning' })}
+              >
+                <Text style={styles.cardBtnPrimaryLabel}>Scan again</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       )}
@@ -319,8 +342,17 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
   },
 
-  bottomBar: { paddingHorizontal: 24, paddingBottom: 24, alignItems: 'center' },
+  bottomBar: { paddingHorizontal: 24, paddingBottom: 24, alignItems: 'center', gap: 16 },
   subtitle: { color: '#fff', fontSize: 14, textAlign: 'center', opacity: 0.85 },
+  cancelBtn: {
+    paddingHorizontal: 28,
+    paddingVertical: 12,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  cancelBtnLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
 
   // Permission screen
   permissionView: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },

@@ -40,9 +40,26 @@ export class PairingError extends Error {
 }
 
 export function parsePairingPayload(raw: string): PairingPayload {
+  const trimmed = raw.trim();
+
+  // Tolerate a BARE public key in the QR. Current desktop builds encode just
+  // `status.publicKey` (a hex Hyperswarm key) rather than the structured JSON
+  // payload, so scanning them would otherwise fail with "not a pairing code".
+  // Treat a lone hex key as a valid pairing and synthesize the metadata.
+  if (PUBKEY_RE.test(trimmed)) {
+    return {
+      v: 1,
+      type: 'kaleido-mind-pair',
+      publicKey: trimmed.toLowerCase(),
+      name: 'KaleidoSwap Desktop',
+      model: '',
+      issued_at: Math.floor(Date.now() / 1000),
+    };
+  }
+
   let obj: unknown;
   try {
-    obj = JSON.parse(raw);
+    obj = JSON.parse(trimmed);
   } catch {
     throw new PairingError("This QR isn't a KaleidoMind pairing code.", 'invalid_json');
   }
