@@ -37,10 +37,21 @@ const LOCAL_LLM_CONFIG = {
 // GPU (Metal on iPhone) offload config tried first for local inference — far
 // faster than CPU when llamacpp can init the Metal context in the worklet. We
 // fall back to LOCAL_LLM_CONFIG (CPU) automatically if the GPU load throws.
+// ctx 4096 gives the agentic prompt (system + tools + skills + a little history)
+// room to fit on-device; 2048 overflowed immediately ("prompt exceeds context").
 const LOCAL_LLM_CONFIG_GPU = {
   ...LOCAL_LLM_CONFIG,
   device: 'gpu',
   gpu_layers: 99, // offload all layers; llamacpp clamps to the model's count
+  ctx_size: 4096,
+} as const;
+
+// Delegated to a desktop provider — it has the RAM to run a big context, so give
+// the agentic prompt plenty of room (Qwen3-600M supports up to 32k). 2048
+// overflowed with the system prompt + tool/skill definitions alone.
+const DELEGATE_LLM_CONFIG = {
+  ...LOCAL_LLM_CONFIG_GPU,
+  ctx_size: 16384,
 } as const;
 
 /**
@@ -500,7 +511,7 @@ class QVACService {
           this.llmModelId = await loadModel({
             modelSrc,
             modelType: 'llamacpp-completion',
-            modelConfig: { ...LOCAL_LLM_CONFIG_GPU },
+            modelConfig: { ...DELEGATE_LLM_CONFIG },
             delegate: {
               providerPublicKey: this.config.providerPublicKey,
               fallbackToLocal: false,
