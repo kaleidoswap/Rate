@@ -21,6 +21,7 @@ import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
 import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-protocols';
+import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
   getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
@@ -131,6 +132,11 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
   // embedding the USD-receiving methods (Liquid USDt, RGB USDT invoice, Spark).
   const [unifiedAsset, setUnifiedAsset] = useState<'BTC' | 'USD'>('BTC');
+  // Lite mode: a single private BIP321 QR (BTC/$ toggle) with the advanced
+  // network picker hidden behind "Show all networks".
+  const disclosureLevel = useSelector(selectDisclosureLevel);
+  const isLite = disclosureLevel === 'lite';
+  const [showAllNetworks, setShowAllNetworks] = useState(false);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
@@ -667,6 +673,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     }, 300);
     return () => clearTimeout(timeoutId);
   }, [networkType, amount, unifiedAsset]);
+
+  // Lite mode receives via the single unified BIP321 QR — force that mode.
+  useEffect(() => {
+    if (isLite && !showAllNetworks && networkType !== 'unified') {
+      setNetworkType('unified');
+    }
+  }, [isLite, showAllNetworks, networkType]);
 
   // Load channels when component mounts or network type changes
   useEffect(() => {
@@ -1435,6 +1448,42 @@ export default function ReceiveScreen({ navigation }: Props) {
       </View>
     );
   };
+
+  // --- Lite mode: one private BIP321 QR (BTC / $ toggle), networks hidden ----
+  if (isLite && !showAllNetworks) {
+    return (
+      <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+        <ScreenHeader title="Receive" showBack={true} />
+        <ScrollView
+          contentContainerStyle={{ paddingBottom: 40 }}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+            {renderUnifiedContent()}
+            {renderAmountInput()}
+            <TouchableOpacity
+              onPress={() => setShowAllNetworks(true)}
+              activeOpacity={0.7}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                marginTop: 20,
+                paddingVertical: 12,
+              }}
+            >
+              <Text style={{ color: theme.colors.text.secondary, fontSize: 14, fontWeight: '600' }}>
+                Show all networks
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
