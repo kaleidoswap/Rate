@@ -279,6 +279,38 @@
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/ReactNativeDependencies/ReactNativeDependencies.framework/ReactNativeDependencies",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/hermes-engine/Pre-built/hermes.framework/hermes",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/BareKit.framework/BareKit",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-abort.2.0.13.framework/bare-abort.2.0.13",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-buffer.3.6.1.framework/bare-buffer.3.6.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-channel.5.2.3.framework/bare-channel.5.2.3",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-crypto.1.14.0.framework/bare-crypto.1.14.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-dns.2.1.4.framework/bare-dns.2.1.4",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-ffmpeg.1.2.2.framework/bare-ffmpeg.1.2.2",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-fs.4.7.1.framework/bare-fs.4.7.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-hrtime.2.1.1.framework/bare-hrtime.2.1.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-inspect.3.1.4.framework/bare-inspect.3.1.4",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-module-lexer.1.4.7.framework/bare-module-lexer.1.4.7",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-module.6.2.0.framework/bare-module.6.2.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-os.3.9.1.framework/bare-os.3.9.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-pipe.4.1.5.framework/bare-pipe.4.1.5",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-signals.4.2.0.framework/bare-signals.4.2.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-stdio.1.0.2.framework/bare-stdio.1.0.2",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-structured-clone.1.5.5.framework/bare-structured-clone.1.5.5",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tcp.2.2.13.framework/bare-tcp.2.2.13",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-thread.1.2.2.framework/bare-thread.1.2.2",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tls.3.1.5.framework/bare-tls.3.1.5",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tty.5.1.0.framework/bare-tty.5.1.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-type.1.1.0.framework/bare-type.1.1.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-url.2.4.3.framework/bare-url.2.4.3",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-zlib.1.3.4.framework/bare-zlib.1.3.4",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/fs-native-extensions.1.5.0.framework/fs-native-extensions.1.5.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/quickbit-native.2.4.8.framework/quickbit-native.2.4.8",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__llm-llamacpp.0.20.1.framework/qvac__llm-llamacpp.0.20.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__transcription-whispercpp.0.7.0.framework/qvac__transcription-whispercpp.0.7.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/rabin-native.2.0.0.framework/rabin-native.2.0.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/rocksdb-native.3.15.1.framework/rocksdb-native.3.15.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/simdle-native.1.3.9.framework/simdle-native.1.3.9",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/sodium-native.5.1.0.framework/sodium-native.5.1.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/udx-native.1.19.2.framework/udx-native.1.19.2",
 			);
 			name = "[CP] Embed Pods Frameworks";
 			outputPaths = (
@@ -286,6 +318,38 @@
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/ReactNativeDependencies.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/hermes.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/BareKit.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-abort.2.0.13.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-buffer.3.6.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-channel.5.2.3.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-crypto.1.14.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-dns.2.1.4.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-ffmpeg.1.2.2.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-fs.4.7.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-hrtime.2.1.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-inspect.3.1.4.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-module-lexer.1.4.7.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-module.6.2.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-os.3.9.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-pipe.4.1.5.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-signals.4.2.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-stdio.1.0.2.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-structured-clone.1.5.5.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tcp.2.2.13.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-thread.1.2.2.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tls.3.1.5.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tty.5.1.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-type.1.1.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-url.2.4.3.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-zlib.1.3.4.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/fs-native-extensions.1.5.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/quickbit-native.2.4.8.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__llm-llamacpp.0.20.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__transcription-whispercpp.0.7.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/rabin-native.2.0.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/rocksdb-native.3.15.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/simdle-native.1.3.9.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/sodium-native.5.1.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/udx-native.1.19.2.framework",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -360,7 +424,7 @@
 				CODE_SIGN_ENTITLEMENTS = KaleidoSwap/KaleidoSwap.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = 644JA45Z2S;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -399,7 +463,7 @@
 				CODE_SIGN_ENTITLEMENTS = KaleidoSwap/KaleidoSwap.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				DEVELOPMENT_TEAM = 644JA45Z2S;
 				INFOPLIST_FILE = KaleidoSwap/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
