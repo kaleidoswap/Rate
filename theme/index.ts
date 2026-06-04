@@ -579,6 +579,17 @@ export const darkTheme: ThemeType = {
   dark: true,
   colors: {
     ...lightTheme.colors,
+    // Override the lightest tint shades (used app-wide as subtle "tinted
+    // surface" backgrounds) so they read as dark tints instead of bright
+    // patches on the dark canvas. Mid/strong shades (text/icon) stay as-is.
+    primary: { ...lightTheme.colors.primary, 50: 'rgba(43, 238, 121, 0.12)', 100: 'rgba(43, 238, 121, 0.18)' },
+    secondary: { ...lightTheme.colors.secondary, 50: 'rgba(111, 50, 255, 0.14)', 100: 'rgba(111, 50, 255, 0.20)' },
+    accent: { ...lightTheme.colors.accent, 50: 'rgba(111, 50, 255, 0.14)', 100: 'rgba(111, 50, 255, 0.20)' },
+    success: { ...lightTheme.colors.success, 50: 'rgba(43, 238, 121, 0.12)', 100: 'rgba(43, 238, 121, 0.18)' },
+    warning: { ...lightTheme.colors.warning, 50: 'rgba(250, 204, 21, 0.12)', 100: 'rgba(250, 204, 21, 0.18)' },
+    error: { ...lightTheme.colors.error, 50: 'rgba(249, 64, 64, 0.12)', 100: 'rgba(249, 64, 64, 0.18)' },
+    info: { ...lightTheme.colors.info, 50: 'rgba(66, 144, 255, 0.12)', 100: 'rgba(66, 144, 255, 0.18)' },
+    gray: { ...lightTheme.colors.gray, 50: '#121C16', 100: '#16241B', 200: '#1B2C21', 300: '#243429' },
     background: {
       primary: '#0D1813',
       secondary: '#0F1C15',
