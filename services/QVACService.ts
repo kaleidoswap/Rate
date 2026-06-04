@@ -24,12 +24,23 @@ import {
 } from './qvacModels';
 import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
 
+// CPU baseline config for the local llamacpp model. Used as the GPU fallback
+// and as the base the GPU attempt overrides (device + gpu_layers).
 const LOCAL_LLM_CONFIG = {
   device: 'cpu',
   gpu_layers: 0,
   ctx_size: 2048,
   tools: true,
   verbosity: VERBOSITY.ERROR,
+} as const;
+
+// GPU (Metal on iPhone) offload config tried first for local inference — far
+// faster than CPU when llamacpp can init the Metal context in the worklet. We
+// fall back to LOCAL_LLM_CONFIG (CPU) automatically if the GPU load throws.
+const LOCAL_LLM_CONFIG_GPU = {
+  ...LOCAL_LLM_CONFIG,
+  device: 'gpu',
+  gpu_layers: 99, // offload all layers; llamacpp clamps to the model's count
 } as const;
 
 /**
@@ -385,6 +396,45 @@ class QVACService {
 
   // --- LLM lifecycle ---
 
+  // Whether to try GPU (Metal) offload for local inference before CPU. Cached
+  // per session so we don't repeatedly attempt a Metal context that can't init.
+  private static PREFER_GPU = true;
+
+  /**
+   * Load the local llamacpp model with Metal/GPU offload when possible, falling
+   * back to CPU if the GPU context can't initialise in the Bare worklet. The
+   * GPU path is dramatically faster on iPhone (A-series Metal) for the small
+   * models we run on-device.
+   */
+  private async loadLocalLLM(modelSrc: any): Promise<string> {
+    if (QVACService.PREFER_GPU) {
+      try {
+        const id = await loadModel({
+          modelSrc,
+          modelType: 'llamacpp-completion',
+          modelConfig: { ...LOCAL_LLM_CONFIG_GPU },
+        } as any);
+        console.log('[QVAC] LLM loaded with Metal/GPU offload');
+        return id;
+      } catch (gpuErr) {
+        // Metal failed to init the llamacpp context — don't try it again this
+        // session, and fall through to CPU.
+        QVACService.PREFER_GPU = false;
+        console.warn(
+          '[QVAC] Metal/GPU load failed, falling back to CPU:',
+          gpuErr instanceof Error ? gpuErr.message : String(gpuErr)
+        );
+      }
+    }
+    const id = await loadModel({
+      modelSrc,
+      modelType: 'llamacpp-completion',
+      modelConfig: { ...LOCAL_LLM_CONFIG },
+    } as any);
+    console.log('[QVAC] LLM loaded on CPU');
+    return id;
+  }
+
   async initializeLLM(): Promise<void> {
     // Hard gate: never start the Bare worklet unless AI is enabled AND the
     // runtime can actually run here. On an unsupported target (e.g. the iOS
@@ -445,27 +495,21 @@ class QVACService {
       }
 
       try {
-        this.llmModelId = await loadModel({
-          modelSrc,
-          modelType: 'llamacpp-completion',
-          modelConfig: {
-            // Local on iPhone: 'cpu' (Metal failed to init the llamacpp context in
-            // the bare worklet). Delegated: the provider (e.g. a Mac) can use GPU.
-            device: delegating ? 'gpu' : LOCAL_LLM_CONFIG.device,
-            gpu_layers: delegating ? 99 : LOCAL_LLM_CONFIG.gpu_layers,
-            ctx_size: 2048,
-            tools: true,
-            verbosity: VERBOSITY.ERROR,
-          },
-          ...(delegating
-            ? {
-                delegate: {
-                  providerPublicKey: this.config.providerPublicKey,
-                  fallbackToLocal: false,
-                },
-              }
-            : {}),
-        } as any);
+        if (delegating) {
+          // Delegated: the provider (e.g. a Mac) runs the model on its GPU.
+          this.llmModelId = await loadModel({
+            modelSrc,
+            modelType: 'llamacpp-completion',
+            modelConfig: { ...LOCAL_LLM_CONFIG_GPU },
+            delegate: {
+              providerPublicKey: this.config.providerPublicKey,
+              fallbackToLocal: false,
+            },
+          } as any);
+        } else {
+          // Local: try Metal/GPU offload first, fall back to CPU.
+          this.llmModelId = await this.loadLocalLLM(modelSrc);
+        }
       } catch (loadErr) {
         if (!delegating) throw loadErr;
         // Delegation failed (provider unreachable / RPC error, e.g. a stale
@@ -486,11 +530,7 @@ class QVACService {
           (pct) => this.setState({ llmDownloadProgress: pct })
         );
         this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
-        this.llmModelId = await loadModel({
-          modelSrc: localSrc,
-          modelType: 'llamacpp-completion',
-          modelConfig: LOCAL_LLM_CONFIG,
-        } as any);
+        this.llmModelId = await this.loadLocalLLM(localSrc);
       }
 
       this.setState({ llmStatus: 'ready' });
