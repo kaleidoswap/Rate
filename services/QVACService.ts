@@ -109,6 +109,13 @@ class QVACService {
 
   private listeners = new Set<StateListener>();
 
+  // Master kill switch for on-device AI. Defaults OFF: starting the QVAC Bare
+  // worklet on a native/JS mismatch (or on the iOS Simulator, which has no
+  // bare-abort framework) aborts the process natively — an error JS can't catch.
+  // App.tsx syncs this from the persisted `settings.aiEnabled` flag, so the
+  // worklet can never start until the user explicitly opts in.
+  private enabled = false;
+
   private constructor() {}
 
   static getInstance(): QVACService {
@@ -116,6 +123,15 @@ class QVACService {
       QVACService.instance = new QVACService();
     }
     return QVACService.instance;
+  }
+
+  /** Enable/disable on-device AI. When disabled, all model init is a no-op. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
   }
 
   subscribe(listener: StateListener): () => void {
@@ -275,6 +291,11 @@ class QVACService {
   // --- LLM lifecycle ---
 
   async initializeLLM(): Promise<void> {
+    // Hard gate: never start the Bare worklet unless AI is explicitly enabled.
+    if (!this.enabled) {
+      console.log('[QVAC] LLM init skipped — on-device AI is disabled');
+      return;
+    }
     if (this.state.llmStatus === 'ready' || this.state.llmStatus === 'downloading' || this.state.llmStatus === 'loading') {
       return;
     }
@@ -377,6 +398,12 @@ class QVACService {
   // --- Whisper lifecycle ---
 
   async initializeWhisper(): Promise<void> {
+    // Hard gate: Whisper also runs in the Bare worklet — never start it unless
+    // on-device AI is explicitly enabled.
+    if (!this.enabled) {
+      console.log('[QVAC] Whisper init skipped — on-device AI is disabled');
+      return;
+    }
     if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
       return;
     }

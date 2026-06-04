@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Provider } from 'react-redux';
+import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons } from '@expo/vector-icons';
 import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
@@ -18,6 +18,8 @@ import { ToastContainer } from './components/Toast';
 import NetworkService from './services/NetworkService';
 
 import { store, persistor } from './store';
+import { selectAiEnabled } from './store/slices/settingsSlice';
+import QVACService from './services/QVACService';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import { KaleidoThemeProvider } from '@kaleidorg/kaleido-ui/native';
@@ -276,6 +278,19 @@ function AppNavigator() {
   );
 }
 
+/**
+ * Mirrors the persisted `settings.aiEnabled` flag into the QVACService master
+ * kill switch, so the on-device AI worklet can never start unless the user has
+ * explicitly opted in. Rendered inside the Redux Provider + PersistGate.
+ */
+function QVACEnabledSync() {
+  const aiEnabled = useSelector(selectAiEnabled);
+  React.useEffect(() => {
+    QVACService.getInstance().setEnabled(aiEnabled);
+  }, [aiEnabled]);
+  return null;
+}
+
 function AppLoadingScreen() {
   return <LoadingScreen variant="app" title="Loading KaleidoSwap Wallet" />;
 }
@@ -300,6 +315,7 @@ export default function App() {
     <ErrorBoundary>
       <Provider store={store}>
         <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
+          <QVACEnabledSync />
           <AppThemeProvider>
             <KaleidoThemeProvider>
               <ThemeProvider value={navigationTheme}>

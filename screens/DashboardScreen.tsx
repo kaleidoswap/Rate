@@ -22,7 +22,7 @@ import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
-import { selectDisclosureLevel, selectAiEnabled } from '../store/slices/settingsSlice';
+import { selectDisclosureLevel, selectAiEnabled, setAiEnabled } from '../store/slices/settingsSlice';
 import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
 
 import { theme } from '../theme';
@@ -682,12 +682,31 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
       </ScrollView>
 
-      {aiEnabled && (
-        <>
-          <VoiceAgentFAB onPress={() => setVoiceAgentOpen(true)} />
-          <VoiceAgentOverlay visible={voiceAgentOpen} onClose={() => setVoiceAgentOpen(false)} />
-        </>
-      )}
+      <VoiceAgentFAB
+        onPress={() => {
+          if (aiEnabled) {
+            setVoiceAgentOpen(true);
+            return;
+          }
+          // AI is opt-in (off by default) so the on-device worklet never starts
+          // unprompted. Ask before enabling — that's what spins up KaleidoMind.
+          Alert.alert(
+            'Enable KaleidoMind?',
+            'The voice assistant runs an AI model on your device. Turn on on-device AI to start talking to it.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              {
+                text: 'Enable',
+                onPress: () => {
+                  dispatch(setAiEnabled(true));
+                  setVoiceAgentOpen(true);
+                },
+              },
+            ]
+          );
+        }}
+      />
+      <VoiceAgentOverlay visible={voiceAgentOpen} onClose={() => setVoiceAgentOpen(false)} />
 
       {renderChannelModal()}
     </View>
