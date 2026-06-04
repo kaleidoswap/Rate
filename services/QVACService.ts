@@ -147,9 +147,13 @@ class QVACService {
   // native packaging is fixed (embed bare-abort.*.framework via react-native-
   // bare-kit). Until then we must NEVER boot the worklet.
   //
-  // Flip to true ONLY after a native build that actually links the bare-abort
-  // framework (verify the worklet starts without ADDON_NOT_FOUND).
-  private static readonly NATIVE_RUNTIME_AVAILABLE = false;
+  // Enabled now that the Bare addon xcframeworks (bare-abort + the full set in
+  // qvac/addons.manifest.json) are linked into the iOS app via the bare-kit
+  // pod's prepare_command (`node ios/link.mjs`). Requires a fresh native build
+  // (`npx expo run:ios --device`) so the frameworks are embedded. If the worklet
+  // ever aborts with ADDON_NOT_FOUND again, the addons weren't linked — re-run
+  // the link step + pod install (see scripts/link-bare-addons.sh).
+  private static readonly NATIVE_RUNTIME_AVAILABLE = true;
 
   // Cached, SYNCHRONOUS "can the Bare worklet even run here?" check — decided
   // WITHOUT booting the worklet (booting an unsupported build aborts the process).
