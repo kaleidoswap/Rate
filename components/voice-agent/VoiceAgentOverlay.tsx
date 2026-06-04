@@ -160,6 +160,12 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   };
 
   const toggleListening = () => {
+    if (qvac.llmStatus === 'error') {
+      // Retry model init.
+      setError(null);
+      qvac.initialize();
+      return;
+    }
     if (!qvac.isReady) return;
     if (phase === 'listening') {
       voiceRef.current?.stopListening();
@@ -185,7 +191,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.8]) }],
   }));
 
-  const statusText = !qvac.isReady
+  const aiFailed = qvac.llmStatus === 'error';
+  const statusText = aiFailed
+    ? `On-device AI unavailable — ${qvac.error || 'the model could not be loaded'}`
+    : !qvac.isReady
     ? qvac.isDownloading
       ? `Preparing the on-device AI… ${qvac.combinedProgress}%`
       : 'Starting the on-device AI…'
@@ -244,7 +253,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           </ScrollView>
 
           {/* Orb */}
-          <Pressable onPress={toggleListening} style={styles.orbArea} disabled={!qvac.isReady}>
+          <Pressable
+            onPress={toggleListening}
+            style={styles.orbArea}
+            disabled={!qvac.isReady && qvac.llmStatus !== 'error'}
+          >
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
             <Animated.View style={[styles.orb, { backgroundColor: orbColor }, orbStyle]}>
               {phase === 'thinking' ? (
