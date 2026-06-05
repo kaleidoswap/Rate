@@ -3,11 +3,21 @@ import {
   loadModel,
   completion,
   transcribe,
+  textToSpeech,
   unloadModel,
   cancel,
   resume,
   suspend,
   VERBOSITY,
+  // SUPERTONIC-2 on-device TTS model components (downloaded over HTTPS like the
+  // LLM weights, then loaded as a single 'tts' model).
+  TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32 as TTS_TEXT_ENCODER,
+  TTS_SUPERTONIC2_OFFICIAL_DURATION_PREDICTOR_SUPERTONE_FP32 as TTS_DURATION_PREDICTOR,
+  TTS_SUPERTONIC2_OFFICIAL_VECTOR_ESTIMATOR_SUPERTONE_FP32 as TTS_VECTOR_ESTIMATOR,
+  TTS_SUPERTONIC2_OFFICIAL_VOCODER_SUPERTONE_FP32 as TTS_VOCODER,
+  TTS_SUPERTONIC2_OFFICIAL_UNICODE_INDEXER_SUPERTONE_FP32 as TTS_UNICODE_INDEXER,
+  TTS_SUPERTONIC2_OFFICIAL_TTS_CONFIG_SUPERTONE as TTS_CONFIG,
+  TTS_SUPERTONIC2_OFFICIAL_VOICE_STYLE_SUPERTONE as TTS_VOICE_STYLE,
 } from '@qvac/sdk';
 import { File, Directory, Paths } from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -71,6 +81,9 @@ const WHISPER_MODEL = {
   size: 77691713,
 };
 
+// SUPERTONIC-2 TTS output sample rate (Hz). Used to build the WAV for playback.
+const TTS_SAMPLE_RATE = 44100;
+
 const CONFIG_KEY = 'qvac.config.v1';
 
 export interface QVACConfig {
@@ -126,6 +139,8 @@ class QVACService {
 
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
+  private ttsModelId: string | null = null;
+  private ttsLoadPromise: Promise<string> | null = null;
 
   private config: QVACConfig = { ...DEFAULT_CONFIG };
   private configLoaded = false;
@@ -889,7 +904,117 @@ class QVACService {
     });
   }
 
+  // --- Text-to-speech (on-device, QVAC SUPERTONIC-2) ---
+
+  /** True once the TTS model is resident. */
+  isTtsReady(): boolean {
+    return this.ttsModelId != null;
+  }
+
+  /**
+   * Download (over HTTPS, like the LLM weights) and load the SUPERTONIC-2 TTS
+   * model components, then keep the loaded model resident. Idempotent + single-
+   * flighted so concurrent speak calls share one load.
+   */
+  private async ensureTtsLoaded(): Promise<string> {
+    if (this.ttsModelId) return this.ttsModelId;
+    if (this.ttsLoadPromise) return this.ttsLoadPromise;
+
+    this.ttsLoadPromise = (async () => {
+      const fetchComponent = async (descriptor: any): Promise<string> => {
+        const url = hfUrlFromDescriptor(descriptor);
+        if (!url) throw new Error(`TTS component ${descriptor?.name} has no HTTPS URL`);
+        const filename = 'tts_' + (descriptor.registryPath as string).split('/').pop();
+        return this.ensureLocalModel(
+          { url, name: filename, size: descriptor.expectedSize ?? 0 },
+          () => {}
+        );
+      };
+
+      const [
+        textEncoder,
+        durationPredictor,
+        vectorEstimator,
+        vocoder,
+        unicodeIndexer,
+        ttsConfig,
+        voiceStyle,
+      ] = await Promise.all([
+        fetchComponent(TTS_TEXT_ENCODER),
+        fetchComponent(TTS_DURATION_PREDICTOR),
+        fetchComponent(TTS_VECTOR_ESTIMATOR),
+        fetchComponent(TTS_VOCODER),
+        fetchComponent(TTS_UNICODE_INDEXER),
+        fetchComponent(TTS_CONFIG),
+        fetchComponent(TTS_VOICE_STYLE),
+      ]);
+
+      console.log('[QVAC] TTS: loading SUPERTONIC-2 model');
+      const id = await loadModel({
+        modelSrc: textEncoder,
+        modelType: 'tts',
+        modelConfig: {
+          ttsEngine: 'supertonic',
+          language: 'en',
+          ttsSpeed: 1.05,
+          ttsNumInferenceSteps: 5,
+          ttsSupertonicMultilingual: true,
+          ttsTextEncoderSrc: textEncoder,
+          ttsDurationPredictorSrc: durationPredictor,
+          ttsVectorEstimatorSrc: vectorEstimator,
+          ttsVocoderSrc: vocoder,
+          ttsUnicodeIndexerSrc: unicodeIndexer,
+          ttsTtsConfigSrc: ttsConfig,
+          ttsVoiceStyleSrc: voiceStyle,
+        },
+      } as any);
+      this.ttsModelId = id;
+      console.log('[QVAC] TTS ready:', id);
+      return id;
+    })();
+
+    try {
+      return await this.ttsLoadPromise;
+    } catch (e) {
+      this.ttsLoadPromise = null; // allow a retry
+      throw e;
+    }
+  }
+
+  /**
+   * Synthesize speech for `text` on-device. Returns 16-bit PCM samples + the
+   * sample rate, or null when on-device AI is unavailable (caller falls back to
+   * the system voice). Throws on a genuine synthesis error.
+   */
+  async synthesizeSpeech(text: string): Promise<{ pcm: number[]; sampleRate: number } | null> {
+    if (this.workletBlocked()) return null;
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+
+    const modelId = await this.ensureTtsLoaded();
+    const result: any = textToSpeech({
+      modelId,
+      text: trimmed,
+      inputType: 'text',
+      stream: false,
+    } as any);
+    const pcm: number[] = await result.buffer;
+    return { pcm, sampleRate: TTS_SAMPLE_RATE };
+  }
+
   // --- Cleanup ---
+
+  async unloadTts(): Promise<void> {
+    if (this.ttsModelId) {
+      try {
+        await unloadModel({ modelId: this.ttsModelId, clearStorage: false });
+      } catch {
+        /* ignore */
+      }
+      this.ttsModelId = null;
+      this.ttsLoadPromise = null;
+    }
+  }
 
   async unloadLLM(): Promise<void> {
     if (this.llmModelId) {
@@ -908,7 +1033,7 @@ class QVACService {
   }
 
   async unloadAll(): Promise<void> {
-    await Promise.all([this.unloadLLM(), this.unloadWhisper()]);
+    await Promise.all([this.unloadLLM(), this.unloadWhisper(), this.unloadTts()]);
   }
 }
 
