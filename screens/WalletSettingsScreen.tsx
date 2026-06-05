@@ -10,6 +10,8 @@ import { updateNetwork, deleteWallet } from '../store/slices/walletSlice';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig, WalletRecord } from '../services/DatabaseService';
 import { Button, Input, Card } from '../components';
+import { SecurityService } from '../services/SecurityService';
+import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
 
 interface Props {
     navigation: any;
@@ -24,6 +26,47 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
 
     const [rlnRemoteUrl, setRlnRemoteUrl] = useState('');
     const [isEditingRln, setIsEditingRln] = useState(false);
+    const [revealedMnemonic, setRevealedMnemonic] = useState<string | null>(null);
+    const [showRevealModal, setShowRevealModal] = useState(false);
+
+    // Auth-gated recovery-phrase reveal: require device authentication (biometric
+    // or passcode) before reading the seed from the secure enclave. When no device
+    // lock exists, warn explicitly before showing it.
+    const handleViewMnemonic = async () => {
+        if (typeof walletId !== 'number') return;
+        const security = SecurityService.getInstance();
+        const reveal = async () => {
+            const mnemonic = await security.getMnemonic(walletId);
+            if (!mnemonic) {
+                Alert.alert('Unavailable', 'No recovery phrase is stored for this wallet on this device.');
+                return;
+            }
+            setRevealedMnemonic(mnemonic);
+            setShowRevealModal(true);
+        };
+
+        const canAuth = await security.isDeviceAuthAvailable();
+        if (canAuth) {
+            const ok = await security.authenticateForReveal();
+            if (!ok) return;
+            await reveal();
+        } else {
+            Alert.alert(
+                'No device lock',
+                'Your device has no biometric or passcode lock, so your recovery phrase cannot be protected here. Make sure no one is watching before continuing.',
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Show anyway', style: 'destructive', onPress: reveal },
+                ],
+            );
+        }
+    };
+
+    const closeRevealModal = () => {
+        setShowRevealModal(false);
+        // Drop the plaintext seed from component state as soon as the sheet closes.
+        setRevealedMnemonic(null);
+    };
 
     useEffect(() => {
         if (wallet) {
@@ -198,7 +241,7 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
                 <Card style={styles.card}>
                     <TouchableOpacity
                         style={styles.menuItem}
-                        onPress={() => Alert.alert('Info', 'View Mnemonic feature coming soon')}
+                        onPress={handleViewMnemonic}
                     >
                         <View style={styles.menuItemLeft}>
                             <View style={[styles.iconContainer, { backgroundColor: theme.colors.secondary[100] }]}>
@@ -228,6 +271,12 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
 
                 <View style={styles.footerSpacer} />
             </ScrollView>
+
+            <RevealMnemonicModal
+                visible={showRevealModal}
+                mnemonic={revealedMnemonic}
+                onClose={closeRevealModal}
+            />
         </View>
     );
 }

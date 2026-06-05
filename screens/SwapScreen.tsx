@@ -1,5 +1,5 @@
 // screens/SwapScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   TextInput,
   View,
@@ -68,7 +68,6 @@ export default function SwapScreen({ navigation }: Props) {
   const rgbAssets = (assetsState?.rgbAssets || []);
 
   const [showAssetPicker, setShowAssetPicker] = useState<'from' | 'to' | null>(null);
-  const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
@@ -77,10 +76,25 @@ export default function SwapScreen({ navigation }: Props) {
   const [pairsLoading, setPairsLoading] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
 
-  // Load trading pairs and assets on mount
+  // Wallet inventory (what the user actually holds), always including BTC — kept
+  // reactive so it reflects balances as the store loads, not just at mount time.
+  const availableAssets: Asset[] = useMemo(() => {
+    const btcSats = walletState?.btcBalance?.vanilla?.spendable || 0;
+    return [
+      { asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', balance: btcSats / 1e8, precision: 8 },
+      ...rgbAssets.map((asset: any) => ({
+        asset_id: asset.asset_id,
+        ticker: asset.ticker,
+        name: asset.name,
+        balance: (asset.balance?.spendable ?? asset.balance ?? 0) / Math.pow(10, asset.precision || 8),
+        precision: asset.precision,
+      })),
+    ];
+  }, [walletState?.btcBalance, rgbAssets]);
+
+  // Load trading pairs on mount
   useEffect(() => {
     loadTradingPairs();
-    loadAvailableAssets();
 
     if (!swapState.fromAsset) dispatch(setFromAsset('BTC'));
     if (!swapState.toAsset) dispatch(setToAsset('USDT'));
@@ -176,35 +190,36 @@ export default function SwapScreen({ navigation }: Props) {
     }
   };
 
-  const loadAvailableAssets = async () => {
-    try {
-      const assets: Asset[] = [
-        {
-          asset_id: 'BTC',
-          ticker: 'BTC',
-          name: 'Bitcoin',
-          balance: (walletState?.btcBalance?.vanilla?.spendable || 0) / 100000000,
-          precision: 8,
-        },
-        ...rgbAssets.map((asset: any) => ({
-          asset_id: asset.asset_id,
-          ticker: asset.ticker,
-          name: asset.name,
-          balance: (asset.balance?.spendable || 0) / Math.pow(10, asset.precision || 8),
-          precision: asset.precision,
-        }))
-      ];
-      setAvailableAssets(assets);
-    } catch (error) {
-      console.error('Failed to load available assets:', error);
-    }
-  };
 
   // Get filtered pairs based on venue selection
   const filteredPairs = tradingPairs.filter(p => {
     if (venueFilter === 'all') return true;
     return p.venue === venueFilter;
   });
+
+  // Assets the user can SELECT in the swap — sourced from the loaded trading
+  // pairs (like the extension), not just owned inventory, so every tradable
+  // asset is pickable even before balances load. BTC is always first. Owned
+  // balance / precision is joined in from the inventory when available.
+  const selectableAssets: Asset[] = useMemo(() => {
+    const tickers: string[] = ['BTC', ...allTickers(filteredPairs)];
+    const seen = new Set<string>();
+    const out: Asset[] = [];
+    for (const ticker of tickers) {
+      if (!ticker || seen.has(ticker)) continue;
+      seen.add(ticker);
+      const inv = availableAssets.find(a => a.ticker === ticker);
+      const pairAsset = findPairAsset(filteredPairs, ticker);
+      out.push({
+        asset_id: inv?.asset_id ?? ticker,
+        ticker,
+        name: inv?.name ?? pairAsset?.name ?? ticker,
+        balance: inv?.balance ?? 0,
+        precision: inv?.precision ?? pairAsset?.precision ?? 8,
+      });
+    }
+    return out;
+  }, [filteredPairs, availableAssets]);
 
   const getQuote = async () => {
     try {
@@ -373,7 +388,6 @@ export default function SwapScreen({ navigation }: Props) {
         }));
         dispatch(setExecuting(false));
         setShowConfirmModal(false);
-        loadAvailableAssets();
       } else {
         // ── Kaleidoswap execution (3-step: init → taker → execute) ──
         if (!kaleidoClientManager.isInitialized()) {
@@ -504,7 +518,6 @@ export default function SwapScreen({ navigation }: Props) {
           setPollingInterval(null);
           setShowConfirmModal(false);
           dispatch(setExecuting(false));
-          loadAvailableAssets();
         }
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
@@ -723,7 +736,14 @@ export default function SwapScreen({ navigation }: Props) {
           </View>
 
           <ScrollView style={styles.assetPickerList}>
-            {availableAssets.map((asset) => (
+            {selectableAssets.length === 0 && (
+              <View style={{ padding: theme.spacing[6], alignItems: 'center' }}>
+                <Text style={styles.assetPickerName}>
+                  No tradable assets yet. Connect your node or wait for pairs to load.
+                </Text>
+              </View>
+            )}
+            {selectableAssets.map((asset) => (
               <TouchableOpacity
                 key={asset.asset_id}
                 style={styles.assetPickerItem}

@@ -159,7 +159,9 @@ export const createNewWallet = createAsyncThunk(
         name: params.name,
         created_at: Date.now(),
         is_active: true,
-        encrypted_mnemonic: params.mnemonic, // Should be encrypted in real app using PIN
+        // Routed to the OS secure enclave by DatabaseService.createWallet — the
+        // seed is never written to the SQLite file.
+        encrypted_mnemonic: params.mnemonic,
       }, params.networks);
 
       // Fetch the newly created wallet
