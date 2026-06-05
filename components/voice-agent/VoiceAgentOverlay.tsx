@@ -9,8 +9,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Speech from 'expo-speech';
-import { speakBest, stopSpeaking } from '../../services/speech';
+import { speak as qvacSpeak, stopSpeak } from '../../services/qvacTts';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -90,7 +89,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   // Clean up audio when the session unmounts (i.e. the overlay is closed).
   useEffect(
     () => () => {
-      Speech.stop();
+      void stopSpeak();
       voiceRef.current?.stopListening?.();
     },
     []
@@ -132,12 +131,12 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         });
         const finalText = (res.text || streamed || 'Done.').trim();
         patchBubble(assistantId, finalText);
-        // Speak the reply with the best available system voice.
+        // Speak the reply with on-device QVAC TTS (falls back to the system
+        // voice automatically if QVAC TTS isn't available).
         setPhase('speaking');
-        stopSpeaking();
-        void speakBest(finalText, {
+        void stopSpeak();
+        void qvacSpeak(finalText, {
           onDone: () => setPhase('idle'),
-          onStopped: () => setPhase('idle'),
           onError: () => setPhase('idle'),
         });
       } catch (e) {
@@ -170,12 +169,12 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     if (phase === 'listening') {
       voiceRef.current?.stopListening();
     } else if (phase === 'idle') {
-      Speech.stop();
+      void stopSpeak();
       setError(null);
       voiceRef.current?.startListening();
     } else if (phase === 'speaking') {
       // interrupt the spoken reply and listen again
-      Speech.stop();
+      void stopSpeak();
       voiceRef.current?.startListening();
     }
   };

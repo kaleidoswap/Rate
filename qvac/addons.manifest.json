@@ -4,6 +4,7 @@
   "addons": [
     "@qvac/llm-llamacpp",
     "@qvac/transcription-whispercpp",
+    "@qvac/tts-onnx",
     "bare-abort",
     "bare-buffer",
     "bare-crypto",
