@@ -77,8 +77,13 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
                 </TouchableOpacity>
               )}
               {showSettings && (
-                <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Settings')}>
-                  <Ionicons name="ellipsis-horizontal" size={18} color={theme.colors.text.secondary} />
+                <TouchableOpacity
+                  style={styles.iconBtn}
+                  onPress={() => navigation.navigate('Settings')}
+                  accessibilityLabel="Settings"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="settings-outline" size={19} color={theme.colors.text.primary} />
                 </TouchableOpacity>
               )}
             </View>

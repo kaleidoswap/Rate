@@ -669,7 +669,6 @@ export default function DashboardScreen({ navigation }: Props) {
             if (protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected()) connected.push('Arkade');
             return connected.length > 0 ? connected.join(' · ') : undefined;
           })()}
-          showNotification
           showSettings
         >
           <BalanceCard
