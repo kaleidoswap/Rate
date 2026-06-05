@@ -682,6 +682,8 @@ export default function DashboardScreen({ navigation }: Props) {
             lightningBalance={offChainBalance}
             // Per-protocol balance breakdown is a network detail — only in advanced mode.
             byProtocol={policy.showNetworks ? (btcBalance as any)?.byProtocol : undefined}
+            // Shimmer the balance while first connecting (before any data lands).
+            loading={(isConnecting || loading) && totalBalance === 0 && !refreshing}
           />
         </MainHeader>
 

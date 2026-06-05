@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { haptic } from '../utils/haptics';
+import { PressableScale } from './PressableScale';
 
 interface ActionButtonsProps {
     onSend: () => void;
@@ -48,14 +49,13 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
                 {ACTION_ITEMS.map(item => {
                     const t = tileStyle(item.tone);
                     return (
-                        <TouchableOpacity
+                        <PressableScale
                             key={item.key}
                             style={styles.actionButton}
                             onPress={() => {
                                 haptic.light();
                                 props[item.action]?.();
                             }}
-                            activeOpacity={0.8}
                         >
                             <View
                                 style={[
@@ -67,7 +67,7 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
                                 <Ionicons name={item.icon} size={22} color={t.glyph} />
                             </View>
                             <Text style={styles.actionButtonText}>{item.label}</Text>
-                        </TouchableOpacity>
+                        </PressableScale>
                     );
                 })}
             </View>
