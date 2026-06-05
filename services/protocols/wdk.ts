@@ -24,6 +24,7 @@ import {
   kaleidoClientManager,
   flashnetClientManager,
 } from '@kaleidorg/wallet-protocols'
+import { NwcRgbAdapter } from '../nwc/NwcRgbAdapter'
 import type {
   ProtocolType,
   SparkAdapterConfig,
@@ -47,6 +48,10 @@ import { buildArkadeStorage } from './arkadeStorage'
  */
 const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID !== '0'
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
+// On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
+// drives a remote node via an NWC connection string instead of a direct HTTP
+// nodeUrl). Set EXPO_PUBLIC_RGB_VIA_NWC=0 to use the HTTP WDK RLN adapter.
+const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0'
 
 /**
  * Register static-require loaders for each enabled WDK package (Metro can't follow
@@ -76,7 +81,13 @@ export function getWdkProtocolManager(): ProtocolManager {
     _wdkManager = new ProtocolManager()
     // Spark + RLN: no WASM, SDKs already shipped — always on.
     _wdkManager.registerAdapter(new SparkWdkAdapter())
-    _wdkManager.registerAdapter(new RlnWdkAdapter())
+    // RGB: NWC-backed (remote node over relays) by default on mobile; HTTP WDK
+    // adapter when EXPO_PUBLIC_RGB_VIA_NWC=0.
+    if (RGB_VIA_NWC) {
+      _wdkManager.registerAdapter(new NwcRgbAdapter())
+    } else {
+      _wdkManager.registerAdapter(new RlnWdkAdapter())
+    }
     // Liquid / Arkade: opt-in (see flags above) so the default build stays WASM-free.
     if (LIQUID_ENABLED) _wdkManager.registerAdapter(new LiquidWdkAdapter())
     if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())

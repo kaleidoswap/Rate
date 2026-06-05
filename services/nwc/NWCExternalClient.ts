@@ -43,7 +43,10 @@ export type NwcMethod =
   | 'rln_decode_rgb_invoice'
   | 'rln_send_asset'
   | 'rln_list_channels'
-  | 'rln_get_address';
+  | 'rln_get_address'
+  | 'rln_decode_ln_invoice'
+  | 'rln_send_btc'
+  | 'rln_list_payments';
 
 export interface NwcConnectionInfo {
   walletPubkey: string;
@@ -226,6 +229,18 @@ export class NWCClient {
 
   payInvoice(params: { invoice: string; amount?: number }): Promise<NwcPayInvoiceResult> {
     return this.request<NwcPayInvoiceResult>('pay_invoice', { ...params });
+  }
+
+  lookupInvoice(params: { payment_hash?: string; invoice?: string }): Promise<NwcInvoice> {
+    return this.request<NwcInvoice>('lookup_invoice', { ...params });
+  }
+
+  async listTransactions(params: Record<string, unknown> = {}): Promise<NwcInvoice[]> {
+    const result = await this.request<{ transactions: NwcInvoice[] }>(
+      'list_transactions',
+      params,
+    );
+    return result?.transactions ?? [];
   }
 
   // --- KaleidoSwap RLN extensions (rln_*) — raw rgb-lightning-node responses ---
