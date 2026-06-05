@@ -2,6 +2,7 @@
 import * as SQLite from 'expo-sqlite';
 import * as SecureStore from 'expo-secure-store';
 import CryptoJS from 'crypto-js';
+import { SecurityService } from './SecurityService';
 
 export type NetworkType = 'spark' | 'arkade' | 'rln' | 'liquid';
 export type RlnNodeType = 'local' | 'remote';
@@ -199,11 +200,17 @@ export class DatabaseService {
         wallet.derivation_path || null,
         wallet.created_at,
         wallet.is_active ? 1 : 0,
-        wallet.encrypted_mnemonic || null
+        // The seed is NEVER written to the SQLite file — it goes to the OS
+        // secure enclave below (keyed by the new wallet id).
+        null,
       ]
     );
 
     const walletId = result.lastInsertRowId;
+
+    if (wallet.encrypted_mnemonic) {
+      await SecurityService.getInstance().storeMnemonic(walletId, wallet.encrypted_mnemonic);
+    }
 
     // Add initial networks
     for (const network of initialNetworks) {
@@ -211,6 +218,27 @@ export class DatabaseService {
     }
 
     return walletId;
+  }
+
+  /**
+   * Fills `encrypted_mnemonic` (in memory only) from the secure enclave so all
+   * existing consumers keep working. Legacy rows that still hold a plaintext
+   * seed in the DB are migrated into the enclave and then scrubbed from SQLite.
+   */
+  private async hydrateMnemonic(wallet: WalletRecord): Promise<WalletRecord> {
+    if (!wallet.id) return wallet;
+    const security = SecurityService.getInstance();
+    let mnemonic = await security.getMnemonic(wallet.id);
+    if (!mnemonic && wallet.encrypted_mnemonic) {
+      // One-time migration of a legacy plaintext seed → secure enclave.
+      mnemonic = wallet.encrypted_mnemonic;
+      await security.storeMnemonic(wallet.id, mnemonic);
+      await this.db!.runAsync(
+        'UPDATE wallets SET encrypted_mnemonic = NULL WHERE id = ?',
+        [wallet.id],
+      );
+    }
+    return { ...wallet, encrypted_mnemonic: mnemonic ?? undefined };
   }
 
   async getActiveWallet(): Promise<WalletRecord | null> {
@@ -222,7 +250,7 @@ export class DatabaseService {
 
     if (wallet) {
       wallet.networks = await this.getWalletNetworks(wallet.id!);
-      return wallet;
+      return this.hydrateMnemonic(wallet);
     }
 
     return null;
@@ -238,7 +266,7 @@ export class DatabaseService {
 
     if (wallet) {
       wallet.networks = await this.getWalletNetworks(wallet.id!);
-      return wallet;
+      return this.hydrateMnemonic(wallet);
     }
 
     return null;
@@ -253,6 +281,8 @@ export class DatabaseService {
 
     for (const wallet of wallets) {
       wallet.networks = await this.getWalletNetworks(wallet.id!);
+      // List views never need the seed — keep it out of memory here.
+      wallet.encrypted_mnemonic = undefined;
     }
 
     return wallets;
@@ -275,6 +305,8 @@ export class DatabaseService {
   async deleteWallet(walletId: number): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
     await this.db.runAsync('DELETE FROM wallets WHERE id = ?', [walletId]);
+    // Also purge the seed from the secure enclave so nothing is left behind.
+    await SecurityService.getInstance().deleteMnemonic(walletId);
   }
 
   // Network operations

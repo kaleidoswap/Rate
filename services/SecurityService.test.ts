@@ -371,6 +371,71 @@ describe('SecurityService', () => {
       expect(result.type).toBe(null);
     });
   });
+
+  describe('seed vault', () => {
+    let store: Record<string, string>;
+    beforeEach(() => {
+      store = {};
+      (SecureStore.setItemAsync as jest.Mock).mockImplementation(async (k: string, v: string) => {
+        store[k] = v;
+      });
+      (SecureStore.getItemAsync as jest.Mock).mockImplementation(async (k: string) =>
+        k in store ? store[k] : null,
+      );
+      (SecureStore.deleteItemAsync as jest.Mock).mockImplementation(async (k: string) => {
+        delete store[k];
+      });
+    });
+
+    it('round-trips a mnemonic under a per-wallet secure-store key (never a DB column)', async () => {
+      expect(await securityService.getMnemonic(1)).toBeNull();
+      expect(await securityService.storeMnemonic(1, 'seed words here')).toBe(true);
+      expect(await securityService.getMnemonic(1)).toBe('seed words here');
+      expect(store['rate_wallet_mnemonic_1']).toBe('seed words here');
+    });
+
+    it('keys mnemonics per wallet id', async () => {
+      await securityService.storeMnemonic(1, 'one');
+      await securityService.storeMnemonic(2, 'two');
+      expect(await securityService.getMnemonic(1)).toBe('one');
+      expect(await securityService.getMnemonic(2)).toBe('two');
+    });
+
+    it('deletes a mnemonic', async () => {
+      await securityService.storeMnemonic(3, 'three');
+      await securityService.deleteMnemonic(3);
+      expect(await securityService.getMnemonic(3)).toBeNull();
+    });
+  });
+
+  describe('reveal authentication', () => {
+    it('isDeviceAuthAvailable requires hardware AND enrollment', async () => {
+      (LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(true);
+      (LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(true);
+      expect(await securityService.isDeviceAuthAvailable()).toBe(true);
+
+      (LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(false);
+      expect(await securityService.isDeviceAuthAvailable()).toBe(false);
+    });
+
+    it('authenticateForReveal enables device-passcode fallback and returns success', async () => {
+      (LocalAuthentication.authenticateAsync as jest.Mock).mockResolvedValue({ success: true });
+      expect(await securityService.authenticateForReveal()).toBe(true);
+      expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ disableDeviceFallback: false }),
+      );
+    });
+
+    it('authenticateForReveal returns false on cancel/failure', async () => {
+      (LocalAuthentication.authenticateAsync as jest.Mock).mockResolvedValue({ success: false });
+      expect(await securityService.authenticateForReveal()).toBe(false);
+    });
+
+    it('authenticateForReveal returns false if the auth call throws', async () => {
+      (LocalAuthentication.authenticateAsync as jest.Mock).mockRejectedValue(new Error('x'));
+      expect(await securityService.authenticateForReveal()).toBe(false);
+    });
+  });
 });
 
 

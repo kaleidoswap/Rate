@@ -506,6 +506,16 @@ export default function DashboardScreen({ navigation }: Props) {
     lite.other.some((o: any) => o.id === asset.asset_id)
   );
 
+  // BTC is filtered out of `rgbAssets` upstream, but — like the extension — it
+  // should always head the asset list as a first-class entry (shown in BTC).
+  const btcAssetEntry = {
+    asset_id: 'BTC',
+    ticker: 'BTC',
+    name: 'Bitcoin',
+    precision: 8,
+    balance: { spendable: totalBalance / 1e8 },
+  } as any;
+
   // Get current hour to determine greeting
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -741,16 +751,20 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
 
         <AssetList
-          // In lite mode, hide USDt (it's folded into the USD figure above) and
-          // strip the per-asset protocol badge (a network detail).
-          assets={isLite
-            ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
-            : rgbAssets}
+          // BTC always leads the list (matches the extension). In lite mode, hide
+          // USDt (folded into the USD figure above) and strip the per-asset
+          // protocol badge (a network detail).
+          assets={[
+            btcAssetEntry,
+            ...(isLite
+              ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
+              : rgbAssets),
+          ]}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
           onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
             asset: {
               ...asset,
-              isRGB: true
+              isRGB: asset.ticker !== 'BTC',
             }
           })}
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
