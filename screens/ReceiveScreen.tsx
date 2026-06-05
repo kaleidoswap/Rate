@@ -916,7 +916,7 @@ export default function ReceiveScreen({ navigation }: Props) {
               return (
                 <TouchableOpacity
                   key={net.id}
-                  onPress={() => setNetworkType(net.id)}
+                  onPress={() => { haptic.selection(); setNetworkType(net.id); }}
                   activeOpacity={0.7}
                   style={{
                     flexDirection: 'row',
