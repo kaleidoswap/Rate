@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { RootState } from '../store';
 import { MainHeader, Card } from '../components';
+import { EmptyState } from '../components/EmptyState';
 import { StatusBadge, type StatusType } from '@kaleidorg/kaleido-ui/native';
 import { theme } from '../theme';
 
@@ -155,10 +156,11 @@ export default function HistoryScreen() {
                 contentContainerStyle={styles.listContent}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary[500]} />}
                 ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <Ionicons name="time-outline" size={48} color={theme.colors.text.tertiary} />
-                        <Text style={styles.emptyText}>No transaction history yet</Text>
-                    </View>
+                    <EmptyState
+                        icon="receipt-outline"
+                        title="No transactions yet"
+                        message="Your payments and asset transfers will appear here once you send or receive."
+                    />
                 }
             />
         </View>

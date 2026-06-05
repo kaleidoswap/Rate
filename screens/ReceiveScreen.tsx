@@ -33,6 +33,8 @@ import { Card, Button, Input, ScreenHeader } from '../components';
 import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
 import { NetworkIcon } from '../components/NetworkIcon';
+import { PressableScale } from '../components/PressableScale';
+import { haptic } from '../utils/haptics';
 import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 interface Props {
@@ -786,10 +788,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   }, [channels]);
 
+  const [copied, setCopied] = useState(false);
   const copyToClipboard = async () => {
     if (!address) return;
     await Clipboard.setString(address);
-    Alert.alert('Copied', 'Address copied to clipboard');
+    haptic.success();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
   };
 
   const shareAddress = async () => {
@@ -910,10 +915,9 @@ export default function ReceiveScreen({ navigation }: Props) {
             {allNetworks.map((net) => {
               const isActive = networkType === net.id;
               return (
-                <TouchableOpacity
+                <PressableScale
                   key={net.id}
-                  onPress={() => setNetworkType(net.id)}
-                  activeOpacity={0.7}
+                  onPress={() => { haptic.selection(); setNetworkType(net.id); }}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -942,7 +946,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                   {isActive && (
                     <View style={{ marginLeft: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: net.color }} />
                   )}
-                </TouchableOpacity>
+                </PressableScale>
               );
             })}
           </View>
@@ -1341,9 +1345,15 @@ export default function ReceiveScreen({ navigation }: Props) {
         <View style={styles.qrActions}>
           <TouchableOpacity style={styles.qrActionButton} onPress={copyUnifiedUri} activeOpacity={0.7}>
             <View style={styles.qrActionIcon}>
-              <Ionicons name="copy" size={18} color={theme.colors.primary[500]} />
+              <Ionicons
+                name={copied ? 'checkmark' : 'copy'}
+                size={18}
+                color={copied ? theme.colors.success[500] : theme.colors.primary[500]}
+              />
             </View>
-            <Text style={styles.qrActionText}>Copy</Text>
+            <Text style={[styles.qrActionText, copied && { color: theme.colors.success[500] }]}>
+              {copied ? 'Copied!' : 'Copy'}
+            </Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.qrActionButton}
@@ -1512,9 +1522,15 @@ export default function ReceiveScreen({ navigation }: Props) {
             activeOpacity={0.7}
           >
             <View style={styles.qrActionIcon}>
-              <Ionicons name="copy" size={18} color={theme.colors.primary[500]} />
+              <Ionicons
+                name={copied ? 'checkmark' : 'copy'}
+                size={18}
+                color={copied ? theme.colors.success[500] : theme.colors.primary[500]}
+              />
             </View>
-            <Text style={styles.qrActionText}>Copy</Text>
+            <Text style={[styles.qrActionText, copied && { color: theme.colors.success[500] }]}>
+              {copied ? 'Copied!' : 'Copy'}
+            </Text>
           </TouchableOpacity>
           
           <TouchableOpacity 

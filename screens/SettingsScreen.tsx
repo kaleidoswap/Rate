@@ -4,6 +4,7 @@ import { View, ScrollView, StyleSheet, Switch, TextInput, Alert, Text, Touchable
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { NetworkIcon } from '../components/NetworkIcon';
+import { NetworkBadge } from '../components/NetworkBadge';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import {
@@ -599,21 +600,12 @@ export default function SettingsScreen({ navigation }: Props) {
                     <Text style={{ fontSize: 12, color: theme.colors.text.tertiary, marginTop: 2 }} numberOfLines={1}>{descs[proto]}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                    <TouchableOpacity
+                    <NetworkBadge
+                      network={protoNetworks[PROTO_TO_NETWORK_TYPE[proto]] ?? PROTO_DEFAULT_NETWORK[PROTO_TO_NETWORK_TYPE[proto]]}
+                      interactive
                       onPress={() => pickProtocolNetwork(proto)}
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 4,
-                        paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
-                        borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.medium,
-                        backgroundColor: theme.colors.surface.secondary,
-                      }}
                       accessibilityLabel={`Change ${proto} network`}
-                    >
-                      <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.secondary }}>
-                        {NETWORK_LABEL[protoNetworks[PROTO_TO_NETWORK_TYPE[proto]] ?? PROTO_DEFAULT_NETWORK[PROTO_TO_NETWORK_TYPE[proto]]] ?? '—'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={12} color={theme.colors.text.tertiary} />
-                    </TouchableOpacity>
+                    />
                     <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.gray[400] }}>
                       {connected ? 'Connected' : 'Offline'}
                     </Text>

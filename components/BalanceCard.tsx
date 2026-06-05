@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
+import { Skeleton } from './Skeleton';
 
 interface ProtocolBalance {
     confirmed: number;
@@ -24,6 +25,8 @@ interface BalanceCardProps {
         SPARK?: ProtocolBalance;
         ARKADE?: ProtocolBalance;
     };
+    /** Show shimmer placeholders instead of the balance while first loading. */
+    loading?: boolean;
 }
 
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
@@ -40,6 +43,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     formatSatoshis,
     formatUSD,
     byProtocol,
+    loading,
 }) => {
     // Filter to only protocols with balance data
     const activeProtocols = byProtocol
@@ -51,15 +55,24 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             {/* Total balance */}
             <View style={styles.totalBalanceContainer}>
                 <Text style={styles.balanceLabel}>Total Balance</Text>
-                <View style={styles.balanceRow}>
-                    <Text style={styles.balanceAmount}>
-                        {formatSatoshis(totalBalance)}
-                    </Text>
-                    <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
-                </View>
-                <Text style={styles.balanceUsd}>
-                    {formatUSD(totalBalance) !== '0.00' ? `$${formatUSD(totalBalance)} USD` : ''}
-                </Text>
+                {loading ? (
+                    <View style={{ gap: 10, marginTop: 4 }}>
+                        <Skeleton width={180} height={34} radius={10} style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
+                        <Skeleton width={110} height={15} radius={7} style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} />
+                    </View>
+                ) : (
+                    <>
+                        <View style={styles.balanceRow}>
+                            <Text style={styles.balanceAmount}>
+                                {formatSatoshis(totalBalance)}
+                            </Text>
+                            <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
+                        </View>
+                        <Text style={styles.balanceUsd}>
+                            {formatUSD(totalBalance) !== '0.00' ? `$${formatUSD(totalBalance)} USD` : ''}
+                        </Text>
+                    </>
+                )}
             </View>
 
             {/* Refresh button */}
