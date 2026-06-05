@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { haptic } from '../utils/haptics';
 
 interface ActionButtonsProps {
     onSend: () => void;
@@ -50,7 +51,10 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
                         <TouchableOpacity
                             key={item.key}
                             style={styles.actionButton}
-                            onPress={props[item.action]}
+                            onPress={() => {
+                                haptic.light();
+                                props[item.action]?.();
+                            }}
                             activeOpacity={0.8}
                         >
                             <View
