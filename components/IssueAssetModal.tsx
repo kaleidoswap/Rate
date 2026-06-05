@@ -33,7 +33,8 @@ export const IssueAssetModal: React.FC<IssueAssetModalProps> = ({
   onSuccess,
 }) => {
   const dispatch = useDispatch<AppDispatch>();
-  const { activeWallet } = useSelector((state: RootState) => state.wallet);
+  const walletState = useSelector((state: RootState) => state.wallet);
+  const activeWallet = walletState?.activeWallet;
   
   const [ticker, setTicker] = useState('');
   const [name, setName] = useState('');
@@ -105,7 +106,7 @@ export const IssueAssetModal: React.FC<IssueAssetModalProps> = ({
         name,
         precision: Number(precision),
         ticker: ticker.toUpperCase(),
-        walletId: activeWallet.id,
+        walletId: activeWallet?.id ?? 0,
       })).unwrap();
 
       Alert.alert('Success', 'Asset issued successfully!');

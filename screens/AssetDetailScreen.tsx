@@ -16,9 +16,9 @@ import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
-import RGBApiService from '../services/RGBApiService';
+import { protocolManager } from '../services/protocols';
 import { theme } from '../theme';
-import { Card, Button } from '../components';
+import { Card, Button, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
 
 const { width } = Dimensions.get('window');
@@ -64,7 +64,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const [assetDetails, setAssetDetails] = useState(asset);
   const [refreshing, setRefreshing] = useState(false);
   
-  const apiService = RGBApiService.getInstance();
+  const rgbAdapter = protocolManager.getAdapter('RGB');
   const isBTC = asset.asset_id === 'BTC';
 
   useEffect(() => {
@@ -72,7 +72,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   }, []);
 
   const loadAssetDetails = async () => {
-    if (isBTC || !apiService) return;
+    if (isBTC || !rgbAdapter) return;
     
     try {
       setLoading(true);
@@ -145,28 +145,18 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
 
     return (
       <View style={styles.headerContainer}>
-        <LinearGradient
-          colors={['#4338ca', '#7c3aed'] as [string, string]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerGradient}
-        >
-          <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.backButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Asset Details</Text>
+        <ScreenHeader
+          title="Asset Details"
+          showBack={true}
+          rightAction={
             <TouchableOpacity
               style={styles.moreButton}
               onPress={() => Alert.alert('More Options', 'Additional asset options coming soon')}
             >
               <Ionicons name="ellipsis-horizontal" size={24} color={theme.colors.text.inverse} />
             </TouchableOpacity>
-          </View>
-
+          }
+        >
           <View style={styles.assetInfo}>
             <AssetIcon />
             <View style={styles.assetTextInfo}>
@@ -190,7 +180,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
             </Text>
             <Text style={styles.balanceTicker}>{assetDetails.ticker}</Text>
           </View>
-        </LinearGradient>
+        </ScreenHeader>
       </View>
     );
   };

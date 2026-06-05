@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { initializeNostrWalletConnect, getNostrWalletConnectStatus } from '../services/initializeServices';
 import NostrService from '../services/NostrService';
 
@@ -269,24 +270,28 @@ const NWCWalletScreen: React.FC = () => {
       {renderControls()}
       {renderConnectionInfo()}
 
-      <View style={styles.infoBox}>
-        <Text style={styles.infoBoxTitle}>💡 How to use:</Text>
-        <Text style={styles.infoBoxText}>
-          1. Initialize the NWC service{'\n'}
-          2. Generate a connection string{'\n'}
-          3. Scan the QR code or copy the string{'\n'}
-          4. Import it in your Nostr client{'\n'}
-          5. Start making payments remotely!
-        </Text>
-      </View>
+      <AlertBanner variant="info" style={styles.infoBox}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.infoBoxTitle}>💡 How to use:</Text>
+          <Text style={styles.infoBoxText}>
+            1. Initialize the NWC service{'\n'}
+            2. Generate a connection string{'\n'}
+            3. Scan the QR code or copy the string{'\n'}
+            4. Import it in your Nostr client{'\n'}
+            5. Start making payments remotely!
+          </Text>
+        </View>
+      </AlertBanner>
 
-      <View style={styles.warningBox}>
-        <Text style={styles.warningBoxTitle}>⚠️ Security Notice:</Text>
-        <Text style={styles.warningBoxText}>
-          Only share connection strings with trusted devices. 
-          Each connection has different permissions - choose wisely!
-        </Text>
-      </View>
+      <AlertBanner variant="warning" style={styles.warningBox}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.warningBoxTitle}>⚠️ Security Notice:</Text>
+          <Text style={styles.warningBoxText}>
+            Only share connection strings with trusted devices.
+            Each connection has different permissions - choose wisely!
+          </Text>
+        </View>
+      </AlertBanner>
     </ScrollView>
   );
 };

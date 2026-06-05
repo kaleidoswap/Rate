@@ -86,6 +86,44 @@ class PriceService {
       return this.cache?.usd || 0;
     }
   }
+
+  // ── Multi-fiat rates (BTC priced in several fiat currencies) ──────────────
+  private ratesCache: { rates: Record<string, number>; timestamp: number } | null = null;
+  private readonly RATES_CACHE_DURATION = 60000; // 60 seconds
+
+  /**
+   * Fetch the BTC price in several fiat currencies at once (CoinGecko).
+   * Returns a lowercase-keyed map, e.g. { usd: 65000, eur: 60000 }.
+   * Falls back to the last good cache (and the single USD price) on failure.
+   */
+  async getBitcoinRates(currencies: string[]): Promise<Record<string, number>> {
+    const wanted = currencies.map((c) => c.toLowerCase());
+    const cacheValid =
+      this.ratesCache && Date.now() - this.ratesCache.timestamp < this.RATES_CACHE_DURATION;
+    if (cacheValid && wanted.every((c) => this.ratesCache!.rates[c] != null)) {
+      return this.ratesCache!.rates;
+    }
+
+    try {
+      const vs = encodeURIComponent(wanted.join(','));
+      const response = await fetch(
+        `https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${vs}`
+      );
+      if (!response.ok) throw new Error('CoinGecko rates API error');
+      const data = await response.json();
+      const rates: Record<string, number> = { ...(this.ratesCache?.rates || {}) };
+      for (const [k, v] of Object.entries(data.bitcoin || {})) {
+        if (typeof v === 'number') rates[k] = v;
+      }
+      this.ratesCache = { rates, timestamp: Date.now() };
+      return rates;
+    } catch (error) {
+      console.warn('Failed to fetch multi-fiat rates:', error);
+      if (this.ratesCache) return this.ratesCache.rates;
+      const usd = await this.getBitcoinPrice();
+      return usd ? { usd } : {};
+    }
+  }
 }
 
 export default PriceService; 

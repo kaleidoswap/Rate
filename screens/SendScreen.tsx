@@ -16,28 +16,34 @@ import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
-import RGBApiService from '../services/RGBApiService';
+// RGBApiService removed — all operations via protocolManager
+import { NetworkIcon } from '../components/NetworkIcon';
+import { PressableScale } from '../components/PressableScale';
+import { feedback } from '../utils/feedback';
+import { protocolManager } from '../services/protocols';
+import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
+import {
+  classifyWithdrawDestination, resolveSendRoutes, resolveActiveSendRoute,
+  METHOD_META, type DestinationKind, type ResolvedSendRoute, type RouteOption,
+} from '../utils/account-routing';
 import { theme } from '../theme';
-import { Card, Button, Input } from '../components';
+import { Card, Button, Input, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
-import { useFormattedBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { formatBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { usePolicy } from '../hooks/usePolicy';
 
 interface Props {
   navigation: any;
   route: any;
 }
 
-type AddressType = 'unknown' | 'bitcoin' | 'lightning' | 'lightning-address' | 'rgb' | 'invalid';
+type AddressType = 'unknown' | 'bitcoin' | 'lightning' | 'lightning-address' | 'lnurl-pay' | 'rgb' | 'spark' | 'arkade' | 'invalid';
 
 interface RGBAsset {
   asset_id: string;
   ticker: string;
   name: string;
-  balance: {
-    settled: number;
-    future: number;
-    spendable: number;
-  };
+  balance: number;
   precision: number;
 }
 
@@ -97,10 +103,14 @@ interface DecodedRGBInvoice extends BaseRGBInvoiceResponse {
 
 function SendScreen({ navigation, route }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
-  const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
+  const assetsState = useSelector((state: RootState) => state.assets);
+  const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD } = useBitcoinConversion();
+  // In Lite mode the auto-router picks the best route; only Advanced lets the
+  // user override it, so the manual route selector is gated.
+  const policy = usePolicy();
 
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
@@ -122,8 +132,11 @@ function SendScreen({ navigation, route }: Props) {
   const [showAssetSelector, setShowAssetSelector] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'input' | 'review' | 'sending'>('input');
+  const [sendRoutes, setSendRoutes] = useState<RouteOption[]>([]);
+  const [activeRoute, setActiveRoute] = useState<ResolvedSendRoute | null>(null);
 
-  const apiService = RGBApiService.getInstance();
+  // All operations via protocolManager
+  const getProtocolStatus = useRefreshableProtocolStatus();
 
   // Fee rate options
   const feeRates = [
@@ -147,7 +160,7 @@ function SendScreen({ navigation, route }: Props) {
       ticker: asset.ticker,
       name: asset.name,
       isRGB: true,
-      balance: asset.balance?.spendable || 0,
+      balance: asset.balance || 0,
       precision: asset.precision,
     })) : [])
   ];
@@ -225,10 +238,32 @@ function SendScreen({ navigation, route }: Props) {
     setValidationError(null);
 
     try {
-      if (input.startsWith('ln')) {
-        // Lightning invoice
+      // Unified destination classification + route resolution
+      const destKind = classifyWithdrawDestination(input);
+      const addrType: AddressType = destKind === 'lnurl-pay' ? 'lnurl-pay'
+        : destKind === 'unknown' ? 'unknown' : destKind as AddressType;
+      setAddressType(addrType);
+
+      // Resolve send routes
+      const accounts = getProtocolStatus();
+      const { routes } = resolveSendRoutes({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts });
+      setSendRoutes(routes);
+      const active = resolveActiveSendRoute({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts });
+      setActiveRoute(active || null);
+
+      if (destKind === 'lightning') {
         try {
-          const decoded = await apiService.decodeLnInvoice({ invoice: input });
+          const rgbAdapter = protocolManager.getAdapter('RGB');
+          const decodedResult = await rgbAdapter.decodeInvoice(input);
+          const decoded = {
+            payment_hash: decodedResult.paymentHash || decodedResult.payment_hash || '',
+            amt_msat: decodedResult.amountMsat || decodedResult.amount_msat || (decodedResult.amount ? decodedResult.amount * 1000 : 0),
+            asset_id: decodedResult.asset_id,
+            asset_amount: decodedResult.asset_amount,
+            description: decodedResult.description || '',
+            expiry_sec: 0,
+            payee_pubkey: decodedResult.destination || decodedResult.payee_pubkey || '',
+          };
           setDecodedInvoice(decoded);
           setAddressType('lightning');
           
@@ -258,7 +293,8 @@ function SendScreen({ navigation, route }: Props) {
       } else if (input.startsWith('rgb')) {
         // RGB invoice
         try {
-          const decoded = await apiService.decodeRGBInvoice({ invoice: input });
+          const rgbAdapterRgb = protocolManager.getAdapter('RGB');
+          const decoded = await rgbAdapterRgb.decodeRgbInvoice?.({ invoice: input }) as any;
           
           // Extract amount from assignment if it's a fungible assignment
           let invoiceAmount: number | null = null;
@@ -292,23 +328,11 @@ function SendScreen({ navigation, route }: Props) {
           setAddressType('invalid');
           setValidationError('Failed to decode RGB invoice');
         }
-      } else if (input.startsWith('bc') || input.startsWith('tb')) {
-        // Bitcoin address
-        setAddressType('bitcoin');
+      } else if (destKind === 'bitcoin' || destKind === 'lightning-address' || destKind === 'lnurl-pay' || destKind === 'spark' || destKind === 'arkade') {
         const btcAsset = allAssets.find(a => a.asset_id === 'BTC');
-        if (btcAsset) {
-          setSelectedAsset(btcAsset);
-        }
-      } else if (isLightningAddress(input)) {
-        // Lightning address
-        setAddressType('lightning-address');
-        const btcAsset = allAssets.find(a => a.asset_id === 'BTC');
-        if (btcAsset) {
-          setSelectedAsset(btcAsset);
-        }
-      } else if (input) {
-        setAddressType('invalid');
-        setValidationError('Invalid address format. Please enter a valid Bitcoin address, Lightning invoice, Lightning address, or RGB invoice.');
+        if (btcAsset) setSelectedAsset(btcAsset);
+      } else if (destKind === 'invalid') {
+        setValidationError('Invalid address format. Please enter a valid Bitcoin, Lightning, Spark, Arkade, or RGB address.');
       }
     } catch (error) {
       console.error('Failed to decode input:', error);
@@ -345,9 +369,15 @@ function SendScreen({ navigation, route }: Props) {
     }
   };
 
-  // Format available balance using the hook at component level
+  // Format available balance. getMaxAmount() returns a display string in the
+  // asset's own units (BTC for the BTC asset, precision-scaled for RGB assets).
+  // BTC balances are sats-native, so render them via the explicit sats formatter;
+  // other assets are already in display units and keep their ticker.
   const maxAmount = getMaxAmount();
-  const formattedMaxAmount = useFormattedBitcoinAmount(maxAmount);
+  const isBtcAsset = selectedAsset?.asset_id === 'BTC';
+  const availableLabel = isBtcAsset
+    ? `${formatBitcoinAmount(selectedAsset?.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
+    : `${maxAmount} ${selectedAsset?.ticker || ''}`;
 
   const validateInputs = (): boolean => {
     if (!address.trim()) {
@@ -402,43 +432,54 @@ function SendScreen({ navigation, route }: Props) {
     setLoading(true);
 
     try {
-      if (addressType === 'lightning' || addressType === 'lightning-address') {
-        const result = await apiService.payLightningInvoice({
-          invoice: address,
-        });
-        
-        Alert.alert(
-          'Payment Sent! ⚡',
-          'Lightning payment sent successfully!',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+      const route = activeRoute;
+      const protocol = route?.protocol || 'RGB';
+      const method = route?.method || 'lightning';
+
+      if (method === 'spark') {
+        // Spark transfer
+        const sparkAdapter = protocolManager.getAdapter('SPARK');
+        const amountSats = bitcoinUnit === 'BTC'
+          ? Math.round(parseFloat(amount) * 1e8)
+          : Math.round(parseFloat(amount));
+        await sparkAdapter.sendPayment({ invoice: address, amount: amountSats });
+        Alert.alert('Payment Sent!', 'Spark payment sent successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+
+      } else if (method === 'arkade' || method === 'boarding') {
+        // Arkade transfer or offboard
+        const arkadeAdapter = protocolManager.getAdapter('ARKADE');
+        const amountSats = bitcoinUnit === 'BTC'
+          ? Math.round(parseFloat(amount) * 1e8)
+          : Math.round(parseFloat(amount));
+        if (method === 'boarding') {
+          await arkadeAdapter.sendBtcOnchain?.({ address, amount: amountSats });
+        } else {
+          await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
+        }
+        Alert.alert('Payment Sent!', 'Arkade payment sent successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+
+      } else if (addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay') {
+        // Lightning payment — route to the correct protocol
+        const lnAdapter = protocolManager.getAdapter(protocol);
+        await lnAdapter.sendPayment({ invoice: address });
+        Alert.alert('Payment Sent!', 'Lightning payment sent successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+
       } else if (addressType === 'bitcoin') {
-        const result = await apiService.sendBitcoin({
-          address,
-          amount: parseFloat(amount),
-          fee_rate: feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate || 2,
-        });
-        
-        Alert.alert(
-          'Payment Sent! ₿',
-          `Bitcoin transaction broadcasted successfully!\nTXID: ${result.txid}`,
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+        // On-chain BTC — route to correct protocol
+        const feeRateNum = feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate || 2;
+        const btcAdapter = protocolManager.getAdapter(protocol);
+        await btcAdapter.sendBtcOnchain?.({ address, amount: parseFloat(amount), feeRate: feeRateNum });
+        Alert.alert('Payment Sent!', 'Bitcoin transaction broadcasted successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+
       } else if (addressType === 'rgb') {
-        const result = await apiService.sendRGBAsset({
-          asset_id: selectedAsset.asset_id,
-          address,
-          amount: parseFloat(amount),
-        });
-        
-        Alert.alert(
-          'Asset Sent! 💎',
-          `RGB asset transfer completed successfully!\nTXID: ${result.txid}`,
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
-        );
+        const rgbSendAdapter = protocolManager.getAdapter('RGB');
+        await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: parseFloat(amount) });
+        Alert.alert('Asset Sent!', 'RGB asset transfer completed successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
       }
+      feedback.send();
     } catch (error) {
       console.error('Send error:', error);
+      feedback.error();
       Alert.alert(
         'Error',
         error instanceof Error ? error.message : 'Failed to send payment'
@@ -467,38 +508,18 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => {
-              if (paymentStep === 'review') {
-                setPaymentStep('input');
-              } else {
-                navigation.goBack();
-              }
-            }}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>
-            {paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
-          </Text>
-          <TouchableOpacity
-            style={styles.helpButton}
-            onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
-          >
-            <Ionicons name="help-circle-outline" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-    </View>
+    <ScreenHeader
+      title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
+      showBack={true}
+      rightAction={
+        <TouchableOpacity
+          onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
+          style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)' }}
+        >
+          <Ionicons name="help-circle-outline" size={22} color={theme.colors.text.inverse} />
+        </TouchableOpacity>
+      }
+    />
   );
 
   const renderAddressInput = () => (
@@ -541,34 +562,87 @@ function SendScreen({ navigation, route }: Props) {
         <View style={styles.addressTypeIndicator}>
           <View style={[
             styles.addressTypeIcon,
-            addressType === 'lightning' || addressType === 'lightning-address' 
-              ? styles.lightningIcon 
-              : addressType === 'bitcoin' 
-              ? styles.bitcoinIcon 
-              : styles.rgbIcon
+            { backgroundColor:
+              addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay' ? '#FACC15'
+              : addressType === 'spark' ? '#60A5FA'
+              : addressType === 'arkade' ? '#A855F7'
+              : addressType === 'bitcoin' ? '#F7931A'
+              : '#2BEE79'
+            }
           ]}>
-            <Ionicons 
-              name={
-                addressType === 'lightning' || addressType === 'lightning-address'
-                  ? 'flash' 
-                  : addressType === 'bitcoin' 
-                  ? 'link' 
-                  : 'diamond'
-              } 
-              size={14} 
-              color="white" 
+            <NetworkIcon
+              network={
+                addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay' ? 'lightning'
+                : addressType === 'spark' ? 'spark'
+                : addressType === 'arkade' ? 'arkade'
+                : addressType === 'bitcoin' ? 'bitcoin'
+                : 'rgb'
+              }
+              size={14}
+              color="white"
             />
           </View>
           <Text style={styles.addressTypeText}>
-            {addressType === 'lightning' 
-              ? 'Lightning Invoice' 
-              : addressType === 'lightning-address'
-              ? 'Lightning Address'
-              : addressType === 'bitcoin' 
-              ? 'Bitcoin Address' 
+            {addressType === 'lightning' ? 'Lightning Invoice'
+              : addressType === 'lightning-address' ? 'Lightning Address'
+              : addressType === 'lnurl-pay' ? 'LNURL Pay'
+              : addressType === 'spark' ? 'Spark Address'
+              : addressType === 'arkade' ? 'Arkade Address'
+              : addressType === 'bitcoin' ? 'Bitcoin Address'
               : 'RGB Invoice'
             }
           </Text>
+        </View>
+      )}
+
+      {/* Route selector — shows available send routes when multiple exist.
+          Hidden in Lite mode: the auto-router sends via the best route. */}
+      {policy.showRouteSelector && sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
+        <View style={{ marginTop: 14, gap: 8 }}>
+          <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            Send via
+          </Text>
+          {sendRoutes.map((route) => {
+            const selected = activeRoute?.account === route.account && activeRoute?.method === route.method;
+            const disabled = !!route.disabled;
+            return (
+              <PressableScale
+                key={`${route.account}-${route.method}`}
+                onPress={() => { if (!disabled) { feedback.select(); setActiveRoute({ ...route, protocol: route.account }); } }}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
+                  backgroundColor: selected ? theme.colors.primary[50] : theme.colors.background.secondary,
+                  borderWidth: 1,
+                  borderColor: selected ? theme.colors.primary[500] : theme.colors.border.light,
+                  opacity: disabled ? 0.5 : 1,
+                }}
+              >
+                <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
+                  <NetworkIcon network={String(route.account).toLowerCase()} size={20} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text.primary }}>
+                      {METHOD_META[route.method]?.label || route.method}
+                    </Text>
+                    {route.recommended && (
+                      <View style={{ backgroundColor: theme.colors.primary[500], borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: theme.colors.text.inverse, letterSpacing: 0.3 }}>BEST</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 11.5, color: disabled ? theme.colors.error[500] : theme.colors.text.tertiary, marginTop: 1 }} numberOfLines={1}>
+                    {disabled ? (route.disabledReason || 'Unavailable') : route.summary}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={selected ? 'radio-button-on' : 'radio-button-off'}
+                  size={20}
+                  color={selected ? theme.colors.primary[500] : theme.colors.text.tertiary}
+                />
+              </PressableScale>
+            );
+          })}
         </View>
       )}
 
@@ -797,7 +871,7 @@ function SendScreen({ navigation, route }: Props) {
         
         <View style={styles.balanceInfo}>
           <Text style={styles.balanceText}>
-            Available: {formattedMaxAmount} {bitcoinUnit}
+            Available: {availableLabel}
           </Text>
           {selectedAsset.asset_id === 'BTC' && amount && (
             <Text style={styles.usdValue}>
@@ -1000,7 +1074,7 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       {renderHeader()}
       
       <ScrollView 

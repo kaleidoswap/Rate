@@ -1,0 +1,1280 @@
+// services/QVACService.ts
+import {
+  loadModel,
+  completion,
+  transcribe,
+  textToSpeech,
+  unloadModel,
+  cancel,
+  resume,
+  suspend,
+  VERBOSITY,
+  TTS_EN_SUPERTONIC_Q4_0,
+  WHISPER_BASE_Q8_0,
+} from '@qvac/sdk';
+import { NativeModules, Platform } from 'react-native';
+import { File, Directory, Paths } from 'expo-file-system';
+import { createDownloadResumable } from 'expo-file-system/legacy';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { z } from 'zod';
+import DeviceInfo from 'react-native-device-info';
+import {
+  QVAC_MODELS,
+  DEFAULT_MODEL_ID,
+  getModelById,
+  hfUrlFromDescriptor,
+  recommendLocalModel,
+  recommendLocalModelId,
+  QVAC_STT_MODELS,
+  DEFAULT_STT_MODEL_ID,
+  getSttModelById,
+  DEFAULT_TTS_ENGINE,
+  type QVACModel,
+  type TtsEngine,
+} from './qvacModels';
+import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
+import { isLikelyValueMovingToolName } from '../utils/toolSafety';
+
+// CPU baseline config for the local llamacpp model. Used as the GPU fallback
+// and as the base the GPU attempt overrides (device + gpu_layers).
+const LOCAL_LLM_CONFIG = {
+  device: 'cpu',
+  gpu_layers: 0,
+  ctx_size: 2048,
+  tools: true,
+  verbosity: VERBOSITY.ERROR,
+} as const;
+
+// GPU (Metal on iPhone) offload config tried first for local inference — far
+// faster than CPU when llamacpp can init the Metal context in the worklet. We
+// fall back to LOCAL_LLM_CONFIG (CPU) automatically if the GPU load throws.
+// ctx 4096 gives the agentic prompt (system + tools + skills + a little history)
+// room to fit on-device; 2048 overflowed immediately ("prompt exceeds context").
+const LOCAL_LLM_CONFIG_GPU = {
+  ...LOCAL_LLM_CONFIG,
+  device: 'gpu',
+  gpu_layers: 99, // offload all layers; llamacpp clamps to the model's count
+  ctx_size: 4096,
+} as const;
+
+// Delegated to a desktop provider — it has the RAM to run a big context, so give
+// the agentic prompt plenty of room (Qwen3-600M supports up to 32k). 2048
+// overflowed with the system prompt + tool/skill definitions alone.
+const DELEGATE_LLM_CONFIG = {
+  ...LOCAL_LLM_CONFIG_GPU,
+  ctx_size: 16384,
+} as const;
+
+/**
+ * On a phone we download model weights over plain HTTPS with React Native's
+ * own networking (expo-file-system) instead of QVAC's `downloadAsset`, whose
+ * `registry://` source pulls over a Hyperswarm/DHT P2P transport that crashes
+ * the bare worklet on iOS. Once the file is on disk we hand the local path to
+ * `loadModel`, which mmaps it directly (no worklet networking involved).
+ *
+ * In DELEGATED mode the model is loaded/run on a remote P2P provider (e.g. a
+ * Mac), so the phone never downloads the weights — we pass the SDK descriptor
+ * plus a `delegate` config to `loadModel`.
+ */
+// SUPERTONIC-2 TTS output sample rate (Hz). Used to build the WAV for playback.
+const TTS_SAMPLE_RATE = 44100;
+
+// Whisper languages we'll request directly from the device locale. whisper.cpp
+// supports far more, but the QVAC handler rejects "auto"/detect_language for
+// these tiny models, so we pass a concrete code (and fall back to 'en').
+const WHISPER_LANGS = new Set([
+  'en', 'it', 'es', 'fr', 'de', 'pt', 'nl', 'ru', 'pl', 'uk', 'tr', 'ar',
+  'zh', 'ja', 'ko', 'hi', 'id', 'sv', 'no', 'da', 'fi', 'cs', 'ro', 'el',
+  'he', 'th', 'vi', 'hu', 'ca',
+]);
+
+/**
+ * Best-effort 2-letter language code from the OS locale (e.g. "it-IT" → "it"),
+ * restricted to codes Whisper handles well. Falls back to 'en'.
+ */
+function deviceWhisperLanguage(): string {
+  try {
+    let loc = 'en';
+    if (Platform.OS === 'ios') {
+      const s: any = NativeModules.SettingsManager?.settings;
+      loc = s?.AppleLocale || (Array.isArray(s?.AppleLanguages) ? s.AppleLanguages[0] : '') || 'en';
+    } else {
+      loc = NativeModules.I18nManager?.localeIdentifier || 'en';
+    }
+    const code = String(loc).split(/[-_]/)[0].toLowerCase();
+    return WHISPER_LANGS.has(code) ? code : 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+function isPhoneRuntime(): boolean {
+  return Platform.OS === 'ios' || Platform.OS === 'android';
+}
+
+function sanitizeForSupertonic(text: string): string {
+  const normalized = text
+    .replace(/\b(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{40,}\b/gi, 'Lightning invoice')
+    .replace(/\blnurl[0-9a-z]{40,}\b/gi, 'Lightning payment link')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/[\u0060\u00B4\u02CB\u2032*_~#<>|[\]{}]/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[•·]/g, '. ')
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  return Array.from(normalized)
+    .filter((ch) => {
+      const code = ch.charCodeAt(0);
+      return (code === 0x09 || code === 0x0A || code === 0x0D || (code >= 0x20 && code <= 0x7E)) &&
+        code !== 0x60;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanAssistantVisibleText(text: string): string {
+  let cleaned = text
+    // Qwen-style reasoning sometimes arrives in contentText. Never show/speak it.
+    .replace(/<think\b[\s\S]*?<\/think>/gi, ' ')
+    .replace(/<think\b[\s\S]*$/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Some small local models emit a tool-call object as plain text. Drop the
+  // leading fragment and keep any natural-language sentence that follows.
+  const toolPrefix = cleaned.match(/^\s*\{?\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*/i);
+  if (toolPrefix) {
+    cleaned = cleaned.slice(toolPrefix[0].length).replace(/^\s*\{?\s*/, '').trim();
+  }
+
+  return cleaned
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const CONFIG_KEY = 'qvac.config.v1';
+
+export interface QVACConfig {
+  /** Selected chat model id (see qvacModels.ts). */
+  modelId: string;
+  /** Route inference to a remote P2P provider instead of running on-device. */
+  delegateEnabled: boolean;
+  /** Public key of the QVAC provider to delegate to (from `startQVACProvider`). */
+  providerPublicKey: string;
+  /** Selected speech-to-text (Whisper) model id for the voice mode. */
+  sttModelId: string;
+  /** Text-to-speech engine for the voice mode ('supertonic' | 'system'). */
+  ttsEngine: TtsEngine;
+  /** True once the user explicitly chose a TTS engine in settings. */
+  ttsEngineUserSelected?: boolean;
+}
+
+const DEFAULT_CONFIG: QVACConfig = {
+  modelId: DEFAULT_MODEL_ID,
+  delegateEnabled: false,
+  providerPublicKey: '',
+  sttModelId: DEFAULT_STT_MODEL_ID,
+  ttsEngine: DEFAULT_TTS_ENGINE,
+};
+
+export type ModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error';
+
+export interface QVACState {
+  llmStatus: ModelStatus;
+  whisperStatus: ModelStatus;
+  llmDownloadProgress: number;
+  whisperDownloadProgress: number;
+  error: string | null;
+}
+
+export interface QVACTool {
+  name: string;
+  description: string;
+  parameters: z.ZodObject<any>;
+  handler: (args: Record<string, unknown>) => Promise<unknown>;
+  /**
+   * When true the tool is NOT auto-executed by `chat()`. Instead it is returned
+   * with `pending: true` so the UI can ask the user to confirm (e.g. payments)
+   * before invoking the handler explicitly.
+   */
+  requiresConfirmation?: boolean;
+}
+
+export interface QVACToolCall {
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  /** True when the tool needs user confirmation before its handler runs. */
+  pending?: boolean;
+}
+
+type StateListener = (state: QVACState) => void;
+
+class QVACService {
+  private static instance: QVACService;
+
+  private llmModelId: string | null = null;
+  private whisperModelId: string | null = null;
+  private ttsModelId: string | null = null;
+  private ttsLoadPromise: Promise<string> | null = null;
+
+  private config: QVACConfig = { ...DEFAULT_CONFIG };
+  private configLoaded = false;
+  private deviceMemBytes: number | null = null;
+
+  private state: QVACState = {
+    llmStatus: 'not_downloaded',
+    whisperStatus: 'not_downloaded',
+    llmDownloadProgress: 0,
+    whisperDownloadProgress: 0,
+    error: null,
+  };
+
+  private listeners = new Set<StateListener>();
+
+  // Master kill switch for on-device AI. Defaults OFF: starting the QVAC Bare
+  // worklet on a native/JS mismatch (or on the iOS Simulator, which has no
+  // bare-abort framework) aborts the process natively — an error JS can't catch.
+  // App.tsx syncs this from the persisted KaleidoMind mode (settings.aiMode), so the
+  // worklet can never start until the user explicitly opts in.
+  private enabled = false;
+
+  private constructor() {}
+
+  static getInstance(): QVACService {
+    if (!QVACService.instance) {
+      QVACService.instance = new QVACService();
+    }
+    return QVACService.instance;
+  }
+
+  /** Enable/disable on-device AI. When disabled, all model init is a no-op. */
+  setEnabled(enabled: boolean): void {
+    this.enabled = enabled;
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  // BUILD-LEVEL KILL SWITCH for the QVAC Bare worklet.
+  //
+  // The worklet bundle imports the `bare-abort` native addon at startup, but
+  // that framework is NOT linked into the app binary in the current build — on
+  // BOTH the iOS Simulator AND a physical device it aborts with:
+  //   AddonError: ADDON_NOT_FOUND … bare-abort.2.0.13.framework
+  // That aborts the whole process (an unhandled rejection in a separate runtime
+  // that JS can't catch), so on-device AI is completely non-functional until the
+  // native packaging is fixed (embed bare-abort.*.framework via react-native-
+  // bare-kit). Until then we must NEVER boot the worklet.
+  //
+  // Enabled now that the Bare addon xcframeworks (bare-abort + the full set in
+  // qvac/addons.manifest.json) are linked into the iOS app via the bare-kit
+  // pod's prepare_command (`node ios/link.mjs`). Requires a fresh native build
+  // (`npx expo run:ios --device`) so the frameworks are embedded. If the worklet
+  // ever aborts with ADDON_NOT_FOUND again, the addons weren't linked — re-run
+  // the link step + pod install (see scripts/link-bare-addons.sh).
+  private static readonly NATIVE_RUNTIME_AVAILABLE = true;
+
+  // Cached, SYNCHRONOUS "can the Bare worklet even run here?" check — decided
+  // WITHOUT booting the worklet (booting an unsupported build aborts the process).
+  private _runtimeOk: boolean | null = null;
+  private runtimeOkSync(): boolean {
+    if (!QVACService.NATIVE_RUNTIME_AVAILABLE) return false;
+    if (this._runtimeOk == null) {
+      try {
+        this._runtimeOk = !DeviceInfo.isEmulatorSync();
+      } catch {
+        this._runtimeOk = true; // unknown → assume a real device build
+      }
+    }
+    return this._runtimeOk;
+  }
+
+  /**
+   * The single gate every worklet-touching method checks. Returns true when it
+   * is NOT safe to touch the QVAC runtime (disabled, or unsupported target).
+   */
+  private workletBlocked(): boolean {
+    return !this.enabled || !this.runtimeOkSync();
+  }
+
+  /** Resume QVAC runtime networking — guarded so it never boots the worklet here. */
+  async resumeRuntime(): Promise<void> {
+    if (this.workletBlocked()) return;
+    try {
+      await resume();
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  /** Suspend QVAC runtime networking — guarded so it never boots the worklet here. */
+  async suspendRuntime(): Promise<void> {
+    if (this.workletBlocked()) return;
+    try {
+      await suspend();
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  subscribe(listener: StateListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  getState(): QVACState {
+    return { ...this.state };
+  }
+
+  private setState(partial: Partial<QVACState>) {
+    this.state = { ...this.state, ...partial };
+    for (const listener of this.listeners) {
+      listener(this.getState());
+    }
+  }
+
+  // --- Config (selected model + P2P delegation) ---
+
+  /** Available chat models (the catalog). */
+  getCatalog(): QVACModel[] {
+    return QVAC_MODELS;
+  }
+
+  getConfig(): QVACConfig {
+    return { ...this.config };
+  }
+
+  /** Total device RAM in bytes (cached). Falls back to a modest 3 GB estimate. */
+  async getDeviceMemoryBytes(): Promise<number> {
+    if (this.deviceMemBytes != null) return this.deviceMemBytes;
+    try {
+      const mem = await DeviceInfo.getTotalMemory();
+      this.deviceMemBytes = mem && mem > 0 ? mem : 3 * 1024 * 1024 * 1024;
+    } catch {
+      this.deviceMemBytes = 3 * 1024 * 1024 * 1024;
+    }
+    return this.deviceMemBytes;
+  }
+
+  /** The model recommended for this device's RAM (for the picker UI). */
+  async getRecommendedModelId(): Promise<string> {
+    return recommendLocalModelId(await this.getDeviceMemoryBytes());
+  }
+
+  /**
+   * Whether the QVAC Bare worklet can run here AT ALL — checked WITHOUT booting
+   * it (booting on an unsupported target aborts the process natively, which JS
+   * can't catch). The iOS Simulator has no bare-abort framework, so the worklet
+   * can't start there; both on-device and delegate modes need it. Used by the
+   * KaleidoMind onboarding to steer users and to refuse init instead of crashing.
+   */
+  async getAvailability(): Promise<{
+    runtimeAvailable: boolean;
+    localCapable: boolean;
+    deviceMemGb: number;
+  }> {
+    const runtimeAvailable = this.runtimeOkSync();
+    const mem = await this.getDeviceMemoryBytes();
+    // Any real phone runs the smallest model; below ~3 GB we recommend delegating.
+    const localCapable = runtimeAvailable && mem >= 3 * 1024 * 1024 * 1024;
+    return {
+      runtimeAvailable,
+      localCapable,
+      deviceMemGb: Math.round((mem / (1024 * 1024 * 1024)) * 10) / 10,
+    };
+  }
+
+  async loadConfig(): Promise<QVACConfig> {
+    if (this.configLoaded) return this.getConfig();
+    let hadSaved = false;
+    try {
+      const raw = await AsyncStorage.getItem(CONFIG_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        this.config = { ...DEFAULT_CONFIG, ...saved };
+        if (saved.ttsEngine === 'system' && !saved.ttsEngineUserSelected) {
+          this.config.ttsEngine = DEFAULT_TTS_ENGINE;
+        }
+        hadSaved = true;
+      }
+    } catch {
+      /* use defaults */
+    }
+    // First run (no saved choice): pick a model that fits this device's RAM
+    // instead of always defaulting to the same one.
+    if (!hadSaved) {
+      try {
+        this.config = { ...this.config, modelId: await this.getRecommendedModelId() };
+      } catch {
+        /* keep DEFAULT_MODEL_ID */
+      }
+    }
+    this.configLoaded = true;
+    return this.getConfig();
+  }
+
+  private async saveConfig() {
+    try {
+      await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(this.config));
+    } catch {
+      /* ignore persistence errors */
+    }
+  }
+
+  /** Switch the active chat model and reload it. */
+  async setModelId(id: string): Promise<void> {
+    if (id === this.config.modelId) return;
+    this.config = { ...this.config, modelId: id };
+    await this.saveConfig();
+    await this.reloadLLM();
+  }
+
+  /** Configure P2P delegation (run inference on a remote provider) and reload. */
+  async setDelegate(opts: { enabled: boolean; providerPublicKey: string }): Promise<void> {
+    this.config = {
+      ...this.config,
+      delegateEnabled: opts.enabled,
+      providerPublicKey: opts.providerPublicKey.trim(),
+    };
+    await this.saveConfig();
+    await this.reloadLLM();
+  }
+
+  /**
+   * Align delegation with the chosen KaleidoMind mode: Desktop => delegate,
+   * Local/Off => on-device. This is the bridge between the redux `aiMode` and
+   * the engine config, so picking "Desktop" actually runs inference remotely
+   * (previously the mode and config.delegateEnabled were never synced, so
+   * "Desktop" still ran the model locally). No-ops when nothing changes, and
+   * won't enable delegation until a desktop is paired.
+   */
+  async setDelegateEnabled(enabled: boolean): Promise<void> {
+    await this.loadConfig();
+    if (enabled === this.config.delegateEnabled) return;
+    if (enabled && !this.config.providerPublicKey) return; // wait for pairing
+    await this.setDelegate({ enabled, providerPublicKey: this.config.providerPublicKey });
+  }
+
+  /** Unload + re-initialize the LLM (after a model/delegation change). */
+  private async reloadLLM(): Promise<void> {
+    await this.unloadLLM().catch(() => {});
+    this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, error: null });
+    await this.initializeLLM();
+  }
+
+  /** Switch the speech-to-text (Whisper) model and reload it if it was active. */
+  async setSttModel(id: string): Promise<void> {
+    await this.loadConfig();
+    if (id === this.config.sttModelId) return;
+    this.config = { ...this.config, sttModelId: id };
+    await this.saveConfig();
+    // Only reload Whisper if it was already loaded/loading — otherwise it'll
+    // pick up the new model lazily on next voice use.
+    if (this.whisperModelId || this.state.whisperStatus !== 'not_downloaded') {
+      await this.unloadWhisper().catch(() => {});
+      this.setState({ whisperStatus: 'not_downloaded', whisperDownloadProgress: 0 });
+      if (!this.workletBlocked()) await this.initializeWhisper();
+    }
+  }
+
+  /** Switch the text-to-speech engine (natural SUPERTONIC vs system voice). */
+  async setTtsEngine(engine: TtsEngine): Promise<void> {
+    await this.loadConfig();
+    if (engine === this.config.ttsEngine) return;
+    this.config = { ...this.config, ttsEngine: engine, ttsEngineUserSelected: true };
+    await this.saveConfig();
+    // Free the neural TTS weights when switching to the system voice.
+    if (engine === 'system') await this.unloadTts().catch(() => {});
+  }
+
+  /** Engine currently selected for speech output. */
+  getTtsEngine(): TtsEngine {
+    return this.config.ttsEngine ?? DEFAULT_TTS_ENGINE;
+  }
+
+  // --- Local model file management (download / delete) ---
+
+  /** Map a downloadable model id to its on-disk filename, if any. */
+  private localFileNameForId(id: string): string | null {
+    const chat = QVAC_MODELS.find((m) => m.id === id);
+    if (chat?.descriptor?.modelId) return String(chat.descriptor.modelId);
+    const stt = QVAC_STT_MODELS.find((m) => m.id === id);
+    if (stt) return stt.name;
+    return null;
+  }
+
+  /**
+   * Ids of models whose weights are fully downloaded on this device (chat + STT).
+   * A file counts as present only if its size matches the expected size, so a
+   * half-finished download isn't reported as installed.
+   */
+  getDownloadedModelIds(): string[] {
+    const dir = new Directory(Paths.document, 'qvac-models');
+    const present: string[] = [];
+    const check = (id: string, name: string, expected: number) => {
+      try {
+        const f = new File(dir, name);
+        if (f.exists && (f.info().size ?? 0) === expected) present.push(id);
+      } catch { /* ignore */ }
+    };
+    for (const m of QVAC_MODELS) {
+      if (m.localCapable && m.descriptor?.modelId) {
+        check(m.id, String(m.descriptor.modelId), m.descriptor.expectedSize ?? -1);
+      }
+    }
+    for (const s of QVAC_STT_MODELS) check(s.id, s.name, s.size);
+    return present;
+  }
+
+  /**
+   * Delete a downloaded model's weights from disk. If it's the model currently
+   * loaded, it is unloaded first so the file isn't held open.
+   */
+  async deleteLocalModel(id: string): Promise<void> {
+    const name = this.localFileNameForId(id);
+    if (!name) return;
+    // Unload if it's the active chat or STT model.
+    const chat = QVAC_MODELS.find((m) => m.id === id);
+    if (chat && this.config.modelId === id) await this.unloadLLM().catch(() => {});
+    const stt = QVAC_STT_MODELS.find((m) => m.id === id);
+    if (stt && this.config.sttModelId === id) await this.unloadWhisper().catch(() => {});
+    try {
+      const file = new File(new Directory(Paths.document, 'qvac-models'), name);
+      if (file.exists) file.delete();
+    } catch { /* ignore */ }
+  }
+
+  /**
+   * Download a model over HTTPS (if not already on disk) and return an
+   * absolute filesystem path suitable for `loadModel({ modelSrc })`.
+   */
+  private async ensureLocalModel(
+    model: { url: string; name: string; size: number },
+    onProgress: (pct: number) => void
+  ): Promise<string> {
+    const dir = new Directory(Paths.document, 'qvac-models');
+    try {
+      if (!dir.exists) dir.create({ intermediates: true } as any);
+    } catch {
+      // directory may already exist
+    }
+
+    const file = new File(dir, model.name);
+
+    // Reuse a previously-downloaded, complete file
+    if (file.exists) {
+      let size = 0;
+      try { size = file.info().size ?? 0; } catch { /* ignore */ }
+      if (size === model.size) {
+        onProgress(100);
+        return file.uri.replace('file://', '');
+      }
+      try { file.delete(); } catch { /* ignore */ }
+    }
+
+    // Download to a *known* path with a real byte-progress callback. The new
+    // `File.downloadFileAsync` derives its own filename and exposes no progress,
+    // so the legacy resumable API is used purely for its progress callback.
+    console.log(`[QVAC] downloading ${model.name} via https…`);
+    onProgress(0);
+    let lastPct = -1;
+    const resumable = createDownloadResumable(
+      model.url,
+      file.uri,
+      {},
+      (p) => {
+        const total = p.totalBytesExpectedToWrite > 0 ? p.totalBytesExpectedToWrite : model.size;
+        const pct = total > 0 ? Math.min(99, Math.round((p.totalBytesWritten / total) * 100)) : 0;
+        if (pct !== lastPct) {
+          lastPct = pct;
+          onProgress(pct);
+        }
+      }
+    );
+
+    const result = await resumable.downloadAsync();
+    if (!result?.uri) throw new Error(`Download failed for ${model.name}`);
+    onProgress(100);
+    console.log(`[QVAC] downloaded ${model.name}`);
+    return result.uri.replace('file://', '');
+  }
+
+  // --- LLM lifecycle ---
+
+  // Whether to try GPU (Metal) offload for local inference before CPU. Cached
+  // per session so we don't repeatedly attempt a Metal context that can't init.
+  private static PREFER_GPU = true;
+
+  /**
+   * Load the local llamacpp model with Metal/GPU offload when possible, falling
+   * back to CPU if the GPU context can't initialise in the Bare worklet. The
+   * GPU path is dramatically faster on iPhone (A-series Metal) for the small
+   * models we run on-device.
+   */
+  private async loadLocalLLM(modelSrc: any): Promise<string> {
+    if (QVACService.PREFER_GPU) {
+      try {
+        const id = await loadModel({
+          modelSrc,
+          modelType: 'llamacpp-completion',
+          modelConfig: { ...LOCAL_LLM_CONFIG_GPU },
+        } as any);
+        console.log('[QVAC] LLM loaded with Metal/GPU offload');
+        return id;
+      } catch (gpuErr) {
+        // Metal failed to init the llamacpp context — don't try it again this
+        // session, and fall through to CPU.
+        QVACService.PREFER_GPU = false;
+        console.warn(
+          '[QVAC] Metal/GPU load failed, falling back to CPU:',
+          gpuErr instanceof Error ? gpuErr.message : String(gpuErr)
+        );
+      }
+    }
+    const id = await loadModel({
+      modelSrc,
+      modelType: 'llamacpp-completion',
+      modelConfig: { ...LOCAL_LLM_CONFIG },
+    } as any);
+    console.log('[QVAC] LLM loaded on CPU');
+    return id;
+  }
+
+  async initializeLLM(): Promise<void> {
+    // Hard gate: never start the Bare worklet unless AI is enabled AND the
+    // runtime can actually run here. On an unsupported target (e.g. the iOS
+    // Simulator) booting the worklet aborts the process, so we refuse and
+    // surface a clear, actionable error instead.
+    if (!this.enabled) {
+      console.log('[QVAC] LLM init skipped — on-device AI is disabled');
+      return;
+    }
+    if (!this.runtimeOkSync()) {
+      console.warn('[QVAC] LLM init skipped — worklet runtime unavailable on this device');
+      this.setState({
+        llmStatus: 'error',
+        error: 'unavailable: KaleidoMind needs a physical device. Connect a desktop to delegate.',
+      });
+      return;
+    }
+    if (this.state.llmStatus === 'ready' || this.state.llmStatus === 'downloading' || this.state.llmStatus === 'loading') {
+      return;
+    }
+
+    try {
+      await this.loadConfig();
+      let model = getModelById(this.config.modelId);
+      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
+
+      // Guard: if we're running on-device but the selected model can't be
+      // downloaded here (P2P-only, e.g. Qwen3 4B, or oversized for this phone),
+      // fall back to a hardware-appropriate local model instead of failing to
+      // load. This is the common cause of "on-device AI failed to load" after a
+      // bigger model was selected during desktop/delegated testing.
+      if (!delegating && (!model.localCapable || model.tier !== 'phone')) {
+        const fallback = recommendLocalModel(await this.getDeviceMemoryBytes());
+        console.warn(
+          `[QVAC] '${model.label}' isn't enabled for stable on-device iPhone loading; falling back to '${fallback.label}'`
+        );
+        model = fallback;
+        this.config = { ...this.config, modelId: fallback.id };
+        await this.saveConfig();
+      }
+
+      let modelSrc: any;
+      if (delegating) {
+        // Weights are resolved/loaded on the remote provider — pass the SDK
+        // descriptor; the phone downloads nothing.
+        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+        modelSrc = model.descriptor;
+        console.log('[QVAC] LLM: delegating', model.id, '→', this.config.providerPublicKey.slice(0, 12) + '…');
+      } else {
+        this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
+        const url = hfUrlFromDescriptor(model.descriptor)!;
+        modelSrc = await this.ensureLocalModel(
+          { url, name: model.descriptor.modelId, size: model.descriptor.expectedSize },
+          (pct) => this.setState({ llmDownloadProgress: pct })
+        );
+        console.log('[QVAC] LLM: loadModel start', modelSrc);
+        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+      }
+
+      try {
+        if (delegating) {
+          // Delegated: the provider (e.g. a Mac) runs the model on its GPU.
+          this.llmModelId = await loadModel({
+            modelSrc,
+            modelType: 'llamacpp-completion',
+            modelConfig: { ...DELEGATE_LLM_CONFIG },
+            delegate: {
+              providerPublicKey: this.config.providerPublicKey,
+              fallbackToLocal: false,
+            },
+          } as any);
+        } else {
+          // Local: try Metal/GPU offload first, fall back to CPU.
+          this.llmModelId = await this.loadLocalLLM(modelSrc);
+        }
+      } catch (loadErr) {
+        if (!delegating) throw loadErr;
+        // Delegation failed (provider unreachable / RPC error, e.g. a stale
+        // "GPT_OSS_20B + delegate" config left over from desktop testing).
+        // Un-stick the phone: disable delegation, persist it, and load a local
+        // hardware-appropriate model instead of staying stuck on the provider.
+        console.warn(
+          '[QVAC] delegation failed; falling back to a local model:',
+          loadErr instanceof Error ? loadErr.message : String(loadErr)
+        );
+        const local = recommendLocalModel(await this.getDeviceMemoryBytes());
+        this.config = { ...this.config, modelId: local.id, delegateEnabled: false };
+        await this.saveConfig();
+        this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
+        const localUrl = hfUrlFromDescriptor(local.descriptor)!;
+        const localSrc = await this.ensureLocalModel(
+          { url: localUrl, name: local.descriptor.modelId, size: local.descriptor.expectedSize },
+          (pct) => this.setState({ llmDownloadProgress: pct })
+        );
+        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+        this.llmModelId = await this.loadLocalLLM(localSrc);
+      }
+
+      this.setState({ llmStatus: 'ready' });
+      console.log('QVAC LLM ready:', this.llmModelId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('QVAC LLM init failed:', msg);
+      this.setState({ llmStatus: 'error', error: `LLM: ${msg}` });
+    }
+  }
+
+  // --- Whisper lifecycle ---
+
+  async initializeWhisper(): Promise<void> {
+    // Hard gate: Whisper also runs in the Bare worklet — never start it unless
+    // on-device AI is enabled and the runtime can actually run here.
+    if (this.workletBlocked()) {
+      console.warn('[QVAC] Whisper init skipped — disabled or runtime unavailable');
+      return;
+    }
+    if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
+      return;
+    }
+
+    try {
+      await this.loadConfig();
+
+      // Delegated: transcription runs on the remote provider's Whisper model
+      // (the same desktop provider the LLM delegates to). The phone downloads no
+      // weights — we pass an SDK descriptor + `delegate`, and the bound modelId
+      // then makes every transcribeAudio() call route over P2P. If the provider
+      // is unreachable we fall through to the local download/load path below.
+      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
+      if (delegating) {
+        this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100, error: null });
+        try {
+          this.whisperModelId = await loadModel({
+            modelSrc: WHISPER_BASE_Q8_0,
+            modelType: 'whispercpp-transcription',
+            modelConfig: { language: deviceWhisperLanguage(), strategy: 'greedy', audio_format: 's16le' } as any,
+            delegate: {
+              providerPublicKey: this.config.providerPublicKey,
+              fallbackToLocal: false,
+            },
+          } as any);
+          this.setState({ whisperStatus: 'ready' });
+          console.log('[QVAC] Whisper ready (delegated):', this.whisperModelId);
+          return;
+        } catch (delErr) {
+          console.warn(
+            '[QVAC] Whisper delegation failed; falling back to local model:',
+            delErr instanceof Error ? delErr.message : String(delErr)
+          );
+        }
+      }
+
+      this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
+
+      // Use the user-selected Whisper variant, but keep the phone voice loop
+      // memory-safe. whisper-large-v3-turbo is ~1.6 GB; loading neural TTS right
+      // after it on iOS can get the app jetsammed before JS can catch anything.
+      const selectedStt = getSttModelById(this.config.sttModelId);
+      const stt = isPhoneRuntime() && selectedStt.id === 'whisper-large-v3-turbo'
+        ? getSttModelById(DEFAULT_STT_MODEL_ID)
+        : selectedStt;
+      if (stt.id !== selectedStt.id) {
+        console.warn(`[QVAC] Whisper model '${selectedStt.id}' is too large for phone voice mode; using '${stt.id}'`);
+      }
+      const modelPath = await this.ensureLocalModel(
+        { url: stt.url, name: stt.name, size: stt.size },
+        (pct) => this.setState({ whisperDownloadProgress: pct })
+      );
+
+      // English-only variants are pinned to 'en'; multilingual variants use the
+      // device locale (e.g. Italian) so non-English speech transcribes instead
+      // of being force-decoded as English → empty. The QVAC whisper handler
+      // rejects "auto"/detect_language for these tiny models, so we always pass
+      // a concrete code and fall back to 'en' if the chosen one won't load.
+      const primaryLang = stt.lang === 'en' ? 'en' : deviceWhisperLanguage();
+      const loadWhisper = (language: string) =>
+        loadModel({
+          modelSrc: modelPath,
+          modelType: 'whispercpp-transcription',
+          modelConfig: { language, strategy: 'greedy', audio_format: 's16le' } as any,
+        });
+
+      console.log('[QVAC] Whisper: loadModel start', stt.id, 'lang=' + primaryLang, modelPath);
+      this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100 });
+
+      try {
+        this.whisperModelId = await loadWhisper(primaryLang);
+      } catch (langErr) {
+        if (primaryLang === 'en') throw langErr;
+        console.warn(`[QVAC] Whisper load failed for '${primaryLang}', retrying as 'en':`,
+          langErr instanceof Error ? langErr.message : String(langErr));
+        this.whisperModelId = await loadWhisper('en');
+      }
+
+      this.setState({ whisperStatus: 'ready' });
+      console.log('QVAC Whisper ready:', this.whisperModelId);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('QVAC Whisper init failed:', msg);
+      this.setState({ whisperStatus: 'error', error: `Whisper: ${msg}` });
+    }
+  }
+
+  // --- Chat completion with tool calling ---
+
+  async chat(params: {
+    messages: Array<{ role: string; content: string }>;
+    tools?: QVACTool[];
+    /** Called for every visible content token as it streams in. */
+    onToken?: (token: string) => void;
+    /**
+     * Called synchronously with the run's requestId the moment generation
+     * starts, so the UI can cancel it mid-stream via `cancelRequest()`.
+     */
+    onStart?: (requestId: string) => void;
+  }): Promise<{ text: string; toolCalls: QVACToolCall[]; requestId: string }> {
+    if (!this.llmModelId) {
+      throw new Error('LLM model not loaded');
+    }
+
+    const tools = params.tools ?? [];
+    const toolsByName = new Map(tools.map(t => [t.name, t]));
+    const toolDefs = tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+      handler: t.handler,
+    }));
+
+    // Canonical completion API (QVAC v0.12): a typed `events` stream plus an
+    // aggregated `final` promise. `requestId` is available synchronously.
+    const run = completion({
+      modelId: this.llmModelId,
+      history: params.messages,
+      stream: true,
+      tools: toolDefs.length ? toolDefs : undefined,
+    });
+
+    params.onStart?.(run.requestId);
+
+    // Stream visible content tokens. `contentDelta` excludes <think> reasoning
+    // (use `thinkingDelta` if you ever want to surface the model's reasoning).
+    let streamed = '';
+    for await (const event of run.events) {
+      if (event.type === 'contentDelta') {
+        streamed += event.text;
+        params.onToken?.(event.text);
+      }
+    }
+
+    const final = await run.final;
+    const text = cleanAssistantVisibleText(final.contentText || streamed);
+
+    // Resolve tool calls. Financial tools (requiresConfirmation) are returned
+    // as `pending` instead of being auto-invoked, so the UI can confirm first.
+    const executedCalls: QVACToolCall[] = [];
+
+    for (const call of final.toolCalls) {
+      const def = toolsByName.get(call.name);
+
+      if (def?.requiresConfirmation) {
+        executedCalls.push({
+          name: call.name,
+          arguments: call.arguments,
+          pending: true,
+        });
+        continue;
+      }
+
+      let callResult: unknown;
+      if (call.invoke) {
+        try {
+          callResult = await call.invoke();
+        } catch (err) {
+          callResult = { error: err instanceof Error ? err.message : String(err) };
+        }
+      }
+      executedCalls.push({
+        name: call.name,
+        arguments: call.arguments,
+        result: callResult,
+      });
+    }
+
+    return { text, toolCalls: executedCalls, requestId: run.requestId };
+  }
+
+  /**
+   * Multi-turn agentic chat. Unlike `chat()` (single-shot), this feeds tool
+   * results back to the model so it produces a natural-language answer and can
+   * chain tool calls (e.g. get_balance → reason → pay). Follows the QVAC SDK
+   * multi-turn pattern: push the raw assistant frame + `{role:'tool'}` results
+   * to history, loop until the model stops calling tools.
+   *
+   * Money tools (requiresConfirmation) pause for `onConfirm` — the UI shows a
+   * confirmation sheet and resolves the promise. The handler always runs on
+   * THIS device (the phone), even when inference is delegated to a desktop
+   * provider — keys never leave the device.
+   */
+  async chatAgentic(params: {
+    messages: Array<{ role: string; content: string }>;
+    tools?: QVACTool[];
+    /** Max reasoning↔tool rounds before forcing a stop. Default 5. */
+    maxTurns?: number;
+    /** Visible content tokens as they stream, tagged with the current turn. */
+    onToken?: (token: string, turn: number) => void;
+    /** The live requestId for the current turn (so a stop button can cancel it). */
+    onStart?: (requestId: string, turn: number) => void;
+    /** Fired when the model requests a tool, before it executes. */
+    onToolCall?: (call: { name: string; arguments: Record<string, unknown> }, turn: number) => void;
+    /** Human-in-the-loop gate for money tools. Resolve to approve/decline. */
+    onConfirm?: (call: {
+      name: string;
+      arguments: Record<string, unknown>;
+    }) => Promise<{ approved: boolean; reason?: string }>;
+  }): Promise<{ text: string; turns: number; toolCalls: QVACToolCall[]; requestId: string }> {
+    if (!this.llmModelId) {
+      throw new Error('LLM model not loaded');
+    }
+
+    const tools = params.tools ?? [];
+    const toolsByName = new Map(tools.map((t) => [t.name, t]));
+    const toolDefs = tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+      handler: t.handler,
+    }));
+    const maxTurns = params.maxTurns ?? 5;
+
+    // Work on a copy — we append assistant/tool frames per the SDK pattern.
+    const history: Array<{ role: string; content: string }> = [...params.messages];
+    const executedCalls: QVACToolCall[] = [];
+    let lastRequestId = '';
+    let finalText = '';
+    let turns = 0;
+
+    for (let turn = 1; turn <= maxTurns; turn++) {
+      turns = turn;
+
+      const run = completion({
+        modelId: this.llmModelId,
+        history,
+        stream: true,
+        tools: toolDefs.length ? toolDefs : undefined,
+      });
+      lastRequestId = run.requestId;
+      params.onStart?.(run.requestId, turn);
+
+      let streamed = '';
+      for await (const event of run.events) {
+        if (event.type === 'contentDelta') {
+          streamed += event.text;
+          params.onToken?.(event.text, turn);
+        }
+      }
+
+      const final = await run.final;
+      finalText = cleanAssistantVisibleText(final.contentText || streamed);
+
+      // No tool calls → the model produced its final answer.
+      if (!final.toolCalls || final.toolCalls.length === 0) {
+        break;
+      }
+
+      // Anchor the next turn with the RAW assistant frame (not the cleaned
+      // text) — the model needs its own tool-call framing to continue.
+      history.push({ role: 'assistant', content: final.raw?.fullText ?? finalText });
+
+      for (const call of final.toolCalls) {
+        const def = toolsByName.get(call.name);
+        params.onToolCall?.({ name: call.name, arguments: call.arguments }, turn);
+
+        let result: unknown;
+
+        // Fail-safe: confirm if the tool opted in OR if its name looks like it
+        // moves value. The heuristic catches fund-moving tools that forget to
+        // set `requiresConfirmation` — a missing flag must never auto-execute.
+        const heuristicValueMoving = isLikelyValueMovingToolName(call.name);
+        const mustConfirm = !!def?.requiresConfirmation || heuristicValueMoving;
+        if (mustConfirm && !def?.requiresConfirmation) {
+          console.warn(
+            `[QVAC] Tool "${call.name}" looks value-moving but is not marked ` +
+              `requiresConfirmation — forcing confirmation. Add the flag to its definition.`,
+          );
+        }
+
+        if (mustConfirm) {
+          // Human-in-the-loop for anything that moves money.
+          const decision = params.onConfirm
+            ? await params.onConfirm({ name: call.name, arguments: call.arguments })
+            : { approved: false, reason: 'no confirmation handler available' };
+
+          if (decision.approved) {
+            try {
+              if (call.invoke) {
+                result = await call.invoke();
+              } else if (def?.handler) {
+                result = await def.handler(call.arguments);
+              } else {
+                result = { error: `unknown tool: ${call.name}` };
+              }
+            } catch (err) {
+              result = { error: err instanceof Error ? err.message : String(err) };
+            }
+          } else {
+            result = { declined: true, reason: decision.reason ?? 'user declined' };
+          }
+        } else {
+          // Read / safe-write tools auto-execute on this device.
+          try {
+            result = call.invoke ? await call.invoke() : await def?.handler(call.arguments);
+          } catch (err) {
+            result = { error: err instanceof Error ? err.message : String(err) };
+          }
+        }
+
+        executedCalls.push({ name: call.name, arguments: call.arguments, result });
+        history.push({
+          role: 'tool',
+          content: typeof result === 'string' ? result : JSON.stringify(result),
+        });
+      }
+
+      if (turn === maxTurns && !finalText) {
+        finalText = 'I had to stop after several steps — please try a more specific request.';
+      }
+    }
+
+    return { text: finalText, turns, toolCalls: executedCalls, requestId: lastRequestId };
+  }
+
+  /**
+   * One completion turn in the shape the shared @kaleido/mind Engine expects.
+   * The Engine owns the agentic loop + tool execution; this just runs a single
+   * round and returns the assistant text, the raw frame (for history push-back)
+   * and any tool calls the model requested. Tools are passed as schemas only —
+   * the Engine executes them via its ToolSources (so wallet signing stays here
+   * on-device even when inference is delegated).
+   */
+  async runProviderTurn(input: TurnInput): Promise<TurnOutput> {
+    if (!this.llmModelId) {
+      throw new Error('LLM model not loaded');
+    }
+
+    const history = input.system
+      ? [{ role: 'system', content: input.system }, ...input.messages]
+      : input.messages;
+
+    const toolDefs = input.tools.map((t) => ({
+      name: t.name,
+      description: t.description,
+      parameters: t.parameters,
+    }));
+
+    const run = completion({
+      modelId: this.llmModelId,
+      history,
+      stream: true,
+      tools: toolDefs.length ? (toolDefs as any) : undefined,
+    });
+
+    let streamed = '';
+    for await (const event of run.events) {
+      if (event.type === 'contentDelta') {
+        streamed += event.text;
+        input.onToken?.(event.text);
+      }
+    }
+
+    const final = await run.final;
+    // Strip <think>…</think> reasoning from the user-visible text; keep the raw
+    // frame (with framing) for the engine's history push-back.
+    const rawText = final.contentText || streamed;
+    const text = cleanAssistantVisibleText(rawText);
+
+    return {
+      text,
+      rawContent: final.raw?.fullText ?? rawText,
+      toolCalls: (final.toolCalls || []).map((c: any) => ({
+        id: c.id,
+        name: c.name,
+        arguments: c.arguments ?? {},
+      })),
+      requestId: run.requestId,
+    };
+  }
+
+  /** Cancel an in-flight completion by its requestId (for a stop button). */
+  async cancelRequest(requestId: string): Promise<void> {
+    try {
+      await cancel({ requestId });
+    } catch (err) {
+      console.warn('QVAC cancel failed:', err);
+    }
+  }
+
+  // --- Transcription ---
+
+  async transcribeAudio(audioUri: string): Promise<string> {
+    if (this.workletBlocked() || !this.whisperModelId) {
+      throw new Error('Whisper model not loaded');
+    }
+
+    // The QVAC SDK's native file reader expects a plain filesystem path, not a
+    // `file://` URI — same as the model-loading paths above. Passing the raw
+    // URI causes AUDIO_FILE_NOT_FOUND even though the file exists.
+    const audioPath = audioUri.replace('file://', '');
+
+    return await transcribe({
+      modelId: this.whisperModelId,
+      audioChunk: audioPath,
+    });
+  }
+
+  // --- Text-to-speech (on-device, QVAC SUPERTONIC-2) ---
+
+  /** True once the TTS model is resident. */
+  isTtsReady(): boolean {
+    return this.ttsModelId != null;
+  }
+
+  /**
+   * Load the QVAC 0.12 GGML Supertonic TTS model and keep it resident.
+   * Idempotent + single-flighted so concurrent speak calls share one load.
+   */
+  private async ensureTtsLoaded(): Promise<string> {
+    if (this.ttsModelId) return this.ttsModelId;
+    if (this.ttsLoadPromise) return this.ttsLoadPromise;
+
+    this.ttsLoadPromise = (async () => {
+      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
+      console.log(`[QVAC] TTS: loading Supertonic GGML model${delegating ? ' (delegated)' : ''}`);
+      // On-device only: free the Whisper weights before loading the neural voice
+      // so the phone never holds both in RAM. When delegating, both models live
+      // on the remote provider, so there's nothing local to unload.
+      if (!delegating && this.whisperModelId) {
+        console.log('[QVAC] TTS: unloading Whisper before neural voice load');
+        await this.unloadWhisper().catch(() => {});
+      }
+      const id = await loadModel({
+        modelSrc: TTS_EN_SUPERTONIC_Q4_0,
+        modelType: 'tts-ggml',
+        modelConfig: {
+          ttsEngine: 'supertonic',
+          language: 'en',
+          voice: 'F1',
+          ttsSpeed: 1.05,
+          ttsNumInferenceSteps: 5,
+        },
+        ...(delegating
+          ? { delegate: { providerPublicKey: this.config.providerPublicKey, fallbackToLocal: false } }
+          : {}),
+      } as any);
+      this.ttsModelId = id;
+      console.log('[QVAC] TTS ready:', id);
+      return id;
+    })();
+
+    try {
+      return await this.ttsLoadPromise;
+    } catch (e) {
+      this.ttsLoadPromise = null; // allow a retry
+      throw e;
+    }
+  }
+
+  /**
+   * Synthesize speech for `text` on-device. Returns 16-bit PCM samples + the
+   * sample rate, or null when on-device AI is unavailable (caller falls back to
+   * the system voice). Throws on a genuine synthesis error.
+   */
+  async synthesizeSpeech(text: string): Promise<{ pcm: number[]; sampleRate: number } | null> {
+    if (this.workletBlocked()) return null;
+    const trimmed = sanitizeForSupertonic(text);
+    if (!trimmed) return null;
+    if (trimmed !== text.trim()) {
+      console.log('[QVAC] TTS: sanitized unsupported characters before synthesis');
+    }
+    if (Array.from(trimmed).some((ch) => ch.charCodeAt(0) === 0x60)) {
+      console.warn('[QVAC] TTS: refusing Supertonic input with U+0060 after sanitize');
+      return null;
+    }
+    console.log('[QVAC] TTS: synth input chars', Array.from(trimmed).map((ch) => ch.charCodeAt(0)).join(','));
+
+    const modelId = await this.ensureTtsLoaded();
+    const result: any = textToSpeech({
+      modelId,
+      text: trimmed,
+      inputType: 'text',
+      stream: false,
+    } as any);
+    const pcm: number[] = await result.buffer;
+    return { pcm, sampleRate: TTS_SAMPLE_RATE };
+  }
+
+  // --- Cleanup ---
+
+  async unloadTts(): Promise<void> {
+    if (this.ttsModelId) {
+      try {
+        await unloadModel({ modelId: this.ttsModelId, clearStorage: false });
+      } catch {
+        /* ignore */
+      }
+      this.ttsModelId = null;
+      this.ttsLoadPromise = null;
+    }
+  }
+
+  async unloadLLM(): Promise<void> {
+    if (this.llmModelId) {
+      await unloadModel({ modelId: this.llmModelId, clearStorage: false });
+      this.llmModelId = null;
+      this.setState({ llmStatus: 'not_downloaded' });
+    }
+  }
+
+  async unloadWhisper(): Promise<void> {
+    if (this.whisperModelId) {
+      await unloadModel({ modelId: this.whisperModelId, clearStorage: false });
+      this.whisperModelId = null;
+      this.setState({ whisperStatus: 'not_downloaded' });
+    }
+  }
+
+  async unloadAll(): Promise<void> {
+    await Promise.all([this.unloadLLM(), this.unloadWhisper(), this.unloadTts()]);
+  }
+}
+
+export default QVACService;

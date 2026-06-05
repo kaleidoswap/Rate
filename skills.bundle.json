@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "skills": [
+    {
+      "dir": "bitrefill",
+      "markdown": "---\nname: bitrefill\ndescription: Shop with Bitcoin via Bitrefill — gift cards, mobile/phone top-ups, eSIM data plans, in 180+ countries. Triggers when the user mentions Bitrefill, a gift card, a mobile top-up, an eSIM, or refilling a phone.\ntriggers: gift card, giftcard, bitrefill, top-up, topup, refill, esim, sim, amazon, steam, voucher, mobile, recharge\nmetadata:\n  surface: mobile\n  note: full bitrefill skill + MCP live on the paired desktop, not the phone\n---\n\n# Bitrefill (mobile)\n\nBitrefill purchases run on the paired KaleidoSwap **desktop**, which hosts the\nofficial Bitrefill agent skill and MCP. This phone is not a Bitrefill client.\n\n1. If a desktop is paired (P2P delegation active): confirm the product, country\n   and value with the user, then hand the purchase off to the desktop brain and\n   relay its result (and the redemption code) back here.\n2. If no desktop is paired: give the user a https://www.bitrefill.com link for\n   the product and explain they can pair a desktop to buy in-chat.\n\nNever invent an order code or claim a purchase succeeded — only the desktop MCP\ncan complete a buy.\n"
+    },
+    {
+      "dir": "merchant-finder",
+      "markdown": "---\nname: merchant-finder\ndescription: Find Bitcoin-accepting merchants and places, especially around Lugano. Triggers when the user asks where to spend Bitcoin, for a shop, store, or restaurant that accepts Bitcoin, or for merchants nearby.\ntools: find_merchant_locations, get_merchant_info\ntriggers: merchant, shop, store, restaurant, lugano, accept, nearby, where, place, spend\n---\n\n# Merchant finder\n\nFind merchants that accept Bitcoin near the user.\n\n- Use `find_merchant_locations` for the area in question (default to the user's\n  current location, e.g. Lugano).\n- Use `get_merchant_info` to share a specific merchant's details, then offer to\n  show it on the map.\n"
+    },
+    {
+      "dir": "paid-data",
+      "markdown": "---\nname: paid-data\ndescription: Fetch premium or paywalled data that requires a small Lightning (L402) payment — paid feeds, gated APIs, unlockable resources. Triggers when the user wants premium, paid, or unlockable data behind an L402 paywall.\ntools: fetch_paid_resource\ntriggers: premium, paid, l402, feed, subscription, unlock, paywall\n---\n\n# Paid data\n\nFetch L402-paywalled resources, paying small Lightning invoices automatically\nwith `fetch_paid_resource`. Small amounts pay without prompting (capped);\nanything larger is declined. Tell the user what was paid and what was returned.\n"
+    },
+    {
+      "dir": "wallet-assistant",
+      "markdown": "---\nname: wallet-assistant\ndescription: Everyday wallet tasks on this phone — check the BTC/asset balance, get a receive address, list recent transactions, create or pay a Lightning invoice, or pay a Nostr contact. Triggers when the user asks about their balance, wants to receive or send money, pay an invoice, or pay a contact.\ntools: get_wallet_balance, get_receive_address, list_recent_transactions, pay_lightning_invoice, generate_invoice, pay_nostr_contact\ntriggers: balance, pay, send, receive, address, invoice, transactions, contact, funds, money\n---\n\n# Wallet assistant\n\nYou operate the user's on-device Bitcoin wallet. ALWAYS use a tool to get real\ndata — NEVER invent or guess a balance, address, amount, or transaction.\n\nRules:\n- Balance / \"how much do I have\" → call `get_wallet_balance`, then state the\n  number from the result. Do not make up a figure.\n- Receive / \"give me an address\" → call `get_receive_address`. For an amount,\n  call `generate_invoice` with that amount.\n- Recent activity → call `list_recent_transactions`.\n- Send / pay → call `get_wallet_balance` first, then `pay_lightning_invoice`\n  (invoice) or `pay_nostr_contact` (contact). State the amount and destination\n  and get the user's confirmation before paying.\n\nKeep replies to one short sentence built from the tool result.\n"
+    }
+  ]
+}

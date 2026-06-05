@@ -23,7 +23,7 @@ import {
   unfollowUser,
 } from '../store/slices/nostrSlice';
 import { theme } from '../theme';
-import { Card, Button, Input } from '../components';
+import { Card, Button, Input, ScreenHeader } from '../components';
 import { NostrContact } from '../services/NostrService';
 import { nip19 } from 'nostr-tools';
 
@@ -178,28 +178,18 @@ export default function NostrContactsScreen({ navigation }: Props) {
 
   const renderHeader = () => (
     <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Nostr Contacts</Text>
+      <ScreenHeader
+        title="Nostr Contacts"
+        showBack={true}
+        rightAction={
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => setShowAddForm(true)}
           >
             <Ionicons name="person-add" size={24} color={theme.colors.text.inverse} />
           </TouchableOpacity>
-        </View>
-      </LinearGradient>
+        }
+      />
     </View>
   );
 

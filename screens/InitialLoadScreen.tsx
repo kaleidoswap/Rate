@@ -1,13 +1,12 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useDispatch } from 'react-redux';
-import { RGBNodeService } from '../services/RGBNodeService';
-import { setUnlocked, setInitialized } from '../store/slices/walletSlice';
-import { autoRestoreNostrConnection } from '../services/initializeServices';
+import DatabaseService, { NetworkConfig } from '../services/DatabaseService';
+import { setUnlocked, setInitialized, setActiveWallet } from '../store/slices/walletSlice';
+import { autoRestoreNostrConnection, initializeProtocolServices } from '../services/initializeServices';
+import { BrandLoading } from '../components/brand/BrandLoading';
 
 export default function InitialLoadScreen({ navigation }: { navigation: any }) {
   const dispatch = useDispatch();
-  const nodeService = RGBNodeService.getInstance();
 
   useEffect(() => {
     initializeApp();
@@ -15,45 +14,57 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
 
   const initializeApp = async () => {
     try {
-      // Initialize remote node connection
-      const nodeInitialized = await nodeService.initializeNode();
+      // Initialize database first
+      const dbService = DatabaseService.getInstance();
+      await dbService.initializeDatabase();
       
-      // Attempt to auto-restore Nostr connection in parallel
-      // Don't block app startup if this fails
-      autoRestoreNostrConnection().catch(error => {
-        console.log('Nostr auto-restore failed (non-blocking):', error);
-      });
-      
-      if (nodeInitialized) {
-        // Set wallet as initialized and unlocked for remote node
+      // Load active wallet
+      let activeWallet = await dbService.getActiveWallet();
+
+      // If no active wallet, try to find any wallet and make it active (Single Wallet enforcement)
+      if (!activeWallet) {
+        const wallets = await dbService.getAllWallets();
+        if (wallets.length > 0) {
+          activeWallet = wallets[0];
+          await dbService.setActiveWallet(activeWallet.id!);
+        }
+      }
+
+      if (activeWallet) {
+        // Set active wallet in Redux
+        dispatch(setActiveWallet(activeWallet));
+
+        // Initialize protocol services for all enabled networks
+        try {
+          await initializeProtocolServices();
+        } catch (e) {
+          console.error('Failed to initialize protocol services:', e);
+        }
+
         dispatch(setInitialized(true));
         dispatch(setUnlocked(true));
-        
-        // Navigate directly to dashboard
+
+        // Attempt to auto-restore Nostr connection in parallel
+        autoRestoreNostrConnection().catch(error => {
+          console.log('Nostr auto-restore failed (non-blocking):', error);
+        });
+
         navigation.replace('Dashboard');
-      } else {
-        // If remote connection fails, show error in wallet setup
-        navigation.replace('WalletSetup');
+        return;
       }
+
+      // If absolutely no wallets, go to WalletSetup (Onboarding)
+      navigation.replace('WalletSetup');
+
     } catch (error) {
       console.error('Initial state check error:', error);
-      // On error, go to wallet setup where it will be handled
+      // Fallback to Setup if something critical fails
       navigation.replace('WalletSetup');
     }
   };
 
-  return (
-    <View style={styles.container}>
-      <ActivityIndicator size="large" color="#007AFF" />
-    </View>
-  );
+  // Branded loader that visually continues the BrandIntro (same dark
+  // kaleidoscope background) so the launch feels like one seamless moment
+  // instead of flashing a white screen with a blue spinner.
+  return <BrandLoading />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-}); 

@@ -1,0 +1,7 @@
+{
+  "plugins": [
+    "@qvac/sdk/llamacpp-completion/plugin",
+    "@qvac/sdk/whispercpp-transcription/plugin",
+    "@qvac/sdk/tts-ggml/plugin"
+  ]
+}

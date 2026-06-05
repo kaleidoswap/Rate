@@ -37,7 +37,7 @@ export const Button: React.FC<ButtonProps> = ({
     const baseStyle = {
       ...styles.base,
       ...styles[size],
-      ...(fullWidth && { width: '100%' }),
+      ...(fullWidth && { width: '100%' as const }),
     };
 
     switch (variant) {
@@ -79,18 +79,18 @@ export const Button: React.FC<ButtonProps> = ({
     }
   };
 
-  const getGradientColors = () => {
+  const getGradientColors = (): [string, string] => {
     switch (variant) {
       case 'primary':
-        return theme.colors.primary.gradient;
+        return theme.colors.primary.gradient || ['#667eea', '#764ba2'];
       case 'success':
-        return theme.colors.success.gradient;
+        return theme.colors.success.gradient || ['#56ab2f', '#a8e6cf'];
       case 'warning':
-        return theme.colors.warning.gradient;
+        return theme.colors.warning.gradient || ['#f093fb', '#f5576c'];
       case 'error':
-        return theme.colors.error.gradient;
+        return theme.colors.error.gradient || ['#ff6b6b', '#ee5a24'];
       default:
-        return theme.colors.primary.gradient;
+        return theme.colors.primary.gradient || ['#667eea', '#764ba2'];
     }
   };
 
@@ -101,20 +101,25 @@ export const Button: React.FC<ButtonProps> = ({
     <>
       {loading && (
         <ActivityIndicator 
+          testID="button-loading"
           size="small" 
           color={variant === 'secondary' || variant === 'ghost' ? theme.colors.primary[500] : theme.colors.text.inverse}
           style={styles.loadingIcon}
         />
       )}
       {icon && !loading && <>{icon}</>}
-      <Text style={finalTextStyle}>{title}</Text>
+      {!loading && <Text style={finalTextStyle}>{title}</Text>}
     </>
   );
 
   if (gradient && (variant === 'primary' || variant === 'success' || variant === 'warning' || variant === 'error')) {
     return (
       <TouchableOpacity
-        style={[buttonStyle, disabled && styles.disabled, style]}
+        testID="button-touchable"
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityState={{ disabled: disabled || loading }}
+        style={[disabled && styles.disabled, style]}
         onPress={onPress}
         disabled={disabled || loading}
         activeOpacity={0.8}
@@ -123,7 +128,7 @@ export const Button: React.FC<ButtonProps> = ({
           colors={getGradientColors()}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={[styles.gradientInner, buttonStyle]}
+          style={[styles.gradientInner, styles.base, styles[size], fullWidth && { width: '100%' as const }]}
         >
           {buttonContent}
         </LinearGradient>
@@ -133,6 +138,10 @@ export const Button: React.FC<ButtonProps> = ({
 
   return (
     <TouchableOpacity
+      testID="button-touchable"
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: disabled || loading }}
       style={[buttonStyle, disabled && styles.disabled, style]}
       onPress={onPress}
       disabled={disabled || loading}

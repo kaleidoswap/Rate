@@ -9,41 +9,49 @@ import {
   RefreshControl,
   Alert,
   Dimensions,
-  ActivityIndicator,
   StatusBar,
-  Platform,
-  Image,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { DrawerActions } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { RootState } from '../store';
-import { initializeRGBApiService } from '../services/initializeServices';
+import { initializeProtocolServices } from '../services/initializeServices';
+import { protocolManager } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
-import RGBApiService from '../services/RGBApiService';
+import {
+  selectDisclosureLevel,
+  selectAiEnabled,
+  selectAiOnboarded,
+  setAiMode,
+  setAiOnboarded,
+} from '../store/slices/settingsSlice';
+import QVACService from '../services/QVACService';
+import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
+import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
 
 import { theme } from '../theme';
-import { Card, Button } from '../components';
-import { LoadingScreen } from '../components/LoadingScreen';
-import { useAssetIcon } from '../utils';
-import { formatBitcoinAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { VoiceAgentFAB } from '../components/voice-agent/VoiceAgentFAB';
+import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
+import {
+  BalanceCard,
+  ActionButtons,
+  AssetList,
+  ChannelList,
+  MainHeader
+} from '../components';
+import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
+import { BackupHealthCard } from '../components/BackupHealthCard';
+import { useBackupHealth } from '../hooks/useBackupHealth';
 
 const { width } = Dimensions.get('window');
-const statusBarHeight = StatusBar.currentHeight || 0;
 
 interface Props {
   navigation: any;
-}
-
-interface BitcoinPrice {
-  bitcoin: {
-    usd: number;
-  };
 }
 
 interface NiaAsset {
@@ -89,17 +97,32 @@ interface Channel {
 
 export default function DashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
-  const { nodeInfo, networkInfo } = useSelector((state: RootState) => state.node);
-  const settings = useSelector((state: RootState) => state.settings);
+  const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  const disclosureLevel = useSelector(selectDisclosureLevel);
+  // On-device AI is opt-in; only surface the voice agent FAB once it's enabled
+  // so the QVAC Bare worklet can't be started (and crash) before a native rebuild.
+  const aiEnabled = useSelector(selectAiEnabled);
+  const aiOnboarded = useSelector(selectAiOnboarded);
+  const policy = policyFor(disclosureLevel);
+  const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
+  const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
+  const [voiceAutoListen, setVoiceAutoListen] = useState(false);
+  // One-time KaleidoMind onboarding (lets the user pick local / delegate / off).
+  const [mindOnboardingOpen, setMindOnboardingOpen] = useState(false);
+  const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [apiService, setApiService] = useState<RGBApiService | null>(null);
+  const [protocolsReady, setProtocolsReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const { bitcoinPrice, formatSatoshisToUSD } = useBitcoinConversion();
+  const { formatSatoshisToUSD } = useBitcoinConversion();
+  // Denomination-aware formatter for the headline balance (tap to cycle sats/BTC/fiat).
+  const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState<Channel[]>([]);
+  // Seed-only recovery covers BTC; RGB assets + channels need node-state backup.
+  const backupHealth = useBackupHealth({ channelCount: channels.length });
   const [btcBalance, setBtcBalanceState] = useState<{
     vanilla: { settled: number; future: number; spendable: number };
     colored: { settled: number; future: number; spendable: number };
@@ -109,59 +132,153 @@ export default function DashboardScreen({ navigation }: Props) {
   });
   const [rgbAssets, setRgbAssetsState] = useState<NiaAsset[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
-  
+
   // Modal state for channel details
   const [channelModalVisible, setChannelModalVisible] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
-  // Asset Icon Component
-  const AssetIcon = ({ ticker }: { ticker: string }) => {
-    const { iconUrl } = useAssetIcon(ticker);
-    
-    if (iconUrl) {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} resizeMode="contain" />
-        </View>
-      );
+  // Open the KaleidoMind voice agent. `autoListen` is set when triggered via a
+  // press-and-hold on the FAB, so the assistant starts listening immediately.
+  const openVoiceAgent = useCallback((autoListen: boolean) => {
+    if (aiEnabled) {
+      setVoiceAutoListen(autoListen);
+      setVoiceAgentOpen(true);
+      return;
     }
-    
-    return (
-      <View style={styles.assetIconContainer}>
-        <Ionicons name="diamond" size={20} color={theme.colors.primary[500]} />
-      </View>
-    );
-  };
+    // AI is opt-in (off by default). Re-open the one-time setup so the user
+    // can pick how KaleidoMind runs — nothing starts the worklet unprompted.
+    QVACService.getInstance()
+      .getAvailability()
+      .then((a) => setMindAvailability(a))
+      .catch(() => {})
+      .finally(() => setMindOnboardingOpen(true));
+  }, [aiEnabled]);
 
-  // Initialize API service
-  const initializeApi = useCallback(() => {
+  // First run: probe whether KaleidoMind can run here, then show the one-time
+  // setup so the user decides once (local / delegate / off). Never boots the
+  // worklet — getAvailability() only reads device capability.
+  useEffect(() => {
+    if (aiOnboarded) return;
+    let active = true;
+    QVACService.getInstance()
+      .getAvailability()
+      .then((a) => {
+        if (active) {
+          setMindAvailability(a);
+          setMindOnboardingOpen(true);
+        }
+      })
+      .catch(() => {
+        if (active) setMindOnboardingOpen(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [aiOnboarded]);
+
+  const finishMindOnboarding = useCallback(() => {
+    dispatch(setAiOnboarded(true));
+    setMindOnboardingOpen(false);
+  }, [dispatch]);
+
+  const handleMindLocal = useCallback(() => {
+    dispatch(setAiMode('local'));
+    finishMindOnboarding();
+  }, [dispatch, finishMindOnboarding]);
+
+  const handleMindDelegate = useCallback(() => {
+    // Don't commit to 'delegate' until pairing actually succeeds — otherwise
+    // backing out of the scanner would strand the user in a desktop mode with no
+    // connection. PairDesktopScreen sets aiMode='delegate' on a successful pair.
+    finishMindOnboarding();
+    navigation.getParent()?.navigate('PairDesktop');
+  }, [finishMindOnboarding, navigation]);
+
+  const handleMindSkip = useCallback(() => {
+    dispatch(setAiMode('off'));
+    finishMindOnboarding();
+  }, [dispatch, finishMindOnboarding]);
+
+  // Initialize protocol services (only once)
+  const initializeApi = useCallback(async () => {
+    if (protocolsReady) return true; // Already initialized
+
     try {
-      console.log('Initializing API service...');
-      const service = initializeRGBApiService();
-      setApiService(service);
-      return service;
+      console.log('Initializing protocol services...');
+      const { results } = await initializeProtocolServices();
+
+      const anyConnected = Array.from(results.values()).some(r => r.success);
+
+      // Report which protocols failed (non-blocking)
+      const failed: string[] = [];
+      for (const [proto, result] of results) {
+        if (!result.success) {
+          failed.push(`${proto}: ${result.error || 'failed'}`);
+        }
+      }
+      if (failed.length > 0) {
+        console.warn('[Dashboard] Protocol failures:', failed.join(', '));
+      }
+
+      if (anyConnected) {
+        setProtocolsReady(true);
+        // Show warning toast if some protocols failed but at least one connected
+        if (failed.length > 0) {
+          const connected = Array.from(results.entries()).filter(([, r]) => r.success).map(([p]) => p);
+          setConnectionError(null); // Clear any previous hard error
+          console.log(`[Dashboard] Connected: ${connected.join(', ')} | Failed: ${failed.join(', ')}`);
+        }
+        return true;
+      }
+
+      // Check if any adapter is already connected from a previous init
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      for (const proto of protocols) {
+        const adapter = protocolManager.getAdapterIfAvailable(proto);
+        if (adapter?.isConnected()) {
+          setProtocolsReady(true);
+          return true;
+        }
+      }
+
+      // Nothing connected — show error with details
+      if (failed.length > 0) {
+        setConnectionError(`Failed to connect:\n${failed.join('\n')}`);
+      } else {
+        setConnectionError('No wallet protocols connected. Please configure a wallet.');
+      }
+      return null;
     } catch (error) {
-      console.error('Failed to initialize API service:', error);
-      setConnectionError(error instanceof Error ? error.message : 'Failed to initialize API service');
+      console.error('Failed to initialize protocol services:', error);
+      setConnectionError(error instanceof Error ? error.message : 'Failed to initialize');
       return null;
     }
-  }, [settings.nodeUrl]);
+  }, []);
 
   const checkNodeStatus = async () => {
     try {
       setIsConnecting(true);
       setConnectionError(null);
 
-      const service = apiService || initializeApi();
-      if (!service) {
-        throw new Error('Could not initialize API service');
+      if (!protocolsReady) {
+        await initializeApi();
       }
 
-      console.log('Checking node status...');
-      const info = await service.getNodeInfo();
+      // Try any connected adapter
+      let info: any = null;
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      for (const proto of protocols) {
+        try {
+          const adapter = protocolManager.getAdapterIfAvailable(proto);
+          if (adapter?.isConnected()) {
+            info = await adapter.getNodeInfo();
+            break;
+          }
+        } catch { /* try next */ }
+      }
+
+      if (!info) throw new Error('No wallet connected');
       console.log('Node info received:', info);
-      
       setIsNodeUnlocked(true);
       return true;
     } catch (error) {
@@ -175,8 +292,8 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const loadDashboardData = async (showLoadingIndicator = true) => {
-    if (!apiService || isUpdating) {
-      console.log('Skipping update: Service not ready or update in progress');
+    if (!protocolsReady || isUpdating) {
+      console.log('Skipping update: Protocols not ready or update in progress');
       return;
     }
 
@@ -187,41 +304,89 @@ export default function DashboardScreen({ navigation }: Props) {
       }
       console.log('Loading dashboard data...');
 
-      // Load BTC balance
+      // Load via protocolManager (multi-protocol)
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
+      const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
+
+      // Load BTC balance (aggregate from all connected adapters with per-protocol breakdown)
       console.log('Fetching BTC balance...');
-      const balance = await apiService.getBtcBalance();
-      console.log('BTC balance received:', balance);
+      let totalConfirmed = 0, totalUnconfirmed = 0;
+      const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
+      const adapterProtoMap: Array<[any, string]> = [
+        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
+      ];
+      for (const [adapter, proto] of adapterProtoMap) {
+        if (adapter?.isConnected()) {
+          try {
+            const btc = await adapter.getBtcBalance();
+            totalConfirmed += btc.confirmed;
+            totalUnconfirmed += btc.unconfirmed;
+            byProtocol[proto] = btc;
+          } catch (e) { console.warn('Balance fetch error:', e); }
+        }
+      }
+      const balance = {
+        vanilla: { settled: totalConfirmed, future: totalConfirmed + totalUnconfirmed, spendable: totalConfirmed },
+        colored: { settled: 0, future: 0, spendable: 0 },
+        byProtocol,
+      };
       setBtcBalanceState(balance);
       dispatch(setBtcBalance(balance));
 
-      // Load RGB assets
-      console.log('Fetching RGB assets...');
-      const assetsResponse = await apiService.listAssets();
-      const assets = assetsResponse.nia || [];
-      console.log('RGB assets received:', assets);
+      // Load assets from all connected adapters (with protocol tag)
+      console.log('Fetching assets...');
+      let assets: any[] = [];
+      const adapterMap: Array<[any, 'RGB' | 'SPARK' | 'ARKADE']> = [
+        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
+      ];
+      for (const [adapter, proto] of adapterMap) {
+        if (adapter?.isConnected()) {
+          try {
+            const unifiedAssets = await adapter.listAssets();
+            const mapped = unifiedAssets
+              .filter((a: any) => a.id !== 'BTC')
+              .map((a: any) => ({
+                asset_id: a.id,
+                ticker: a.ticker,
+                name: a.name,
+                precision: a.precision,
+                issued_supply: a.metadata?.issued_supply || 0,
+                protocol: proto,
+                balance: {
+                  settled: a.balance.total,
+                  future: a.balance.pending,
+                  spendable: a.balance.available,
+                  offchain_outbound: a.balance.locked || 0,
+                  offchain_inbound: 0,
+                },
+              }));
+            assets.push(...mapped);
+          } catch (e) { console.warn('Asset fetch error:', e); }
+        }
+      }
       setRgbAssetsState(assets);
-      
-      // Convert NiaAsset to AssetRecord before dispatching
-      const assetRecords = assets.map(asset => ({
+
+      const assetRecords = assets.map((asset: any) => ({
         wallet_id: 1,
         asset_id: asset.asset_id,
         ticker: asset.ticker,
         name: asset.name,
         precision: asset.precision,
         issued_supply: asset.issued_supply,
-        balance: asset.balance.spendable,
+        balance: asset.balance?.spendable || asset.balance?.available || 0,
         last_updated: Date.now()
       }));
       dispatch(setRgbAssets(assetRecords));
 
-      // Load Lightning channels
+      // Load Lightning channels (RGB only)
       console.log('Fetching Lightning channels...');
-      const channelsResponse = await apiService.listChannels();
-      const channelsList = channelsResponse.channels || [];
-      console.log('Channels received:', channelsList);
+      let channelsList: any[] = [];
+      if (rgbAdapter?.isConnected()) {
+        try { channelsList = await rgbAdapter.listChannels(); } catch { /* no channels */ }
+      }
       setChannels(channelsList);
 
-      setLastUpdateTime(new Date());
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
       if (showLoadingIndicator) {
@@ -238,24 +403,22 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   };
 
-
-
-  // Add this useEffect for auto-refresh of wallet data
+  // Auto-refresh wallet data (only when protocols are ready)
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
 
+    if (!protocolsReady) return;
+
     const refreshData = async () => {
-      if (isNodeUnlocked && !isConnecting && !isUpdating) {
-        await loadDashboardData(false); // Don't show loading indicator for background updates
+      if (!isUpdating) {
+        await loadDashboardData(false);
       }
     };
 
     // Initial load
-    if (isNodeUnlocked && !isConnecting) {
-      refreshData();
-    }
+    refreshData();
 
-    // Set up polling every 30 seconds
+    // Poll every 30 seconds
     intervalId = setInterval(refreshData, 30000);
 
     return () => {
@@ -264,8 +427,6 @@ export default function DashboardScreen({ navigation }: Props) {
       }
     };
   }, [isNodeUnlocked, isConnecting]);
-
-
 
   // Update the useFocusEffect to handle screen focus
   useFocusEffect(
@@ -278,7 +439,7 @@ export default function DashboardScreen({ navigation }: Props) {
       };
 
       initializeAndLoad();
-    }, [settings.nodeUrl])
+    }, [])
   );
 
   const onRefresh = async () => {
@@ -287,7 +448,6 @@ export default function DashboardScreen({ navigation }: Props) {
     setRefreshing(false);
   };
 
-  // Move the hook usage to the component level
   const formatSatoshis = (satoshis: number): string => {
     return formatBitcoinAmount(satoshis, bitcoinUnit);
   };
@@ -307,6 +467,44 @@ export default function DashboardScreen({ navigation }: Props) {
   );
 
   const totalBalance = offChainBalance + getTotalBtcBalance();
+  const denominatedTotal = formatDisplayAmount(totalBalance);
+
+  // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
+  // which network each lives on. BTC is filtered out of `rgbAssets` upstream, so
+  // its true total comes from `totalBalance` (on-chain + Lightning). USDt assets
+  // bucket into `usd`; everything else stays in `other`.
+  const liteAssets = rgbAssets.map((asset) => ({
+    id: asset.asset_id,
+    ticker: asset.ticker,
+    balance: {
+      total:
+        asset.balance.settled +
+        (asset.balance.offchain_inbound ?? 0) +
+        (asset.balance.offchain_outbound ?? 0),
+    },
+  })) as any;
+  const lite = aggregateForLite(liteAssets);
+  // The aggregated USD figure is in base units; convert each contributing asset
+  // to its human value using its own precision so the display reads as dollars.
+  const liteUsdAssetIds = new Set(
+    liteAssets
+      .filter((a: any) => !lite.other.some((o: any) => o.id === a.id))
+      .map((a: any) => a.id)
+  );
+  const liteUsdDisplay = rgbAssets
+    .filter((asset) => liteUsdAssetIds.has(asset.asset_id))
+    .reduce((sum, asset) => {
+      const total =
+        asset.balance.settled +
+        (asset.balance.offchain_inbound ?? 0) +
+        (asset.balance.offchain_outbound ?? 0);
+      return sum + total / Math.pow(10, asset.precision ?? 0);
+    }, 0);
+  // Assets the AssetList should show in lite mode: drop USDt (folded into the USD
+  // figure) and keep the original rgbAssets shape the list already renders.
+  const liteOtherAssets = rgbAssets.filter((asset) =>
+    lite.other.some((o: any) => o.id === asset.asset_id)
+  );
 
   // Get current hour to determine greeting
   const getGreeting = () => {
@@ -316,355 +514,7 @@ export default function DashboardScreen({ navigation }: Props) {
     return 'Good evening';
   };
 
-  const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
-      >
-        <SafeAreaView style={styles.headerSafeArea}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerTop}>
-              <View style={styles.headerLeft}>
-                <Text style={styles.greeting}>{getGreeting()}</Text>
-                <Text style={styles.headerTitle}>Rate Wallet</Text>
-              </View>
-              <View style={styles.headerActions}>
-                <TouchableOpacity 
-                  style={styles.headerActionButton}
-                  onPress={() => navigation.navigate('Notifications')}
-                >
-                  <Ionicons name="notifications-outline" size={20} color={theme.colors.text.inverse} />
-                  <View style={styles.notificationDot} />
-                </TouchableOpacity>
-                <TouchableOpacity 
-                  style={styles.headerActionButton}
-                  onPress={() => {
-                    const drawerNavigation = navigation.getParent();
-                    if (drawerNavigation) {
-                      drawerNavigation.dispatch(DrawerActions.openDrawer());
-                    }
-                  }}
-                >
-                  <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.text.inverse} />
-                </TouchableOpacity>
-              </View>
-            </View>
 
-          {/* Enhanced Balance Display */}
-          <View style={styles.balanceSection}>
-            <View style={styles.totalBalanceContainer}>
-              <Text style={styles.balanceLabel}>Total Portfolio</Text>
-              <View style={styles.balanceRow}>
-                <Text style={styles.balanceAmount}>
-                  {formatSatoshis(totalBalance)}
-                </Text>
-                <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
-              </View>
-              <Text style={styles.balanceUsd}>
-                ${formatUSD(totalBalance)} USD
-              </Text>
-              
-              {/* Price Change Indicator */}
-              <View style={styles.priceChangeContainer}>
-                <Ionicons name="trending-up" size={12} color="#10b981" />
-                <Text style={styles.priceChange}>+2.4% today</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity 
-              style={styles.refreshButton} 
-              onPress={onRefresh}
-              disabled={refreshing}
-            >
-              <Ionicons 
-                name="refresh" 
-                size={16} 
-                color={theme.colors.text.inverse} 
-                style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
-              />
-            </TouchableOpacity>
-          </View>
-
-          {/* Balance Breakdown */}
-          <View style={styles.balanceBreakdown}>
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownIcon}>
-                <Ionicons name="wallet" size={14} color="#10b981" />
-              </View>
-              <View style={styles.breakdownText}>
-                <Text style={styles.breakdownLabel}>On-chain</Text>
-                <Text style={styles.breakdownValue}>
-                  {formatSatoshis(getTotalBtcBalance())}
-                </Text>
-              </View>
-            </View>
-            
-            <View style={styles.breakdownDivider} />
-            
-            <View style={styles.breakdownItem}>
-              <View style={styles.breakdownIcon}>
-                <Ionicons name="flash" size={14} color="#f59e0b" />
-              </View>
-              <View style={styles.breakdownText}>
-                <Text style={styles.breakdownLabel}>Lightning</Text>
-                <Text style={styles.breakdownValue}>
-                  {formatSatoshis(offChainBalance)}
-                </Text>
-              </View>
-            </View>
-          </View>
-        </View>
-        </SafeAreaView>
-      </LinearGradient>
-    </View>
-  );
-
-  const renderActionButtons = () => (
-    <View style={styles.actionButtonsContainer}>
-      <View style={styles.actionButtons}>
-        {/* Receive Button */}
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Receive')}
-          activeOpacity={0.7}
-        >
-          <LinearGradient
-            colors={['#10b981', '#059669'] as [string, string]}
-            style={styles.actionButtonGradient}
-          >
-            <Ionicons name="arrow-down" size={18} color="white" />
-          </LinearGradient>
-          <Text style={styles.actionButtonText}>Receive</Text>
-        </TouchableOpacity>
-
-        {/* Swap Button */}
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Swap')}
-          activeOpacity={0.7}
-        >
-          <LinearGradient
-            colors={['#f59e0b', '#d97706'] as [string, string]}
-            style={styles.actionButtonGradient}
-          >
-            <Ionicons name="swap-horizontal" size={18} color="white" />
-          </LinearGradient>
-          <Text style={styles.actionButtonText}>Swap</Text>
-        </TouchableOpacity>
-
-        {/* Send Button */}
-        <TouchableOpacity 
-          style={styles.actionButton}
-          onPress={() => navigation.navigate('Send')}
-          activeOpacity={0.7}
-        >
-          <LinearGradient
-            colors={['#ef4444', '#dc2626'] as [string, string]}
-            style={styles.actionButtonGradient}
-          >
-            <Ionicons name="arrow-up" size={18} color="white" />
-          </LinearGradient>
-          <Text style={styles.actionButtonText}>Send</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
-  const renderRGBAssets = () => (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>RGB Assets</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Assets')}>
-          <Text style={styles.sectionAction}>View All</Text>
-        </TouchableOpacity>
-      </View>
-
-      {rgbAssets.length === 0 ? (
-        <Card style={styles.emptyCard}>
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="diamond-outline" size={28} color={theme.colors.gray[400]} />
-            </View>
-            <Text style={styles.emptyTitle}>No RGB assets yet</Text>
-            <Text style={styles.emptyDescription}>
-              Issue your first RGB asset to get started
-            </Text>
-            <Button
-              title="Issue Asset"
-              variant="secondary"
-              size="sm"
-              onPress={() => navigation.navigate('IssueAsset')}
-              style={styles.emptyButton}
-            />
-          </View>
-        </Card>
-      ) : (
-        <View style={styles.assetsVerticalContainer}>
-          {rgbAssets.slice(0, 3).map((asset, index) => (
-            <TouchableOpacity
-              key={asset.asset_id}
-              style={styles.assetVerticalCard}
-              onPress={() => navigation.navigate('AssetDetail', { 
-                asset: {
-                  ...asset,
-                  isRGB: true
-                }
-              })}
-            >
-              <View style={styles.assetVerticalContent}>
-                <View style={styles.assetVerticalLeft}>
-                  <AssetIcon ticker={asset.ticker} />
-                  <View style={styles.assetVerticalInfo}>
-                    <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
-                    <Text style={styles.assetVerticalName}>{asset.name}</Text>
-                  </View>
-                </View>
-                <View style={styles.assetVerticalRight}>
-                  <Text style={styles.assetVerticalBalance}>
-                    {asset.balance.spendable.toFixed(asset.precision)}
-                  </Text>
-                  <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-          {rgbAssets.length > 3 && (
-            <TouchableOpacity 
-              style={styles.viewMoreButton}
-              onPress={() => navigation.navigate('Assets')}
-            >
-              <Text style={styles.viewMoreText}>View {rgbAssets.length - 3} more assets</Text>
-              <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-    </View>
-  );
-
-  const renderChannels = () => (
-    <View style={styles.section}>
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Lightning Channels</Text>
-        <TouchableOpacity onPress={() => navigation.navigate('Channels')}>
-          <Text style={styles.sectionAction}>View All</Text>
-        </TouchableOpacity>
-      </View>
-
-      {channels.length === 0 ? (
-        <Card style={styles.emptyCard}>
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="flash-outline" size={28} color={theme.colors.gray[400]} />
-            </View>
-            <Text style={styles.emptyTitle}>No channels yet</Text>
-            <Text style={styles.emptyDescription}>
-              Open your first Lightning channel to start transacting
-            </Text>
-            <View style={styles.emptyActions}>
-              <Button
-                title="Open Channel"
-                variant="secondary"
-                size="sm"
-                onPress={() => navigation.navigate('OpenChannel')}
-                style={styles.emptyButton}
-              />
-              <Button
-                title="Buy Channel"
-                variant="primary"
-                size="sm"
-                onPress={() => navigation.navigate('LSP')}
-                style={styles.emptyButton}
-              />
-            </View>
-          </View>
-        </Card>
-      ) : (
-        <View style={styles.channelsVerticalContainer}>
-          {channels.slice(0, 3).map((channel, index) => (
-            <TouchableOpacity
-              key={channel.channel_id}
-              style={styles.channelVerticalCard}
-              onPress={() => {
-                setSelectedChannel(channel);
-                setChannelModalVisible(true);
-              }}
-            >
-              <View style={styles.channelVerticalContent}>
-                <View style={styles.channelVerticalLeft}>
-                  <View style={styles.channelVerticalStatus}>
-                    <View style={[
-                      styles.channelVerticalStatusDot,
-                      { backgroundColor: channel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
-                    ]} />
-                    <View style={styles.channelVerticalInfo}>
-                      <Text style={styles.channelVerticalPeerName} numberOfLines={1}>
-                        {channel.peer_alias || channel.peer_pubkey.slice(0, 8)}
-                      </Text>
-                      <View style={styles.channelVerticalStatusRow}>
-                        <Text style={[
-                          styles.channelVerticalStatusText,
-                          { color: channel.ready ? theme.colors.success[500] : theme.colors.warning[500] }
-                        ]}>
-                          {channel.ready ? 'Open' : 'Pending'}
-                        </Text>
-                        <Text style={styles.channelVerticalCapacity}>
-                          {formatSatoshis(channel.capacity_sat)} {bitcoinUnit}
-                        </Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-                <View style={styles.channelVerticalRight}>
-                  <View style={styles.channelVerticalTopRow}>
-                    <View style={styles.channelVerticalLiquidity}>
-                      <View style={styles.liquidityVerticalRow}>
-                        <View style={styles.liquidityVerticalItem}>
-                          <Ionicons name="arrow-up" size={10} color={theme.colors.success[500]} />
-                          <Text style={styles.liquidityVerticalAmount}>
-                            {formatSatoshis(channel.outbound_balance_msat / 1000)}
-                          </Text>
-                        </View>
-                        <View style={styles.liquidityVerticalItem}>
-                          <Ionicons name="arrow-down" size={10} color={theme.colors.primary[500]} />
-                          <Text style={styles.liquidityVerticalAmount}>
-                            {formatSatoshis(channel.inbound_balance_msat / 1000)}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.liquidityVerticalBar}>
-                        <View style={[
-                          styles.liquidityVerticalBarFill,
-                          { 
-                            width: `${(channel.outbound_balance_msat + channel.inbound_balance_msat) > 0 ? 
-                              (channel.outbound_balance_msat / (channel.outbound_balance_msat + channel.inbound_balance_msat) * 100) : 0}%`,
-                            backgroundColor: theme.colors.success[500]
-                          }
-                        ]} />
-                      </View>
-                    </View>
-                    <Ionicons name="chevron-forward" size={14} color={theme.colors.gray[400]} />
-                  </View>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-          {channels.length > 3 && (
-            <TouchableOpacity 
-              style={styles.viewMoreButton}
-              onPress={() => navigation.navigate('Channels')}
-            >
-              <Text style={styles.viewMoreText}>View {channels.length - 3} more channels</Text>
-              <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
-    </View>
-  );
 
   const renderChannelModal = () => (
     <Modal
@@ -677,14 +527,14 @@ export default function DashboardScreen({ navigation }: Props) {
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Channel Details</Text>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.modalCloseButton}
               onPress={() => setChannelModalVisible(false)}
             >
               <Ionicons name="close" size={24} color={theme.colors.text.primary} />
             </TouchableOpacity>
           </View>
-          
+
           {selectedChannel && (
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               {/* Channel Status */}
@@ -768,8 +618,8 @@ export default function DashboardScreen({ navigation }: Props) {
                   <View style={styles.modalLiquidityBar}>
                     <View style={[
                       styles.modalLiquidityBarFill,
-                      { 
-                        width: `${(selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) > 0 ? 
+                      {
+                        width: `${(selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) > 0 ?
                           (selectedChannel.outbound_balance_msat / (selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) * 100) : 0}%`,
                         backgroundColor: theme.colors.success[500]
                       }
@@ -807,44 +657,9 @@ export default function DashboardScreen({ navigation }: Props) {
                         </View>
                       </View>
                     </View>
-                    <View style={styles.modalLiquidityBar}>
-                      <View style={[
-                        styles.modalLiquidityBarFill,
-                        { 
-                          width: `${(selectedChannel.asset_local_amount + selectedChannel.asset_remote_amount) > 0 ? 
-                            (selectedChannel.asset_local_amount / (selectedChannel.asset_local_amount + selectedChannel.asset_remote_amount) * 100) : 0}%`,
-                          backgroundColor: theme.colors.secondary[500]
-                        }
-                      ]} />
-                    </View>
                   </View>
                 </View>
               )}
-
-              {/* Technical Details */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Technical Details</Text>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalInfoLabel}>Channel ID</Text>
-                  <Text style={styles.modalInfoValue} numberOfLines={1}>
-                    {selectedChannel.channel_id}
-                  </Text>
-                </View>
-                {selectedChannel.short_channel_id && (
-                  <View style={styles.modalInfoRow}>
-                    <Text style={styles.modalInfoLabel}>Short Channel ID</Text>
-                    <Text style={styles.modalInfoValue}>
-                      {selectedChannel.short_channel_id}
-                    </Text>
-                  </View>
-                )}
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalInfoLabel}>Funding TxID</Text>
-                  <Text style={styles.modalInfoValue} numberOfLines={1}>
-                    {selectedChannel.funding_txid}
-                  </Text>
-                </View>
-              </View>
             </ScrollView>
           )}
         </View>
@@ -852,76 +667,133 @@ export default function DashboardScreen({ navigation }: Props) {
     </Modal>
   );
 
-  if (isConnecting) {
-    return (
-      <LoadingScreen 
-        variant="connection" 
-        title="Connecting to Node"
-        subtitle={`Establishing connection to ${settings.nodeUrl || 'Lightning node'}...`}
-      />
-    );
-  }
-
-  if (!isNodeUnlocked) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <Card style={styles.errorCard}>
-            <View style={styles.errorState}>
-              <View style={styles.errorIcon}>
-                <Ionicons name="warning-outline" size={48} color={theme.colors.error[500]} />
-              </View>
-              <Text style={styles.errorTitle}>Failed to connect to node</Text>
-              <Text style={styles.errorDescription}>
-                {connectionError || 'Unable to establish connection'}
-              </Text>
-              <Text style={styles.nodeUrl}>URL: {settings.nodeUrl || 'Not configured'}</Text>
-              
-              <View style={styles.errorActions}>
-                <Button
-                  title="Retry Connection"
-                  variant="primary"
-                  onPress={checkNodeStatus}
-                  style={styles.errorButton}
-                />
-                <Button
-                  title="Check Settings"
-                  variant="secondary"
-                  onPress={() => navigation.navigate('Settings')}
-                  style={styles.errorButton}
-                />
-              </View>
-            </View>
-          </Card>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <View style={styles.container}>
-      {renderHeader()}
-      {renderActionButtons()}
-      
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
       <ScrollView
-        style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
         refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
+          <RefreshControl
+            refreshing={refreshing}
             onRefresh={onRefresh}
             tintColor={theme.colors.primary[500]}
+            colors={[theme.colors.primary[500]]}
           />
         }
-        showsVerticalScrollIndicator={false}
       >
-        {renderRGBAssets()}
-        {renderChannels()}
-        
-        {/* Bottom padding */}
-        <View style={styles.bottomPadding} />
+        <MainHeader
+          greeting={getGreeting()}
+          title="KaleidoSwap Wallet"
+          subtitle={(() => {
+            // Network/protocol attribution is an "advanced" detail — hide it in lite mode.
+            if (!policy.showNetworks) return undefined;
+            const connected: string[] = [];
+            if (protocolManager.getAdapterIfAvailable('SPARK')?.isConnected()) connected.push('Spark');
+            if (protocolManager.getAdapterIfAvailable('RGB')?.isConnected()) connected.push('RLN');
+            if (protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected()) connected.push('Arkade');
+            return connected.length > 0 ? connected.join(' · ') : undefined;
+          })()}
+          showSettings
+        >
+          <BalanceCard
+            totalBalance={totalBalance}
+            bitcoinUnit={bitcoinUnit}
+            onRefresh={onRefresh}
+            refreshing={refreshing}
+            formatSatoshis={formatSatoshis}
+            formatUSD={formatUSD}
+            primaryText={denominatedTotal.primary}
+            primaryUnitLabel={denominatedTotal.unitLabel}
+            secondaryText={denominatedTotal.secondary}
+            onCycleDenomination={cycleDenomination}
+            onChainBalance={getTotalBtcBalance()}
+            lightningBalance={offChainBalance}
+            // Per-protocol balance breakdown is a network detail — only in advanced mode.
+            byProtocol={policy.showNetworks ? (btcBalance as any)?.byProtocol : undefined}
+            // Shimmer the balance while first connecting (before any data lands).
+            loading={(isConnecting || loading) && totalBalance === 0 && !refreshing}
+          />
+        </MainHeader>
+
+        <ActionButtons
+          onSend={() => navigation.getParent()?.navigate('Send')}
+          onReceive={() => navigation.getParent()?.navigate('Receive')}
+          onSwap={() => navigation.getParent()?.navigate('Swap')}
+          onHistory={() => navigation.getParent()?.navigate('History')}
+        />
+
+        {/* Honest recovery status: loud when RGB assets/channels can't be
+            restored from the seed alone. Renders nothing for plain-BTC wallets. */}
+        <BackupHealthCard health={backupHealth} />
+
+        {isLite && liteUsdDisplay > 0 && (
+          <View style={styles.liteUsdCard}>
+            <View style={styles.liteUsdLeft}>
+              <View style={styles.liteUsdIcon}>
+                <Ionicons name="cash-outline" size={20} color={theme.colors.success[600]} />
+              </View>
+              <Text style={styles.liteUsdLabel}>USD</Text>
+            </View>
+            <Text style={styles.liteUsdValue}>${liteUsdDisplay.toFixed(2)}</Text>
+          </View>
+        )}
+
+        <AssetList
+          // In lite mode, hide USDt (it's folded into the USD figure above) and
+          // strip the per-asset protocol badge (a network detail).
+          assets={isLite
+            ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
+            : rgbAssets}
+          onViewAll={() => navigation.getParent()?.navigate('Assets')}
+          onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
+            asset: {
+              ...asset,
+              isRGB: true
+            }
+          })}
+          onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
+        />
+
+        {policy.showChannelManagement && (
+        <ChannelList
+          channels={channels}
+          bitcoinUnit={bitcoinUnit}
+          formatSatoshis={formatSatoshis}
+          onViewAll={() => navigation.getParent()?.navigate('Channels')}
+          onChannelPress={(channel) => {
+            // ChannelList narrows Channel to a UI subset; the runtime object
+            // carries the full shape, so widen back to DashboardScreen's Channel.
+            setSelectedChannel(channel as unknown as Channel);
+            setChannelModalVisible(true);
+          }}
+          onOpenChannel={() => navigation.getParent()?.navigate('OpenChannel')}
+          onBuyChannel={() => navigation.getParent()?.navigate('LSP')}
+        />
+        )}
       </ScrollView>
-      
+
+      <VoiceAgentFAB
+        onPress={() => openVoiceAgent(false)}
+        onHoldActivate={() => openVoiceAgent(true)}
+        bottom={Platform.OS === 'ios' ? 100 : 84}
+        right={16}
+      />
+      <VoiceAgentOverlay
+        visible={voiceAgentOpen}
+        autoListen={voiceAutoListen}
+        onClose={() => setVoiceAgentOpen(false)}
+      />
+
+      <KaleidoMindOnboarding
+        visible={mindOnboardingOpen}
+        availability={mindAvailability}
+        onSelectLocal={handleMindLocal}
+        onSelectDelegate={handleMindDelegate}
+        onSkip={handleMindSkip}
+      />
+
       {renderChannelModal()}
     </View>
   );
@@ -932,571 +804,114 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background.secondary,
   },
-  
-  scrollView: {
-    flex: 1,
-  },
-  
   scrollContent: {
-    paddingBottom: 20,
+    paddingBottom: theme.spacing[24],
   },
-  
-  centerContent: {
-    flex: 1,
-    justifyContent: 'center',
+  liteUsdCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing[5],
+    justifyContent: 'space-between',
+    marginTop: theme.spacing[6],
+    marginHorizontal: theme.spacing[4],
+    padding: theme.spacing[4],
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
   },
-  
-  // Enhanced Header
+  liteUsdLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+  },
+  liteUsdIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: theme.colors.success[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  liteUsdLabel: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  liteUsdValue: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
   headerContainer: {
     marginBottom: theme.spacing[4],
   },
-  
   headerGradient: {
-    paddingTop: Platform.OS === 'android' ? statusBarHeight : 0,
-    paddingBottom: theme.spacing[6],
-    borderBottomLeftRadius: theme.borderRadius['2xl'],
-    borderBottomRightRadius: theme.borderRadius['2xl'],
+    paddingBottom: theme.spacing[12],
+    borderBottomLeftRadius: theme.borderRadius['3xl'],
+    borderBottomRightRadius: theme.borderRadius['3xl'],
   },
-  
   headerSafeArea: {
     backgroundColor: 'transparent',
   },
-  
   headerContent: {
-    paddingHorizontal: theme.spacing[5],
+    paddingHorizontal: theme.spacing[4],
   },
-  
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: theme.spacing[6],
+    marginTop: theme.spacing[2],
   },
-  
   headerLeft: {
     flex: 1,
   },
-  
   greeting: {
     fontSize: theme.typography.fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: theme.spacing[1],
-    fontWeight: '500',
+    color: theme.colors.text.inverse,
+    opacity: 0.8,
+    marginBottom: 4,
   },
-  
   headerTitle: {
-    fontSize: theme.typography.fontSize['3xl'],
+    fontSize: theme.typography.fontSize['2xl'],
     fontWeight: '700',
     color: theme.colors.text.inverse,
   },
-  
   headerActions: {
     flexDirection: 'row',
-    gap: theme.spacing[2],
+    gap: theme.spacing[3],
   },
-  
   headerActionButton: {
     width: 40,
     height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     justifyContent: 'center',
-    position: 'relative',
+    alignItems: 'center',
   },
-  
   notificationDot: {
     position: 'absolute',
-    top: 6,
-    right: 6,
+    top: 10,
+    right: 10,
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#ef4444',
-  },
-  
-  balanceSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: theme.spacing[5],
-  },
-  
-  totalBalanceContainer: {
-    flex: 1,
-  },
-  
-  balanceLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: theme.spacing[2],
-    fontWeight: '500',
-  },
-  
-  balanceRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: theme.spacing[1],
-  },
-  
-  balanceAmount: {
-    fontSize: theme.typography.fontSize['4xl'],
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-    marginRight: theme.spacing[2],
-  },
-  
-  balanceCurrency: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  
-  balanceUsd: {
-    fontSize: theme.typography.fontSize.lg,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: theme.spacing[2],
-  },
-  
-  priceChangeContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[1],
-  },
-  
-  priceChange: {
-    fontSize: theme.typography.fontSize.sm,
-    color: '#10b981',
-    fontWeight: '500',
-  },
-  
-  refreshButton: {
-    width: 36,
-    height: 36,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  balanceBreakdown: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[4],
-  },
-  
-  breakdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  
-  breakdownIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing[3],
-  },
-  
-  breakdownText: {
-    flex: 1,
-  },
-  
-  breakdownLabel: {
-    fontSize: theme.typography.fontSize.xs,
-    color: 'rgba(255, 255, 255, 0.7)',
-    marginBottom: theme.spacing[1],
-  },
-  
-  breakdownValue: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.inverse,
-  },
-  
-  breakdownDivider: {
-    width: 1,
-    height: 32,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    marginHorizontal: theme.spacing[4],
-  },
-  
-  // Enhanced Action Buttons
-  actionButtonsContainer: {
-    paddingHorizontal: theme.spacing[5],
-    marginBottom: theme.spacing[4],
-    marginTop: -theme.spacing[4],
-  },
-  
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[4],
-    ...theme.shadows.md,
-  },
-  
-  actionButton: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  
-  actionButtonGradient: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[2],
-    ...theme.shadows.sm,
-  },
-  
-  actionButtonText: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  section: {
-    paddingHorizontal: theme.spacing[5],
-    marginBottom: theme.spacing[6],
-  },
-  
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[4],
-  },
-  
-  sectionTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-  
-  sectionAction: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.primary[500],
-  },
-  
-  emptyCard: {
-    paddingVertical: theme.spacing[8],
-  },
-  
-  emptyState: {
-    alignItems: 'center',
-  },
-  
-  emptyIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[4],
-  },
-  
-  emptyTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
-  },
-  
-  emptyDescription: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing[5],
-  },
-  
-  emptyButton: {
-    paddingHorizontal: theme.spacing[6],
-  },
-  
-  floatingAIButton: {
-    position: 'absolute',
-    right: theme.spacing[5],
-    bottom: theme.spacing[5],
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  
-  floatingAIGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  bottomPadding: {
-    height: theme.spacing[4],
-  },
-  
-  
-  
-  errorCard: {
-    width: '100%',
-    paddingVertical: theme.spacing[8],
-  },
-  
-  errorState: {
-    alignItems: 'center',
-  },
-  
-  errorIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.error[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[5],
-  },
-  
-  errorTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
-    textAlign: 'center',
-  },
-  
-  errorDescription: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing[3],
-  },
-  
-  nodeUrl: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.muted,
-    textAlign: 'center',
-    marginBottom: theme.spacing[6],
-  },
-  
-  errorActions: {
-    width: '100%',
-    gap: theme.spacing[3],
-  },
-  
-  errorButton: {
-    width: '100%',
-  },
-  
-  assetIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing[3],
-  },
-  
-  assetIconImage: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-  },
-  emptyActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-    marginTop: theme.spacing[4],
-  },
-
-  // New styles for vertical layouts
-  assetsVerticalContainer: {
-    marginTop: theme.spacing[4],
-  },
-  assetVerticalCard: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[4],
-    marginBottom: theme.spacing[3],
+    backgroundColor: theme.colors.error[500],
     borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    ...theme.shadows.sm,
+    borderColor: theme.colors.primary[600],
   },
-  assetVerticalContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  assetVerticalLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  assetVerticalInfo: {
-    marginLeft: theme.spacing[3],
-  },
-  assetVerticalTicker: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '700',
-    color: theme.colors.primary[500],
-  },
-  assetVerticalName: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
-  },
-  assetVerticalRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  assetVerticalBalance: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginRight: theme.spacing[2],
-  },
-  viewMoreButton: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    marginTop: theme.spacing[3],
-    ...theme.shadows.sm,
-  },
-  viewMoreText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.primary[500],
-  },
-
-  channelsVerticalContainer: {
-    marginTop: theme.spacing[4],
-  },
-  channelVerticalCard: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[4],
-    marginBottom: theme.spacing[3],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    ...theme.shadows.sm,
-  },
-     channelVerticalContent: {
-     flexDirection: 'row',
-     alignItems: 'flex-start',
-   },
-   channelVerticalLeft: {
-     flex: 1,
-     flexDirection: 'row',
-     alignItems: 'center',
-     marginRight: theme.spacing[3],
-   },
-   channelVerticalStatus: {
-     flexDirection: 'row',
-     alignItems: 'center',
-   },
-   channelVerticalStatusDot: {
-     width: 10,
-     height: 10,
-     borderRadius: 5,
-     marginRight: theme.spacing[2],
-   },
-   channelVerticalInfo: {
-     flex: 1,
-     marginLeft: theme.spacing[2],
-   },
-   channelVerticalPeerName: {
-     fontSize: theme.typography.fontSize.base,
-     fontWeight: '600',
-     color: theme.colors.text.primary,
-     marginBottom: theme.spacing[1],
-   },
-   channelVerticalStatusRow: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     flexWrap: 'wrap',
-   },
-   channelVerticalStatusText: {
-     fontSize: theme.typography.fontSize.xs,
-     fontWeight: '600',
-     marginRight: theme.spacing[2],
-   },
-   channelVerticalCapacity: {
-     fontSize: theme.typography.fontSize.xs,
-     color: theme.colors.text.secondary,
-   },
-   channelVerticalRight: {
-     alignItems: 'flex-end',
-     justifyContent: 'space-between',
-     minWidth: 80,
-   },
-   channelVerticalTopRow: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     justifyContent: 'flex-end',
-   },
-   channelVerticalLiquidity: {
-     alignItems: 'flex-end',
-     marginRight: theme.spacing[2],
-   },
-   liquidityVerticalRow: {
-     flexDirection: 'column',
-     alignItems: 'flex-end',
-     marginBottom: theme.spacing[1],
-   },
-   liquidityVerticalItem: {
-     flexDirection: 'row',
-     alignItems: 'center',
-     marginBottom: theme.spacing[0.5],
-   },
-   liquidityVerticalAmount: {
-     fontSize: theme.typography.fontSize.xs,
-     fontWeight: '600',
-     color: theme.colors.text.primary,
-     marginLeft: theme.spacing[1],
-   },
-   liquidityVerticalBar: {
-     width: 60,
-     height: 4,
-     backgroundColor: theme.colors.gray[200],
-     borderRadius: 2,
-     marginTop: theme.spacing[1],
-   },
-   liquidityVerticalBarFill: {
-     height: '100%',
-     borderRadius: 2,
-   },
-
-  // Modal styles
+  // Modal Styles
   modalOverlay: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
   },
   modalContent: {
     backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    width: '90%',
+    borderTopLeftRadius: theme.borderRadius['2xl'],
+    borderTopRightRadius: theme.borderRadius['2xl'],
     maxHeight: '80%',
-    ...theme.shadows.lg,
+    paddingBottom: theme.spacing[8],
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1518,119 +933,123 @@ const styles = StyleSheet.create({
     padding: theme.spacing[4],
   },
   modalSection: {
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[6],
   },
   modalSectionTitle: {
-    fontSize: theme.typography.fontSize.lg,
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing[3],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   modalStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing[1],
+    flexWrap: 'wrap',
+    gap: theme.spacing[2],
   },
   modalStatusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: theme.spacing[2],
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   modalStatusText: {
     fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
+    fontWeight: '500',
     color: theme.colors.text.primary,
+    marginRight: theme.spacing[2],
   },
   modalPublicBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.success[50],
-    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.primary[50],
     paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    marginLeft: theme.spacing[3],
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.full,
+    gap: 4,
   },
   modalPublicText: {
     fontSize: theme.typography.fontSize.xs,
-    fontWeight: '600',
-    color: theme.colors.success[500],
-    marginLeft: theme.spacing[1],
+    color: theme.colors.primary[600],
+    fontWeight: '500',
   },
   modalPrivateBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.warning[50],
-    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.gray[100],
     paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    marginLeft: theme.spacing[3],
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.full,
+    gap: 4,
   },
   modalPrivateText: {
     fontSize: theme.typography.fontSize.xs,
-    fontWeight: '600',
-    color: theme.colors.warning[500],
-    marginLeft: theme.spacing[1],
+    color: theme.colors.gray[600],
+    fontWeight: '500',
   },
   modalInfoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: theme.spacing[1],
+    alignItems: 'center',
+    marginBottom: theme.spacing[3],
   },
   modalInfoLabel: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.secondary,
   },
   modalInfoValue: {
     fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
+    fontWeight: '500',
     color: theme.colors.text.primary,
-    flexShrink: 1,
+    maxWidth: '60%',
   },
   modalCapacityValue: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize['2xl'],
+    fontWeight: '700',
     color: theme.colors.text.primary,
   },
   modalLiquidityContainer: {
-    marginTop: theme.spacing[2],
+    backgroundColor: theme.colors.surface.secondary,
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.xl,
   },
   modalLiquidityRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: theme.spacing[1],
+    marginBottom: theme.spacing[3],
   },
   modalLiquidityItem: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: theme.spacing[3],
   },
   modalLiquidityIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surface.primary,
     justifyContent: 'center',
-    marginRight: theme.spacing[2],
+    alignItems: 'center',
   },
   modalLiquidityLabel: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.secondary,
+    marginBottom: 2,
   },
   modalLiquidityValue: {
-    fontSize: theme.typography.fontSize.base,
+    fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
   },
   modalLiquidityBar: {
-    width: '100%',
-    height: 8,
+    height: 6,
     backgroundColor: theme.colors.gray[200],
-    borderRadius: 4,
-    marginTop: theme.spacing[1],
+    borderRadius: 3,
+    overflow: 'hidden',
   },
   modalLiquidityBarFill: {
     height: '100%',
-    borderRadius: 4,
+    borderRadius: 3,
   },
 });

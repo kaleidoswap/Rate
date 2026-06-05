@@ -11,6 +11,7 @@ import {
   Clipboard,
   ActivityIndicator,
   Image,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -18,10 +19,26 @@ import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
-import RGBApiService from '../services/RGBApiService';
+// RGBApiService removed — all operations via protocolManager
+import { protocolManager } from '../services/protocols';
+import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-protocols';
+import { selectDisclosureLevel } from '../store/slices/settingsSlice';
+import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
+import {
+  getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
+  type AccountId, type NetworkType as ProtocolNetworkType,
+} from '../utils/account-routing';
 import { theme } from '../theme';
-import { Card, Button, Input } from '../components';
-import { useAssetIcon } from '../utils';
+import { Card, Button, Input, ScreenHeader } from '../components';
+import { AssetIcon } from '../components/AssetIcon';
+import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
+import { NetworkIcon } from '../components/NetworkIcon';
+import { BitcoinIcon, UsdCoinIcon } from '../components/ProtocolIcons';
+import { QrCode } from '@kaleidorg/kaleido-ui/native';
+import { AmountEditorModal } from '../components/AmountEditorModal';
+import { useFiatRates } from '../hooks/useFiatRates';
+import { PressableScale } from '../components/PressableScale';
+import { feedback } from '../utils/feedback';
 import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 interface Props {
@@ -33,11 +50,7 @@ interface RGBAsset {
   ticker: string;
   name: string;
   precision?: number;
-  balance: {
-    settled: number;
-    future: number;
-    spendable: number;
-  };
+  balance: number;
 }
 
 interface Asset {
@@ -71,11 +84,12 @@ interface Channel {
 
 export default function ReceiveScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
+  const assetsState = useSelector((state: RootState) => state.assets);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD } = useBitcoinConversion();
   
   // Safe destructuring with fallbacks
-  const rgbAssets = (walletState?.rgbAssets || []) as RGBAsset[];
+  const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
   
 
@@ -95,14 +109,47 @@ export default function ReceiveScreen({ navigation }: Props) {
     return amount.toFixed(precision);
   };
   
+  // Must call hooks first before any other code
+  const getProtocolStatus = useRefreshableProtocolStatus();
+
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
     ticker: 'BTC',
     name: 'Bitcoin',
     isRGB: false,
   });
-  const [networkType, setNetworkType] = useState<'on-chain' | 'lightning'>('on-chain');
+
+  // Default to first available network based on connected protocols
+  const getDefaultNetwork = (): ProtocolNetworkType => {
+    const status = getProtocolStatus();
+    if (status.SPARK) return 'spark';
+    if (status.RGB) return 'onchain';
+    if (status.ARKADE) return 'arkade';
+    return 'onchain';
+  };
+  // Network selection allows the per-protocol types plus a 'unified' single-QR mode.
+  type ReceiveMode = ProtocolNetworkType | 'unified';
+  // Default to the single "All networks" QR; specific networks are opt-in.
+  const [networkType, setNetworkType] = useState<ReceiveMode>('unified');
   const [address, setAddress] = useState('');
+  // Unified receive (single BIP21 QR embedding all available methods)
+  const [unifiedUri, setUnifiedUri] = useState('');
+  const [unifiedLoading, setUnifiedLoading] = useState(false);
+  const [unifiedError, setUnifiedError] = useState<string | null>(null);
+  const [unifiedMethods, setUnifiedMethods] = useState<string[]>([]);
+  // Per-method address breakdown for the Pro/advanced address list.
+  const [unifiedAddresses, setUnifiedAddresses] = useState<
+    Array<{ key: string; label: string; value: string }>
+  >([]);
+  const [showAddressInfo, setShowAddressInfo] = useState(false);
+  // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
+  // embedding the USD-receiving methods (Liquid USDt, RGB USDT invoice, Spark).
+  const [unifiedAsset, setUnifiedAsset] = useState<'BTC' | 'USD'>('BTC');
+  // Lite mode: a single private BIP321 QR (BTC/$ toggle) with the advanced
+  // network picker hidden behind "Show all networks".
+  const disclosureLevel = useSelector(selectDisclosureLevel);
+  const isLite = disclosureLevel === 'lite';
+  const [showAllNetworks, setShowAllNetworks] = useState(false);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
@@ -111,8 +158,34 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [maxDepositAmount, setMaxDepositAmount] = useState<number>(0);
   const [isUserTyping, setIsUserTyping] = useState(false);
+  const [arkadeSubMode, setArkadeSubMode] = useState<'ark' | 'boarding'>('ark');
+  // Network selector dropdown (All selected by default; specific networks hidden).
+  const [showNetworkDropdown, setShowNetworkDropdown] = useState(false);
+  // Multi-currency amount editor (BTC / sats / USD / other fiat).
+  const [showAmountEditor, setShowAmountEditor] = useState(false);
+  const fiatRates = useFiatRates();
 
-  const apiService = RGBApiService.getInstance();
+  // Determine available network types based on connected protocols and selected asset
+  const availableNetworkTypes = useMemo((): ProtocolNetworkType[] => {
+    const status = getProtocolStatus();
+    const family = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
+    const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
+
+    const networks = new Set<ProtocolNetworkType>();
+    for (const account of accounts) {
+      for (const net of getNetworkTypesForAccount(account, family)) {
+        networks.add(net);
+      }
+    }
+
+    // Always include on-chain and lightning if RGB is connected (legacy compatibility)
+    if (status.RGB) {
+      networks.add('onchain');
+      networks.add('lightning');
+    }
+
+    return Array.from(networks);
+  }, [selectedAsset, getProtocolStatus]);
   
   // Constants for HTLC calculations (from desktop app)
   const MSATS_PER_SAT = 1000;
@@ -124,8 +197,9 @@ export default function ReceiveScreen({ navigation }: Props) {
     
     try {
       setChannelsLoading(true);
-      const channelsResponse = await apiService.listChannels();
-      const channelsList = channelsResponse.channels || [];
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const channelsResponse = rgbAdapter?.isConnected() ? await rgbAdapter.listChannels() : { channels: [] };
+      const channelsList = Array.isArray(channelsResponse) ? channelsResponse : channelsResponse.channels || [];
       setChannels(channelsList);
     } catch (error) {
       console.error('Failed to load channels:', error);
@@ -181,7 +255,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           ticker: rgbAsset.ticker,
           name: rgbAsset.name,
           isRGB: true,
-          balance: rgbAsset.balance?.spendable || 0,
+          balance: rgbAsset.balance || 0,
         } : null;
       })
       .filter(asset => asset !== null) as Asset[];
@@ -208,7 +282,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       ticker: asset.ticker,
       name: asset.name,
       isRGB: true,
-      balance: asset.balance?.spendable || 0,
+      balance: asset.balance || 0,
     })) : [])
   ];
 
@@ -247,76 +321,140 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   const generateAddress = async () => {
     if (!selectedAsset) return;
-    
-    // Clear previous error
+
     setError(null);
-    
-    // Validate amount if required
+
     if (isAmountRequired() && !isAmountValid()) {
-      setError('Please enter a valid amount for Lightning invoices');
+      setError('Please enter a valid amount');
       return;
     }
-    
+
     setLoading(true);
     try {
       let result: any = null;
-      
-              if (selectedAsset.asset_id === 'BTC') {
-          if (networkType === 'on-chain') {
-            // BTC on-chain address
-            const response = await apiService.getNewAddress();
-            result = (response as any)?.address || response;
+
+      // ── Spark network ──
+      if (networkType === 'spark') {
+        try {
+          const sparkAdapter = protocolManager.getAdapter('SPARK');
+          if (amount && isAmountValid()) {
+            const cleanAmount = amount.replace(/,/g, '');
+            const numericAmount = parseFloat(cleanAmount);
+            const amountSats = bitcoinUnit === 'BTC'
+              ? Math.round(numericAmount * 1e8)
+              : Math.round(numericAmount);
+            const invoice = await sparkAdapter.createInvoice({
+              amount: amountSats,
+              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              expirySeconds: 3600,
+            });
+            result = invoice.invoice;
+          } else {
+            const addr = await sparkAdapter.getReceiveAddress();
+            result = addr.address;
+          }
+        } catch (err: any) {
+          throw new Error(`Spark: ${err.message || 'Failed to generate address'}`);
+        }
+      }
+      // ── Arkade network ──
+      else if (networkType === 'arkade') {
+        try {
+          const arkadeAdapter = protocolManager.getAdapter('ARKADE');
+          if (arkadeSubMode === 'boarding') {
+            const addr = await arkadeAdapter.getReceiveAddress('boarding');
+            result = addr.address;
+          } else {
+            const addr = await arkadeAdapter.getReceiveAddress();
+            result = addr.address;
+          }
+        } catch (err: any) {
+          throw new Error(`Arkade: ${err.message || 'Failed to generate address'}`);
+        }
+      }
+      // ── RGB / Legacy: on-chain + lightning ──
+      else if (selectedAsset.asset_id === 'BTC') {
+        if (networkType === 'onchain') {
+          // Use whichever adapter is connected for on-chain address
+          const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
+          if (rgbAdapter?.isConnected()) {
+            const addr = await rgbAdapter.getReceiveAddress();
+            result = addr.address;
+          } else if (sparkAdapter?.isConnected()) {
+            // Spark can provide a single-use deposit address for on-chain BTC
+            const addr = await sparkAdapter.getReceiveAddress('onchain');
+            result = addr.address;
+          } else {
+            throw new Error('No wallet connected for on-chain deposit');
+          }
         } else {
           // Lightning invoice for BTC
           if (!amount || !isAmountValid()) {
             throw new Error('Amount is required for Lightning invoices');
           }
-          
-          // Clean amount and convert to msat
           const cleanAmount = amount.replace(/,/g, '');
           const numericAmount = parseFloat(cleanAmount);
-          const amountMsat = bitcoinUnit === 'BTC' 
-            ? Math.round(numericAmount * 100000000 * 1000)
-            : Math.round(numericAmount * 1000);
-          
-          const response = await apiService.createLightningInvoice({
-            amount_msat: amountMsat,
-            description: `Receive ${cleanAmount} ${bitcoinUnit}`,
-            duration_seconds: 3600, // 1 hour expiry
-          });
-          result = response?.invoice;
+          const amountSats = bitcoinUnit === 'BTC'
+            ? Math.round(numericAmount * 1e8)
+            : Math.round(numericAmount);
+
+          // Try RGB first (Lightning), then Spark (also supports Lightning)
+          const rgbLn = protocolManager.getAdapterIfAvailable('RGB');
+          const sparkLn = protocolManager.getAdapterIfAvailable('SPARK');
+          if (rgbLn?.isConnected()) {
+            const invoice = await rgbLn.createInvoice({
+              amount: amountSats,
+              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              expirySeconds: 3600,
+            });
+            result = invoice.invoice;
+          } else if (sparkLn?.isConnected()) {
+            const invoice = await sparkLn.createInvoice({
+              amount: amountSats,
+              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              expirySeconds: 3600,
+            });
+            result = invoice.invoice;
+          } else {
+            throw new Error('No wallet connected for Lightning invoice');
+          }
         }
       } else {
-        // For RGB assets
-        if (networkType === 'on-chain') {
-          // Create RGB invoice for on-chain transfer (similar to desktop app)
-          const response = await apiService.getRGBInvoice({
+        // RGB assets (require RGB adapter)
+        if (networkType === 'onchain') {
+          const rgbAssetAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          if (!rgbAssetAdapter?.isConnected()) {
+            throw new Error('RGB node required for on-chain RGB asset deposits. Please configure in Settings.');
+          }
+          const rgbInvoice = await rgbAssetAdapter.createRgbInvoice?.({
             asset_id: selectedAsset.asset_id,
             min_confirmations: 1,
-            duration_seconds: 3600, // 1 hour
+            duration_seconds: 3600,
           });
-          result = response?.invoice;
+          result = rgbInvoice?.invoice;
         } else {
           // Lightning invoice for RGB asset
           if (!amount || !isAmountValid()) {
             throw new Error('Amount is required for RGB Lightning invoices');
           }
-          
-          // Clean amount and parse with proper precision
           const cleanAmount = amount.replace(/,/g, '');
           const assetAmount = parseFloat(cleanAmount);
 
-          const response = await apiService.createLightningInvoice({
-            asset_id: selectedAsset.asset_id,
-            asset_amount: assetAmount,
+          const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          if (!rgbAssetLnAdapter?.isConnected()) {
+            throw new Error('RGB node required for RGB Lightning deposits. Please configure in Settings.');
+          }
+          const assetInvoice = await rgbAssetLnAdapter.createInvoice({
+            asset: selectedAsset.asset_id,
+            assetAmount,
             description: `Receive ${cleanAmount} ${selectedAsset.ticker}`,
-            duration_seconds: 3600, // 1 hour expiry
+            expirySeconds: 3600,
           });
-          result = response?.invoice;
+          result = assetInvoice.invoice;
         }
       }
 
-      // Enhanced validation with better error handling
       const validatedResult = validateAddressOrInvoice(result);
       if (validatedResult) {
         setAddress(validatedResult);
@@ -326,31 +464,271 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
     } catch (error) {
       console.error('Failed to generate address:', error);
-      
-      // Handle UTXO-related errors (similar to desktop app)
-      if (error && typeof error === 'object' && error !== null && 'data' in error) {
-        const errorData = (error as any).data;
-        if (errorData && typeof errorData === 'object' && 'error' in errorData) {
-          const errorMessage = String(errorData.error);
-          if (errorMessage.includes('No uncolored UTXOs are available')) {
-            setError('No uncolored UTXOs available. Please create UTXOs first or try a different network.');
-          } else {
-            setError(errorMessage);
-          }
-        } else {
-          const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
-          setError(errorMessage);
-        }
+      const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
+      if (errorMessage.includes('No uncolored UTXOs')) {
+        setError('No uncolored UTXOs available. Please create UTXOs first or try a different network.');
       } else {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
         setError(errorMessage);
       }
-      
-      setAddress(''); // Reset address on error
+      setAddress('');
     } finally {
       setLoading(false);
     }
   };
+
+  // ──────────────────────────────────────────────────────────────────────
+  // USD unified receive: a BIP321 QR (address-less) embedding the ways to receive
+  // USD (USDt) across protocols — Liquid USDt, an RGB USDT invoice (RGB-LN or
+  // RGB-L1), and the Spark address. Caller has already reset loading/error state.
+  const generateUsdUnifiedUri = async () => {
+    const rgb = protocolManager.getAdapterIfAvailable('RGB');
+    const spark = protocolManager.getAdapterIfAvailable('SPARK');
+    const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
+
+    const methods: string[] = [];
+    let sparkAddress: string | undefined;
+    let liquidAddress: string | undefined;
+    let rgbInvoice: string | undefined;
+
+    // The RGB USDT asset (from the loaded RGB assets), for an RGB invoice.
+    const usdtRgb = rgbAssets.find((a) => /usdt/i.test(a.ticker));
+
+    try {
+      // 1) Liquid USDt — assets ride on the same confidential address.
+      if (liquid?.isConnected()) {
+        try {
+          const addr = await liquid.getReceiveAddress();
+          if (addr?.address) { liquidAddress = addr.address; methods.push('Liquid USDt'); }
+        } catch (e) { console.warn('USD: Liquid address failed', e); }
+      }
+      // 2) RGB USDT invoice (covers RGB-LN and RGB on-chain L1).
+      if (rgb?.isConnected() && usdtRgb?.asset_id && rgb.createRgbInvoice) {
+        try {
+          const inv: any = await rgb.createRgbInvoice({ assetId: usdtRgb.asset_id });
+          const invoice = inv?.invoice ?? inv?.recipient_id;
+          if (invoice) { rgbInvoice = invoice; methods.push('RGB USDT'); }
+        } catch (e) { console.warn('USD: RGB invoice failed', e); }
+      }
+      // 3) Spark address (for a Spark USD token transfer).
+      if (spark?.isConnected()) {
+        try {
+          const addr = await spark.getReceiveAddress();
+          if (addr?.address) { sparkAddress = addr.address; methods.push('Spark'); }
+        } catch (e) { console.warn('USD: Spark address failed', e); }
+      }
+
+      if (!sparkAddress && !liquidAddress && !rgbInvoice) {
+        setUnifiedError('No USD receive method available. Connect Liquid, an RGB node, or Spark.');
+        return;
+      }
+
+      setUnifiedAddresses(
+        [
+          liquidAddress && { key: 'liquid', label: 'Liquid USDt', value: liquidAddress },
+          rgbInvoice && { key: 'rgb', label: 'RGB USDT invoice', value: rgbInvoice },
+          sparkAddress && { key: 'spark', label: 'Spark', value: sparkAddress },
+        ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
+      );
+
+      const uri = buildUnifiedReceiveURI({
+        sparkAddress,
+        liquidAddress,
+        rgbInvoice,
+        assetId: LITE_USD.assetId, // Liquid USDt asset id
+        label: 'KaleidoSwap USD',
+      });
+      setUnifiedUri(uri);
+      setUnifiedMethods(methods);
+    } catch (e: any) {
+      console.error('USD: unified receive failed', e);
+      setUnifiedError(e?.message || 'Failed to build USD receive code.');
+    } finally {
+      setUnifiedLoading(false);
+    }
+  };
+
+  // Unified receive: build ONE BIP321 QR embedding every available method.
+  // Defensive — each adapter call is wrapped so a missing/disconnected
+  // protocol is silently skipped rather than failing the whole QR.
+  // ──────────────────────────────────────────────────────────────────────
+  const generateUnifiedUri = async () => {
+    setUnifiedError(null);
+    setUnifiedLoading(true);
+    setUnifiedUri('');
+    setUnifiedMethods([]);
+    setUnifiedAddresses([]);
+
+    if (unifiedAsset === 'USD') {
+      await generateUsdUnifiedUri();
+      return;
+    }
+
+    const rgb = protocolManager.getAdapterIfAvailable('RGB');
+    const spark = protocolManager.getAdapterIfAvailable('SPARK');
+    const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
+    const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
+
+    const methods: string[] = [];
+    let btcAddress: string | undefined;
+    let lightningInvoice: string | undefined;
+    let sparkAddress: string | undefined;
+    let arkadeAddress: string | undefined;
+    let liquidAddress: string | undefined;
+
+    // Optional amount (in sats) for the Lightning leg / BIP21 amount.
+    let amountSats = 0;
+    if (amount && isAmountValid()) {
+      const cleanAmount = amount.replace(/,/g, '');
+      const numericAmount = parseFloat(cleanAmount);
+      if (!isNaN(numericAmount) && numericAmount > 0) {
+        amountSats = bitcoinUnit === 'BTC'
+          ? Math.round(numericAmount * 1e8)
+          : Math.round(numericAmount);
+      }
+    }
+
+    // 1) BTC on-chain address — the universal BIP321/BIP21 fallback (optional under BIP321).
+    //    Prefer RGB, then Spark single-use deposit, then Arkade boarding.
+    if (rgb?.isConnected()) {
+      try {
+        const addr = await rgb.getReceiveAddress();
+        if (addr?.address) btcAddress = addr.address;
+      } catch (e) { console.warn('Unified: RGB on-chain address failed', e); }
+    }
+    if (!btcAddress && spark?.isConnected()) {
+      try {
+        const addr = await spark.getReceiveAddress('onchain');
+        if (addr?.address) btcAddress = addr.address;
+      } catch (e) { console.warn('Unified: Spark on-chain address failed', e); }
+    }
+    if (!btcAddress && arkade?.isConnected()) {
+      try {
+        const addr = await arkade.getReceiveAddress('boarding');
+        if (addr?.address) btcAddress = addr.address;
+      } catch (e) { console.warn('Unified: Arkade boarding address failed', e); }
+    }
+
+    // 2) Lightning invoice (RGB node first, then Spark). Best-effort.
+    const lnAdapter = rgb?.isConnected() ? rgb : spark?.isConnected() ? spark : undefined;
+    if (lnAdapter) {
+      try {
+        const invoice = await lnAdapter.createInvoice({
+          amount: amountSats > 0 ? amountSats : undefined,
+          description: 'Unified receive',
+          expirySeconds: 3600,
+        });
+        if (invoice?.invoice) {
+          lightningInvoice = invoice.invoice;
+          methods.push('Lightning');
+        }
+      } catch (e) { console.warn('Unified: Lightning invoice failed', e); }
+    }
+
+    // 3) Spark native address.
+    if (spark?.isConnected()) {
+      try {
+        const addr = await spark.getReceiveAddress();
+        if (addr?.address) {
+          sparkAddress = addr.address;
+          methods.push('Spark');
+        }
+      } catch (e) { console.warn('Unified: Spark address failed', e); }
+    }
+
+    // 4) Arkade native (ark) address.
+    if (arkade?.isConnected()) {
+      try {
+        const addr = await arkade.getReceiveAddress();
+        if (addr?.address) {
+          arkadeAddress = addr.address;
+          methods.push('Arkade');
+        }
+      } catch (e) { console.warn('Unified: Arkade address failed', e); }
+    }
+
+    // 5) Liquid (L-BTC / USDt) address.
+    if (liquid?.isConnected()) {
+      try {
+        const addr = await liquid.getReceiveAddress();
+        if (addr?.address) {
+          liquidAddress = addr.address;
+          methods.push('Liquid');
+        }
+      } catch (e) { console.warn('Unified: Liquid address failed', e); }
+    }
+
+    // BIP321 allows an address-less URI (bitcoin:?lightning=...&liquid=...), so we only
+    // need at least ONE receive method, not necessarily an on-chain address.
+    if (!btcAddress && !lightningInvoice && !sparkAddress && !arkadeAddress && !liquidAddress) {
+      setUnifiedError('No receive method available. Connect a wallet (RGB, Spark, Arkade, or Liquid) to use unified receive.');
+      setUnifiedLoading(false);
+      return;
+    }
+    if (btcAddress) methods.unshift('On-chain');
+
+    setUnifiedAddresses(
+      [
+        btcAddress && { key: 'onchain', label: 'Bitcoin on-chain', value: btcAddress },
+        lightningInvoice && { key: 'lightning', label: 'Lightning invoice', value: lightningInvoice },
+        sparkAddress && { key: 'spark', label: 'Spark', value: sparkAddress },
+        arkadeAddress && { key: 'arkade', label: 'Arkade', value: arkadeAddress },
+        liquidAddress && { key: 'liquid', label: 'Liquid', value: liquidAddress },
+      ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
+    );
+
+    try {
+      const uri = buildUnifiedReceiveURI({
+        btcAddress,
+        lightningInvoice,
+        sparkAddress,
+        arkadeAddress,
+        liquidAddress,
+        amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
+        label: 'KaleidoSwap',
+      });
+      setUnifiedUri(uri);
+      setUnifiedMethods(methods);
+    } catch (e: any) {
+      console.error('Unified: buildUnifiedReceiveURI failed', e);
+      setUnifiedError(e?.message || 'Failed to build unified receive code.');
+    } finally {
+      setUnifiedLoading(false);
+    }
+  };
+
+  const copyUnifiedUri = async () => {
+    if (!unifiedUri) return;
+    await Clipboard.setString(unifiedUri);
+    Alert.alert('Copied', 'Unified receive URI copied to clipboard');
+  };
+
+  // Generate the unified URI when that mode is selected, or amount changes.
+  useEffect(() => {
+    if (networkType !== 'unified') return;
+    const timeoutId = setTimeout(() => {
+      generateUnifiedUri();
+    }, 300);
+    return () => clearTimeout(timeoutId);
+  }, [networkType, amount, unifiedAsset]);
+
+  // Keep the unified BTC/USD asset in sync with the selected asset tab.
+  useEffect(() => {
+    if (selectedAsset.ticker === 'BTC') {
+      setUnifiedAsset('BTC');
+    } else if (/usd/i.test(selectedAsset.ticker)) {
+      setUnifiedAsset('USD');
+    }
+  }, [selectedAsset]);
+
+  // "All networks" can only encode BTC or USD — a custom RGB asset falls back
+  // to a specific on-chain (RGB) invoice.
+  useEffect(() => {
+    const t = selectedAsset.ticker;
+    const isBtcOrUsd = t === 'BTC' || /usd/i.test(t);
+    if (!isBtcOrUsd && networkType === 'unified') {
+      setNetworkType('onchain');
+    }
+  }, [selectedAsset, networkType]);
 
   // Load channels when component mounts or network type changes
   useEffect(() => {
@@ -389,10 +767,11 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Auto-generate address when conditions change
   useEffect(() => {
+    if (networkType === 'unified') return; // unified has its own generator
     if (selectedAsset) {
       setAddress('');
       setError(null);
-      
+
       // Only auto-generate if amount is not required, or if it's valid
       // Use a small delay to avoid interfering with user input
       const timeoutId = setTimeout(() => {
@@ -431,10 +810,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   }, [channels]);
 
+  const [copied, setCopied] = useState(false);
   const copyToClipboard = async () => {
     if (!address) return;
     await Clipboard.setString(address);
-    Alert.alert('Copied', 'Address copied to clipboard');
+    feedback.select();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
   };
 
   const shareAddress = async () => {
@@ -449,204 +831,203 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   };
 
-  const AssetIcon = ({ asset }: { asset: Asset }) => {
-    const { iconUrl } = useAssetIcon(asset?.ticker || '');
-    
-    if (!asset) return null;
-    
-    if (asset.ticker === 'BTC') {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
-        </View>
-      );
+  // AssetIcon is now imported from components/AssetIcon
+
+  // ── Amount <-> sats bridging for the multi-currency editor ────────────────
+  const SATS_PER_BTC = 1e8;
+  const currentAmountSats = (() => {
+    if (!amount) return 0;
+    const n = parseFloat(amount.replace(/,/g, ''));
+    if (isNaN(n) || n <= 0) return 0;
+    return bitcoinUnit === 'BTC' ? Math.round(n * SATS_PER_BTC) : Math.round(n);
+  })();
+
+  const applyAmountSats = (sats: number) => {
+    if (!sats || sats <= 0) {
+      setAmount('');
+      return;
     }
-    
-    if (iconUrl) {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
-        </View>
-      );
-    }
-    
-    return (
-      <View style={styles.assetIconContainer}>
-        <Ionicons name="diamond" size={24} color={theme.colors.primary[500]} />
-      </View>
-    );
+    setAmount(bitcoinUnit === 'BTC' ? (sats / SATS_PER_BTC).toString() : String(Math.round(sats)));
   };
 
-  const renderHeader = () => {
-    return (
-      <View style={styles.headerContainer}>
-        <LinearGradient
-          colors={['#4338ca', '#7c3aed'] as [string, string]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.headerGradient}
-        >
-          <View style={styles.header}>
-            <TouchableOpacity 
-              style={styles.backButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Receive</Text>
-            <TouchableOpacity
-              style={styles.helpButton}
-              onPress={() => Alert.alert('Help', 'Generate addresses and invoices to receive payments')}
-            >
-              <Ionicons name="help-circle-outline" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
-          </View>
-          
-          {/* Asset Selector */}
-          {selectedAsset && (
-            <TouchableOpacity 
-              style={styles.assetSelector}
-              onPress={() => setShowAssetSelector(!showAssetSelector)}
-              activeOpacity={0.8}
-            >
-              <AssetIcon asset={selectedAsset} />
-              <View style={styles.assetInfo}>
-                <Text style={styles.assetTicker}>{selectedAsset.ticker}</Text>
-                <Text style={styles.assetName}>{selectedAsset.name}</Text>
-                {typeof selectedAsset.balance === 'number' && (
-                  <Text style={styles.assetBalance}>
-                    Balance: {selectedAsset.balance.toLocaleString()}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.chevronContainer}>
-                <Ionicons 
-                  name={showAssetSelector ? "chevron-up" : "chevron-down"} 
-                  size={20} 
-                  color="rgba(255, 255, 255, 0.8)" 
-                />
-              </View>
-            </TouchableOpacity>
-          )}
-        </LinearGradient>
-        
-        {/* Asset Dropdown */}
-        {showAssetSelector && allAssets.length > 0 && (
-          <View style={styles.assetDropdown}>
-            <ScrollView style={styles.assetDropdownScroll} nestedScrollEnabled>
-              {allAssets.map((asset) => (
-                <TouchableOpacity
-                  key={asset.asset_id}
-                  style={[
-                    styles.assetOption,
-                    selectedAsset.asset_id === asset.asset_id && styles.assetOptionSelected
-                  ]}
-                  onPress={() => {
-                    setSelectedAsset(asset);
-                    setShowAssetSelector(false);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <AssetIcon asset={asset} />
-                  <View style={styles.assetOptionInfo}>
-                    <Text style={styles.assetOptionTicker}>{asset.ticker}</Text>
-                    <Text style={styles.assetOptionName}>{asset.name}</Text>
-                    {typeof asset.balance === 'number' && (
-                      <Text style={styles.assetOptionBalance}>
-                        Balance: {asset.balance.toLocaleString()}
-                      </Text>
-                    )}
-                  </View>
-                  {selectedAsset.asset_id === asset.asset_id && (
-                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
+  // Human label for the current requested amount (BTC view + ≈USD).
+  const amountSummary = (): string | null => {
+    if (!currentAmountSats) return null;
+    const unit = bitcoinUnit === 'BTC'
+      ? `${(currentAmountSats / SATS_PER_BTC).toFixed(8)} BTC`
+      : `${currentAmountSats.toLocaleString()} sats`;
+    const usd = fiatRates['usd'];
+    return usd
+      ? `${unit}  ·  ≈ $${((currentAmountSats / SATS_PER_BTC) * usd).toFixed(2)}`
+      : unit;
+  };
+
+  const renderHeader = () => (
+    <View>
+      <ScreenHeader title="Receive" showBack={true} />
+
+      {/* Asset Selector — below header, above network tabs */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>
+        {selectedAsset && (
+          <TouchableOpacity
+            onPress={() => setShowAssetSelector(true)}
+            activeOpacity={0.7}
+            style={{
+              flexDirection: 'row', alignItems: 'center',
+              backgroundColor: theme.colors.surface.primary,
+              borderRadius: 14, padding: 12,
+              shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
+            }}
+          >
+            <AssetIcon ticker={selectedAsset.ticker} protocol={selectedAsset.isRGB ? 'RGB' : undefined} size={36} showBadge={false} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '600', color: theme.colors.text.primary }}>{selectedAsset.ticker}</Text>
+              <Text style={{ fontSize: 12, color: theme.colors.text.tertiary }}>{selectedAsset.name}</Text>
+            </View>
+            <Ionicons name="chevron-down" size={18} color={theme.colors.gray[400]} />
+          </TouchableOpacity>
         )}
       </View>
-    );
+
+      {/* Asset Selector Modal */}
+      <AssetSelector
+        visible={showAssetSelector}
+        onClose={() => setShowAssetSelector(false)}
+        onSelect={(asset) => {
+          setSelectedAsset({
+            asset_id: asset.asset_id,
+            ticker: asset.ticker,
+            name: asset.name,
+            isRGB: asset.isRGB || asset.protocol === 'RGB',
+            balance: asset.balance,
+          });
+        }}
+        assets={allAssets.map(a => ({
+          asset_id: a.asset_id,
+          ticker: a.ticker,
+          name: a.name,
+          balance: a.balance,
+          isRGB: a.isRGB,
+          protocol: a.isRGB ? 'RGB' as const : undefined,
+        }))}
+        selectedAssetId={selectedAsset?.asset_id}
+        title="Select Asset"
+      />
+    </View>
+  );
+
+  // Network color coding (matches rate-extension)
+  const NETWORK_COLORS: Record<string, string> = {
+    'onchain': '#F7931A', // Bitcoin orange
+    'lightning': '#FACC15', // Lightning yellow
+    'spark': '#60A5FA',     // Spark blue
+    'arkade': '#A855F7',    // Arkade purple
+    'unified': '#10B981',   // Unified / all-networks green
+  };
+
+  const NETWORK_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
+    'onchain': 'link',
+    'lightning': 'flash',
+    'spark': 'sparkles',
+    'arkade': 'shield-checkmark',
+  };
+
+  const NETWORK_LABELS: Record<string, string> = {
+    'onchain': 'On-chain',
+    'lightning': 'Lightning',
+    'spark': 'Spark',
+    'arkade': 'Arkade',
   };
 
   const renderNetworkTabs = () => {
+    // Lite mode abstracts away networks/layers: no manual picker, just the
+    // unified single-QR receive (networkType defaults to 'unified').
+    if (isLite) return null;
+
     const onChainAssets = getOnChainAssets();
     const lightningAssets = getLightningAssets();
-    
+
+    // Build list of available networks with metadata
+    // Only show networks that are actually available (based on connected protocols)
+    // The 'unified' chip is always offered first — it produces a single QR
+    // embedding every method the connected adapters can provide.
+    const allNetworks: Array<{ id: ReceiveMode; label: string; icon: keyof typeof Ionicons.glyphMap; color: string; subtitle: string; available: boolean }> = [
+      { id: 'unified' as ReceiveMode, label: 'All networks', icon: 'apps' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['unified'], subtitle: 'one QR', available: true },
+      ...(availableNetworkTypes.includes('onchain') ? [{ id: 'onchain' as ProtocolNetworkType, label: 'On-chain', icon: 'link' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['onchain'], subtitle: onChainAssets.length === 1 ? '1 asset' : `${onChainAssets.length} assets`, available: true }] : []),
+      ...(availableNetworkTypes.includes('lightning') ? [{ id: 'lightning' as ProtocolNetworkType, label: 'Lightning', icon: 'flash' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['lightning'], subtitle: lightningAssets.length === 0 ? 'no channels' : lightningAssets.length === 1 ? '1 asset' : `${lightningAssets.length} assets`, available: lightningAssets.length > 0 }] : []),
+      ...(availableNetworkTypes.includes('spark') ? [{ id: 'spark' as ProtocolNetworkType, label: 'Spark', icon: 'sparkles' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['spark'], subtitle: 'instant', available: true }] : []),
+      ...(availableNetworkTypes.includes('arkade') ? [{ id: 'arkade' as ProtocolNetworkType, label: 'Arkade', icon: 'shield-checkmark' as keyof typeof Ionicons.glyphMap, color: NETWORK_COLORS['arkade'], subtitle: arkadeSubMode === 'boarding' ? 'boarding' : 'off-chain', available: true }] : []),
+    ];
+
     return (
       <View style={styles.networkTabsContainer}>
-        <View style={styles.networkTabs}>
-          <TouchableOpacity
-            style={[
-              styles.networkTab,
-              networkType === 'on-chain' && styles.networkTabActive
-            ]}
-            onPress={() => setNetworkType('on-chain')}
-            activeOpacity={0.8}
-          >
-            <Ionicons 
-              name="link" 
-              size={18} 
-              color={networkType === 'on-chain' ? theme.colors.primary[500] : theme.colors.text.secondary} 
-            />
-            <View style={styles.networkTabContent}>
-              <Text style={[
-                styles.networkTabText,
-                networkType === 'on-chain' && styles.networkTabTextActive
-              ]}>
-                On-chain
-              </Text>
-              <Text style={[
-                styles.networkTabSubtext,
-                networkType === 'on-chain' && styles.networkTabSubtextActive
-              ]}>
-                {onChainAssets.length} assets
-              </Text>
-            </View>
-          </TouchableOpacity>
+        {/* Account chips — horizontal scrollable */}
+        <Text style={{ fontSize: 11, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, paddingHorizontal: 4 }}>
+          Destination Network
+        </Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {allNetworks.map((net) => {
+              const isActive = networkType === net.id;
+              return (
+                <PressableScale
+                  key={net.id}
+                  onPress={() => { feedback.select(); setNetworkType(net.id); }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    borderRadius: 12,
+                    backgroundColor: isActive ? net.color + '20' : theme.colors.background.secondary,
+                    borderWidth: isActive ? 1.5 : 1,
+                    borderColor: isActive ? net.color : theme.colors.background.tertiary || 'rgba(255,255,255,0.08)',
+                    opacity: net.available ? 1 : 0.4,
+                  }}
+                >
+                  {net.id === 'unified' ? (
+                    <Ionicons name={net.icon} size={18} color={isActive ? net.color : theme.colors.text.secondary} />
+                  ) : (
+                    <NetworkIcon network={net.id} size={18} color={isActive ? net.color : theme.colors.text.secondary} />
+                  )}
+                  <View style={{ marginLeft: 8 }}>
+                    <Text style={{ fontSize: 13, fontWeight: isActive ? '600' : '500', color: isActive ? net.color : theme.colors.text.primary }}>
+                      {net.label}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: isActive ? net.color + 'AA' : theme.colors.text.tertiary, marginTop: 1 }}>
+                      {net.subtitle}
+                    </Text>
+                  </View>
+                  {isActive && (
+                    <View style={{ marginLeft: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: net.color }} />
+                  )}
+                </PressableScale>
+              );
+            })}
+          </View>
+        </ScrollView>
 
+        {/* Arkade sub-mode toggle */}
+        {networkType === 'arkade' && (
           <TouchableOpacity
-            style={[
-              styles.networkTab,
-              networkType === 'lightning' && styles.networkTabActive,
-              lightningAssets.length === 1 && styles.networkTabDisabled // Only BTC available
-            ]}
-            onPress={() => setNetworkType('lightning')}
-            activeOpacity={lightningAssets.length > 1 ? 0.8 : 0.5}
+            onPress={() => setArkadeSubMode(arkadeSubMode === 'ark' ? 'boarding' : 'ark')}
+            style={{
+              flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: 10, marginBottom: 12,
+              backgroundColor: NETWORK_COLORS['arkade'] + '15',
+              borderWidth: 1, borderColor: NETWORK_COLORS['arkade'] + '30',
+            }}
           >
-            <Ionicons 
-              name="flash" 
-              size={18} 
-              color={networkType === 'lightning' ? theme.colors.primary[500] : theme.colors.text.secondary} 
-            />
-            <View style={styles.networkTabContent}>
-              <Text style={[
-                styles.networkTabText,
-                networkType === 'lightning' && styles.networkTabTextActive
-              ]}>
-                Lightning
-              </Text>
-              <Text style={[
-                styles.networkTabSubtext,
-                networkType === 'lightning' && styles.networkTabSubtextActive
-              ]}>
-                {lightningAssets.length} assets
-              </Text>
-            </View>
-            {channelsLoading && (
-              <ActivityIndicator 
-                size="small" 
-                color={theme.colors.text.secondary} 
-                style={styles.networkTabLoader}
-              />
-            )}
+            <Ionicons name="swap-horizontal" size={16} color={NETWORK_COLORS['arkade']} />
+            <Text style={{ marginLeft: 8, fontSize: 13, color: NETWORK_COLORS['arkade'], fontWeight: '500' }}>
+              {arkadeSubMode === 'ark' ? 'Switch to Boarding (on-chain deposit)' : 'Switch to Ark (off-chain receive)'}
+            </Text>
           </TouchableOpacity>
-        </View>
-        
+        )}
+
         {/* Warning for Lightning with limited assets */}
         {networkType === 'lightning' && lightningAssets.length === 1 && (
           <View style={styles.networkWarning}>
-            <Ionicons name="information-circle" size={16} color={theme.colors.warning[500]} />
+            <Ionicons name="information-circle" size={16} color={theme.colors.warning?.[500] || '#EAB308'} />
             <Text style={styles.networkWarningText}>
               Only Bitcoin available. Open RGB Lightning channels to receive RGB assets.
             </Text>
@@ -659,7 +1040,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const renderAmountInput = () => {
     if (!selectedAsset) return null;
     
-    const showAmount = isAmountRequired() || selectedAsset.isRGB;
+    const showAmount = isAmountRequired() || selectedAsset.isRGB || networkType === 'unified';
     if (!showAmount) return null;
 
     const isRequired = isAmountRequired();
@@ -827,7 +1208,373 @@ export default function ReceiveScreen({ navigation }: Props) {
     return validateAddressOrInvoice(data) !== null;
   };
 
+  // Unified single-QR receive view (wraps the body with a BTC/USD asset selector).
+  // Pro/extension-style list of every address embedded in the unified QR. Each
+  // row copies its address; a collapsible panel explains them; "Add RGB address"
+  // jumps to the advanced asset picker.
+  const renderUnifiedAddressList = () => {
+    if (!unifiedAddresses.length) return null;
+    const colorFor = (key: string): string =>
+      (NETWORK_COLORS as Record<string, string>)[key] ?? theme.colors.primary[500];
+    const trunc = (v: string) => (v.length > 30 ? `${v.slice(0, 16)}…${v.slice(-10)}` : v);
+    return (
+      <View style={styles.addrListSection}>
+        <Text style={styles.addrListTitle}>Addresses</Text>
+        {unifiedAddresses.map((a) => (
+          <TouchableOpacity
+            key={a.key}
+            style={styles.addrRow}
+            activeOpacity={0.7}
+            onPress={async () => {
+              await Clipboard.setString(a.value);
+              Alert.alert('Copied', `${a.label} copied to clipboard`);
+            }}
+          >
+            <View style={[styles.addrDot, { backgroundColor: colorFor(a.key) }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.addrLabel}>{a.label}</Text>
+              <Text style={styles.addrValue} numberOfLines={1}>
+                {trunc(a.value)}
+              </Text>
+            </View>
+            <Ionicons name="copy-outline" size={18} color={theme.colors.text.tertiary} />
+          </TouchableOpacity>
+        ))}
+
+        <TouchableOpacity
+          style={styles.addrInfoToggle}
+          onPress={() => setShowAddressInfo((v) => !v)}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="information-circle-outline" size={16} color={theme.colors.text.tertiary} />
+          <Text style={styles.addrInfoToggleText}>What are these addresses?</Text>
+          <Ionicons
+            name={showAddressInfo ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={theme.colors.text.tertiary}
+          />
+        </TouchableOpacity>
+        {showAddressInfo && (
+          <Text style={styles.addrInfoBody}>
+            The single QR above carries several ways to be paid — a sender's wallet automatically picks
+            whichever it supports: Bitcoin on-chain, Lightning (instant, low fee), Spark, Arkade or
+            Liquid. You can also copy any individual address above.
+          </Text>
+        )}
+
+        <TouchableOpacity
+          style={styles.addRgbBtn}
+          activeOpacity={0.7}
+          onPress={() => {
+            setShowAllNetworks(true);
+            setShowAssetSelector(true);
+          }}
+        >
+          <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
+          <Text style={styles.addRgbText}>Add RGB address</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // ── Asset tabs: BTC | USD | (custom) | + ──────────────────────────────────
+  const renderAssetTabs = () => {
+    const accent = theme.colors.primary[500];
+    const t = selectedAsset.ticker;
+    const isBtc = t === 'BTC';
+    const isUsd = /usd/i.test(t);
+    const isCustom = !isBtc && !isUsd;
+
+    const selectBtc = () => {
+      feedback.select();
+      setSelectedAsset({
+        asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
+        balance: btcBalance?.vanilla?.spendable || 0,
+      });
+    };
+    const selectUsd = () => {
+      feedback.select();
+      const usdt = rgbAssets.find((a) => /usdt/i.test(a.ticker));
+      if (usdt) {
+        setSelectedAsset({
+          asset_id: usdt.asset_id, ticker: usdt.ticker, name: usdt.name,
+          isRGB: true, balance: usdt.balance || 0,
+        });
+      } else {
+        setSelectedAsset({ asset_id: 'USD', ticker: 'USD', name: 'US Dollar', isRGB: false });
+      }
+    };
+
+    const Tab = (
+      key: string,
+      active: boolean,
+      onPress: () => void,
+      icon: React.ReactNode,
+      label: string
+    ) => (
+      <TouchableOpacity
+        key={key}
+        style={[styles.assetTab, active && { borderColor: accent, backgroundColor: accent + '15' }]}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
+        {icon}
+        <Text style={[styles.assetTabText, active && { color: accent, fontWeight: '700' }]}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+
+    return (
+      <View style={styles.assetTabs}>
+        {Tab('BTC', isBtc, selectBtc, <BitcoinIcon size={20} />, 'BTC')}
+        {Tab('USD', isUsd, selectUsd, <UsdCoinIcon size={20} />, 'USD')}
+        {isCustom &&
+          Tab('custom', true, () => {}, (
+            <AssetIcon
+              ticker={t}
+              protocol={selectedAsset.isRGB ? 'RGB' : undefined}
+              size={20}
+              showBadge={false}
+            />
+          ), t)}
+        <TouchableOpacity
+          style={styles.assetAddTab}
+          onPress={() => { feedback.select(); setShowAssetSelector(true); }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="add" size={20} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // ── Network selector: "All" by default, specific networks behind a dropdown ─
+  const renderNetworkDropdown = () => {
+    const canUseAll = selectedAsset.ticker === 'BTC' || /usd/i.test(selectedAsset.ticker);
+    const options: Array<{ id: ReceiveMode; label: string; sub: string }> = [
+      ...(canUseAll
+        ? [{ id: 'unified' as ReceiveMode, label: 'All networks', sub: 'On-chain · Lightning · Spark · Arkade' }]
+        : []),
+      ...(availableNetworkTypes.includes('onchain')
+        ? [{ id: 'onchain' as ReceiveMode, label: 'On-chain', sub: 'Bitcoin Layer 1' }] : []),
+      ...(availableNetworkTypes.includes('lightning')
+        ? [{ id: 'lightning' as ReceiveMode, label: 'Lightning', sub: 'Instant · low fee' }] : []),
+      ...(availableNetworkTypes.includes('spark')
+        ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Instant' }] : []),
+      ...(availableNetworkTypes.includes('arkade')
+        ? [{ id: 'arkade' as ReceiveMode, label: 'Arkade', sub: 'Off-chain' }] : []),
+    ];
+    const current = options.find((o) => o.id === networkType) || options[0];
+    if (!current) return null;
+    const color = NETWORK_COLORS[current.id] || theme.colors.primary[500];
+
+    const glyph = (id: ReceiveMode, c: string) =>
+      id === 'unified'
+        ? <Ionicons name="apps" size={18} color={c} />
+        : <NetworkIcon network={id as ProtocolNetworkType} size={18} color={c} />;
+
+    return (
+      <View style={styles.netSelectorWrap}>
+        <TouchableOpacity
+          style={[styles.netSelector, showNetworkDropdown && { borderColor: color }]}
+          onPress={() => { feedback.select(); setShowNetworkDropdown((v) => !v); }}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.netGlyph, { backgroundColor: color + '1A' }]}>
+            {glyph(current.id, color)}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.netSelectorLabel}>{current.label}</Text>
+            <Text style={styles.netSelectorSub} numberOfLines={1}>{current.sub}</Text>
+          </View>
+          <Ionicons
+            name={showNetworkDropdown ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={theme.colors.text.tertiary}
+          />
+        </TouchableOpacity>
+
+        {showNetworkDropdown && (
+          <View style={styles.netDropdown}>
+            {options.map((o) => {
+              const active = o.id === networkType;
+              const c = NETWORK_COLORS[o.id] || theme.colors.primary[500];
+              return (
+                <TouchableOpacity
+                  key={o.id}
+                  style={[styles.netOption, active && { backgroundColor: c + '12' }]}
+                  onPress={() => {
+                    feedback.select();
+                    setNetworkType(o.id);
+                    setShowNetworkDropdown(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.netGlyph, { backgroundColor: c + '1A' }]}>
+                    {glyph(o.id, c)}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.netOptionLabel, active && { color: c }]}>{o.label}</Text>
+                    <Text style={styles.netSelectorSub} numberOfLines={1}>{o.sub}</Text>
+                  </View>
+                  {active && <Ionicons name="checkmark-circle" size={18} color={c} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // ── Amount row with pencil edit (opens the multi-currency editor) ─────────
+  const renderAmountRow = () => {
+    const summary = amountSummary();
+    const required = isAmountRequired();
+    return (
+      <TouchableOpacity
+        style={styles.amountRow}
+        onPress={() => setShowAmountEditor(true)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.amountRowIcon}>
+          <Ionicons name="cash-outline" size={18} color={theme.colors.primary[500]} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.amountRowLabel}>
+            {summary ? 'Requested amount' : required ? 'Amount required' : 'Add amount'}
+          </Text>
+          <Text style={styles.amountRowValue} numberOfLines={1}>
+            {summary || 'Optional — set in BTC, USD or other fiat'}
+          </Text>
+        </View>
+        <View style={styles.amountEditBtn}>
+          <Ionicons name="pencil" size={16} color={theme.colors.primary[500]} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderUnifiedContent = () => {
+    const accent = NETWORK_COLORS['unified'];
+    return (
+      <>
+        {renderUnifiedBody(accent)}
+        {renderUnifiedAddressList()}
+      </>
+    );
+  };
+
+  const renderUnifiedBody = (accent: string) => {
+    if (unifiedLoading) {
+      return (
+        <View style={styles.loadingSection}>
+          <ActivityIndicator size="large" color={accent} />
+          <Text style={styles.loadingText}>Building unified receive code...</Text>
+        </View>
+      );
+    }
+
+    if (unifiedError) {
+      return (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle" size={48} color={theme.colors.error[500]} />
+          <Text style={styles.errorText}>{unifiedError}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={generateUnifiedUri} activeOpacity={0.7}>
+            <Text style={styles.retryButtonText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (!unifiedUri) {
+      return (
+        <View style={styles.promptContainer}>
+          <Ionicons name="apps-outline" size={48} color={accent} />
+          <Text style={styles.promptText}>
+            Generate a single QR that any wallet can pay — on-chain, Lightning, Spark and Arkade combined.
+          </Text>
+          <TouchableOpacity style={[styles.generateButton, { backgroundColor: accent }]} onPress={generateUnifiedUri} activeOpacity={0.7}>
+            <Text style={styles.generateButtonText}>Generate</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.qrSection}>
+        {unifiedMethods.length > 0 && (
+          <View style={[styles.qrMethodsChip, { backgroundColor: accent + '18' }]}>
+            <Text style={[styles.qrMethodsChipText, { color: accent }]} numberOfLines={1}>
+              {unifiedMethods.join(' · ')}
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.qrContainer}>
+          <View style={styles.qrCodeWrapper}>
+            <QrCode value={unifiedUri} size={200} />
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.addressContainer, { borderLeftWidth: 3, borderLeftColor: accent }]}
+          onPress={copyUnifiedUri}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+            <Ionicons name="apps" size={16} color={accent} />
+            <Text style={[styles.addressLabel, { marginLeft: 6, marginBottom: 0 }]}>Unified Receive URI</Text>
+          </View>
+          <Text style={[styles.addressText, { fontFamily: 'monospace' }]} numberOfLines={3} selectable>
+            {unifiedUri.length > 50 ? `${unifiedUri.slice(0, 24)}...${unifiedUri.slice(-16)}` : unifiedUri}
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.qrActions}>
+          <TouchableOpacity style={styles.qrActionButton} onPress={copyUnifiedUri} activeOpacity={0.7}>
+            <View style={styles.qrActionIcon}>
+              <Ionicons
+                name={copied ? 'checkmark' : 'copy'}
+                size={18}
+                color={copied ? theme.colors.success[500] : theme.colors.primary[500]}
+              />
+            </View>
+            <Text style={[styles.qrActionText, copied && { color: theme.colors.success[500] }]}>
+              {copied ? 'Copied!' : 'Copy'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.qrActionButton}
+            onPress={async () => {
+              try {
+                await Share.share({ message: unifiedUri, title: 'Unified Receive' });
+              } catch (e) { console.error('Failed to share unified URI:', e); }
+            }}
+            activeOpacity={0.7}
+          >
+            <View style={styles.qrActionIcon}>
+              <Ionicons name="share" size={18} color={theme.colors.primary[500]} />
+            </View>
+            <Text style={styles.qrActionText}>Share</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.qrActionButton} onPress={generateUnifiedUri} activeOpacity={0.7}>
+            <View style={styles.qrActionIcon}>
+              <Ionicons name="refresh" size={18} color={theme.colors.primary[500]} />
+            </View>
+            <Text style={styles.qrActionText}>New</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
+
   const renderContent = () => {
+    if (networkType === 'unified') {
+      return renderUnifiedContent();
+    }
+
     if (loading) {
       return (
         <View style={styles.loadingSection}>
@@ -884,46 +1631,47 @@ export default function ReceiveScreen({ navigation }: Props) {
       );
     }
 
-    // Render QR code
-    const qrTitle = selectedAsset.isRGB 
-      ? 'RGB Asset Invoice'
-      : selectedAsset.asset_id === 'BTC' && networkType === 'lightning' 
-      ? 'Lightning Invoice'
-      : 'Bitcoin Address';
+    // Render QR code with network-aware title
+    const qrTitle = networkType === 'spark' ? 'Spark Address'
+      : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+      : networkType === 'lightning' ? 'Lightning Invoice'
+      : selectedAsset.isRGB ? 'RGB Invoice'
+      : 'On-chain Address';
 
+    const netColor = NETWORK_COLORS[networkType] || theme.colors.primary[500];
     return (
       <View style={styles.qrSection}>
-        <View style={styles.qrHeader}>
-          <Text style={styles.qrTitle}>{qrTitle}</Text>
-          {amount && selectedAsset.ticker && (
-            <View style={styles.qrAmountContainer}>
-              <Text style={styles.qrAmount}>
-                {amount} {selectedAsset.ticker}
-              </Text>
-            </View>
-          )}
+        <View style={[styles.qrMethodsChip, { backgroundColor: netColor + '18' }]}>
+          <NetworkIcon network={networkType as ProtocolNetworkType} size={14} color={netColor} />
+          <Text style={[styles.qrMethodsChipText, { color: netColor, marginLeft: 6 }]} numberOfLines={1}>
+            {qrTitle}{amount && selectedAsset.ticker ? `  ·  ${amount} ${selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}` : ''}
+          </Text>
         </View>
 
         <View style={styles.qrContainer}>
           <View style={styles.qrCodeWrapper}>
-            <QRCode
-              value={address}
-              size={220}
-              backgroundColor={theme.colors.surface.primary || '#FFFFFF'}
-              color={theme.colors.text.primary || '#000000'}
-              logoSize={40}
-              logoMargin={8}
-              logoBorderRadius={8}
-            />
+            <QrCode value={address} size={200} />
           </View>
         </View>
 
-        <View style={styles.addressContainer}>
-          <Text style={styles.addressLabel}>Address/Invoice</Text>
-          <Text style={styles.addressText} numberOfLines={4} selectable>
-            {address}
+        {/* Address card with left border accent */}
+        <TouchableOpacity style={[styles.addressContainer, {
+          borderLeftWidth: 3,
+          borderLeftColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
+        }]} onPress={copyToClipboard} activeOpacity={0.7}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+            <NetworkIcon network={networkType} size={16} color={NETWORK_COLORS[networkType] || theme.colors.primary[500]} />
+            <Text style={[styles.addressLabel, { marginLeft: 6, marginBottom: 0 }]}>
+              {networkType === 'lightning' ? 'Lightning Invoice'
+                : networkType === 'spark' ? 'Spark Address'
+                : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+                : 'Deposit Address'}
+            </Text>
+          </View>
+          <Text style={[styles.addressText, { fontFamily: 'monospace' }]} numberOfLines={3} selectable>
+            {address.length > 50 ? `${address.slice(0, 20)}...${address.slice(-16)}` : address}
           </Text>
-        </View>
+        </TouchableOpacity>
 
         <View style={styles.qrActions}>
           <TouchableOpacity 
@@ -932,9 +1680,15 @@ export default function ReceiveScreen({ navigation }: Props) {
             activeOpacity={0.7}
           >
             <View style={styles.qrActionIcon}>
-              <Ionicons name="copy" size={18} color={theme.colors.primary[500]} />
+              <Ionicons
+                name={copied ? 'checkmark' : 'copy'}
+                size={18}
+                color={copied ? theme.colors.success[500] : theme.colors.primary[500]}
+              />
             </View>
-            <Text style={styles.qrActionText}>Copy</Text>
+            <Text style={[styles.qrActionText, copied && { color: theme.colors.success[500] }]}>
+              {copied ? 'Copied!' : 'Copy'}
+            </Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -964,20 +1718,56 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      {renderNetworkTabs()}
-      
-      <ScrollView 
+    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
+      <ScreenHeader title="Receive" showBack={true} />
+
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        {renderAmountInput()}
+        {renderAssetTabs()}
+        {renderNetworkDropdown()}
         {renderContent()}
+        {renderAmountRow()}
       </ScrollView>
+
+      {/* Asset picker (opened by the "+" tab) */}
+      <AssetSelector
+        visible={showAssetSelector}
+        onClose={() => setShowAssetSelector(false)}
+        onSelect={(asset) => {
+          setSelectedAsset({
+            asset_id: asset.asset_id,
+            ticker: asset.ticker,
+            name: asset.name,
+            isRGB: asset.isRGB || asset.protocol === 'RGB',
+            balance: asset.balance,
+          });
+        }}
+        assets={allAssets.map((a) => ({
+          asset_id: a.asset_id,
+          ticker: a.ticker,
+          name: a.name,
+          balance: a.balance,
+          isRGB: a.isRGB,
+          protocol: a.isRGB ? ('RGB' as const) : undefined,
+        }))}
+        selectedAssetId={selectedAsset?.asset_id}
+        title="Select Asset"
+      />
+
+      {/* Multi-currency amount editor (BTC / sats / USD / fiat) */}
+      <AmountEditorModal
+        visible={showAmountEditor}
+        onClose={() => setShowAmountEditor(false)}
+        initialSats={currentAmountSats}
+        rates={fiatRates}
+        bitcoinUnit={bitcoinUnit}
+        onConfirm={applyAmountSats}
+      />
     </SafeAreaView>
   );
 }
@@ -1234,7 +2024,8 @@ const styles = StyleSheet.create({
   
   scrollContent: {
     paddingHorizontal: theme.spacing[5],
-    paddingBottom: theme.spacing[6],
+    paddingTop: theme.spacing[4],
+    paddingBottom: theme.spacing[10],
   },
   
   // Amount Section
@@ -1474,10 +2265,114 @@ const styles = StyleSheet.create({
   },
   
   // QR Section
+  assetTabs: {
+    flexDirection: 'row',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[3],
+  },
+  assetTab: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.medium,
+    backgroundColor: theme.colors.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  assetTabText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    color: theme.colors.text.secondary,
+  },
+  addrListSection: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    padding: 12,
+  },
+  addrListTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: theme.colors.text.tertiary,
+    marginBottom: 6,
+    paddingHorizontal: 4,
+  },
+  addrRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border.light,
+  },
+  addrDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  addrLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  addrValue: {
+    fontSize: 12,
+    color: theme.colors.text.muted,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop: 1,
+  },
+  addrInfoToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+  },
+  addrInfoToggleText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.text.tertiary,
+  },
+  addrInfoBody: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.colors.text.muted,
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+  },
+  addRgbBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 4,
+    paddingVertical: 11,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.border.medium,
+    borderStyle: 'dashed',
+  },
+  addRgbText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: theme.colors.primary[500],
+  },
   qrSection: {
     backgroundColor: theme.colors.surface.primary,
     borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
+    paddingHorizontal: theme.spacing[6],
+    paddingTop: theme.spacing[4],
+    paddingBottom: theme.spacing[5],
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: {
@@ -1488,18 +2383,18 @@ const styles = StyleSheet.create({
     shadowRadius: 6.27,
     elevation: 10,
   },
-  
+
   qrHeader: {
     alignItems: 'center',
-    marginBottom: theme.spacing[5],
+    marginBottom: theme.spacing[3],
   },
-  
+
   qrTitle: {
-    fontSize: theme.typography.fontSize.xl,
+    fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.text.primary,
     textAlign: 'center',
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
   },
   
   qrAmountContainer: {
@@ -1521,8 +2416,8 @@ const styles = StyleSheet.create({
   },
   
   qrCodeWrapper: {
-    padding: theme.spacing[5],
-    backgroundColor: theme.colors.surface.primary,
+    padding: theme.spacing[4],
+    backgroundColor: '#FFFFFF', // QR must sit on white to stay scannable
     borderRadius: theme.borderRadius.xl,
     shadowColor: '#000',
     shadowOffset: {
@@ -1532,6 +2427,134 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+
+  // Compact methods/label chip above the QR
+  qrMethodsChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    marginBottom: theme.spacing[4],
+    maxWidth: '100%',
+  },
+  qrMethodsChipText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+  },
+
+  // Asset "+" tab (square add button)
+  assetAddTab: {
+    width: 44,
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.medium,
+    backgroundColor: theme.colors.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Network selector + dropdown
+  netSelectorWrap: {
+    marginBottom: theme.spacing[4],
+  },
+  netSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.medium,
+    backgroundColor: theme.colors.surface.primary,
+  },
+  netGlyph: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  netSelectorLabel: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  netSelectorSub: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+    marginTop: 1,
+  },
+  netDropdown: {
+    marginTop: theme.spacing[2],
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  netOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border.light,
+  },
+  netOptionLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+
+  // Amount row with pencil edit
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[5],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+  },
+  amountRowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.primary[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  amountRowLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  amountRowValue: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    marginTop: 2,
+  },
+  amountEditBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.primary[50],
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   
   addressContainer: {

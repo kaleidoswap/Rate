@@ -20,8 +20,9 @@ import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
 import { useAssetIcon } from '../utils';
 import { theme } from '../theme';
-import { Card, Button } from '../components';
+import { Card, Button, ScreenHeader } from '../components';
 import { IssueAssetModal } from '../components/IssueAssetModal';
+import { usePolicy } from '../hooks/usePolicy';
 
 interface Props {
   navigation: any;
@@ -33,6 +34,9 @@ export default function AssetsScreen({ navigation }: Props) {
   const { rgbAssets, isLoading } = useSelector((state: RootState) => state.assets);
   const [refreshing, setRefreshing] = useState(false);
   const [showIssueModal, setShowIssueModal] = useState(false);
+  // Issuing RGB assets is an advanced/experimental surface — hidden in Lite mode.
+  const policy = usePolicy();
+  const canIssue = policy.showExperimental;
 
   // Asset Icon Component
   const AssetIcon = ({ ticker }: { ticker: string }) => {
@@ -60,7 +64,7 @@ export default function AssetsScreen({ navigation }: Props) {
   }, [activeWallet]);
 
   const loadAssetData = async () => {
-    if (!activeWallet) return;
+    if (!activeWallet?.id) return;
     try {
       await dispatch(loadAssets(activeWallet.id));
     } catch (error) {
@@ -70,7 +74,7 @@ export default function AssetsScreen({ navigation }: Props) {
   };
 
   const handleRefresh = async () => {
-    if (!activeWallet) return;
+    if (!activeWallet?.id) return;
     setRefreshing(true);
     try {
       await dispatch(syncAssets(activeWallet.id));
@@ -89,28 +93,20 @@ export default function AssetsScreen({ navigation }: Props) {
 
   const renderHeader = () => (
     <View style={styles.headerContainer}>
-      <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.headerGradient}
+      <ScreenHeader
+        title="RGB Assets"
+        showBack={true}
+        rightAction={
+          canIssue ? (
+            <TouchableOpacity
+              style={styles.issueHeaderButton}
+              onPress={() => setShowIssueModal(true)}
+            >
+              <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
+            </TouchableOpacity>
+          ) : undefined
+        }
       >
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>RGB Assets</Text>
-          <TouchableOpacity
-            style={styles.issueHeaderButton}
-            onPress={() => setShowIssueModal(true)}
-          >
-            <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
-        </View>
-
         <View style={styles.headerStats}>
           <View style={styles.statItem}>
             <Text style={styles.statValue}>{rgbAssets?.length || 0}</Text>
@@ -124,7 +120,7 @@ export default function AssetsScreen({ navigation }: Props) {
             <Text style={styles.statLabel}>Total Tokens</Text>
           </View>
         </View>
-      </LinearGradient>
+      </ScreenHeader>
     </View>
   );
 
@@ -178,18 +174,22 @@ export default function AssetsScreen({ navigation }: Props) {
       <View style={styles.emptyIcon}>
         <Ionicons name="diamond-outline" size={64} color={theme.colors.gray[400]} />
       </View>
-      <Text style={styles.emptyTitle}>No RGB Assets Yet</Text>
+      <Text style={styles.emptyTitle}>No Assets Yet</Text>
       <Text style={styles.emptyDescription}>
-        Issue your first RGB asset to get started with tokenization on Bitcoin
+        {canIssue
+          ? 'Issue your first RGB asset to get started with tokenization on Bitcoin'
+          : 'Assets you receive will appear here'}
       </Text>
-      <Button
-        title="Issue Your First Asset"
-        variant="primary"
-        size="lg"
-        onPress={() => setShowIssueModal(true)}
-        style={styles.emptyButton}
-        icon={<Ionicons name="add" size={20} color={theme.colors.text.inverse} />}
-      />
+      {canIssue && (
+        <Button
+          title="Issue Your First Asset"
+          variant="primary"
+          size="lg"
+          onPress={() => setShowIssueModal(true)}
+          style={styles.emptyButton}
+          icon={<Ionicons name="add" size={20} color={theme.colors.text.inverse} />}
+        />
+      )}
     </View>
   );
 
@@ -246,7 +246,7 @@ export default function AssetsScreen({ navigation }: Props) {
             {renderAssetsList()}
           </ScrollView>
           
-          {rgbAssets && rgbAssets.length > 0 && renderFloatingButton()}
+          {canIssue && rgbAssets && rgbAssets.length > 0 && renderFloatingButton()}
         </>
       )}
 

@@ -57,8 +57,10 @@ export default function NostrContactsSelector({
   const nostrState = useSelector((state: RootState) => state.nostr);
   const contactsState = useSelector((state: RootState) => state.contacts);
 
-  const { contacts: nostrContacts, isConnected, isContactsLoading } = nostrState;
-  const { contacts: localContacts } = contactsState;
+  const nostrContacts = nostrState?.contacts ?? [];
+  const isConnected = nostrState?.isConnected ?? false;
+  const isContactsLoading = nostrState?.isContactsLoading ?? false;
+  const localContacts = contactsState?.contacts ?? [];
 
   useEffect(() => {
     if (visible) {
@@ -207,7 +209,7 @@ export default function NostrContactsSelector({
           
           {contact.isNostrContact && (
             <View style={styles.nostrBadge}>
-              <Ionicons name="logo-nostr" size={10} color="white" />
+              <Ionicons name="flash" size={10} color="white" />
             </View>
           )}
         </View>

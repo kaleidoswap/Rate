@@ -1,10 +1,10 @@
-# Rate - Smart RGB Lightning Wallet
+# KaleidoSwap Wallet — Smart RGB Lightning Wallet
 
 A next-generation non-custodial mobile wallet that integrates RGB assets, Lightning Network, AI assistance, and social features into a unified Bitcoin experience.
 
 ## Overview
 
-Rate is a React Native mobile application that provides a complete self-custodial wallet solution for Bitcoin and RGB assets. The wallet features an embedded RGB Lightning Node, AI-powered natural language interface, Nostr social integration, and local business discovery through BTC Map integration.
+KaleidoSwap is a React Native mobile application that provides a complete self-custodial wallet solution for Bitcoin and RGB assets. The wallet features an embedded RGB Lightning Node, AI-powered natural language interface, Nostr social integration, and local business discovery through BTC Map integration.
 
 ## Key Features
 
@@ -65,18 +65,102 @@ Rate is a React Native mobile application that provides a complete self-custodia
 
 ## Quick Start
 
-### Installation
+### Prerequisites
+
+- **Node.js** ≥ 20 and **pnpm** ≥ 10 (`npm i -g pnpm`). This repo uses pnpm; mixing in `npm install` is not supported.
+- **Watchman** (recommended): `brew install watchman`.
+- **For iOS:** macOS with **Xcode 16+** (iOS 18 SDK) and **CocoaPods** (`brew install cocoapods`). A **UTF-8 locale** is required (CocoaPods on Ruby 3.4 crashes otherwise).
+- **For Android:** **Android Studio** + SDK (API 34+), a configured emulator or a connected device, and **JDK 17**.
+
+> The app uses the **New Architecture** (default on Expo SDK 54) — required by the native `lwk-rn` (Liquid) module.
+
+### Install dependencies
 
 ```bash
-git clone https://github.com/kaleidoswap/rate.git
+git clone https://github.com/kaleidoswap/Rate.git
 cd Rate
-npm install
-npx expo start
+pnpm install        # also runs setup:native → fetches the lwk-rn native artifacts
 ```
 
-### Development Setup
+`pnpm install` resolves the WDK protocol stack (Spark, RLN/RGB, Liquid, Arkade) — several of these are local `file:` siblings (`../wallet-protocols`, `../wdk-wallet-*`, `../arkade-wdk`), so keep those checked out next to this repo.
 
-For detailed development setup including RGB node compilation and Bitcoin node configuration, see [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md).
+> ⚠️ **Do not symlink `node_modules`** (e.g. `ln -s` into another checkout). A self-referencing link causes `ELOOP: too many symbolic links`. If you hit it: `rm node_modules && pnpm install`.
+
+### Native setup (lwk-rn artifacts)
+
+The Liquid protocol uses the `lwk-rn` native module, whose prebuilt native artifacts
+(iOS `LwkRnFramework.xcframework` + Android `jniLibs`) are **excluded** from its npm
+tarball and normally downloaded by its own `postinstall`. Because pnpm skips
+dependency postinstall scripts, a fresh `pnpm install` leaves these artifacts missing,
+and the iOS `pod install` / native build then fails on a missing
+`LwkRnFramework.xcframework`.
+
+This repo fetches them automatically via `scripts/fetch-lwk-artifacts.sh`, wired into
+its own `postinstall`. The step is idempotent (skips when the artifacts already exist)
+and non-fatal (warns and continues when offline).
+
+If the iOS build complains about a missing `LwkRnFramework.xcframework` (e.g. because
+your package manager skipped postinstall), fetch the artifacts manually:
+
+```bash
+pnpm run setup:native
+```
+
+### Run on iOS
+
+```bash
+# CocoaPods (Ruby 3.4) needs a UTF-8 locale — export it for the session:
+export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
+
+# Build + install + launch on a simulator (runs prebuild + pod install + xcodebuild):
+npx expo run:ios
+
+# …or pick a specific simulator / device:
+npx expo run:ios --device "iPhone 16 Pro"
+```
+
+Notes:
+- The **first build is slow** — it compiles the native modules, including `lwk-rn` (Liquid) and the Spark/RGB SDKs.
+- `lwk-rn` pins the pod `uniffi-bindgen-react-native` to `0.28.3-3` (already in `package.json`); don't bump it independently or `pod install` will fail with a version conflict.
+- If `pod install` crashes with a Ruby `Unicode Normalization … ASCII-8BIT` error, you forgot the `LANG=en_US.UTF-8` export above.
+- The **QVAC AI assistant requires a physical device** (no simulator support); the wallet itself runs fine on a simulator.
+
+### Run on Android
+
+```bash
+# Have an emulator running (or a device connected — check with `adb devices`), then:
+npx expo run:android
+```
+
+Notes:
+- `lwk-rn` ships prebuilt Android `jniLibs` (arm64-v8a, etc.), fetched automatically during `pnpm install`.
+- First build compiles the native modules + Gradle — allow several minutes.
+
+### Run the dev server (after a native build is installed)
+
+Once the app is installed on a simulator/device/emulator, you only need Metro for JS changes:
+
+```bash
+npx expo start --dev-client    # then press `i` for iOS or `a` for Android
+```
+
+### AI assistant & voice (on-device vs delegated)
+
+The AI assistant and voice mode (speech-to-text + text-to-speech) run **on-device
+via the QVAC SDK, which requires a physical device** — they are unavailable on an
+iOS simulator / Android emulator. The rest of the wallet works fine on a simulator.
+
+To develop the AI / voice features without a physical device, **delegate inference
+to a desktop KaleidoMind provider**:
+
+1. Run the KaleidoMind provider on a desktop (it loads the LLM and, for voice, a
+   Whisper STT + Supertonic TTS model, then advertises over P2P).
+2. Pair this app to it from the QVAC / KaleidoMind settings (**Pair Desktop** —
+   scan the provider's public-key QR).
+
+Chat, transcription, and speech synthesis are then served over P2P by the desktop,
+so they work even on a simulator. Toggle delegation off to fall back to on-device
+inference (physical device only).
 
 ### Demo Mode
 
@@ -155,7 +239,7 @@ Integrates with BTC Map to discover local Bitcoin-accepting merchants and enable
 
 ### Project Structure
 ```
-Rate/
+rate/
 ├── screens/          # React Native screens
 ├── services/         # Business logic and API integrations
 ├── store/           # Redux state management
@@ -168,17 +252,37 @@ Rate/
 
 ### Building
 
+This is a **prebuilt** Expo project (it has `ios/` and `android/` directories), so use `expo run:*`, not `expo start --ios/--android`.
+
 #### Development
 ```bash
-npx expo start --android  # Android
-npx expo start --ios      # iOS
+# First build (compiles native code) — see "Run on iOS" / "Run on Android" above:
+npx expo run:ios          # iOS simulator/device
+npx expo run:android      # Android emulator/device
+
+# Subsequent JS-only changes just need Metro:
+npx expo start --dev-client
 ```
 
-#### Production
+#### Production (EAS)
+
+Build profiles live in `eas.json` (`development`, `preview`, `production`):
+
 ```bash
-eas build --platform android
-eas build --platform ios
+eas build --profile development --platform ios      # dev client, internal distribution
+eas build --profile preview     --platform android  # internal test build
+eas build --profile production   --platform ios      # store build (auto-increments version)
 ```
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `ELOOP: too many symbolic links … node_modules` | A self-referencing `node_modules` symlink. `rm node_modules && pnpm install`. |
+| iOS `pod install` → `Unicode Normalization … ASCII-8BIT` | `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` before running. |
+| iOS build: missing `LwkRnFramework.xcframework` | `pnpm run setup:native` (re-fetches lwk-rn artifacts). |
+| `pod install`: `uniffi-bindgen-react-native` version conflict | Keep it pinned to `0.28.3-3` (lwk-rn's podspec requires that exact version). |
+| `npx expo` prompts to install a different Expo version | `node_modules` is broken — reinstall so the local `expo` is used. |
 
 ## Contributing
 
@@ -194,7 +298,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- **Documentation**: See [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md) for detailed setup
+- **Documentation**: See the [Quick Start](#quick-start) above for setup and troubleshooting
 - **Issues**: Report bugs via GitHub Issues
 
 ## Roadmap
@@ -210,4 +314,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-*Rate: Making Bitcoin and RGB assets accessible through conversational AI and social integration.*
+*KaleidoSwap Wallet: Making Bitcoin and RGB assets accessible through conversational AI and social integration.*

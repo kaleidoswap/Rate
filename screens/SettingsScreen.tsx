@@ -1,52 +1,203 @@
 // screens/SettingsScreen.tsx
-import React, { useState } from 'react';
-import { View, ScrollView, StyleSheet, Switch, TextInput, Alert, Text, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, ScrollView, StyleSheet, Switch, Alert, Text, TouchableOpacity } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { NetworkIcon } from '../components/NetworkIcon';
+import { NetworkBadge } from '../components/NetworkBadge';
 import { RootState } from '../store';
-import { 
-  setTheme, 
-  setCurrency, 
-  setLanguage, 
+import {
+  setTheme,
+  setCurrency,
   setNetwork,
-  setBiometricEnabled,
-  setPinEnabled,
-  setAutoLockTimeout,
-  setNotifications,
-  setTransactionNotifications,
-  setPriceAlerts,
-  setHideBalances,
   setNodeType,
   setRemoteNodeUrl,
   setBitcoinUnit,
+  cycleDisplayDenomination,
+  selectDisplayDenomination,
+  setDisclosureLevel,
+  setSoundEnabled,
+  selectDisclosureLevel,
 } from '../store/slices/settingsSlice';
+import { feedback } from '../utils/feedback';
 import { setWalletConnectEnabled } from '../store/slices/nostrSlice';
-import { RGBNodeService } from '../services/RGBNodeService';
-import { Button, ListItem, Input } from '../components';
+import { setActiveWallet } from '../store/slices/walletSlice';
+import { Button, Input, MainHeader } from '../components';
 import NostrProfileManager from '../components/NostrProfileManager';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme';
+import { PairingService, type DesktopPairing } from '../services/PairingService';
+import DatabaseService, { type NetworkType } from '../services/DatabaseService';
+
+// Networks each protocol supports (mirrors the adapter network unions).
+const PROTO_SUPPORTED_NETWORKS: Record<'RGB' | 'SPARK' | 'ARKADE', string[]> = {
+  SPARK: ['regtest', 'testnet', 'signet', 'mainnet'],
+  ARKADE: ['signet', 'mainnet'],
+  RGB: ['regtest', 'testnet', 'signet'],
+};
+const PROTO_TO_NETWORK_TYPE: Record<'RGB' | 'SPARK' | 'ARKADE', NetworkType> = {
+  RGB: 'rln',
+  SPARK: 'spark',
+  ARKADE: 'arkade',
+};
+const PROTO_DEFAULT_NETWORK: Record<string, string> = {
+  spark: 'regtest',
+  arkade: 'signet',
+  rln: 'regtest',
+  liquid: 'testnet',
+};
+const NETWORK_LABEL: Record<string, string> = {
+  mainnet: 'Mainnet',
+  testnet: 'Testnet',
+  regtest: 'Regtest',
+  signet: 'Mutinynet',
+};
 
 interface Props {
   navigation: any;
 }
 
+// ---------------------------------------------------------------------------
+// Reusable building blocks — consistent, fully-themed rows so nothing renders
+// invisible on the dark surface.
+// ---------------------------------------------------------------------------
+
+const SectionLabel: React.FC<{ children: React.ReactNode; tone?: 'default' | 'danger' }> = ({ children, tone = 'default' }) => (
+  <Text style={[styles.sectionLabel, tone === 'danger' && { color: theme.colors.error[500] }]}>{children}</Text>
+);
+
+const Group: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <View style={styles.group}>{children}</View>
+);
+
+const Row: React.FC<{
+  icon?: keyof typeof Ionicons.glyphMap;
+  iconColor?: string;
+  label: string;
+  description?: string;
+  value?: string;
+  onPress?: () => void;
+  right?: React.ReactNode;
+  first?: boolean;
+}> = ({ icon, iconColor, label, description, value, onPress, right, first }) => {
+  const content = (
+    <View style={[styles.row, !first && styles.rowDivider]}>
+      {icon && (
+        <View style={[styles.rowIcon, { backgroundColor: (iconColor ?? theme.colors.primary[500]) + '1A' }]}>
+          <Ionicons name={icon} size={18} color={iconColor ?? theme.colors.primary[500]} />
+        </View>
+      )}
+      <View style={styles.rowText}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {description && <Text style={styles.rowDescription}>{description}</Text>}
+      </View>
+      {right ?? (
+        <View style={styles.rowRight}>
+          {value != null && <Text style={styles.rowValue}>{value}</Text>}
+          {onPress && <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
+        </View>
+      )}
+    </View>
+  );
+  if (onPress) {
+    return (
+      <TouchableOpacity activeOpacity={0.7} onPress={onPress}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+  return content;
+};
+
 export default function SettingsScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const settings = useSelector((state: RootState) => state.settings);
   const nostrState = useSelector((state: RootState) => state.nostr);
+  const disclosureLevel = useSelector(selectDisclosureLevel);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [tempNodeUrl, setTempNodeUrl] = useState(settings.remoteNodeUrl);
   const [showNostrSection, setShowNostrSection] = useState(false);
 
+  // Per-protocol network (read from / written to the wallet's DB config).
+  const activeWallet = useSelector((state: RootState) => state.wallet?.activeWallet);
+  const [protoNetworks, setProtoNetworks] = useState<Record<string, string>>({});
+  useEffect(() => {
+    (async () => {
+      const id = (activeWallet as any)?.id;
+      if (!id) return;
+      try {
+        const nets = await DatabaseService.getInstance().getWalletNetworks(id);
+        const map: Record<string, string> = {};
+        for (const n of nets) {
+          let net = PROTO_DEFAULT_NETWORK[n.type] ?? 'regtest';
+          try {
+            if (n.config) net = JSON.parse(n.config).network || net;
+          } catch { /* keep default */ }
+          map[n.type] = net;
+        }
+        setProtoNetworks(map);
+      } catch { /* ignore */ }
+    })();
+  }, [activeWallet]);
+
+  const changeProtocolNetwork = (proto: 'RGB' | 'SPARK' | 'ARKADE', network: string) => {
+    const id = (activeWallet as any)?.id;
+    const type = PROTO_TO_NETWORK_TYPE[proto];
+    if (!id) return;
+    (async () => {
+      try {
+        const db = DatabaseService.getInstance();
+        const nets = await db.getWalletNetworks(id);
+        const existing = nets.find((n) => n.type === type);
+        const cfg = existing?.config ? JSON.parse(existing.config) : {};
+        cfg.network = network;
+        await db.updateNetworkConfig(id, type, { config: JSON.stringify(cfg) });
+        setProtoNetworks((prev) => ({ ...prev, [type]: network }));
+        Alert.alert(
+          'Network updated',
+          `${proto} will connect on ${NETWORK_LABEL[network] ?? network} the next time you open the app.`,
+        );
+      } catch (e: any) {
+        Alert.alert('Could not update network', e?.message ?? 'Please try again.');
+      }
+    })();
+  };
+
+  const pickProtocolNetwork = (proto: 'RGB' | 'SPARK' | 'ARKADE') => {
+    const type = PROTO_TO_NETWORK_TYPE[proto];
+    const current = protoNetworks[type] ?? PROTO_DEFAULT_NETWORK[type];
+    const options = PROTO_SUPPORTED_NETWORKS[proto];
+    Alert.alert(
+      `${proto} network`,
+      `Currently ${NETWORK_LABEL[current] ?? current}. Choose a network:`,
+      [
+        ...options.map((n) => ({
+          text: `${NETWORK_LABEL[n] ?? n}${n === current ? '  ✓' : ''}`,
+          onPress: () => n !== current && changeProtocolNetwork(proto, n),
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  };
+
+  // KaleidoMind — active desktop pairing (refreshed on focus)
+  const [activePairing, setActivePairing] = useState<DesktopPairing | null>(null);
+  useEffect(() => {
+    const refresh = async () => {
+      try {
+        setActivePairing(await PairingService.getActive());
+      } catch {
+        setActivePairing(null);
+      }
+    };
+    refresh();
+    const unsubscribe = navigation.addListener?.('focus', refresh);
+    return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
+  }, [navigation]);
+
   const handleNodeTypeChange = async (useRemoteNode: boolean) => {
     const newType = useRemoteNode ? 'remote' : 'local';
-    
     try {
       dispatch(setNodeType(newType));
-      
-      // TODO: Implement node configuration update when available
       Alert.alert(
         'Node Type Changed',
         `Switched to ${newType} node. You may need to restart the app for changes to take effect.`,
@@ -63,9 +214,9 @@ export default function SettingsScreen({ navigation }: Props) {
       Alert.alert('Error', 'Please enter a valid node URL');
       return;
     }
-
     try {
-      const url = new URL(tempNodeUrl);
+      // eslint-disable-next-line no-new
+      new URL(tempNodeUrl);
       dispatch(setRemoteNodeUrl(tempNodeUrl));
       setIsEditingUrl(false);
       Alert.alert(
@@ -78,34 +229,6 @@ export default function SettingsScreen({ navigation }: Props) {
     }
   };
 
-  const handleBiometricToggle = (enabled: boolean) => {
-    dispatch(setBiometricEnabled(enabled));
-  };
-
-  const handlePinToggle = (enabled: boolean) => {
-    dispatch(setPinEnabled(enabled));
-  };
-
-  const handleAutoLockChange = (timeout: number) => {
-    dispatch(setAutoLockTimeout(timeout));
-  };
-
-  const handleNotificationsToggle = (enabled: boolean) => {
-    dispatch(setNotifications(enabled));
-  };
-
-  const handleTransactionNotificationsToggle = (enabled: boolean) => {
-    dispatch(setTransactionNotifications(enabled));
-  };
-
-  const handlePriceAlertsToggle = (enabled: boolean) => {
-    dispatch(setPriceAlerts(enabled));
-  };
-
-  const handleHideBalancesToggle = (enabled: boolean) => {
-    dispatch(setHideBalances(enabled));
-  };
-
   const handleWalletConnectToggle = (enabled: boolean) => {
     if (enabled && !nostrState.isConnected) {
       Alert.alert(
@@ -115,301 +238,300 @@ export default function SettingsScreen({ navigation }: Props) {
       );
       return;
     }
-    
     if (enabled) {
       Alert.alert(
         'Enable Nostr Wallet Connect',
         'Go to your Nostr profile settings to generate a connection string and configure NWC.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Go to Profile',
-            onPress: () => {
-              dispatch(setWalletConnectEnabled(enabled));
-              // Navigate to nostr profile (this would need navigation prop passed to settings)
-              // For now, just enable it
-            }
-          }
+          { text: 'Enable', onPress: () => dispatch(setWalletConnectEnabled(enabled)) },
         ]
       );
     } else {
-      // Disable directly
       dispatch(setWalletConnectEnabled(enabled));
     }
   };
 
-  const handleBitcoinUnitChange = (unit: 'BTC' | 'sats') => {
-    dispatch(setBitcoinUnit(unit));
+  const handleBitcoinUnitChange = () => {
+    dispatch(setBitcoinUnit(settings.bitcoinUnit === 'BTC' ? 'sats' : 'BTC'));
+  };
+
+  const displayDenomination = useSelector(selectDisplayDenomination);
+  const denominationLabel: Record<typeof displayDenomination, string> = {
+    sats: 'Sats',
+    BTC: 'BTC',
+    fiat: settings.currency,
+  };
+  const handleDisplayDenominationChange = () => {
+    dispatch(cycleDisplayDenomination());
+  };
+
+  // soundEnabled may be undefined in state persisted before this setting existed.
+  const soundOn = settings.soundEnabled ?? true;
+  const handleSoundToggle = (value: boolean) => {
+    dispatch(setSoundEnabled(value));
+    // Play a confirming chime when turning sound ON so the change is audible.
+    if (value) feedback.success();
   };
 
   const handleThemeChange = () => {
     const themes: ('light' | 'dark' | 'system')[] = ['light', 'dark', 'system'];
     const currentIndex = themes.indexOf(settings.theme);
-    const nextTheme = themes[(currentIndex + 1) % themes.length];
-    dispatch(setTheme(nextTheme));
+    dispatch(setTheme(themes[(currentIndex + 1) % themes.length]));
   };
 
   const handleCurrencyChange = () => {
     const currencies = ['USD', 'EUR', 'GBP'];
     const currentIndex = currencies.indexOf(settings.currency);
-    const nextCurrency = currencies[(currentIndex + 1) % currencies.length];
-    dispatch(setCurrency(nextCurrency));
+    dispatch(setCurrency(currencies[(currentIndex + 1) % currencies.length]));
+  };
+
+  const handleDisclosureLevelToggle = () => {
+    dispatch(setDisclosureLevel(disclosureLevel === 'lite' ? 'advanced' : 'lite'));
   };
 
   const handleNetworkChange = () => {
     const networks = ['mainnet', 'testnet', 'regtest'];
     const currentIndex = networks.indexOf(settings.network);
-    const nextNetwork = networks[(currentIndex + 1) % networks.length];
-    dispatch(setNetwork(nextNetwork));
+    dispatch(setNetwork(networks[(currentIndex + 1) % networks.length]));
   };
 
-  const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Settings</Text>
-        <View style={styles.placeholder} />
-      </View>
-    </View>
-  );
+  const handleRemoveWallet = () => {
+    Alert.alert(
+      'Remove Wallet',
+      'This will delete your wallet data from this device. Make sure you have backed up your mnemonic phrase before proceeding.\n\nThis action cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove Wallet',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { protocolManager } = require('../services/protocols');
+              await protocolManager.disconnectAll();
+              const DBService = require('../services/DatabaseService').default;
+              const db = DBService.getInstance();
+              const aw = await db.getActiveWallet();
+              if (aw?.id) await db.deleteWallet(aw.id);
+              dispatch(setActiveWallet(null as any));
+              Alert.alert('Wallet Removed', 'You can now create or import a new wallet.');
+              navigation.reset({ index: 0, routes: [{ name: 'InitialLoad' as any }] });
+            } catch (err: any) {
+              Alert.alert('Error', err.message || 'Failed to remove wallet');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Nostr Section */}
-        <View style={styles.section}>
-          <TouchableOpacity 
-            style={styles.sectionHeader}
-            onPress={() => setShowNostrSection(!showNostrSection)}
-          >
-            <View style={styles.sectionTitleContainer}>
-              <Ionicons 
-                name="planet-outline" 
-                size={24} 
-                color={theme.colors.primary[500]} 
-                style={styles.sectionIcon}
-              />
-              <Text style={styles.sectionTitle}>Nostr</Text>
-              <View style={styles.statusBadge}>
-                <View style={[
-                  styles.statusDot,
-                  { backgroundColor: nostrState.isConnected ? theme.colors.success[500] : theme.colors.gray[400] }
-                ]} />
-                <Text style={styles.statusText}>
-                  {nostrState.isConnected ? 'Connected' : 'Disconnected'}
+    <View style={styles.container}>
+      <MainHeader title="Settings" onBack={() => navigation.goBack()} />
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+
+        {/* Identity & Social */}
+        <SectionLabel>Identity &amp; Social</SectionLabel>
+        <Group>
+          <TouchableOpacity activeOpacity={0.7} onPress={() => setShowNostrSection(!showNostrSection)}>
+            <View style={styles.row}>
+              <View style={[styles.rowIcon, { backgroundColor: theme.colors.primary[500] + '1A' }]}>
+                <Ionicons name="planet" size={18} color={theme.colors.primary[500]} />
+              </View>
+              <View style={styles.rowText}>
+                <Text style={styles.rowLabel}>Nostr</Text>
+                <Text style={styles.rowDescription}>
+                  {nostrState.isConnected ? 'Connected to relays' : 'Not connected'}
                 </Text>
               </View>
-            </View>
-            <Ionicons 
-              name={showNostrSection ? "chevron-up" : "chevron-down"} 
-              size={20} 
-              color={theme.colors.text.secondary} 
-            />
-          </TouchableOpacity>
-          
-          {showNostrSection && (
-            <View style={styles.sectionContent}>
-              <NostrProfileManager navigation={navigation} />
-              
-              {/* Nostr Wallet Connect */}
-              <View style={styles.walletConnectSection}>
-                <View style={styles.featureHeader}>
-                  <View style={styles.featureInfo}>
-                    <Text style={styles.featureTitle}>Nostr Wallet Connect</Text>
-                    <Text style={styles.featureDescription}>
-                      Share your wallet with other applications via NWC protocol
-                    </Text>
-                  </View>
-                  <Switch
-                    value={nostrState.walletConnectEnabled}
-                    onValueChange={handleWalletConnectToggle}
-                    disabled={!nostrState.isConnected}
-                  />
+              <View style={styles.rowRight}>
+                <View style={[styles.statusPill, { backgroundColor: (nostrState.isConnected ? theme.colors.success[500] : theme.colors.gray[400]) + '22' }]}>
+                  <View style={[styles.statusDot, { backgroundColor: nostrState.isConnected ? theme.colors.success[500] : theme.colors.gray[400] }]} />
+                  <Text style={[styles.statusPillText, { color: nostrState.isConnected ? theme.colors.success[500] : theme.colors.text.tertiary }]}>
+                    {nostrState.isConnected ? 'On' : 'Off'}
+                  </Text>
                 </View>
-                
-                {nostrState.walletConnectEnabled && (
-                  <View style={styles.walletConnectInfo}>
-                    <Text style={styles.walletConnectInfoText}>
-                      ✅ Nostr Wallet Connect is active. You can now:
-                    </Text>
-                    <Text style={styles.walletConnectFeature}>• Generate connection strings for other apps</Text>
-                    <Text style={styles.walletConnectFeature}>• Allow external wallets to make payments</Text>
-                    <Text style={styles.walletConnectFeature}>• Manage NWC connections in your Nostr profile</Text>
-                    {nostrState.nwcConnectionString && (
-                      <Text style={styles.walletConnectFeature}>• Active connection string available</Text>
-                    )}
-                  </View>
-                )}
+                <Ionicons name={showNostrSection ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.tertiary} />
+              </View>
+            </View>
+          </TouchableOpacity>
+
+          {showNostrSection && (
+            <View style={styles.nostrContent}>
+              <NostrProfileManager navigation={navigation} />
+              <View style={styles.nwcRow}>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>Nostr Wallet Connect</Text>
+                  <Text style={styles.rowDescription}>Let other apps pay via the NWC protocol</Text>
+                </View>
+                <Switch
+                  value={nostrState.walletConnectEnabled}
+                  onValueChange={handleWalletConnectToggle}
+                  disabled={!nostrState.isConnected}
+                  trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+                />
               </View>
             </View>
           )}
-        </View>
+        </Group>
 
-        {/* Node Settings */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleContainer}>
-              <Ionicons 
-                name="server-outline" 
-                size={24} 
-                color={theme.colors.primary[500]} 
-                style={styles.sectionIcon}
-              />
-              <Text style={styles.sectionTitle}>RGB Node Settings</Text>
-            </View>
-          </View>
-          
-          <View style={styles.sectionContent}>
-            <ListItem>
-              <Text>Use Remote Node</Text>
+        {/* Connectivity */}
+        <SectionLabel>Connectivity</SectionLabel>
+        <Group>
+          <Row
+            first
+            icon="server-outline"
+            label="Use Remote Node"
+            description="Connect to a remote RGB Lightning node"
+            right={
               <Switch
                 value={settings.nodeType === 'remote'}
-                onValueChange={(value) => handleNodeTypeChange(value)}
+                onValueChange={handleNodeTypeChange}
+                trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
               />
-            </ListItem>
-
-            {settings.nodeType === 'remote' && (
-              <ListItem>
-                <View style={styles.nodeUrlContainer}>
-                  <Text>Node URL</Text>
-                  {isEditingUrl ? (
-                    <View style={styles.urlEditContainer}>
-                      <Input
-                        value={tempNodeUrl}
-                        onChangeText={setTempNodeUrl}
-                        placeholder="Enter node URL"
-                        style={styles.urlInput}
-                      />
-                      <View style={styles.urlButtons}>
-                        <Button
-                          title="Save"
-                          onPress={handleNodeUrlSave}
-                          style={styles.urlButton}
-                        />
-                        <Button
-                          title="Cancel"
-                          onPress={() => {
-                            setTempNodeUrl(settings.remoteNodeUrl);
-                            setIsEditingUrl(false);
-                          }}
-                          style={styles.cancelButton}
-                        />
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={styles.urlViewContainer}>
-                      <Text style={styles.urlText} numberOfLines={1}>
-                        {settings.remoteNodeUrl}
-                      </Text>
-                      <Button
-                        title="Edit"
-                        onPress={() => setIsEditingUrl(true)}
-                        style={styles.editButton}
-                      />
-                    </View>
-                  )}
+            }
+          />
+          {settings.nodeType === 'remote' && (
+            <View style={styles.nodeUrlBlock}>
+              <Text style={styles.rowLabel}>Node URL</Text>
+              {isEditingUrl ? (
+                <>
+                  <Input
+                    value={tempNodeUrl}
+                    onChangeText={setTempNodeUrl}
+                    placeholder="https://example.com:3000"
+                    style={{ marginVertical: theme.spacing[2] }}
+                  />
+                  <View style={styles.urlButtons}>
+                    <Button title="Cancel" variant="secondary" onPress={() => { setTempNodeUrl(settings.remoteNodeUrl); setIsEditingUrl(false); }} style={{ flex: 1 }} />
+                    <Button title="Save" onPress={handleNodeUrlSave} style={{ flex: 1 }} />
+                  </View>
+                </>
+              ) : (
+                <View style={styles.urlView}>
+                  <Text style={styles.urlText} numberOfLines={1}>{settings.remoteNodeUrl || 'Not set'}</Text>
+                  <TouchableOpacity onPress={() => setIsEditingUrl(true)} style={styles.editChip}>
+                    <Text style={styles.editChipText}>Edit</Text>
+                  </TouchableOpacity>
                 </View>
-              </ListItem>
-            )}
-          </View>
-        </View>
-
-        {/* General Settings Section */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <View style={styles.sectionTitleContainer}>
-              <Ionicons 
-                name="settings-outline" 
-                size={24} 
-                color={theme.colors.primary[500]} 
-                style={styles.sectionIcon}
-              />
-              <Text style={styles.sectionTitle}>General Settings</Text>
+              )}
             </View>
-          </View>
-          
-          <View style={styles.sectionContent}>
-            <ListItem>
-              <Text>Bitcoin Unit</Text>
-              <TouchableOpacity 
-                style={styles.settingRow}
-                onPress={() => handleBitcoinUnitChange(settings.bitcoinUnit === 'BTC' ? 'sats' : 'BTC')}
-              >
-                <Text style={[styles.settingValue, styles.clickableValue]}>
-                  {settings.bitcoinUnit}
-                </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
-                  color={theme.colors.text.secondary}
-                  style={styles.settingIcon}
-                />
-              </TouchableOpacity>
-            </ListItem>
+          )}
+        </Group>
 
-            <ListItem>
-              <Text>Theme</Text>
-              <TouchableOpacity 
-                style={styles.settingRow}
-                onPress={handleThemeChange}
-              >
-                <Text style={[styles.settingValue, styles.clickableValue]}>
-                  {settings.theme}
-                </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
-                  color={theme.colors.text.secondary}
-                  style={styles.settingIcon}
-                />
-              </TouchableOpacity>
-            </ListItem>
-            
-            <ListItem>
-              <Text>Currency</Text>
-              <TouchableOpacity 
-                style={styles.settingRow}
-                onPress={handleCurrencyChange}
-              >
-                <Text style={[styles.settingValue, styles.clickableValue]}>
-                  {settings.currency}
-                </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
-                  color={theme.colors.text.secondary}
-                  style={styles.settingIcon}
-                />
-              </TouchableOpacity>
-            </ListItem>
-            
-            <ListItem>
-              <Text>Network</Text>
-              <TouchableOpacity 
-                style={styles.settingRow}
-                onPress={handleNetworkChange}
-              >
-                <Text style={[styles.settingValue, styles.clickableValue]}>
-                  {settings.network}
-                </Text>
-                <Ionicons 
-                  name="chevron-forward" 
-                  size={16} 
-                  color={theme.colors.text.secondary}
-                  style={styles.settingIcon}
-                />
-              </TouchableOpacity>
-            </ListItem>
-          </View>
-        </View>
+        {/* KaleidoMind */}
+        <SectionLabel>KaleidoMind</SectionLabel>
+        <Group>
+          <Row
+            first
+            icon="sparkles-outline"
+            iconColor={theme.colors.accent[500]}
+            label="Desktop brain"
+            description={activePairing ? 'Paired' : 'Run AI on your desktop'}
+            value={activePairing ? activePairing.name : 'Connect'}
+            onPress={() => navigation.navigate('PairDesktop')}
+          />
+          {activePairing && (
+            <Row icon="cube-outline" iconColor={theme.colors.accent[500]} label="Active model" value={activePairing.model} />
+          )}
+        </Group>
+
+        <SectionLabel>Connections</SectionLabel>
+        <Group>
+          <Row
+            first
+            icon="link-outline"
+            label="Nostr Wallet Connect"
+            description="Connect an external wallet via NWC"
+            onPress={() => navigation.navigate('NWCConnect')}
+          />
+        </Group>
+
+        {/* Preferences */}
+        <SectionLabel>Preferences</SectionLabel>
+        <Group>
+          <Row first icon="options-outline" label="Display Mode" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={handleDisclosureLevelToggle} />
+          <Row icon="logo-bitcoin" iconColor={theme.colors.warning[500]} label="Bitcoin Unit" value={settings.bitcoinUnit} onPress={handleBitcoinUnitChange} />
+          <Row icon="swap-horizontal-outline" iconColor={theme.colors.primary[500]} label="Balance Display" value={denominationLabel[displayDenomination]} onPress={handleDisplayDenominationChange} />
+          <Row icon="contrast-outline" label="Theme" value={capitalize(settings.theme)} onPress={handleThemeChange} />
+          <Row
+            icon="volume-high-outline"
+            iconColor={theme.colors.accent[500]}
+            label="Sound Effects"
+            description="Audio cues paired with haptics for actions"
+            right={
+              <Switch
+                value={soundOn}
+                onValueChange={handleSoundToggle}
+                trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+              />
+            }
+          />
+          <Row icon="cash-outline" iconColor={theme.colors.success[500]} label="Currency" value={settings.currency} onPress={handleCurrencyChange} />
+          <Row icon="git-network-outline" iconColor={theme.colors.accent[500]} label="Network" value={capitalize(settings.network)} onPress={handleNetworkChange} />
+        </Group>
+
+        {/* Wallet Protocols */}
+        <SectionLabel>Wallet Protocols</SectionLabel>
+        <Group>
+          {(['RGB', 'SPARK', 'ARKADE'] as const).map((proto, idx) => {
+            const { protocolManager: pm } = require('../services/protocols');
+            const adapter = pm.getAdapterIfAvailable(proto);
+            const connected = adapter?.isConnected() ?? false;
+            const colors: Record<string, string> = { RGB: '#2BEE79', SPARK: '#60A5FA', ARKADE: '#A855F7' };
+            const labels: Record<string, string> = { RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade' };
+            const descs: Record<string, string> = {
+              RGB: 'On-chain, Lightning, RGB assets',
+              SPARK: 'Spark L2 Bitcoin + tokens',
+              ARKADE: 'Off-chain Bitcoin (VTXOs)',
+            };
+            return (
+              <View key={proto} style={[styles.row, idx > 0 && styles.rowDivider]}>
+                <View style={[styles.rowIcon, { backgroundColor: colors[proto] + '1A', opacity: connected ? 1 : 0.5 }]}>
+                  <NetworkIcon network={proto} size={18} color={colors[proto]} />
+                </View>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>{labels[proto]}</Text>
+                  <Text style={styles.rowDescription} numberOfLines={1}>{descs[proto]}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  <NetworkBadge
+                    network={protoNetworks[PROTO_TO_NETWORK_TYPE[proto]] ?? PROTO_DEFAULT_NETWORK[PROTO_TO_NETWORK_TYPE[proto]]}
+                    interactive
+                    onPress={() => pickProtocolNetwork(proto)}
+                    accessibilityLabel={`Change ${proto} network`}
+                  />
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.text.tertiary }}>
+                    {connected ? 'Connected' : 'Offline'}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </Group>
+
+        {/* Danger Zone */}
+        <SectionLabel tone="danger">Danger Zone</SectionLabel>
+        <Group>
+          <TouchableOpacity activeOpacity={0.7} onPress={handleRemoveWallet}>
+            <View style={styles.row}>
+              <View style={[styles.rowIcon, { backgroundColor: theme.colors.error[500] + '1A' }]}>
+                <Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} />
+              </View>
+              <View style={styles.rowText}>
+                <Text style={[styles.rowLabel, { color: theme.colors.error[500] }]}>Remove Wallet</Text>
+                <Text style={styles.rowDescription}>Delete wallet data and start fresh</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.error[500]} />
+            </View>
+          </TouchableOpacity>
+        </Group>
+
+        <View style={{ height: theme.spacing[10] }} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -418,231 +540,137 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background.secondary,
   },
-  
-  headerContainer: {
-    backgroundColor: theme.colors.surface.primary,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
+  scrollView: {
+    flex: 1,
   },
-  
-  header: {
+  scrollContent: {
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[2],
+  },
+  sectionLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: theme.spacing[5],
+    marginBottom: theme.spacing[2],
+    marginLeft: theme.spacing[1],
+  },
+  group: {
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    overflow: 'hidden',
+  },
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing[5],
-    paddingVertical: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
+    gap: theme.spacing[3],
+    minHeight: 60,
   },
-  
-  backButton: {
-    width: 40,
-    height: 40,
+  rowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border.light,
+  },
+  rowIcon: {
+    width: 36,
+    height: 36,
     borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.gray[100],
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
-  headerTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-  
-  placeholder: {
-    width: 40,
-  },
-
-  scrollView: {
-    flex: 1,
-    paddingHorizontal: theme.spacing[5],
-  },
-  
-  section: {
-    marginBottom: theme.spacing[4],
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-  
-  sectionTitleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  rowText: {
     flex: 1,
   },
-  
-  sectionIcon: {
-    marginRight: theme.spacing[3],
-  },
-  
-  sectionTitle: {
-    fontSize: theme.typography.fontSize.lg,
+  rowLabel: {
+    fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.text.primary,
-    flex: 1,
   },
-  
-  statusBadge: {
+  rowDescription: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+    marginTop: 2,
+  },
+  rowRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.gray[100],
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.base,
-    marginLeft: theme.spacing[2],
+    gap: theme.spacing[2],
   },
-  
+  rowValue: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.primary[500],
+    textTransform: 'capitalize',
+  },
+  statusPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 3,
+    borderRadius: theme.borderRadius.full,
+  },
   statusDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    marginRight: theme.spacing[2],
   },
-  
-  statusText: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
-    fontWeight: '500',
+  statusPillText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
-  
-  sectionContent: {
-    padding: theme.spacing[4],
+  nostrContent: {
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: theme.spacing[4],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border.light,
   },
-  
-  walletConnectSection: {
-    marginTop: theme.spacing[4],
-    padding: theme.spacing[4],
-    backgroundColor: theme.colors.primary[50],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100],
-  },
-  
-  featureHeader: {
+  nwcRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: theme.spacing[3],
+    marginTop: theme.spacing[4],
+    paddingTop: theme.spacing[4],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border.light,
+    gap: theme.spacing[3],
   },
-  
-  featureInfo: {
-    flex: 1,
-    marginRight: theme.spacing[4],
+  nodeUrlBlock: {
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: theme.spacing[4],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border.light,
+    paddingTop: theme.spacing[3],
   },
-  
-  featureTitle: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.primary[700],
-    marginBottom: theme.spacing[1],
-  },
-  
-  featureDescription: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[600],
-    lineHeight: 18,
-  },
-  
-     walletConnectInfo: {
-     marginTop: theme.spacing[3],
-     paddingTop: theme.spacing[3],
-     borderTopWidth: 1,
-     borderTopColor: theme.colors.primary[100],
-   },
-  
-  walletConnectInfoText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[700],
-    marginBottom: theme.spacing[2],
-    fontWeight: '500',
-  },
-  
-  walletConnectFeature: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[600],
-    marginBottom: theme.spacing[1],
-    lineHeight: 18,
-  },
-  
-  settingValue: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    textTransform: 'capitalize',
-  },
-  
-  nodeUrlContainer: {
-    flex: 1,
-  },
-  
-  urlEditContainer: {
-    marginTop: theme.spacing[2],
-  },
-  
-  urlInput: {
-    marginVertical: theme.spacing[2],
-  },
-  
   urlButtons: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     gap: theme.spacing[2],
   },
-  
-  urlButton: {
-    minWidth: 80,
-  },
-  
-     cancelButton: {
-     backgroundColor: theme.colors.gray[400],
-     minWidth: 80,
-   },
-  
-  urlViewContainer: {
+  urlView: {
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: theme.spacing[2],
+    gap: theme.spacing[2],
   },
-  
   urlText: {
     flex: 1,
-    marginRight: theme.spacing[2],
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
   },
-  
-  editButton: {
-    minWidth: 60,
-  },
-  unitSelector: {
-    backgroundColor: theme.colors.background.secondary,
+  editChip: {
     paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[2],
+    paddingVertical: theme.spacing[1],
     borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.primary[50],
   },
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  clickableValue: {
+  editChipText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
     color: theme.colors.primary[500],
-  },
-  settingIcon: {
-    marginLeft: theme.spacing[2],
   },
 });
