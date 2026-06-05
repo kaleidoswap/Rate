@@ -33,6 +33,7 @@ import { Card, Button, Input, ScreenHeader } from '../components';
 import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
 import { NetworkIcon } from '../components/NetworkIcon';
+import { PressableScale } from '../components/PressableScale';
 import { haptic } from '../utils/haptics';
 import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
@@ -914,10 +915,9 @@ export default function ReceiveScreen({ navigation }: Props) {
             {allNetworks.map((net) => {
               const isActive = networkType === net.id;
               return (
-                <TouchableOpacity
+                <PressableScale
                   key={net.id}
                   onPress={() => { haptic.selection(); setNetworkType(net.id); }}
-                  activeOpacity={0.7}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -946,7 +946,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                   {isActive && (
                     <View style={{ marginLeft: 8, width: 6, height: 6, borderRadius: 3, backgroundColor: net.color }} />
                   )}
-                </TouchableOpacity>
+                </PressableScale>
               );
             })}
           </View>
