@@ -362,6 +362,21 @@ class QVACService {
     await this.reloadLLM();
   }
 
+  /**
+   * Align delegation with the chosen KaleidoMind mode: Desktop => delegate,
+   * Local/Off => on-device. This is the bridge between the redux `aiMode` and
+   * the engine config, so picking "Desktop" actually runs inference remotely
+   * (previously the mode and config.delegateEnabled were never synced, so
+   * "Desktop" still ran the model locally). No-ops when nothing changes, and
+   * won't enable delegation until a desktop is paired.
+   */
+  async setDelegateEnabled(enabled: boolean): Promise<void> {
+    await this.loadConfig();
+    if (enabled === this.config.delegateEnabled) return;
+    if (enabled && !this.config.providerPublicKey) return; // wait for pairing
+    await this.setDelegate({ enabled, providerPublicKey: this.config.providerPublicKey });
+  }
+
   /** Unload + re-initialize the LLM (after a model/delegation change). */
   private async reloadLLM(): Promise<void> {
     await this.unloadLLM().catch(() => {});

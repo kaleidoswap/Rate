@@ -18,7 +18,7 @@ import { ToastContainer } from './components/Toast';
 import NetworkService from './services/NetworkService';
 
 import { store, persistor } from './store';
-import { selectAiEnabled } from './store/slices/settingsSlice';
+import { selectAiMode } from './store/slices/settingsSlice';
 import QVACService from './services/QVACService';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
@@ -284,10 +284,13 @@ function AppNavigator() {
  * explicitly opted in. Rendered inside the Redux Provider + PersistGate.
  */
 function QVACEnabledSync() {
-  const aiEnabled = useSelector(selectAiEnabled);
+  const aiMode = useSelector(selectAiMode);
   React.useEffect(() => {
-    QVACService.getInstance().setEnabled(aiEnabled);
-  }, [aiEnabled]);
+    const svc = QVACService.getInstance();
+    svc.setEnabled(aiMode !== 'off');
+    // Desktop mode => delegate to the paired provider; Local/Off => on-device.
+    void svc.setDelegateEnabled(aiMode === 'delegate');
+  }, [aiMode]);
   return null;
 }
 

@@ -6,7 +6,6 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Switch,
   StyleSheet,
   ActivityIndicator,
   TextInput,
@@ -149,16 +148,19 @@ export default function QVACSettingsSheet({
             </Text>
           )}
 
-          {/* ---- On-device model ---- */}
-          <Text style={styles.sectionTitle}>On-device model</Text>
+          {/* ---- Model picker (only when a mode is active) ---- */}
+          {aiMode !== 'off' && (
+          <>
+          <Text style={styles.sectionTitle}>{aiMode === 'delegate' ? 'Model (runs on the desktop)' : 'On-device model'}</Text>
           <Text style={styles.sectionHint}>
-            {deviceMemGb
-              ? `Your device has ~${deviceMemGb} GB RAM. The recommended model fits it best; `
-              : 'Smaller models run on a phone; '}
-            larger ones need a Mac or P2P delegation.
+            {aiMode === 'delegate'
+              ? 'Your paired desktop runs this model — larger models are available here.'
+              : deviceMemGb
+                ? `Your device has ~${deviceMemGb} GB RAM. The recommended model fits it best; smaller models run faster.`
+                : 'Smaller models run on a phone; larger ones need a desktop.'}
           </Text>
 
-          {catalog.map((m) => {
+          {catalog.filter((m) => aiMode === 'delegate' || m.localCapable).map((m) => {
             const selected = m.id === config.modelId;
             const delegateOnly = !m.localCapable;
             const disabled = delegateOnly && !config.delegateEnabled;
@@ -196,11 +198,15 @@ export default function QVACSettingsSheet({
               </TouchableOpacity>
             );
           })}
+          </>
+          )}
 
-          {/* ---- P2P delegation ---- */}
-          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Desktop brain (P2P)</Text>
+          {/* ---- Desktop pairing (only in Desktop mode) ---- */}
+          {aiMode === 'delegate' && (
+          <>
+          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Connect a desktop</Text>
           <Text style={styles.sectionHint}>
-            Run inference on a desktop running KaleidoMind instead of on this device.
+            Inference runs on a Mac/PC running KaleidoMind. Selecting “Desktop” above is what enables delegation.
           </Text>
 
           {hasProvider ? (
@@ -213,22 +219,9 @@ export default function QVACSettingsSheet({
                   </Text>
                   <Text style={styles.providerKey}>{shortKey}</Text>
                 </View>
-                {config.delegateEnabled && (
-                  <View style={styles.activePill}>
-                    <Text style={styles.activePillText}>Active</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Delegate to this desktop</Text>
-                <Switch
-                  value={config.delegateEnabled}
-                  onValueChange={(v) =>
-                    onSetDelegate({ enabled: v, providerPublicKey: config.providerPublicKey })
-                  }
-                  trackColor={{ true: theme.colors.primary[500], false: theme.colors.border.medium }}
-                />
+                <View style={styles.activePill}>
+                  <Text style={styles.activePillText}>{config.delegateEnabled ? 'Active' : 'Paired'}</Text>
+                </View>
               </View>
 
               <TouchableOpacity style={styles.scanButtonGhost} onPress={onScanQR}>
@@ -292,6 +285,8 @@ export default function QVACSettingsSheet({
             On your Mac, open KaleidoMind → Pair to show the QR (or copy the public key).
             Scan it, or paste the key above.
           </Text>
+          </>
+          )}
         </ScrollView>
       </SafeAreaView>
     </Modal>

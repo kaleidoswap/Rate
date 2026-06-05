@@ -151,9 +151,11 @@ export default function PairDesktopScreen({ navigation }: Props) {
         onBarcodeScanned={stage.kind === 'scanning' ? handleScan : undefined}
       />
 
-      {/* Mask */}
-      <View pointerEvents="none" style={StyleSheet.absoluteFillObject}>
-        <SafeAreaView style={styles.overlay}>
+      {/* Mask — box-none so the camera shows through empty areas BUT the
+          overlay buttons (close, flash, cancel) stay tappable. 'none' here
+          made the whole overlay non-interactive, so the user couldn't exit. */}
+      <View pointerEvents="box-none" style={StyleSheet.absoluteFillObject}>
+        <SafeAreaView pointerEvents="box-none" style={styles.overlay}>
           {/* Top bar */}
           <View style={styles.topBar}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconBtn}>
