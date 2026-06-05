@@ -15,35 +15,50 @@ interface TypingDotsProps {
  */
 const TypingDots: React.FC<TypingDotsProps> = ({ label }) => {
   const theme = useAppTheme();
-  const anim = useRef(new Animated.Value(0)).current;
+  // One animated value per dot, started on a stagger so the dots bounce in a
+  // travelling wave (smoother + more "alive" than the old two-phase blink).
+  const dots = useRef([new Animated.Value(0), new Animated.Value(0), new Animated.Value(0)]).current;
 
   useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, { toValue: 1, duration: 600, useNativeDriver: true }),
-        Animated.timing(anim, { toValue: 0, duration: 600, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [anim]);
-
-  const dot = (offsetPhase: [number, number, number]) => ({
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginHorizontal: 2,
-    backgroundColor: theme.colors.primary[500],
-    opacity: anim.interpolate({ inputRange: [0, 0.5, 1], outputRange: offsetPhase }),
-  });
+    const make = (v: Animated.Value) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(v, { toValue: 1, duration: 420, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 0, duration: 420, useNativeDriver: true }),
+          Animated.delay(240),
+        ]),
+      );
+    const loops = dots.map(make);
+    const timers = dots.map((_, i) => setTimeout(() => loops[i].start(), i * 160));
+    return () => {
+      timers.forEach(clearTimeout);
+      loops.forEach((l) => l.stop());
+    };
+  }, [dots]);
 
   return (
     <View style={styles.row}>
-      <Animated.View style={dot([0.3, 1, 0.3])} />
-      <Animated.View style={dot([1, 0.3, 1])} />
-      <Animated.View style={dot([0.3, 1, 0.3])} />
+      <View style={styles.dotsRow}>
+        {dots.map((v, i) => (
+          <Animated.View
+            key={i}
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: 3.5,
+              marginHorizontal: 2.5,
+              backgroundColor: theme.colors.primary[400] ?? theme.colors.primary[500],
+              opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }),
+              transform: [
+                { translateY: v.interpolate({ inputRange: [0, 1], outputRange: [0, -5] }) },
+                { scale: v.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.1] }) },
+              ],
+            }}
+          />
+        ))}
+      </View>
       {label ? (
-        <Text style={[styles.label, { color: theme.colors.text.tertiary }]}>{label}</Text>
+        <Text style={[styles.label, { color: theme.colors.text.secondary }]}>{label}</Text>
       ) : null}
     </View>
   );
@@ -51,7 +66,8 @@ const TypingDots: React.FC<TypingDotsProps> = ({ label }) => {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center' },
-  label: { fontSize: 13, fontStyle: 'italic', marginLeft: 8 },
+  dotsRow: { flexDirection: 'row', alignItems: 'center', height: 12 },
+  label: { fontSize: 13, marginLeft: 10, fontWeight: '500' },
 });
 
 export default TypingDots;

@@ -80,6 +80,20 @@ setStore(store);
 // Create persistor
 export const persistor = persistStore(store);
 
+// Keep the UI sound engine in sync with the persisted "Sound effects" setting,
+// including across rehydration. Subscribing here (rather than in a component)
+// means audio honours the preference before any screen mounts.
+import { soundEngine } from '../services/sounds';
+import { selectSoundEnabled } from './slices/settingsSlice';
+let _lastSoundEnabled: boolean | undefined;
+store.subscribe(() => {
+  const enabled = selectSoundEnabled(store.getState() as RootState);
+  if (enabled !== _lastSoundEnabled) {
+    _lastSoundEnabled = enabled;
+    soundEngine.setEnabled(enabled);
+  }
+});
+
 // Function to reset the store
 export const resetStore = async () => {
   await persistor.purge(); // Clear persisted state

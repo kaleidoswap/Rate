@@ -134,7 +134,7 @@ export default function NostrProfileManager({ navigation }: Props) {
 
   const handleImportKeys = async () => {
     if (!keyInput.trim()) {
-      Alert.alert('Error', 'Please enter your private key (nsec)');
+      Alert.alert('Error', 'Please enter your private key (nsec, npriv, or hex)');
       return;
     }
 
@@ -144,7 +144,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       const keys = nostrService.importPrivateKey(keyInput.trim());
 
       if (!keys) {
-        Alert.alert('Error', 'Invalid private key format');
+        Alert.alert('Error', 'Invalid private key format. Use nsec1…, npriv1…, or 64-character hex.');
         return;
       }
 
@@ -523,13 +523,13 @@ export default function NostrProfileManager({ navigation }: Props) {
         </View>
 
         <Text style={styles.importDescription}>
-          Enter or paste your Nostr private key (nsec) to import your existing identity. Use the paste button to paste from clipboard.
+          Enter or paste your Nostr private key (nsec, npriv, or hex) to import your existing identity. Use the paste button to paste from clipboard.
         </Text>
 
         <View style={styles.keyInputContainer}>
           <Input
-            label="Private Key (nsec)"
-            placeholder="nsec1..."
+            label="Private Key"
+            placeholder="nsec1..., npriv1..., or hex"
             value={keyInput}
             onChangeText={setKeyInput}
             variant="outlined"

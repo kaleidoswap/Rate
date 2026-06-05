@@ -217,19 +217,19 @@ const makeStyles = (theme: Theme) =>
     title: {
       fontSize: theme.typography.fontSize.sm,
       fontWeight: '600',
-      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
       marginBottom: theme.spacing[2],
       letterSpacing: 0.5,
     },
     successText: {
       fontSize: theme.typography.fontSize.xs,
-      color: theme.colors.success[700] ?? theme.colors.success[600],
+      color: theme.colors.success[500] ?? theme.colors.success[600],
       fontWeight: '500',
       marginBottom: theme.spacing[1],
     },
     errorText: {
       fontSize: theme.typography.fontSize.xs,
-      color: theme.colors.error[700] ?? theme.colors.error[600],
+      color: theme.colors.error[400] ?? theme.colors.error[500],
       fontWeight: '500',
     },
     invoiceText: {
@@ -248,7 +248,7 @@ const makeStyles = (theme: Theme) =>
     },
     copyText: {
       fontSize: theme.typography.fontSize.xs,
-      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
       fontWeight: '500',
     },
     merchantList: { maxHeight: 180 },
@@ -275,21 +275,21 @@ const makeStyles = (theme: Theme) =>
     },
     merchantLink: {
       fontSize: theme.typography.fontSize.xs,
-      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
       marginBottom: theme.spacing[1],
       fontWeight: '500',
       lineHeight: 16,
     },
     merchantHours: {
       fontSize: theme.typography.fontSize.xs,
-      color: theme.colors.success[700] ?? theme.colors.success[600],
+      color: theme.colors.success[500] ?? theme.colors.success[600],
       marginBottom: theme.spacing[1],
       fontWeight: '500',
     },
     balanceAmount: {
       fontSize: theme.typography.fontSize.xl,
       fontWeight: '700',
-      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
     },
     balanceSub: {
       fontSize: theme.typography.fontSize.xs,

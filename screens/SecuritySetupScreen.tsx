@@ -208,7 +208,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       handleSaveAndComplete(); // Skip biometric
     } else if (step === 'options') {
       if (isInitialSetup) {
-        navigation.replace('Dashboard');
+        navigation.replace('NostrSetup', { isInitialSetup: true });
       } else {
         navigation.goBack();
       }
@@ -227,7 +227,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
 
   const handleFinish = () => {
     if (isInitialSetup) {
-      navigation.replace('Dashboard');
+      navigation.replace('NostrSetup', { isInitialSetup: true });
     } else {
       navigation.goBack();
     }
@@ -374,7 +374,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
           style={styles.continueButton}
         />
         {isInitialSetup && (
-          <TouchableOpacity style={styles.skipLink} onPress={() => navigation.replace('Dashboard')}>
+          <TouchableOpacity style={styles.skipLink} onPress={() => navigation.replace('NostrSetup', { isInitialSetup: true })}>
             <Text style={styles.skipLinkText}>Skip for now</Text>
           </TouchableOpacity>
         )}

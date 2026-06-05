@@ -9,17 +9,12 @@ import {
   resume,
   suspend,
   VERBOSITY,
-  // SUPERTONIC-2 on-device TTS model components (downloaded over HTTPS like the
-  // LLM weights, then loaded as a single 'tts' model).
-  TTS_SUPERTONIC2_OFFICIAL_TEXT_ENCODER_SUPERTONE_FP32 as TTS_TEXT_ENCODER,
-  TTS_SUPERTONIC2_OFFICIAL_DURATION_PREDICTOR_SUPERTONE_FP32 as TTS_DURATION_PREDICTOR,
-  TTS_SUPERTONIC2_OFFICIAL_VECTOR_ESTIMATOR_SUPERTONE_FP32 as TTS_VECTOR_ESTIMATOR,
-  TTS_SUPERTONIC2_OFFICIAL_VOCODER_SUPERTONE_FP32 as TTS_VOCODER,
-  TTS_SUPERTONIC2_OFFICIAL_UNICODE_INDEXER_SUPERTONE_FP32 as TTS_UNICODE_INDEXER,
-  TTS_SUPERTONIC2_OFFICIAL_TTS_CONFIG_SUPERTONE as TTS_CONFIG,
-  TTS_SUPERTONIC2_OFFICIAL_VOICE_STYLE_SUPERTONE as TTS_VOICE_STYLE,
+  TTS_EN_SUPERTONIC_Q4_0,
+  WHISPER_BASE_Q8_0,
 } from '@qvac/sdk';
+import { NativeModules, Platform } from 'react-native';
 import { File, Directory, Paths } from 'expo-file-system';
+import { createDownloadResumable } from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { z } from 'zod';
 import DeviceInfo from 'react-native-device-info';
@@ -30,9 +25,15 @@ import {
   hfUrlFromDescriptor,
   recommendLocalModel,
   recommendLocalModelId,
+  QVAC_STT_MODELS,
+  DEFAULT_STT_MODEL_ID,
+  getSttModelById,
+  DEFAULT_TTS_ENGINE,
   type QVACModel,
+  type TtsEngine,
 } from './qvacModels';
 import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
+import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 
 // CPU baseline config for the local llamacpp model. Used as the GPU fallback
 // and as the base the GPU attempt overrides (device + gpu_layers).
@@ -75,14 +76,85 @@ const DELEGATE_LLM_CONFIG = {
  * Mac), so the phone never downloads the weights — we pass the SDK descriptor
  * plus a `delegate` config to `loadModel`.
  */
-const WHISPER_MODEL = {
-  url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.bin',
-  name: 'ggml-tiny.bin',
-  size: 77691713,
-};
-
 // SUPERTONIC-2 TTS output sample rate (Hz). Used to build the WAV for playback.
 const TTS_SAMPLE_RATE = 44100;
+
+// Whisper languages we'll request directly from the device locale. whisper.cpp
+// supports far more, but the QVAC handler rejects "auto"/detect_language for
+// these tiny models, so we pass a concrete code (and fall back to 'en').
+const WHISPER_LANGS = new Set([
+  'en', 'it', 'es', 'fr', 'de', 'pt', 'nl', 'ru', 'pl', 'uk', 'tr', 'ar',
+  'zh', 'ja', 'ko', 'hi', 'id', 'sv', 'no', 'da', 'fi', 'cs', 'ro', 'el',
+  'he', 'th', 'vi', 'hu', 'ca',
+]);
+
+/**
+ * Best-effort 2-letter language code from the OS locale (e.g. "it-IT" → "it"),
+ * restricted to codes Whisper handles well. Falls back to 'en'.
+ */
+function deviceWhisperLanguage(): string {
+  try {
+    let loc = 'en';
+    if (Platform.OS === 'ios') {
+      const s: any = NativeModules.SettingsManager?.settings;
+      loc = s?.AppleLocale || (Array.isArray(s?.AppleLanguages) ? s.AppleLanguages[0] : '') || 'en';
+    } else {
+      loc = NativeModules.I18nManager?.localeIdentifier || 'en';
+    }
+    const code = String(loc).split(/[-_]/)[0].toLowerCase();
+    return WHISPER_LANGS.has(code) ? code : 'en';
+  } catch {
+    return 'en';
+  }
+}
+
+function isPhoneRuntime(): boolean {
+  return Platform.OS === 'ios' || Platform.OS === 'android';
+}
+
+function sanitizeForSupertonic(text: string): string {
+  const normalized = text
+    .replace(/\b(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{40,}\b/gi, 'Lightning invoice')
+    .replace(/\blnurl[0-9a-z]{40,}\b/gi, 'Lightning payment link')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/[\u0060\u00B4\u02CB\u2032*_~#<>|[\]{}]/g, ' ')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[•·]/g, '. ')
+    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
+    .replace(/\s+/g, ' ');
+
+  return Array.from(normalized)
+    .filter((ch) => {
+      const code = ch.charCodeAt(0);
+      return (code === 0x09 || code === 0x0A || code === 0x0D || (code >= 0x20 && code <= 0x7E)) &&
+        code !== 0x60;
+    })
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanAssistantVisibleText(text: string): string {
+  let cleaned = text
+    // Qwen-style reasoning sometimes arrives in contentText. Never show/speak it.
+    .replace(/<think\b[\s\S]*?<\/think>/gi, ' ')
+    .replace(/<think\b[\s\S]*$/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Some small local models emit a tool-call object as plain text. Drop the
+  // leading fragment and keep any natural-language sentence that follows.
+  const toolPrefix = cleaned.match(/^\s*\{?\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*/i);
+  if (toolPrefix) {
+    cleaned = cleaned.slice(toolPrefix[0].length).replace(/^\s*\{?\s*/, '').trim();
+  }
+
+  return cleaned
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
 const CONFIG_KEY = 'qvac.config.v1';
 
@@ -93,12 +165,20 @@ export interface QVACConfig {
   delegateEnabled: boolean;
   /** Public key of the QVAC provider to delegate to (from `startQVACProvider`). */
   providerPublicKey: string;
+  /** Selected speech-to-text (Whisper) model id for the voice mode. */
+  sttModelId: string;
+  /** Text-to-speech engine for the voice mode ('supertonic' | 'system'). */
+  ttsEngine: TtsEngine;
+  /** True once the user explicitly chose a TTS engine in settings. */
+  ttsEngineUserSelected?: boolean;
 }
 
 const DEFAULT_CONFIG: QVACConfig = {
   modelId: DEFAULT_MODEL_ID,
   delegateEnabled: false,
   providerPublicKey: '',
+  sttModelId: DEFAULT_STT_MODEL_ID,
+  ttsEngine: DEFAULT_TTS_ENGINE,
 };
 
 export type ModelStatus = 'not_downloaded' | 'downloading' | 'downloaded' | 'loading' | 'ready' | 'error';
@@ -316,7 +396,11 @@ class QVACService {
     try {
       const raw = await AsyncStorage.getItem(CONFIG_KEY);
       if (raw) {
-        this.config = { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+        const saved = JSON.parse(raw);
+        this.config = { ...DEFAULT_CONFIG, ...saved };
+        if (saved.ttsEngine === 'system' && !saved.ttsEngineUserSelected) {
+          this.config.ttsEngine = DEFAULT_TTS_ENGINE;
+        }
         hadSaved = true;
       }
     } catch {
@@ -362,11 +446,108 @@ class QVACService {
     await this.reloadLLM();
   }
 
+  /**
+   * Align delegation with the chosen KaleidoMind mode: Desktop => delegate,
+   * Local/Off => on-device. This is the bridge between the redux `aiMode` and
+   * the engine config, so picking "Desktop" actually runs inference remotely
+   * (previously the mode and config.delegateEnabled were never synced, so
+   * "Desktop" still ran the model locally). No-ops when nothing changes, and
+   * won't enable delegation until a desktop is paired.
+   */
+  async setDelegateEnabled(enabled: boolean): Promise<void> {
+    await this.loadConfig();
+    if (enabled === this.config.delegateEnabled) return;
+    if (enabled && !this.config.providerPublicKey) return; // wait for pairing
+    await this.setDelegate({ enabled, providerPublicKey: this.config.providerPublicKey });
+  }
+
   /** Unload + re-initialize the LLM (after a model/delegation change). */
   private async reloadLLM(): Promise<void> {
     await this.unloadLLM().catch(() => {});
     this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, error: null });
     await this.initializeLLM();
+  }
+
+  /** Switch the speech-to-text (Whisper) model and reload it if it was active. */
+  async setSttModel(id: string): Promise<void> {
+    await this.loadConfig();
+    if (id === this.config.sttModelId) return;
+    this.config = { ...this.config, sttModelId: id };
+    await this.saveConfig();
+    // Only reload Whisper if it was already loaded/loading — otherwise it'll
+    // pick up the new model lazily on next voice use.
+    if (this.whisperModelId || this.state.whisperStatus !== 'not_downloaded') {
+      await this.unloadWhisper().catch(() => {});
+      this.setState({ whisperStatus: 'not_downloaded', whisperDownloadProgress: 0 });
+      if (!this.workletBlocked()) await this.initializeWhisper();
+    }
+  }
+
+  /** Switch the text-to-speech engine (natural SUPERTONIC vs system voice). */
+  async setTtsEngine(engine: TtsEngine): Promise<void> {
+    await this.loadConfig();
+    if (engine === this.config.ttsEngine) return;
+    this.config = { ...this.config, ttsEngine: engine, ttsEngineUserSelected: true };
+    await this.saveConfig();
+    // Free the neural TTS weights when switching to the system voice.
+    if (engine === 'system') await this.unloadTts().catch(() => {});
+  }
+
+  /** Engine currently selected for speech output. */
+  getTtsEngine(): TtsEngine {
+    return this.config.ttsEngine ?? DEFAULT_TTS_ENGINE;
+  }
+
+  // --- Local model file management (download / delete) ---
+
+  /** Map a downloadable model id to its on-disk filename, if any. */
+  private localFileNameForId(id: string): string | null {
+    const chat = QVAC_MODELS.find((m) => m.id === id);
+    if (chat?.descriptor?.modelId) return String(chat.descriptor.modelId);
+    const stt = QVAC_STT_MODELS.find((m) => m.id === id);
+    if (stt) return stt.name;
+    return null;
+  }
+
+  /**
+   * Ids of models whose weights are fully downloaded on this device (chat + STT).
+   * A file counts as present only if its size matches the expected size, so a
+   * half-finished download isn't reported as installed.
+   */
+  getDownloadedModelIds(): string[] {
+    const dir = new Directory(Paths.document, 'qvac-models');
+    const present: string[] = [];
+    const check = (id: string, name: string, expected: number) => {
+      try {
+        const f = new File(dir, name);
+        if (f.exists && (f.info().size ?? 0) === expected) present.push(id);
+      } catch { /* ignore */ }
+    };
+    for (const m of QVAC_MODELS) {
+      if (m.localCapable && m.descriptor?.modelId) {
+        check(m.id, String(m.descriptor.modelId), m.descriptor.expectedSize ?? -1);
+      }
+    }
+    for (const s of QVAC_STT_MODELS) check(s.id, s.name, s.size);
+    return present;
+  }
+
+  /**
+   * Delete a downloaded model's weights from disk. If it's the model currently
+   * loaded, it is unloaded first so the file isn't held open.
+   */
+  async deleteLocalModel(id: string): Promise<void> {
+    const name = this.localFileNameForId(id);
+    if (!name) return;
+    // Unload if it's the active chat or STT model.
+    const chat = QVAC_MODELS.find((m) => m.id === id);
+    if (chat && this.config.modelId === id) await this.unloadLLM().catch(() => {});
+    const stt = QVAC_STT_MODELS.find((m) => m.id === id);
+    if (stt && this.config.sttModelId === id) await this.unloadWhisper().catch(() => {});
+    try {
+      const file = new File(new Directory(Paths.document, 'qvac-models'), name);
+      if (file.exists) file.delete();
+    } catch { /* ignore */ }
   }
 
   /**
@@ -397,27 +578,31 @@ class QVACService {
       try { file.delete(); } catch { /* ignore */ }
     }
 
-    // Poll the partial file for rough download progress (the new
-    // expo-file-system download API has no progress callback).
-    const poll = setInterval(() => {
-      try {
-        if (file.exists) {
-          const written = file.info().size ?? 0;
-          const pct = Math.min(99, Math.round((written / model.size) * 100));
+    // Download to a *known* path with a real byte-progress callback. The new
+    // `File.downloadFileAsync` derives its own filename and exposes no progress,
+    // so the legacy resumable API is used purely for its progress callback.
+    console.log(`[QVAC] downloading ${model.name} via https…`);
+    onProgress(0);
+    let lastPct = -1;
+    const resumable = createDownloadResumable(
+      model.url,
+      file.uri,
+      {},
+      (p) => {
+        const total = p.totalBytesExpectedToWrite > 0 ? p.totalBytesExpectedToWrite : model.size;
+        const pct = total > 0 ? Math.min(99, Math.round((p.totalBytesWritten / total) * 100)) : 0;
+        if (pct !== lastPct) {
+          lastPct = pct;
           onProgress(pct);
         }
-      } catch { /* ignore */ }
-    }, 1000);
+      }
+    );
 
-    try {
-      console.log(`[QVAC] downloading ${model.name} via https…`);
-      const downloaded = await File.downloadFileAsync(model.url, dir, { idempotent: true } as any);
-      onProgress(100);
-      console.log(`[QVAC] downloaded ${model.name}`);
-      return downloaded.uri.replace('file://', '');
-    } finally {
-      clearInterval(poll);
-    }
+    const result = await resumable.downloadAsync();
+    if (!result?.uri) throw new Error(`Download failed for ${model.name}`);
+    onProgress(100);
+    console.log(`[QVAC] downloaded ${model.name}`);
+    return result.uri.replace('file://', '');
   }
 
   // --- LLM lifecycle ---
@@ -582,24 +767,78 @@ class QVACService {
     }
 
     try {
+      await this.loadConfig();
+
+      // Delegated: transcription runs on the remote provider's Whisper model
+      // (the same desktop provider the LLM delegates to). The phone downloads no
+      // weights — we pass an SDK descriptor + `delegate`, and the bound modelId
+      // then makes every transcribeAudio() call route over P2P. If the provider
+      // is unreachable we fall through to the local download/load path below.
+      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
+      if (delegating) {
+        this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100, error: null });
+        try {
+          this.whisperModelId = await loadModel({
+            modelSrc: WHISPER_BASE_Q8_0,
+            modelType: 'whispercpp-transcription',
+            modelConfig: { language: deviceWhisperLanguage(), strategy: 'greedy', audio_format: 's16le' } as any,
+            delegate: {
+              providerPublicKey: this.config.providerPublicKey,
+              fallbackToLocal: false,
+            },
+          } as any);
+          this.setState({ whisperStatus: 'ready' });
+          console.log('[QVAC] Whisper ready (delegated):', this.whisperModelId);
+          return;
+        } catch (delErr) {
+          console.warn(
+            '[QVAC] Whisper delegation failed; falling back to local model:',
+            delErr instanceof Error ? delErr.message : String(delErr)
+          );
+        }
+      }
+
       this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
 
-      const modelPath = await this.ensureLocalModel(WHISPER_MODEL, (pct) =>
-        this.setState({ whisperDownloadProgress: pct })
+      // Use the user-selected Whisper variant, but keep the phone voice loop
+      // memory-safe. whisper-large-v3-turbo is ~1.6 GB; loading neural TTS right
+      // after it on iOS can get the app jetsammed before JS can catch anything.
+      const selectedStt = getSttModelById(this.config.sttModelId);
+      const stt = isPhoneRuntime() && selectedStt.id === 'whisper-large-v3-turbo'
+        ? getSttModelById(DEFAULT_STT_MODEL_ID)
+        : selectedStt;
+      if (stt.id !== selectedStt.id) {
+        console.warn(`[QVAC] Whisper model '${selectedStt.id}' is too large for phone voice mode; using '${stt.id}'`);
+      }
+      const modelPath = await this.ensureLocalModel(
+        { url: stt.url, name: stt.name, size: stt.size },
+        (pct) => this.setState({ whisperDownloadProgress: pct })
       );
 
-      console.log('[QVAC] Whisper: loadModel start', modelPath);
+      // English-only variants are pinned to 'en'; multilingual variants use the
+      // device locale (e.g. Italian) so non-English speech transcribes instead
+      // of being force-decoded as English → empty. The QVAC whisper handler
+      // rejects "auto"/detect_language for these tiny models, so we always pass
+      // a concrete code and fall back to 'en' if the chosen one won't load.
+      const primaryLang = stt.lang === 'en' ? 'en' : deviceWhisperLanguage();
+      const loadWhisper = (language: string) =>
+        loadModel({
+          modelSrc: modelPath,
+          modelType: 'whispercpp-transcription',
+          modelConfig: { language, strategy: 'greedy', audio_format: 's16le' } as any,
+        });
+
+      console.log('[QVAC] Whisper: loadModel start', stt.id, 'lang=' + primaryLang, modelPath);
       this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100 });
 
-      this.whisperModelId = await loadModel({
-        modelSrc: modelPath,
-        modelType: 'whispercpp-transcription',
-        modelConfig: {
-          language: 'en',
-          strategy: 'greedy',
-          audio_format: 's16le',
-        },
-      });
+      try {
+        this.whisperModelId = await loadWhisper(primaryLang);
+      } catch (langErr) {
+        if (primaryLang === 'en') throw langErr;
+        console.warn(`[QVAC] Whisper load failed for '${primaryLang}', retrying as 'en':`,
+          langErr instanceof Error ? langErr.message : String(langErr));
+        this.whisperModelId = await loadWhisper('en');
+      }
 
       this.setState({ whisperStatus: 'ready' });
       console.log('QVAC Whisper ready:', this.whisperModelId);
@@ -658,7 +897,7 @@ class QVACService {
     }
 
     const final = await run.final;
-    const text = (final.contentText || streamed).trim();
+    const text = cleanAssistantVisibleText(final.contentText || streamed);
 
     // Resolve tool calls. Financial tools (requiresConfirmation) are returned
     // as `pending` instead of being auto-invoked, so the UI can confirm first.
@@ -765,7 +1004,7 @@ class QVACService {
       }
 
       const final = await run.final;
-      finalText = (final.contentText || streamed).trim();
+      finalText = cleanAssistantVisibleText(final.contentText || streamed);
 
       // No tool calls → the model produced its final answer.
       if (!final.toolCalls || final.toolCalls.length === 0) {
@@ -782,7 +1021,19 @@ class QVACService {
 
         let result: unknown;
 
-        if (def?.requiresConfirmation) {
+        // Fail-safe: confirm if the tool opted in OR if its name looks like it
+        // moves value. The heuristic catches fund-moving tools that forget to
+        // set `requiresConfirmation` — a missing flag must never auto-execute.
+        const heuristicValueMoving = isLikelyValueMovingToolName(call.name);
+        const mustConfirm = !!def?.requiresConfirmation || heuristicValueMoving;
+        if (mustConfirm && !def?.requiresConfirmation) {
+          console.warn(
+            `[QVAC] Tool "${call.name}" looks value-moving but is not marked ` +
+              `requiresConfirmation — forcing confirmation. Add the flag to its definition.`,
+          );
+        }
+
+        if (mustConfirm) {
           // Human-in-the-loop for anything that moves money.
           const decision = params.onConfirm
             ? await params.onConfirm({ name: call.name, arguments: call.arguments })
@@ -790,7 +1041,13 @@ class QVACService {
 
           if (decision.approved) {
             try {
-              result = call.invoke ? await call.invoke() : await def.handler(call.arguments);
+              if (call.invoke) {
+                result = await call.invoke();
+              } else if (def?.handler) {
+                result = await def.handler(call.arguments);
+              } else {
+                result = { error: `unknown tool: ${call.name}` };
+              }
             } catch (err) {
               result = { error: err instanceof Error ? err.message : String(err) };
             }
@@ -863,7 +1120,7 @@ class QVACService {
     // Strip <think>…</think> reasoning from the user-visible text; keep the raw
     // frame (with framing) for the engine's history push-back.
     const rawText = final.contentText || streamed;
-    const text = rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    const text = cleanAssistantVisibleText(rawText);
 
     return {
       text,
@@ -912,61 +1169,36 @@ class QVACService {
   }
 
   /**
-   * Download (over HTTPS, like the LLM weights) and load the SUPERTONIC-2 TTS
-   * model components, then keep the loaded model resident. Idempotent + single-
-   * flighted so concurrent speak calls share one load.
+   * Load the QVAC 0.12 GGML Supertonic TTS model and keep it resident.
+   * Idempotent + single-flighted so concurrent speak calls share one load.
    */
   private async ensureTtsLoaded(): Promise<string> {
     if (this.ttsModelId) return this.ttsModelId;
     if (this.ttsLoadPromise) return this.ttsLoadPromise;
 
     this.ttsLoadPromise = (async () => {
-      const fetchComponent = async (descriptor: any): Promise<string> => {
-        const url = hfUrlFromDescriptor(descriptor);
-        if (!url) throw new Error(`TTS component ${descriptor?.name} has no HTTPS URL`);
-        const filename = 'tts_' + (descriptor.registryPath as string).split('/').pop();
-        return this.ensureLocalModel(
-          { url, name: filename, size: descriptor.expectedSize ?? 0 },
-          () => {}
-        );
-      };
-
-      const [
-        textEncoder,
-        durationPredictor,
-        vectorEstimator,
-        vocoder,
-        unicodeIndexer,
-        ttsConfig,
-        voiceStyle,
-      ] = await Promise.all([
-        fetchComponent(TTS_TEXT_ENCODER),
-        fetchComponent(TTS_DURATION_PREDICTOR),
-        fetchComponent(TTS_VECTOR_ESTIMATOR),
-        fetchComponent(TTS_VOCODER),
-        fetchComponent(TTS_UNICODE_INDEXER),
-        fetchComponent(TTS_CONFIG),
-        fetchComponent(TTS_VOICE_STYLE),
-      ]);
-
-      console.log('[QVAC] TTS: loading SUPERTONIC-2 model');
+      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
+      console.log(`[QVAC] TTS: loading Supertonic GGML model${delegating ? ' (delegated)' : ''}`);
+      // On-device only: free the Whisper weights before loading the neural voice
+      // so the phone never holds both in RAM. When delegating, both models live
+      // on the remote provider, so there's nothing local to unload.
+      if (!delegating && this.whisperModelId) {
+        console.log('[QVAC] TTS: unloading Whisper before neural voice load');
+        await this.unloadWhisper().catch(() => {});
+      }
       const id = await loadModel({
-        modelSrc: textEncoder,
-        modelType: 'tts',
+        modelSrc: TTS_EN_SUPERTONIC_Q4_0,
+        modelType: 'tts-ggml',
         modelConfig: {
           ttsEngine: 'supertonic',
           language: 'en',
+          voice: 'F1',
           ttsSpeed: 1.05,
           ttsNumInferenceSteps: 5,
-          ttsSupertonicMultilingual: true,
-          ttsTextEncoderSrc: textEncoder,
-          ttsDurationPredictorSrc: durationPredictor,
-          ttsVectorEstimatorSrc: vectorEstimator,
-          ttsVocoderSrc: vocoder,
-          ttsUnicodeIndexerSrc: unicodeIndexer,
-          ttsTtsConfigSrc: ttsConfig,
-          ttsVoiceStyleSrc: voiceStyle,
         },
+        ...(delegating
+          ? { delegate: { providerPublicKey: this.config.providerPublicKey, fallbackToLocal: false } }
+          : {}),
       } as any);
       this.ttsModelId = id;
       console.log('[QVAC] TTS ready:', id);
@@ -988,8 +1220,16 @@ class QVACService {
    */
   async synthesizeSpeech(text: string): Promise<{ pcm: number[]; sampleRate: number } | null> {
     if (this.workletBlocked()) return null;
-    const trimmed = text.trim();
+    const trimmed = sanitizeForSupertonic(text);
     if (!trimmed) return null;
+    if (trimmed !== text.trim()) {
+      console.log('[QVAC] TTS: sanitized unsupported characters before synthesis');
+    }
+    if (Array.from(trimmed).some((ch) => ch.charCodeAt(0) === 0x60)) {
+      console.warn('[QVAC] TTS: refusing Supertonic input with U+0060 after sanitize');
+      return null;
+    }
+    console.log('[QVAC] TTS: synth input chars', Array.from(trimmed).map((ch) => ch.charCodeAt(0)).join(','));
 
     const modelId = await this.ensureTtsLoaded();
     const result: any = textToSpeech({

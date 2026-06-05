@@ -16,9 +16,10 @@ import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import NetworkService from './services/NetworkService';
+import { preloadFeedback } from './utils/feedback';
 
 import { store, persistor } from './store';
-import { selectAiEnabled } from './store/slices/settingsSlice';
+import { selectAiMode } from './store/slices/settingsSlice';
 import QVACService from './services/QVACService';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
@@ -43,9 +44,11 @@ import NostrContactsScreen from './screens/NostrContactsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
+import NostrSetupScreen from './screens/NostrSetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
 import PairDesktopScreen from './screens/PairDesktopScreen';
+import NWCConnectScreen from './screens/NWCConnectScreen';
 
 type RootStackParamList = {
   InitialLoad: undefined;
@@ -55,6 +58,7 @@ type RootStackParamList = {
   AddWallet: undefined;
   WalletSettings: { walletId: number };
   SecuritySetup: { walletId?: number; isInitialSetup?: boolean };
+  NostrSetup: { isInitialSetup?: boolean } | undefined;
   Dashboard: undefined;
   Settings: undefined;
   Send: { selectedAsset?: any } | undefined;
@@ -72,6 +76,7 @@ type RootStackParamList = {
   IssueAsset: undefined;
   Channels: undefined;
   PairDesktop: undefined;
+  NWCConnect: undefined;
 };
 
 type TabBarIconProps = {
@@ -217,6 +222,7 @@ function AppNavigator() {
         <Stack.Screen name="AddWallet" component={AddWalletScreen} />
         <Stack.Screen name="WalletSettings" component={WalletSettingsScreen} />
         <Stack.Screen name="SecuritySetup" component={SecuritySetupScreen} />
+        <Stack.Screen name="NostrSetup" component={NostrSetupScreen} />
         <Stack.Screen name="Dashboard" component={DashboardTabs} />
         <Stack.Screen
           name="Settings"
@@ -232,6 +238,11 @@ function AppNavigator() {
         <Stack.Screen
           name="PairDesktop"
           component={PairDesktopScreen}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen
+          name="NWCConnect"
+          component={NWCConnectScreen}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
@@ -284,10 +295,13 @@ function AppNavigator() {
  * explicitly opted in. Rendered inside the Redux Provider + PersistGate.
  */
 function QVACEnabledSync() {
-  const aiEnabled = useSelector(selectAiEnabled);
+  const aiMode = useSelector(selectAiMode);
   React.useEffect(() => {
-    QVACService.getInstance().setEnabled(aiEnabled);
-  }, [aiEnabled]);
+    const svc = QVACService.getInstance();
+    svc.setEnabled(aiMode !== 'off');
+    // Desktop mode => delegate to the paired provider; Local/Off => on-device.
+    void svc.setDelegateEnabled(aiMode === 'delegate');
+  }, [aiMode]);
   return null;
 }
 
@@ -306,6 +320,9 @@ export default function App() {
     networkService.initialize().catch(error => {
       console.error('Failed to initialize network monitoring:', error);
     });
+
+    // Warm the UI sound cache so the first tap/chime plays without synthesis lag.
+    preloadFeedback();
 
     return () => {
       networkService.cleanup();

@@ -6,15 +6,15 @@ import {
   Text,
   ScrollView,
   TouchableOpacity,
-  Switch,
   StyleSheet,
   ActivityIndicator,
   TextInput,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
-import type { QVACModel } from '../services/qvacModels';
+import type { QVACModel, SttModel, TtsOption, TtsEngine } from '../services/qvacModels';
 import type { QVACConfig, ModelStatus } from '../services/QVACService';
 import type { AiMode } from '../store/slices/settingsSlice';
 
@@ -39,6 +39,18 @@ interface Props {
   aiMode: AiMode;
   /** Switch the KaleidoMind mode. 'off' keeps the QVAC worklet from starting. */
   onSetAiMode: (mode: AiMode) => void;
+  /** Ids of models with weights already downloaded on this device. */
+  downloadedModelIds: string[];
+  /** Delete a downloaded model's weights from disk. */
+  onDeleteModel: (id: string) => void;
+  /** Speech-to-text (Whisper) models for the voice mode. */
+  sttCatalog: SttModel[];
+  /** Text-to-speech engine options for the voice mode. */
+  ttsOptions: TtsOption[];
+  /** Switch the speech-to-text model. */
+  onSetSttModel: (id: string) => void;
+  /** Switch the text-to-speech engine. */
+  onSetTtsEngine: (engine: TtsEngine) => void;
 }
 
 /** Extract a 64–66 char hex provider key from pasted text (QR payload or raw). */
@@ -68,9 +80,27 @@ export default function QVACSettingsSheet({
   recommendedModelId,
   aiMode,
   onSetAiMode,
+  downloadedModelIds,
+  onDeleteModel,
+  sttCatalog,
+  ttsOptions,
+  onSetSttModel,
+  onSetTtsEngine,
 }: Props) {
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const hasProvider = !!config.providerPublicKey;
+  const isDownloaded = (id: string) => downloadedModelIds.includes(id);
+
+  const confirmDelete = (id: string, label: string) => {
+    Alert.alert(
+      'Delete model?',
+      `Remove “${label}” from this device? You can download it again later.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: () => onDeleteModel(id) },
+      ]
+    );
+  };
 
   // Paste-a-pubkey delegation (alternative to scanning the QR).
   const [showPaste, setShowPaste] = useState(false);
@@ -118,11 +148,7 @@ export default function QVACSettingsSheet({
                 <TouchableOpacity
                   key={m.key}
                   style={[styles.modeBtn, active && styles.modeBtnActive]}
-                  onPress={() => {
-                    onSetAiMode(m.key);
-                    // Picking Desktop with nobody paired yet → jump straight to pairing.
-                    if (m.key === 'delegate' && !hasProvider) onScanQR();
-                  }}
+                  onPress={() => onSetAiMode(m.key)}
                   activeOpacity={0.85}
                 >
                   <Ionicons
@@ -149,26 +175,24 @@ export default function QVACSettingsSheet({
             </Text>
           )}
 
-          {/* ---- On-device model ---- */}
+          {/* ---- Model picker (on-device mode only; Desktop shows connection only) ---- */}
+          {aiMode === 'local' && (
+          <>
           <Text style={styles.sectionTitle}>On-device model</Text>
           <Text style={styles.sectionHint}>
             {deviceMemGb
-              ? `Your device has ~${deviceMemGb} GB RAM. The recommended model fits it best; `
-              : 'Smaller models run on a phone; '}
-            larger ones need a Mac or P2P delegation.
+              ? `Your device has ~${deviceMemGb} GB RAM. The recommended model fits it best; smaller models run faster.`
+              : 'Smaller models run on a phone; larger ones need a desktop.'}
           </Text>
 
-          {catalog.map((m) => {
+          {catalog.filter((m) => m.localCapable).map((m) => {
             const selected = m.id === config.modelId;
-            const delegateOnly = !m.localCapable;
-            const disabled = delegateOnly && !config.delegateEnabled;
             const recommended = m.id === recommendedModelId;
             return (
               <TouchableOpacity
                 key={m.id}
-                style={[styles.modelRow, selected && styles.modelRowSelected, disabled && styles.modelRowDisabled]}
-                onPress={() => !disabled && onSelectModel(m.id)}
-                disabled={disabled}
+                style={[styles.modelRow, selected && styles.modelRowSelected]}
+                onPress={() => onSelectModel(m.id)}
               >
                 <View style={styles.modelInfo}>
                   <View style={styles.modelLabelRow}>
@@ -185,8 +209,89 @@ export default function QVACSettingsSheet({
                   <Text style={styles.modelMeta}>
                     {m.params} · {(m.sizeMB / 1024).toFixed(m.sizeMB < 1024 ? 0 : 1)}
                     {m.sizeMB < 1024 ? ` MB` : ` GB`} · {TIER_LABEL[m.tier]}
-                    {delegateOnly ? ' · P2P only' : ''}
+                    {isDownloaded(m.id) ? ' · ✓ Downloaded' : ''}
                   </Text>
+                </View>
+                <View style={styles.modelRight}>
+                  {isDownloaded(m.id) && !(selected && busy) && (
+                    <TouchableOpacity
+                      onPress={() => confirmDelete(m.id, m.label)}
+                      hitSlop={10}
+                      style={styles.trashBtn}
+                      accessibilityLabel={`Delete ${m.label}`}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} />
+                    </TouchableOpacity>
+                  )}
+                  {selected ? (
+                    <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[600]} />
+                  ) : (
+                    <Ionicons name="ellipse-outline" size={22} color={theme.colors.border.medium} />
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+          </>
+          )}
+
+          {/* ---- Voice mode: STT + TTS (on-device mode only) ---- */}
+          {aiMode === 'local' && (
+          <>
+          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Voice mode</Text>
+          <Text style={styles.sectionHint}>
+            Speech recognition and the spoken reply run on-device.
+          </Text>
+
+          <Text style={styles.subSectionTitle}>Speech-to-text (Whisper)</Text>
+          {sttCatalog.map((s) => {
+            const selected = s.id === config.sttModelId;
+            return (
+              <TouchableOpacity
+                key={s.id}
+                style={[styles.modelRow, selected && styles.modelRowSelected]}
+                onPress={() => onSetSttModel(s.id)}
+              >
+                <View style={styles.modelInfo}>
+                  <Text style={styles.modelLabel}>{s.label}</Text>
+                  <Text style={styles.modelMeta}>
+                    {s.lang === 'en' ? 'English only' : 'Multilingual'} · {s.sizeMB} MB
+                    {isDownloaded(s.id) ? ' · ✓ Downloaded' : ''}
+                  </Text>
+                </View>
+                <View style={styles.modelRight}>
+                  {isDownloaded(s.id) && (
+                    <TouchableOpacity
+                      onPress={() => confirmDelete(s.id, s.label)}
+                      hitSlop={10}
+                      style={styles.trashBtn}
+                      accessibilityLabel={`Delete ${s.label}`}
+                    >
+                      <Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} />
+                    </TouchableOpacity>
+                  )}
+                  {selected ? (
+                    <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[600]} />
+                  ) : (
+                    <Ionicons name="ellipse-outline" size={22} color={theme.colors.border.medium} />
+                  )}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+
+          <Text style={[styles.subSectionTitle, { marginTop: theme.spacing[4] }]}>Voice output</Text>
+          {ttsOptions.map((t) => {
+            const selected = t.id === config.ttsEngine;
+            return (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.modelRow, selected && styles.modelRowSelected]}
+                onPress={() => onSetTtsEngine(t.id)}
+              >
+                <View style={styles.modelInfo}>
+                  <Text style={styles.modelLabel}>{t.label}</Text>
+                  <Text style={styles.modelMeta}>{t.hint}</Text>
                 </View>
                 {selected ? (
                   <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[600]} />
@@ -196,11 +301,15 @@ export default function QVACSettingsSheet({
               </TouchableOpacity>
             );
           })}
+          </>
+          )}
 
-          {/* ---- P2P delegation ---- */}
-          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Desktop brain (P2P)</Text>
+          {/* ---- Desktop pairing (only in Desktop mode) ---- */}
+          {aiMode === 'delegate' && (
+          <>
+          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Connect a desktop</Text>
           <Text style={styles.sectionHint}>
-            Run inference on a desktop running KaleidoMind instead of on this device.
+            Inference runs on a Mac/PC running KaleidoMind. Selecting “Desktop” above is what enables delegation.
           </Text>
 
           {hasProvider ? (
@@ -213,22 +322,9 @@ export default function QVACSettingsSheet({
                   </Text>
                   <Text style={styles.providerKey}>{shortKey}</Text>
                 </View>
-                {config.delegateEnabled && (
-                  <View style={styles.activePill}>
-                    <Text style={styles.activePillText}>Active</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Delegate to this desktop</Text>
-                <Switch
-                  value={config.delegateEnabled}
-                  onValueChange={(v) =>
-                    onSetDelegate({ enabled: v, providerPublicKey: config.providerPublicKey })
-                  }
-                  trackColor={{ true: theme.colors.primary[500], false: theme.colors.border.medium }}
-                />
+                <View style={styles.activePill}>
+                  <Text style={styles.activePillText}>{config.delegateEnabled ? 'Active' : 'Paired'}</Text>
+                </View>
               </View>
 
               <TouchableOpacity style={styles.scanButtonGhost} onPress={onScanQR}>
@@ -292,6 +388,8 @@ export default function QVACSettingsSheet({
             On your Mac, open KaleidoMind → Pair to show the QR (or copy the public key).
             Scan it, or paste the key above.
           </Text>
+          </>
+          )}
         </ScrollView>
       </SafeAreaView>
     </Modal>
@@ -341,7 +439,10 @@ const styles = StyleSheet.create({
   modeBtnLabelActive: { color: theme.colors.text.inverse },
   disabledNote: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontStyle: 'italic', marginTop: theme.spacing[1], marginBottom: theme.spacing[4] },
   sectionTitle: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
+  subSectionTitle: { fontSize: theme.typography.fontSize.sm, fontWeight: '700', color: theme.colors.text.secondary, marginBottom: theme.spacing[2], textTransform: 'uppercase', letterSpacing: 0.5 },
   sectionHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginBottom: theme.spacing[3], lineHeight: 18 },
+  modelRight: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
+  trashBtn: { padding: theme.spacing[1] },
   modelRow: {
     flexDirection: 'row',
     alignItems: 'center',

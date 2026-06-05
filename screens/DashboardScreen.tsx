@@ -11,6 +11,7 @@ import {
   Dimensions,
   StatusBar,
   Modal,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -43,7 +44,9 @@ import {
   ChannelList,
   MainHeader
 } from '../components';
-import { formatBitcoinAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
+import { BackupHealthCard } from '../components/BackupHealthCard';
+import { useBackupHealth } from '../hooks/useBackupHealth';
 
 const { width } = Dimensions.get('window');
 
@@ -106,6 +109,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
+  const [voiceAutoListen, setVoiceAutoListen] = useState(false);
   // One-time KaleidoMind onboarding (lets the user pick local / delegate / off).
   const [mindOnboardingOpen, setMindOnboardingOpen] = useState(false);
   const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
@@ -113,8 +117,12 @@ export default function DashboardScreen({ navigation }: Props) {
   const [protocolsReady, setProtocolsReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const { formatSatoshisToUSD } = useBitcoinConversion();
+  // Denomination-aware formatter for the headline balance (tap to cycle sats/BTC/fiat).
+  const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState<Channel[]>([]);
+  // Seed-only recovery covers BTC; RGB assets + channels need node-state backup.
+  const backupHealth = useBackupHealth({ channelCount: channels.length });
   const [btcBalance, setBtcBalanceState] = useState<{
     vanilla: { settled: number; future: number; spendable: number };
     colored: { settled: number; future: number; spendable: number };
@@ -128,6 +136,23 @@ export default function DashboardScreen({ navigation }: Props) {
   // Modal state for channel details
   const [channelModalVisible, setChannelModalVisible] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
+
+  // Open the KaleidoMind voice agent. `autoListen` is set when triggered via a
+  // press-and-hold on the FAB, so the assistant starts listening immediately.
+  const openVoiceAgent = useCallback((autoListen: boolean) => {
+    if (aiEnabled) {
+      setVoiceAutoListen(autoListen);
+      setVoiceAgentOpen(true);
+      return;
+    }
+    // AI is opt-in (off by default). Re-open the one-time setup so the user
+    // can pick how KaleidoMind runs — nothing starts the worklet unprompted.
+    QVACService.getInstance()
+      .getAvailability()
+      .then((a) => setMindAvailability(a))
+      .catch(() => {})
+      .finally(() => setMindOnboardingOpen(true));
+  }, [aiEnabled]);
 
   // First run: probe whether KaleidoMind can run here, then show the one-time
   // setup so the user decides once (local / delegate / off). Never boots the
@@ -442,6 +467,7 @@ export default function DashboardScreen({ navigation }: Props) {
   );
 
   const totalBalance = offChainBalance + getTotalBtcBalance();
+  const denominatedTotal = formatDisplayAmount(totalBalance);
 
   // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
   // which network each lives on. BTC is filtered out of `rgbAssets` upstream, so
@@ -678,6 +704,10 @@ export default function DashboardScreen({ navigation }: Props) {
             refreshing={refreshing}
             formatSatoshis={formatSatoshis}
             formatUSD={formatUSD}
+            primaryText={denominatedTotal.primary}
+            primaryUnitLabel={denominatedTotal.unitLabel}
+            secondaryText={denominatedTotal.secondary}
+            onCycleDenomination={cycleDenomination}
             onChainBalance={getTotalBtcBalance()}
             lightningBalance={offChainBalance}
             // Per-protocol balance breakdown is a network detail — only in advanced mode.
@@ -693,6 +723,10 @@ export default function DashboardScreen({ navigation }: Props) {
           onSwap={() => navigation.getParent()?.navigate('Swap')}
           onHistory={() => navigation.getParent()?.navigate('History')}
         />
+
+        {/* Honest recovery status: loud when RGB assets/channels can't be
+            restored from the seed alone. Renders nothing for plain-BTC wallets. */}
+        <BackupHealthCard health={backupHealth} />
 
         {isLite && liteUsdDisplay > 0 && (
           <View style={styles.liteUsdCard}>
@@ -722,7 +756,7 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
-        {policy.showNetworks && (
+        {policy.showChannelManagement && (
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
@@ -741,21 +775,16 @@ export default function DashboardScreen({ navigation }: Props) {
       </ScrollView>
 
       <VoiceAgentFAB
-        onPress={() => {
-          if (aiEnabled) {
-            setVoiceAgentOpen(true);
-            return;
-          }
-          // AI is opt-in (off by default). Re-open the one-time setup so the user
-          // can pick how KaleidoMind runs — nothing starts the worklet unprompted.
-          QVACService.getInstance()
-            .getAvailability()
-            .then((a) => setMindAvailability(a))
-            .catch(() => {})
-            .finally(() => setMindOnboardingOpen(true));
-        }}
+        onPress={() => openVoiceAgent(false)}
+        onHoldActivate={() => openVoiceAgent(true)}
+        bottom={Platform.OS === 'ios' ? 100 : 84}
+        right={16}
       />
-      <VoiceAgentOverlay visible={voiceAgentOpen} onClose={() => setVoiceAgentOpen(false)} />
+      <VoiceAgentOverlay
+        visible={voiceAgentOpen}
+        autoListen={voiceAutoListen}
+        onClose={() => setVoiceAgentOpen(false)}
+      />
 
       <KaleidoMindOnboarding
         visible={mindOnboardingOpen}

@@ -225,7 +225,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const handleSkipSecurity = () => {
-    navigation.replace('Dashboard');
+    navigation.replace('NostrSetup', { isInitialSetup: true });
   };
 
   const renderStepIndicator = () => {

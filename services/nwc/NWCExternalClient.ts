@@ -1,0 +1,208 @@
+/**
+ * Nostr Wallet Connect (NIP-47) CLIENT.
+ *
+ * This is the *client* side — it connects this app to an external NWC wallet
+ * service (e.g. the KaleidoSwap desktop hub) via a `nostr+walletconnect://`
+ * string. It is distinct from `services/NWCService.ts`, which is the *server*
+ * (this app acting as a wallet for others).
+ *
+ * Vendored from `kaleido-sdk/nwc` until that SDK version is published; keep the
+ * two in sync. Requests are NIP-04 encrypted (kind 23194); responses are
+ * correlated as kind 23195 over relays. Relies on the global `WebSocket` and
+ * the `react-native-get-random-values` polyfill loaded at app entry.
+ */
+
+import {
+  SimplePool,
+  finalizeEvent,
+  getPublicKey,
+  nip04,
+  type Event,
+  type Filter,
+} from 'nostr-tools';
+
+const NWC_KIND_REQUEST = 23194;
+const NWC_KIND_RESPONSE = 23195;
+const DEFAULT_TIMEOUT_MS = 60_000;
+const URI_SCHEME = 'nostr+walletconnect://';
+
+export type NwcMethod =
+  | 'get_info'
+  | 'get_balance'
+  | 'make_invoice'
+  | 'pay_invoice'
+  | 'pay_keysend'
+  | 'lookup_invoice'
+  | 'list_transactions';
+
+export interface NwcConnectionInfo {
+  walletPubkey: string;
+  relays: string[];
+  secret: string;
+  lud16?: string;
+}
+
+export interface NwcGetInfoResult {
+  alias?: string;
+  pubkey?: string;
+  network?: string;
+  block_height?: number;
+  methods: string[];
+}
+
+export interface NwcGetBalanceResult {
+  balance: number;
+}
+
+export interface NwcInvoice {
+  type?: 'incoming' | 'outgoing';
+  state?: 'pending' | 'settled' | 'expired' | 'failed';
+  invoice?: string;
+  preimage?: string;
+  payment_hash?: string;
+  amount?: number;
+  fees_paid?: number;
+  created_at?: number;
+}
+
+export interface NwcPayInvoiceResult {
+  preimage: string;
+  fees_paid?: number;
+}
+
+export class NwcError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'NwcError';
+    this.code = code;
+  }
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
+  if (clean.length % 2 !== 0) throw new Error('Invalid hex string');
+  const bytes = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
+}
+
+export function parseNwcUri(uri: string): NwcConnectionInfo {
+  const trimmed = uri.trim();
+  if (!trimmed.startsWith(URI_SCHEME)) {
+    throw new Error('Invalid NWC URI: missing nostr+walletconnect:// scheme');
+  }
+  const withoutScheme = trimmed.slice(URI_SCHEME.length);
+  const queryIndex = withoutScheme.indexOf('?');
+  if (queryIndex === -1) throw new Error('Invalid NWC URI: missing query parameters');
+  const walletPubkey = withoutScheme.slice(0, queryIndex).toLowerCase();
+  const params = new URLSearchParams(withoutScheme.slice(queryIndex + 1));
+  const relays = params.getAll('relay').filter(Boolean);
+  const secret = params.get('secret') ?? '';
+  const lud16 = params.get('lud16') ?? undefined;
+  if (!walletPubkey) throw new Error('Invalid NWC URI: missing wallet pubkey');
+  if (relays.length === 0) throw new Error('Invalid NWC URI: missing relay');
+  if (!secret) throw new Error('Invalid NWC URI: missing secret');
+  return { walletPubkey, relays, secret, lud16 };
+}
+
+export class NWCClient {
+  private readonly pool: SimplePool;
+  private readonly walletPubkey: string;
+  private readonly relays: string[];
+  private readonly secretBytes: Uint8Array;
+  readonly clientPubkey: string;
+  private readonly timeoutMs: number;
+
+  constructor(uri: string, options: { timeoutMs?: number } = {}) {
+    const info = parseNwcUri(uri);
+    this.walletPubkey = info.walletPubkey;
+    this.relays = info.relays;
+    this.secretBytes = hexToBytes(info.secret);
+    this.clientPubkey = getPublicKey(this.secretBytes);
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.pool = new SimplePool();
+  }
+
+  async request<T>(method: NwcMethod, params: Record<string, unknown>): Promise<T> {
+    const content = nip04.encrypt(
+      this.secretBytes,
+      this.walletPubkey,
+      JSON.stringify({ method, params }),
+    );
+    const reqEvent = finalizeEvent(
+      {
+        kind: NWC_KIND_REQUEST,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['p', this.walletPubkey]],
+        content,
+      },
+      this.secretBytes,
+    );
+    const filter: Filter = {
+      kinds: [NWC_KIND_RESPONSE],
+      authors: [this.walletPubkey],
+      '#e': [reqEvent.id],
+    };
+
+    return new Promise<T>((resolve, reject) => {
+      let settled = false;
+      const sub = this.pool.subscribeMany(this.relays, filter, {
+        onevent: (event: Event) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          sub.close();
+          try {
+            const decrypted = nip04.decrypt(this.secretBytes, this.walletPubkey, event.content);
+            const response = JSON.parse(decrypted) as {
+              error?: { code: string; message: string } | null;
+              result?: T;
+            };
+            if (response.error) {
+              reject(new NwcError(response.error.code, response.error.message));
+            } else {
+              resolve(response.result as T);
+            }
+          } catch (err) {
+            reject(err instanceof Error ? err : new Error(String(err)));
+          }
+        },
+      });
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        sub.close();
+        reject(new NwcError('OTHER', `NWC request '${method}' timed out`));
+      }, this.timeoutMs);
+
+      // Fire the request to every relay; per-relay failures are swallowed (the
+      // response — or the timeout — drives resolution).
+      for (const pub of this.pool.publish(this.relays, reqEvent)) {
+        pub.catch(() => undefined);
+      }
+    });
+  }
+
+  getInfo(): Promise<NwcGetInfoResult> {
+    return this.request<NwcGetInfoResult>('get_info', {});
+  }
+
+  getBalance(): Promise<NwcGetBalanceResult> {
+    return this.request<NwcGetBalanceResult>('get_balance', {});
+  }
+
+  makeInvoice(params: { amount: number; description?: string; expiry?: number }): Promise<NwcInvoice> {
+    return this.request<NwcInvoice>('make_invoice', { ...params });
+  }
+
+  payInvoice(params: { invoice: string; amount?: number }): Promise<NwcPayInvoiceResult> {
+    return this.request<NwcPayInvoiceResult>('pay_invoice', { ...params });
+  }
+
+  close(): void {
+    this.pool.close(this.relays);
+  }
+}

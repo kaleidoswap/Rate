@@ -117,7 +117,7 @@ const makeMarkdownStyles = (theme: Theme) => ({
   },
   code_inline: {
     backgroundColor: theme.colors.surface.secondary,
-    color: theme.colors.primary[700] ?? theme.colors.primary[600],
+    color: theme.colors.primary[400] ?? theme.colors.primary[500],
     borderRadius: 4,
     paddingHorizontal: 4,
   },

@@ -22,6 +22,7 @@ import { useAssetIcon } from '../utils';
 import { theme } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
 import { IssueAssetModal } from '../components/IssueAssetModal';
+import { usePolicy } from '../hooks/usePolicy';
 
 interface Props {
   navigation: any;
@@ -33,6 +34,9 @@ export default function AssetsScreen({ navigation }: Props) {
   const { rgbAssets, isLoading } = useSelector((state: RootState) => state.assets);
   const [refreshing, setRefreshing] = useState(false);
   const [showIssueModal, setShowIssueModal] = useState(false);
+  // Issuing RGB assets is an advanced/experimental surface — hidden in Lite mode.
+  const policy = usePolicy();
+  const canIssue = policy.showExperimental;
 
   // Asset Icon Component
   const AssetIcon = ({ ticker }: { ticker: string }) => {
@@ -93,12 +97,14 @@ export default function AssetsScreen({ navigation }: Props) {
         title="RGB Assets"
         showBack={true}
         rightAction={
-          <TouchableOpacity
-            style={styles.issueHeaderButton}
-            onPress={() => setShowIssueModal(true)}
-          >
-            <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
+          canIssue ? (
+            <TouchableOpacity
+              style={styles.issueHeaderButton}
+              onPress={() => setShowIssueModal(true)}
+            >
+              <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
+            </TouchableOpacity>
+          ) : undefined
         }
       >
         <View style={styles.headerStats}>
@@ -168,18 +174,22 @@ export default function AssetsScreen({ navigation }: Props) {
       <View style={styles.emptyIcon}>
         <Ionicons name="diamond-outline" size={64} color={theme.colors.gray[400]} />
       </View>
-      <Text style={styles.emptyTitle}>No RGB Assets Yet</Text>
+      <Text style={styles.emptyTitle}>No Assets Yet</Text>
       <Text style={styles.emptyDescription}>
-        Issue your first RGB asset to get started with tokenization on Bitcoin
+        {canIssue
+          ? 'Issue your first RGB asset to get started with tokenization on Bitcoin'
+          : 'Assets you receive will appear here'}
       </Text>
-      <Button
-        title="Issue Your First Asset"
-        variant="primary"
-        size="lg"
-        onPress={() => setShowIssueModal(true)}
-        style={styles.emptyButton}
-        icon={<Ionicons name="add" size={20} color={theme.colors.text.inverse} />}
-      />
+      {canIssue && (
+        <Button
+          title="Issue Your First Asset"
+          variant="primary"
+          size="lg"
+          onPress={() => setShowIssueModal(true)}
+          style={styles.emptyButton}
+          icon={<Ionicons name="add" size={20} color={theme.colors.text.inverse} />}
+        />
+      )}
     </View>
   );
 
@@ -236,7 +246,7 @@ export default function AssetsScreen({ navigation }: Props) {
             {renderAssetsList()}
           </ScrollView>
           
-          {rgbAssets && rgbAssets.length > 0 && renderFloatingButton()}
+          {canIssue && rgbAssets && rgbAssets.length > 0 && renderFloatingButton()}
         </>
       )}
 

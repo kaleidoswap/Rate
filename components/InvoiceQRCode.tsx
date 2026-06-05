@@ -28,7 +28,8 @@ interface InvoiceQRCodeProps {
 }
 
 const { width: screenWidth } = Dimensions.get('window');
-const QR_SIZE = Math.min(screenWidth - 80, 240);
+// Keep the QR compact so the whole invoice card fits on screen without scrolling.
+const QR_SIZE = Math.min(screenWidth - 160, 180);
 
 export default function InvoiceQRCode({ 
   invoice, 
@@ -250,15 +251,15 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: theme.colors.surface.primary,
     borderRadius: theme.borderRadius.xl,
-    marginVertical: theme.spacing[4],
+    marginVertical: theme.spacing[2],
     overflow: 'hidden',
     ...theme.shadows.lg,
   },
   gradientContainer: {
-    padding: theme.spacing[4],
+    padding: theme.spacing[3],
   },
   header: {
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[2],
   },
   titleContainer: {
     flexDirection: 'row',
@@ -291,38 +292,39 @@ const styles = StyleSheet.create({
   },
   qrContainer: {
     alignItems: 'center',
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[3],
   },
   qrWrapper: {
-    padding: theme.spacing[4],
+    padding: theme.spacing[3],
     borderRadius: theme.borderRadius.xl,
     ...theme.shadows.md,
   },
   infoContainer: {
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[3],
     backgroundColor: 'rgba(255,255,255,0.5)',
     borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
+    padding: theme.spacing[2],
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing[3],
-    paddingBottom: theme.spacing[3],
+    marginBottom: theme.spacing[2],
+    paddingBottom: theme.spacing[2],
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
+    borderBottomColor: 'rgba(16,34,23,0.10)',
   },
   infoLabel: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
+    // Card is a fixed white "receipt" — force dark text regardless of app theme.
+    color: '#3D5A4A',
     fontWeight: '500',
     minWidth: 80,
   },
   infoValue: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
+    color: '#102217',
     fontWeight: '600',
     textAlign: 'right',
   },
@@ -348,7 +350,7 @@ const styles = StyleSheet.create({
   },
   invoiceText: {
     fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
+    color: '#3D5A4A',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     textAlign: 'right',
     flex: 1,
@@ -363,7 +365,7 @@ const styles = StyleSheet.create({
   actionsContainer: {
     flexDirection: 'row',
     gap: theme.spacing[3],
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[2],
   },
   actionButton: {
     flex: 1,
@@ -386,7 +388,7 @@ const styles = StyleSheet.create({
   },
   hint: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
+    color: '#475C51',
     textAlign: 'center',
     fontStyle: 'italic',
     lineHeight: 20,
