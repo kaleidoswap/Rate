@@ -77,8 +77,8 @@ KaleidoSwap is a React Native mobile application that provides a complete self-c
 ### Install dependencies
 
 ```bash
-git clone https://github.com/kaleidoswap/rate.git
-cd rate
+git clone https://github.com/kaleidoswap/Rate.git
+cd Rate
 pnpm install        # also runs setup:native → fetches the lwk-rn native artifacts
 ```
 
@@ -144,9 +144,23 @@ Once the app is installed on a simulator/device/emulator, you only need Metro fo
 npx expo start --dev-client    # then press `i` for iOS or `a` for Android
 ```
 
-### Development Setup
+### AI assistant & voice (on-device vs delegated)
 
-For detailed development setup including RGB node compilation and Bitcoin node configuration, see [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md).
+The AI assistant and voice mode (speech-to-text + text-to-speech) run **on-device
+via the QVAC SDK, which requires a physical device** — they are unavailable on an
+iOS simulator / Android emulator. The rest of the wallet works fine on a simulator.
+
+To develop the AI / voice features without a physical device, **delegate inference
+to a desktop KaleidoMind provider**:
+
+1. Run the KaleidoMind provider on a desktop (it loads the LLM and, for voice, a
+   Whisper STT + Supertonic TTS model, then advertises over P2P).
+2. Pair this app to it from the QVAC / KaleidoMind settings (**Pair Desktop** —
+   scan the provider's public-key QR).
+
+Chat, transcription, and speech synthesis are then served over P2P by the desktop,
+so they work even on a simulator. Toggle delegation off to fall back to on-device
+inference (physical device only).
 
 ### Demo Mode
 
@@ -250,10 +264,14 @@ npx expo run:android      # Android emulator/device
 npx expo start --dev-client
 ```
 
-#### Production
+#### Production (EAS)
+
+Build profiles live in `eas.json` (`development`, `preview`, `production`):
+
 ```bash
-eas build --platform ios
-eas build --platform android
+eas build --profile development --platform ios      # dev client, internal distribution
+eas build --profile preview     --platform android  # internal test build
+eas build --profile production   --platform ios      # store build (auto-increments version)
 ```
 
 ### Troubleshooting
@@ -280,7 +298,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- **Documentation**: See [TECHNICAL_SETUP.md](TECHNICAL_SETUP.md) for detailed setup
+- **Documentation**: See the [Quick Start](#quick-start) above for setup and troubleshooting
 - **Issues**: Report bugs via GitHub Issues
 
 ## Roadmap
