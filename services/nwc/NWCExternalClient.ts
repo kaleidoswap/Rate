@@ -33,7 +33,16 @@ export type NwcMethod =
   | 'pay_invoice'
   | 'pay_keysend'
   | 'lookup_invoice'
-  | 'list_transactions';
+  | 'list_transactions'
+  // KaleidoSwap RLN extensions (raw rgb-lightning-node responses)
+  | 'rln_node_info'
+  | 'rln_list_assets'
+  | 'rln_asset_balance'
+  | 'rln_rgb_invoice'
+  | 'rln_decode_rgb_invoice'
+  | 'rln_send_asset'
+  | 'rln_list_channels'
+  | 'rln_get_address';
 
 export interface NwcConnectionInfo {
   walletPubkey: string;
