@@ -31,6 +31,31 @@ import NostrProfileManager from '../components/NostrProfileManager';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { theme } from '../theme';
 import { PairingService, type DesktopPairing } from '../services/PairingService';
+import DatabaseService, { type NetworkType } from '../services/DatabaseService';
+
+// Networks each protocol supports (mirrors the adapter network unions).
+const PROTO_SUPPORTED_NETWORKS: Record<'RGB' | 'SPARK' | 'ARKADE', string[]> = {
+  SPARK: ['regtest', 'testnet', 'signet', 'mainnet'],
+  ARKADE: ['signet', 'mainnet'],
+  RGB: ['regtest', 'testnet', 'signet'],
+};
+const PROTO_TO_NETWORK_TYPE: Record<'RGB' | 'SPARK' | 'ARKADE', NetworkType> = {
+  RGB: 'rln',
+  SPARK: 'spark',
+  ARKADE: 'arkade',
+};
+const PROTO_DEFAULT_NETWORK: Record<string, string> = {
+  spark: 'regtest',
+  arkade: 'signet',
+  rln: 'regtest',
+  liquid: 'testnet',
+};
+const NETWORK_LABEL: Record<string, string> = {
+  mainnet: 'Mainnet',
+  testnet: 'Testnet',
+  regtest: 'Regtest',
+  signet: 'Mutinynet',
+};
 
 interface Props {
   navigation: any;
@@ -44,6 +69,68 @@ export default function SettingsScreen({ navigation }: Props) {
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [tempNodeUrl, setTempNodeUrl] = useState(settings.remoteNodeUrl);
   const [showNostrSection, setShowNostrSection] = useState(false);
+
+  // Per-protocol network (read from / written to the wallet's DB config).
+  const activeWallet = useSelector((state: RootState) => state.wallet?.activeWallet);
+  const [protoNetworks, setProtoNetworks] = useState<Record<string, string>>({});
+  useEffect(() => {
+    (async () => {
+      const id = (activeWallet as any)?.id;
+      if (!id) return;
+      try {
+        const nets = await DatabaseService.getInstance().getWalletNetworks(id);
+        const map: Record<string, string> = {};
+        for (const n of nets) {
+          let net = PROTO_DEFAULT_NETWORK[n.type] ?? 'regtest';
+          try {
+            if (n.config) net = JSON.parse(n.config).network || net;
+          } catch { /* keep default */ }
+          map[n.type] = net;
+        }
+        setProtoNetworks(map);
+      } catch { /* ignore */ }
+    })();
+  }, [activeWallet]);
+
+  const changeProtocolNetwork = (proto: 'RGB' | 'SPARK' | 'ARKADE', network: string) => {
+    const id = (activeWallet as any)?.id;
+    const type = PROTO_TO_NETWORK_TYPE[proto];
+    if (!id) return;
+    (async () => {
+      try {
+        const db = DatabaseService.getInstance();
+        const nets = await db.getWalletNetworks(id);
+        const existing = nets.find((n) => n.type === type);
+        const cfg = existing?.config ? JSON.parse(existing.config) : {};
+        cfg.network = network;
+        await db.updateNetworkConfig(id, type, { config: JSON.stringify(cfg) });
+        setProtoNetworks((prev) => ({ ...prev, [type]: network }));
+        Alert.alert(
+          'Network updated',
+          `${proto} will connect on ${NETWORK_LABEL[network] ?? network} the next time you open the app.`,
+        );
+      } catch (e: any) {
+        Alert.alert('Could not update network', e?.message ?? 'Please try again.');
+      }
+    })();
+  };
+
+  const pickProtocolNetwork = (proto: 'RGB' | 'SPARK' | 'ARKADE') => {
+    const type = PROTO_TO_NETWORK_TYPE[proto];
+    const current = protoNetworks[type] ?? PROTO_DEFAULT_NETWORK[type];
+    const options = PROTO_SUPPORTED_NETWORKS[proto];
+    Alert.alert(
+      `${proto} network`,
+      `Currently ${NETWORK_LABEL[current] ?? current}. Choose a network:`,
+      [
+        ...options.map((n) => ({
+          text: `${NETWORK_LABEL[n] ?? n}${n === current ? '  ✓' : ''}`,
+          onPress: () => n !== current && changeProtocolNetwork(proto, n),
+        })),
+        { text: 'Cancel', style: 'cancel' as const },
+      ],
+    );
+  };
 
   // KaleidoMind — active desktop pairing (refreshed on focus)
   const [activePairing, setActivePairing] = useState<DesktopPairing | null>(null);
@@ -511,12 +598,26 @@ export default function SettingsScreen({ navigation }: Props) {
                     <Text style={{ fontSize: 15, fontWeight: '600', color: theme.colors.text.primary }}>{labels[proto]}</Text>
                     <Text style={{ fontSize: 12, color: theme.colors.text.tertiary, marginTop: 2 }} numberOfLines={1}>{descs[proto]}</Text>
                   </View>
-                  <Text style={{
-                    fontSize: 12, fontWeight: '600',
-                    color: connected ? colors[proto] : theme.colors.gray[400],
-                  }}>
-                    {connected ? 'Connected' : 'Offline'}
-                  </Text>
+                  <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                    <TouchableOpacity
+                      onPress={() => pickProtocolNetwork(proto)}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 4,
+                        paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14,
+                        borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.medium,
+                        backgroundColor: theme.colors.surface.secondary,
+                      }}
+                      accessibilityLabel={`Change ${proto} network`}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.secondary }}>
+                        {NETWORK_LABEL[protoNetworks[PROTO_TO_NETWORK_TYPE[proto]] ?? PROTO_DEFAULT_NETWORK[PROTO_TO_NETWORK_TYPE[proto]]] ?? '—'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={12} color={theme.colors.text.tertiary} />
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.gray[400] }}>
+                      {connected ? 'Connected' : 'Offline'}
+                    </Text>
+                  </View>
                 </View>
               );
             })}
