@@ -39,10 +39,12 @@ import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
   getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair,
-  normalizeMakerPairs, buildFlashnetPairs,
-  QUOTE_DEBOUNCE_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
+  normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
+  QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
 import { theme } from '../theme';
+import { feedback } from '../utils/feedback';
+import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon } from '../components';
 
 interface Props {
@@ -73,6 +75,7 @@ export default function SwapScreen({ navigation }: Props) {
   const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
+  const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
 
   // Load trading pairs and assets on mount
   useEffect(() => {
@@ -107,6 +110,32 @@ export default function SwapScreen({ navigation }: Props) {
 
     return () => clearTimeout(timer);
   }, [swapState.fromAmount, swapState.fromAsset, swapState.toAsset]);
+
+  // Always-fresh handle to getQuote for use inside intervals (avoids stale closures).
+  const getQuoteRef = React.useRef<() => void>(() => {});
+
+  // Live quote expiry countdown + auto-refresh (mirrors the extension's behaviour:
+  // quotes are short-lived, so we tick a countdown and refresh as it ages out).
+  useEffect(() => {
+    const q = swapState.currentQuote;
+    if (!q || swapState.isExecuting || showConfirmModal) {
+      setQuoteSecsLeft(null);
+      return;
+    }
+    let lastRefresh = Date.now();
+    const tick = () => {
+      const left = Math.max(0, Math.round((q.expiry_timestamp - Date.now()) / 1000));
+      setQuoteSecsLeft(left);
+      const aged = Date.now() - lastRefresh >= QUOTE_REFRESH_MS;
+      if (left <= 0 || aged) {
+        lastRefresh = Date.now();
+        getQuoteRef.current?.();
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [swapState.currentQuote, swapState.isExecuting, showConfirmModal]);
 
   const loadTradingPairs = async () => {
     setPairsLoading(true);
@@ -197,25 +226,46 @@ export default function SwapScreen({ navigation }: Props) {
       }
 
       if (isFlashnetPair(pair)) {
-        // Flashnet: simulate quote from pool reserves (client-side)
+        // Flashnet: simulate the swap against the pool to get a real output amount.
         try {
           const client = flashnetClientManager.getClient();
           const poolId = pair.poolId || flashnetClientManager.getPoolId();
-          // Use simulateSwap if available, otherwise build a simple estimate
-          const fromAssetId = getAssetId(pair.base.ticker === fromTicker ? pair.base : pair.quote);
-          const toAssetId = getAssetId(pair.base.ticker === toTicker ? pair.base : pair.quote);
-          const fromPrecision = (pair.base.ticker === fromTicker ? pair.base : pair.quote).precision;
+          const fromAssetSide = pair.base.ticker === fromTicker ? pair.base : pair.quote;
+          const toAssetSide = pair.base.ticker === toTicker ? pair.base : pair.quote;
+          const fromAssetId = getAssetId(fromAssetSide);
+          const toAssetId = getAssetId(toAssetSide);
+          const fromPrecision = fromAssetSide.precision;
+          const toPrecision = toAssetSide.precision;
           const rawAmount = isBtcTicker(fromTicker) ? Math.round(fromAmount * 1e8) : Math.round(fromAmount * Math.pow(10, fromPrecision));
+
+          let toAmount = 0;
+          let feeAmount = 0;
+          let rate = 0;
+          try {
+            const sim: any = await client.simulateSwap({
+              poolId,
+              assetInAddress: fromAssetId,
+              assetOutAddress: toAssetId,
+              amountIn: String(rawAmount),
+              maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
+            });
+            const rawOut = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
+            toAmount = isBtcTicker(toTicker) ? rawOut / 1e8 : rawOut / Math.pow(10, toPrecision);
+            feeAmount = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0) / (isBtcTicker(fromTicker) ? 1e8 : Math.pow(10, fromPrecision));
+            rate = fromAmount > 0 ? toAmount / fromAmount : Number(sim?.executionPrice ?? 0);
+          } catch (simErr) {
+            console.warn('[SwapScreen] Flashnet simulate failed, showing estimate:', simErr);
+          }
 
           const quote: SwapQuote = {
             rfq_id: `flashnet-${Date.now()}`,
             from_asset: fromTicker,
             to_asset: toTicker,
             from_amount: fromAmount,
-            to_amount: 0, // Will be filled by execution
-            fee_amount: 0,
-            exchange_rate: 0,
-            expiry_timestamp: Date.now() + 60000,
+            to_amount: toAmount,
+            fee_amount: feeAmount,
+            exchange_rate: rate,
+            expiry_timestamp: Date.now() + 30000,
             maker_pubkey: poolId || '',
           };
 
@@ -280,6 +330,9 @@ export default function SwapScreen({ navigation }: Props) {
       dispatch(setQuoteLoading(false));
     }
   };
+
+  // Keep the interval's handle pointing at the latest getQuote.
+  getQuoteRef.current = getQuote;
 
   const executeSwap = async () => {
     if (!swapState.currentQuote) return;
@@ -350,6 +403,12 @@ export default function SwapScreen({ navigation }: Props) {
 
         const swapstring = initResult?.swapstring || initResult?.swap_string || '';
         const paymentHash = initResult?.payment_hash || '';
+
+        // Safety check: verify the maker's swapstring encodes the exact terms we
+        // agreed to before whitelisting it on our node. Abort on any mismatch.
+        if (!validateSwapString(swapstring, rawFromAmount, fromAssetId, rawToAmount, toAssetId, paymentHash)) {
+          throw new Error('Swap verification failed — the returned terms did not match your quote. Aborted for your safety.');
+        }
 
         const execution: SwapExecution = {
           rfq_id: quote.rfq_id,
@@ -426,6 +485,8 @@ export default function SwapScreen({ navigation }: Props) {
         const swapStatus = status?.status || 'pending';
 
         if (swapStatus === 'confirmed' || swapStatus === 'completed' || swapStatus === 'failed') {
+          if (swapStatus === 'failed') feedback.error();
+          else feedback.swap();
           dispatch(updateExecutionStatus({
             rfq_id: rfqId,
             status: swapStatus === 'failed' ? 'failed' : 'completed',
@@ -456,6 +517,10 @@ export default function SwapScreen({ navigation }: Props) {
   const getAssetIcon = (ticker: string) => {
     return <AssetIcon ticker={ticker} size={28} showBadge={false} />;
   };
+
+  // Look up an available asset by ticker (swap state stores tickers, not ids).
+  const assetByTicker = (ticker: string) =>
+    availableAssets.find(a => a.ticker === ticker);
 
 
 
@@ -506,7 +571,7 @@ export default function SwapScreen({ navigation }: Props) {
             <TouchableOpacity
               style={styles.maxButton}
               onPress={() => {
-                const asset = availableAssets.find(a => a.asset_id === swapState.fromAsset);
+                const asset = assetByTicker(swapState.fromAsset);
                 if (asset) {
                   dispatch(setFromAmount(asset.balance.toString()));
                 }
@@ -514,7 +579,7 @@ export default function SwapScreen({ navigation }: Props) {
             >
               <Text style={styles.maxButtonText}>MAX</Text>
               <Text style={styles.balanceText}>
-                {availableAssets.find(a => a.asset_id === swapState.fromAsset)?.balance.toFixed(4) || '0.00'}
+                {assetByTicker(swapState.fromAsset)?.balance.toFixed(4) || '0.00'}
               </Text>
             </TouchableOpacity>
           )}
@@ -535,9 +600,9 @@ export default function SwapScreen({ navigation }: Props) {
           >
             {swapState.fromAsset ? (
               <>
-                {getAssetIcon(availableAssets.find(a => a.asset_id === swapState.fromAsset)?.ticker || '')}
+                {getAssetIcon(swapState.fromAsset)}
                 <Text style={styles.assetSelectorTokenText}>
-                  {availableAssets.find(a => a.asset_id === swapState.fromAsset)?.ticker}
+                  {swapState.fromAsset}
                 </Text>
               </>
             ) : (
@@ -582,9 +647,9 @@ export default function SwapScreen({ navigation }: Props) {
           >
             {swapState.toAsset ? (
               <>
-                {getAssetIcon(availableAssets.find(a => a.asset_id === swapState.toAsset)?.ticker || '')}
+                {getAssetIcon(swapState.toAsset)}
                 <Text style={styles.assetSelectorTokenText}>
-                  {availableAssets.find(a => a.asset_id === swapState.toAsset)?.ticker}
+                  {swapState.toAsset}
                 </Text>
               </>
             ) : (
@@ -601,15 +666,30 @@ export default function SwapScreen({ navigation }: Props) {
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Rate</Text>
             <Text style={styles.quoteInfoValue}>
-              1 {availableAssets.find(a => a.asset_id === swapState.fromAsset)?.ticker} ≈ {swapState.currentQuote.exchange_rate.toFixed(2)} {availableAssets.find(a => a.asset_id === swapState.toAsset)?.ticker}
+              1 {swapState.fromAsset} ≈ {swapState.currentQuote.exchange_rate.toFixed(2)} {swapState.toAsset}
             </Text>
           </View>
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Network Fee</Text>
             <Text style={styles.quoteInfoValue}>
-              {swapState.currentQuote.fee_amount} {availableAssets.find(a => a.asset_id === swapState.fromAsset)?.ticker}
+              {swapState.currentQuote.fee_amount} {swapState.fromAsset}
             </Text>
           </View>
+          {quoteSecsLeft != null && (
+            <View style={styles.quoteInfoRow}>
+              <Text style={styles.quoteInfoLabel}>Quote expires</Text>
+              <View style={styles.expiryPill}>
+                <Ionicons
+                  name="time-outline"
+                  size={13}
+                  color={quoteSecsLeft <= 5 ? theme.colors.warning[500] : theme.colors.primary[500]}
+                />
+                <Text style={[styles.expiryText, quoteSecsLeft <= 5 && { color: theme.colors.warning[500] }]}>
+                  {quoteSecsLeft > 0 ? `in ${quoteSecsLeft}s` : 'refreshing…'}
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
       )}
 
@@ -648,10 +728,13 @@ export default function SwapScreen({ navigation }: Props) {
                 key={asset.asset_id}
                 style={styles.assetPickerItem}
                 onPress={() => {
+                  // Swap state identifies assets by TICKER (matches findPair /
+                  // the quote logic). Storing asset_id here previously broke both
+                  // the chip label and pair lookup.
                   if (showAssetPicker === 'from') {
-                    dispatch(setFromAsset(asset.asset_id));
+                    dispatch(setFromAsset(asset.ticker));
                   } else {
-                    dispatch(setToAsset(asset.asset_id));
+                    dispatch(setToAsset(asset.ticker));
                   }
                   setShowAssetPicker(null);
                 }}
@@ -672,63 +755,112 @@ export default function SwapScreen({ navigation }: Props) {
     );
   };
 
+  const renderProgressSteps = () => {
+    const pair = findPair(filteredPairs, swapState.currentQuote!.from_asset, swapState.currentQuote!.to_asset);
+    const flash = pair ? isFlashnetPair(pair) : false;
+    const steps = flash
+      ? [{ key: 'execute', label: 'Executing swap' }, { key: 'done', label: 'Completed' }]
+      : [
+          { key: 'init', label: 'Requesting swap' },
+          { key: 'taker', label: 'Preparing channels' },
+          { key: 'execute', label: 'Atomic swap' },
+          { key: 'done', label: 'Completed' },
+        ];
+    const order = ['idle', 'init', 'taker', 'execute', 'done'];
+    const currentIdx = order.indexOf(swapProgress);
+    return (
+      <View style={styles.progressSteps}>
+        {steps.map((s, i) => {
+          const stepIdx = order.indexOf(s.key);
+          const done = currentIdx > stepIdx;
+          const active = swapProgress === s.key;
+          return (
+            <View key={s.key} style={styles.progressStepRow}>
+              <View style={[
+                styles.progressDot,
+                done && styles.progressDotDone,
+                active && styles.progressDotActive,
+              ]}>
+                {done ? (
+                  <Ionicons name="checkmark" size={14} color={theme.colors.text.inverse} />
+                ) : active ? (
+                  <ActivityIndicator size="small" color={theme.colors.text.inverse} />
+                ) : (
+                  <Text style={styles.progressDotNum}>{i + 1}</Text>
+                )}
+              </View>
+              <Text style={[styles.progressStepLabel, (done || active) && { color: theme.colors.text.primary }]}>
+                {s.label}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
   const renderConfirmModal = () => {
     if (!showConfirmModal || !swapState.currentQuote) return null;
 
-    const fromAsset = availableAssets.find(a => a.asset_id === swapState.currentQuote!.from_asset);
-    const toAsset = availableAssets.find(a => a.asset_id === swapState.currentQuote!.to_asset);
+    // currentQuote stores tickers (see from_asset: fromTicker in loadQuote).
+    const fromTicker = swapState.currentQuote.from_asset;
+    const toTicker = swapState.currentQuote.to_asset;
 
     return (
       <View style={styles.modalOverlay}>
         <View style={styles.confirmModal}>
           <Text style={styles.confirmTitle}>Confirm Swap</Text>
 
+          {swapState.isExecuting ? (
+            renderProgressSteps()
+          ) : (
           <View style={styles.confirmDetails}>
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>From:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.from_amount} {fromAsset?.ticker}
+                {swapState.currentQuote.from_amount} {fromTicker}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>To:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.to_amount} {toAsset?.ticker}
+                {swapState.currentQuote.to_amount} {toTicker}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Fee:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.fee_amount} {fromAsset?.ticker}
+                {swapState.currentQuote.fee_amount} {fromTicker}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Rate:</Text>
               <Text style={styles.confirmValue}>
-                1 {fromAsset?.ticker} = {swapState.currentQuote.exchange_rate.toFixed(8)} {toAsset?.ticker}
+                1 {fromTicker} = {swapState.currentQuote.exchange_rate.toFixed(8)} {toTicker}
               </Text>
             </View>
           </View>
+          )}
 
-          <View style={styles.confirmActions}>
-            <Button
-              title="Cancel"
-              variant="secondary"
-              onPress={() => setShowConfirmModal(false)}
-              style={styles.confirmActionButton}
-            />
-            <Button
-              title={swapState.isExecuting ? 'Executing...' : 'Confirm Swap'}
-              variant="primary"
-              onPress={executeSwap}
-              loading={swapState.isExecuting}
-              disabled={swapState.isExecuting}
-              style={styles.confirmActionButton}
-            />
-          </View>
+          {!swapState.isExecuting && (
+            <View style={styles.confirmActions}>
+              <Button
+                title="Cancel"
+                variant="secondary"
+                onPress={() => setShowConfirmModal(false)}
+                style={styles.confirmActionButton}
+              />
+              <Button
+                title="Confirm Swap"
+                variant="primary"
+                onPress={executeSwap}
+                style={styles.confirmActionButton}
+              />
+            </View>
+          )}
         </View>
       </View>
     );
@@ -743,16 +875,19 @@ export default function SwapScreen({ navigation }: Props) {
         <View style={styles.statusContent}>
           <View style={styles.statusRow}>
             <Text style={styles.statusLabel}>Status:</Text>
-            <Text style={[styles.statusValue, {
-              color: swapState.currentExecution.status === 'completed'
-                ? theme.colors.success[500]
-                : swapState.currentExecution.status === 'failed'
-                  ? theme.colors.error[500]
-                  : theme.colors.warning[500]
-            }]}>
-              {swapState.currentExecution.status.toUpperCase()}
+            <Text style={[styles.statusValue, { color: swapStatusVisual(swapState.currentExecution.status).color }]}>
+              {swapStatusVisual(swapState.currentExecution.status).label}
             </Text>
           </View>
+
+          {swapState.currentExecution.status === 'failed' && !!swapState.currentExecution.error_message && (
+            <View style={styles.statusRow}>
+              <Text style={styles.statusLabel}>Reason:</Text>
+              <Text style={[styles.statusValue, { color: theme.colors.error[500], flexShrink: 1, textAlign: 'right' }]}>
+                {swapState.currentExecution.error_message}
+              </Text>
+            </View>
+          )}
 
           {swapState.currentExecution.txid && (
             <View style={styles.statusRow}>
@@ -1193,5 +1328,61 @@ const styles = StyleSheet.create({
 
   confirmActionButton: {
     flex: 1,
+  },
+
+  expiryPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  expiryText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.primary[500],
+  },
+
+  progressSteps: {
+    gap: theme.spacing[4],
+    marginVertical: theme.spacing[5],
+  },
+
+  progressStepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+  },
+
+  progressDot: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: theme.colors.surface.tertiary,
+    borderWidth: 1,
+    borderColor: theme.colors.border.medium,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  progressDotActive: {
+    backgroundColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[500],
+  },
+
+  progressDotDone: {
+    backgroundColor: theme.colors.success[500],
+    borderColor: theme.colors.success[500],
+  },
+
+  progressDotNum: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '700',
+    color: theme.colors.text.tertiary,
+  },
+
+  progressStepLabel: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '500',
+    color: theme.colors.text.tertiary,
   },
 }); 

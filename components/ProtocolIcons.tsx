@@ -2,7 +2,7 @@
  * Protocol SVG icons — exact SVGs from rate-extension.
  */
 import React from 'react';
-import Svg, { Path, Rect, Polygon, Circle } from 'react-native-svg';
+import Svg, { Path, Rect, Polygon, Circle, Text as SvgText } from 'react-native-svg';
 
 interface IconProps {
   size?: number;
@@ -72,6 +72,25 @@ export const OnchainIcon: React.FC<IconProps> = ({ size = 24, color = '#F7931A' 
   <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
     <Path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     <Path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </Svg>
+);
+
+/** USD — green coin with a white dollar sign (matches the brand USDt mark) */
+export const UsdCoinIcon: React.FC<IconProps> = ({ size = 24, color = '#16A974' }) => (
+  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+    {/* darker rim for a subtle coin depth */}
+    <Circle cx="12" cy="12" r="11" fill={color} opacity={0.85} />
+    <Circle cx="12" cy="11.4" r="9.6" fill={color} />
+    <SvgText
+      x="12"
+      y="16.6"
+      fill="#FFFFFF"
+      fontSize="15"
+      fontWeight="900"
+      textAnchor="middle"
+    >
+      $
+    </SvgText>
   </Svg>
 );
 

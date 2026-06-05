@@ -364,11 +364,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   const stopListening = () => voiceInputRef.current?.stopListening();
 
-  // ---- Shared feedback helpers (non-blocking toasts) ----
-  const copyToClipboard = useCallback((text: string, label: string = 'Text') => {
+  // ---- Shared feedback helpers ----
+  // Copy actions give a haptic tick instead of a top toast (the toast overlapped
+  // the status bar on this screen). The cards have their own inline copy cues.
+  const copyToClipboard = useCallback((text: string, _label: string = 'Text') => {
     if (!text) return;
     Clipboard.setString(text);
-    toast().success(`${label} copied to clipboard`);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   }, []);
 
   const openLink = useCallback((url: string) => {
@@ -379,7 +381,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
     if (!message.text?.trim()) return;
     Haptics.selectionAsync();
     Clipboard.setString(message.text);
-    toast().success('Message copied');
   }, []);
 
   // ---- Contacts ----
@@ -827,7 +828,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 </ScrollView>
               )}
 
-              <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+              <View style={styles.inputContainer}>
                 <BlurView intensity={80} tint={theme.dark ? 'dark' : 'light'} style={styles.inputGradient}>
                   {showActions && renderQuickActions()}
 
@@ -925,20 +926,21 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
                   {isListening && (
                     <Animated.View
+                      pointerEvents="box-none"
                       style={[
                         styles.recordingIndicator,
-                        { opacity: pulseAnim.interpolate({ inputRange: [1, 1.3], outputRange: [0.8, 1] }) },
+                        { opacity: pulseAnim.interpolate({ inputRange: [1, 1.3], outputRange: [0.85, 1] }) },
                       ]}
                     >
-                      <View style={styles.recordingInfo}>
+                      <View style={styles.recordingPill}>
                         <View style={styles.recordingDot} />
                         <Text style={styles.recordingText}>
                           Listening… {formatRecordingDuration(recordingDuration)}
                         </Text>
+                        <TouchableOpacity style={styles.stopRecordingButton} onPress={stopListening} hitSlop={8}>
+                          <Text style={styles.stopRecordingText}>Stop</Text>
+                        </TouchableOpacity>
                       </View>
-                      <TouchableOpacity style={styles.stopRecordingButton} onPress={stopListening}>
-                        <Text style={styles.stopRecordingText}>Tap to stop</Text>
-                      </TouchableOpacity>
                     </Animated.View>
                   )}
                 </BlurView>
@@ -978,6 +980,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
             recommendedModelId={qvac.recommendedModelId}
             aiMode={aiMode}
             onSetAiMode={(mode) => dispatch(setAiMode(mode))}
+            downloadedModelIds={qvac.downloadedModelIds}
+            onDeleteModel={(id) => qvac.deleteModel(id)}
+            sttCatalog={qvac.sttCatalog}
+            ttsOptions={qvac.ttsOptions}
+            onSetSttModel={(id) => qvac.setSttModel(id)}
+            onSetTtsEngine={(engine) => qvac.setTtsEngine(engine)}
           />
         </LinearGradient>
       </View>
@@ -1039,9 +1047,8 @@ const makeStyles = (theme: Theme) =>
     },
     inputGradient: {
       padding: theme.spacing[3],
-      paddingBottom: Platform.OS === 'ios' ? theme.spacing[5] : theme.spacing[3],
     },
-    inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: theme.spacing[2] },
+    inputRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
     plusButton: {
       width: 40,
       height: 40,
@@ -1095,37 +1102,42 @@ const makeStyles = (theme: Theme) =>
     disabledButton: { opacity: 0.5 },
 
     // Recording
+    // Floats ABOVE the input bar (absolute) so toggling voice never reflows the
+    // input row / buttons. A single compact pill instead of a stacked block.
     recordingIndicator: {
-      marginTop: theme.spacing[3],
-      paddingVertical: theme.spacing[2],
-      paddingHorizontal: theme.spacing[3],
-      backgroundColor: theme.colors.error[50] ?? 'rgba(255,107,107,0.1)',
-      borderRadius: theme.borderRadius.lg,
-      borderWidth: 1,
-      borderColor: theme.colors.error[100] ?? 'rgba(255,107,107,0.2)',
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: -2,
+      alignItems: 'center',
+      transform: [{ translateY: -44 }],
     },
-    recordingInfo: {
+    recordingPill: {
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: theme.spacing[1],
+      gap: theme.spacing[2],
+      paddingVertical: theme.spacing[2],
+      paddingHorizontal: theme.spacing[3],
+      backgroundColor: theme.colors.error[50] ?? 'rgba(255,107,107,0.12)',
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: theme.colors.error[100] ?? 'rgba(255,107,107,0.25)',
+      ...theme.shadows.sm,
     },
     recordingDot: {
       width: 6,
       height: 6,
       borderRadius: 3,
       backgroundColor: theme.colors.error[500],
-      marginRight: theme.spacing[2],
     },
     recordingText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.error[600], fontWeight: '600' },
     stopRecordingButton: {
-      alignSelf: 'center',
       paddingVertical: theme.spacing[1],
       paddingHorizontal: theme.spacing[2],
       backgroundColor: theme.colors.error[100] ?? 'rgba(255,107,107,0.2)',
       borderRadius: theme.borderRadius.md,
     },
-    stopRecordingText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.error[600], fontWeight: '600' },
+    stopRecordingText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.error[600], fontWeight: '700' },
 
     // Header buttons
     nostrIndicator: { padding: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12 },

@@ -2,7 +2,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState } from 'react-native';
 import QVACService, { QVACState, QVACConfig } from '../services/QVACService';
-import { QVAC_MODELS, type QVACModel } from '../services/qvacModels';
+import {
+  QVAC_MODELS,
+  QVAC_STT_MODELS,
+  QVAC_TTS_OPTIONS,
+  type QVACModel,
+  type SttModel,
+  type TtsOption,
+  type TtsEngine,
+} from '../services/qvacModels';
 
 export interface UseQVACResult extends QVACState {
   service: QVACService;
@@ -32,6 +40,18 @@ export interface UseQVACResult extends QVACState {
   deviceMemGb?: number;
   /** Model id recommended for this device's RAM. */
   recommendedModelId?: string;
+  /** Available speech-to-text (Whisper) models for the voice mode. */
+  sttCatalog: SttModel[];
+  /** Available text-to-speech engines for the voice mode. */
+  ttsOptions: TtsOption[];
+  /** Switch the speech-to-text model. */
+  setSttModel: (id: string) => Promise<void>;
+  /** Switch the text-to-speech engine. */
+  setTtsEngine: (engine: TtsEngine) => Promise<void>;
+  /** Ids of models whose weights are fully downloaded on this device. */
+  downloadedModelIds: string[];
+  /** Delete a downloaded model's weights from disk. */
+  deleteModel: (id: string) => Promise<void>;
 }
 
 /**
@@ -57,10 +77,37 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     return () => { active = false; };
   }, [service]);
 
+  // Which model weights are present on disk (for the delete UI). Refreshed
+  // whenever a download completes or the settings sheet asks for it.
+  const [downloadedModelIds, setDownloadedModelIds] = useState<string[]>(() =>
+    service.getDownloadedModelIds()
+  );
+  const refreshDownloaded = useCallback(() => {
+    setDownloadedModelIds(service.getDownloadedModelIds());
+  }, [service]);
+
   const setModel = useCallback(async (id: string) => {
     await service.setModelId(id);
     setConfig(service.getConfig());
+    refreshDownloaded();
+  }, [service, refreshDownloaded]);
+
+  const setSttModel = useCallback(async (id: string) => {
+    await service.setSttModel(id);
+    setConfig(service.getConfig());
+    refreshDownloaded();
+  }, [service, refreshDownloaded]);
+
+  const setTtsEngine = useCallback(async (engine: TtsEngine) => {
+    await service.setTtsEngine(engine);
+    setConfig(service.getConfig());
   }, [service]);
+
+  const deleteModel = useCallback(async (id: string) => {
+    await service.deleteLocalModel(id);
+    setConfig(service.getConfig());
+    refreshDownloaded();
+  }, [service, refreshDownloaded]);
 
   const setDelegate = useCallback(async (opts: { enabled: boolean; providerPublicKey: string }) => {
     await service.setDelegate(opts);
@@ -88,10 +135,12 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   }, [service]);
 
   // Keep the local config in sync after the service mutates it itself — e.g.
-  // an auto-fallback to a loadable model during initializeLLM().
+  // an auto-fallback to a loadable model during initializeLLM(). Also refresh
+  // the on-disk model list when a model becomes ready (download finished).
   useEffect(() => {
     setConfig(service.getConfig());
-  }, [service, state.llmStatus]);
+    setDownloadedModelIds(service.getDownloadedModelIds());
+  }, [service, state.llmStatus, state.whisperStatus]);
 
   const initialize = useMemo(
     () => async () => {
@@ -147,6 +196,12 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     reloadConfig,
     deviceMemGb,
     recommendedModelId,
+    sttCatalog: QVAC_STT_MODELS,
+    ttsOptions: QVAC_TTS_OPTIONS,
+    setSttModel,
+    setTtsEngine,
+    downloadedModelIds,
+    deleteModel,
   };
 }
 

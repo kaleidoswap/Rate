@@ -12,17 +12,27 @@ import type { RootState } from '../index';
 //   'delegate' run it on a paired desktop; the phone relays
 export type AiMode = 'off' | 'local' | 'delegate';
 
+// Primary denomination the balance/amounts are shown in. Cycled by tapping the
+// balance (sats → BTC → fiat → sats). Distinct from `bitcoinUnit`, which only
+// covers the BTC/sats sub-choice used for amount *entry* in send/receive.
+export type DisplayDenomination = 'sats' | 'BTC' | 'fiat';
+const DENOMINATION_CYCLE: DisplayDenomination[] = ['sats', 'BTC', 'fiat'];
+
 interface SettingsState {
   nodeType: 'remote' | 'local';
   remoteNodeUrl: string;
   nodePort: number;
   bitcoinUnit: 'BTC' | 'sats';
+  // Primary denomination for displaying balances/amounts (tap-to-cycle).
+  displayDenomination: DisplayDenomination;
   theme: 'light' | 'dark' | 'system';
   language: string;
   notifications: boolean;
   transactionNotifications: boolean;
   priceAlerts: boolean;
   hideBalances: boolean;
+  // UI sound effects (paired with haptics for accessible, multi-modal feedback).
+  soundEnabled: boolean;
   biometricEnabled: boolean;
   pinEnabled: boolean;
   autoLockTimeout: number;
@@ -44,12 +54,14 @@ const initialState: SettingsState = {
   remoteNodeUrl: '', // thunderstack url
   nodePort: 3000,
   bitcoinUnit: 'sats',
+  displayDenomination: 'sats',
   theme: 'dark',
   language: 'en',
   notifications: true,
   transactionNotifications: true,
   priceAlerts: false,
   hideBalances: false,
+  soundEnabled: true,
   biometricEnabled: false,
   pinEnabled: false,
   autoLockTimeout: 5,
@@ -76,6 +88,15 @@ const settingsSlice = createSlice({
     setBitcoinUnit: (state, action: PayloadAction<'BTC' | 'sats'>) => {
       state.bitcoinUnit = action.payload;
     },
+    setDisplayDenomination: (state, action: PayloadAction<DisplayDenomination>) => {
+      state.displayDenomination = action.payload;
+    },
+    // Advance the display denomination one step: sats → BTC → fiat → sats.
+    cycleDisplayDenomination: (state) => {
+      const current = state.displayDenomination ?? 'sats';
+      const idx = DENOMINATION_CYCLE.indexOf(current);
+      state.displayDenomination = DENOMINATION_CYCLE[(idx + 1) % DENOMINATION_CYCLE.length];
+    },
     setTheme: (state, action: PayloadAction<'light' | 'dark' | 'system'>) => {
       state.theme = action.payload;
     },
@@ -93,6 +114,9 @@ const settingsSlice = createSlice({
     },
     setHideBalances: (state, action: PayloadAction<boolean>) => {
       state.hideBalances = action.payload;
+    },
+    setSoundEnabled: (state, action: PayloadAction<boolean>) => {
+      state.soundEnabled = action.payload;
     },
     setBiometricEnabled: (state, action: PayloadAction<boolean>) => {
       state.biometricEnabled = action.payload;
@@ -136,12 +160,15 @@ export const {
   setNodeType,
   setRemoteNodeUrl,
   setBitcoinUnit,
+  setDisplayDenomination,
+  cycleDisplayDenomination,
   setTheme,
   setLanguage,
   setNotifications,
   setTransactionNotifications,
   setPriceAlerts,
   setHideBalances,
+  setSoundEnabled,
   setBiometricEnabled,
   setPinEnabled,
   setAutoLockTimeout,
@@ -154,10 +181,19 @@ export const {
   clearApiConfigUpdateFlag
 } = settingsSlice.actions;
 
+// UI sound effects. Defaults true for state persisted before this field existed.
+export const selectSoundEnabled = (state: RootState): boolean =>
+  state.settings.soundEnabled ?? true;
+
 // Selector for the current disclosure level ('lite' | 'advanced').
 // Falls back to 'lite' for state persisted before this field existed.
 export const selectDisclosureLevel = (state: RootState): DisclosureLevel =>
   state.settings.disclosureLevel ?? 'lite';
+
+// Primary display denomination. Falls back to the existing bitcoinUnit (or
+// 'sats') for state persisted before this field existed.
+export const selectDisplayDenomination = (state: RootState): DisplayDenomination =>
+  state.settings.displayDenomination ?? state.settings.bitcoinUnit ?? 'sats';
 
 // KaleidoMind mode. Defaults 'off' so the QVAC worklet never auto-starts.
 export const selectAiMode = (state: RootState): AiMode =>

@@ -9,8 +9,33 @@ import NDK, {
   NDKKind,
 } from '@nostr-dev-kit/ndk';
 import { getPublicKey, nip19, utils } from 'nostr-tools';
+import { bech32 } from '@scure/base';
+import { HDKey } from '@scure/bip32';
+import { mnemonicToSeedSync } from '@scure/bip39';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NWCService from './NWCService';
+
+// NIP-06 derivation path for Nostr keys from a BIP39 mnemonic.
+// m/44'/1237'/<account>'/0/0 — 1237 is the registered Nostr coin type.
+const NOSTR_DERIVATION_PATH = (account = 0) => `m/44'/1237'/${account}'/0/0`;
+
+function decodeNpriv(npriv: string): Uint8Array {
+  const decoded = bech32.decodeToBytes(npriv.trim());
+  if (decoded.prefix !== 'npriv') {
+    throw new Error('Invalid npriv prefix');
+  }
+  if (decoded.bytes.length !== 32) {
+    throw new Error(`Invalid npriv payload length: ${decoded.bytes.length}`);
+  }
+  return decoded.bytes;
+}
+
+function normalizeNostrPrivateKeyInput(input: string): string {
+  return input
+    .trim()
+    .replace(/^nostr:/i, '')
+    .replace(/\s+/g, '');
+}
 
 export interface NostrProfile {
   name?: string;
@@ -120,17 +145,21 @@ class NostrService {
   importPrivateKey(nsecOrPrivateKey: string): { privateKey: string; publicKey: string; nsec: string; npub: string } | null {
     try {
       let privateKeyBytes: Uint8Array;
+      const input = normalizeNostrPrivateKeyInput(nsecOrPrivateKey);
+      const lowerInput = input.toLowerCase();
 
-      if (nsecOrPrivateKey.startsWith('nsec')) {
-        const { type, data } = nip19.decode(nsecOrPrivateKey);
+      if (lowerInput.startsWith('nsec')) {
+        const { type, data } = nip19.decode(input);
         if (type !== 'nsec') throw new Error('Invalid nsec format');
         privateKeyBytes = data as Uint8Array;
+      } else if (lowerInput.startsWith('npriv')) {
+        privateKeyBytes = decodeNpriv(input);
       } else {
         // Validate hex format
-        if (!/^[0-9a-f]{64}$/i.test(nsecOrPrivateKey)) {
+        if (!/^[0-9a-f]{64}$/i.test(input)) {
           throw new Error('Invalid private key format');
         }
-        privateKeyBytes = utils.hexToBytes(nsecOrPrivateKey.toLowerCase());
+        privateKeyBytes = utils.hexToBytes(input.toLowerCase());
       }
 
       const privateKey = utils.bytesToHex(privateKeyBytes);
@@ -141,6 +170,38 @@ class NostrService {
       return { privateKey, publicKey, nsec, npub };
     } catch (error) {
       console.error('NostrService: Failed to import private key:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Derive a Nostr key pair deterministically from a BIP39 wallet mnemonic
+   * following NIP-06 (path m/44'/1237'/<account>'/0/0). This lets the user's
+   * Nostr identity be backed up by the same seed as their wallet — matching
+   * the browser extension's behaviour.
+   */
+  deriveKeysFromMnemonic(
+    mnemonic: string,
+    account = 0,
+  ): { privateKey: string; publicKey: string; nsec: string; npub: string } | null {
+    try {
+      const trimmed = (mnemonic || '').trim();
+      if (!trimmed) throw new Error('Mnemonic is required');
+
+      const seed = mnemonicToSeedSync(trimmed);
+      const root = HDKey.fromMasterSeed(seed);
+      const child = root.derive(NOSTR_DERIVATION_PATH(account));
+      if (!child.privateKey) throw new Error('Failed to derive private key');
+
+      const privateKeyBytes = child.privateKey;
+      const privateKey = utils.bytesToHex(privateKeyBytes);
+      const publicKey = getPublicKey(privateKeyBytes);
+      const nsec = nip19.nsecEncode(privateKeyBytes);
+      const npub = nip19.npubEncode(publicKey);
+
+      return { privateKey, publicKey, nsec, npub };
+    } catch (error) {
+      console.error('NostrService: Failed to derive keys from mnemonic:', error);
       return null;
     }
   }

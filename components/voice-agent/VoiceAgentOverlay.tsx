@@ -48,16 +48,18 @@ const nextId = () => `${Date.now()}-${_id++}`;
 interface VoiceAgentOverlayProps {
   visible: boolean;
   onClose: () => void;
+  /** Start listening as soon as the on-device AI is ready (press-and-hold entry). */
+  autoListen?: boolean;
 }
 
 /**
  * Wrapper: only mount the session (and its QVAC/audio init) once opened, so the
  * dashboard stays light and nothing audio-related runs until the user taps the mic.
  */
-export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, onClose }) =>
-  visible ? <VoiceAgentSession onClose={onClose} /> : null;
+export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, onClose, autoListen }) =>
+  visible ? <VoiceAgentSession onClose={onClose} autoListen={autoListen} /> : null;
 
-const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
+const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
   const qvac = useQVAC();
   const tools = useMemo(() => createQVACTools(new AIAssistantFunctions()), []);
   const voiceRef = useRef<VoiceInputRef>(null);
@@ -95,6 +97,18 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     []
   );
 
+  // Press-and-hold entry: begin listening the moment the model is ready, so the
+  // hold gesture flows straight into a spoken request without a second tap.
+  const autoStartedRef = useRef(false);
+  useEffect(() => {
+    if (autoListen && qvac.isReady && phase === 'idle' && !autoStartedRef.current) {
+      autoStartedRef.current = true;
+      void stopSpeak();
+      setError(null);
+      voiceRef.current?.startListening();
+    }
+  }, [autoListen, qvac.isReady, phase]);
+
   const appendBubble = (role: Bubble['role'], text: string) => {
     const id = nextId();
     setBubbles((p) => [...p, { id, role, text }]);
@@ -123,8 +137,6 @@ const VoiceAgentSession: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           maxTurns: 5,
           onToken: (tok) => {
             streamed += tok;
-            patchBubble(assistantId, streamed);
-            requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
           },
           onConfirm: (call) =>
             new Promise((resolve) => setConfirm({ call, resolve })),

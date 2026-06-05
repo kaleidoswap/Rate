@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "bundleId": "fc2983ae96796287fad430caba968b97c605823610dadb701c57db4448f2a10b",
+  "bundleId": "b769b5cced3f7d02ea6aa9c70518619ea772e69503170554f45cd71c78ec6e95",
   "addons": [
     "@qvac/llm-llamacpp",
     "@qvac/transcription-whispercpp",
-    "@qvac/tts-onnx",
+    "@qvac/tts-ggml",
     "bare-abort",
     "bare-buffer",
     "bare-crypto",

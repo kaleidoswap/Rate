@@ -1,168 +1,273 @@
-
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
-import { StatusBar } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+    View,
+    Text,
+    StyleSheet,
+    SectionList,
+    TouchableOpacity,
+    RefreshControl,
+    StatusBar,
+    ActivityIndicator,
+} from 'react-native';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { RootState } from '../store';
-import { MainHeader, Card } from '../components';
+import { MainHeader } from '../components';
 import { EmptyState } from '../components/EmptyState';
-import { StatusBadge, type StatusType } from '@kaleidorg/kaleido-ui/native';
 import { theme } from '../theme';
+import {
+    loadActivity,
+    type ActivityItem,
+    type ActivityItemType,
+    type ActivityLayer,
+    type ActivityStatus,
+    type AssetMeta,
+} from '../services/ActivityService';
+import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 
-// Map domain transaction statuses to kaleido-ui StatusBadge types
-const toBadgeStatus = (s: Transaction['status']): StatusType => {
-    if (s === 'completed') return 'completed';
-    if (s === 'failed') return 'failed';
-    return 'pending'; // 'whitelisted' | 'executing' | 'pending'
+type FilterTab = 'all' | 'receive' | 'send' | 'swap';
+
+const FILTERS: { key: FilterTab; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'receive', label: 'Received' },
+    { key: 'send', label: 'Sent' },
+    { key: 'swap', label: 'Swaps' },
+];
+
+// Per-type visual identity: icon + accent colour.
+function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
+    switch (type) {
+        case 'receive':
+            return { icon: 'arrow-down', color: theme.colors.success[500] };
+        case 'send':
+            return { icon: 'arrow-up', color: theme.colors.error[500] };
+        case 'swap':
+            return { icon: 'swap-horizontal', color: '#A78BFA' };
+        case 'issuance':
+            return { icon: 'add-circle-outline', color: theme.colors.accent[500] };
+        case 'channel_open':
+            return { icon: 'git-branch-outline', color: theme.colors.accent[500] };
+        case 'channel_close':
+            return { icon: 'close-circle-outline', color: theme.colors.warning[500] };
+        default:
+            return { icon: 'ellipse-outline', color: theme.colors.text.tertiary };
+    }
+}
+
+const LAYER_LABEL: Record<ActivityLayer, string> = {
+    'L1': 'On-chain',
+    'RGB-L1': 'RGB',
+    'LN': 'Lightning',
+    'RGB-LN': 'RGB · LN',
+    'Spark': 'Spark',
+    'Arkade': 'Arkade',
+    'Swap': 'Swap',
 };
 
-// Define transaction types
-type TransactionType = 'deposit' | 'withdraw' | 'swap';
+function typeLabel(item: ActivityItem): string {
+    switch (item.type) {
+        case 'receive': return 'Received';
+        case 'send': return 'Sent';
+        case 'swap': return 'Atomic Swap';
+        case 'issuance': return item.kind === 'Inflation' ? 'Inflation' : 'Issuance';
+        case 'channel_open': return 'Channel Open';
+        case 'channel_close': return 'Channel Close';
+        default: return 'Transaction';
+    }
+}
 
-interface Transaction {
-    id: string;
-    type: TransactionType;
-    amount: number;
-    asset: string;
-    date: number;
-    status: 'completed' | 'pending' | 'failed' | 'whitelisted' | 'executing';
-    txid?: string;
-    toAmount?: number; // For swaps
-    toAsset?: string; // For swaps
+// Status → label/color now lives in utils/paymentStatus (single source of truth).
+const statusVisual = ACTIVITY_STATUS_VISUAL;
+
+function amountPrefix(type: ActivityItemType): string {
+    if (type === 'receive' || type === 'issuance') return '+';
+    if (type === 'send') return '−';
+    return '';
+}
+
+// Group items by relative day for section headers.
+function sectionTitle(ts?: number): string {
+    if (!ts) return 'Earlier';
+    const d = new Date(ts);
+    const now = new Date();
+    const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+    const diffDays = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
+    if (diffDays <= 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 7) return d.toLocaleDateString(undefined, { weekday: 'long' });
+    return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 export default function HistoryScreen() {
-    const navigation = useNavigation();
+    const navigation = useNavigation<any>();
     const swapHistory = useSelector((state: RootState) => state.swap.swapHistory);
-    const [history, setHistory] = useState<Transaction[]>([]);
+    const rgbAssets = useSelector((state: RootState) => state.assets.rgbAssets);
+
+    const [items, setItems] = useState<ActivityItem[]>([]);
+    const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [softError, setSoftError] = useState<string | null>(null);
+    const [filter, setFilter] = useState<FilterTab>('all');
+
+    const fetchActivity = useCallback(async () => {
+        const assets: AssetMeta[] = (rgbAssets || []).map((a: any) => ({
+            asset_id: a.asset_id,
+            ticker: a.ticker,
+            name: a.name,
+            precision: a.precision ?? 0,
+        }));
+        const swaps = (swapHistory || []).map((s: any) => ({
+            rfq_id: s.rfq_id,
+            status: s.status,
+            created_at: s.created_at,
+            txid: s.txid,
+        }));
+        try {
+            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps });
+            setItems(result);
+            if (!hadConnectedAdapter && result.length === 0) {
+                setSoftError('Wallet is offline. Connect a protocol to see your activity.');
+            } else if (failedSources > 0 && result.length === 0) {
+                setSoftError('Could not load some activity. Pull to refresh.');
+            } else {
+                setSoftError(null);
+            }
+        } catch (e: any) {
+            setSoftError(e?.message || 'Failed to load activity.');
+        }
+    }, [rgbAssets, swapHistory]);
 
     useEffect(() => {
-        loadHistory();
-    }, [swapHistory]);
+        setLoading(true);
+        fetchActivity().finally(() => setLoading(false));
+    }, [fetchActivity]);
 
-    const loadHistory = () => {
-        // 1. Convert Swap History
-        const swaps: Transaction[] = swapHistory.map(swap => {
-            // We need to find quote info if stored, but swapHistory only stores execution currently.
-            // If we don't have amounts in execution, we might need to rely on what we have.
-            // However, looking at swapSlice, SwapExecution doesn't have amounts.
-            // We might need to enrich this in the future.
-            // For now, let's just show it as a Swap interaction.
-            return {
-                id: swap.rfq_id,
-                type: 'swap',
-                amount: 0, // Placeholder as we don't store amount in execution history yet
-                asset: 'BTC/RGB',
-                date: swap.created_at,
-                status: swap.status,
-                txid: swap.txid
-            };
-        });
-
-        // 2. Mock Deposits/Withdrawals
-        const mockTx: Transaction[] = [
-            {
-                id: 'tx-1',
-                type: 'deposit',
-                amount: 0.05,
-                asset: 'BTC',
-                date: Date.now() - 10000000,
-                status: 'completed',
-                txid: 'abcdef123456'
-            },
-            {
-                id: 'tx-2',
-                type: 'withdraw',
-                amount: 100,
-                asset: 'USDT',
-                date: Date.now() - 50000000,
-                status: 'completed'
-            },
-            {
-                id: 'tx-3',
-                type: 'deposit',
-                amount: 500,
-                asset: 'L-BTC',
-                date: Date.now() - 2000000,
-                status: 'pending'
-            }
-        ];
-
-        // Merge and sort by date descending
-        const allHistory = [...swaps, ...mockTx].sort((a, b) => b.date - a.date);
-        setHistory(allHistory);
-    };
-
-    const onRefresh = () => {
+    const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        loadHistory();
-        setTimeout(() => setRefreshing(false), 1000);
-    };
+        await fetchActivity();
+        setRefreshing(false);
+    }, [fetchActivity]);
 
-    const getIcon = (type: TransactionType) => {
-        switch (type) {
-            case 'deposit': return 'arrow-down';
-            case 'withdraw': return 'arrow-up';
-            case 'swap': return 'swap-horizontal';
+    const filtered = items.filter((it) => {
+        if (filter === 'all') return true;
+        if (filter === 'swap') return it.type === 'swap';
+        return it.type === filter;
+    });
+
+    // Build sections grouped by day.
+    const sections = (() => {
+        const map = new Map<string, ActivityItem[]>();
+        for (const it of filtered) {
+            const key = sectionTitle(it.timestamp);
+            if (!map.has(key)) map.set(key, []);
+            map.get(key)!.push(it);
         }
+        return Array.from(map.entries()).map(([title, data]) => ({ title, data }));
+    })();
+
+    const renderItem = ({ item }: { item: ActivityItem }) => {
+        const v = typeVisual(item.type);
+        const st = statusVisual[item.status];
+        const hasAmount = item.amount !== '';
+        return (
+            <TouchableOpacity activeOpacity={0.7} style={styles.row}>
+                <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
+                    <Ionicons name={v.icon} size={20} color={v.color} />
+                </View>
+
+                <View style={styles.rowBody}>
+                    <View style={styles.rowTopLine}>
+                        <Text style={styles.rowTitle} numberOfLines={1}>{typeLabel(item)}</Text>
+                        {hasAmount && (
+                            <Text
+                                style={[
+                                    styles.rowAmount,
+                                    { color: item.type === 'receive' || item.type === 'issuance' ? theme.colors.success[500] : theme.colors.text.primary },
+                                ]}
+                                numberOfLines={1}
+                            >
+                                {amountPrefix(item.type)}{item.amount} {item.assetTicker}
+                            </Text>
+                        )}
+                    </View>
+                    <View style={styles.rowBottomLine}>
+                        <View style={styles.metaRow}>
+                            <View style={styles.layerChip}>
+                                <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
+                            </View>
+                            {item.timestamp != null && (
+                                <Text style={styles.timeText}>
+                                    {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                            )}
+                        </View>
+                        <View style={styles.statusRow}>
+                            <View style={[styles.statusDot, { backgroundColor: st.color }]} />
+                            <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
+                        </View>
+                    </View>
+                </View>
+            </TouchableOpacity>
+        );
     };
-
-    const getColor = (type: TransactionType) => {
-        switch (type) {
-            case 'deposit': return theme.colors.success[500];
-            case 'withdraw': return theme.colors.error[500];
-            case 'swap': return theme.colors.warning[500];
-        }
-    };
-
-    const renderItem = ({ item }: { item: Transaction }) => (
-        <Card style={styles.card}>
-            <View style={styles.row}>
-                <View style={[styles.iconContainer, { backgroundColor: getColor(item.type) + '20' }]}>
-                    <Ionicons name={getIcon(item.type)} size={20} color={getColor(item.type)} />
-                </View>
-
-                <View style={styles.details}>
-                    <Text style={styles.typeText}>{item.type.charAt(0).toUpperCase() + item.type.slice(1)}</Text>
-                    <Text style={styles.dateText}>{new Date(item.date).toLocaleDateString()} {new Date(item.date).toLocaleTimeString()}</Text>
-                </View>
-
-                <View style={styles.amountContainer}>
-                    <Text style={[styles.amountText, { color: item.type === 'deposit' ? theme.colors.success[500] : theme.colors.text.primary }]}>
-                        {item.type === 'deposit' ? '+' : '-'}{item.amount > 0 ? item.amount : '?'} {item.asset}
-                    </Text>
-                    <StatusBadge status={toBadgeStatus(item.status)} style={styles.statusText} />
-                </View>
-            </View>
-        </Card>
-    );
 
     return (
         <View style={styles.container}>
-            {/* Ensure header background handles status bar area */}
             <StatusBar barStyle="light-content" />
-            <MainHeader
-                title="History"
-                onBack={() => navigation.goBack()}
-            />
+            <MainHeader title="Activity" onBack={() => navigation.goBack()} />
 
-            <FlatList
-                data={history}
-                renderItem={renderItem}
-                keyExtractor={item => item.id}
-                contentContainerStyle={styles.listContent}
-                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary[500]} />}
-                ListEmptyComponent={
-                    <EmptyState
-                        icon="receipt-outline"
-                        title="No transactions yet"
-                        message="Your payments and asset transfers will appear here once you send or receive."
-                    />
-                }
-            />
+            {/* Filter tabs */}
+            <View style={styles.filterBar}>
+                {FILTERS.map((f) => {
+                    const active = filter === f.key;
+                    return (
+                        <TouchableOpacity
+                            key={f.key}
+                            style={[styles.filterTab, active && styles.filterTabActive]}
+                            onPress={() => setFilter(f.key)}
+                            activeOpacity={0.8}
+                        >
+                            <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>{f.label}</Text>
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
+
+            {softError && (
+                <View style={styles.errorBanner}>
+                    <Ionicons name="cloud-offline-outline" size={16} color={theme.colors.warning[500]} />
+                    <Text style={styles.errorBannerText}>{softError}</Text>
+                </View>
+            )}
+
+            {loading ? (
+                <View style={styles.loadingWrap}>
+                    <ActivityIndicator color={theme.colors.primary[500]} />
+                    <Text style={styles.loadingText}>Loading activity…</Text>
+                </View>
+            ) : (
+                <SectionList
+                    sections={sections}
+                    keyExtractor={(item) => item.id}
+                    renderItem={renderItem}
+                    renderSectionHeader={({ section }) => (
+                        <Text style={styles.sectionHeader}>{section.title}</Text>
+                    )}
+                    stickySectionHeadersEnabled={false}
+                    contentContainerStyle={styles.listContent}
+                    refreshControl={
+                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary[500]} />
+                    }
+                    ListEmptyComponent={
+                        <EmptyState
+                            icon="receipt-outline"
+                            title="No activity yet"
+                            message="Your payments, transfers and swaps will appear here once you send or receive."
+                        />
+                    }
+                />
+            )}
         </View>
     );
 }
@@ -172,58 +277,149 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: theme.colors.background.secondary,
     },
-    listContent: {
-        padding: theme.spacing[4],
+    filterBar: {
+        flexDirection: 'row',
+        gap: theme.spacing[2],
+        paddingHorizontal: theme.spacing[4],
+        paddingTop: theme.spacing[3],
+        paddingBottom: theme.spacing[2],
     },
-    card: {
-        marginBottom: theme.spacing[3],
+    filterTab: {
+        paddingHorizontal: theme.spacing[4],
+        paddingVertical: theme.spacing[2],
+        borderRadius: theme.borderRadius.full,
+        backgroundColor: theme.colors.surface.primary,
+        borderWidth: 1,
+        borderColor: theme.colors.border.light,
+    },
+    filterTabActive: {
+        backgroundColor: theme.colors.primary[500],
+        borderColor: theme.colors.primary[500],
+    },
+    filterTabText: {
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: '600',
+        color: theme.colors.text.secondary,
+    },
+    filterTabTextActive: {
+        color: theme.colors.text.inverse,
+    },
+    errorBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[2],
+        marginHorizontal: theme.spacing[4],
+        marginTop: theme.spacing[2],
         padding: theme.spacing[3],
+        borderRadius: theme.borderRadius.lg,
+        backgroundColor: theme.colors.warning[50],
+        borderWidth: 1,
+        borderColor: theme.colors.warning[100],
+    },
+    errorBannerText: {
+        flex: 1,
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.text.secondary,
+    },
+    loadingWrap: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: theme.spacing[3],
+    },
+    loadingText: {
+        color: theme.colors.text.tertiary,
+        fontSize: theme.typography.fontSize.sm,
+    },
+    listContent: {
+        paddingHorizontal: theme.spacing[4],
+        paddingBottom: theme.spacing[10],
+        flexGrow: 1,
+    },
+    sectionHeader: {
+        fontSize: theme.typography.fontSize.xs,
+        fontWeight: '700',
+        color: theme.colors.text.tertiary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+        marginTop: theme.spacing[4],
+        marginBottom: theme.spacing[2],
     },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
+        backgroundColor: theme.colors.surface.primary,
+        borderRadius: theme.borderRadius.lg,
+        padding: theme.spacing[3],
+        marginBottom: theme.spacing[2],
+        borderWidth: 1,
+        borderColor: theme.colors.border.light,
     },
-    iconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        justifyContent: 'center',
+    iconWrap: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
+        justifyContent: 'center',
         marginRight: theme.spacing[3],
     },
-    details: {
+    rowBody: {
         flex: 1,
+        gap: 4,
     },
-    typeText: {
+    rowTopLine: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: theme.spacing[2],
+    },
+    rowTitle: {
+        flex: 1,
         fontSize: theme.typography.fontSize.base,
         fontWeight: '600',
         color: theme.colors.text.primary,
     },
-    dateText: {
+    rowAmount: {
+        fontSize: theme.typography.fontSize.base,
+        fontWeight: '700',
+    },
+    rowBottomLine: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    metaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[2],
+    },
+    layerChip: {
+        paddingHorizontal: theme.spacing[2],
+        paddingVertical: 2,
+        borderRadius: theme.borderRadius.sm,
+        backgroundColor: theme.colors.surface.tertiary,
+    },
+    layerChipText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: theme.colors.text.secondary,
+    },
+    timeText: {
         fontSize: theme.typography.fontSize.xs,
         color: theme.colors.text.tertiary,
-        marginTop: 2,
     },
-    amountContainer: {
-        alignItems: 'flex-end',
+    statusRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
     },
-    amountText: {
-        fontSize: theme.typography.fontSize.base,
-        fontWeight: '600',
+    statusDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
     },
     statusText: {
         fontSize: theme.typography.fontSize.xs,
-        marginTop: 2,
-        textTransform: 'capitalize',
+        fontWeight: '600',
     },
-    emptyContainer: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginTop: theme.spacing[10],
-    },
-    emptyText: {
-        marginTop: theme.spacing[3],
-        color: theme.colors.text.secondary,
-        fontSize: theme.typography.fontSize.base,
-    }
 });

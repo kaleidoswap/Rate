@@ -21,6 +21,8 @@ export interface VoiceInputRef {
 const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
   ({ onResult, onPartialResult, onError, onStart, onEnd }, ref) => {
     const recorderRef = useRef<Audio.Recording | null>(null);
+    const startingRef = useRef(false);
+    const isRecordingRef = useRef(false);
     const [isRecording, setIsRecording] = useState(false);
 
     useImperativeHandle(ref, () => ({
@@ -29,8 +31,10 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
     }));
 
     const startRecording = async () => {
-      if (isRecording) return;
+      if (startingRef.current || isRecordingRef.current || recorderRef.current) return;
 
+      let recording: Audio.Recording | null = null;
+      startingRef.current = true;
       try {
         const { status } = await Audio.requestPermissionsAsync();
         if (status !== 'granted') {
@@ -43,7 +47,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
           playsInSilentModeIOS: true,
         });
 
-        const recording = new Audio.Recording();
+        recording = new Audio.Recording();
         await recording.prepareToRecordAsync({
           isMeteringEnabled: false,
           android: {
@@ -70,19 +74,33 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         await recording.startAsync();
 
         recorderRef.current = recording;
+        isRecordingRef.current = true;
         setIsRecording(true);
         onStart();
         console.log('🎤 QVAC VoiceInput: recording started');
       } catch (err) {
+        if (recording) {
+          try {
+            await recording.stopAndUnloadAsync();
+          } catch {
+            /* ignore cleanup */
+          }
+        }
+        recorderRef.current = null;
+        isRecordingRef.current = false;
+        setIsRecording(false);
         console.error('VoiceInput start error:', err);
         onError(err instanceof Error ? err.message : 'Failed to start recording');
+      } finally {
+        startingRef.current = false;
       }
     };
 
     const stopRecording = async () => {
-      if (!isRecording || !recorderRef.current) return;
+      if (!isRecordingRef.current || !recorderRef.current) return;
 
       try {
+        isRecordingRef.current = false;
         setIsRecording(false);
         const recording = recorderRef.current;
         recorderRef.current = null;
@@ -117,7 +135,13 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         }
 
         const transcription = await qvac.transcribeAudio(uri);
-        const trimmed = transcription.trim();
+        // Whisper emits non-speech markers like "[BLANK_AUDIO]", "(silence)" or
+        // "[ Silence ]" for empty/quiet clips — treat those as no-speech too.
+        const trimmed = transcription
+          .replace(/\[[^\]]*\]|\([^)]*\)/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+        console.log('🎤 QVAC VoiceInput: transcription =', JSON.stringify(transcription));
 
         if (trimmed) {
           onResult(trimmed);
@@ -131,6 +155,9 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
           // ignore cleanup errors
         }
       } catch (err) {
+        isRecordingRef.current = false;
+        recorderRef.current = null;
+        setIsRecording(false);
         console.error('VoiceInput stop error:', err);
         onError(err instanceof Error ? err.message : 'Transcription failed');
       }

@@ -19,7 +19,7 @@ import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { NetworkIcon } from '../components/NetworkIcon';
 import { PressableScale } from '../components/PressableScale';
-import { haptic } from '../utils/haptics';
+import { feedback } from '../utils/feedback';
 import { protocolManager } from '../services/protocols';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
@@ -29,7 +29,8 @@ import {
 import { theme } from '../theme';
 import { Card, Button, Input, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
-import { useFormattedBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { formatBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { usePolicy } from '../hooks/usePolicy';
 
 interface Props {
   navigation: any;
@@ -107,6 +108,9 @@ function SendScreen({ navigation, route }: Props) {
   const btcBalance = walletState?.btcBalance;
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD } = useBitcoinConversion();
+  // In Lite mode the auto-router picks the best route; only Advanced lets the
+  // user override it, so the manual route selector is gated.
+  const policy = usePolicy();
 
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
@@ -365,9 +369,15 @@ function SendScreen({ navigation, route }: Props) {
     }
   };
 
-  // Format available balance using the hook at component level
+  // Format available balance. getMaxAmount() returns a display string in the
+  // asset's own units (BTC for the BTC asset, precision-scaled for RGB assets).
+  // BTC balances are sats-native, so render them via the explicit sats formatter;
+  // other assets are already in display units and keep their ticker.
   const maxAmount = getMaxAmount();
-  const formattedMaxAmount = useFormattedBitcoinAmount(maxAmount);
+  const isBtcAsset = selectedAsset?.asset_id === 'BTC';
+  const availableLabel = isBtcAsset
+    ? `${formatBitcoinAmount(selectedAsset?.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
+    : `${maxAmount} ${selectedAsset?.ticker || ''}`;
 
   const validateInputs = (): boolean => {
     if (!address.trim()) {
@@ -466,8 +476,10 @@ function SendScreen({ navigation, route }: Props) {
         await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: parseFloat(amount) });
         Alert.alert('Asset Sent!', 'RGB asset transfer completed successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
       }
+      feedback.send();
     } catch (error) {
       console.error('Send error:', error);
+      feedback.error();
       Alert.alert(
         'Error',
         error instanceof Error ? error.message : 'Failed to send payment'
@@ -583,8 +595,9 @@ function SendScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {/* Route selector — shows available send routes when multiple exist */}
-      {sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
+      {/* Route selector — shows available send routes when multiple exist.
+          Hidden in Lite mode: the auto-router sends via the best route. */}
+      {policy.showRouteSelector && sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
         <View style={{ marginTop: 14, gap: 8 }}>
           <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.4 }}>
             Send via
@@ -595,7 +608,7 @@ function SendScreen({ navigation, route }: Props) {
             return (
               <PressableScale
                 key={`${route.account}-${route.method}`}
-                onPress={() => { if (!disabled) { haptic.selection(); setActiveRoute({ ...route, protocol: route.account }); } }}
+                onPress={() => { if (!disabled) { feedback.select(); setActiveRoute({ ...route, protocol: route.account }); } }}
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
                   backgroundColor: selected ? theme.colors.primary[50] : theme.colors.background.secondary,
@@ -858,7 +871,7 @@ function SendScreen({ navigation, route }: Props) {
         
         <View style={styles.balanceInfo}>
           <Text style={styles.balanceText}>
-            Available: {formattedMaxAmount} {bitcoinUnit}
+            Available: {availableLabel}
           </Text>
           {selectedAsset.asset_id === 'BTC' && amount && (
             <Text style={styles.usdValue}>

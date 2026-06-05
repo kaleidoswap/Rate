@@ -114,3 +114,70 @@ export function recommendLocalModel(totalMemBytes: number): QVACModel {
 export function recommendLocalModelId(totalMemBytes: number): string {
   return recommendLocalModel(totalMemBytes).id;
 }
+
+// ---------------------------------------------------------------------------
+// Speech-to-text (Whisper) catalog — used by the voice/vocal mode.
+// All entries are HTTPS-downloadable from the pinned ggerganov/whisper.cpp repo.
+// ---------------------------------------------------------------------------
+const WHISPER_BASE_URL =
+  'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1';
+
+export interface SttModel {
+  id: string;
+  label: string;
+  /** Display hint: multilingual vs English-only. */
+  lang: 'multi' | 'en';
+  /** Absolute HTTPS download URL. */
+  url: string;
+  /** Local filename on disk. */
+  name: string;
+  /** Exact byte size (used for the reuse/integrity check). */
+  size: number;
+  sizeMB: number;
+}
+
+function stt(id: string, label: string, lang: 'multi' | 'en', file: string, size: number): SttModel {
+  return {
+    id,
+    label,
+    lang,
+    url: `${WHISPER_BASE_URL}/${file}`,
+    name: file,
+    size,
+    sizeMB: Math.round(size / 1048576),
+  };
+}
+
+export const QVAC_STT_MODELS: SttModel[] = [
+  stt('whisper-tiny', 'Whisper Tiny', 'multi', 'ggml-tiny.bin', 77691713),
+  stt('whisper-tiny-en', 'Whisper Tiny (English)', 'en', 'ggml-tiny.en-q8_0.bin', 43550795),
+  stt('whisper-base', 'Whisper Base', 'multi', 'ggml-base-q8_0.bin', 81768585),
+  stt('whisper-base-en', 'Whisper Base (English)', 'en', 'ggml-base.en-q8_0.bin', 81781811),
+  stt('whisper-large-v3-turbo', 'Whisper Large v3 Turbo', 'multi', 'ggml-large-v3-turbo.bin', 1624555275),
+];
+
+export const DEFAULT_STT_MODEL_ID = QVAC_STT_MODELS[0].id;
+
+export function getSttModelById(id: string | undefined | null): SttModel {
+  return QVAC_STT_MODELS.find((m) => m.id === id) ?? QVAC_STT_MODELS[0];
+}
+
+// ---------------------------------------------------------------------------
+// Text-to-speech engine options for the voice/vocal mode.
+//  - 'supertonic': on-device neural SUPERTONIC-2 (natural, ~slower first load).
+//  - 'system':     the OS speech synthesiser (instant, robotic, no download).
+// ---------------------------------------------------------------------------
+export type TtsEngine = 'supertonic' | 'system';
+
+export interface TtsOption {
+  id: TtsEngine;
+  label: string;
+  hint: string;
+}
+
+export const QVAC_TTS_OPTIONS: TtsOption[] = [
+  { id: 'supertonic', label: 'Natural (on-device)', hint: 'Neural SUPERTONIC voice — best quality, downloads ~80 MB once.' },
+  { id: 'system', label: 'System voice', hint: 'Instant, uses your phone’s built-in voice. No download.' },
+];
+
+export const DEFAULT_TTS_ENGINE: TtsEngine = 'supertonic';

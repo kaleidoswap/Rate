@@ -33,8 +33,12 @@ import { Card, Button, Input, ScreenHeader } from '../components';
 import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
 import { NetworkIcon } from '../components/NetworkIcon';
+import { BitcoinIcon, UsdCoinIcon } from '../components/ProtocolIcons';
+import { QrCode } from '@kaleidorg/kaleido-ui/native';
+import { AmountEditorModal } from '../components/AmountEditorModal';
+import { useFiatRates } from '../hooks/useFiatRates';
 import { PressableScale } from '../components/PressableScale';
-import { haptic } from '../utils/haptics';
+import { feedback } from '../utils/feedback';
 import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
 
 interface Props {
@@ -125,7 +129,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
   // Network selection allows the per-protocol types plus a 'unified' single-QR mode.
   type ReceiveMode = ProtocolNetworkType | 'unified';
-  const [networkType, setNetworkType] = useState<ReceiveMode>(getDefaultNetwork());
+  // Default to the single "All networks" QR; specific networks are opt-in.
+  const [networkType, setNetworkType] = useState<ReceiveMode>('unified');
   const [address, setAddress] = useState('');
   // Unified receive (single BIP21 QR embedding all available methods)
   const [unifiedUri, setUnifiedUri] = useState('');
@@ -154,6 +159,11 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [maxDepositAmount, setMaxDepositAmount] = useState<number>(0);
   const [isUserTyping, setIsUserTyping] = useState(false);
   const [arkadeSubMode, setArkadeSubMode] = useState<'ark' | 'boarding'>('ark');
+  // Network selector dropdown (All selected by default; specific networks hidden).
+  const [showNetworkDropdown, setShowNetworkDropdown] = useState(false);
+  // Multi-currency amount editor (BTC / sats / USD / other fiat).
+  const [showAmountEditor, setShowAmountEditor] = useState(false);
+  const fiatRates = useFiatRates();
 
   // Determine available network types based on connected protocols and selected asset
   const availableNetworkTypes = useMemo((): ProtocolNetworkType[] => {
@@ -701,12 +711,24 @@ export default function ReceiveScreen({ navigation }: Props) {
     return () => clearTimeout(timeoutId);
   }, [networkType, amount, unifiedAsset]);
 
-  // Lite mode receives via the single unified BIP321 QR — force that mode.
+  // Keep the unified BTC/USD asset in sync with the selected asset tab.
   useEffect(() => {
-    if (isLite && !showAllNetworks && networkType !== 'unified') {
-      setNetworkType('unified');
+    if (selectedAsset.ticker === 'BTC') {
+      setUnifiedAsset('BTC');
+    } else if (/usd/i.test(selectedAsset.ticker)) {
+      setUnifiedAsset('USD');
     }
-  }, [isLite, showAllNetworks, networkType]);
+  }, [selectedAsset]);
+
+  // "All networks" can only encode BTC or USD — a custom RGB asset falls back
+  // to a specific on-chain (RGB) invoice.
+  useEffect(() => {
+    const t = selectedAsset.ticker;
+    const isBtcOrUsd = t === 'BTC' || /usd/i.test(t);
+    if (!isBtcOrUsd && networkType === 'unified') {
+      setNetworkType('onchain');
+    }
+  }, [selectedAsset, networkType]);
 
   // Load channels when component mounts or network type changes
   useEffect(() => {
@@ -792,7 +814,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const copyToClipboard = async () => {
     if (!address) return;
     await Clipboard.setString(address);
-    haptic.success();
+    feedback.select();
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
@@ -810,6 +832,35 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   // AssetIcon is now imported from components/AssetIcon
+
+  // ── Amount <-> sats bridging for the multi-currency editor ────────────────
+  const SATS_PER_BTC = 1e8;
+  const currentAmountSats = (() => {
+    if (!amount) return 0;
+    const n = parseFloat(amount.replace(/,/g, ''));
+    if (isNaN(n) || n <= 0) return 0;
+    return bitcoinUnit === 'BTC' ? Math.round(n * SATS_PER_BTC) : Math.round(n);
+  })();
+
+  const applyAmountSats = (sats: number) => {
+    if (!sats || sats <= 0) {
+      setAmount('');
+      return;
+    }
+    setAmount(bitcoinUnit === 'BTC' ? (sats / SATS_PER_BTC).toString() : String(Math.round(sats)));
+  };
+
+  // Human label for the current requested amount (BTC view + ≈USD).
+  const amountSummary = (): string | null => {
+    if (!currentAmountSats) return null;
+    const unit = bitcoinUnit === 'BTC'
+      ? `${(currentAmountSats / SATS_PER_BTC).toFixed(8)} BTC`
+      : `${currentAmountSats.toLocaleString()} sats`;
+    const usd = fiatRates['usd'];
+    return usd
+      ? `${unit}  ·  ≈ $${((currentAmountSats / SATS_PER_BTC) * usd).toFixed(2)}`
+      : unit;
+  };
 
   const renderHeader = () => (
     <View>
@@ -889,6 +940,10 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   const renderNetworkTabs = () => {
+    // Lite mode abstracts away networks/layers: no manual picker, just the
+    // unified single-QR receive (networkType defaults to 'unified').
+    if (isLite) return null;
+
     const onChainAssets = getOnChainAssets();
     const lightningAssets = getLightningAssets();
 
@@ -917,7 +972,7 @@ export default function ReceiveScreen({ navigation }: Props) {
               return (
                 <PressableScale
                   key={net.id}
-                  onPress={() => { haptic.selection(); setNetworkType(net.id); }}
+                  onPress={() => { feedback.select(); setNetworkType(net.id); }}
                   style={{
                     flexDirection: 'row',
                     alignItems: 'center',
@@ -1222,32 +1277,191 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
+  // ── Asset tabs: BTC | USD | (custom) | + ──────────────────────────────────
+  const renderAssetTabs = () => {
+    const accent = theme.colors.primary[500];
+    const t = selectedAsset.ticker;
+    const isBtc = t === 'BTC';
+    const isUsd = /usd/i.test(t);
+    const isCustom = !isBtc && !isUsd;
+
+    const selectBtc = () => {
+      feedback.select();
+      setSelectedAsset({
+        asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
+        balance: btcBalance?.vanilla?.spendable || 0,
+      });
+    };
+    const selectUsd = () => {
+      feedback.select();
+      const usdt = rgbAssets.find((a) => /usdt/i.test(a.ticker));
+      if (usdt) {
+        setSelectedAsset({
+          asset_id: usdt.asset_id, ticker: usdt.ticker, name: usdt.name,
+          isRGB: true, balance: usdt.balance || 0,
+        });
+      } else {
+        setSelectedAsset({ asset_id: 'USD', ticker: 'USD', name: 'US Dollar', isRGB: false });
+      }
+    };
+
+    const Tab = (
+      key: string,
+      active: boolean,
+      onPress: () => void,
+      icon: React.ReactNode,
+      label: string
+    ) => (
+      <TouchableOpacity
+        key={key}
+        style={[styles.assetTab, active && { borderColor: accent, backgroundColor: accent + '15' }]}
+        onPress={onPress}
+        activeOpacity={0.7}
+      >
+        {icon}
+        <Text style={[styles.assetTabText, active && { color: accent, fontWeight: '700' }]}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+
+    return (
+      <View style={styles.assetTabs}>
+        {Tab('BTC', isBtc, selectBtc, <BitcoinIcon size={20} />, 'BTC')}
+        {Tab('USD', isUsd, selectUsd, <UsdCoinIcon size={20} />, 'USD')}
+        {isCustom &&
+          Tab('custom', true, () => {}, (
+            <AssetIcon
+              ticker={t}
+              protocol={selectedAsset.isRGB ? 'RGB' : undefined}
+              size={20}
+              showBadge={false}
+            />
+          ), t)}
+        <TouchableOpacity
+          style={styles.assetAddTab}
+          onPress={() => { feedback.select(); setShowAssetSelector(true); }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="add" size={20} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  // ── Network selector: "All" by default, specific networks behind a dropdown ─
+  const renderNetworkDropdown = () => {
+    const canUseAll = selectedAsset.ticker === 'BTC' || /usd/i.test(selectedAsset.ticker);
+    const options: Array<{ id: ReceiveMode; label: string; sub: string }> = [
+      ...(canUseAll
+        ? [{ id: 'unified' as ReceiveMode, label: 'All networks', sub: 'On-chain · Lightning · Spark · Arkade' }]
+        : []),
+      ...(availableNetworkTypes.includes('onchain')
+        ? [{ id: 'onchain' as ReceiveMode, label: 'On-chain', sub: 'Bitcoin Layer 1' }] : []),
+      ...(availableNetworkTypes.includes('lightning')
+        ? [{ id: 'lightning' as ReceiveMode, label: 'Lightning', sub: 'Instant · low fee' }] : []),
+      ...(availableNetworkTypes.includes('spark')
+        ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Instant' }] : []),
+      ...(availableNetworkTypes.includes('arkade')
+        ? [{ id: 'arkade' as ReceiveMode, label: 'Arkade', sub: 'Off-chain' }] : []),
+    ];
+    const current = options.find((o) => o.id === networkType) || options[0];
+    if (!current) return null;
+    const color = NETWORK_COLORS[current.id] || theme.colors.primary[500];
+
+    const glyph = (id: ReceiveMode, c: string) =>
+      id === 'unified'
+        ? <Ionicons name="apps" size={18} color={c} />
+        : <NetworkIcon network={id as ProtocolNetworkType} size={18} color={c} />;
+
+    return (
+      <View style={styles.netSelectorWrap}>
+        <TouchableOpacity
+          style={[styles.netSelector, showNetworkDropdown && { borderColor: color }]}
+          onPress={() => { feedback.select(); setShowNetworkDropdown((v) => !v); }}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.netGlyph, { backgroundColor: color + '1A' }]}>
+            {glyph(current.id, color)}
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.netSelectorLabel}>{current.label}</Text>
+            <Text style={styles.netSelectorSub} numberOfLines={1}>{current.sub}</Text>
+          </View>
+          <Ionicons
+            name={showNetworkDropdown ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={theme.colors.text.tertiary}
+          />
+        </TouchableOpacity>
+
+        {showNetworkDropdown && (
+          <View style={styles.netDropdown}>
+            {options.map((o) => {
+              const active = o.id === networkType;
+              const c = NETWORK_COLORS[o.id] || theme.colors.primary[500];
+              return (
+                <TouchableOpacity
+                  key={o.id}
+                  style={[styles.netOption, active && { backgroundColor: c + '12' }]}
+                  onPress={() => {
+                    feedback.select();
+                    setNetworkType(o.id);
+                    setShowNetworkDropdown(false);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.netGlyph, { backgroundColor: c + '1A' }]}>
+                    {glyph(o.id, c)}
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.netOptionLabel, active && { color: c }]}>{o.label}</Text>
+                    <Text style={styles.netSelectorSub} numberOfLines={1}>{o.sub}</Text>
+                  </View>
+                  {active && <Ionicons name="checkmark-circle" size={18} color={c} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // ── Amount row with pencil edit (opens the multi-currency editor) ─────────
+  const renderAmountRow = () => {
+    const summary = amountSummary();
+    const required = isAmountRequired();
+    return (
+      <TouchableOpacity
+        style={styles.amountRow}
+        onPress={() => setShowAmountEditor(true)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.amountRowIcon}>
+          <Ionicons name="cash-outline" size={18} color={theme.colors.primary[500]} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.amountRowLabel}>
+            {summary ? 'Requested amount' : required ? 'Amount required' : 'Add amount'}
+          </Text>
+          <Text style={styles.amountRowValue} numberOfLines={1}>
+            {summary || 'Optional — set in BTC, USD or other fiat'}
+          </Text>
+        </View>
+        <View style={styles.amountEditBtn}>
+          <Ionicons name="pencil" size={16} color={theme.colors.primary[500]} />
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   const renderUnifiedContent = () => {
     const accent = NETWORK_COLORS['unified'];
     return (
       <>
-        <View style={styles.assetTabs}>
-          {(['BTC', 'USD'] as const).map((a) => {
-            const active = unifiedAsset === a;
-            return (
-              <TouchableOpacity
-                key={a}
-                style={[
-                  styles.assetTab,
-                  active && { borderColor: accent, backgroundColor: accent + '15' },
-                ]}
-                onPress={() => setUnifiedAsset(a)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.assetTabText, active && { color: accent, fontWeight: '700' }]}>
-                  {a}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
         {renderUnifiedBody(accent)}
-        {(!isLite || showAllNetworks) && renderUnifiedAddressList()}
+        {renderUnifiedAddressList()}
       </>
     );
   };
@@ -1290,41 +1504,17 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     return (
       <View style={styles.qrSection}>
-        <View style={styles.qrHeader}>
-          <Text style={styles.qrTitle}>All networks</Text>
-          <View style={[styles.qrAmountContainer, { backgroundColor: accent + '20' }]}>
-            <Text style={[styles.qrAmount, { color: accent }]}>
-              {unifiedMethods.length > 0 ? unifiedMethods.join(' · ') : 'BIP21'}
+        {unifiedMethods.length > 0 && (
+          <View style={[styles.qrMethodsChip, { backgroundColor: accent + '18' }]}>
+            <Text style={[styles.qrMethodsChipText, { color: accent }]} numberOfLines={1}>
+              {unifiedMethods.join(' · ')}
             </Text>
           </View>
-        </View>
+        )}
 
         <View style={styles.qrContainer}>
-          <View style={[styles.qrCodeWrapper, {
-            borderColor: accent,
-            borderWidth: 2,
-            shadowColor: accent,
-            shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.3,
-            shadowRadius: 12,
-            elevation: 6,
-          }]}>
-            <QRCode
-              value={unifiedUri}
-              size={170}
-              backgroundColor="#FFFFFF"
-              color="#000000"
-            />
-            <View style={{
-              position: 'absolute', top: -1, right: -1,
-              flexDirection: 'row', alignItems: 'center',
-              backgroundColor: accent,
-              paddingHorizontal: 8, paddingVertical: 4,
-              borderBottomLeftRadius: 8, borderTopRightRadius: 12,
-            }}>
-              <Ionicons name="apps" size={14} color="#fff" />
-              <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff', marginLeft: 4 }}>All</Text>
-            </View>
+          <View style={styles.qrCodeWrapper}>
+            <QrCode value={unifiedUri} size={200} />
           </View>
         </View>
 
@@ -1448,51 +1638,19 @@ export default function ReceiveScreen({ navigation }: Props) {
       : selectedAsset.isRGB ? 'RGB Invoice'
       : 'On-chain Address';
 
+    const netColor = NETWORK_COLORS[networkType] || theme.colors.primary[500];
     return (
       <View style={styles.qrSection}>
-        <View style={styles.qrHeader}>
-          <Text style={styles.qrTitle}>{qrTitle}</Text>
-          {amount && selectedAsset.ticker && (
-            <View style={styles.qrAmountContainer}>
-              <Text style={styles.qrAmount}>
-                {amount} {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
-              </Text>
-            </View>
-          )}
+        <View style={[styles.qrMethodsChip, { backgroundColor: netColor + '18' }]}>
+          <NetworkIcon network={networkType as ProtocolNetworkType} size={14} color={netColor} />
+          <Text style={[styles.qrMethodsChipText, { color: netColor, marginLeft: 6 }]} numberOfLines={1}>
+            {qrTitle}{amount && selectedAsset.ticker ? `  ·  ${amount} ${selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}` : ''}
+          </Text>
         </View>
 
         <View style={styles.qrContainer}>
-          <View style={[styles.qrCodeWrapper, {
-            borderColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
-            borderWidth: 2,
-            shadowColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
-            shadowOffset: { width: 0, height: 0 },
-            shadowOpacity: 0.3,
-            shadowRadius: 12,
-            elevation: 6,
-          }]}>
-            <QRCode
-              value={address}
-              size={170}
-              backgroundColor="#FFFFFF"
-              color="#000000"
-              logoSize={30}
-              logoMargin={4}
-              logoBorderRadius={6}
-            />
-            {/* Network badge overlay */}
-            <View style={{
-              position: 'absolute', top: -1, right: -1,
-              flexDirection: 'row', alignItems: 'center',
-              backgroundColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
-              paddingHorizontal: 8, paddingVertical: 4,
-              borderBottomLeftRadius: 8, borderTopRightRadius: 12,
-            }}>
-              <NetworkIcon network={networkType} size={14} color="#fff" />
-              <Text style={{ fontSize: 10, fontWeight: '600', color: '#fff', marginLeft: 4 }}>
-                {NETWORK_LABELS[networkType] || networkType}
-              </Text>
-            </View>
+          <View style={styles.qrCodeWrapper}>
+            <QrCode value={address} size={200} />
           </View>
         </View>
 
@@ -1559,57 +1717,57 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
-  // --- Lite mode: one private BIP321 QR (BTC / $ toggle), networks hidden ----
-  if (isLite && !showAllNetworks) {
-    return (
-      <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-        <ScreenHeader title="Receive" showBack={true} />
-        <ScrollView
-          contentContainerStyle={{ paddingBottom: 40 }}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
-            {renderUnifiedContent()}
-            {renderAmountInput()}
-            <TouchableOpacity
-              onPress={() => setShowAllNetworks(true)}
-              activeOpacity={0.7}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 6,
-                marginTop: 20,
-                paddingVertical: 12,
-              }}
-            >
-              <Text style={{ color: theme.colors.text.secondary, fontSize: 14, fontWeight: '600' }}>
-                Show all networks
-              </Text>
-              <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      {renderHeader()}
-      {renderNetworkTabs()}
-      
-      <ScrollView 
+      <ScreenHeader title="Receive" showBack={true} />
+
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        {renderAmountInput()}
+        {renderAssetTabs()}
+        {renderNetworkDropdown()}
         {renderContent()}
+        {renderAmountRow()}
       </ScrollView>
+
+      {/* Asset picker (opened by the "+" tab) */}
+      <AssetSelector
+        visible={showAssetSelector}
+        onClose={() => setShowAssetSelector(false)}
+        onSelect={(asset) => {
+          setSelectedAsset({
+            asset_id: asset.asset_id,
+            ticker: asset.ticker,
+            name: asset.name,
+            isRGB: asset.isRGB || asset.protocol === 'RGB',
+            balance: asset.balance,
+          });
+        }}
+        assets={allAssets.map((a) => ({
+          asset_id: a.asset_id,
+          ticker: a.ticker,
+          name: a.name,
+          balance: a.balance,
+          isRGB: a.isRGB,
+          protocol: a.isRGB ? ('RGB' as const) : undefined,
+        }))}
+        selectedAssetId={selectedAsset?.asset_id}
+        title="Select Asset"
+      />
+
+      {/* Multi-currency amount editor (BTC / sats / USD / fiat) */}
+      <AmountEditorModal
+        visible={showAmountEditor}
+        onClose={() => setShowAmountEditor(false)}
+        initialSats={currentAmountSats}
+        rates={fiatRates}
+        bitcoinUnit={bitcoinUnit}
+        onConfirm={applyAmountSats}
+      />
     </SafeAreaView>
   );
 }
@@ -1866,7 +2024,8 @@ const styles = StyleSheet.create({
   
   scrollContent: {
     paddingHorizontal: theme.spacing[5],
-    paddingBottom: theme.spacing[6],
+    paddingTop: theme.spacing[4],
+    paddingBottom: theme.spacing[10],
   },
   
   // Amount Section
@@ -2109,16 +2268,19 @@ const styles = StyleSheet.create({
   assetTabs: {
     flexDirection: 'row',
     gap: theme.spacing[2],
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[3],
   },
   assetTab: {
     flex: 1,
-    paddingVertical: theme.spacing[3],
+    flexDirection: 'row',
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1.5,
     borderColor: theme.colors.border.medium,
     backgroundColor: theme.colors.surface.primary,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   assetTabText: {
     fontSize: theme.typography.fontSize.base,
@@ -2208,7 +2370,9 @@ const styles = StyleSheet.create({
   qrSection: {
     backgroundColor: theme.colors.surface.primary,
     borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
+    paddingHorizontal: theme.spacing[6],
+    paddingTop: theme.spacing[4],
+    paddingBottom: theme.spacing[5],
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: {
@@ -2219,18 +2383,18 @@ const styles = StyleSheet.create({
     shadowRadius: 6.27,
     elevation: 10,
   },
-  
+
   qrHeader: {
     alignItems: 'center',
-    marginBottom: theme.spacing[5],
+    marginBottom: theme.spacing[3],
   },
-  
+
   qrTitle: {
-    fontSize: theme.typography.fontSize.xl,
+    fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.text.primary,
     textAlign: 'center',
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
   },
   
   qrAmountContainer: {
@@ -2252,8 +2416,8 @@ const styles = StyleSheet.create({
   },
   
   qrCodeWrapper: {
-    padding: theme.spacing[5],
-    backgroundColor: theme.colors.surface.primary,
+    padding: theme.spacing[4],
+    backgroundColor: '#FFFFFF', // QR must sit on white to stay scannable
     borderRadius: theme.borderRadius.xl,
     shadowColor: '#000',
     shadowOffset: {
@@ -2263,6 +2427,134 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+
+  // Compact methods/label chip above the QR
+  qrMethodsChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[1],
+    borderRadius: theme.borderRadius.full,
+    marginBottom: theme.spacing[4],
+    maxWidth: '100%',
+  },
+  qrMethodsChipText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+  },
+
+  // Asset "+" tab (square add button)
+  assetAddTab: {
+    width: 44,
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.medium,
+    backgroundColor: theme.colors.surface.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Network selector + dropdown
+  netSelectorWrap: {
+    marginBottom: theme.spacing[4],
+  },
+  netSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.medium,
+    backgroundColor: theme.colors.surface.primary,
+  },
+  netGlyph: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  netSelectorLabel: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  netSelectorSub: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+    marginTop: 1,
+  },
+  netDropdown: {
+    marginTop: theme.spacing[2],
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  netOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[3],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border.light,
+  },
+  netOptionLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+
+  // Amount row with pencil edit
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[5],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+  },
+  amountRowIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.primary[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  amountRowLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  amountRowValue: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.primary,
+    marginTop: 2,
+  },
+  amountEditBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: theme.colors.primary[50],
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   
   addressContainer: {

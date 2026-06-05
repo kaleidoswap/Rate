@@ -27,6 +27,15 @@ interface BalanceCardProps {
     };
     /** Show shimmer placeholders instead of the balance while first loading. */
     loading?: boolean;
+    /**
+     * Denomination-aware display (sats / BTC / fiat). When `primaryText` is
+     * provided it overrides the `formatSatoshis`/`bitcoinUnit`/USD rendering of
+     * the total, and tapping the balance calls `onCycleDenomination`.
+     */
+    primaryText?: string;
+    primaryUnitLabel?: string;
+    secondaryText?: string;
+    onCycleDenomination?: () => void;
 }
 
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
@@ -44,7 +53,12 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     formatUSD,
     byProtocol,
     loading,
+    primaryText,
+    primaryUnitLabel,
+    secondaryText,
+    onCycleDenomination,
 }) => {
+    const useDenominated = primaryText !== undefined;
     // Filter to only protocols with balance data
     const activeProtocols = byProtocol
         ? PROTOCOL_DISPLAY.filter(p => byProtocol[p.key as keyof typeof byProtocol])
@@ -60,6 +74,22 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         <Skeleton width={180} height={34} radius={10} style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
                         <Skeleton width={110} height={15} radius={7} style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} />
                     </View>
+                ) : useDenominated ? (
+                    <TouchableOpacity
+                        activeOpacity={onCycleDenomination ? 0.6 : 1}
+                        onPress={onCycleDenomination}
+                        disabled={!onCycleDenomination}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}. Tap to change denomination.`}
+                    >
+                        <View style={styles.balanceRow}>
+                            <Text style={styles.balanceAmount}>{primaryText}</Text>
+                            {!!primaryUnitLabel && (
+                                <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
+                            )}
+                        </View>
+                        <Text style={styles.balanceUsd}>{secondaryText ?? ''}</Text>
+                    </TouchableOpacity>
                 ) : (
                     <>
                         <View style={styles.balanceRow}>
