@@ -17,6 +17,7 @@ import {
   finalizeEvent,
   getPublicKey,
   nip04,
+  nip44,
   type Event,
   type Filter,
 } from 'nostr-tools';
@@ -124,23 +125,39 @@ export class NWCClient {
   private readonly secretBytes: Uint8Array;
   readonly clientPubkey: string;
   private readonly timeoutMs: number;
+  private readonly encryption: 'nip44' | 'nip04';
+  private readonly convKey: Uint8Array;
 
-  constructor(uri: string, options: { timeoutMs?: number } = {}) {
+  constructor(
+    uri: string,
+    options: { timeoutMs?: number; encryption?: 'nip44' | 'nip04' } = {},
+  ) {
     const info = parseNwcUri(uri);
     this.walletPubkey = info.walletPubkey;
     this.relays = info.relays;
     this.secretBytes = hexToBytes(info.secret);
     this.clientPubkey = getPublicKey(this.secretBytes);
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.encryption = options.encryption ?? 'nip44';
+    this.convKey = nip44.getConversationKey(this.secretBytes, this.walletPubkey);
     this.pool = new SimplePool();
   }
 
+  private encryptContent(plaintext: string): string {
+    return this.encryption === 'nip44'
+      ? nip44.encrypt(plaintext, this.convKey)
+      : nip04.encrypt(this.secretBytes, this.walletPubkey, plaintext);
+  }
+
+  /** Decrypt a response, detecting the scheme (NIP-04 carries a `?iv=` marker). */
+  private decryptContent(payload: string): string {
+    return payload.includes('?iv=')
+      ? nip04.decrypt(this.secretBytes, this.walletPubkey, payload)
+      : nip44.decrypt(payload, this.convKey);
+  }
+
   async request<T>(method: NwcMethod, params: Record<string, unknown>): Promise<T> {
-    const content = nip04.encrypt(
-      this.secretBytes,
-      this.walletPubkey,
-      JSON.stringify({ method, params }),
-    );
+    const content = this.encryptContent(JSON.stringify({ method, params }));
     const reqEvent = finalizeEvent(
       {
         kind: NWC_KIND_REQUEST,
@@ -165,7 +182,7 @@ export class NWCClient {
           clearTimeout(timer);
           sub.close();
           try {
-            const decrypted = nip04.decrypt(this.secretBytes, this.walletPubkey, event.content);
+            const decrypted = this.decryptContent(event.content);
             const response = JSON.parse(decrypted) as {
               error?: { code: string; message: string } | null;
               result?: T;
@@ -209,6 +226,33 @@ export class NWCClient {
 
   payInvoice(params: { invoice: string; amount?: number }): Promise<NwcPayInvoiceResult> {
     return this.request<NwcPayInvoiceResult>('pay_invoice', { ...params });
+  }
+
+  // --- KaleidoSwap RLN extensions (rln_*) — raw rgb-lightning-node responses ---
+
+  rlnNodeInfo(): Promise<unknown> {
+    return this.request<unknown>('rln_node_info', {});
+  }
+  rlnListAssets(params: Record<string, unknown> = {}): Promise<unknown> {
+    return this.request<unknown>('rln_list_assets', params);
+  }
+  rlnAssetBalance(params: { asset_id: string }): Promise<unknown> {
+    return this.request<unknown>('rln_asset_balance', params);
+  }
+  rlnRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
+    return this.request<unknown>('rln_rgb_invoice', params);
+  }
+  rlnDecodeRgbInvoice(params: { invoice: string }): Promise<unknown> {
+    return this.request<unknown>('rln_decode_rgb_invoice', params);
+  }
+  rlnSendAsset(params: Record<string, unknown>): Promise<unknown> {
+    return this.request<unknown>('rln_send_asset', params);
+  }
+  rlnListChannels(): Promise<unknown> {
+    return this.request<unknown>('rln_list_channels', {});
+  }
+  rlnGetAddress(): Promise<unknown> {
+    return this.request<unknown>('rln_get_address', {});
   }
 
   close(): void {
