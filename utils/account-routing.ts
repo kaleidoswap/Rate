@@ -24,6 +24,9 @@ export interface RouteOption {
   method: TransferMethod
   summary: string
   recommended: boolean
+  /** Set when the route can't be used (e.g. insufficient balance). */
+  disabled?: boolean
+  disabledReason?: string
 }
 
 export interface ResolvedSendRoute extends RouteOption {

@@ -18,6 +18,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { NetworkIcon } from '../components/NetworkIcon';
+import { PressableScale } from '../components/PressableScale';
+import { haptic } from '../utils/haptics';
 import { protocolManager } from '../services/protocols';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
@@ -583,31 +585,51 @@ function SendScreen({ navigation, route }: Props) {
 
       {/* Route selector — shows available send routes when multiple exist */}
       {sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
-        <View style={{ marginTop: 8, borderRadius: 8, backgroundColor: theme.colors.background.secondary, padding: 8 }}>
-          <Text style={{ fontSize: 12, color: theme.colors.text.secondary, marginBottom: 6 }}>Send via:</Text>
-          {sendRoutes.map((route, idx) => (
-            <TouchableOpacity
-              key={`${route.account}-${route.method}`}
-              onPress={() => setActiveRoute({ ...route, protocol: route.account })}
-              style={{
-                flexDirection: 'row', alignItems: 'center', padding: 8, borderRadius: 6, marginBottom: idx < sendRoutes.length - 1 ? 4 : 0,
-                backgroundColor: activeRoute?.account === route.account ? theme.colors.primary[500] + '20' : 'transparent',
-                borderWidth: activeRoute?.account === route.account ? 1 : 0,
-                borderColor: theme.colors.primary[500] + '40',
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, fontWeight: route.recommended ? '600' : '400', color: theme.colors.text.primary }}>
-                  {METHOD_META[route.method]?.label || route.method}
-                  {route.recommended ? ' (recommended)' : ''}
-                </Text>
-                <Text style={{ fontSize: 11, color: theme.colors.text.secondary }}>{route.summary}</Text>
-              </View>
-              {activeRoute?.account === route.account && (
-                <Ionicons name="checkmark-circle" size={18} color={theme.colors.primary[500]} />
-              )}
-            </TouchableOpacity>
-          ))}
+        <View style={{ marginTop: 14, gap: 8 }}>
+          <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+            Send via
+          </Text>
+          {sendRoutes.map((route) => {
+            const selected = activeRoute?.account === route.account && activeRoute?.method === route.method;
+            const disabled = !!route.disabled;
+            return (
+              <PressableScale
+                key={`${route.account}-${route.method}`}
+                onPress={() => { if (!disabled) { haptic.selection(); setActiveRoute({ ...route, protocol: route.account }); } }}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
+                  backgroundColor: selected ? theme.colors.primary[50] : theme.colors.background.secondary,
+                  borderWidth: 1,
+                  borderColor: selected ? theme.colors.primary[500] : theme.colors.border.light,
+                  opacity: disabled ? 0.5 : 1,
+                }}
+              >
+                <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
+                  <NetworkIcon network={String(route.account).toLowerCase()} size={20} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text.primary }}>
+                      {METHOD_META[route.method]?.label || route.method}
+                    </Text>
+                    {route.recommended && (
+                      <View style={{ backgroundColor: theme.colors.primary[500], borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '800', color: theme.colors.text.inverse, letterSpacing: 0.3 }}>BEST</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={{ fontSize: 11.5, color: disabled ? theme.colors.error[500] : theme.colors.text.tertiary, marginTop: 1 }} numberOfLines={1}>
+                    {disabled ? (route.disabledReason || 'Unavailable') : route.summary}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={selected ? 'radio-button-on' : 'radio-button-off'}
+                  size={20}
+                  color={selected ? theme.colors.primary[500] : theme.colors.text.tertiary}
+                />
+              </PressableScale>
+            );
+          })}
         </View>
       )}
 
