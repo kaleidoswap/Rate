@@ -115,7 +115,8 @@ export async function initializeWdkProtocols(
           config = {
             protocol: 'SPARK',
             mnemonic,
-            network: parsed.network || 'mainnet',
+            // Default Spark to regtest (test network); changeable per-account.
+            network: parsed.network || 'regtest',
           } as SparkAdapterConfig
           break
 

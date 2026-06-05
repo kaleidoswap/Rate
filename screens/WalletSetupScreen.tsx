@@ -25,6 +25,7 @@ import type { DisclosureLevel } from '@kaleidorg/wallet-protocols';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
+import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 
 interface Props {
@@ -114,7 +115,15 @@ export default function WalletSetupScreen({ navigation }: Props) {
     } else if (step === 'mode') {
       // Persist the chosen disclosure level; reversible later in Settings.
       dispatch(setDisclosureLevel(mode));
-      animateTransition('networks');
+      if (mode === 'lite') {
+        // Lite hides network management — just enable Spark + Arkade + Liquid on
+        // their default test networks and skip straight to backup. Network can be
+        // changed later in Settings.
+        setNetworks({ spark: true, arkade: true, liquid: true, rln: false });
+        handleCreate();
+      } else {
+        animateTransition('networks');
+      }
     } else if (step === 'networks') {
       handleCreate();
     }
@@ -165,14 +174,16 @@ export default function WalletSetupScreen({ navigation }: Props) {
     try {
       const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [];
 
+      // Default per-protocol networks (changeable later in Settings):
+      //   Spark → regtest, Arkade → signet (Mutinynet), Liquid → testnet.
       if (networks.spark) {
-        selectedNetworks.push({ type: 'spark', enabled: true, config: '{}' });
+        selectedNetworks.push({ type: 'spark', enabled: true, config: JSON.stringify({ network: 'regtest' }) });
       }
       if (networks.liquid) {
-        selectedNetworks.push({ type: 'liquid', enabled: true, config: '{}' });
+        selectedNetworks.push({ type: 'liquid', enabled: true, config: JSON.stringify({ network: 'testnet' }) });
       }
       if (networks.arkade) {
-        selectedNetworks.push({ type: 'arkade', enabled: true, config: '{}' });
+        selectedNetworks.push({ type: 'arkade', enabled: true, config: JSON.stringify({ network: 'signet' }) });
       }
       if (networks.rln) {
         selectedNetworks.push({
@@ -392,7 +403,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         >
           <View style={styles.networkInfo}>
             <View style={[styles.iconContainer, { backgroundColor: '#FEF3C7' }]}>
-              <Ionicons name="flash" size={22} color="#F59E0B" />
+              <NetworkIcon network="spark" size={24} />
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>Spark</Text>
@@ -440,7 +451,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         >
           <View style={styles.networkInfo}>
             <View style={[styles.iconContainer, { backgroundColor: '#E0E7FF' }]}>
-              <Ionicons name="cube" size={22} color="#6366F1" />
+              <NetworkIcon network="arkade" size={24} />
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>Arkade</Text>
@@ -464,7 +475,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         >
           <View style={styles.networkInfo}>
             <View style={[styles.iconContainer, { backgroundColor: '#D1FAE5' }]}>
-              <Ionicons name="color-palette" size={22} color="#10B981" />
+              <NetworkIcon network="rgb" size={24} />
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>RGB Node</Text>
