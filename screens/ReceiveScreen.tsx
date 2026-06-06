@@ -21,7 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
-import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-protocols';
+import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {

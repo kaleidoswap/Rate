@@ -2,7 +2,7 @@
 
 // store/slices/settingsSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import type { DisclosureLevel } from '@kaleidorg/wallet-protocols';
+import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import type { RootState } from '../index';
 
 // KaleidoMind (on-device AI) mode. Chosen once in onboarding, changeable in

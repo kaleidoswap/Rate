@@ -2,7 +2,7 @@
  * WDK Protocol Wiring — KaleidoSwap App
  * -------------------------------------
  * Parallel to ./index.ts (native adapters), this wires the WDK-backed adapters
- * (@kaleidorg/wallet-protocols `*WdkAdapter`) into a ProtocolManager.
+ * (@kaleidorg/wallet-engine `*WdkAdapter`) into a ProtocolManager.
  *
  * Two RN-specific concerns are handled here:
  *  1. Module loading: WDK adapters call `loadWdkModule()`, which we satisfy with a
@@ -23,7 +23,7 @@ import {
   networkTypeToProtocol,
   kaleidoClientManager,
   flashnetClientManager,
-} from '@kaleidorg/wallet-protocols'
+} from '@kaleidorg/wallet-engine'
 import { NwcRgbAdapter } from '../nwc/NwcRgbAdapter'
 import type {
   ProtocolType,
@@ -31,7 +31,7 @@ import type {
   LiquidAdapterConfig,
   RlnAdapterConfig,
   ArkadeAdapterConfig,
-} from '@kaleidorg/wallet-protocols'
+} from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
 
 /**
@@ -166,6 +166,16 @@ export async function initializeWdkProtocols(
         }
 
         case 'RGB': {
+          // NWC mode (default on mobile): the NwcRgbAdapter drives a remote node over
+          // relays and reads its connection string from SecureStore — no HTTP nodeUrl.
+          if (RGB_VIA_NWC) {
+            config = {
+              protocol: 'RGB',
+              mnemonic,
+              network: parsed.network || 'regtest',
+            } as RlnAdapterConfig
+            break
+          }
           const nodeUrl =
             parsed.type === 'remote' ? parsed.url : parsed.nodeUrl || 'http://127.0.0.1:3000'
           if (!nodeUrl) {

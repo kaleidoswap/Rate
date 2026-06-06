@@ -1,7 +1,7 @@
 /**
  * NWC-backed RGB protocol adapter.
  *
- * Implements the wallet-protocols `IProtocolAdapter` for the 'RGB' protocol by
+ * Implements the wallet-engine `IProtocolAdapter` for the 'RGB' protocol by
  * driving a remote RGB Lightning Node entirely over Nostr Wallet Connect
  * (NIP-47) — no direct HTTP `nodeUrl`. Used on mobile when the wallet is
  * configured to reach RLN via an NWC connection string (the desktop hub).
@@ -32,7 +32,7 @@ import type {
   Address,
   ConnectionInfo,
   TransactionFilter,
-} from '@kaleidorg/wallet-protocols';
+} from '@kaleidorg/wallet-engine';
 
 import { NWCClient, parseNwcUri } from './NWCExternalClient';
 

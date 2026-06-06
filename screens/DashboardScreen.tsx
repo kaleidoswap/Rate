@@ -32,7 +32,7 @@ import {
 } from '../store/slices/settingsSlice';
 import QVACService from '../services/QVACService';
 import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
-import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
+import { policyFor, aggregateForLite } from '@kaleidorg/wallet-engine';
 
 import { theme } from '../theme';
 import { VoiceAgentFAB } from '../components/voice-agent/VoiceAgentFAB';

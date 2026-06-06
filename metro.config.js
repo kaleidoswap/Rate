@@ -7,7 +7,7 @@ const path = require('path');
 const config = getDefaultConfig(__dirname);
 
 // Allow Metro to resolve local packages still linked via file:
-// (@kaleidorg/wallet-protocols now comes from npm — no sibling watchFolder needed).
+// (@kaleidorg/wallet-engine now comes from npm — no sibling watchFolder needed).
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 // @kaleidorg/mind — the shared agentic engine, also published to npm as
 // @kaleidorg/mind. Linked via file: for fast local dev (pure JS dist/, no
@@ -70,7 +70,7 @@ config.resolver.alias = {
 // The WDK wallet modules now come from npm (published versions) / a github dep, so
 // they resolve from node_modules normally — no sibling watchFolders needed. Keep the
 // shared @tetherto/wdk-wallet base as a single copy to avoid duplicate instances
-// (only @kaleidorg/wallet-protocols remains a file: sibling, watched above).
+// (only @kaleidorg/wallet-engine remains a file: sibling, watched above).
 config.resolver.extraNodeModules['@tetherto/wdk-wallet'] = path.resolve(
   __dirname,
   'node_modules/@tetherto/wdk-wallet'

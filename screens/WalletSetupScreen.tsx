@@ -19,20 +19,26 @@ import { useDispatch } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as SecureStore from 'expo-secure-store';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
 import { setDisclosureLevel } from '../store/slices/settingsSlice';
-import type { DisclosureLevel } from '@kaleidorg/wallet-protocols';
+import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
+import { NWCClient, parseNwcUri } from '../services/nwc/NWCExternalClient';
+
+/** SecureStore key shared with NwcRgbAdapter + NWCConnectScreen. */
+const NWC_CONNECTION_KEY = 'nwc_connection_string';
 
 interface Props {
   navigation: any;
 }
 
-type SetupStep = 'welcome' | 'mode' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
+type SetupStep = 'welcome' | 'mode' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
 
 export default function WalletSetupScreen({ navigation }: Props) {
   const dispatch = useDispatch();
@@ -54,9 +60,14 @@ export default function WalletSetupScreen({ navigation }: Props) {
     rln: true,
   });
 
-  // RLN Config
-  const [rlnType, setRlnType] = useState<'local' | 'remote'>('remote');
-  const [rlnRemoteUrl, setRlnRemoteUrl] = useState('');
+  // RLN (RGB Lightning Node) over NWC — paste/scan a connection string to drive a
+  // remote node. Optional: the user can skip and add it later in Settings.
+  const [nwcUri, setNwcUri] = useState('');
+  const [rlnConnected, setRlnConnected] = useState(false);
+  const [rlnConnecting, setRlnConnecting] = useState(false);
+  const [rlnError, setRlnError] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -116,22 +127,82 @@ export default function WalletSetupScreen({ navigation }: Props) {
       // Persist the chosen disclosure level; reversible later in Settings.
       dispatch(setDisclosureLevel(mode));
       if (mode === 'lite') {
-        // Lite hides network management — just enable Spark + Arkade + Liquid on
-        // their default test networks and skip straight to backup. Network can be
-        // changed later in Settings.
-        setNetworks({ spark: true, arkade: true, liquid: true, rln: false });
-        handleCreate();
-      } else {
-        animateTransition('networks');
+        // Lite hides network management — enable Spark + Arkade + Liquid on their
+        // default test networks. RLN stays governed by the next (NWC) step.
+        setNetworks((prev) => ({ ...prev, spark: true, arkade: true, liquid: true }));
       }
+      // Both modes go through the RLN-over-NWC step (skippable).
+      animateTransition('rln');
     } else if (step === 'networks') {
       handleCreate();
     }
   };
 
+  /** Advance past the RLN step: Lite goes straight to backup, Advanced picks networks. */
+  const proceedAfterRln = () => {
+    if (mode === 'lite') {
+      handleCreate();
+    } else {
+      animateTransition('networks');
+    }
+  };
+
+  const handleConnectRln = async () => {
+    Keyboard.dismiss();
+    const uri = nwcUri.trim();
+    setRlnError('');
+    try {
+      parseNwcUri(uri); // validate shape before hitting the network
+    } catch (e) {
+      setRlnError(e instanceof Error ? e.message : 'Invalid connection string');
+      return;
+    }
+    setRlnConnecting(true);
+    let client: NWCClient | null = null;
+    try {
+      client = new NWCClient(uri, { timeoutMs: 20_000 });
+      await client.getInfo(); // live connection test
+      await SecureStore.setItemAsync(NWC_CONNECTION_KEY, uri);
+      setRlnConnected(true);
+      proceedAfterRln();
+    } catch (e) {
+      setRlnError(e instanceof Error ? e.message : 'Could not reach the node');
+    } finally {
+      client?.close();
+      setRlnConnecting(false);
+    }
+  };
+
+  const handleSkipRln = async () => {
+    Keyboard.dismiss();
+    setRlnConnected(false);
+    // Drop any previously stored string so a skipped setup doesn't reuse a stale node.
+    await SecureStore.deleteItemAsync(NWC_CONNECTION_KEY).catch(() => {});
+    proceedAfterRln();
+  };
+
+  const handleOpenScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const res = await requestCameraPermission();
+      if (!res.granted) {
+        setRlnError('Camera permission is required to scan the QR code');
+        return;
+      }
+    }
+    setRlnError('');
+    setShowScanner(true);
+  };
+
+  const handleScanned = (data: string) => {
+    setShowScanner(false);
+    setNwcUri(data.trim());
+  };
+
   const handleBack = () => {
     Keyboard.dismiss();
     if (step === 'networks') {
+      animateTransition('rln');
+    } else if (step === 'rln') {
       animateTransition('mode');
     } else if (step === 'mode') {
       animateTransition('welcome');
@@ -185,11 +256,13 @@ export default function WalletSetupScreen({ navigation }: Props) {
       if (networks.arkade) {
         selectedNetworks.push({ type: 'arkade', enabled: true, config: JSON.stringify({ network: 'signet' }) });
       }
-      if (networks.rln) {
+      // RLN is reached over NWC: enable it only when the user connected a node.
+      // The NwcRgbAdapter reads the connection string from SecureStore.
+      if (rlnConnected) {
         selectedNetworks.push({
           type: 'rln',
           enabled: true,
-          config: JSON.stringify({ type: rlnType, url: rlnRemoteUrl })
+          config: JSON.stringify({ via: 'nwc', network: 'regtest' })
         });
       }
 
@@ -229,7 +302,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const renderStepIndicator = () => {
-    const steps: SetupStep[] = ['welcome', 'mode', 'networks'];
+    const steps: SetupStep[] = mode === 'advanced'
+      ? ['welcome', 'mode', 'rln', 'networks']
+      : ['welcome', 'mode', 'rln'];
     const currentIdx = steps.indexOf(step);
 
     if (step === 'creating' || step === 'success') return null;
@@ -465,75 +540,69 @@ export default function WalletSetupScreen({ navigation }: Props) {
             thumbColor={networks.arkade ? theme.colors.primary[500] : theme.colors.gray[100]}
           />
         </TouchableOpacity>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={styles.networkItem}
-          onPress={() => setNetworks(prev => ({ ...prev, rln: !prev.rln }))}
-          activeOpacity={0.7}
-        >
-          <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: '#D1FAE5' }]}>
-              <NetworkIcon network="rgb" size={24} />
-            </View>
-            <View style={styles.networkTextContainer}>
-              <Text style={styles.networkName}>RGB Node</Text>
-              <Text style={styles.networkDesc}>Smart contracts & tokens</Text>
-            </View>
-          </View>
-          <Switch
-            value={networks.rln}
-            onValueChange={(v) => setNetworks(prev => ({ ...prev, rln: v }))}
-            trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
-            thumbColor={networks.rln ? theme.colors.primary[500] : theme.colors.gray[100]}
-          />
-        </TouchableOpacity>
-
-        {networks.rln && (
-          <View style={styles.rlnConfig}>
-            <Text style={styles.subLabel}>Connection Type</Text>
-            <View style={styles.radioGroup}>
-              <TouchableOpacity
-                style={[styles.radioButton, rlnType === 'local' && styles.radioButtonActive]}
-                onPress={() => setRlnType('local')}
-              >
-                <Ionicons
-                  name="phone-portrait-outline"
-                  size={16}
-                  color={rlnType === 'local' ? theme.colors.primary[600] : theme.colors.text.secondary}
-                />
-                <Text style={[styles.radioText, rlnType === 'local' && styles.radioTextActive]}>Local</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.radioButton, rlnType === 'remote' && styles.radioButtonActive]}
-                onPress={() => setRlnType('remote')}
-              >
-                <Ionicons
-                  name="cloud-outline"
-                  size={16}
-                  color={rlnType === 'remote' ? theme.colors.primary[600] : theme.colors.text.secondary}
-                />
-                <Text style={[styles.radioText, rlnType === 'remote' && styles.radioTextActive]}>Remote</Text>
-              </TouchableOpacity>
-            </View>
-
-            {rlnType === 'remote' && (
-              <View style={styles.inputContainer}>
-                <Input
-                  value={rlnRemoteUrl}
-                  onChangeText={setRlnRemoteUrl}
-                  placeholder="https://your-node.example.com"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  variant="outlined"
-                />
-              </View>
-            )}
-          </View>
-        )}
       </Card>
+    </ScrollView>
+  );
+
+  const renderRlnStep = () => (
+    <ScrollView
+      style={styles.stepContent}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="always"
+      keyboardDismissMode="none"
+      contentContainerStyle={styles.scrollContent}
+    >
+      <View style={styles.iconHeader}>
+        <View style={[styles.welcomeIconContainer, { backgroundColor: '#D1FAE5' }]}>
+          <NetworkIcon network="rgb" size={32} />
+        </View>
+      </View>
+
+      <Text style={styles.stepTitle}>RGB Lightning Node</Text>
+      <Text style={styles.stepDescription}>
+        Hold RGB assets and open Lightning channels via your own RLN node. Connect it over
+        Nostr Wallet Connect — or skip and add it later in Settings.
+      </Text>
+
+      <View style={styles.experimentalBadge}>
+        <Ionicons name="flask-outline" size={14} color={theme.colors.warning[600]} />
+        <Text style={styles.experimentalText}>Experimental · Test network only</Text>
+      </View>
+
+      <View style={styles.inputWrapper}>
+        <Input
+          label="NWC connection string"
+          value={nwcUri}
+          onChangeText={(t) => { setNwcUri(t); if (rlnError) setRlnError(''); }}
+          placeholder="nostr+walletconnect://..."
+          autoCapitalize="none"
+          autoCorrect={false}
+          multiline
+          editable={!rlnConnecting}
+          variant="outlined"
+        />
+      </View>
+
+      <TouchableOpacity style={styles.scanButton} onPress={handleOpenScanner} disabled={rlnConnecting}>
+        <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[600]} />
+        <Text style={styles.scanButtonText}>Scan QR code</Text>
+      </TouchableOpacity>
+
+      {!!rlnError && (
+        <AlertBanner variant="error" style={styles.rlnErrorBox}>
+          <Ionicons name="alert-circle" size={20} color={theme.colors.error[500]} />
+          <Text style={styles.rlnErrorText}>{rlnError}</Text>
+        </AlertBanner>
+      )}
+
+      <View style={styles.tipContainer}>
+        <View style={styles.tipIcon}>
+          <Ionicons name="bulb-outline" size={18} color={theme.colors.info[500]} />
+        </View>
+        <Text style={styles.tipText}>
+          Get a connection string from the KaleidoSwap desktop app (or your self-hosted node).
+        </Text>
+      </View>
     </ScrollView>
   );
 
@@ -747,6 +816,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           <View style={styles.animatedContent}>
             {step === 'welcome' && renderWelcomeStep()}
             {step === 'mode' && renderModeStep()}
+            {step === 'rln' && renderRlnStep()}
             {step === 'networks' && renderNetworksStep()}
             {step === 'backup' && renderBackupStep()}
             {step === 'confirmBackup' && renderConfirmBackupStep()}
@@ -769,7 +839,44 @@ export default function WalletSetupScreen({ navigation }: Props) {
             />
           </View>
         )}
+
+        {step === 'rln' && (
+          <View style={styles.footer}>
+            <Button
+              title={rlnConnecting ? 'Connecting…' : 'Connect RLN'}
+              onPress={handleConnectRln}
+              disabled={rlnConnecting || !nwcUri.trim()}
+              loading={rlnConnecting}
+              style={styles.nextButton}
+            />
+            <TouchableOpacity
+              style={styles.skipButton}
+              onPress={handleSkipRln}
+              disabled={rlnConnecting}
+            >
+              <Text style={styles.skipButtonText}>Skip for now</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </KeyboardAvoidingView>
+
+      {showScanner && (
+        <View style={styles.scannerOverlay}>
+          <CameraView
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={({ data }) => handleScanned(data)}
+          />
+          <SafeAreaView style={styles.scannerControls}>
+            <Text style={styles.scannerHint}>Scan the NWC connection QR code</Text>
+            <TouchableOpacity style={styles.scannerClose} onPress={() => setShowScanner(false)}>
+              <Ionicons name="close" size={24} color="white" />
+              <Text style={styles.scannerCloseText}>Cancel</Text>
+            </TouchableOpacity>
+          </SafeAreaView>
+        </View>
+      )}
     </View>
   );
 }
@@ -900,9 +1007,6 @@ const styles = StyleSheet.create({
   inputWrapper: {
     marginBottom: theme.spacing[4],
   },
-  inputContainer: {
-    marginTop: theme.spacing[4],
-  },
   tipContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1010,25 +1114,25 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.border.light,
     marginLeft: theme.spacing[4] + 44 + theme.spacing[3],
   },
-  rlnConfig: {
-    padding: theme.spacing[4],
-    backgroundColor: theme.colors.gray[50],
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border.light,
-  },
-  subLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[3],
-  },
-  radioGroup: {
+  experimentalBadge: {
     flexDirection: 'row',
-    gap: theme.spacing[3],
-    marginBottom: theme.spacing[3],
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: theme.spacing[2],
+    backgroundColor: theme.colors.warning[50],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.full,
+    marginBottom: theme.spacing[5],
   },
-  radioButton: {
-    flex: 1,
+  experimentalText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    color: theme.colors.warning[700] || theme.colors.warning[600],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  scanButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1036,20 +1140,60 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[3],
     borderRadius: theme.borderRadius.md,
     borderWidth: 1.5,
-    borderColor: theme.colors.border.medium,
-    backgroundColor: theme.colors.surface.primary,
-  },
-  radioButtonActive: {
-    borderColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[200],
     backgroundColor: theme.colors.primary[50],
+    marginTop: theme.spacing[3],
   },
-  radioText: {
+  scanButtonText: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    fontWeight: '500',
-  },
-  radioTextActive: {
+    fontWeight: '600',
     color: theme.colors.primary[600],
+  },
+  rlnErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing[3],
+    marginTop: theme.spacing[4],
+  },
+  rlnErrorText: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.error[600] || theme.colors.error[500],
+    lineHeight: 20,
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'black',
+    zIndex: 100,
+  },
+  scannerControls: {
+    flex: 1,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: theme.spacing[10],
+  },
+  scannerHint: {
+    color: 'white',
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: theme.spacing[4],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.full,
+    overflow: 'hidden',
+  },
+  scannerClose: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.full,
+  },
+  scannerCloseText: {
+    color: 'white',
+    fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
   },
   centerContent: {
