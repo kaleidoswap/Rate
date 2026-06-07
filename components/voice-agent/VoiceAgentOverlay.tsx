@@ -22,8 +22,7 @@ import Animated, {
 import { theme } from '../../theme';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
-import { createQVACTools } from '../../services/qvacTools';
-import { AIAssistantFunctions } from '../../services/aiAssistantFunctions';
+import { createMindAgent } from '../../services/mindAgent';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 interface Bubble {
@@ -35,12 +34,6 @@ interface ConfirmState {
   call: { name: string; arguments: Record<string, unknown> };
   resolve: (v: { approved: boolean; reason?: string }) => void;
 }
-
-const SYSTEM_PROMPT =
-  'You are KaleidoMind, the voice assistant inside the KaleidoSwap Bitcoin wallet. ' +
-  'Be concise and conversational — your replies are spoken aloud. Help the user check ' +
-  'balances, create invoices/addresses to receive, and send payments using the available ' +
-  'tools. Always confirm amounts before spending. Keep answers to one or two short sentences.';
 
 let _id = 0;
 const nextId = () => `${Date.now()}-${_id++}`;
@@ -61,7 +54,9 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
 
 const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
   const qvac = useQVAC();
-  const tools = useMemo(() => createQVACTools(new AIAssistantFunctions()), []);
+  // Same KaleidoMind funnel as the chat screen — fast-path, recipes, contract
+  // wallet tools, memory + on-device RAG, confirm gate.
+  const agent = useMemo(() => createMindAgent(qvac.service), [qvac.service]);
   const voiceRef = useRef<VoiceInputRef>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -122,19 +117,13 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     async (userText: string) => {
       setError(null);
       appendBubble('user', userText);
-      const history = [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...bubbles.map((b) => ({ role: b.role, content: b.text })),
-        { role: 'user', content: userText },
-      ];
+      const priorHistory = bubbles.map((b) => ({ role: b.role, content: b.text }));
       setPhase('thinking');
       const assistantId = appendBubble('assistant', '');
       let streamed = '';
       try {
-        const res = await qvac.service.chatAgentic({
-          messages: history,
-          tools,
-          maxTurns: 5,
+        const res = await agent.runTurn(userText, {
+          history: priorHistory,
           onToken: (tok) => {
             streamed += tok;
           },
@@ -157,7 +146,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         setPhase('idle');
       }
     },
-    [bubbles, qvac.service, tools]
+    [bubbles, agent]
   );
 
   // VoiceInput callbacks
