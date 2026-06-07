@@ -46,6 +46,9 @@ import {
   createL402ToolSource,
   SkillRegistry,
   skillsFromBundle,
+  RecipeRegistry,
+  runRecipe,
+  paymentsRecipe,
   type LLMProvider,
   type InProcessTool,
   type SkillBundle,
@@ -209,6 +212,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
     () => new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle)),
     [],
   );
+
+  // Recipes = mobile multi-step ("recipes, not planning"). A matched recipe
+  // (e.g. "pay bob 3 EUR") carries the plan; the model only fills slots, the
+  // deterministic chain runs locally, and the spend is confirmation-gated.
+  const recipes = useMemo(() => new RecipeRegistry([paymentsRecipe]), []);
 
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
@@ -492,6 +500,28 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     const assistantId = nextId();
     addMessage({ id: assistantId, text: '', isUser: false, timestamp: new Date(), streaming: true });
+
+    // ── Tier-2: recipe fast-path (mobile multi-step) ──
+    // A known chain like "pay bob 3 EUR": the recipe carries the plan, the model
+    // only fills slots (~1 inference), the deterministic steps run on-device, and
+    // the spend is confirmation-gated. Only fires when a recipient is confidently
+    // extracted; otherwise fall through to the agentic loop below.
+    const recipe = recipes.select(messageText);
+    if (recipe && recipe.extract?.(messageText)?.recipient) {
+      const recipeProvider: LLMProvider = {
+        name: 'qvac',
+        runTurn: (input) => qvac.service.runProviderTurn(input),
+      };
+      const result = await runRecipe(recipe, messageText, {
+        provider: recipeProvider,
+        tools: new ToolRegistry([buildWalletToolSource()]),
+        onConfirm: requestConfirmation,
+        onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
+      });
+      updateMessage(assistantId, () => ({ text: result.text, streaming: false }));
+      setIsLoading(false);
+      return;
+    }
 
     // Track which agentic turn is currently streaming so we show only the
     // latest turn's text — early reasoning turns are replaced by the final
