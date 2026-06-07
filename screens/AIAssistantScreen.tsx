@@ -51,6 +51,8 @@ import {
   paymentsRecipe,
   FastPath,
   WALLET_FAST_INTENTS,
+  InMemoryMemoryStore,
+  createMemoryToolSource,
   type LLMProvider,
   type InProcessTool,
   type SkillBundle,
@@ -58,6 +60,7 @@ import {
 } from '@kaleidorg/mind';
 import { protocolManager } from '../services/protocols';
 import { buildWalletToolSource } from '../services/walletTools';
+import { asyncStorageMemoryIO } from '../services/aiMemory';
 // Skills authored as SKILL.md under ./skills, bundled to JSON at build time
 // (`npm run bundle-skills`). Same authoring + loader the desktop uses.
 import skillBundle from '../skills.bundle.json';
@@ -154,6 +157,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
   const tools = useMemo(() => createQVACTools(aiFunctions), [aiFunctions]);
 
+  // Long-term memory (remember/recall) — kaleido-mind owns the logic; we inject
+  // on-device AsyncStorage persistence. Available to the agent in every turn.
+  const memoryStore = useMemo(() => new InMemoryMemoryStore({ io: asyncStorageMemoryIO() }), []);
+
   // Shared @kaleido/mind engine: same agentic loop on mobile, desktop and agent.
   // Provider = QVAC (local or P2P-delegated); tool source = the on-device wallet
   // tools (handlers run here, so signing never leaves the phone). The QVACService
@@ -174,6 +181,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
       (t) => t.name === 'find_merchant_locations' || t.name === 'get_merchant_info',
     );
     const merchantSource = new InProcessToolSource('merchant', merchantTools);
+    // Memory tools (remember/recall) over the persisted store.
+    const memorySource = createMemoryToolSource(memoryStore);
 
     // Shared wallet payment path — used by every "agent spends sats" source
     // (L402, Bitrefill, …). Pays a BOLT11 with the on-device Lightning wallet
@@ -199,11 +208,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     return new Engine({
       provider,
-      tools: new ToolRegistry([walletSource, merchantSource, l402Source]),
+      tools: new ToolRegistry([walletSource, merchantSource, memorySource, l402Source]),
       defaultMaxTurns: 5,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tools, qvac.service]);
+  }, [tools, qvac.service, memoryStore]);
 
   // Skills route a query to a focused playbook + a curated tool subset
   // (progressive disclosure — the small mobile model never sees every tool at
@@ -578,6 +587,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
         String(SYSTEM_PROMPT.content),
         skill,
       );
+      // Memory is ambient: keep remember/recall available even when a skill
+      // narrows the toolset, so the assistant can always recall preferences.
+      const scopedTools = allowedTools
+        ? [...new Set([...allowedTools, 'remember', 'recall'])]
+        : allowedTools;
       const chatMessages = [
         { role: 'system', content: skillSystem },
         ...history,
@@ -585,7 +599,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       ];
 
       const res = await engine.runAgentic(chatMessages as MindMessage[], {
-        allowedTools,
+        allowedTools: scopedTools,
         onStart: (requestId) => setActiveRequestId(requestId),
         onToken: (token, turn) => {
           updateMessage(assistantId, (m) => {
