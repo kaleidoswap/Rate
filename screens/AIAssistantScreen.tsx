@@ -33,6 +33,7 @@ import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import QVACSettingsSheet from '../components/QVACSettingsSheet';
+import { shareLightningInvoice } from '../components/InvoiceQRCode';
 import ToastService from '../services/ToastService';
 import { AIAssistantFunctions } from '../services/aiAssistantFunctions';
 import { createQVACTools } from '../services/qvacTools';
@@ -46,12 +47,22 @@ import {
   createL402ToolSource,
   SkillRegistry,
   skillsFromBundle,
+  RecipeRegistry,
+  runRecipe,
+  paymentsRecipe,
+  FastPath,
+  WALLET_FAST_INTENTS,
+  InMemoryMemoryStore,
+  createMemoryToolSource,
   type LLMProvider,
   type InProcessTool,
   type SkillBundle,
   type Message as MindMessage,
 } from '@kaleidorg/mind';
 import { protocolManager } from '../services/protocols';
+import { buildWalletToolSource } from '../services/walletTools';
+import { asyncStorageMemoryIO } from '../services/aiMemory';
+import { buildKnowledgeToolSource } from '../services/aiKnowledge';
 // Skills authored as SKILL.md under ./skills, bundled to JSON at build time
 // (`npm run bundle-skills`). Same authoring + loader the desktop uses.
 import skillBundle from '../skills.bundle.json';
@@ -128,6 +139,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   const scrollViewRef = useRef<ScrollView>(null);
   const voiceInputRef = useRef<VoiceInputRef>(null);
+  // Accumulates the model's reasoning for the in-flight assistant message so the
+  // provider (built once in a useMemo) can stream it into the right bubble.
+  const thinkingRef = useRef<{ id: string; text: string } | null>(null);
+  // Most recent successfully generated invoice — lets "share" act on it.
+  const lastInvoiceRef = useRef<{ invoice: string; amount: number; description?: string } | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -148,6 +164,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
   const tools = useMemo(() => createQVACTools(aiFunctions), [aiFunctions]);
 
+  // Long-term memory (remember/recall) — kaleido-mind owns the logic; we inject
+  // on-device AsyncStorage persistence. Available to the agent in every turn.
+  const memoryStore = useMemo(() => new InMemoryMemoryStore({ io: asyncStorageMemoryIO() }), []);
+
   // Shared @kaleido/mind engine: same agentic loop on mobile, desktop and agent.
   // Provider = QVAC (local or P2P-delegated); tool source = the on-device wallet
   // tools (handlers run here, so signing never leaves the phone). The QVACService
@@ -156,10 +176,31 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const engine = useMemo(() => {
     const provider: LLMProvider = {
       name: 'qvac',
-      runTurn: (input) => qvac.service.runProviderTurn(input),
+      runTurn: (input) =>
+        qvac.service.runProviderTurn({
+          ...input,
+          onThinking: (tok) => {
+            const cur = thinkingRef.current;
+            if (!cur) return;
+            cur.text += tok;
+            updateMessage(cur.id, () => ({ thinking: cur.text }));
+          },
+        }),
       cancel: (id) => qvac.service.cancelRequest(id),
     };
-    const walletSource = new InProcessToolSource('wallet', tools as unknown as InProcessTool[]);
+    // Wallet tools now come from the canonical @kaleidorg/mind contract, bound
+    // to the WDK adapters (same names/schemas as the desktop MCP). Handlers run
+    // on-device; spend tools stay confirmation-gated.
+    const walletSource = buildWalletToolSource();
+    // Keep the non-wallet (merchant/map) tools from the legacy set.
+    const merchantTools = (tools as unknown as InProcessTool[]).filter(
+      (t) => t.name === 'find_merchant_locations' || t.name === 'get_merchant_info',
+    );
+    const merchantSource = new InProcessToolSource('merchant', merchantTools);
+    // Memory tools (remember/recall) over the persisted store.
+    const memorySource = createMemoryToolSource(memoryStore);
+    // Knowledge (search_knowledge) — on-device RAG over the Bitcoin corpus.
+    const knowledgeSource = buildKnowledgeToolSource(qvac.service);
 
     // Shared wallet payment path — used by every "agent spends sats" source
     // (L402, Bitrefill, …). Pays a BOLT11 with the on-device Lightning wallet
@@ -185,11 +226,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     return new Engine({
       provider,
-      tools: new ToolRegistry([walletSource, l402Source]),
+      tools: new ToolRegistry([walletSource, merchantSource, memorySource, knowledgeSource, l402Source]),
       defaultMaxTurns: 5,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tools, qvac.service]);
+  }, [tools, qvac.service, memoryStore]);
 
   // Skills route a query to a focused playbook + a curated tool subset
   // (progressive disclosure — the small mobile model never sees every tool at
@@ -200,6 +241,16 @@ export default function AIAssistantScreen({ navigation }: Props) {
     () => new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle)),
     [],
   );
+
+  // Recipes = mobile multi-step ("recipes, not planning"). A matched recipe
+  // (e.g. "pay bob 3 EUR") carries the plan; the model only fills slots, the
+  // deterministic chain runs locally, and the spend is confirmation-gated.
+  const recipes = useMemo(() => new RecipeRegistry([paymentsRecipe]), []);
+
+  // Tier-0 fast-path: common reads (balance / address / price) answered with
+  // NO model at all. The wallet ToolRegistry is shared with the recipe tier.
+  const fastPath = useMemo(() => new FastPath(WALLET_FAST_INTENTS), []);
+  const walletRegistry = useMemo(() => new ToolRegistry([buildWalletToolSource()]), []);
 
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
@@ -466,6 +517,25 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     addMessage({ id: nextId(), text: messageText, isUser: true, timestamp: new Date() });
 
+    // Deterministic: a short "share" command opens the share sheet for the most
+    // recent invoice — no model needed. Kept narrow so it can't swallow other
+    // requests (e.g. "share my address").
+    if (lastInvoiceRef.current && /^\s*(share( it| the invoice)?|condividi(lo|la)?|invia(la)?|send it)\s*[.!]*\s*$/i.test(messageText)) {
+      const inv = lastInvoiceRef.current;
+      try {
+        const opened = await shareLightningInvoice(inv);
+        addMessage({
+          id: nextId(),
+          text: opened ? '📤 Opened the share sheet for your invoice.' : '📋 Sharing isn’t available, so I copied the invoice to your clipboard.',
+          isUser: false,
+          timestamp: new Date(),
+        });
+      } catch {
+        addMessage({ id: nextId(), text: 'Sorry, I couldn’t open the share sheet.', isUser: false, timestamp: new Date() });
+      }
+      return;
+    }
+
     if (!qvac.isReady) {
       addMessage({
         id: nextId(),
@@ -483,6 +553,57 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     const assistantId = nextId();
     addMessage({ id: assistantId, text: '', isUser: false, timestamp: new Date(), streaming: true });
+
+    // ── Tier-0: deterministic fast-path (no LLM) ──
+    // Common reads (balance / address / price) answered instantly by calling one
+    // tool directly — zero inference. Reserves the model for harder asks.
+    const fast = fastPath.select(messageText);
+    if (fast) {
+      try {
+        const r: any = await walletRegistry.execute(fast.tool, fast.args);
+        let text: string;
+        if (fast.intent.name === 'balance') {
+          const sats = Number(r?.total_sats ?? 0);
+          const n = r?.layers?.length ?? 0;
+          text = `You have ${sats.toLocaleString()} sats${n > 1 ? ` across ${n} layers` : ''}.`;
+        } else if (fast.intent.name === 'address') {
+          text = r?.address ? `Here's your receive address:\n\n\`${r.address}\`` : 'No address available right now.';
+        } else {
+          text = `Bitcoin is $${Number(r?.price_usd ?? 0).toLocaleString()}.`;
+        }
+        updateMessage(assistantId, () => ({ text, streaming: false }));
+      } catch (e) {
+        updateMessage(assistantId, () => ({ text: (e as Error)?.message ?? 'That failed.', streaming: false }));
+      }
+      setIsLoading(false);
+      return;
+    }
+
+    // ── Tier-2: recipe fast-path (mobile multi-step) ──
+    // A known chain like "pay bob 3 EUR": the recipe carries the plan, the model
+    // only fills slots (~1 inference), the deterministic steps run on-device, and
+    // the spend is confirmation-gated. Only fires when a recipient is confidently
+    // extracted; otherwise fall through to the agentic loop below.
+    const recipe = recipes.select(messageText);
+    if (recipe && recipe.extract?.(messageText)?.recipient) {
+      const recipeProvider: LLMProvider = {
+        name: 'qvac',
+        runTurn: (input) => qvac.service.runProviderTurn(input),
+      };
+      const result = await runRecipe(recipe, messageText, {
+        provider: recipeProvider,
+        tools: walletRegistry,
+        onConfirm: requestConfirmation,
+        onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
+      });
+      updateMessage(assistantId, () => ({ text: result.text, streaming: false }));
+      setIsLoading(false);
+      return;
+    }
+
+    // Route this turn's reasoning tokens (from the provider's onThinking) into
+    // this assistant bubble so they can be revealed on tap.
+    thinkingRef.current = { id: assistantId, text: '' };
 
     // Track which agentic turn is currently streaming so we show only the
     // latest turn's text — early reasoning turns are replaced by the final
@@ -507,6 +628,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
         String(SYSTEM_PROMPT.content),
         skill,
       );
+      // Memory is ambient: keep remember/recall available even when a skill
+      // narrows the toolset, so the assistant can always recall preferences.
+      const scopedTools = allowedTools
+        ? [...new Set([...allowedTools, 'remember', 'recall', 'search_knowledge'])]
+        : allowedTools;
       const chatMessages = [
         { role: 'system', content: skillSystem },
         ...history,
@@ -514,7 +640,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       ];
 
       const res = await engine.runAgentic(chatMessages as MindMessage[], {
-        allowedTools,
+        allowedTools: scopedTools,
         onStart: (requestId) => setActiveRequestId(requestId),
         onToken: (token, turn) => {
           updateMessage(assistantId, (m) => {
@@ -542,8 +668,26 @@ export default function AIAssistantScreen({ navigation }: Props) {
       });
 
       const lastCall = res.toolCalls[res.toolCalls.length - 1];
+
+      // If an invoice was just generated, remember it (so "share" can act on it)
+      // and offer to share it if the model didn't already mention it. Covers the
+      // legacy generate_invoice and the canonical *_create_invoice wallet tools.
+      let finalText = res.text?.trim() || 'Done.';
+      const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
+      const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;
+      if (invResult?.invoice) {
+        lastInvoiceRef.current = {
+          invoice: invResult.invoice,
+          amount: Number(invResult.amount_sats ?? invResult.amount) || 0,
+          description: invResult.description,
+        };
+        if (!/share/i.test(finalText)) {
+          finalText += '\n\nWant me to share it? Just say “share”.';
+        }
+      }
+
       updateMessage(assistantId, () => ({
-        text: res.text?.trim() || 'Done.',
+        text: finalText,
         streaming: false,
         functionCalled: lastCall?.name,
         functionResult: lastCall?.result,
@@ -562,6 +706,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       }));
     }
 
+    thinkingRef.current = null;
     setActiveRequestId(null);
     setIsLoading(false);
   };

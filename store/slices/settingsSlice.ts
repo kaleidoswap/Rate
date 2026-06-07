@@ -2,7 +2,7 @@
 
 // store/slices/settingsSlice.ts
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
-import type { DisclosureLevel } from '@kaleidorg/wallet-protocols';
+import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import type { RootState } from '../index';
 
 // KaleidoMind (on-device AI) mode. Chosen once in onboarding, changeable in
@@ -91,11 +91,25 @@ const settingsSlice = createSlice({
     setDisplayDenomination: (state, action: PayloadAction<DisplayDenomination>) => {
       state.displayDenomination = action.payload;
     },
+    // Single source of truth for the unit preference. Sets the display
+    // denomination AND mirrors the sats/BTC choice into `bitcoinUnit` (the
+    // amount-entry unit) so display and input never disagree. 'fiat' leaves the
+    // crypto entry unit on its last sats/BTC value.
+    setUnitPreference: (state, action: PayloadAction<DisplayDenomination>) => {
+      state.displayDenomination = action.payload;
+      if (action.payload === 'sats' || action.payload === 'BTC') {
+        state.bitcoinUnit = action.payload;
+      }
+    },
     // Advance the display denomination one step: sats → BTC → fiat → sats.
+    // Mirrors the sats/BTC choice into `bitcoinUnit` so tap-to-cycle stays
+    // consistent with amount entry.
     cycleDisplayDenomination: (state) => {
       const current = state.displayDenomination ?? 'sats';
       const idx = DENOMINATION_CYCLE.indexOf(current);
-      state.displayDenomination = DENOMINATION_CYCLE[(idx + 1) % DENOMINATION_CYCLE.length];
+      const next = DENOMINATION_CYCLE[(idx + 1) % DENOMINATION_CYCLE.length];
+      state.displayDenomination = next;
+      if (next === 'sats' || next === 'BTC') state.bitcoinUnit = next;
     },
     setTheme: (state, action: PayloadAction<'light' | 'dark' | 'system'>) => {
       state.theme = action.payload;
@@ -161,6 +175,7 @@ export const {
   setRemoteNodeUrl,
   setBitcoinUnit,
   setDisplayDenomination,
+  setUnitPreference,
   cycleDisplayDenomination,
   setTheme,
   setLanguage,

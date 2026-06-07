@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { AppDispatch, RootState } from '../store';
 import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
+import { formatAssetAmount } from '../utils/assetAmount';
 import { useAssetIcon } from '../utils';
 import { theme } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
@@ -30,8 +31,13 @@ interface Props {
 
 export default function AssetsScreen({ navigation }: Props) {
   const dispatch = useDispatch<AppDispatch>();
-  const { activeWallet } = useSelector((state: RootState) => state.wallet);
+  const { activeWallet, btcBalance } = useSelector((state: RootState) => state.wallet);
+  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { rgbAssets, isLoading } = useSelector((state: RootState) => state.assets);
+  // BTC is the base asset — show it in the list whenever a node is reporting a
+  // balance (i.e. a wallet/node is connected), even at zero.
+  const btcSats = (btcBalance?.vanilla?.spendable ?? 0) + (btcBalance?.colored?.spendable ?? 0);
+  const showBtc = btcBalance != null;
   const [refreshing, setRefreshing] = useState(false);
   const [showIssueModal, setShowIssueModal] = useState(false);
   // Issuing RGB assets is an advanced/experimental surface — hidden in Lite mode.
@@ -124,6 +130,42 @@ export default function AssetsScreen({ navigation }: Props) {
     </View>
   );
 
+  const renderBtcItem = () => {
+    const display =
+      bitcoinUnit === 'BTC' ? (btcSats / 1e8).toFixed(8) : btcSats.toLocaleString();
+    return (
+      <TouchableOpacity
+        key="BTC"
+        style={[styles.assetCard, styles.firstAssetCard]}
+        onPress={() =>
+          navigation.navigate('AssetDetail', {
+            asset: { asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', precision: 8, isRGB: false },
+          })
+        }
+      >
+        <View style={styles.assetCardHeader}>
+          <View style={styles.assetCardLeft}>
+            <AssetIcon ticker="BTC" />
+            <View style={styles.assetInfo}>
+              <Text style={styles.assetTicker}>BTC</Text>
+              <Text style={styles.assetName}>Bitcoin</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.gray[400]} />
+        </View>
+
+        <View style={styles.assetCardStats}>
+          <View style={styles.assetStat}>
+            <Text style={styles.assetStatLabel}>Balance</Text>
+            <Text style={styles.assetStatValue}>
+              {display} {bitcoinUnit}
+            </Text>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
+
   const renderAssetItem = (asset: AssetRecord, index: number) => (
     <TouchableOpacity
       key={asset.asset_id}
@@ -150,7 +192,7 @@ export default function AssetsScreen({ navigation }: Props) {
         <View style={styles.assetStat}>
           <Text style={styles.assetStatLabel}>Balance</Text>
           <Text style={styles.assetStatValue}>
-            {asset.balance.toFixed(asset.precision || 0)}
+            {formatAssetAmount(asset.balance, asset.precision || 0)}
           </Text>
         </View>
         <View style={styles.assetStat}>
@@ -199,10 +241,16 @@ export default function AssetsScreen({ navigation }: Props) {
       contentContainerStyle={styles.assetsListContent}
       showsVerticalScrollIndicator={false}
     >
-             {rgbAssets && rgbAssets.length > 0 
-         ? rgbAssets.map((asset: AssetRecord, index: number) => renderAssetItem(asset, index))
-         : renderEmptyState()
-       }
+             {showBtc || (rgbAssets && rgbAssets.length > 0) ? (
+        <>
+          {showBtc && renderBtcItem()}
+          {rgbAssets?.map((asset: AssetRecord, index: number) =>
+            renderAssetItem(asset, showBtc ? index + 1 : index),
+          )}
+        </>
+      ) : (
+        renderEmptyState()
+      )}
     </ScrollView>
   );
 

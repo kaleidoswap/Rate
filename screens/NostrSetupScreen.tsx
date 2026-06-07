@@ -36,6 +36,7 @@ export default function NostrSetupScreen({ navigation, route }: Props) {
     const { isInitialSetup = true } = route.params || {};
     const dispatch = useDispatch();
     const activeWallet = useSelector((state: RootState) => state.wallet?.activeWallet);
+    const relays = useSelector((state: RootState) => state.nostr.relays);
 
     const mnemonic = useMemo(
         () => (activeWallet as any)?.encrypted_mnemonic || (activeWallet as any)?.mnemonic || '',
@@ -57,7 +58,7 @@ export default function NostrSetupScreen({ navigation, route }: Props) {
         await dispatch(saveKeysSecurely({ privateKey: keys.privateKey, nsec: keys.nsec }) as any);
         dispatch(setKeys(keys));
         // Fire-and-forget relay connection; never block onboarding on the network.
-        dispatch(initializeNostr({ privateKey: keys.privateKey } as any) as any);
+        dispatch(initializeNostr({ privateKey: keys.privateKey, relays } as any) as any);
     };
 
     const handleDeriveFromSeed = async () => {

@@ -21,7 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
-import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-protocols';
+import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
@@ -30,16 +30,23 @@ import {
 } from '../utils/account-routing';
 import { theme } from '../theme';
 import { Card, Button, Input, ScreenHeader } from '../components';
+import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
+import { useDepositDetection } from '../hooks/useDepositDetection';
 import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
 import { NetworkIcon } from '../components/NetworkIcon';
-import { BitcoinIcon, UsdCoinIcon } from '../components/ProtocolIcons';
+import { UsdCoinIcon } from '../components/ProtocolIcons';
 import { QrCode } from '@kaleidorg/kaleido-ui/native';
 import { AmountEditorModal } from '../components/AmountEditorModal';
+import { NewAssetSheet, type NewAssetKind } from '../components/NewAssetSheet';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { PressableScale } from '../components/PressableScale';
 import { feedback } from '../utils/feedback';
 import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
+
+// Sentinel asset id for receiving an RGB asset the user doesn't hold yet
+// (generates a blind RGB invoice with no specific asset_id).
+const NEW_RGB_ASSET_ID = 'RGB_NEW';
 
 interface Props {
   navigation: any;
@@ -142,6 +149,10 @@ export default function ReceiveScreen({ navigation }: Props) {
     Array<{ key: string; label: string; value: string }>
   >([]);
   const [showAddressInfo, setShowAddressInfo] = useState(false);
+  // Per-address "show full" toggles in the unified address list (keyed by row).
+  const [expandedAddrs, setExpandedAddrs] = useState<Record<string, boolean>>({});
+  // Collapse/expand the full address inside the single-network receive card.
+  const [showFullAddr, setShowFullAddr] = useState(false);
   // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
   // embedding the USD-receiving methods (Liquid USDt, RGB USDT invoice, Spark).
   const [unifiedAsset, setUnifiedAsset] = useState<'BTC' | 'USD'>('BTC');
@@ -153,6 +164,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
+  // "+" opens the new-asset chooser (Spark / Arkade / new RGB asset).
+  const [showNewAsset, setShowNewAsset] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
@@ -163,29 +176,63 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [showNetworkDropdown, setShowNetworkDropdown] = useState(false);
   // Multi-currency amount editor (BTC / sats / USD / other fiat).
   const [showAmountEditor, setShowAmountEditor] = useState(false);
+  const [showDepositSuccess, setShowDepositSuccess] = useState(false);
+
+  // Watch for an incoming deposit whenever a receive address / invoice is shown,
+  // then celebrate with the success overlay (mirrors rate-extension).
+  const receiveTarget = unifiedUri || address;
+  const handleDepositDetected = React.useCallback(() => {
+    feedback.swap();
+    setShowDepositSuccess(true);
+  }, []);
+  useDepositDetection({
+    enabled: !!receiveTarget && !showDepositSuccess,
+    networkType,
+    assetId: selectedAsset?.asset_id,
+    invoice: networkType === 'lightning' ? address : undefined,
+    onDetected: handleDepositDetected,
+  });
   const fiatRates = useFiatRates();
 
-  // Determine available network types based on connected protocols and selected asset
+  // Channel helpers — drive which RGB networks are actually receivable.
+  const hasAnyUsableChannel = (): boolean => channels.some((c) => c.is_usable);
+  const hasUsableChannelForAsset = (assetId: string): boolean =>
+    channels.some((c) => c.is_usable && c.asset_id === assetId);
+
+  // Determine available network types for the SELECTED asset. Only surface a
+  // network where the asset actually lives:
+  //  • RGB asset → RGB-L1 (on-chain) always; RGB-LN only if a usable channel for
+  //    THIS asset exists. (Spark/Liquid would appear only if the same asset also
+  //    existed there — it doesn't for an NWC-RLN asset.)
+  //  • BTC / other families → resolved via account routing.
   const availableNetworkTypes = useMemo((): ProtocolNetworkType[] => {
     const status = getProtocolStatus();
     const family = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
-    const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
-
     const networks = new Set<ProtocolNetworkType>();
-    for (const account of accounts) {
-      for (const net of getNetworkTypesForAccount(account, family)) {
-        networks.add(net);
+
+    if (family === 'RGB') {
+      if (status.RGB) {
+        networks.add('onchain'); // RGB-L1
+        const id = selectedAsset.asset_id;
+        const lnReady =
+          id === NEW_RGB_ASSET_ID || id === 'USD'
+            ? hasAnyUsableChannel()
+            : hasUsableChannelForAsset(id);
+        if (lnReady) networks.add('lightning'); // RGB-LN — only with a channel
+      }
+    } else {
+      const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
+      for (const account of accounts) {
+        for (const net of getNetworkTypesForAccount(account, family)) networks.add(net);
+      }
+      // BTC Lightning needs a usable channel (Spark brings its own LN liquidity).
+      if (networks.has('lightning') && !hasAnyUsableChannel() && !status.SPARK) {
+        networks.delete('lightning');
       }
     }
 
-    // Always include on-chain and lightning if RGB is connected (legacy compatibility)
-    if (status.RGB) {
-      networks.add('onchain');
-      networks.add('lightning');
-    }
-
     return Array.from(networks);
-  }, [selectedAsset, getProtocolStatus]);
+  }, [selectedAsset, getProtocolStatus, channels]);
   
   // Constants for HTLC calculations (from desktop app)
   const MSATS_PER_SAT = 1000;
@@ -307,8 +354,11 @@ export default function ReceiveScreen({ navigation }: Props) {
     return cleanData;
   };
 
-  // Check if amount is required and valid
+  // Check if amount is required and valid. RGB invoices (L1 + LN) are open-amount
+  // — the sender chooses how much asset to send — so no amount is required for
+  // them. Only a plain BTC Lightning invoice needs an amount up front.
   const isAmountRequired = (): boolean => {
+    if (selectedAsset?.isRGB) return false;
     return networkType === 'lightning';
   };
 
@@ -427,19 +477,25 @@ export default function ReceiveScreen({ navigation }: Props) {
           if (!rgbAssetAdapter?.isConnected()) {
             throw new Error('RGB node required for on-chain RGB asset deposits. Please configure in Settings.');
           }
+          // 'RGB_NEW' = a blind invoice (no asset_id) that can receive any RGB
+          // asset the user doesn't hold yet — the "New RGB asset" entry point.
           const rgbInvoice = await rgbAssetAdapter.createRgbInvoice?.({
-            asset_id: selectedAsset.asset_id,
+            ...(selectedAsset.asset_id === NEW_RGB_ASSET_ID ? {} : { asset_id: selectedAsset.asset_id }),
             min_confirmations: 1,
             duration_seconds: 3600,
           });
-          result = rgbInvoice?.invoice;
+          result = rgbInvoice?.invoice ?? rgbInvoice?.recipient_id;
         } else {
-          // Lightning invoice for RGB asset
-          if (!amount || !isAmountValid()) {
-            throw new Error('Amount is required for RGB Lightning invoices');
-          }
+          // RGB-over-Lightning invoice. Open-amount: if the user did enter a
+          // number, scale it to BASE units (10^precision) for the node; otherwise
+          // mint an amount-less RGB-LN invoice the sender fills in.
           const cleanAmount = amount.replace(/,/g, '');
-          const assetAmount = parseFloat(cleanAmount);
+          const parsed = parseFloat(cleanAmount);
+          const precision = getAssetPrecision(selectedAsset.ticker);
+          const assetAmount =
+            !isNaN(parsed) && parsed > 0
+              ? Math.round(parsed * Math.pow(10, precision))
+              : undefined;
 
           const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB');
           if (!rgbAssetLnAdapter?.isConnected()) {
@@ -447,8 +503,10 @@ export default function ReceiveScreen({ navigation }: Props) {
           }
           const assetInvoice = await rgbAssetLnAdapter.createInvoice({
             asset: selectedAsset.asset_id,
-            assetAmount,
-            description: `Receive ${cleanAmount} ${selectedAsset.ticker}`,
+            ...(assetAmount ? { assetAmount } : {}),
+            description: assetAmount
+              ? `Receive ${cleanAmount} ${selectedAsset.ticker}`
+              : `Receive ${selectedAsset.ticker}`,
             expirySeconds: 3600,
           });
           result = assetInvoice.invoice;
@@ -568,13 +626,6 @@ export default function ReceiveScreen({ navigation }: Props) {
     const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
     const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
 
-    const methods: string[] = [];
-    let btcAddress: string | undefined;
-    let lightningInvoice: string | undefined;
-    let sparkAddress: string | undefined;
-    let arkadeAddress: string | undefined;
-    let liquidAddress: string | undefined;
-
     // Optional amount (in sats) for the Lightning leg / BIP21 amount.
     let amountSats = 0;
     if (amount && isAmountValid()) {
@@ -587,113 +638,125 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
     }
 
-    // 1) BTC on-chain address — the universal BIP321/BIP21 fallback (optional under BIP321).
-    //    Prefer RGB, then Spark single-use deposit, then Arkade boarding.
-    if (rgb?.isConnected()) {
-      try {
-        const addr = await rgb.getReceiveAddress();
-        if (addr?.address) btcAddress = addr.address;
-      } catch (e) { console.warn('Unified: RGB on-chain address failed', e); }
-    }
-    if (!btcAddress && spark?.isConnected()) {
-      try {
-        const addr = await spark.getReceiveAddress('onchain');
-        if (addr?.address) btcAddress = addr.address;
-      } catch (e) { console.warn('Unified: Spark on-chain address failed', e); }
-    }
-    if (!btcAddress && arkade?.isConnected()) {
-      try {
-        const addr = await arkade.getReceiveAddress('boarding');
-        if (addr?.address) btcAddress = addr.address;
-      } catch (e) { console.warn('Unified: Arkade boarding address failed', e); }
-    }
+    // Progressive collection: every adapter is queried in PARALLEL, and as each
+    // method resolves we rebuild the QR + address list so the user sees whatever
+    // is ready first instead of waiting for the slowest protocol.
+    const collected: {
+      btcAddress?: string;
+      lightningInvoice?: string;
+      sparkAddress?: string;
+      arkadeAddress?: string;
+      liquidAddress?: string;
+    } = {};
+    let anyShown = false;
 
-    // 2) Lightning invoice (RGB node first, then Spark). Best-effort.
-    const lnAdapter = rgb?.isConnected() ? rgb : spark?.isConnected() ? spark : undefined;
-    if (lnAdapter) {
-      try {
-        const invoice = await lnAdapter.createInvoice({
-          amount: amountSats > 0 ? amountSats : undefined,
-          description: 'Unified receive',
-          expirySeconds: 3600,
-        });
-        if (invoice?.invoice) {
-          lightningInvoice = invoice.invoice;
-          methods.push('Lightning');
-        }
-      } catch (e) { console.warn('Unified: Lightning invoice failed', e); }
-    }
+    const rebuild = () => {
+      const methods: string[] = [];
+      if (collected.btcAddress) methods.push('On-chain');
+      if (collected.lightningInvoice) methods.push('Lightning');
+      if (collected.sparkAddress) methods.push('Spark');
+      if (collected.arkadeAddress) methods.push('Arkade');
+      if (collected.liquidAddress) methods.push('Liquid');
+      if (methods.length === 0) return;
 
-    // 3) Spark native address.
-    if (spark?.isConnected()) {
-      try {
-        const addr = await spark.getReceiveAddress();
-        if (addr?.address) {
-          sparkAddress = addr.address;
-          methods.push('Spark');
-        }
-      } catch (e) { console.warn('Unified: Spark address failed', e); }
-    }
-
-    // 4) Arkade native (ark) address.
-    if (arkade?.isConnected()) {
-      try {
-        const addr = await arkade.getReceiveAddress();
-        if (addr?.address) {
-          arkadeAddress = addr.address;
-          methods.push('Arkade');
-        }
-      } catch (e) { console.warn('Unified: Arkade address failed', e); }
-    }
-
-    // 5) Liquid (L-BTC / USDt) address.
-    if (liquid?.isConnected()) {
-      try {
-        const addr = await liquid.getReceiveAddress();
-        if (addr?.address) {
-          liquidAddress = addr.address;
-          methods.push('Liquid');
-        }
-      } catch (e) { console.warn('Unified: Liquid address failed', e); }
-    }
-
-    // BIP321 allows an address-less URI (bitcoin:?lightning=...&liquid=...), so we only
-    // need at least ONE receive method, not necessarily an on-chain address.
-    if (!btcAddress && !lightningInvoice && !sparkAddress && !arkadeAddress && !liquidAddress) {
-      setUnifiedError('No receive method available. Connect a wallet (RGB, Spark, Arkade, or Liquid) to use unified receive.');
-      setUnifiedLoading(false);
-      return;
-    }
-    if (btcAddress) methods.unshift('On-chain');
-
-    setUnifiedAddresses(
-      [
-        btcAddress && { key: 'onchain', label: 'Bitcoin on-chain', value: btcAddress },
-        lightningInvoice && { key: 'lightning', label: 'Lightning invoice', value: lightningInvoice },
-        sparkAddress && { key: 'spark', label: 'Spark', value: sparkAddress },
-        arkadeAddress && { key: 'arkade', label: 'Arkade', value: arkadeAddress },
-        liquidAddress && { key: 'liquid', label: 'Liquid', value: liquidAddress },
-      ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
-    );
-
-    try {
-      const uri = buildUnifiedReceiveURI({
-        btcAddress,
-        lightningInvoice,
-        sparkAddress,
-        arkadeAddress,
-        liquidAddress,
-        amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
-        label: 'KaleidoSwap',
-      });
-      setUnifiedUri(uri);
+      setUnifiedAddresses(
+        [
+          collected.btcAddress && { key: 'onchain', label: 'Bitcoin on-chain', value: collected.btcAddress },
+          collected.lightningInvoice && { key: 'lightning', label: 'Lightning invoice', value: collected.lightningInvoice },
+          collected.sparkAddress && { key: 'spark', label: 'Spark', value: collected.sparkAddress },
+          collected.arkadeAddress && { key: 'arkade', label: 'Arkade', value: collected.arkadeAddress },
+          collected.liquidAddress && { key: 'liquid', label: 'Liquid', value: collected.liquidAddress },
+        ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
+      );
       setUnifiedMethods(methods);
-    } catch (e: any) {
-      console.error('Unified: buildUnifiedReceiveURI failed', e);
-      setUnifiedError(e?.message || 'Failed to build unified receive code.');
-    } finally {
-      setUnifiedLoading(false);
+
+      try {
+        const uri = buildUnifiedReceiveURI({
+          btcAddress: collected.btcAddress,
+          lightningInvoice: collected.lightningInvoice,
+          sparkAddress: collected.sparkAddress,
+          arkadeAddress: collected.arkadeAddress,
+          liquidAddress: collected.liquidAddress,
+          amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
+          label: 'KaleidoSwap',
+        });
+        setUnifiedUri(uri);
+        // Hide the spinner as soon as we have something scannable.
+        if (!anyShown) { anyShown = true; setUnifiedLoading(false); }
+      } catch (e: any) {
+        console.error('Unified: buildUnifiedReceiveURI failed', e);
+      }
+    };
+
+    const tasks: Promise<void>[] = [
+      // 1) BTC on-chain — prefer RGB, then Spark single-use deposit, then Arkade boarding.
+      (async () => {
+        try {
+          if (rgb?.isConnected()) {
+            const addr = await rgb.getReceiveAddress();
+            if (addr?.address) collected.btcAddress = addr.address;
+          }
+          if (!collected.btcAddress && spark?.isConnected()) {
+            const addr = await spark.getReceiveAddress('onchain');
+            if (addr?.address) collected.btcAddress = addr.address;
+          }
+          if (!collected.btcAddress && arkade?.isConnected()) {
+            const addr = await arkade.getReceiveAddress('boarding');
+            if (addr?.address) collected.btcAddress = addr.address;
+          }
+        } catch (e) { console.warn('Unified: on-chain address failed', e); }
+        if (collected.btcAddress) rebuild();
+      })(),
+
+      // 2) Lightning invoice (RGB node first, then Spark).
+      (async () => {
+        const lnAdapter = rgb?.isConnected() ? rgb : spark?.isConnected() ? spark : undefined;
+        if (!lnAdapter) return;
+        try {
+          const invoice = await lnAdapter.createInvoice({
+            amount: amountSats > 0 ? amountSats : undefined,
+            description: 'Unified receive',
+            expirySeconds: 3600,
+          });
+          if (invoice?.invoice) { collected.lightningInvoice = invoice.invoice; rebuild(); }
+        } catch (e) { console.warn('Unified: Lightning invoice failed', e); }
+      })(),
+
+      // 3) Spark native address.
+      (async () => {
+        if (!spark?.isConnected()) return;
+        try {
+          const addr = await spark.getReceiveAddress();
+          if (addr?.address) { collected.sparkAddress = addr.address; rebuild(); }
+        } catch (e) { console.warn('Unified: Spark address failed', e); }
+      })(),
+
+      // 4) Arkade native (ark) address.
+      (async () => {
+        if (!arkade?.isConnected()) return;
+        try {
+          const addr = await arkade.getReceiveAddress();
+          if (addr?.address) { collected.arkadeAddress = addr.address; rebuild(); }
+        } catch (e) { console.warn('Unified: Arkade address failed', e); }
+      })(),
+
+      // 5) Liquid (L-BTC / USDt) address.
+      (async () => {
+        if (!liquid?.isConnected()) return;
+        try {
+          const addr = await liquid.getReceiveAddress();
+          if (addr?.address) { collected.liquidAddress = addr.address; rebuild(); }
+        } catch (e) { console.warn('Unified: Liquid address failed', e); }
+      })(),
+    ];
+
+    await Promise.allSettled(tasks);
+
+    // BIP321 allows an address-less URI, so a single method is enough.
+    if (!anyShown) {
+      setUnifiedError('No receive method available. Connect a wallet (RGB, Spark, Arkade, or Liquid) to use unified receive.');
     }
+    setUnifiedLoading(false);
   };
 
   const copyUnifiedUri = async () => {
@@ -730,7 +793,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   }, [selectedAsset, networkType]);
 
-  // Load channels when component mounts or network type changes
+  // Load channels on mount AND when the network type changes. Mounting needs them
+  // so the network selector can decide whether RGB-LN is offered (a channel for
+  // the asset must exist) before the user ever taps Lightning.
+  useEffect(() => {
+    loadChannels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   useEffect(() => {
     if (networkType === 'lightning') {
       loadChannels();
@@ -752,7 +821,9 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Reset selected asset if not available in current network type
   useEffect(() => {
     if (selectedAsset && allAssets.length > 0) {
-      const isAssetAvailable = allAssets.some(asset => asset.asset_id === selectedAsset.asset_id);
+      const isAssetAvailable =
+        selectedAsset.asset_id === NEW_RGB_ASSET_ID ||
+        allAssets.some(asset => asset.asset_id === selectedAsset.asset_id);
       if (!isAssetAvailable) {
         // Reset to BTC if current asset is not available
         const btcAsset = allAssets.find(asset => asset.asset_id === 'BTC');
@@ -771,6 +842,12 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (selectedAsset) {
       setAddress('');
       setError(null);
+
+      // Show the loader straight away (during the debounce window) when we know
+      // we'll auto-generate — otherwise the "Generate address" prompt flashes
+      // in between while switching networks.
+      const willAutoGenerate = !isAmountRequired() || isAmountValid();
+      if (willAutoGenerate) setLoading(true);
 
       // Only auto-generate if amount is not required, or if it's valid
       // Use a small delay to avoid interfering with user input
@@ -1220,26 +1297,47 @@ export default function ReceiveScreen({ navigation }: Props) {
     return (
       <View style={styles.addrListSection}>
         <Text style={styles.addrListTitle}>Addresses</Text>
-        {unifiedAddresses.map((a) => (
-          <TouchableOpacity
-            key={a.key}
-            style={styles.addrRow}
-            activeOpacity={0.7}
-            onPress={async () => {
-              await Clipboard.setString(a.value);
-              Alert.alert('Copied', `${a.label} copied to clipboard`);
-            }}
-          >
-            <View style={[styles.addrDot, { backgroundColor: colorFor(a.key) }]} />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.addrLabel}>{a.label}</Text>
-              <Text style={styles.addrValue} numberOfLines={1}>
-                {trunc(a.value)}
-              </Text>
+        {unifiedAddresses.map((a) => {
+          const isOpen = !!expandedAddrs[a.key];
+          return (
+            <View key={a.key} style={styles.addrRow}>
+              <View style={[styles.addrDot, { backgroundColor: colorFor(a.key) }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.addrLabel}>{a.label}</Text>
+                {isOpen ? (
+                  <Text style={styles.uriFull} selectable>{a.value}</Text>
+                ) : (
+                  <Text style={styles.addrValue} numberOfLines={1}>{trunc(a.value)}</Text>
+                )}
+              </View>
+              {/* Per-address "show full" — the full value lives here, not on the URI. */}
+              <TouchableOpacity
+                onPress={() => setExpandedAddrs((p) => ({ ...p, [a.key]: !p[a.key] }))}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ paddingHorizontal: 4 }}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={isOpen ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={theme.colors.text.tertiary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={async () => {
+                  await Clipboard.setString(a.value);
+                  feedback.select();
+                  Alert.alert('Copied', `${a.label} copied to clipboard`);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                style={{ paddingHorizontal: 4 }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="copy-outline" size={18} color={theme.colors.text.tertiary} />
+              </TouchableOpacity>
             </View>
-            <Ionicons name="copy-outline" size={18} color={theme.colors.text.tertiary} />
-          </TouchableOpacity>
-        ))}
+          );
+        })}
 
         <TouchableOpacity
           style={styles.addrInfoToggle}
@@ -1275,6 +1373,23 @@ export default function ReceiveScreen({ navigation }: Props) {
         </TouchableOpacity>
       </View>
     );
+  };
+
+  // Handle a pick from the "+" new-asset sheet: switch to a fresh receive on the
+  // chosen protocol (Spark / Arkade address, or a blind RGB invoice).
+  const handleNewAsset = (kind: NewAssetKind) => {
+    feedback.select();
+    if (kind === 'spark') {
+      setSelectedAsset({ asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false, balance: btcBalance?.vanilla?.spendable || 0 });
+      setNetworkType('spark');
+    } else if (kind === 'arkade') {
+      setSelectedAsset({ asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false, balance: btcBalance?.vanilla?.spendable || 0 });
+      setNetworkType('arkade');
+    } else {
+      // New RGB asset → blind RGB invoice via the on-chain RGB path.
+      setSelectedAsset({ asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'New RGB asset', isRGB: true });
+      setNetworkType('onchain');
+    }
   };
 
   // ── Asset tabs: BTC | USD | (custom) | + ──────────────────────────────────
@@ -1327,7 +1442,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     return (
       <View style={styles.assetTabs}>
-        {Tab('BTC', isBtc, selectBtc, <BitcoinIcon size={20} />, 'BTC')}
+        {Tab('BTC', isBtc, selectBtc, <AssetIcon ticker="BTC" size={20} showBadge={false} />, 'BTC')}
         {Tab('USD', isUsd, selectUsd, <UsdCoinIcon size={20} />, 'USD')}
         {isCustom &&
           Tab('custom', true, () => {}, (
@@ -1340,7 +1455,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           ), t)}
         <TouchableOpacity
           style={styles.assetAddTab}
-          onPress={() => { feedback.select(); setShowAssetSelector(true); }}
+          onPress={() => { feedback.select(); setShowNewAsset(true); }}
           activeOpacity={0.7}
         >
           <Ionicons name="add" size={20} color={theme.colors.text.secondary} />
@@ -1352,14 +1467,15 @@ export default function ReceiveScreen({ navigation }: Props) {
   // ── Network selector: "All" by default, specific networks behind a dropdown ─
   const renderNetworkDropdown = () => {
     const canUseAll = selectedAsset.ticker === 'BTC' || /usd/i.test(selectedAsset.ticker);
+    const isRgbAsset = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker) === 'RGB';
     const options: Array<{ id: ReceiveMode; label: string; sub: string }> = [
       ...(canUseAll
         ? [{ id: 'unified' as ReceiveMode, label: 'All networks', sub: 'On-chain · Lightning · Spark · Arkade' }]
         : []),
       ...(availableNetworkTypes.includes('onchain')
-        ? [{ id: 'onchain' as ReceiveMode, label: 'On-chain', sub: 'Bitcoin Layer 1' }] : []),
+        ? [{ id: 'onchain' as ReceiveMode, label: isRgbAsset ? 'RGB on-chain' : 'On-chain', sub: isRgbAsset ? 'RGB Layer 1 (L1)' : 'Bitcoin Layer 1' }] : []),
       ...(availableNetworkTypes.includes('lightning')
-        ? [{ id: 'lightning' as ReceiveMode, label: 'Lightning', sub: 'Instant · low fee' }] : []),
+        ? [{ id: 'lightning' as ReceiveMode, label: isRgbAsset ? 'RGB Lightning' : 'Lightning', sub: isRgbAsset ? 'Instant · in-channel (RGB-LN)' : 'Instant · low fee' }] : []),
       ...(availableNetworkTypes.includes('spark')
         ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Instant' }] : []),
       ...(availableNetworkTypes.includes('arkade')
@@ -1430,6 +1546,9 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // ── Amount row with pencil edit (opens the multi-currency editor) ─────────
   const renderAmountRow = () => {
+    // The amount editor works in BTC/sats/fiat — it can't express an RGB asset
+    // amount, and RGB invoices are open-amount anyway, so hide it for RGB assets.
+    if (selectedAsset?.isRGB) return null;
     const summary = amountSummary();
     const required = isAmountRequired();
     return (
@@ -1466,17 +1585,83 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
-  const renderUnifiedBody = (accent: string) => {
-    if (unifiedLoading) {
-      return (
-        <View style={styles.loadingSection}>
-          <ActivityIndicator size="large" color={accent} />
-          <Text style={styles.loadingText}>Building unified receive code...</Text>
+  // Middle-truncate a long address/invoice for the collapsed card.
+  const truncMid = (v: string, head = 22, tail = 14) =>
+    v.length > head + tail + 1 ? `${v.slice(0, head)}…${v.slice(-tail)}` : v;
+
+  // Reusable receive card: collapsed address/URI with copy + expand + share,
+  // icon-driven to match rate-extension. Tapping the row copies; the chevron
+  // reveals the full value; share lives as a small icon action.
+  const renderUriCard = ({
+    value, accent, label, icon, expanded, onToggle, onCopy, onShare,
+  }: {
+    value: string;
+    accent: string;
+    label: string;
+    icon: React.ReactNode;
+    // Expand ("Show full") is opt-in. The unified payment-request URI omits it —
+    // the full value of each method is read/expanded in the address list below.
+    expanded?: boolean;
+    onToggle?: () => void;
+    onCopy: () => void;
+    onShare: () => void;
+  }) => (
+    <View style={[styles.uriCard, { borderLeftColor: accent }]}>
+      <TouchableOpacity style={styles.uriCardRow} onPress={onCopy} activeOpacity={0.7}>
+        <View style={[styles.uriIconWrap, { backgroundColor: accent + '1A' }]}>{icon}</View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={styles.uriLabel}>{label}</Text>
+          <Text style={styles.uriValue} numberOfLines={1}>{truncMid(value)}</Text>
         </View>
-      );
+        <View style={styles.uriCopyBtn}>
+          <Ionicons
+            name={copied ? 'checkmark' : 'copy-outline'}
+            size={18}
+            color={copied ? theme.colors.success[500] : accent}
+          />
+        </View>
+      </TouchableOpacity>
+
+      {expanded && onToggle && <Text style={styles.uriFull} selectable>{value}</Text>}
+
+      <View style={styles.uriActions}>
+        {onToggle ? (
+          <TouchableOpacity style={styles.uriActionChip} onPress={onToggle} activeOpacity={0.7}>
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={14}
+              color={theme.colors.text.tertiary}
+            />
+            <Text style={styles.uriActionChipText}>{expanded ? 'Hide' : 'Show full'}</Text>
+          </TouchableOpacity>
+        ) : null}
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity style={styles.uriIconAction} onPress={onShare} activeOpacity={0.7}>
+          <Ionicons name="share-outline" size={18} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // Clean QR-sized loader (no copy text) — a spinner sitting where the QR will be.
+  const renderQrLoading = (accent: string) => (
+    <View style={styles.qrSection}>
+      <View style={styles.qrContainer}>
+        <View style={[styles.qrCodeWrapper, styles.qrLoadingBox]}>
+          <ActivityIndicator size="large" color={accent} />
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderUnifiedBody = (accent: string) => {
+    // Only block on the spinner until the FIRST method is ready; after that the
+    // QR is shown and remaining methods stream in (see the inline indicator).
+    if (unifiedLoading && !unifiedUri) {
+      return renderQrLoading(accent);
     }
 
-    if (unifiedError) {
+    if (unifiedError && !unifiedUri) {
       return (
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color={theme.colors.error[500]} />
@@ -1504,13 +1689,26 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     return (
       <View style={styles.qrSection}>
-        {unifiedMethods.length > 0 && (
-          <View style={[styles.qrMethodsChip, { backgroundColor: accent + '18' }]}>
-            <Text style={[styles.qrMethodsChipText, { color: accent }]} numberOfLines={1}>
-              {unifiedMethods.join(' · ')}
-            </Text>
-          </View>
-        )}
+        {/* Small refresh tucked top-right — the methods are already listed in the
+            network selector above, so no duplicate methods chip here. */}
+        <View style={styles.qrTopBar}>
+          {unifiedLoading ? (
+            <View style={styles.qrStreamHint}>
+              <ActivityIndicator size="small" color={theme.colors.text.tertiary} />
+              <Text style={styles.qrStreamHintText}>Adding more methods…</Text>
+            </View>
+          ) : (
+            <View style={{ flex: 1 }} />
+          )}
+          <TouchableOpacity
+            onPress={generateUnifiedUri}
+            style={styles.qrRefreshBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh" size={15} color={theme.colors.text.tertiary} />
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.qrContainer}>
           <View style={styles.qrCodeWrapper}>
@@ -1518,54 +1716,20 @@ export default function ReceiveScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={[styles.addressContainer, { borderLeftWidth: 3, borderLeftColor: accent }]}
-          onPress={copyUnifiedUri}
-          activeOpacity={0.7}
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-            <Ionicons name="apps" size={16} color={accent} />
-            <Text style={[styles.addressLabel, { marginLeft: 6, marginBottom: 0 }]}>Unified Receive URI</Text>
-          </View>
-          <Text style={[styles.addressText, { fontFamily: 'monospace' }]} numberOfLines={3} selectable>
-            {unifiedUri.length > 50 ? `${unifiedUri.slice(0, 24)}...${unifiedUri.slice(-16)}` : unifiedUri}
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.qrActions}>
-          <TouchableOpacity style={styles.qrActionButton} onPress={copyUnifiedUri} activeOpacity={0.7}>
-            <View style={styles.qrActionIcon}>
-              <Ionicons
-                name={copied ? 'checkmark' : 'copy'}
-                size={18}
-                color={copied ? theme.colors.success[500] : theme.colors.primary[500]}
-              />
-            </View>
-            <Text style={[styles.qrActionText, copied && { color: theme.colors.success[500] }]}>
-              {copied ? 'Copied!' : 'Copy'}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.qrActionButton}
-            onPress={async () => {
-              try {
-                await Share.share({ message: unifiedUri, title: 'Unified Receive' });
-              } catch (e) { console.error('Failed to share unified URI:', e); }
-            }}
-            activeOpacity={0.7}
-          >
-            <View style={styles.qrActionIcon}>
-              <Ionicons name="share" size={18} color={theme.colors.primary[500]} />
-            </View>
-            <Text style={styles.qrActionText}>Share</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.qrActionButton} onPress={generateUnifiedUri} activeOpacity={0.7}>
-            <View style={styles.qrActionIcon}>
-              <Ionicons name="refresh" size={18} color={theme.colors.primary[500]} />
-            </View>
-            <Text style={styles.qrActionText}>New</Text>
-          </TouchableOpacity>
-        </View>
+        {renderUriCard({
+          value: unifiedUri,
+          accent,
+          label: 'Payment request',
+          icon: <Ionicons name="apps" size={16} color={accent} />,
+          // No "Show full" here — the composite BIP321 URI isn't meant to be read;
+          // each method's full address is expandable in the list below.
+          onCopy: copyUnifiedUri,
+          onShare: async () => {
+            try {
+              await Share.share({ message: unifiedUri, title: 'Payment request' });
+            } catch (e) { console.error('Failed to share unified URI:', e); }
+          },
+        })}
       </View>
     );
   };
@@ -1576,14 +1740,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
 
     if (loading) {
-      return (
-        <View style={styles.loadingSection}>
-          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-          <Text style={styles.loadingText}>
-            Generating {networkType === 'lightning' ? 'invoice' : 'address'}...
-          </Text>
-        </View>
-      );
+      return renderQrLoading(NETWORK_COLORS[networkType] || theme.colors.primary[500]);
     }
 
     if (error) {
@@ -1639,13 +1796,28 @@ export default function ReceiveScreen({ navigation }: Props) {
       : 'On-chain Address';
 
     const netColor = NETWORK_COLORS[networkType] || theme.colors.primary[500];
+    const addrLabel = networkType === 'lightning' ? 'Lightning Invoice'
+      : networkType === 'spark' ? 'Spark Address'
+      : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+      : 'Deposit Address';
     return (
       <View style={styles.qrSection}>
-        <View style={[styles.qrMethodsChip, { backgroundColor: netColor + '18' }]}>
-          <NetworkIcon network={networkType as ProtocolNetworkType} size={14} color={netColor} />
-          <Text style={[styles.qrMethodsChipText, { color: netColor, marginLeft: 6 }]} numberOfLines={1}>
-            {qrTitle}{amount && selectedAsset.ticker ? `  ·  ${amount} ${selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}` : ''}
-          </Text>
+        {/* Type/amount chip on the left, small refresh tucked top-right. */}
+        <View style={styles.qrTopBar}>
+          <View style={[styles.qrMethodsChip, { backgroundColor: netColor + '18' }]}>
+            <NetworkIcon network={networkType as ProtocolNetworkType} size={14} color={netColor} />
+            <Text style={[styles.qrMethodsChipText, { color: netColor, marginLeft: 6 }]} numberOfLines={1}>
+              {qrTitle}{amount && selectedAsset.ticker ? `  ·  ${amount} ${selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}` : ''}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={generateAddress}
+            style={styles.qrRefreshBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="refresh" size={15} color={theme.colors.text.tertiary} />
+          </TouchableOpacity>
         </View>
 
         <View style={styles.qrContainer}>
@@ -1654,65 +1826,16 @@ export default function ReceiveScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* Address card with left border accent */}
-        <TouchableOpacity style={[styles.addressContainer, {
-          borderLeftWidth: 3,
-          borderLeftColor: NETWORK_COLORS[networkType] || theme.colors.primary[500],
-        }]} onPress={copyToClipboard} activeOpacity={0.7}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-            <NetworkIcon network={networkType} size={16} color={NETWORK_COLORS[networkType] || theme.colors.primary[500]} />
-            <Text style={[styles.addressLabel, { marginLeft: 6, marginBottom: 0 }]}>
-              {networkType === 'lightning' ? 'Lightning Invoice'
-                : networkType === 'spark' ? 'Spark Address'
-                : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
-                : 'Deposit Address'}
-            </Text>
-          </View>
-          <Text style={[styles.addressText, { fontFamily: 'monospace' }]} numberOfLines={3} selectable>
-            {address.length > 50 ? `${address.slice(0, 20)}...${address.slice(-16)}` : address}
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.qrActions}>
-          <TouchableOpacity 
-            style={styles.qrActionButton} 
-            onPress={copyToClipboard}
-            activeOpacity={0.7}
-          >
-            <View style={styles.qrActionIcon}>
-              <Ionicons
-                name={copied ? 'checkmark' : 'copy'}
-                size={18}
-                color={copied ? theme.colors.success[500] : theme.colors.primary[500]}
-              />
-            </View>
-            <Text style={[styles.qrActionText, copied && { color: theme.colors.success[500] }]}>
-              {copied ? 'Copied!' : 'Copy'}
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.qrActionButton} 
-            onPress={shareAddress}
-            activeOpacity={0.7}
-          >
-            <View style={styles.qrActionIcon}>
-              <Ionicons name="share" size={18} color={theme.colors.primary[500]} />
-            </View>
-            <Text style={styles.qrActionText}>Share</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.qrActionButton} 
-            onPress={generateAddress}
-            activeOpacity={0.7}
-          >
-            <View style={styles.qrActionIcon}>
-              <Ionicons name="refresh" size={18} color={theme.colors.primary[500]} />
-            </View>
-            <Text style={styles.qrActionText}>New</Text>
-          </TouchableOpacity>
-        </View>
+        {renderUriCard({
+          value: address,
+          accent: netColor,
+          label: addrLabel,
+          icon: <NetworkIcon network={networkType} size={16} color={netColor} />,
+          expanded: showFullAddr,
+          onToggle: () => setShowFullAddr((v) => !v),
+          onCopy: copyToClipboard,
+          onShare: shareAddress,
+        })}
       </View>
     );
   };
@@ -1730,8 +1853,8 @@ export default function ReceiveScreen({ navigation }: Props) {
       >
         {renderAssetTabs()}
         {renderNetworkDropdown()}
-        {renderContent()}
         {renderAmountRow()}
+        {renderContent()}
       </ScrollView>
 
       {/* Asset picker (opened by the "+" tab) */}
@@ -1759,14 +1882,37 @@ export default function ReceiveScreen({ navigation }: Props) {
         title="Select Asset"
       />
 
-      {/* Multi-currency amount editor (BTC / sats / USD / fiat) */}
+      {/* "+" new-asset chooser (Spark / Arkade / new RGB asset) */}
+      <NewAssetSheet
+        visible={showNewAsset}
+        onClose={() => setShowNewAsset(false)}
+        available={(() => {
+          const status = getProtocolStatus();
+          return { spark: !!status.SPARK, arkade: !!status.ARKADE, rgb: !!status.RGB };
+        })()}
+        onPick={handleNewAsset}
+        onChooseExisting={() => setShowAssetSelector(true)}
+      />
+
+      {/* Amount editor — WDK AmountInput (BTC ↔ USD) inside a bottom sheet */}
       <AmountEditorModal
         visible={showAmountEditor}
         onClose={() => setShowAmountEditor(false)}
         initialSats={currentAmountSats}
         rates={fiatRates}
         bitcoinUnit={bitcoinUnit}
+        balanceSats={btcBalance?.vanilla?.spendable || 0}
         onConfirm={applyAmountSats}
+      />
+
+      <DepositSuccessOverlay
+        visible={showDepositSuccess}
+        ticker={selectedAsset?.ticker || 'BTC'}
+        network={networkType === 'unified' ? undefined : networkType}
+        onDone={() => {
+          setShowDepositSuccess(false);
+          navigation.goBack();
+        }}
       />
     </SafeAreaView>
   );
@@ -2024,7 +2170,7 @@ const styles = StyleSheet.create({
   
   scrollContent: {
     paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[4],
+    paddingTop: theme.spacing[3],
     paddingBottom: theme.spacing[10],
   },
   
@@ -2445,6 +2591,125 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
+  // Top bar above the QR (chip on the left, small refresh on the right)
+  qrTopBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[4],
+    minHeight: 30,
+  },
+  qrRefreshBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+  },
+  qrStreamHint: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  qrStreamHintText: {
+    fontSize: 11,
+    color: theme.colors.text.tertiary,
+    fontWeight: '500',
+  },
+  // Loading placeholder sized to match the QR (200 + 16 padding each side)
+  qrLoadingBox: {
+    width: 232,
+    height: 232,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Collapsible receive card (address / unified URI)
+  uriCard: {
+    width: '100%',
+    backgroundColor: theme.colors.gray[50],
+    borderRadius: theme.borderRadius.lg,
+    borderLeftWidth: 3,
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    marginBottom: theme.spacing[2],
+  },
+  uriCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+  },
+  uriIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  uriLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    color: theme.colors.text.tertiary,
+  },
+  uriValue: {
+    fontSize: 12,
+    color: theme.colors.text.primary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop: 2,
+  },
+  uriCopyBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface.primary,
+  },
+  uriFull: {
+    fontSize: 12,
+    lineHeight: 18,
+    color: theme.colors.text.secondary,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    marginTop: theme.spacing[3],
+    paddingTop: theme.spacing[3],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border.light,
+  },
+  uriActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: theme.spacing[2],
+  },
+  uriActionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    borderRadius: 8,
+  },
+  uriActionChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.text.tertiary,
+  },
+  uriIconAction: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.surface.primary,
+  },
+
   // Asset "+" tab (square add button)
   assetAddTab: {
     width: 44,
@@ -2521,7 +2786,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing[3],
-    marginTop: theme.spacing[5],
+    marginBottom: theme.spacing[4],
     padding: theme.spacing[4],
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface.primary,

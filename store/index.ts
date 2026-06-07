@@ -41,9 +41,39 @@ const persistConfig: PersistConfig<RootReducerState> = {
   storage: AsyncStorage,
   whitelist: ['settings', 'ui', 'contacts', 'nostr'], // Added nostr to persist non-sensitive nostr data
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 1,
+  version: 2,
   migrate: (state: any) => {
-    // Handle migrations if needed
+    // v2: replace the legacy default Nostr relay set with the current one.
+    // The old defaults included relay.snort.social (frequently offline) and
+    // nostr.wine (paid/auth-gated), which made Nostr appear broken. Only swap
+    // when the persisted list is the untouched old default — never clobber a
+    // list the user has customised.
+    const LEGACY_DEFAULT_RELAYS = [
+      'wss://relay.damus.io',
+      'wss://relay.snort.social',
+      'wss://nos.lol',
+      'wss://relay.nostr.band',
+      'wss://nostr.wine',
+    ];
+    const CURRENT_DEFAULT_RELAYS = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.nostr.band',
+      'wss://relay.primal.net',
+      'wss://purplepag.es',
+    ];
+    try {
+      const relays: string[] | undefined = state?.nostr?.relays;
+      if (
+        Array.isArray(relays) &&
+        relays.length === LEGACY_DEFAULT_RELAYS.length &&
+        relays.every((r, i) => r === LEGACY_DEFAULT_RELAYS[i])
+      ) {
+        state.nostr.relays = [...CURRENT_DEFAULT_RELAYS];
+      }
+    } catch {
+      // Non-fatal: fall through with state unchanged.
+    }
     return Promise.resolve(state);
   },
 };

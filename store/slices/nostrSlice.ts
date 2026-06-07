@@ -161,6 +161,9 @@ interface NostrState {
   walletConnectEnabled: boolean;
   connectedWallet: string | null;
   nwcConnectionString: string | null; // persisted for easy access
+  // Type of the connected NWC wallet: plain Lightning ('ln') vs KaleidoSwap
+  // RGB Lightning Node ('rln'). Drives which capabilities the UI exposes.
+  nwcWalletType: 'ln' | 'rln' | null;
   
   // UI State (some persisted, some not)
   showContactSync: boolean;
@@ -191,16 +194,17 @@ const initialState: NostrState = {
   
   relays: [
     'wss://relay.damus.io',
-    'wss://relay.snort.social',
     'wss://nos.lol',
     'wss://relay.nostr.band',
-    'wss://nostr.wine',
+    'wss://relay.primal.net',
+    'wss://purplepag.es',
   ],
   isRelaysExpanded: false,
   
   walletConnectEnabled: false,
   connectedWallet: null,
   nwcConnectionString: null,
+  nwcWalletType: null,
   
   showContactSync: false,
   subscriptionId: null,
@@ -319,6 +323,10 @@ const nostrSlice = createSlice({
     
     setNWCConnectionString: (state, action: PayloadAction<string | null>) => {
       state.nwcConnectionString = action.payload;
+    },
+
+    setNwcWalletType: (state, action: PayloadAction<'ln' | 'rln' | null>) => {
+      state.nwcWalletType = action.payload;
     },
     
     // UI State
@@ -521,6 +529,7 @@ export const {
   setWalletConnectEnabled,
   setConnectedWallet,
   setNWCConnectionString,
+  setNwcWalletType,
   setShowContactSync,
   setSubscriptionId,
   setError,

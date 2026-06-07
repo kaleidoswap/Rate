@@ -1,12 +1,15 @@
 // services/NostrService.ts
-import NDK, { 
-  NDKEvent, 
-  NDKFilter, 
-  NDKPrivateKeySigner, 
-  NDKUser, 
+import NDK, {
+  NDKEvent,
+  NDKFilter,
+  NDKPrivateKeySigner,
+  NDKUser,
   NDKRelay,
   NDKSubscription,
   NDKKind,
+  getNip57ZapSpecFromLud,
+  generateZapRequest,
+  type NDKLnUrlData,
 } from '@nostr-dev-kit/ndk';
 import { getPublicKey, nip19, utils } from 'nostr-tools';
 import { bech32 } from '@scure/base';
@@ -78,14 +81,24 @@ class NostrService {
   private isConnected = false;
   private nwcService: NWCService | null = null;
 
-  // Default relays
+  // Default relays. Chosen for reliability and open (no-auth, no-payment) read
+  // access — relay.snort.social is frequently offline and nostr.wine requires a
+  // paid subscription, both of which made connections look "broken". purplepag.es
+  // is an indexer optimised for profile (kind 0) and relay-list (kind 10002)
+  // lookups, which speeds up contact resolution under the outbox model.
   private defaultRelays = [
     'wss://relay.damus.io',
-    'wss://relay.snort.social',
     'wss://nos.lol',
     'wss://relay.nostr.band',
-    'wss://nostr.wine',
+    'wss://relay.primal.net',
+    'wss://purplepag.es',
   ];
+
+  // The most recent kind-3 (NIP-02) follow-list event we have seen for the user.
+  // Retained so follow/unfollow can rewrite the list without dropping the
+  // `content` field or other tags, and so we can detect a failed re-fetch
+  // before publishing a destructive (near-empty) replacement.
+  private lastContactListEvent: NDKEvent | null = null;
 
   private constructor() {}
 
@@ -99,8 +112,12 @@ class NostrService {
   // Initialize NDK and connect to relays
   async initialize(settings?: NostrSettings): Promise<boolean> {
     try {
-      const relays = settings?.relays || this.defaultRelays;
-      
+      const relays = settings?.relays && settings.relays.length > 0
+        ? settings.relays
+        : this.defaultRelays;
+
+      this.lastContactListEvent = null;
+
       this.ndk = new NDK({
         explicitRelayUrls: relays,
         enableOutboxModel: true,
@@ -113,13 +130,67 @@ class NostrService {
         this.user = await this.signer.user();
       }
 
-      await this.ndk.connect();
+      // `connect(timeout)` resolves once relays have been *asked* to connect,
+      // but the WebSocket handshakes complete asynchronously. Without waiting
+      // for at least one relay to actually reach CONNECTED, the first
+      // fetchEvents/fetchProfile races ahead and returns empty — which is the
+      // classic "Nostr doesn't work / no contacts" symptom.
+      await this.ndk.connect(3000);
+      const ready = await this.waitForRelays(3000);
+
       this.isConnected = true;
-      console.log('NostrService: Connected to Nostr network');
+      console.log(
+        `NostrService: Connected to Nostr network (relays ready: ${ready})`,
+      );
       return true;
     } catch (error) {
       console.error('NostrService: Failed to initialize:', error);
       return false;
+    }
+  }
+
+  /**
+   * Resolve once at least one relay reaches the CONNECTED state, or when the
+   * timeout elapses. Returns whether any relay is connected.
+   */
+  private async waitForRelays(timeoutMs = 3000): Promise<boolean> {
+    if (!this.ndk) return false;
+
+    const anyConnected = () =>
+      Array.from(this.ndk!.pool.relays.values()).some(r => r.connected);
+
+    if (anyConnected()) return true;
+
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      if (anyConnected()) return true;
+    }
+    return anyConnected();
+  }
+
+  /**
+   * Guard used before any read/write that touches relays. Ensures NDK exists,
+   * (re)connects if every relay has dropped, and waits for connectivity. Throws
+   * when no relay can be reached so callers never operate against a dead pool —
+   * critical for follow-list writes, which would otherwise publish a
+   * destructive (empty) replacement.
+   */
+  private async ensureReady(timeoutMs = 3000): Promise<void> {
+    if (!this.ndk) {
+      throw new Error('Nostr is not initialized');
+    }
+
+    const hasConnected = Array.from(this.ndk.pool.relays.values()).some(
+      r => r.connected,
+    );
+    if (!hasConnected) {
+      await this.ndk.connect(timeoutMs);
+    }
+
+    const ready = await this.waitForRelays(timeoutMs);
+    if (!ready) {
+      throw new Error('No Nostr relay is reachable');
     }
   }
 
@@ -292,9 +363,12 @@ class NostrService {
 
     try {
       const relays = Array.from(this.ndk.pool.relays.values());
+      // `relay.connected` is the supported boolean accessor. The previous code
+      // compared the raw status to `1`, but in NDK's NDKRelayStatus enum
+      // 1 = DISCONNECTED and 5 = CONNECTED, so every relay was reported offline.
       return relays.map(relay => ({
         url: relay.url,
-        connected: relay.connectivity.status === 1 // 1 = connected in NDK
+        connected: relay.connected,
       }));
     } catch (error) {
       console.error('NostrService: Failed to get relay status:', error);
@@ -324,6 +398,7 @@ class NostrService {
   async getUserProfile(): Promise<NostrProfile | null> {
     try {
       if (!this.user) return null;
+      await this.ensureReady();
 
       const profile = await this.user.fetchProfile();
       if (!profile) return null;
@@ -365,44 +440,61 @@ class NostrService {
     }
   }
 
-  // Get contact list (following list)
+  /**
+   * Fetch the user's most recent kind-3 (NIP-02) follow-list event from the
+   * relays. Caches it in `lastContactListEvent` so subsequent follow/unfollow
+   * writes can preserve its `content` and tags. `closeOnEose` ensures the
+   * request resolves promptly instead of hanging on a long-lived subscription.
+   */
+  private async fetchContactListEvent(): Promise<NDKEvent | null> {
+    if (!this.ndk || !this.user) {
+      throw new Error('NDK or user not initialized');
+    }
+
+    const filter: NDKFilter = {
+      kinds: [3],
+      authors: [this.user.pubkey],
+      limit: 1,
+    };
+
+    const event = await this.ndk.fetchEvent(filter, { closeOnEose: true });
+    if (event) {
+      // Keep the newest event only (fetchEvent already returns the latest).
+      this.lastContactListEvent = event;
+    }
+    return event;
+  }
+
+  private parseContactsFromEvent(event: NDKEvent): NostrContact[] {
+    const contacts: NostrContact[] = [];
+    for (const tag of event.tags) {
+      if (tag[0] === 'p' && tag[1]) {
+        contacts.push({
+          pubkey: tag[1],
+          relay: tag[2] || undefined,
+          petname: tag[3] || undefined,
+        });
+      }
+    }
+    return contacts;
+  }
+
+  // Get contact list (following list, NIP-02 kind 3)
   async getContactList(): Promise<NostrContact[]> {
     try {
       if (!this.ndk || !this.user) {
         throw new Error('NDK or user not initialized');
       }
+      await this.ensureReady();
 
-      const contacts: NostrContact[] = [];
-      
-      // Get the user's contact list (kind 3)
-      const filter: NDKFilter = {
-        kinds: [3],
-        authors: [this.user.pubkey],
-        limit: 1,
-      };
-
-      const events = await this.ndk.fetchEvents(filter);
-      const contactListEvent = Array.from(events)[0];
+      const contactListEvent = await this.fetchContactListEvent();
 
       if (!contactListEvent) {
         console.log('NostrService: No contact list found');
         return [];
       }
 
-      // Parse contacts from tags
-      for (const tag of contactListEvent.tags) {
-        if (tag[0] === 'p') {
-          const pubkey = tag[1];
-          const relay = tag[2];
-          const petname = tag[3];
-
-          contacts.push({
-            pubkey,
-            relay,
-            petname,
-          });
-        }
-      }
+      const contacts = this.parseContactsFromEvent(contactListEvent);
 
       // Fetch profiles for contacts
       await this.fetchContactProfiles(contacts);
@@ -410,7 +502,7 @@ class NostrService {
       return contacts;
     } catch (error) {
       console.error('NostrService: Failed to get contact list:', error);
-      return [];
+      throw error instanceof Error ? error : new Error('Failed to get contact list');
     }
   }
 
@@ -426,7 +518,7 @@ class NostrService {
         authors: pubkeys,
       };
 
-      const profileEvents = await this.ndk.fetchEvents(filter);
+      const profileEvents = await this.ndk.fetchEvents(filter, { closeOnEose: true });
 
       // Map profiles to contacts
       const profileMap = new Map<string, NostrProfile>();
@@ -452,77 +544,103 @@ class NostrService {
     }
   }
 
-  // Follow a user
+  /**
+   * Publish an updated kind-3 follow list (NIP-02), preserving the existing
+   * event's `content` (which may hold a NIP-65-style relay map) and any
+   * non-`p` tags. `event.publish()` returns the set of relays that accepted
+   * the event; an empty set means nothing was stored, so we treat that as a
+   * failure rather than reporting a phantom success.
+   */
+  private async publishContactTags(
+    pTags: string[][],
+    content: string,
+  ): Promise<boolean> {
+    if (!this.ndk) throw new Error('NDK not initialized');
+
+    const event = new NDKEvent(this.ndk);
+    event.kind = NDKKind.Contacts; // kind 3
+    event.tags = pTags;
+    event.content = content;
+
+    const publishedTo = await event.publish();
+    if (publishedTo.size === 0) {
+      throw new Error('No relay accepted the contact list update');
+    }
+
+    // Cache so the next follow/unfollow builds on the freshly published list.
+    event.created_at = event.created_at || Math.floor(Date.now() / 1000);
+    this.lastContactListEvent = event;
+    return true;
+  }
+
+  // Follow a user (append to the NIP-02 kind-3 follow list)
   async followUser(pubkey: string, relay?: string, petname?: string): Promise<boolean> {
     try {
       if (!this.ndk || !this.user) {
         throw new Error('NDK or user not initialized');
       }
+      await this.ensureReady();
 
-      // Get current contact list
-      const currentContacts = await this.getContactList();
-      
-      // Check if already following
-      if (currentContacts.some(c => c.pubkey === pubkey)) {
+      // Always re-fetch the latest list so we never clobber follows added from
+      // another client. ensureReady() guarantees relays are reachable, so a
+      // null result here means the user genuinely has no list yet (safe to
+      // create one) rather than a transient fetch failure that would wipe it.
+      const existing = await this.fetchContactListEvent();
+      const existingTags = existing ? [...existing.tags] : [];
+      const content = existing?.content ?? '';
+
+      // Already following? Nothing to do.
+      if (existingTags.some(t => t[0] === 'p' && t[1] === pubkey)) {
         console.log('NostrService: Already following user');
         return true;
       }
 
-      // Create new contact list event
-      const event = new NDKEvent(this.ndk);
-      event.kind = 3; // Contact list
-      
-      // Add existing contacts
-      for (const contact of currentContacts) {
-        const tag = ['p', contact.pubkey];
-        if (contact.relay) tag.push(contact.relay);
-        if (contact.petname) tag.push(contact.petname);
-        event.tags.push(tag);
-      }
-
-      // Add new contact
+      // NIP-02 p-tag shape: ['p', <pubkey>, <relay hint>, <petname>].
+      // The relay slot must be present (even if empty) when a petname follows.
       const newTag = ['p', pubkey];
-      if (relay) newTag.push(relay);
+      if (relay || petname) newTag.push(relay || '');
       if (petname) newTag.push(petname);
-      event.tags.push(newTag);
 
-      await event.publish();
-      console.log('NostrService: Successfully followed user');
-      return true;
+      const ok = await this.publishContactTags([...existingTags, newTag], content);
+      if (ok) console.log('NostrService: Successfully followed user');
+      return ok;
     } catch (error) {
       console.error('NostrService: Failed to follow user:', error);
       return false;
     }
   }
 
-  // Unfollow a user
+  // Unfollow a user (remove from the NIP-02 kind-3 follow list)
   async unfollowUser(pubkey: string): Promise<boolean> {
     try {
       if (!this.ndk || !this.user) {
         throw new Error('NDK or user not initialized');
       }
+      await this.ensureReady();
 
-      // Get current contact list
-      const currentContacts = await this.getContactList();
-      
-      // Filter out the user to unfollow
-      const updatedContacts = currentContacts.filter(c => c.pubkey !== pubkey);
+      const existing = await this.fetchContactListEvent();
 
-      // Create new contact list event
-      const event = new NDKEvent(this.ndk);
-      event.kind = 3; // Contact list
-      
-      // Add remaining contacts
-      for (const contact of updatedContacts) {
-        const tag = ['p', contact.pubkey];
-        if (contact.relay) tag.push(contact.relay);
-        if (contact.petname) tag.push(contact.petname);
-        event.tags.push(tag);
+      // No list on the relays means there is nothing to unfollow. Publishing an
+      // empty kind-3 here would be a destructive no-op, so bail out instead.
+      if (!existing) {
+        console.log('NostrService: No contact list to unfollow from');
+        return true;
       }
 
-      await event.publish();
-      console.log('NostrService: Successfully unfollowed user');
-      return true;
+      const wasFollowing = existing.tags.some(
+        t => t[0] === 'p' && t[1] === pubkey,
+      );
+      if (!wasFollowing) {
+        return true;
+      }
+
+      const updatedTags = existing.tags.filter(
+        t => !(t[0] === 'p' && t[1] === pubkey),
+      );
+
+      const ok = await this.publishContactTags(updatedTags, existing.content ?? '');
+      if (ok) console.log('NostrService: Successfully unfollowed user');
+      return ok;
     } catch (error) {
       console.error('NostrService: Failed to unfollow user:', error);
       return false;
@@ -543,20 +661,17 @@ class NostrService {
     };
 
     const subscription = this.ndk.subscribe(filter);
-    
-    subscription.on('event', async (event: NDKEvent) => {
-      const contacts: NostrContact[] = [];
-      
-      for (const tag of event.tags) {
-        if (tag[0] === 'p') {
-          contacts.push({
-            pubkey: tag[1],
-            relay: tag[2],
-            petname: tag[3],
-          });
-        }
-      }
 
+    subscription.on('event', async (event: NDKEvent) => {
+      // Relays may deliver an older replaceable event after a newer one; keep
+      // only the most recent so a stale copy can't roll the follow list back.
+      const prev = this.lastContactListEvent;
+      if (prev && (event.created_at ?? 0) < (prev.created_at ?? 0)) {
+        return;
+      }
+      this.lastContactListEvent = event;
+
+      const contacts = this.parseContactsFromEvent(event);
       await this.fetchContactProfiles(contacts);
       callback(contacts);
     });
@@ -582,6 +697,7 @@ class NostrService {
       if (!this.ndk) {
         return { profile: null, npub };
       }
+      await this.ensureReady();
 
       const user = this.ndk.getUser({ pubkey });
       const profile = await user.fetchProfile();
@@ -608,6 +724,296 @@ class NostrService {
       console.error('NostrService: Failed to get user info:', error);
       const npub = nip19.npubEncode(pubkey);
       return { profile: null, npub };
+    }
+  }
+
+  /**
+   * Resolve any of the common contact identifiers users paste in — npub1…,
+   * nprofile1…, a 64-char hex pubkey, or a NIP-05 address (name@domain) — to a
+   * hex pubkey. Returning a structured error lets the UI explain *why* an entry
+   * was rejected instead of a generic "invalid pubkey".
+   */
+  async resolveToPubkey(
+    input: string,
+  ): Promise<{ pubkey: string } | { error: string }> {
+    const trimmed = (input || '').trim().replace(/^nostr:/i, '');
+    if (!trimmed) return { error: 'Enter an npub, hex key, or name@domain.' };
+
+    // NIP-19 bech32 entities (npub / nprofile).
+    if (/^(npub|nprofile)1[0-9a-z]+$/i.test(trimmed)) {
+      try {
+        const decoded = nip19.decode(trimmed);
+        if (decoded.type === 'npub') return { pubkey: decoded.data as string };
+        if (decoded.type === 'nprofile') {
+          return { pubkey: (decoded.data as { pubkey: string }).pubkey };
+        }
+        return { error: 'Unsupported Nostr entity.' };
+      } catch {
+        return { error: 'Invalid npub/nprofile.' };
+      }
+    }
+
+    // Raw hex pubkey.
+    if (/^[0-9a-f]{64}$/i.test(trimmed)) {
+      return { pubkey: trimmed.toLowerCase() };
+    }
+
+    // NIP-05 address (name@domain or _@domain / bare domain).
+    if (/^[^@\s]*@?[^@\s]+\.[^@\s]+$/.test(trimmed) && trimmed.includes('.')) {
+      try {
+        if (!this.ndk) throw new Error('not initialized');
+        await this.ensureReady();
+        const nip05 = trimmed.includes('@') ? trimmed : `_@${trimmed}`;
+        const user = await this.ndk.getUserFromNip05(nip05);
+        if (user?.pubkey) return { pubkey: user.pubkey };
+        return { error: `Could not resolve NIP-05 address "${trimmed}".` };
+      } catch {
+        return { error: `Could not resolve NIP-05 address "${trimmed}".` };
+      }
+    }
+
+    return { error: 'Unrecognised format. Use npub1…, a hex key, or name@domain.' };
+  }
+
+  /**
+   * Read the user's NIP-65 relay list (kind 10002). This is the modern,
+   * relay-portable way to manage which relays a user publishes to / reads from,
+   * superseding stuffing relay data into the kind-3 content field. Falls back
+   * to deriving relays from a legacy kind-3 list when no kind 10002 exists.
+   */
+  async getRelayListMetadata(
+    pubkey?: string,
+  ): Promise<{ url: string; read: boolean; write: boolean }[]> {
+    try {
+      if (!this.ndk) throw new Error('NDK not initialized');
+      const author = pubkey || this.user?.pubkey;
+      if (!author) throw new Error('No pubkey available');
+      await this.ensureReady();
+
+      const event = await this.ndk.fetchEvent(
+        { kinds: [NDKKind.RelayList], authors: [author], limit: 1 },
+        { closeOnEose: true },
+      );
+      if (!event) return [];
+
+      const relays: { url: string; read: boolean; write: boolean }[] = [];
+      for (const tag of event.tags) {
+        if (tag[0] !== 'r' || !tag[1]) continue;
+        const marker = tag[2]; // 'read' | 'write' | undefined (= both)
+        relays.push({
+          url: tag[1],
+          read: !marker || marker === 'read',
+          write: !marker || marker === 'write',
+        });
+      }
+      return relays;
+    } catch (error) {
+      console.error('NostrService: Failed to get relay list (NIP-65):', error);
+      return [];
+    }
+  }
+
+  /**
+   * Publish the user's NIP-65 relay list (kind 10002) so other clients and the
+   * outbox model know where to find them.
+   */
+  async publishRelayList(
+    relays: { url: string; read?: boolean; write?: boolean }[],
+  ): Promise<boolean> {
+    try {
+      if (!this.ndk || !this.user) throw new Error('NDK or user not initialized');
+      await this.ensureReady();
+
+      const event = new NDKEvent(this.ndk);
+      event.kind = NDKKind.RelayList; // kind 10002
+      event.tags = relays.map(({ url, read = true, write = true }) => {
+        const tag = ['r', url];
+        // Omit the marker when both read & write (NIP-65 default); otherwise
+        // emit the single applicable marker.
+        if (read && !write) tag.push('read');
+        else if (write && !read) tag.push('write');
+        return tag;
+      });
+
+      const publishedTo = await event.publish();
+      return publishedTo.size > 0;
+    } catch (error) {
+      console.error('NostrService: Failed to publish relay list (NIP-65):', error);
+      return false;
+    }
+  }
+
+  // ── NIP-57 Lightning Zaps ──────────────────────────────────────────────
+
+  /** Fetch JSON with a hard timeout so a slow LNURL endpoint can't hang the UI. */
+  private async fetchJsonWithTimeout(url: string, timeoutMs = 10000): Promise<any> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        headers: { Accept: 'application/json' },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`Lightning service returned ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Resolve a recipient's NIP-57 zap endpoint from their profile (lud16/lud06).
+   * Returns the LNURL-pay spec, including whether the endpoint supports Nostr
+   * zaps (`allowsNostr`) and the zapper pubkey that will publish receipts.
+   */
+  async getZapEndpoint(pubkey: string): Promise<NDKLnUrlData | null> {
+    if (!this.ndk) throw new Error('Nostr is not initialized');
+    await this.ensureReady();
+
+    const user = this.ndk.getUser({ pubkey });
+    const profile = await user.fetchProfile();
+    const lud16 = profile?.lud16;
+    const lud06 = profile?.lud06;
+    if (!lud16 && !lud06) return null;
+
+    return (await getNip57ZapSpecFromLud({ lud06, lud16 }, this.ndk)) ?? null;
+  }
+
+  /**
+   * Build a zap-tagged BOLT11 invoice for a recipient (NIP-57). The caller pays
+   * the returned invoice with the wallet's Lightning adapter; once paid, the
+   * recipient's LNURL provider publishes a kind-9735 zap receipt so the zap
+   * shows up publicly on Nostr.
+   *
+   * Falls back to a plain LNURL-pay invoice (no `nostr` param, so it is a
+   * private payment rather than a public zap) when the endpoint or the local
+   * signer can't produce a zap request — the payment still goes through.
+   */
+  async requestZapInvoice(params: {
+    pubkey: string;
+    amountSats: number;
+    comment?: string;
+  }): Promise<
+    | { invoice: string; isZap: boolean; zapRequest?: NDKEvent }
+    | { error: string }
+  > {
+    const { pubkey, amountSats, comment } = params;
+    try {
+      if (!this.ndk) throw new Error('Nostr is not initialized');
+      if (!Number.isFinite(amountSats) || amountSats <= 0) {
+        return { error: 'Enter an amount greater than zero.' };
+      }
+      await this.ensureReady();
+
+      const zapSpec = await this.getZapEndpoint(pubkey);
+      if (!zapSpec) {
+        return { error: 'This contact has no Lightning address to zap.' };
+      }
+
+      const msat = Math.round(amountSats) * 1000;
+      if (zapSpec.minSendable && msat < zapSpec.minSendable) {
+        return { error: `Minimum is ${Math.ceil(zapSpec.minSendable / 1000)} sats.` };
+      }
+      if (zapSpec.maxSendable && msat > zapSpec.maxSendable) {
+        return { error: `Maximum is ${Math.floor(zapSpec.maxSendable / 1000)} sats.` };
+      }
+
+      const maxComment = zapSpec.commentAllowed ?? 0;
+      const trimmedComment = maxComment > 0 ? (comment || '').slice(0, maxComment) : '';
+
+      const user = this.ndk.getUser({ pubkey });
+      const sep = zapSpec.callback.includes('?') ? '&' : '?';
+      let callbackUrl = `${zapSpec.callback}${sep}amount=${msat}`;
+      let zapRequest: NDKEvent | undefined;
+
+      // Real NIP-57 zap when the endpoint advertises support and we can sign.
+      if (zapSpec.allowsNostr && this.signer) {
+        const relays = await this.getRelays();
+        const req = await generateZapRequest(
+          user,
+          this.ndk,
+          zapSpec,
+          pubkey,
+          msat,
+          relays,
+          trimmedComment || undefined,
+        );
+        if (req) {
+          zapRequest = req;
+          const raw = req.rawEvent();
+          callbackUrl += `&nostr=${encodeURIComponent(JSON.stringify(raw))}`;
+        }
+      }
+
+      if (trimmedComment) {
+        callbackUrl += `&comment=${encodeURIComponent(trimmedComment)}`;
+      }
+
+      const inv = await this.fetchJsonWithTimeout(callbackUrl);
+      if (inv?.status === 'ERROR') {
+        return { error: inv.reason || 'The Lightning service rejected the request.' };
+      }
+      if (!inv?.pr) {
+        return { error: 'No invoice was returned for the zap.' };
+      }
+
+      return { invoice: String(inv.pr), isZap: !!zapRequest, zapRequest };
+    } catch (error: any) {
+      console.error('NostrService: Failed to create zap invoice:', error);
+      return { error: error?.message || 'Failed to create the zap.' };
+    }
+  }
+
+  /**
+   * Plain LNURL-pay for a Lightning address (user@domain) — no Nostr identity
+   * or relay connection required. Used to pay contacts that only have a
+   * Lightning address (not a real zap, since there is no recipient pubkey).
+   */
+  async requestLnurlPayInvoice(params: {
+    lightningAddress: string;
+    amountSats: number;
+    comment?: string;
+  }): Promise<{ invoice: string } | { error: string }> {
+    const { lightningAddress, amountSats, comment } = params;
+    try {
+      const [username, domain] = lightningAddress.trim().split('@');
+      if (!username || !domain) {
+        return { error: `That doesn't look like a Lightning address.` };
+      }
+      if (!Number.isFinite(amountSats) || amountSats <= 0) {
+        return { error: 'Enter an amount greater than zero.' };
+      }
+
+      const lnurl = await this.fetchJsonWithTimeout(
+        `https://${domain}/.well-known/lnurlp/${username}`,
+      );
+      if (lnurl?.status === 'ERROR') {
+        return { error: lnurl.reason || 'Lightning address rejected the request.' };
+      }
+
+      const msat = Math.round(amountSats) * 1000;
+      if (lnurl?.minSendable && msat < lnurl.minSendable) {
+        return { error: `Minimum is ${Math.ceil(lnurl.minSendable / 1000)} sats.` };
+      }
+      if (lnurl?.maxSendable && msat > lnurl.maxSendable) {
+        return { error: `Maximum is ${Math.floor(lnurl.maxSendable / 1000)} sats.` };
+      }
+
+      const maxComment = lnurl?.commentAllowed ?? 0;
+      const trimmedComment = maxComment > 0 ? (comment || '').slice(0, maxComment) : '';
+      const sep = String(lnurl.callback).includes('?') ? '&' : '?';
+      let callbackUrl = `${lnurl.callback}${sep}amount=${msat}`;
+      if (trimmedComment) callbackUrl += `&comment=${encodeURIComponent(trimmedComment)}`;
+
+      const inv = await this.fetchJsonWithTimeout(callbackUrl);
+      if (inv?.status === 'ERROR') {
+        return { error: inv.reason || 'Could not get an invoice.' };
+      }
+      if (!inv?.pr) return { error: 'No invoice was returned.' };
+      return { invoice: String(inv.pr) };
+    } catch (error: any) {
+      console.error('NostrService: LNURL-pay failed:', error);
+      return { error: error?.message || 'Failed to fetch a Lightning invoice.' };
     }
   }
 

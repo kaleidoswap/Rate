@@ -10,12 +10,12 @@
  * NOTE: the `*ClientManager` singletons re-exported below are still referenced by
  * the swap UI (screens/SwapScreen.tsx). They are NO LONGER initialized here (that
  * used to happen via the native adapters), so the swap path needs migration to the
- * WDK swap wrapper (@kaleidorg/wallet-protocols → KaleidoswapSwap) + a Spark-DEX
+ * WDK swap wrapper (@kaleidorg/wallet-engine → KaleidoswapSwap) + a Spark-DEX
  * (flashnet) story. Tracked as a known gap.
  */
 
-import { ProtocolManager } from '@kaleidorg/wallet-protocols'
-import type { ProtocolType } from '@kaleidorg/wallet-protocols'
+import { ProtocolManager } from '@kaleidorg/wallet-engine'
+import type { ProtocolType } from '@kaleidorg/wallet-engine'
 import { getWdkProtocolManager, initializeWdkProtocols } from './wdk'
 
 export function getProtocolManager(): ProtocolManager {
@@ -35,7 +35,7 @@ export async function initializeProtocols(
 }
 
 // Re-export everything consumers need from the shared lib.
-export type { ProtocolType, IProtocolAdapter, SparkConfig, ArkadeConfig, RgbConfig } from '@kaleidorg/wallet-protocols'
+export type { ProtocolType, IProtocolAdapter, SparkConfig, ArkadeConfig, RgbConfig } from '@kaleidorg/wallet-engine'
 export {
   ProtocolManager,
   // Swap-path client managers (see note above — not initialized by the WDK engine).
@@ -43,4 +43,4 @@ export {
   flashnetClientManager,
   sparkClientManager,
   arkadeClientManager,
-} from '@kaleidorg/wallet-protocols'
+} from '@kaleidorg/wallet-engine'

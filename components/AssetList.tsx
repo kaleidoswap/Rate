@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { Card } from './Card';
 import { AssetIcon } from './AssetIcon';
+import { formatAssetAmount } from '../utils/assetAmount';
 
 interface NiaAsset {
     asset_id: string;
@@ -91,7 +92,7 @@ export const AssetList: React.FC<AssetListProps> = ({
                                 </View>
                                 <View style={styles.assetVerticalRight}>
                                     <Text style={styles.assetVerticalBalance}>
-                                        {asset.balance.spendable.toFixed(asset.precision)}
+                                        {formatAssetAmount(asset.balance.spendable, asset.precision)}
                                     </Text>
                                     <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
                                 </View>

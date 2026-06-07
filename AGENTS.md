@@ -51,7 +51,7 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 ### Service Layer
 
 `services/` contains all business logic, keeping screens/components free of direct API calls:
-- `protocols/index.ts` – **ProtocolManager** singleton from `@kaleidorg/wallet-protocols` shared lib; adapters for Spark, Arkade, RGB (kaleido-sdk). Entry point: `protocolManager`
+- `protocols/index.ts` – **ProtocolManager** singleton from `@kaleidorg/wallet-engine` shared lib; adapters for Spark, Arkade, RGB (kaleido-sdk). Entry point: `protocolManager`
 - `RGBApiService.ts` – **DEPRECATED** legacy RGB node REST API (being replaced by ProtocolManager)
 - `WalletManager.ts` – **DEPRECATED** thin facade over ProtocolManager
 - `DatabaseService.ts` – SQLite (expo-sqlite) with SQLCipher encryption
@@ -62,7 +62,7 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 
 ### Protocol Layer (shared library)
 
-The app uses `@kaleidorg/wallet-protocols` (at `../wallet-protocols/`) for multi-protocol wallet support:
+The app uses `@kaleidorg/wallet-engine` (at `../wallet-engine/`) for multi-protocol wallet support:
 - **SparkAdapter** – `@buildonspark/spark-sdk` (Spark L2 Bitcoin)
 - **ArkadeAdapter** – `@arkade-os/sdk` with Expo providers (Arkade VTXOs)
 - **RgbAdapter** – `kaleido-sdk` for RGB Lightning node + KaleidoSwap maker API
@@ -83,7 +83,7 @@ Utility files:
 - Async operations use Redux Toolkit `createAsyncThunk`; dispatch thunks from screens via action hooks
 - `metro.config.js` includes Node.js polyfills (crypto, stream, buffer) required for Bitcoin libs
 - Multi-protocol wallet via `protocolManager` (Spark, Arkade, RGB); screens use `protocolManager.getAdapter('PROTOCOL')` with legacy `RGBApiService` fallback
-- RGB Lightning node accessed via kaleido-sdk through the shared `@kaleidorg/wallet-protocols` library
+- RGB Lightning node accessed via kaleido-sdk through the shared `@kaleidorg/wallet-engine` library
 - Swaps support two venues: KaleidoSwap (maker-based atomic swaps) and Flashnet (Spark AMM pools)
 - AI assistant uses QVAC SDK for on-device LLM (QWEN3 600M) and Whisper transcription — see `services/QVACService.ts`, `services/qvacTools.ts`, and `services/aiAssistantFunctions.ts`
 - Voice input uses `components/VoiceInput.tsx` (QVAC Whisper) instead of WebView-based speech recognition

@@ -66,6 +66,27 @@ export default function SwapScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
   const assetsState = useSelector((state: RootState) => state.assets);
   const rgbAssets = (assetsState?.rgbAssets || []);
+  // The wallet is sats-first by default. The BTC-side amount field is therefore
+  // entered/shown in this unit — NOT BTC. Treating the input as BTC (the old
+  // behaviour) multiplied every BTC swap amount by 1e8, blowing past the maker's
+  // max and silently returning no quote.
+  const bitcoinUnit = useSelector((state: RootState) => state.settings?.bitcoinUnit || 'sats');
+
+  // Convert a BTC-side display value (in the active unit) to integer sats, and back.
+  const btcDisplayToSats = (val: number) => (bitcoinUnit === 'sats' ? Math.round(val) : Math.round(val * 1e8));
+  const satsToBtcDisplay = (sats: number) => (bitcoinUnit === 'sats' ? Math.round(sats) : sats / 1e8);
+  // Human label for the BTC side, e.g. "sats" or "BTC".
+  const btcUnitLabel = bitcoinUnit === 'sats' ? 'sats' : 'BTC';
+
+  // Format a display amount for a given ticker: sats render as whole integers,
+  // BTC/tokens trim trailing zeros. Keeps the UI readable in either unit.
+  const formatDisplayAmount = (value: number, ticker: string): string => {
+    if (!Number.isFinite(value)) return '0';
+    if (isBtcTicker(ticker) && bitcoinUnit === 'sats') return Math.round(value).toLocaleString('en-US');
+    return parseFloat(value.toFixed(8)).toString();
+  };
+  // The unit shown next to a ticker (BTC side respects the active unit).
+  const unitLabelFor = (ticker: string) => (isBtcTicker(ticker) ? btcUnitLabel : ticker);
 
   const [showAssetPicker, setShowAssetPicker] = useState<'from' | 'to' | null>(null);
   const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
@@ -183,8 +204,10 @@ export default function SwapScreen({ navigation }: Props) {
           asset_id: 'BTC',
           ticker: 'BTC',
           name: 'Bitcoin',
-          balance: (walletState?.btcBalance?.vanilla?.spendable || 0) / 100000000,
-          precision: 8,
+          // Balance is in the active BTC unit (sats by default) so the MAX
+          // button and the amount field agree with how the input is parsed.
+          balance: satsToBtcDisplay(walletState?.btcBalance?.vanilla?.spendable || 0),
+          precision: bitcoinUnit === 'sats' ? 0 : 8,
         },
         ...rgbAssets.map((asset: any) => ({
           asset_id: asset.asset_id,
@@ -236,9 +259,11 @@ export default function SwapScreen({ navigation }: Props) {
           const toAssetId = getAssetId(toAssetSide);
           const fromPrecision = fromAssetSide.precision;
           const toPrecision = toAssetSide.precision;
-          const rawAmount = isBtcTicker(fromTicker) ? Math.round(fromAmount * 1e8) : Math.round(fromAmount * Math.pow(10, fromPrecision));
+          // Flashnet settles in sats (not msats). BTC input is in the active unit.
+          const rawAmount = isBtcTicker(fromTicker) ? btcDisplayToSats(fromAmount) : Math.round(fromAmount * Math.pow(10, fromPrecision));
 
           let toAmount = 0;
+          let toAmountRaw = 0;
           let feeAmount = 0;
           let rate = 0;
           try {
@@ -250,8 +275,10 @@ export default function SwapScreen({ navigation }: Props) {
               maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
             });
             const rawOut = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
-            toAmount = isBtcTicker(toTicker) ? rawOut / 1e8 : rawOut / Math.pow(10, toPrecision);
-            feeAmount = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0) / (isBtcTicker(fromTicker) ? 1e8 : Math.pow(10, fromPrecision));
+            toAmountRaw = rawOut;
+            toAmount = isBtcTicker(toTicker) ? satsToBtcDisplay(rawOut) : rawOut / Math.pow(10, toPrecision);
+            const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
+            feeAmount = isBtcTicker(fromTicker) ? satsToBtcDisplay(rawFee) : rawFee / Math.pow(10, fromPrecision);
             rate = fromAmount > 0 ? toAmount / fromAmount : Number(sim?.executionPrice ?? 0);
           } catch (simErr) {
             console.warn('[SwapScreen] Flashnet simulate failed, showing estimate:', simErr);
@@ -267,6 +294,13 @@ export default function SwapScreen({ navigation }: Props) {
             exchange_rate: rate,
             expiry_timestamp: Date.now() + 30000,
             maker_pubkey: poolId || '',
+            venue: 'flashnet',
+            from_asset_id: fromAssetId,
+            to_asset_id: toAssetId,
+            // Flashnet works in sats (not msats): rawAmount is the exact input,
+            // and the simulated output in smallest units (used verbatim on execute).
+            from_amount_raw: rawAmount,
+            to_amount_raw: toAmountRaw,
           };
 
           dispatch(setCurrentQuote(quote));
@@ -287,8 +321,10 @@ export default function SwapScreen({ navigation }: Props) {
           const fromAssetId = getAssetId(fromAsset);
           const toAssetId = getAssetId(toAsset);
           const fromPrecision = fromAsset.precision;
+          // BTC input is in the active unit (sats by default); the maker quotes
+          // the BTC leg in msats. sats → msats is ×1000.
           const rawFromAmount = isBtcTicker(fromTicker)
-            ? Math.round(fromAmount * 1e8 * 1000) // msats
+            ? btcDisplayToSats(fromAmount) * 1000 // active unit → sats → msats
             : Math.round(fromAmount * Math.pow(10, fromPrecision));
 
           const { fromLayer, toLayer } = getQuoteLayers(pair, fromAssetId, toAssetId);
@@ -299,11 +335,18 @@ export default function SwapScreen({ navigation }: Props) {
             to_asset: { asset_id: toAssetId, layer: toLayer as any },
           }) as any;
 
-          const toAmount = Number(quoteResponse.to_asset?.amount || 0);
+          // Raw, maker-quoted integers (smallest units). The maker echoes the
+          // exact legs it will encode into the swapstring; keep these verbatim
+          // for initSwap + swapstring validation (re-deriving from the rounded
+          // display amount is what previously broke execution).
+          const rawToAmount = Number(quoteResponse.to_asset?.amount || 0);
+          const rawFromAmountQuoted = Number(quoteResponse.from_asset?.amount || rawFromAmount);
+          const quotedFromAssetId = quoteResponse.from_asset?.asset_id || fromAssetId;
+          const quotedToAssetId = quoteResponse.to_asset?.asset_id || toAssetId;
           const toPrecision = toAsset.precision;
           const displayToAmount = isBtcTicker(toTicker)
-            ? toAmount / 1000 / 1e8 // msats → BTC
-            : toAmount / Math.pow(10, toPrecision);
+            ? satsToBtcDisplay(rawToAmount / 1000) // msats → sats → active unit
+            : rawToAmount / Math.pow(10, toPrecision);
 
           const quote: SwapQuote = {
             rfq_id: quoteResponse.rfq_id || `kaleido-${Date.now()}`,
@@ -315,6 +358,10 @@ export default function SwapScreen({ navigation }: Props) {
             exchange_rate: quoteResponse.price || 0,
             expiry_timestamp: quoteResponse.expires_at ? quoteResponse.expires_at * 1000 : Date.now() + 60000,
             maker_pubkey: quoteResponse.maker_pubkey || '',
+            from_asset_id: quotedFromAssetId,
+            to_asset_id: quotedToAssetId,
+            from_amount_raw: rawFromAmountQuoted,
+            to_amount_raw: rawToAmount,
           };
 
           dispatch(setCurrentQuote(quote));
@@ -352,16 +399,22 @@ export default function SwapScreen({ navigation }: Props) {
         const fromAssetId = getAssetId(pair.base.ticker === quote.from_asset ? pair.base : pair.quote);
         const toAssetId = getAssetId(pair.base.ticker === quote.to_asset ? pair.base : pair.quote);
         const fromPrecision = (pair.base.ticker === quote.from_asset ? pair.base : pair.quote).precision;
-        const rawAmount = isBtcTicker(quote.from_asset)
+        const toPrecision = (pair.base.ticker === quote.to_asset ? pair.base : pair.quote).precision;
+        const rawAmount = quote.from_amount_raw ?? (isBtcTicker(quote.from_asset)
           ? Math.round(quote.from_amount * 1e8)
-          : Math.round(quote.from_amount * Math.pow(10, fromPrecision));
+          : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
+        const rawToAmount = quote.to_amount_raw ?? Math.round(isBtcTicker(quote.to_asset)
+          ? quote.to_amount * 1e8
+          : quote.to_amount * Math.pow(10, toPrecision));
 
         const result = await client.executeSwap({
           poolId,
           assetInAddress: fromAssetId,
           assetOutAddress: toAssetId,
           amountIn: String(rawAmount),
-          minAmountOut: '0', // TODO: calculate from slippage
+          // Floor the output at 95% of the quote to bound slippage, matching
+          // rate-extension (a `minAmountOut` of '0' offered no protection).
+          minAmountOut: String(Math.floor(rawToAmount * 0.95)),
           maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
         });
 
@@ -382,24 +435,36 @@ export default function SwapScreen({ navigation }: Props) {
         const client = kaleidoClientManager.getClient();
         const fromAsset = pair ? (pair.base.ticker === quote.from_asset ? pair.base : pair.quote) : null;
         const toAsset = pair ? (pair.base.ticker === quote.to_asset ? pair.base : pair.quote) : null;
-        const fromAssetId = fromAsset ? getAssetId(fromAsset) : quote.from_asset;
-        const toAssetId = toAsset ? getAssetId(toAsset) : quote.to_asset;
         const fromPrecision = fromAsset?.precision || 8;
         const toPrecision = toAsset?.precision || 8;
-        const rawFromAmount = isBtcTicker(quote.from_asset)
+        // Prefer the exact integers the maker quoted (stored on the quote); only
+        // fall back to re-deriving from the display amount for older quotes that
+        // predate the raw fields. The maker encodes these exact values into the
+        // swapstring, so they MUST match for validateSwapString to pass.
+        const fromAssetId = quote.from_asset_id
+          ?? (fromAsset ? getAssetId(fromAsset) : quote.from_asset);
+        const toAssetId = quote.to_asset_id
+          ?? (toAsset ? getAssetId(toAsset) : quote.to_asset);
+        const rawFromAmount = quote.from_amount_raw ?? (isBtcTicker(quote.from_asset)
           ? Math.round(quote.from_amount * 1e8 * 1000)
-          : Math.round(quote.from_amount * Math.pow(10, fromPrecision));
-        const rawToAmount = isBtcTicker(quote.to_asset)
+          : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
+        const rawToAmount = quote.to_amount_raw ?? (isBtcTicker(quote.to_asset)
           ? Math.round(quote.to_amount * 1e8 * 1000)
-          : Math.round(quote.to_amount * Math.pow(10, toPrecision));
+          : Math.round(quote.to_amount * Math.pow(10, toPrecision)));
 
-        // Step 1: Init swap
+        // Step 1: Init swap. The maker SDK's SwapRequest is a FLAT shape
+        // ({ rfq_id, from_asset, from_amount, to_asset, to_amount }) — passing a
+        // nested { asset_id, amount, layer } object (as the old `as any` cast
+        // did) sent the asset as an object and the amounts as undefined, so the
+        // swap never initialised. Mirrors rate-extension's INIT_SWAP route.
         setSwapProgress('init');
         const initResult = await client.maker.initSwap({
           rfq_id: quote.rfq_id,
-          from_asset: { asset_id: fromAssetId, amount: rawFromAmount, layer: 'RGB_LN' },
-          to_asset: { asset_id: toAssetId, amount: rawToAmount, layer: 'RGB_LN' },
-        } as any) as any;
+          from_asset: fromAssetId,
+          from_amount: rawFromAmount,
+          to_asset: toAssetId,
+          to_amount: rawToAmount,
+        }) as any;
 
         const swapstring = initResult?.swapstring || initResult?.swap_string || '';
         const paymentHash = initResult?.payment_hash || '';
@@ -579,7 +644,7 @@ export default function SwapScreen({ navigation }: Props) {
             >
               <Text style={styles.maxButtonText}>MAX</Text>
               <Text style={styles.balanceText}>
-                {assetByTicker(swapState.fromAsset)?.balance.toFixed(4) || '0.00'}
+                {formatDisplayAmount(assetByTicker(swapState.fromAsset)?.balance || 0, swapState.fromAsset)} {unitLabelFor(swapState.fromAsset)}
               </Text>
             </TouchableOpacity>
           )}
@@ -637,7 +702,7 @@ export default function SwapScreen({ navigation }: Props) {
               styles.amountText,
               !swapState.currentQuote?.to_amount && styles.amountTextPlaceholder
             ]}>
-              {swapState.currentQuote?.to_amount ? swapState.currentQuote.to_amount.toFixed(6) : '0'}
+              {swapState.currentQuote?.to_amount ? formatDisplayAmount(swapState.currentQuote.to_amount, swapState.toAsset) : '0'}
             </Text>
           )}
 
@@ -818,21 +883,21 @@ export default function SwapScreen({ navigation }: Props) {
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>From:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.from_amount} {fromTicker}
+                {formatDisplayAmount(swapState.currentQuote.from_amount, fromTicker)} {unitLabelFor(fromTicker)}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>To:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.to_amount} {toTicker}
+                {formatDisplayAmount(swapState.currentQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Fee:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.fee_amount} {fromTicker}
+                {swapState.currentQuote.fee_amount} {unitLabelFor(fromTicker)}
               </Text>
             </View>
 

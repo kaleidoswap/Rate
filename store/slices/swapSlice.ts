@@ -14,6 +14,15 @@ export interface SwapQuote {
   expiry_timestamp: number;
   maker_pubkey: string;
   venue?: SwapVenue;
+  // Exact maker-quoted values in smallest units (msats for BTC on a Kaleidoswap
+  // RGB_LN leg, sats for Flashnet, raw token units otherwise). These are the
+  // integers the maker encodes into the swapstring, so initSwap and the
+  // swapstring validation MUST use them verbatim — never re-derive from the
+  // rounded display amounts (mirrors rate-extension's SwapQuoteView.amount).
+  from_asset_id?: string;
+  to_asset_id?: string;
+  from_amount_raw?: number;
+  to_amount_raw?: number;
 }
 
 export interface SwapExecution {

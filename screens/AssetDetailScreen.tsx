@@ -20,6 +20,8 @@ import { protocolManager } from '../services/protocols';
 import { theme } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
 import { useAssetIcon } from '../utils';
+import { formatAssetAmount } from '../utils/assetAmount';
+import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 
 const { width } = Dimensions.get('window');
 
@@ -58,6 +60,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   }
 
   const walletState = useSelector((state: RootState) => state.wallet);
+  const bitcoinUnit = useSelector((state: RootState) => state.settings?.bitcoinUnit || 'sats');
   const { iconUrl } = useAssetIcon(asset.ticker);
   
   const [loading, setLoading] = useState(false);
@@ -139,9 +142,20 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   };
 
   const renderHeader = () => {
-    const balance = isBTC 
+    const balance = isBTC
       ? walletState.btcBalance?.vanilla?.spendable || 0
       : assetDetails.balance?.spendable || 0;
+
+    // Balances arrive in smallest units (sats for BTC, base units for RGB).
+    // Divide by 10^precision before display, and render BTC in the user's
+    // active unit (sats by default) — previously the raw integer was shown
+    // (e.g. "10000000" instead of "10 USDT").
+    const formattedBalance = isBTC
+      ? formatBitcoinAmount(balance, bitcoinUnit)
+      : formatAssetAmount(balance, assetDetails.precision || 0);
+    const tickerLabel = isBTC
+      ? (bitcoinUnit === 'sats' ? 'sats' : 'BTC')
+      : assetDetails.ticker;
 
     return (
       <View style={styles.headerContainer}>
@@ -173,12 +187,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
           <View style={styles.balanceContainer}>
             <Text style={styles.balanceLabel}>Available Balance</Text>
             <Text style={styles.balanceAmount}>
-              {balance.toLocaleString(undefined, {
-                minimumFractionDigits: isBTC ? 8 : (assetDetails.precision || 0),
-                maximumFractionDigits: isBTC ? 8 : (assetDetails.precision || 0),
-              })}
+              {formattedBalance}
             </Text>
-            <Text style={styles.balanceTicker}>{assetDetails.ticker}</Text>
+            <Text style={styles.balanceTicker}>{tickerLabel}</Text>
           </View>
         </ScreenHeader>
       </View>
@@ -452,7 +463,9 @@ const styles = StyleSheet.create({
   balanceAmount: {
     fontSize: theme.typography.fontSize['3xl'],
     fontWeight: '700',
-    color: theme.colors.text.inverse,
+    // The header has a dark/gradient background; text.inverse is near-black and
+    // rendered the amount invisible. White matches the sibling label/ticker.
+    color: '#FFFFFF',
     marginBottom: theme.spacing[1],
   },
   
