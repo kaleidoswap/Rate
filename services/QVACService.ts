@@ -945,7 +945,9 @@ class QVACService {
    * the Engine executes them via its ToolSources (so wallet signing stays here
    * on-device even when inference is delegated).
    */
-  async runProviderTurn(input: TurnInput): Promise<TurnOutput> {
+  async runProviderTurn(
+    input: TurnInput & { onThinking?: (token: string) => void },
+  ): Promise<TurnOutput> {
     if (!this.llmModelId) {
       throw new Error('LLM model not loaded');
     }
@@ -964,6 +966,9 @@ class QVACService {
       modelId: this.llmModelId,
       history,
       stream: true,
+      // Parse <think> blocks into separate `thinkingDelta` events so the UI can
+      // surface the model's reasoning on demand without it polluting the answer.
+      captureThinking: true,
       // Cap output so a turn can't ramble to the context limit (slow + battery);
       // a wallet reply / tool call is short. 512 is generous headroom.
       max_tokens: 512,
@@ -975,6 +980,10 @@ class QVACService {
       if (event.type === 'contentDelta') {
         streamed += event.text;
         input.onToken?.(event.text);
+      } else if (event.type === 'thinkingDelta') {
+        // The model's chain-of-thought, streamed separately from the visible
+        // answer. Surfaced so the UI can show it on demand (collapsed reveal).
+        input.onThinking?.(event.text);
       }
     }
 

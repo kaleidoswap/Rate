@@ -33,6 +33,7 @@ import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import QVACSettingsSheet from '../components/QVACSettingsSheet';
+import { shareLightningInvoice } from '../components/InvoiceQRCode';
 import ToastService from '../services/ToastService';
 import { AIAssistantFunctions } from '../services/aiAssistantFunctions';
 import { createQVACTools } from '../services/qvacTools';
@@ -138,6 +139,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   const scrollViewRef = useRef<ScrollView>(null);
   const voiceInputRef = useRef<VoiceInputRef>(null);
+  // Accumulates the model's reasoning for the in-flight assistant message so the
+  // provider (built once in a useMemo) can stream it into the right bubble.
+  const thinkingRef = useRef<{ id: string; text: string } | null>(null);
+  // Most recent successfully generated invoice — lets "share" act on it.
+  const lastInvoiceRef = useRef<{ invoice: string; amount: number; description?: string } | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const recordingTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -170,7 +176,16 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const engine = useMemo(() => {
     const provider: LLMProvider = {
       name: 'qvac',
-      runTurn: (input) => qvac.service.runProviderTurn(input),
+      runTurn: (input) =>
+        qvac.service.runProviderTurn({
+          ...input,
+          onThinking: (tok) => {
+            const cur = thinkingRef.current;
+            if (!cur) return;
+            cur.text += tok;
+            updateMessage(cur.id, () => ({ thinking: cur.text }));
+          },
+        }),
       cancel: (id) => qvac.service.cancelRequest(id),
     };
     // Wallet tools now come from the canonical @kaleidorg/mind contract, bound
@@ -502,6 +517,25 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     addMessage({ id: nextId(), text: messageText, isUser: true, timestamp: new Date() });
 
+    // Deterministic: a short "share" command opens the share sheet for the most
+    // recent invoice — no model needed. Kept narrow so it can't swallow other
+    // requests (e.g. "share my address").
+    if (lastInvoiceRef.current && /^\s*(share( it| the invoice)?|condividi(lo|la)?|invia(la)?|send it)\s*[.!]*\s*$/i.test(messageText)) {
+      const inv = lastInvoiceRef.current;
+      try {
+        const opened = await shareLightningInvoice(inv);
+        addMessage({
+          id: nextId(),
+          text: opened ? '📤 Opened the share sheet for your invoice.' : '📋 Sharing isn’t available, so I copied the invoice to your clipboard.',
+          isUser: false,
+          timestamp: new Date(),
+        });
+      } catch {
+        addMessage({ id: nextId(), text: 'Sorry, I couldn’t open the share sheet.', isUser: false, timestamp: new Date() });
+      }
+      return;
+    }
+
     if (!qvac.isReady) {
       addMessage({
         id: nextId(),
@@ -567,6 +601,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
       return;
     }
 
+    // Route this turn's reasoning tokens (from the provider's onThinking) into
+    // this assistant bubble so they can be revealed on tap.
+    thinkingRef.current = { id: assistantId, text: '' };
+
     // Track which agentic turn is currently streaming so we show only the
     // latest turn's text — early reasoning turns are replaced by the final
     // answer once tools have run.
@@ -630,8 +668,26 @@ export default function AIAssistantScreen({ navigation }: Props) {
       });
 
       const lastCall = res.toolCalls[res.toolCalls.length - 1];
+
+      // If an invoice was just generated, remember it (so "share" can act on it)
+      // and offer to share it if the model didn't already mention it. Covers the
+      // legacy generate_invoice and the canonical *_create_invoice wallet tools.
+      let finalText = res.text?.trim() || 'Done.';
+      const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
+      const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;
+      if (invResult?.invoice) {
+        lastInvoiceRef.current = {
+          invoice: invResult.invoice,
+          amount: Number(invResult.amount_sats ?? invResult.amount) || 0,
+          description: invResult.description,
+        };
+        if (!/share/i.test(finalText)) {
+          finalText += '\n\nWant me to share it? Just say “share”.';
+        }
+      }
+
       updateMessage(assistantId, () => ({
-        text: res.text?.trim() || 'Done.',
+        text: finalText,
         streaming: false,
         functionCalled: lastCall?.name,
         functionResult: lastCall?.result,
@@ -650,6 +706,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       }));
     }
 
+    thinkingRef.current = null;
     setActiveRequestId(null);
     setIsLoading(false);
   };

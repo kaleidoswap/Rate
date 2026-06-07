@@ -16,6 +16,8 @@ export * from './ActionButtons';
 export * from './AssetList';
 export * from './AssetIcon';
 export * from './AssetSelector';
+export { default as ZapModal } from './ZapModal';
+export type { ZapRecipient } from './ZapModal';
 export * from './ProtocolIcons';
 export * from './NetworkIcon';
 export * from './ChannelList';

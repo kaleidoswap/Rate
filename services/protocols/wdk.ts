@@ -156,7 +156,11 @@ export async function initializeWdkProtocols(
             mnemonic,
             network: arkadeNetwork,
             arkadeConfig: {
-              arkServerUrl: parsed.arkServerUrl || 'https://signet.arkade.sh',
+              // mutinynet.arkade.sh is the live signet/mutinynet Ark server;
+              // signet.arkade.sh is deprecated and silently fails to board/receive
+              // (matches rate-extension's ARKADE_SERVER_URLS.signet).
+              arkServerUrl: parsed.arkServerUrl
+                || (arkadeNetwork === 'mainnet' ? 'https://arkade.computer' : 'https://mutinynet.arkade.sh'),
               esploraUrl: parsed.esploraUrl,
               ...(parsed.arkadeConfig || {}),
               ...(arkadeStorage ? { storage: arkadeStorage } : {}),

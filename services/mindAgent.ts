@@ -40,6 +40,8 @@ const AMBIENT = ['remember', 'recall', 'search_knowledge'];
 export interface RunTurnCallbacks {
   history?: MindMessage[];
   onToken?: (token: string, turn: number) => void;
+  /** The model's chain-of-thought, streamed as it reasons (shown on demand). */
+  onThinking?: (token: string) => void;
   onStep?: (name: string) => void;
   onConfirm?: (call: { name: string; arguments: Record<string, unknown> }) => Promise<ConfirmDecision>;
 }
@@ -60,7 +62,13 @@ function renderFast(intent: string, r: any): string {
 
 /** Build the shared agent. Stable for the lifetime of a QVACService instance. */
 export function createMindAgent(qvac: QVACService): MindAgent {
-  const provider: LLMProvider = { name: 'qvac', runTurn: (i) => qvac.runProviderTurn(i) };
+  // The engine builds each TurnInput internally, so we inject the per-turn
+  // thinking sink here via a mutable holder set at the start of runTurn().
+  let thinkingSink: ((token: string) => void) | undefined;
+  const provider: LLMProvider = {
+    name: 'qvac',
+    runTurn: (i) => qvac.runProviderTurn({ ...i, onThinking: (t) => thinkingSink?.(t) }),
+  };
   const walletRegistry = new ToolRegistry([buildWalletToolSource()]);
   const memoryStore = new InMemoryMemoryStore({ io: asyncStorageMemoryIO() });
   const engine = new Engine({
@@ -73,6 +81,8 @@ export function createMindAgent(qvac: QVACService): MindAgent {
   const skills = new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle));
 
   async function runTurn(text: string, cbs: RunTurnCallbacks = {}): Promise<{ text: string }> {
+    // Make this turn's reasoning available to the provider closure (cleared after).
+    thinkingSink = cbs.onThinking;
     // Tier-0: deterministic fast-path (no LLM).
     const fast = fastPath.select(text);
     if (fast) {

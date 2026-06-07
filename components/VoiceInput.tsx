@@ -1,9 +1,24 @@
 // components/VoiceInput.tsx
-import React, { useRef, useImperativeHandle, forwardRef, useState } from 'react';
+import React, { useRef, useImperativeHandle, forwardRef, useState, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import QVACService from '../services/QVACService';
+
+// expo-av exposes a SINGLE native recorder for the whole process: only one
+// Audio.Recording can be prepared at a time, app-wide. Multiple VoiceInput
+// instances can be mounted simultaneously on the tab navigator (the AI chat
+// screen's mic + the dashboard voice-agent overlay), so per-instance refs are
+// not enough — without coordination a second instance calls prepareToRecordAsync
+// while the first still owns the native recorder and throws
+// "Only one Recording object can be prepared at a given time." This module-level
+// handle mirrors the native singleton so every instance shares one source of
+// truth and we can always release it (on stop, error, or unmount).
+let activeRecording: Audio.Recording | null = null;
+// Synchronous reservation so two instances starting in the same tick can't both
+// pass the activeRecording check (there are awaits before it's assigned) and
+// race into prepareToRecordAsync. Set before the first await, cleared in finally.
+let recorderStarting = false;
 
 interface VoiceInputProps {
   onResult: (text: string) => void;
@@ -30,12 +45,51 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
       stopListening: () => stopRecording(),
     }));
 
+    // Release the app-wide native recorder if this instance still owns it when it
+    // unmounts (e.g. the voice-agent overlay closes mid-recording). Otherwise the
+    // leftover native session blocks the next VoiceInput — the chat mic — with
+    // "Only one Recording object can be prepared at a given time."
+    useEffect(
+      () => () => {
+        const rec = recorderRef.current;
+        recorderRef.current = null;
+        isRecordingRef.current = false;
+        startingRef.current = false;
+        if (rec) {
+          if (activeRecording === rec) activeRecording = null;
+          rec.stopAndUnloadAsync().catch(() => {
+            /* already released */
+          });
+        }
+      },
+      []
+    );
+
     const startRecording = async () => {
       if (startingRef.current || isRecordingRef.current || recorderRef.current) return;
+      // App-wide: don't start while any instance is mid-start (the native
+      // recorder can't be prepared twice). The owner will finish or release it.
+      if (recorderStarting) return;
 
       let recording: Audio.Recording | null = null;
       startingRef.current = true;
+      recorderStarting = true;
       try {
+        // Another VoiceInput instance (or a closed overlay) may have left the
+        // app-wide native recorder prepared. Only one can exist at a time, so
+        // tear down the stale one before preparing ours — otherwise
+        // prepareToRecordAsync throws "Only one Recording object can be prepared
+        // at a given time."
+        if (activeRecording) {
+          const stale = activeRecording;
+          activeRecording = null;
+          try {
+            await stale.stopAndUnloadAsync();
+          } catch {
+            /* already released */
+          }
+        }
+
         const { status } = await Audio.requestPermissionsAsync();
         if (status !== 'granted') {
           onError('not-allowed');
@@ -74,6 +128,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         await recording.startAsync();
 
         recorderRef.current = recording;
+        activeRecording = recording;
         isRecordingRef.current = true;
         setIsRecording(true);
         onStart();
@@ -86,6 +141,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
             /* ignore cleanup */
           }
         }
+        if (activeRecording === recording) activeRecording = null;
         recorderRef.current = null;
         isRecordingRef.current = false;
         setIsRecording(false);
@@ -93,19 +149,21 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         onError(err instanceof Error ? err.message : 'Failed to start recording');
       } finally {
         startingRef.current = false;
+        recorderStarting = false;
       }
     };
 
     const stopRecording = async () => {
       if (!isRecordingRef.current || !recorderRef.current) return;
 
+      const recording = recorderRef.current;
       try {
         isRecordingRef.current = false;
         setIsRecording(false);
-        const recording = recorderRef.current;
         recorderRef.current = null;
 
         await recording.stopAndUnloadAsync();
+        if (activeRecording === recording) activeRecording = null;
         const uri = recording.getURI();
 
         await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
@@ -150,12 +208,14 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         }
 
         try {
-          await FileSystem.deleteAsync(uri, { idempotent: true });
+          const file = new File(uri);
+          if (file.exists) file.delete();
         } catch {
           // ignore cleanup errors
         }
       } catch (err) {
         isRecordingRef.current = false;
+        if (activeRecording === recording) activeRecording = null;
         recorderRef.current = null;
         setIsRecording(false);
         console.error('VoiceInput stop error:', err);

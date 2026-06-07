@@ -40,6 +40,7 @@ export type NwcMethod =
   | 'rln_list_assets'
   | 'rln_asset_balance'
   | 'rln_rgb_invoice'
+  | 'rln_ln_invoice'
   | 'rln_decode_rgb_invoice'
   | 'rln_send_asset'
   | 'rln_list_channels'
@@ -256,6 +257,10 @@ export class NWCClient {
   }
   rlnRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
     return this.request<unknown>('rln_rgb_invoice', params);
+  }
+  /** Lightning invoice; pass asset_id + asset_amount for an RGB-over-LN invoice. */
+  rlnLnInvoice(params: Record<string, unknown>): Promise<unknown> {
+    return this.request<unknown>('rln_ln_invoice', params);
   }
   rlnDecodeRgbInvoice(params: { invoice: string }): Promise<unknown> {
     return this.request<unknown>('rln_decode_rgb_invoice', params);

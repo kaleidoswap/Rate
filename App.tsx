@@ -7,7 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemeProvider } from '@react-navigation/native';
@@ -40,7 +40,7 @@ import AIAssistantScreen from './screens/AIAssistantScreen';
 import MapScreen from './screens/MapScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import SwapScreen from './screens/SwapScreen';
-import NostrContactsScreen from './screens/NostrContactsScreen';
+import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
@@ -63,12 +63,12 @@ type RootStackParamList = {
   Settings: undefined;
   Send: { selectedAsset?: any } | undefined;
   Receive: { selectedAsset?: any } | undefined;
-  QRScanner: undefined;
+  QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   PaymentConfirmation: { paymentData: any };
   AIAssistant: undefined;
   Assets: undefined;
   Swap: undefined;
-  NostrContacts: undefined;
+  NostrSettings: undefined;
   AssetDetail: { asset: any };
   History: undefined;
   LSP: undefined;
@@ -76,7 +76,7 @@ type RootStackParamList = {
   IssueAsset: undefined;
   Channels: undefined;
   PairDesktop: undefined;
-  NWCConnect: undefined;
+  NWCConnect: { scanned?: string } | undefined;
 };
 
 type TabBarIconProps = {
@@ -189,11 +189,7 @@ function DashboardTabs() {
         options={{
           tabBarLabel: 'Mind',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons
-              name={focused ? 'sparkles' : 'sparkles-outline'}
-              size={24}
-              color={color}
-            />
+            <MaterialCommunityIcons name="brain" size={24} color={color} />
           ),
         }}
       />
@@ -233,8 +229,13 @@ function AppNavigator() {
           }}
         />
         <Stack.Screen name="Send" component={SendScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={ReceiveScreen} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+        <Stack.Screen
+          name="QRScanner"
+          component={QRScannerScreen}
+          options={{ presentation: 'modal' }}
+        />
         <Stack.Screen
           name="PairDesktop"
           component={PairDesktopScreen}
@@ -251,14 +252,6 @@ function AppNavigator() {
         <Stack.Screen
           name="Swap"
           component={SwapScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="NostrContacts"
-          component={NostrContactsScreen}
           options={{
             presentation: 'modal',
             headerShown: false,

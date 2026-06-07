@@ -18,6 +18,31 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Sharing from 'expo-sharing';
 import { theme } from '../theme';
 
+/**
+ * Open the OS share sheet for a Lightning invoice. Exported so both the invoice
+ * card's Share button and the AI assistant ("share" command) trigger the exact
+ * same flow. Returns true if the share sheet opened.
+ */
+export async function shareLightningInvoice(params: {
+  invoice: string;
+  amount: number;
+  description?: string;
+}): Promise<boolean> {
+  const { invoice, amount, description } = params;
+  const message = `⚡️ Lightning Invoice\n\n💰 Amount: ${amount.toLocaleString()} sats\n${
+    description ? `📝 Description: ${description}\n` : ''
+  }\n🧾 Invoice:\n${invoice}`;
+  if (!(await Sharing.isAvailableAsync())) {
+    Clipboard.setString(invoice);
+    return false;
+  }
+  await Sharing.shareAsync('data:text/plain;base64,' + btoa(message), {
+    mimeType: 'text/plain',
+    dialogTitle: 'Share Lightning Invoice',
+  });
+  return true;
+}
+
 interface InvoiceQRCodeProps {
   invoice: string;
   amount: number;
@@ -93,20 +118,12 @@ export default function InvoiceQRCode({
   const shareInvoice = async () => {
     setIsSharing(true);
     try {
-      if (await Sharing.isAvailableAsync()) {
-        const shareData = {
-          message: `⚡️ Lightning Invoice\n\n💰 Amount: ${amount.toLocaleString()} sats\n${description ? `📝 Description: ${description}\n` : ''}\n🧾 Invoice:\n${invoice}`,
-          title: 'Lightning Invoice'
-        };
-        
-        await Sharing.shareAsync('data:text/plain;base64,' + btoa(shareData.message), {
-          mimeType: 'text/plain',
-          dialogTitle: 'Share Lightning Invoice'
-        });
+      const opened = await shareLightningInvoice({ invoice, amount, description });
+      if (opened) {
         animateSuccess(shareAnimation);
         onShare?.();
       } else {
-        copyToClipboard();
+        animateSuccess(copyAnimation);
         Alert.alert('Shared!', 'Invoice copied to clipboard (sharing not available)');
       }
     } catch (error) {

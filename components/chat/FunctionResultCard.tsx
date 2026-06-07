@@ -53,21 +53,31 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
         </View>
       );
 
+    // Invoice generation. Covers the legacy `generate_invoice` shape
+    // ({success, invoice, amount_sats}) and the canonical wallet-contract tools
+    // (spark_create_invoice / rln_create_ln_invoice / rln_create_rgb_invoice),
+    // whose result is the wallet-engine Invoice ({invoice, amount, description}).
     case 'generate_invoice':
-      return functionResult.success ? (
+    case 'spark_create_invoice':
+    case 'rln_create_ln_invoice':
+    case 'rln_create_rgb_invoice': {
+      const invoice = functionResult.invoice;
+      const amount = Number(functionResult.amount_sats ?? functionResult.amount ?? 0);
+      return invoice ? (
         <InvoiceQRCode
-          invoice={functionResult.invoice}
-          amount={functionResult.amount_sats}
+          invoice={invoice}
+          amount={amount}
           description={functionResult.description}
-          onCopy={() => onCopy(functionResult.invoice, 'Invoice')}
+          onCopy={() => onCopy(invoice, 'Invoice')}
           onShare={() => {}}
         />
       ) : (
         <View style={styles.card}>
           <Text style={styles.title}>🧾 Invoice Generation Failed</Text>
-          <Text style={styles.errorText}>❌ {functionResult.error}</Text>
+          <Text style={styles.errorText}>❌ {functionResult.error || 'Could not generate an invoice.'}</Text>
         </View>
       );
+    }
 
     case 'find_merchant_locations':
       return (

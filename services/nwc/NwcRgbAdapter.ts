@@ -79,6 +79,9 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   private connected = false;
   private network = 'regtest';
   private nodePubkey?: string;
+  /** Whether the connected NWC wallet is a KaleidoSwap RGB Lightning Node
+   *  (supports rln_* methods) vs a plain Lightning wallet (NIP-47 only). */
+  private isRln = false;
 
   // ── lifecycle ──────────────────────────────────────────────────────────
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -89,9 +92,50 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     }
     parseNwcUri(uri); // validate
     this.client = new NWCClient(uri, { timeoutMs: 60_000 });
-    const info = anyRec(await this.client.rlnNodeInfo());
+
+    // Detect the wallet type from the standard NIP-47 get_info (works for both
+    // plain Lightning wallets and RLN nodes). RLN nodes advertise rln_* methods.
+    const info = await this.client.getInfo();
+    this.isRln = (info.methods ?? []).some((m) => m.startsWith('rln_'));
     this.nodePubkey = info.pubkey;
+
+    // Fallback: some hubs don't list rln_* in get_info (older builds emit only
+    // the standard NIP-47 methods). Actively probe rln_node_info — if the hub
+    // answers, it's an RGB Lightning Node and the connection permits RGB ops.
+    if (!this.isRln) {
+      try {
+        const rln = anyRec(await this.client.rlnNodeInfo());
+        if (rln.pubkey) {
+          this.isRln = true;
+          this.nodePubkey = rln.pubkey;
+        }
+      } catch {
+        /* not an RLN node, or rln_node_info not allowed → plain LN wallet */
+      }
+    } else {
+      // Best-effort enrich the node id for RLN; never fail the connection on it.
+      try {
+        const rln = anyRec(await this.client.rlnNodeInfo());
+        if (rln.pubkey) this.nodePubkey = rln.pubkey;
+      } catch {
+        /* ignore — get_info already succeeded */
+      }
+    }
     this.connected = true;
+  }
+
+  /** 'rln' for a KaleidoSwap RGB Lightning Node, 'ln' for a plain LN wallet. */
+  walletType(): 'ln' | 'rln' {
+    return this.isRln ? 'rln' : 'ln';
+  }
+
+  /** Guard for RGB/RLN-only operations against a plain Lightning wallet. */
+  private requireRln(): void {
+    if (!this.isRln) {
+      throw new Error(
+        'This wallet is a plain Lightning wallet and does not support RGB assets.',
+      );
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -110,7 +154,8 @@ export class NwcRgbAdapter implements IProtocolAdapter {
       connected: this.connected,
       nodeId: this.nodePubkey,
       network: this.network,
-    };
+      metadata: { walletType: this.walletType() },
+    } as ConnectionInfo;
   }
 
   private c(): NWCClient {
@@ -120,16 +165,33 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   // ── assets / balances ──────────────────────────────────────────────────
   private mapAssetBalance(raw: Record<string, any>, precision: number): AssetBalance {
-    const spendable = Number(raw.spendable ?? raw.offchain_outbound ?? raw.settled ?? 0);
-    const pending = Number(raw.future ?? 0);
-    const total = spendable + Number(raw.offchain_inbound ?? 0);
+    // RLN /assetbalance & /listassets report five fields. Mirror the rate-extension
+    // display semantics: an asset's holdings = the on-chain leg (`future`, falling
+    // back to `settled`) PLUS what's held in Lightning channels (`offchain_outbound`).
+    // NB: use explicit Number()+|| — NOT `??` — because the node returns a real `0`
+    // for empty legs, and `0 ?? x` keeps the 0 (so an in-channel-only asset that has
+    // spendable:0 but offchain_outbound:Y would otherwise read as zero).
+    const settled = Number(raw.settled) || 0;
+    const future = Number(raw.future) || 0;
+    const onchainSpendable = Number(raw.spendable) || 0;
+    const offchainOutbound = Number(raw.offchain_outbound) || 0; // LN liquidity held
+    const offchainInbound = Number(raw.offchain_inbound) || 0; // LN receive capacity
+    const onchain = future || settled;
+    const total = onchain + offchainOutbound;
+    // Immediately usable = on-chain spendable + what can be sent over Lightning.
+    const available = onchainSpendable + offchainOutbound;
     return {
       total,
-      available: spendable,
-      pending,
+      available,
+      pending: future,
+      // Extra RGB breakdown fields consumed by the dashboard/asset screens.
+      locked: offchainOutbound,
+      offchain_outbound: offchainOutbound,
+      offchain_inbound: offchainInbound,
+      settled,
       totalDisplay: display(total, precision),
-      availableDisplay: display(spendable, precision),
-    };
+      availableDisplay: display(available, precision),
+    } as AssetBalance;
   }
 
   private toUnifiedAsset(raw: Record<string, any>): UnifiedAsset {
@@ -154,6 +216,23 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {
+    // Plain Lightning wallets have no RGB assets — expose BTC only, with the
+    // live Lightning balance so the wallet still shows a usable balance.
+    if (!this.isRln) {
+      const { confirmed } = await this.getBtcBalance();
+      return [
+        {
+          ...BTC_ASSET,
+          balance: {
+            total: confirmed,
+            available: confirmed,
+            pending: 0,
+            totalDisplay: display(confirmed, 8),
+            availableDisplay: display(confirmed, 8),
+          },
+        },
+      ];
+    }
     const res = anyRec(await this.c().rlnListAssets());
     const groups = ['nia', 'cfa', 'uda', 'ifa'];
     const out: UnifiedAsset[] = [];
@@ -172,6 +251,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
+    this.requireRln();
     const raw = anyRec(await this.c().rlnAssetBalance({ asset_id: assetId }));
     return this.mapAssetBalance(raw, 0);
   }
@@ -221,11 +301,13 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async listChannels(): Promise<any[]> {
+    if (!this.isRln) return []; // plain LN wallets don't expose channels over NWC
     const res = anyRec(await this.c().rlnListChannels());
     return Array.isArray(res.channels) ? res.channels : [];
   }
 
   async listPayments(): Promise<any> {
+    if (!this.isRln) return { payments: [] };
     return this.c().request('rln_list_payments', {});
   }
 
@@ -238,17 +320,28 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   // ── invoices / payments ───────────────────────────────────────────────────
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     if (request.asset) {
+      // RGB-over-Lightning invoice (a BOLT11 carrying an RGB asset). This rides
+      // /lninvoice with asset_id + asset_amount — NOT /rgbinvoice (that's the
+      // on-chain RGB invoice exposed via createRgbInvoice). The HTLC must carry
+      // a minimum sat amount alongside the asset (matches rate-extension).
+      this.requireRln();
+      const RGB_HTLC_MIN_MSAT = 3_000_000; // 3000 sats
+      const requestedMsat = request.amount && request.amount > 0 ? request.amount * 1000 : 0;
       const raw = anyRec(
-        await this.c().rlnRgbInvoice({
+        await this.c().rlnLnInvoice({
           asset_id: request.asset,
-          ...(request.assetAmount != null ? { asset_amount: request.assetAmount } : {}),
+          ...(request.assetAmount != null && request.assetAmount > 0
+            ? { asset_amount: request.assetAmount }
+            : {}),
+          amt_msat: Math.max(requestedMsat, RGB_HTLC_MIN_MSAT),
+          expiry_sec: request.expirySeconds ?? 3600,
         })
       );
       return {
-        invoice: raw.invoice ?? raw.recipient_id ?? '',
-        paymentHash: raw.recipient_id ?? '',
+        invoice: raw.invoice ?? '',
+        paymentHash: raw.payment_hash ?? '',
         amount: request.assetAmount,
-        expiresAt: (raw.expiration_timestamp ?? 0) * 1000,
+        expiresAt: (raw.expiry_sec ?? request.expirySeconds ?? 0) * 1000,
         description: request.description,
       };
     }
@@ -267,10 +360,17 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async createRgbInvoice(params: any): Promise<any> {
+    this.requireRln();
     return this.c().rlnRgbInvoice(params);
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
+    // Plain Lightning wallets can't decode server-side (no rln_* methods). Return
+    // a minimal descriptor — pay_invoice honours the amount embedded in the
+    // BOLT11, so payment still works without an explicit decode.
+    if (!this.isRln) {
+      return { paymentHash: '', destination: invoice };
+    }
     const isRgb = invoice.toLowerCase().includes('rgb');
     if (isRgb) {
       const raw = anyRec(await this.c().rlnDecodeRgbInvoice({ invoice }));
@@ -299,6 +399,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async decodeRgbInvoice(params: any): Promise<any> {
+    this.requireRln();
     return this.c().rlnDecodeRgbInvoice(params);
   }
 
@@ -332,10 +433,12 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async sendAsset(params: any): Promise<any> {
+    this.requireRln();
     return this.c().rlnSendAsset(params);
   }
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
+    this.requireRln();
     return this.c().request('rln_send_btc', {
       address: params.address,
       amount: params.amount,
@@ -346,6 +449,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
     if (assetId) {
+      this.requireRln();
       const raw = anyRec(await this.c().rlnRgbInvoice({ asset_id: assetId }));
       return {
         address: raw.invoice ?? raw.recipient_id ?? '',
@@ -353,12 +457,14 @@ export class NwcRgbAdapter implements IProtocolAdapter {
         asset: assetId,
       };
     }
+    // On-chain BTC address is only available from an RLN node over NWC.
+    this.requireRln();
     const raw = anyRec(await this.c().rlnGetAddress());
     return { address: raw.address ?? '', format: 'BTC_ADDRESS' };
   }
 
   async getNodeInfo(): Promise<any> {
-    return this.c().rlnNodeInfo();
+    return this.isRln ? this.c().rlnNodeInfo() : this.c().getInfo();
   }
 
   // ── swaps (not over NWC) ───────────────────────────────────────────────────

@@ -7,14 +7,16 @@ const path = require('path');
 const config = getDefaultConfig(__dirname);
 
 // Allow Metro to resolve local packages still linked via file:
-// (@kaleidorg/wallet-engine now comes from npm — no sibling watchFolder needed).
+// @kaleidorg/wallet-engine is a local file: sibling (not yet published under the new
+// name), so Metro watches it and resolves it from ../wallet-engine (its built dist/).
+const walletEngineRoot = path.resolve(__dirname, '../wallet-engine');
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 // @kaleidorg/mind — the shared agentic engine, also published to npm as
 // @kaleidorg/mind. Linked via file: for fast local dev (pure JS dist/, no
 // native deps). To consume the published version instead, set its dep to
 // `^0.0.1` and drop this watchFolder.
 const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
-config.watchFolders = [kaleidoUiRoot, kaleidoMindRoot];
+config.watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot];
 config.resolver.nodeModulesPaths = [
   path.resolve(__dirname, 'node_modules'),
   path.resolve(kaleidoUiRoot, 'node_modules'),
@@ -40,6 +42,7 @@ config.resolver.blockList = exclusionList(blockedLinkedModules);
 
 // Force all shared deps to resolve from rate's node_modules (single copy, correct platform entries)
 config.resolver.extraNodeModules = {
+  '@kaleidorg/wallet-engine': walletEngineRoot,
   react: path.resolve(__dirname, 'node_modules/react'),
   'react-native': path.resolve(__dirname, 'node_modules/react-native'),
   'react-native-svg': path.resolve(__dirname, 'node_modules/react-native-svg'),

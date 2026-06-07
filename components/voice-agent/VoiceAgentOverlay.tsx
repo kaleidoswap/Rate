@@ -29,6 +29,8 @@ interface Bubble {
   id: string;
   role: 'user' | 'assistant';
   text: string;
+  /** The model's chain-of-thought for this turn (shown on demand). */
+  thinking?: string;
 }
 interface ConfirmState {
   call: { name: string; arguments: Record<string, unknown> };
@@ -64,6 +66,18 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Which assistant bubbles have their reasoning expanded (tap to reveal).
+  const [openThinking, setOpenThinking] = useState<Record<string, boolean>>({});
+
+  // True while the session is mounted — guards the speak→listen loop so a late
+  // TTS callback can't start the recorder after the overlay has closed.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const pulse = useSharedValue(0);
   const spin = useSharedValue(0);
@@ -110,8 +124,21 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     return id;
   };
-  const patchBubble = (id: string, text: string) =>
-    setBubbles((p) => p.map((b) => (b.id === id ? { ...b, text } : b)));
+  const patchBubble = (id: string, patch: Partial<Bubble>) =>
+    setBubbles((p) => p.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  // Keep the latest reply in view as it streams in (the user is often not
+  // looking at the screen while it speaks).
+  const scrollToEnd = () =>
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+
+  // After a spoken reply ends, automatically listen again so the conversation
+  // flows hands-free (turn-taking). Guarded so it never fires once closed.
+  const resumeListening = useCallback(() => {
+    if (!aliveRef.current) return;
+    setPhase('idle');
+    setError(null);
+    voiceRef.current?.startListening();
+  }, []);
 
   const runTurn = useCallback(
     async (userText: string) => {
@@ -121,32 +148,42 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       setPhase('thinking');
       const assistantId = appendBubble('assistant', '');
       let streamed = '';
+      let reasoning = '';
       try {
         const res = await agent.runTurn(userText, {
           history: priorHistory,
           onToken: (tok) => {
+            // Stream the answer into the bubble live + keep it scrolled into view.
             streamed += tok;
+            patchBubble(assistantId, { text: streamed });
+            scrollToEnd();
+          },
+          onThinking: (tok) => {
+            reasoning += tok;
+            patchBubble(assistantId, { thinking: reasoning });
           },
           onConfirm: (call) =>
             new Promise((resolve) => setConfirm({ call, resolve })),
         });
         const finalText = (res.text || streamed || 'Done.').trim();
-        patchBubble(assistantId, finalText);
+        patchBubble(assistantId, { text: finalText });
+        scrollToEnd();
         // Speak the reply with on-device QVAC TTS (falls back to the system
-        // voice automatically if QVAC TTS isn't available).
+        // voice automatically if QVAC TTS isn't available). When it finishes,
+        // listen again so the user can simply keep talking.
         setPhase('speaking');
         void stopSpeak();
         void qvacSpeak(finalText, {
-          onDone: () => setPhase('idle'),
+          onDone: resumeListening,
           onError: () => setPhase('idle'),
         });
       } catch (e) {
-        patchBubble(assistantId, '');
+        patchBubble(assistantId, { text: '' });
         setError(e instanceof Error ? e.message : 'Something went wrong.');
         setPhase('idle');
       }
     },
-    [bubbles, agent]
+    [bubbles, agent, resumeListening]
   );
 
   // VoiceInput callbacks
@@ -192,6 +229,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   }));
 
   const aiFailed = qvac.llmStatus === 'error';
+  // The on-device model is still downloading/loading (not an error, not ready).
+  const modelLoading = !aiFailed && !qvac.isReady;
   const statusText = aiFailed
     ? `On-device AI unavailable — ${qvac.error || 'the model could not be loaded'}`
     : !qvac.isReady
@@ -238,18 +277,41 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                 Try: "What's my balance?" · "Create an invoice for 5000 sats" · "Show my receive address"
               </Text>
             )}
-            {bubbles.map((b) =>
-              b.text ? (
+            {bubbles.map((b) => {
+              const hasThinking = b.role === 'assistant' && !!b.thinking?.trim();
+              if (!b.text && !hasThinking) return null;
+              const open = !!openThinking[b.id];
+              return (
                 <View
                   key={b.id}
                   style={[styles.bubble, b.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}
                 >
-                  <Text style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}>
-                    {b.text}
-                  </Text>
+                  {hasThinking && (
+                    <>
+                      <Pressable
+                        onPress={() => setOpenThinking((p) => ({ ...p, [b.id]: !p[b.id] }))}
+                        style={styles.thinkToggle}
+                        hitSlop={6}
+                      >
+                        <Ionicons name="sparkles-outline" size={12} color={theme.colors.text.muted} />
+                        <Text style={styles.thinkToggleText}>{open ? 'Hide thinking' : 'Show thinking'}</Text>
+                        <Ionicons
+                          name={open ? 'chevron-up' : 'chevron-down'}
+                          size={12}
+                          color={theme.colors.text.muted}
+                        />
+                      </Pressable>
+                      {open && <Text style={styles.thinkText}>{b.thinking!.trim()}</Text>}
+                    </>
+                  )}
+                  {!!b.text && (
+                    <Text style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}>
+                      {b.text}
+                    </Text>
+                  )}
                 </View>
-              ) : null
-            )}
+              );
+            })}
           </ScrollView>
 
           {/* Orb */}
@@ -260,7 +322,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           >
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
             <Animated.View style={[styles.orb, { backgroundColor: orbColor }, orbStyle]}>
-              {phase === 'thinking' ? (
+              {modelLoading || phase === 'thinking' ? (
                 <ActivityIndicator color={theme.colors.text.inverse} />
               ) : (
                 <Ionicons
@@ -271,6 +333,17 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               )}
             </Animated.View>
           </Pressable>
+          {/* Loading progress bar while the on-device model downloads/loads. */}
+          {modelLoading && (
+            <View style={styles.loadTrack}>
+              <View
+                style={[
+                  styles.loadFill,
+                  { width: `${qvac.isDownloading ? qvac.combinedProgress : 100}%` },
+                ]}
+              />
+            </View>
+          )}
           <Text style={styles.status}>{statusText}</Text>
 
           {/* Hidden recorder */}
@@ -343,7 +416,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 14,
     paddingBottom: 36,
-    maxHeight: '88%',
+    maxHeight: '94%',
+    minHeight: '70%',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border.light,
   },
@@ -358,13 +432,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: theme.colors.surface.secondary,
   },
-  convo: { maxHeight: 280, marginTop: 8 },
+  convo: { flex: 1, minHeight: 240, marginTop: 8 },
   hint: { color: theme.colors.text.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', paddingHorizontal: 12 },
   bubble: { maxWidth: '85%', paddingVertical: 9, paddingHorizontal: 13, borderRadius: 16 },
   bubbleUser: { alignSelf: 'flex-end', backgroundColor: theme.colors.primary[500], borderBottomRightRadius: 5 },
   bubbleAssistant: { alignSelf: 'flex-start', backgroundColor: theme.colors.surface.secondary, borderBottomLeftRadius: 5 },
   bubbleUserText: { color: theme.colors.text.inverse, fontSize: 15, fontWeight: '500' },
   bubbleAssistantText: { color: theme.colors.text.primary, fontSize: 15 },
+  thinkToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  thinkToggleText: { color: theme.colors.text.muted, fontSize: 12, fontWeight: '600' },
+  thinkText: {
+    color: theme.colors.text.secondary,
+    fontSize: 13,
+    fontStyle: 'italic',
+    lineHeight: 18,
+    marginBottom: 8,
+    paddingLeft: 8,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.colors.border.medium,
+  },
+  loadTrack: {
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: theme.colors.surface.secondary,
+    overflow: 'hidden',
+    marginTop: 10,
+    marginHorizontal: 40,
+  },
+  loadFill: { height: '100%', borderRadius: 2, backgroundColor: theme.colors.primary[500] },
   orbArea: { alignItems: 'center', justifyContent: 'center', height: 130, marginTop: 8 },
   orbRing: { position: 'absolute', width: 92, height: 92, borderRadius: 46 },
   orb: {
