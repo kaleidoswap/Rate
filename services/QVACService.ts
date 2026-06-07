@@ -9,8 +9,10 @@ import {
   resume,
   suspend,
   VERBOSITY,
+  embed,
   TTS_EN_SUPERTONIC_Q4_0,
   WHISPER_BASE_Q8_0,
+  EMBEDDINGGEMMA_300M_Q4_0,
 } from '@qvac/sdk';
 import { NativeModules, Platform } from 'react-native';
 import { File, Directory, Paths } from 'expo-file-system';
@@ -220,6 +222,8 @@ class QVACService {
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
   private ttsModelId: string | null = null;
+  private embedModelId: string | null = null;
+  private embedLoadPromise: Promise<string> | null = null;
   private ttsLoadPromise: Promise<string> | null = null;
 
   private config: QVACConfig = { ...DEFAULT_CONFIG };
@@ -1242,7 +1246,49 @@ class QVACService {
     return { pcm, sampleRate: TTS_SAMPLE_RATE };
   }
 
+  // --- Embeddings (for on-device RAG) ---
+
+  /** Lazily load the embeddings model (EmbeddingGemma-300M) on first use. */
+  private async ensureEmbedModel(): Promise<string> {
+    if (this.embedModelId) return this.embedModelId;
+    if (!this.embedLoadPromise) {
+      this.embedLoadPromise = (async () => {
+        const id: string = await loadModel({
+          modelSrc: EMBEDDINGGEMMA_300M_Q4_0,
+          modelType: 'embeddings',
+          verbosity: VERBOSITY.ERROR,
+        } as any);
+        this.embedModelId = id;
+        return id;
+      })();
+    }
+    return this.embedLoadPromise;
+  }
+
+  /** Embed texts on-device (the QVAC half of RAG). One vector per input text. */
+  async embed(texts: string[]): Promise<number[][]> {
+    const modelId = await this.ensureEmbedModel();
+    const out: number[][] = [];
+    for (const text of texts) {
+      const res: any = await embed({ modelId, text });
+      out.push(res.embedding as number[]);
+    }
+    return out;
+  }
+
   // --- Cleanup ---
+
+  async unloadEmbeddings(): Promise<void> {
+    if (this.embedModelId) {
+      try {
+        await unloadModel({ modelId: this.embedModelId, clearStorage: false });
+      } catch {
+        /* ignore */
+      }
+      this.embedModelId = null;
+      this.embedLoadPromise = null;
+    }
+  }
 
   async unloadTts(): Promise<void> {
     if (this.ttsModelId) {
@@ -1273,7 +1319,7 @@ class QVACService {
   }
 
   async unloadAll(): Promise<void> {
-    await Promise.all([this.unloadLLM(), this.unloadWhisper(), this.unloadTts()]);
+    await Promise.all([this.unloadLLM(), this.unloadWhisper(), this.unloadTts(), this.unloadEmbeddings()]);
   }
 }
 

@@ -61,6 +61,7 @@ import {
 import { protocolManager } from '../services/protocols';
 import { buildWalletToolSource } from '../services/walletTools';
 import { asyncStorageMemoryIO } from '../services/aiMemory';
+import { buildKnowledgeToolSource } from '../services/aiKnowledge';
 // Skills authored as SKILL.md under ./skills, bundled to JSON at build time
 // (`npm run bundle-skills`). Same authoring + loader the desktop uses.
 import skillBundle from '../skills.bundle.json';
@@ -183,6 +184,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
     const merchantSource = new InProcessToolSource('merchant', merchantTools);
     // Memory tools (remember/recall) over the persisted store.
     const memorySource = createMemoryToolSource(memoryStore);
+    // Knowledge (search_knowledge) — on-device RAG over the Bitcoin corpus.
+    const knowledgeSource = buildKnowledgeToolSource(qvac.service);
 
     // Shared wallet payment path — used by every "agent spends sats" source
     // (L402, Bitrefill, …). Pays a BOLT11 with the on-device Lightning wallet
@@ -208,7 +211,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     return new Engine({
       provider,
-      tools: new ToolRegistry([walletSource, merchantSource, memorySource, l402Source]),
+      tools: new ToolRegistry([walletSource, merchantSource, memorySource, knowledgeSource, l402Source]),
       defaultMaxTurns: 5,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -590,7 +593,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       // Memory is ambient: keep remember/recall available even when a skill
       // narrows the toolset, so the assistant can always recall preferences.
       const scopedTools = allowedTools
-        ? [...new Set([...allowedTools, 'remember', 'recall'])]
+        ? [...new Set([...allowedTools, 'remember', 'recall', 'search_knowledge'])]
         : allowedTools;
       const chatMessages = [
         { role: 'system', content: skillSystem },
