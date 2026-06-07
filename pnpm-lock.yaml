@@ -33,11 +33,11 @@ importers:
         specifier: ^5.2.1
         version: 5.2.1
       '@kaleidorg/kaleido-ui':
-        specifier: npm:kaleido-ui@^0.1.46
-        version: kaleido-ui@0.1.46(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
+        specifier: npm:kaleido-ui@^0.1.48
+        version: kaleido-ui@0.1.48(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@kaleidorg/mind':
-        specifier: ^0.0.1
-        version: 0.0.1
+        specifier: ^0.1.0
+        version: 0.1.0
       '@kaleidorg/wallet-protocols':
         specifier: ^1.0.0-beta.2
         version: 1.0.0-beta.2(0034e19555df349dc615af7a283f9fc6)
@@ -1569,8 +1569,8 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
-  '@kaleidorg/mind@0.0.1':
-    resolution: {integrity: sha512-JyctGfAikt1ps+RArlwc4rI21ca0LiqSS3sTQt2crhLIC38gsl70/W/VuleChBnFsz7OboX3sfQN5c1+gkHJ6Q==}
+  '@kaleidorg/mind@0.1.0':
+    resolution: {integrity: sha512-UyHDZwmCy5Xi8UukuL08gH53xcHvLbKGhzb48w+tN+1qxtU1gujaOKaaARaaPQLAiAxD50jY0oFoPV9zb1EZmA==}
 
   '@kaleidorg/wallet-protocols@1.0.0-beta.2':
     resolution: {integrity: sha512-1pd3dLy3vi7xB/OudXsfLLhSsAMxWfcsj/CvLIlsUtJjlJ5bNLMrQlYXEWMQ+MsGHZEzyN68iMbwvuEibeQtxQ==}
@@ -4628,8 +4628,8 @@ packages:
     resolution: {integrity: sha512-44O0bRambj+KIfKS9pO8bIFLAbYYqrT6lsv8Y1QDt7uJOV4cCGoYDmVSVvBM9OTQSmOQTYYZ+M7kdJK0bgDrOg==}
     engines: {node: '>=18.0.0'}
 
-  kaleido-ui@0.1.46:
-    resolution: {integrity: sha512-yDWO5AA5LJ6ktnITAnWDx0ARkc0olhmQIEyYqC6ZvK1SBtXcoHIva5D5yEKmnx2bDnm1OkN+A6slJ4GaiW36Aw==}
+  kaleido-ui@0.1.48:
+    resolution: {integrity: sha512-tHAKHDHT+Ojv8AsjEkc1eMeMD9ZGM2HLSQgeM+jRAqGRFVzxMFIpPPeqzSoWJQPhXDxg/CUot4Qh5SP3kw0hDQ==}
     peerDependencies:
       '@radix-ui/react-dialog': ^1.1.0
       '@radix-ui/react-label': ^2.1.0
@@ -4642,6 +4642,7 @@ packages:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
       react-native: '>=0.73.0'
+      react-native-svg: '>=13.0.0'
       tailwind-merge: ^2.0.0
     peerDependenciesMeta:
       '@radix-ui/react-dialog':
@@ -4663,6 +4664,8 @@ packages:
       react-dom:
         optional: true
       react-native:
+        optional: true
+      react-native-svg:
         optional: true
       tailwind-merge:
         optional: true
@@ -8625,7 +8628,7 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@kaleidorg/mind@0.0.1': {}
+  '@kaleidorg/mind@0.1.0': {}
 
   '@kaleidorg/wallet-protocols@1.0.0-beta.2(0034e19555df349dc615af7a283f9fc6)':
     dependencies:
@@ -13091,7 +13094,7 @@ snapshots:
     dependencies:
       openapi-fetch: 0.15.2
 
-  kaleido-ui@0.1.46(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
+  kaleido-ui@0.1.48(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:
       '@tetherto/wdk-uikit-react-native': 1.0.0-beta.2(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       qr: 0.5.5
@@ -13099,8 +13102,7 @@ snapshots:
     optionalDependencies:
       react-dom: 19.1.4(react@19.1.4)
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
-    transitivePeerDependencies:
-      - react-native-svg
+      react-native-svg: 15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
 
   kdbush@4.1.0: {}
 
