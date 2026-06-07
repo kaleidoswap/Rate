@@ -53,6 +53,35 @@ function findContact(name: string): any | undefined {
   return list.find((c) => c?.name?.toLowerCase() === q) ?? list.find((c) => c?.name?.toLowerCase().includes(q));
 }
 const looksLikeDestination = (s: string) => /^(ln(bc|tb|bcrt)|bc1|tb1|[a-z0-9._-]+@)/i.test(s.trim());
+const isLightningAddress = (s: string) => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.trim());
+const isOnchainAddress = (s: string) => /^(bc1|tb1|bcrt1)/i.test(s.trim());
+
+/** LNURL-pay: resolve a Lightning address (user@domain) to a BOLT11 invoice. */
+async function resolveLightningAddress(address: string, amountSats: number, comment = ''): Promise<string> {
+  const [username, domain] = address.trim().split('@');
+  if (!username || !domain) throw new Error(`That doesn't look like a Lightning address: ${address}`);
+  const fetchJson = async (url: string): Promise<any> => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    try {
+      const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: ctrl.signal });
+      if (!res.ok) throw new Error(`Lightning address endpoint returned ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  const lnurl = await fetchJson(`https://${domain}/.well-known/lnurlp/${username}`);
+  if (lnurl?.status === 'ERROR') throw new Error(lnurl.reason || 'Lightning address rejected the request.');
+  const msat = amountSats * 1000;
+  if (lnurl?.minSendable && msat < lnurl.minSendable) throw new Error(`Minimum is ${Math.ceil(lnurl.minSendable / 1000)} sats.`);
+  if (lnurl?.maxSendable && msat > lnurl.maxSendable) throw new Error(`Maximum is ${Math.floor(lnurl.maxSendable / 1000)} sats.`);
+  const sep = String(lnurl.callback).includes('?') ? '&' : '?';
+  const inv = await fetchJson(`${lnurl.callback}${sep}amount=${msat}&comment=${encodeURIComponent(comment)}`);
+  if (inv?.status === 'ERROR') throw new Error(inv.reason || 'Could not get an invoice from the Lightning address.');
+  if (!inv?.pr) throw new Error('The Lightning address returned no invoice.');
+  return String(inv.pr);
+}
 
 /** Contract tool → handler. Only the safe, well-understood subset for now;
  *  the rest are bound via `allowMissing` (i.e. simply not exposed yet). */
@@ -114,15 +143,23 @@ const HANDLERS: Record<string, WalletHandler> = {
   rln_pay_invoice: async ({ invoice }) => lightningAdapter().sendPayment({ invoice: String(invoice) }),
   send_payment: async ({ to, amount_sats }) => {
     let target = String(to ?? '').trim();
+    const sats = amount_sats != null ? Number(amount_sats) : undefined;
+    // Contact name → its payable destination.
     if (target && !looksLikeDestination(target)) {
       const c = findContact(target);
       if (c?.lightning_address) target = c.lightning_address;
       else throw new Error(`I don't have a payable address for "${to}".`);
     }
     if (!target) throw new Error('A destination (invoice, address, or contact) is required.');
-    // Lightning rail (Spark preferred, RLN fallback). amount_sats applies to
-    // amountless invoices / addresses.
-    return lightningAdapter().sendPayment({ invoice: target, ...(amount_sats ? { amountSats: Number(amount_sats) } : {}) });
+    // Lightning address (user@domain) → resolve to a BOLT11 invoice via LNURL-pay.
+    if (isLightningAddress(target)) {
+      if (!sats) throw new Error('I need an amount in sats to pay a Lightning address.');
+      target = await resolveLightningAddress(target, sats);
+    } else if (isOnchainAddress(target)) {
+      throw new Error("On-chain sends from the assistant aren't supported yet — use the Send screen.");
+    }
+    // Pay the BOLT11 invoice on the Lightning rail (Spark preferred, RLN fallback).
+    return lightningAdapter().sendPayment({ invoice: target, ...(sats ? { amountSats: sats } : {}) });
   },
 };
 
