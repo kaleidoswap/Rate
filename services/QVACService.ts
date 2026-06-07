@@ -1109,8 +1109,11 @@ class QVACService {
       modelId: this.llmModelId,
       history,
       stream: true,
+      // Cap output so a turn can't ramble to the context limit (slow + battery);
+      // a wallet reply / tool call is short. 512 is generous headroom.
+      max_tokens: 512,
       tools: toolDefs.length ? (toolDefs as any) : undefined,
-    });
+    } as any);
 
     let streamed = '';
     for await (const event of run.events) {
