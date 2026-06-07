@@ -49,6 +49,8 @@ import {
   RecipeRegistry,
   runRecipe,
   paymentsRecipe,
+  FastPath,
+  WALLET_FAST_INTENTS,
   type LLMProvider,
   type InProcessTool,
   type SkillBundle,
@@ -217,6 +219,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // (e.g. "pay bob 3 EUR") carries the plan; the model only fills slots, the
   // deterministic chain runs locally, and the spend is confirmation-gated.
   const recipes = useMemo(() => new RecipeRegistry([paymentsRecipe]), []);
+
+  // Tier-0 fast-path: common reads (balance / address / price) answered with
+  // NO model at all. The wallet ToolRegistry is shared with the recipe tier.
+  const fastPath = useMemo(() => new FastPath(WALLET_FAST_INTENTS), []);
+  const walletRegistry = useMemo(() => new ToolRegistry([buildWalletToolSource()]), []);
 
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
@@ -501,6 +508,31 @@ export default function AIAssistantScreen({ navigation }: Props) {
     const assistantId = nextId();
     addMessage({ id: assistantId, text: '', isUser: false, timestamp: new Date(), streaming: true });
 
+    // ── Tier-0: deterministic fast-path (no LLM) ──
+    // Common reads (balance / address / price) answered instantly by calling one
+    // tool directly — zero inference. Reserves the model for harder asks.
+    const fast = fastPath.select(messageText);
+    if (fast) {
+      try {
+        const r: any = await walletRegistry.execute(fast.tool, fast.args);
+        let text: string;
+        if (fast.intent.name === 'balance') {
+          const sats = Number(r?.total_sats ?? 0);
+          const n = r?.layers?.length ?? 0;
+          text = `You have ${sats.toLocaleString()} sats${n > 1 ? ` across ${n} layers` : ''}.`;
+        } else if (fast.intent.name === 'address') {
+          text = r?.address ? `Here's your receive address:\n\n\`${r.address}\`` : 'No address available right now.';
+        } else {
+          text = `Bitcoin is $${Number(r?.price_usd ?? 0).toLocaleString()}.`;
+        }
+        updateMessage(assistantId, () => ({ text, streaming: false }));
+      } catch (e) {
+        updateMessage(assistantId, () => ({ text: (e as Error)?.message ?? 'That failed.', streaming: false }));
+      }
+      setIsLoading(false);
+      return;
+    }
+
     // ── Tier-2: recipe fast-path (mobile multi-step) ──
     // A known chain like "pay bob 3 EUR": the recipe carries the plan, the model
     // only fills slots (~1 inference), the deterministic steps run on-device, and
@@ -514,7 +546,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       };
       const result = await runRecipe(recipe, messageText, {
         provider: recipeProvider,
-        tools: new ToolRegistry([buildWalletToolSource()]),
+        tools: walletRegistry,
         onConfirm: requestConfirmation,
         onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
       });
