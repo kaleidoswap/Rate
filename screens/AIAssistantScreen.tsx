@@ -52,6 +52,7 @@ import {
   type Message as MindMessage,
 } from '@kaleidorg/mind';
 import { protocolManager } from '../services/protocols';
+import { buildWalletToolSource } from '../services/walletTools';
 // Skills authored as SKILL.md under ./skills, bundled to JSON at build time
 // (`npm run bundle-skills`). Same authoring + loader the desktop uses.
 import skillBundle from '../skills.bundle.json';
@@ -159,7 +160,15 @@ export default function AIAssistantScreen({ navigation }: Props) {
       runTurn: (input) => qvac.service.runProviderTurn(input),
       cancel: (id) => qvac.service.cancelRequest(id),
     };
-    const walletSource = new InProcessToolSource('wallet', tools as unknown as InProcessTool[]);
+    // Wallet tools now come from the canonical @kaleidorg/mind contract, bound
+    // to the WDK adapters (same names/schemas as the desktop MCP). Handlers run
+    // on-device; spend tools stay confirmation-gated.
+    const walletSource = buildWalletToolSource();
+    // Keep the non-wallet (merchant/map) tools from the legacy set.
+    const merchantTools = (tools as unknown as InProcessTool[]).filter(
+      (t) => t.name === 'find_merchant_locations' || t.name === 'get_merchant_info',
+    );
+    const merchantSource = new InProcessToolSource('merchant', merchantTools);
 
     // Shared wallet payment path — used by every "agent spends sats" source
     // (L402, Bitrefill, …). Pays a BOLT11 with the on-device Lightning wallet
@@ -185,7 +194,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
     return new Engine({
       provider,
-      tools: new ToolRegistry([walletSource, l402Source]),
+      tools: new ToolRegistry([walletSource, merchantSource, l402Source]),
       defaultMaxTurns: 5,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

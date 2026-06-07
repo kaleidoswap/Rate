@@ -127,12 +127,15 @@ const HANDLERS: Record<string, WalletHandler> = {
 };
 
 /**
- * Build the wallet ToolSource for the engine: the contract tools for connected
- * layers + core helpers, bound to the WDK adapters. Tools without a handler yet
- * (e.g. per-layer *_send, swaps, Liquid) are simply not exposed.
+ * Build the wallet ToolSource for the engine: all implemented contract tools
+ * (Spark/RLN/Arkade + core helpers), bound to the WDK adapters. The tool surface
+ * is STABLE regardless of connection state — each handler checks its adapter at
+ * call time and throws a friendly error if that layer isn't connected (so the
+ * agent can be built once at mount, before wallets connect). Tools without a
+ * handler yet (per-layer *_send, swaps, Liquid) are simply not exposed.
  */
 export function buildWalletToolSource() {
-  const layers: WalletLayer[] = [...connectedLayers(), 'core'];
+  const layers: WalletLayer[] = ['spark', 'rln', 'arkade', 'core'];
   return bindWalletTools(HANDLERS, { layers, includeCore: true, allowMissing: true, id: 'wallet' });
 }
 
