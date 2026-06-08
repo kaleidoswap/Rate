@@ -60,7 +60,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
         isUser ? styles.rowUser : styles.rowAi,
         {
           opacity: enter,
-          transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+          transform: [
+            { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) },
+            { translateX: enter.interpolate({ inputRange: [0, 1], outputRange: [isUser ? 22 : -22, 0] }) },
+            { scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+          ],
         },
       ]}
     >
