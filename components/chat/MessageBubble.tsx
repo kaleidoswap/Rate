@@ -10,6 +10,7 @@ import TypingDots from './TypingDots';
 import FunctionResultCard from './FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
 import { PayableCard } from './PayableCard';
+import { BalanceCard } from './BalanceCard';
 
 export interface ChatMessage {
   id: string;
@@ -21,6 +22,8 @@ export interface ChatMessage {
   streaming?: boolean;
   /** The model's chain-of-thought for this reply (revealed on tap). */
   thinking?: string;
+  /** Structured card to render in place of (or alongside) the text. */
+  card?: { type: 'balance' | 'contact' | 'merchant'; data: any };
 }
 
 interface MessageBubbleProps {
@@ -117,6 +120,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
             )}
             {message.streaming && !message.text.trim() ? (
               <TypingDots />
+            ) : message.card?.type === 'balance' ? (
+              <BalanceCard data={message.card.data} />
             ) : payable ? (
               <>
                 {stripPayable(message.text, payable).trim() ? (

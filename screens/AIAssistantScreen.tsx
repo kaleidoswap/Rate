@@ -609,17 +609,19 @@ export default function AIAssistantScreen({ navigation }: Props) {
       try {
         const r: any = await walletRegistry.execute(fast.tool, fast.args);
         let text: string;
+        let card: ChatMessage['card'] | undefined;
         if (fast.intent.name === 'balance') {
           const sats = Number(r?.total_sats ?? 0);
           const n = r?.layers?.length ?? 0;
           text = `You have ${sats.toLocaleString()} sats${n > 1 ? ` across ${n} layers` : ''}.`;
+          card = { type: 'balance', data: { ...r, priceUsd: btcPriceUSD } };
         } else if (fast.intent.name === 'address') {
           text = r?.address ? `Here's your receive address:\n\n\`${r.address}\`` : 'No address available right now.';
         } else {
           text = `Bitcoin is $${Number(r?.price_usd ?? 0).toLocaleString()}.`;
         }
         console.log(`[AI] ◀ ${text}`);
-        updateMessage(assistantId, () => ({ text, streaming: false }));
+        updateMessage(assistantId, () => ({ text, card, streaming: false }));
       } catch (e) {
         console.log(`[AI] ✗ fast-path ${fast.tool}: ${(e as Error)?.message}`);
         updateMessage(assistantId, () => ({ text: (e as Error)?.message ?? 'That failed.', streaming: false }));
