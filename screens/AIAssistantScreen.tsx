@@ -23,7 +23,7 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, selectAiMode, setAiMode } from '../store/slices/settingsSlice';
+import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { MainHeader } from '../components';
@@ -174,6 +174,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const aiEnabled = useSelector(selectAiEnabled);
   const aiMode = useSelector(selectAiMode);
   const btcPriceUSD = useSelector((s: any) => s?.wallet?.btcPriceUSD) || 0;
+  const mindConfig = useSelector(selectMindConfig);
   const dispatch = useDispatch();
   const qvac = useQVAC(aiEnabled);
   const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
@@ -194,6 +195,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
       runTurn: (input) =>
         qvac.service.runProviderTurn({
           ...input,
+          temperature: mindConfig.temperature,
+          maxTokens: mindConfig.maxTokens,
           onThinking: (tok) => {
             const cur = thinkingRef.current;
             if (!cur) return;
@@ -239,13 +242,19 @@ export default function AIAssistantScreen({ navigation }: Props) {
       log: (m: string) => console.log('[L402]', m),
     });
 
+    // Memory + knowledge are user-toggleable (Design your agent → Context/Knowledge).
+    const sources: any[] = [walletSource, merchantSource];
+    if (mindConfig.memoryEnabled) sources.push(memorySource);
+    if (mindConfig.ragEnabled) sources.push(knowledgeSource);
+    sources.push(l402Source);
+
     return new Engine({
       provider,
-      tools: new ToolRegistry([walletSource, merchantSource, memorySource, knowledgeSource, l402Source]),
+      tools: new ToolRegistry(sources),
       defaultMaxTurns: 5,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tools, qvac.service, memoryStore]);
+  }, [tools, qvac.service, memoryStore, mindConfig.memoryEnabled, mindConfig.ragEnabled, mindConfig.temperature, mindConfig.maxTokens]);
 
   // Skills route a query to a focused playbook + a curated tool subset
   // (progressive disclosure — the small mobile model never sees every tool at
@@ -642,7 +651,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       console.log(`[AI] ▶ "${messageText}"  · tier=recipe:${recipe.name}  slots=${JSON.stringify(recipeSlots)}`);
       const recipeProvider: LLMProvider = {
         name: 'qvac',
-        runTurn: (input) => qvac.service.runProviderTurn(input),
+        runTurn: (input) => qvac.service.runProviderTurn({ ...input, temperature: mindConfig.temperature, maxTokens: mindConfig.maxTokens }),
       };
       const result = await runRecipe(recipe, messageText, {
         provider: recipeProvider,
@@ -669,7 +678,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       // Keep only the most recent turns so the prompt (system + skill + tools +
       // history) stays within the model's context window. Small on-device /
       // delegated models overflow quickly; the last few exchanges are enough.
-      const MAX_HISTORY_MESSAGES = 8;
+      const MAX_HISTORY_MESSAGES = mindConfig.historyLength;
       const history = messages
         .filter((m) => !m.streaming && m.text.trim().length > 0)
         .slice(-MAX_HISTORY_MESSAGES)
@@ -677,17 +686,19 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
       // Enter the most relevant skill: compose its playbook into the system
       // prompt and expose only its tools (progressive disclosure). No match →
-      // the base prompt + full toolset.
+      // the base prompt + full toolset. The user's persona is appended last.
       const skill = skills.select(messageText);
-      const { system: skillSystem, allowedTools } = skills.compose(
-        String(SYSTEM_PROMPT.content),
-        skill,
-      );
-      // Memory is ambient: keep remember/recall available even when a skill
-      // narrows the toolset, so the assistant can always recall preferences.
-      const scopedTools = allowedTools
-        ? [...new Set([...allowedTools, 'remember', 'recall', 'search_knowledge'])]
-        : allowedTools;
+      const basePrompt = mindConfig.persona
+        ? `${String(SYSTEM_PROMPT.content)}\n\n## Your persona\n${mindConfig.persona}`
+        : String(SYSTEM_PROMPT.content);
+      const { system: skillSystem, allowedTools } = skills.compose(basePrompt, skill);
+      // Ambient tools that stay available even when a skill narrows the set —
+      // gated by the user's memory/knowledge toggles.
+      const ambient = [
+        ...(mindConfig.memoryEnabled ? ['remember', 'recall'] : []),
+        ...(mindConfig.ragEnabled ? ['search_knowledge'] : []),
+      ];
+      const scopedTools = allowedTools ? [...new Set([...allowedTools, ...ambient])] : allowedTools;
       const chatMessages = [
         { role: 'system', content: skillSystem },
         ...history,

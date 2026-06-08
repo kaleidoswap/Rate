@@ -946,7 +946,7 @@ class QVACService {
    * on-device even when inference is delegated).
    */
   async runProviderTurn(
-    input: TurnInput & { onThinking?: (token: string) => void },
+    input: TurnInput & { onThinking?: (token: string) => void; temperature?: number; maxTokens?: number },
   ): Promise<TurnOutput> {
     if (!this.llmModelId) {
       throw new Error('LLM model not loaded');
@@ -969,9 +969,10 @@ class QVACService {
       // Parse <think> blocks into separate `thinkingDelta` events so the UI can
       // surface the model's reasoning on demand without it polluting the answer.
       captureThinking: true,
-      // Cap output so a turn can't ramble to the context limit (slow + battery);
-      // a wallet reply / tool call is short. 512 is generous headroom.
-      max_tokens: 512,
+      // Cap output so a turn can't ramble to the context limit (slow + battery).
+      // User-tunable via "Design your agent" (default 512). Temperature too.
+      max_tokens: input.maxTokens ?? 512,
+      temperature: input.temperature ?? 0.6,
       tools: toolDefs.length ? (toolDefs as any) : undefined,
     } as any);
 

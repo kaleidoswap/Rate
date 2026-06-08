@@ -7,7 +7,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { MemoryIO, MemoryItem } from '@kaleidorg/mind';
 
-const KEY = 'kaleidomind.memory.v1';
+export const MEMORY_KEY = 'kaleidomind.memory.v1';
+const KEY = MEMORY_KEY;
 
 export function asyncStorageMemoryIO(): MemoryIO {
   return {

@@ -15,6 +15,7 @@ import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
+import ChatNotifications from './components/ChatNotifications';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
 
@@ -39,6 +40,7 @@ import SettingsScreen from './screens/SettingsScreen';
 import AIAssistantScreen from './screens/AIAssistantScreen';
 import MapScreen from './screens/MapScreen';
 import ContactsScreen from './screens/ContactsScreen';
+import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
@@ -48,6 +50,7 @@ import NostrSetupScreen from './screens/NostrSetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
 import PairDesktopScreen from './screens/PairDesktopScreen';
+import MindSettingsScreen from './screens/MindSettingsScreen';
 import NWCConnectScreen from './screens/NWCConnectScreen';
 
 type RootStackParamList = {
@@ -76,7 +79,9 @@ type RootStackParamList = {
   IssueAsset: undefined;
   Channels: undefined;
   PairDesktop: undefined;
+  MindSettings: undefined;
   NWCConnect: { scanned?: string } | undefined;
+  Chat: { pubkey: string; name?: string; npub?: string; avatarUrl?: string };
 };
 
 type TabBarIconProps = {
@@ -242,10 +247,16 @@ function AppNavigator() {
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen
+          name="MindSettings"
+          component={MindSettingsScreen}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen
           name="NWCConnect"
           component={NWCConnectScreen}
           options={{ presentation: 'modal', headerShown: false }}
         />
+        <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
         <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
         <Stack.Screen name="Assets" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />
@@ -327,6 +338,7 @@ export default function App() {
       <Provider store={store}>
         <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
           <QVACEnabledSync />
+          <ChatNotifications />
           <AppThemeProvider>
             <KaleidoThemeProvider>
               <ThemeProvider value={navigationTheme}>

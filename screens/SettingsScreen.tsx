@@ -392,6 +392,13 @@ export default function SettingsScreen({ navigation }: Props) {
           {activePairing && (
             <Row icon="cube-outline" iconColor={theme.colors.accent[500]} label="Active model" value={activePairing.model} />
           )}
+          <Row
+            icon="construct-outline"
+            iconColor={theme.colors.accent[500]}
+            label="Design your agent"
+            description="Persona, responses, context, memory & knowledge"
+            onPress={() => navigation.navigate('MindSettings')}
+          />
         </Group>
 
         <SectionLabel>Connections</SectionLabel>

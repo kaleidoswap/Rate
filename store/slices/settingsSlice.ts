@@ -12,6 +12,32 @@ import type { RootState } from '../index';
 //   'delegate' run it on a paired desktop; the phone relays
 export type AiMode = 'off' | 'local' | 'delegate';
 
+// User-tunable KaleidoMind agent configuration (persisted). Lets the user shape
+// the agent's behaviour, sampling, context window, and knowledge/memory.
+export interface MindConfig {
+  /** Extra instructions appended to the agent's system prompt (its "persona"). */
+  persona: string;
+  /** Sampling temperature 0..1 (lower = more deterministic). */
+  temperature: number;
+  /** Max tokens per reply. */
+  maxTokens: number;
+  /** How many past messages to keep in context. */
+  historyLength: number;
+  /** Ground answers in the on-device knowledge base (RAG). */
+  ragEnabled: boolean;
+  /** Long-term memory: let the agent remember/recall preferences. */
+  memoryEnabled: boolean;
+}
+
+export const DEFAULT_MIND_CONFIG: MindConfig = {
+  persona: '',
+  temperature: 0.6,
+  maxTokens: 512,
+  historyLength: 8,
+  ragEnabled: true,
+  memoryEnabled: true,
+};
+
 // Primary denomination the balance/amounts are shown in. Cycled by tapping the
 // balance (sats → BTC → fiat → sats). Distinct from `bitcoinUnit`, which only
 // covers the BTC/sats sub-choice used for amount *entry* in send/receive.
@@ -47,6 +73,8 @@ interface SettingsState {
   aiMode: AiMode;
   // Whether the user has been through the one-time KaleidoMind onboarding.
   aiOnboarded: boolean;
+  // User-tunable agent configuration (persona, sampling, context, RAG, memory).
+  mindConfig: MindConfig;
 }
 
 const initialState: SettingsState = {
@@ -71,6 +99,7 @@ const initialState: SettingsState = {
   disclosureLevel: 'lite',
   aiMode: 'off',
   aiOnboarded: false,
+  mindConfig: DEFAULT_MIND_CONFIG,
 };
 
 const settingsSlice = createSlice({
@@ -156,6 +185,12 @@ const settingsSlice = createSlice({
     setAiOnboarded: (state, action: PayloadAction<boolean>) => {
       state.aiOnboarded = action.payload;
     },
+    setMindConfig: (state, action: PayloadAction<Partial<MindConfig>>) => {
+      state.mindConfig = { ...DEFAULT_MIND_CONFIG, ...state.mindConfig, ...action.payload };
+    },
+    resetMindConfig: (state) => {
+      state.mindConfig = DEFAULT_MIND_CONFIG;
+    },
     // Convenience on/off toggle that preserves a chosen 'delegate' setup.
     setAiEnabled: (state, action: PayloadAction<boolean>) => {
       if (action.payload) {
@@ -190,6 +225,8 @@ export const {
   setCurrency,
   setNetwork,
   setDisclosureLevel,
+  setMindConfig,
+  resetMindConfig,
   setAiMode,
   setAiOnboarded,
   setAiEnabled,
@@ -221,5 +258,11 @@ export const selectAiEnabled = (state: RootState): boolean =>
 // Whether the user has completed the one-time KaleidoMind onboarding.
 export const selectAiOnboarded = (state: RootState): boolean =>
   state.settings.aiOnboarded ?? false;
+
+// Returns the stored object (stable ref) so useSelector doesn't re-render on
+// every dispatch; the reducer always writes a complete MindConfig, and older
+// persisted state with no mindConfig falls back to the constant default.
+export const selectMindConfig = (state: RootState): MindConfig =>
+  state.settings.mindConfig ?? DEFAULT_MIND_CONFIG;
 
 export default settingsSlice.reducer;
