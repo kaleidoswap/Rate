@@ -84,6 +84,7 @@ interface PaymentDetails {
   recipientAvatar?: string;
   lightningAddress?: string;
   isNostrContact?: boolean;
+  priceUsd?: number;
 }
 
 interface Contact {
@@ -162,6 +163,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // (off by default) — starting it on a native/JS mismatch hard-crashes the app.
   const aiEnabled = useSelector(selectAiEnabled);
   const aiMode = useSelector(selectAiMode);
+  const btcPriceUSD = useSelector((s: any) => s?.wallet?.btcPriceUSD) || 0;
   const dispatch = useDispatch();
   const qvac = useQVAC(aiEnabled);
   const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
@@ -478,13 +480,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
         const to = String(a.to ?? '');
         const isAddr = to.includes('@');
         const amount = Number(a.amount_sats) || decAmt(to) || 0;
-        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: to, amount, description: 'Payment', lightningAddress: isAddr ? to : undefined };
+        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: to, amount, description: 'Payment', lightningAddress: isAddr ? to : undefined, priceUsd: btcPriceUSD };
       }
       case 'rln_pay_invoice': {
         const inv = String(a.invoice ?? a.to ?? '');
         let dec: ReturnType<typeof decodeBolt11> | null = null;
         try { dec = decodeBolt11(inv); } catch { /* ignore */ }
-        return { type: 'lightning_invoice', recipient: inv, amount: dec?.amountSats ?? Number(a.amount_sats) ?? 0, description: dec?.description || 'Invoice payment' };
+        return { type: 'lightning_invoice', recipient: inv, amount: dec?.amountSats ?? Number(a.amount_sats) ?? 0, description: dec?.description || 'Invoice payment', priceUsd: btcPriceUSD };
       }
       case 'rln_send_asset': {
         const amt = Number(a.amount) || 0;
@@ -502,7 +504,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         // legacy pay_lightning_invoice / generic
         const target = String(a.invoice_or_address || a.to || '');
         const isAddr = target.includes('@');
-        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: target, amount: Number(a.amount_sats) || decAmt(target) || 0, description: a.description || 'Payment', lightningAddress: isAddr ? target : undefined };
+        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: target, amount: Number(a.amount_sats) || decAmt(target) || 0, description: a.description || 'Payment', lightningAddress: isAddr ? target : undefined, priceUsd: btcPriceUSD };
       }
     }
   };
