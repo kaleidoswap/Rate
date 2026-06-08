@@ -14,6 +14,7 @@ import {
   RecipeRegistry,
   paymentsRecipe,
   receiveRecipe,
+  assetSendRecipe,
   runRecipe,
   InMemoryMemoryStore,
   createMemoryToolSource,
@@ -78,7 +79,7 @@ export function createMindAgent(qvac: QVACService): MindAgent {
     defaultMaxTurns: 5,
   });
   const fastPath = new FastPath(WALLET_FAST_INTENTS);
-  const recipes = new RecipeRegistry([paymentsRecipe, receiveRecipe]);
+  const recipes = new RecipeRegistry([assetSendRecipe, paymentsRecipe, receiveRecipe]);
   const skills = new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle));
 
   async function runTurn(text: string, cbs: RunTurnCallbacks = {}): Promise<{ text: string }> {

@@ -51,6 +51,7 @@ import {
   runRecipe,
   paymentsRecipe,
   receiveRecipe,
+  assetSendRecipe,
   FastPath,
   WALLET_FAST_INTENTS,
   InMemoryMemoryStore,
@@ -246,7 +247,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // Recipes = mobile multi-step ("recipes, not planning"). A matched recipe
   // (e.g. "pay bob 3 EUR") carries the plan; the model only fills slots, the
   // deterministic chain runs locally, and the spend is confirmation-gated.
-  const recipes = useMemo(() => new RecipeRegistry([paymentsRecipe, receiveRecipe]), []);
+  const recipes = useMemo(() => new RecipeRegistry([assetSendRecipe, paymentsRecipe, receiveRecipe]), []);
 
   // Tier-0 fast-path: common reads (balance / address / price) answered with
   // NO model at all. The wallet ToolRegistry is shared with the recipe tier.

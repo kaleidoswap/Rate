@@ -155,6 +155,16 @@ const HANDLERS: Record<string, WalletHandler> = {
 
   // ── Spend (confirmation-gated by the contract) ──
   rln_pay_invoice: async ({ invoice }) => lightningAdapter().sendPayment({ invoice: String(invoice) }),
+  // RGB asset send. RGB transfers go to an RGB/Lightning invoice (which carries
+  // the asset); a contact's plain Lightning address can't receive an asset, so
+  // we guide the user to get their RGB invoice rather than silently mis-send.
+  rln_send_asset: async ({ asset, amount, to }) => {
+    const target = String(to ?? '').trim();
+    if (/^(rgb:|ln(bc|tb|bcrt))/i.test(target)) {
+      return requireLayer('rln').sendPayment({ invoice: target });
+    }
+    throw new Error(`To send ${amount ?? ''} ${String(asset).toUpperCase()} to "${to}", ask them for an RGB invoice and paste it here.`);
+  },
   send_payment: async ({ to, amount_sats }) => {
     let target = String(to ?? '').trim();
     const sats = amount_sats != null ? Number(amount_sats) : undefined;
