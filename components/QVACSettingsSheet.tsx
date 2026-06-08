@@ -51,6 +51,8 @@ interface Props {
   onSetSttModel: (id: string) => void;
   /** Switch the text-to-speech engine. */
   onSetTtsEngine: (engine: TtsEngine) => void;
+  /** Open the "Design your agent" screen (personality, connectors, context). */
+  onDesignAgent?: () => void;
 }
 
 /** Extract a 64–66 char hex provider key from pasted text (QR payload or raw). */
@@ -86,6 +88,7 @@ export default function QVACSettingsSheet({
   ttsOptions,
   onSetSttModel,
   onSetTtsEngine,
+  onDesignAgent,
 }: Props) {
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const hasProvider = !!config.providerPublicKey;
@@ -161,6 +164,17 @@ export default function QVACSettingsSheet({
               );
             })}
           </View>
+
+          {onDesignAgent && aiMode !== 'off' && (
+            <TouchableOpacity style={styles.designRow} onPress={onDesignAgent} activeOpacity={0.85}>
+              <Ionicons name="construct-outline" size={18} color={theme.colors.primary[600]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.designLabel}>Design your agent</Text>
+                <Text style={styles.designHint}>Personality, connectors, context & memory</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
+            </TouchableOpacity>
+          )}
 
           {aiMode === 'off' && (
             <Text style={styles.disabledNote}>
@@ -438,6 +452,9 @@ const styles = StyleSheet.create({
   modeBtnLabel: { fontSize: theme.typography.fontSize.xs, fontWeight: '600', color: theme.colors.text.secondary, textAlign: 'center' },
   modeBtnLabelActive: { color: theme.colors.text.inverse },
   disabledNote: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontStyle: 'italic', marginTop: theme.spacing[1], marginBottom: theme.spacing[4] },
+  designRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: theme.colors.surface.primary, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, padding: 14, marginTop: theme.spacing[3], marginBottom: theme.spacing[4] },
+  designLabel: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.primary },
+  designHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
   sectionTitle: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
   subSectionTitle: { fontSize: theme.typography.fontSize.sm, fontWeight: '700', color: theme.colors.text.secondary, marginBottom: theme.spacing[2], textTransform: 'uppercase', letterSpacing: 0.5 },
   sectionHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginBottom: theme.spacing[3], lineHeight: 18 },

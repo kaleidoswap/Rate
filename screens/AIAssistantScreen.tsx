@@ -16,6 +16,8 @@ import {
   Linking,
   Clipboard,
   Keyboard,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -262,8 +264,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // ./skills and bundled to skills.bundle.json; add a skill by dropping a new
   // folder there and re-running `npm run bundle-skills`.
   const skills = useMemo(
-    () => new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle)),
-    [],
+    () => new SkillRegistry(
+      skillsFromBundle(skillBundle as SkillBundle).filter((s) => !mindConfig.disabledSkills.includes(s.name)),
+    ),
+    [mindConfig.disabledSkills],
   );
 
   // Recipes = mobile multi-step ("recipes, not planning"). A matched recipe
@@ -284,6 +288,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // AI settings sheet (model selection + P2P delegation)
   const [showSettings, setShowSettings] = useState(false);
+  const [showSkills, setShowSkills] = useState(false);
 
   // Friendly name of the paired desktop (for the settings chip + header).
   const [providerName, setProviderName] = useState<string | null>(null);
@@ -965,6 +970,15 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />
               </View>
             )}
+            {aiEnabled && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => setShowSkills(true)}
+                accessibilityLabel="Skills"
+              >
+                <Ionicons name="extension-puzzle-outline" size={20} color="white" />
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.headerBtn}
               onPress={() => setShowSettings(true)}
@@ -1189,6 +1203,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSelectModel={(id) => qvac.setModel(id)}
             onSetDelegate={(opts) => qvac.setDelegate(opts)}
             onScanQR={openScanner}
+            onDesignAgent={() => { setShowSettings(false); navigation.navigate('MindSettings'); }}
             providerName={providerName}
             deviceMemGb={qvac.deviceMemGb}
             recommendedModelId={qvac.recommendedModelId}
@@ -1201,17 +1216,63 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSetSttModel={(id) => qvac.setSttModel(id)}
             onSetTtsEngine={(engine) => qvac.setTtsEngine(engine)}
           />
+
+          {/* Skills launcher — tap a skill to start a task with it. */}
+          <Modal visible={showSkills} transparent animationType="slide" onRequestClose={() => setShowSkills(false)}>
+            <Pressable style={styles.skillsBackdrop} onPress={() => setShowSkills(false)}>
+              <Pressable style={styles.skillsSheet} onPress={() => {}}>
+                <View style={styles.skillsHandle} />
+                <Text style={styles.skillsTitle}>Skills</Text>
+                <Text style={styles.skillsHint}>Tap one to start. Turn skills on/off in Settings → Design your agent → Connectors.</Text>
+                {skills.list().length === 0 ? (
+                  <Text style={styles.skillsHint}>No skills enabled.</Text>
+                ) : (
+                  skills.list().map((s) => (
+                    <TouchableOpacity
+                      key={s.name}
+                      style={styles.skillItem}
+                      onPress={() => { setShowSkills(false); sendMessage(skillStarter(s.name)); }}
+                      activeOpacity={0.85}
+                    >
+                      <View style={styles.skillItemIcon}>
+                        <Ionicons name="extension-puzzle" size={16} color={theme.colors.primary[500]} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.skillItemName}>{s.name}</Text>
+                        {!!s.description && <Text style={styles.skillItemDesc} numberOfLines={2}>{s.description}</Text>}
+                      </View>
+                      <Ionicons name="arrow-forward" size={16} color={theme.colors.text.tertiary} />
+                    </TouchableOpacity>
+                  ))
+                )}
+              </Pressable>
+            </Pressable>
+          </Modal>
         </LinearGradient>
       </View>
     </View>
   );
 }
 
+const SKILL_STARTERS: Record<string, string> = {
+  bitrefill: 'Buy a $25 gift card with Bitrefill',
+};
+const skillStarter = (name: string) => SKILL_STARTERS[name] ?? `Help me use the ${name} skill`;
+
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.colors.background.primary },
     chatContainer: { flex: 1 },
     background: { flex: 1 },
+    skillsBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+    skillsSheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 36 },
+    skillsHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 14 },
+    skillsTitle: { color: theme.colors.text.primary, fontSize: 17, fontWeight: '700' },
+    skillsHint: { color: theme.colors.text.tertiary, fontSize: 12, marginTop: 4, marginBottom: 12 },
+    skillItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
+    skillItemIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primary[500] + '1A' },
+    skillItemName: { color: theme.colors.text.primary, fontSize: 15, fontWeight: '600', textTransform: 'capitalize' },
+    skillItemDesc: { color: theme.colors.text.tertiary, fontSize: 12, marginTop: 2, lineHeight: 16 },
     content: { flex: 1 },
     contentInner: { flex: 1 },
     messagesContainer: { flex: 1 },

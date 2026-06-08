@@ -27,6 +27,10 @@ export interface MindConfig {
   ragEnabled: boolean;
   /** Long-term memory: let the agent remember/recall preferences. */
   memoryEnabled: boolean;
+  /** Skill names the user has turned OFF (bundled skills are on by default). */
+  disabledSkills: string[];
+  /** User-added MCP connectors (name + URL). */
+  mcpServers: { name: string; url: string }[];
 }
 
 export const DEFAULT_MIND_CONFIG: MindConfig = {
@@ -36,6 +40,8 @@ export const DEFAULT_MIND_CONFIG: MindConfig = {
   historyLength: 8,
   ragEnabled: true,
   memoryEnabled: true,
+  disabledSkills: [],
+  mcpServers: [],
 };
 
 // Primary denomination the balance/amounts are shown in. Cycled by tapping the
