@@ -17,6 +17,7 @@ import {
 import { protocolManager, type ProtocolType } from './protocols';
 import { getStore } from '../store/storeProvider';
 import { fetchBitcoinPrice } from '../store/slices/walletSlice';
+import NostrService from './NostrService';
 
 const log = (...a: any[]) => { try { console.log('[AI/wallet]', ...a); } catch { /* noop */ } };
 
@@ -211,7 +212,20 @@ const HANDLERS: Record<string, WalletHandler> = {
       throw new Error(`There are ${matches.length} contacts matching "${name}" (${matches.map((c) => c.name).join(', ')}) — which one?`);
     }
     const c = matches[0];
-    return { name: c.name, ln_address: c.lightning_address, npub: c.npub };
+    let ln = c.lightning_address as string | undefined;
+    // Nostr contact whose lud16 wasn't cached (no contacts-picker pre-resolve, as
+    // in voice) → fetch the profile's Lightning address on demand.
+    if (!ln && c.pubkey) {
+      try {
+        const info = await NostrService.getInstance().getUserInfo(String(c.pubkey));
+        ln = info?.profile?.lud16;
+        log('resolve_contact nostr lud16', { found: !!ln });
+      } catch (e) {
+        log('resolve_contact nostr fetch failed', e);
+      }
+    }
+    if (!ln) throw new Error(`"${c.name}" doesn't have a Lightning address set.`);
+    return { name: c.name, ln_address: ln, npub: c.npub };
   },
 
   // ── Spend (confirmation-gated by the contract) ──
