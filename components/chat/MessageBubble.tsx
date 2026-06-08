@@ -8,6 +8,8 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import type { Theme } from '../../theme';
 import TypingDots from './TypingDots';
 import FunctionResultCard from './FunctionResultCard';
+import { findPayable, stripPayable } from '../../utils/decodeInvoice';
+import { PayableCard } from './PayableCard';
 
 export interface ChatMessage {
   id: string;
@@ -48,6 +50,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
 
   const isUser = message.isUser;
   const hasThinking = !isUser && !!message.thinking?.trim();
+  // Detect a Lightning invoice / address / RGB invoice in an AI reply → render a card.
+  const payable = useMemo(() => (!isUser && !message.streaming ? findPayable(message.text) : null), [isUser, message.streaming, message.text]);
 
   return (
     <Animated.View
@@ -109,6 +113,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
             )}
             {message.streaming && !message.text.trim() ? (
               <TypingDots />
+            ) : payable ? (
+              <>
+                {stripPayable(message.text, payable).trim() ? (
+                  <Markdown style={mdStyles}>{stripPayable(message.text, payable)}</Markdown>
+                ) : null}
+                <PayableCard payable={payable} onCopy={onCopy} />
+              </>
             ) : (
               <Markdown style={mdStyles}>{message.text}</Markdown>
             )}
