@@ -134,6 +134,17 @@ const HANDLERS: Record<string, WalletHandler> = {
     return ad.createInvoice({ amount: amt });
   },
 
+  // Swap quote — venue-aware (Flashnet on Spark · KaleidoSwap on RLN). Read-only:
+  // the live quote + atomic execution happen on the tested Swap screen, so the
+  // agent quotes + hands off rather than moving funds blind.
+  get_swap_quote: async ({ from_asset, to_asset, amount }) => {
+    const venue = adapter('RGB') ? 'KaleidoSwap (RLN)' : adapter('SPARK') ? 'Flashnet (Spark)' : null;
+    if (!venue) throw new Error('Connect a Spark or RLN wallet to swap.');
+    const f = String(from_asset ?? '').toUpperCase();
+    const t = String(to_asset ?? '').toUpperCase();
+    return { from_asset: f, to_asset: t, amount, venue, note: `Swap ${amount ?? ''} ${f} → ${t} via ${venue}. Open the Swap screen to see the live quote and confirm.` };
+  },
+
   // ── Cross-cutting helpers ──
   get_price: async ({ fiat }) => {
     const price = btcPriceUsd();
@@ -148,8 +159,16 @@ const HANDLERS: Record<string, WalletHandler> = {
     return { sats, ...(cur !== 'USD' ? { note: `approximate — treated ${cur} as USD` } : {}) };
   },
   resolve_contact: async ({ name }) => {
-    const c = findContact(String(name));
-    if (!c) throw new Error(`No contact named "${name}".`);
+    const q = String(name).trim().toLowerCase();
+    const list = contacts();
+    const exact = list.filter((c) => c?.name?.toLowerCase() === q);
+    const matches = exact.length ? exact : list.filter((c) => c?.name?.toLowerCase().includes(q));
+    if (matches.length === 0) throw new Error(`No contact named "${name}".`);
+    // Disambiguate duplicates — never guess who to pay.
+    if (matches.length > 1) {
+      throw new Error(`There are ${matches.length} contacts matching "${name}" (${matches.map((c) => c.name).join(', ')}) — which one?`);
+    }
+    const c = matches[0];
     return { name: c.name, ln_address: c.lightning_address, npub: c.npub };
   },
 
