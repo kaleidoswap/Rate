@@ -16,6 +16,16 @@ import {
 } from '@kaleidorg/mind';
 import { protocolManager, type ProtocolType } from './protocols';
 import { getStore } from '../store/storeProvider';
+import { fetchBitcoinPrice } from '../store/slices/walletSlice';
+
+const log = (...a: any[]) => { try { console.log('[AI/wallet]', ...a); } catch { /* noop */ } };
+
+/** Normalize whatever shape an adapter's createInvoice returns to { invoice, address }. */
+function normInvoice(r: any): Record<string, unknown> {
+  const invoice = r?.invoice ?? r?.paymentRequest ?? r?.payment_request ?? r?.bolt11 ?? r?.pr ?? r?.encodedInvoice ?? (typeof r === 'string' ? r : undefined);
+  const address = r?.address ?? r?.btcAddress;
+  return { invoice, address, ...(r && typeof r === 'object' ? r : {}) };
+}
 
 const LAYER_PROTO: Record<'spark' | 'rln' | 'arkade', ProtocolType> = {
   spark: 'SPARK',
@@ -44,8 +54,27 @@ function connectedLayers(): WalletLayer[] {
 function btcPriceUsd(): number {
   return Number((getStore().getState() as any)?.wallet?.btcPriceUSD ?? 0);
 }
+/** Price may be 0 until the wallet fetches it — fetch on demand for the agent. */
+async function ensureBtcPrice(): Promise<number> {
+  let p = btcPriceUsd();
+  if (!p) {
+    try { await (getStore().dispatch as any)(fetchBitcoinPrice()); } catch (e) { log('price fetch failed', e); }
+    p = btcPriceUsd();
+  }
+  return p;
+}
+/** Both local AND Nostr contacts (the screen merges them; so must the agent). */
 function contacts(): any[] {
-  return (getStore().getState() as any)?.contacts?.contacts ?? [];
+  const st = getStore().getState() as any;
+  const local = (st?.contacts?.contacts ?? []) as any[];
+  const nostr = ((st?.nostr?.contacts ?? []) as any[]).map((c) => ({
+    name: c?.profile?.display_name || c?.profile?.name || c?.petname || 'Anonymous',
+    lightning_address: c?.profile?.lud16,
+    pubkey: c?.pubkey,
+    npub: c?.npub,
+  }));
+  log('contacts', { local: local.length, nostr: nostr.length });
+  return [...local, ...nostr];
 }
 function findContact(name: string): any | undefined {
   const q = name.trim().toLowerCase();
@@ -116,22 +145,27 @@ const HANDLERS: Record<string, WalletHandler> = {
   arkade_get_address: async () => ({ address: (await requireLayer('arkade').getReceiveAddress()).address }),
 
   // ── Receive (invoices with amount) ──
-  spark_create_invoice: async ({ amount_sats }) => requireLayer('spark').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined }),
-  rln_create_ln_invoice: async ({ amount_sats }) => requireLayer('rln').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined }),
-  rln_create_rgb_invoice: async ({ asset, amount }) => requireLayer('rln').createInvoice({ asset: String(asset), assetAmount: Number(amount) }),
+  spark_create_invoice: async ({ amount_sats }) => normInvoice(await requireLayer('spark').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined })),
+  rln_create_ln_invoice: async ({ amount_sats }) => normInvoice(await requireLayer('rln').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined })),
+  rln_create_rgb_invoice: async ({ asset, amount }) => normInvoice(await requireLayer('rln').createInvoice({ asset: String(asset), assetAmount: Number(amount) })),
 
   // Router: pick the right invoice tool for the asset/layer.
   create_invoice: async ({ asset, amount, layer }) => {
     const a = String(asset ?? 'BTC').toUpperCase();
     const amt = amount != null ? Number(amount) : undefined;
+    log('create_invoice', { asset: a, amount: amt, layer });
+    let r: any;
     if (a !== 'BTC') {
       // RGB asset (USDT/XAUT) → RLN node RGB invoice.
-      return requireLayer('rln').createInvoice({ asset: a, assetAmount: amt });
+      r = await requireLayer('rln').createInvoice({ asset: a, assetAmount: amt });
+    } else {
+      // BTC: the requested layer if connected, else the Lightning rail.
+      const lk = layer === 'spark' || layer === 'arkade' || layer === 'rln' ? (layer as keyof typeof LAYER_PROTO) : undefined;
+      const ad = (lk && adapter(LAYER_PROTO[lk])) || lightningAdapter();
+      r = await ad.createInvoice({ amount: amt });
     }
-    // BTC: the requested layer if connected, else the Lightning rail.
-    const lk = layer === 'spark' || layer === 'arkade' || layer === 'rln' ? (layer as keyof typeof LAYER_PROTO) : undefined;
-    const ad = (lk && adapter(LAYER_PROTO[lk])) || lightningAdapter();
-    return ad.createInvoice({ amount: amt });
+    log('create_invoice result', r);
+    return normInvoice(r);
   },
 
   // Swap quote — venue-aware (Flashnet on Spark · KaleidoSwap on RLN). Read-only:
@@ -147,12 +181,13 @@ const HANDLERS: Record<string, WalletHandler> = {
 
   // ── Cross-cutting helpers ──
   get_price: async ({ fiat }) => {
-    const price = btcPriceUsd();
+    const price = await ensureBtcPrice();
+    log('get_price', { price });
     if (!price) throw new Error('Price is not available right now.');
     return { asset: 'BTC', price_usd: price, fiat: (fiat as string) ?? 'USD' };
   },
   fiat_to_sats: async ({ amount, currency }) => {
-    const price = btcPriceUsd();
+    const price = await ensureBtcPrice();
     if (!price) throw new Error('Price is not available right now.');
     const sats = Math.round((Number(amount) / price) * 1e8);
     const cur = String(currency ?? 'USD').toUpperCase();
@@ -161,6 +196,7 @@ const HANDLERS: Record<string, WalletHandler> = {
   resolve_contact: async ({ name }) => {
     const q = String(name).trim().toLowerCase();
     const list = contacts();
+    log('resolve_contact', { name, total: list.length });
     const exact = list.filter((c) => c?.name?.toLowerCase() === q);
     const matches = exact.length ? exact : list.filter((c) => c?.name?.toLowerCase().includes(q));
     if (matches.length === 0) throw new Error(`No contact named "${name}".`);
