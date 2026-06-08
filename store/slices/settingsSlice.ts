@@ -1,7 +1,7 @@
 
 
 // store/slices/settingsSlice.ts
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, PayloadAction, createSelector } from '@reduxjs/toolkit';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import type { RootState } from '../index';
 
@@ -265,10 +265,12 @@ export const selectAiEnabled = (state: RootState): boolean =>
 export const selectAiOnboarded = (state: RootState): boolean =>
   state.settings.aiOnboarded ?? false;
 
-// Returns the stored object (stable ref) so useSelector doesn't re-render on
-// every dispatch; the reducer always writes a complete MindConfig, and older
-// persisted state with no mindConfig falls back to the constant default.
-export const selectMindConfig = (state: RootState): MindConfig =>
-  state.settings.mindConfig ?? DEFAULT_MIND_CONFIG;
+// Memoized so the ref is stable across renders (no thrash), while always
+// merging defaults — older persisted state may be missing newer fields
+// (e.g. disabledSkills/mcpServers), which would otherwise crash consumers.
+export const selectMindConfig = createSelector(
+  [(state: RootState) => state.settings.mindConfig],
+  (mc): MindConfig => ({ ...DEFAULT_MIND_CONFIG, ...(mc ?? {}) }),
+);
 
 export default settingsSlice.reducer;
