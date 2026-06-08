@@ -108,6 +108,16 @@ const SYSTEM_PROMPT = {
     'Keep replies short and friendly.',
 };
 
+const WELCOME_TEXT =
+  "👋 Hi, I'm **KaleidoMind** — your private, on-device wallet assistant. Everything runs on your phone; nothing leaves the device.\n\n" +
+  'I can help you:\n' +
+  '• Check your **balance** and the BTC **price**\n' +
+  '• Create an **invoice** to get paid\n' +
+  '• **Send** a payment — you always confirm before anything moves\n' +
+  '• **Swap** between BTC and assets\n' +
+  '• Answer **Bitcoin / Lightning / RGB** questions, and remember your preferences\n\n' +
+  'Try: _"what\'s my balance"_, _"create an invoice for 5000 sats"_, or _"pay alice 3 eur"_.';
+
 const toast = () => ToastService.getInstance();
 
 export default function AIAssistantScreen({ navigation }: Props) {
@@ -353,6 +363,14 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const updateMessage = useCallback((id: string, patch: (m: ChatMessage) => Partial<ChatMessage>) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch(m) } : m)));
   }, []);
+
+  // Greet the user with a contextual welcome the first time the chat is ready.
+  const welcomed = useRef(false);
+  useEffect(() => {
+    if (welcomed.current || !qvac.isReady || messages.length > 0) return;
+    welcomed.current = true;
+    addMessage({ id: nextId(), text: WELCOME_TEXT, isUser: false, timestamp: new Date() });
+  }, [qvac.isReady, messages.length, addMessage]);
 
   // ---- Voice handlers ----
   const handleSpeechStart = () => {
