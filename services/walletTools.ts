@@ -120,6 +120,20 @@ const HANDLERS: Record<string, WalletHandler> = {
   rln_create_ln_invoice: async ({ amount_sats }) => requireLayer('rln').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined }),
   rln_create_rgb_invoice: async ({ asset, amount }) => requireLayer('rln').createInvoice({ asset: String(asset), assetAmount: Number(amount) }),
 
+  // Router: pick the right invoice tool for the asset/layer.
+  create_invoice: async ({ asset, amount, layer }) => {
+    const a = String(asset ?? 'BTC').toUpperCase();
+    const amt = amount != null ? Number(amount) : undefined;
+    if (a !== 'BTC') {
+      // RGB asset (USDT/XAUT) → RLN node RGB invoice.
+      return requireLayer('rln').createInvoice({ asset: a, assetAmount: amt });
+    }
+    // BTC: the requested layer if connected, else the Lightning rail.
+    const lk = layer === 'spark' || layer === 'arkade' || layer === 'rln' ? (layer as keyof typeof LAYER_PROTO) : undefined;
+    const ad = (lk && adapter(LAYER_PROTO[lk])) || lightningAdapter();
+    return ad.createInvoice({ amount: amt });
+  },
+
   // ── Cross-cutting helpers ──
   get_price: async ({ fiat }) => {
     const price = btcPriceUsd();

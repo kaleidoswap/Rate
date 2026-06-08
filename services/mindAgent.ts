@@ -13,6 +13,7 @@ import {
   WALLET_FAST_INTENTS,
   RecipeRegistry,
   paymentsRecipe,
+  receiveRecipe,
   runRecipe,
   InMemoryMemoryStore,
   createMemoryToolSource,
@@ -77,7 +78,7 @@ export function createMindAgent(qvac: QVACService): MindAgent {
     defaultMaxTurns: 5,
   });
   const fastPath = new FastPath(WALLET_FAST_INTENTS);
-  const recipes = new RecipeRegistry([paymentsRecipe]);
+  const recipes = new RecipeRegistry([paymentsRecipe, receiveRecipe]);
   const skills = new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle));
 
   async function runTurn(text: string, cbs: RunTurnCallbacks = {}): Promise<{ text: string }> {
@@ -90,9 +91,12 @@ export function createMindAgent(qvac: QVACService): MindAgent {
       return { text: renderFast(fast.intent.name, r) };
     }
 
-    // Tier-2: recipe multi-step (only when a recipient is confidently extracted).
+    // Tier-2: recipe multi-step — fire only when the recipe is confident given
+    // its extracted slots (payments need a recipient; receive always fires).
     const recipe = recipes.select(text);
-    if (recipe && recipe.extract?.(text)?.recipient) {
+    const slots = recipe?.extract?.(text) ?? null;
+    const fires = !!recipe && !!slots && (recipe.confident ? recipe.confident(slots) : Object.keys(slots).length > 0);
+    if (recipe && fires) {
       const res = await runRecipe(recipe, text, {
         provider,
         tools: walletRegistry,

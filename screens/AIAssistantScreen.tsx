@@ -50,6 +50,7 @@ import {
   RecipeRegistry,
   runRecipe,
   paymentsRecipe,
+  receiveRecipe,
   FastPath,
   WALLET_FAST_INTENTS,
   InMemoryMemoryStore,
@@ -245,7 +246,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // Recipes = mobile multi-step ("recipes, not planning"). A matched recipe
   // (e.g. "pay bob 3 EUR") carries the plan; the model only fills slots, the
   // deterministic chain runs locally, and the spend is confirmation-gated.
-  const recipes = useMemo(() => new RecipeRegistry([paymentsRecipe]), []);
+  const recipes = useMemo(() => new RecipeRegistry([paymentsRecipe, receiveRecipe]), []);
 
   // Tier-0 fast-path: common reads (balance / address / price) answered with
   // NO model at all. The wallet ToolRegistry is shared with the recipe tier.
@@ -585,7 +586,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
     // the spend is confirmation-gated. Only fires when a recipient is confidently
     // extracted; otherwise fall through to the agentic loop below.
     const recipe = recipes.select(messageText);
-    if (recipe && recipe.extract?.(messageText)?.recipient) {
+    const recipeSlots = recipe?.extract?.(messageText) ?? null;
+    const recipeFires = !!recipe && !!recipeSlots && (recipe.confident ? recipe.confident(recipeSlots) : Object.keys(recipeSlots).length > 0);
+    if (recipe && recipeFires) {
       const recipeProvider: LLMProvider = {
         name: 'qvac',
         runTurn: (input) => qvac.service.runProviderTurn(input),
