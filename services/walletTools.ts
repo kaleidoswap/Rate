@@ -159,9 +159,15 @@ const HANDLERS: Record<string, WalletHandler> = {
       // RGB asset (USDT/XAUT) → RLN node RGB invoice.
       r = await requireLayer('rln').createInvoice({ asset: a, assetAmount: amt });
     } else {
-      // BTC: the requested layer if connected, else the Lightning rail.
-      const lk = layer === 'spark' || layer === 'arkade' || layer === 'rln' ? (layer as keyof typeof LAYER_PROTO) : undefined;
-      const ad = (lk && adapter(LAYER_PROTO[lk])) || lightningAdapter();
+      // BTC: honor an expressed layer; otherwise prefer RLN (a real bolt11
+      // Lightning invoice), then Spark. A Spark invoice (spark1…) is NOT a
+      // standard Lightning invoice, so RLN is the better default when connected.
+      const lk: keyof typeof LAYER_PROTO =
+        layer === 'spark' || layer === 'arkade' || layer === 'rln'
+          ? (layer as keyof typeof LAYER_PROTO)
+          : adapter(LAYER_PROTO.rln) ? 'rln' : 'spark';
+      const ad = adapter(LAYER_PROTO[lk]) || lightningAdapter();
+      log('create_invoice via', lk);
       r = await ad.createInvoice({ amount: amt });
     }
     log('create_invoice result', r);
