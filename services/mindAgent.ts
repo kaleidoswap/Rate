@@ -88,8 +88,11 @@ export function createMindAgent(qvac: QVACService): MindAgent {
     // Tier-0: deterministic fast-path (no LLM).
     const fast = fastPath.select(text);
     if (fast) {
+      console.log(`[AI/voice] ▶ "${text}" · fast-path → ${fast.tool}`);
       const r = await walletRegistry.execute(fast.tool, fast.args);
-      return { text: renderFast(fast.intent.name, r) };
+      const out = renderFast(fast.intent.name, r);
+      console.log(`[AI/voice] ◀ ${out}`);
+      return { text: out };
     }
 
     // Tier-2: recipe multi-step — fire only when the recipe is confident given
@@ -98,12 +101,14 @@ export function createMindAgent(qvac: QVACService): MindAgent {
     const slots = recipe?.extract?.(text) ?? null;
     const fires = !!recipe && !!slots && (recipe.confident ? recipe.confident(slots) : Object.keys(slots).length > 0);
     if (recipe && fires) {
+      console.log(`[AI/voice] ▶ "${text}" · recipe:${recipe.name}  slots=${JSON.stringify(slots)}`);
       const res = await runRecipe(recipe, text, {
         provider,
         tools: walletRegistry,
         onConfirm: cbs.onConfirm,
-        onStep: cbs.onStep ? (name) => cbs.onStep!(name) : undefined,
+        onStep: (name) => { console.log(`[AI/voice]   🔧 ${name}`); cbs.onStep?.(name); },
       });
+      console.log(`[AI/voice] ◀ [${res.status}] ${res.text}`);
       return { text: res.text };
     }
 
@@ -116,11 +121,14 @@ export function createMindAgent(qvac: QVACService): MindAgent {
       ...(cbs.history ?? []),
       { role: 'user', content: text },
     ];
+    console.log(`[AI/voice] ▶ "${text}" · agentic  skill=${skill?.name ?? 'none'}`);
     const res = await engine.runAgentic(messages, {
       allowedTools: scoped,
       onToken: cbs.onToken,
+      onToolCall: (call) => console.log(`[AI/voice]   🔧 ${call.name}`, JSON.stringify(call.arguments)),
       onConfirm: cbs.onConfirm,
     });
+    console.log(`[AI/voice] ◀ (${res.turns} turns) ${res.text?.trim() || '(no text)'}`);
     return { text: res.text ?? '' };
   }
 

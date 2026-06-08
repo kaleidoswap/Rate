@@ -561,6 +561,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
     // tool directly — zero inference. Reserves the model for harder asks.
     const fast = fastPath.select(messageText);
     if (fast) {
+      console.log(`[AI] ▶ "${messageText}"  · tier=fast-path → ${fast.tool}`);
       try {
         const r: any = await walletRegistry.execute(fast.tool, fast.args);
         let text: string;
@@ -573,8 +574,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
         } else {
           text = `Bitcoin is $${Number(r?.price_usd ?? 0).toLocaleString()}.`;
         }
+        console.log(`[AI] ◀ ${text}`);
         updateMessage(assistantId, () => ({ text, streaming: false }));
       } catch (e) {
+        console.log(`[AI] ✗ fast-path ${fast.tool}: ${(e as Error)?.message}`);
         updateMessage(assistantId, () => ({ text: (e as Error)?.message ?? 'That failed.', streaming: false }));
       }
       setIsLoading(false);
@@ -590,6 +593,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
     const recipeSlots = recipe?.extract?.(messageText) ?? null;
     const recipeFires = !!recipe && !!recipeSlots && (recipe.confident ? recipe.confident(recipeSlots) : Object.keys(recipeSlots).length > 0);
     if (recipe && recipeFires) {
+      console.log(`[AI] ▶ "${messageText}"  · tier=recipe:${recipe.name}  slots=${JSON.stringify(recipeSlots)}`);
       const recipeProvider: LLMProvider = {
         name: 'qvac',
         runTurn: (input) => qvac.service.runProviderTurn(input),
@@ -598,8 +602,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
         provider: recipeProvider,
         tools: walletRegistry,
         onConfirm: requestConfirmation,
-        onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
+        onStep: (name, args) => { console.log(`[AI]   🔧 ${name}`, JSON.stringify(args)); updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })); },
       });
+      console.log(`[AI] ◀ [${result.status}] ${result.text}`);
       updateMessage(assistantId, () => ({ text: result.text, streaming: false }));
       setIsLoading(false);
       return;
@@ -643,6 +648,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         { role: 'user', content: messageText },
       ];
 
+      console.log(`[AI] ▶ "${messageText}"  · tier=agentic  skill=${skill?.name ?? 'none'}  tools=[${(scopedTools ?? ['all']).join(',')}]`);
       const res = await engine.runAgentic(chatMessages as MindMessage[], {
         allowedTools: scopedTools,
         onStart: (requestId) => setActiveRequestId(requestId),
@@ -658,6 +664,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
           scrollToBottom(true);
         },
         onToolCall: (call) => {
+          console.log(`[AI]   🔧 ${call.name}`, JSON.stringify(call.arguments));
           const def = tools.find((t) => t.name === call.name);
           // Visible feedback while a tool runs (esp. during the payment gap).
           updateMessage(assistantId, () => ({
@@ -671,6 +678,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         onConfirm: requestConfirmation,
       });
 
+      console.log(`[AI] ◀ (${res.turns} turns, ${res.toolCalls.length} calls) ${res.text?.trim() || '(no text)'}`);
       const lastCall = res.toolCalls[res.toolCalls.length - 1];
 
       // If an invoice was just generated, remember it (so "share" can act on it)
