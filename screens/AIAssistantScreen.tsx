@@ -65,6 +65,7 @@ import { protocolManager } from '../services/protocols';
 import { buildWalletToolSource } from '../services/walletTools';
 import { asyncStorageMemoryIO } from '../services/aiMemory';
 import { buildKnowledgeToolSource } from '../services/aiKnowledge';
+import { decodeBolt11 } from '../utils/decodeInvoice';
 // Skills authored as SKILL.md under ./skills, bundled to JSON at build time
 // (`npm run bundle-skills`). Same authoring + loader the desktop uses.
 import skillBundle from '../skills.bundle.json';
@@ -463,40 +464,63 @@ export default function AIAssistantScreen({ navigation }: Props) {
     confirmResolver.current = null;
   };
 
+  // Map a money-moving tool call → the confirmation sheet. Handles the canonical
+  // @kaleidorg/mind contract tools (send_payment, rln_pay_invoice, rln_send_asset,
+  // execute_swap) AND the legacy ones. The amount is read from the call args, and
+  // for a bare invoice we decode it (the amount lives in the invoice, not args).
+  const decAmt = (s: string): number | undefined => {
+    try { return /^ln(bc|tb|bcrt)/i.test(s) ? decodeBolt11(s).amountSats : undefined; } catch { return undefined; }
+  };
   const buildPaymentDetails = (call: { name: string; arguments: any }): PaymentDetails => {
-    const args = call.arguments || {};
-    if (call.name === 'pay_nostr_contact') {
-      return {
-        type: 'nostr_contact',
-        recipient: args.contact_name || args.contact_npub || 'Nostr contact',
-        amount: Number(args.amount_sats) || 0,
-        description: args.description || 'Payment to Nostr contact',
-        recipientName: args.contact_name,
-        isNostrContact: true,
-      };
+    const a = call.arguments || {};
+    switch (call.name) {
+      case 'send_payment': {
+        const to = String(a.to ?? '');
+        const isAddr = to.includes('@');
+        const amount = Number(a.amount_sats) || decAmt(to) || 0;
+        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: to, amount, description: 'Payment', lightningAddress: isAddr ? to : undefined };
+      }
+      case 'rln_pay_invoice': {
+        const inv = String(a.invoice ?? a.to ?? '');
+        let dec: ReturnType<typeof decodeBolt11> | null = null;
+        try { dec = decodeBolt11(inv); } catch { /* ignore */ }
+        return { type: 'lightning_invoice', recipient: inv, amount: dec?.amountSats ?? Number(a.amount_sats) ?? 0, description: dec?.description || 'Invoice payment' };
+      }
+      case 'rln_send_asset': {
+        const amt = Number(a.amount) || 0;
+        const asset = String(a.asset ?? '').toUpperCase();
+        return { type: 'lightning_invoice', recipient: String(a.to ?? ''), amount: 0, description: `Send ${amt.toLocaleString()} ${asset}`, recipientName: `${amt.toLocaleString()} ${asset}` };
+      }
+      case 'execute_swap': {
+        const from = String(a.from_asset ?? '').toUpperCase();
+        const to = String(a.to_asset ?? '').toUpperCase();
+        return { type: 'lightning_invoice', recipient: `${from} → ${to}`, amount: 0, description: `Swap ${a.amount ?? ''} ${from} → ${to}` };
+      }
+      case 'pay_nostr_contact':
+        return { type: 'nostr_contact', recipient: a.contact_name || a.contact_npub || 'Nostr contact', amount: Number(a.amount_sats) || 0, description: a.description || 'Payment to Nostr contact', recipientName: a.contact_name, isNostrContact: true };
+      default: {
+        // legacy pay_lightning_invoice / generic
+        const target = String(a.invoice_or_address || a.to || '');
+        const isAddr = target.includes('@');
+        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: target, amount: Number(a.amount_sats) || decAmt(target) || 0, description: a.description || 'Payment', lightningAddress: isAddr ? target : undefined };
+      }
     }
-    const target = String(args.invoice_or_address || '');
-    const isAddress = target.includes('@');
-    return {
-      type: isAddress ? 'lightning_address' : 'lightning_invoice',
-      recipient: target,
-      amount: Number(args.amount_sats) || 0,
-      description: args.description || 'Payment via AI Assistant',
-      lightningAddress: isAddress ? target : undefined,
-    };
   };
 
   // Opens the confirmation modal and returns a promise the agentic loop awaits.
   const requestConfirmation = (call: {
     name: string;
     arguments: Record<string, unknown>;
-  }): Promise<{ approved: boolean; reason?: string }> =>
-    new Promise((resolve) => {
+  }): Promise<{ approved: boolean; reason?: string }> => {
+    const details = buildPaymentDetails(call);
+    console.log(`[AI] 🔐 CONFIRM ${call.name} · ${details.amount.toLocaleString()} sats → ${details.recipient || details.recipientName} (awaiting user before executing)`);
+    return new Promise((resolve) => {
       confirmResolver.current = resolve;
       setPendingToolCall({ name: call.name, arguments: call.arguments });
-      setPendingPayment(buildPaymentDetails(call));
+      setPendingPayment(details);
       setShowPaymentConfirmation(true);
     });
+  };
 
   // Approve only — the payment itself executes inside the engine's agentic loop
   // (via the wallet ToolSource), after which the model summarises the outcome.
