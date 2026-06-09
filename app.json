@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kaleidoswap.wallet",
-      "buildNumber": "6",
+      "buildNumber": "7",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",
         "NSFaceIDUsageDescription": "Use Face ID to unlock your wallet securely.",
@@ -60,6 +60,14 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "Allow KaleidoSwap to use Face ID for secure wallet access."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.",
+          "locationWhenInUsePermission": "Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.",
+          "isAndroidForegroundServiceEnabled": false
         }
       ],
       "expo-secure-store",
