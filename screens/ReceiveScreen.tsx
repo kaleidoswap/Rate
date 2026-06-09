@@ -797,7 +797,10 @@ export default function ReceiveScreen({ navigation }: Props) {
   const copyUnifiedUri = async () => {
     if (!unifiedUri) return;
     await Clipboard.setString(unifiedUri);
-    Alert.alert('Copied', 'Unified receive URI copied to clipboard');
+    // Inline checkmark on the card (matches the address list) — no modal Alert.
+    feedback.select();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1600);
   };
 
   // Generate the unified URI when that mode is selected, or amount changes.
@@ -858,6 +861,10 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (selectedAsset && allAssets.length > 0) {
       const isAssetAvailable =
         selectedAsset.asset_id === NEW_RGB_ASSET_ID ||
+        // Synthetic 'USD' isn't a real per-network asset (it's the multi-protocol
+        // USD aggregator) so it never appears in allAssets — don't bounce it to BTC.
+        selectedAsset.asset_id === 'USD' ||
+        /usd/i.test(selectedAsset.ticker) ||
         allAssets.some(asset => asset.asset_id === selectedAsset.asset_id);
       if (!isAssetAvailable) {
         // Reset to BTC if current asset is not available
@@ -923,6 +930,9 @@ export default function ReceiveScreen({ navigation }: Props) {
   }, [channels]);
 
   const [copied, setCopied] = useState(false);
+  // Which address-list row was just copied (inline checkmark, auto-resets) —
+  // avoids a disruptive modal Alert on every copy.
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyToClipboard = async () => {
     if (!address) return;
     await Clipboard.setString(address);
@@ -1034,6 +1044,8 @@ export default function ReceiveScreen({ navigation }: Props) {
     'lightning': '#FACC15', // Lightning yellow
     'spark': '#60A5FA',     // Spark blue
     'arkade': '#A855F7',    // Arkade purple
+    'liquid': '#22D3EE',    // Liquid cyan (USD aggregator leg)
+    'rgb': '#F472B6',       // RGB pink (USD aggregator leg)
     'unified': '#10B981',   // Unified / all-networks green
   };
 
@@ -1342,24 +1354,37 @@ export default function ReceiveScreen({ navigation }: Props) {
     return (
       <View style={styles.addrListSection}>
         <Text style={styles.addrListTitle}>Addresses</Text>
-        {unifiedAddresses.map((a) => {
+        {unifiedAddresses.map((a, idx) => {
           const isOpen = !!expandedAddrs[a.key];
+          const isCopied = copiedKey === a.key;
+          const isLast = idx === unifiedAddresses.length - 1;
+          const copyAddr = async () => {
+            await Clipboard.setString(a.value);
+            feedback.select();
+            setCopiedKey(a.key);
+            setTimeout(() => setCopiedKey((k) => (k === a.key ? null : k)), 1600);
+          };
+          const dotColor = colorFor(a.key);
           return (
-            <View key={a.key} style={styles.addrRow}>
-              <View style={[styles.addrDot, { backgroundColor: colorFor(a.key) }]} />
-              <View style={{ flex: 1 }}>
-                <Text style={styles.addrLabel}>{a.label}</Text>
-                {isOpen ? (
-                  <Text style={styles.uriFull} selectable>{a.value}</Text>
-                ) : (
-                  <Text style={styles.addrValue} numberOfLines={1}>{trunc(a.value)}</Text>
-                )}
-              </View>
+            <View key={a.key} style={[styles.addrRow, isLast && styles.addrRowLast]}>
+              {/* Tap anywhere on the label/value to copy (large target); the
+                  chevron expands the full value, the icon mirrors the copy. */}
+              <TouchableOpacity style={styles.addrRowMain} onPress={copyAddr} activeOpacity={0.6}>
+                <View style={[styles.addrDot, { backgroundColor: dotColor }]} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.addrLabel}>{a.label}</Text>
+                  {isOpen ? (
+                    <Text style={styles.uriFull} selectable>{a.value}</Text>
+                  ) : (
+                    <Text style={styles.addrValue} numberOfLines={1}>{trunc(a.value)}</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
               {/* Per-address "show full" — the full value lives here, not on the URI. */}
               <TouchableOpacity
                 onPress={() => setExpandedAddrs((p) => ({ ...p, [a.key]: !p[a.key] }))}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={{ paddingHorizontal: 4 }}
+                style={styles.addrIconBtn}
                 activeOpacity={0.7}
               >
                 <Ionicons
@@ -1369,16 +1394,16 @@ export default function ReceiveScreen({ navigation }: Props) {
                 />
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={async () => {
-                  await Clipboard.setString(a.value);
-                  feedback.select();
-                  Alert.alert('Copied', `${a.label} copied to clipboard`);
-                }}
+                onPress={copyAddr}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={{ paddingHorizontal: 4 }}
+                style={styles.addrIconBtn}
                 activeOpacity={0.7}
               >
-                <Ionicons name="copy-outline" size={18} color={theme.colors.text.tertiary} />
+                <Ionicons
+                  name={isCopied ? 'checkmark' : 'copy-outline'}
+                  size={18}
+                  color={isCopied ? theme.colors.success[500] : dotColor}
+                />
               </TouchableOpacity>
             </View>
           );
@@ -1454,15 +1479,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     };
     const selectUsd = () => {
       feedback.select();
-      const usdt = rgbAssets.find((a) => /usdt/i.test(a.ticker));
-      if (usdt) {
-        setSelectedAsset({
-          asset_id: usdt.asset_id, ticker: usdt.ticker, name: usdt.name,
-          isRGB: true, balance: usdt.balance || 0,
-        });
-      } else {
-        setSelectedAsset({ asset_id: 'USD', ticker: 'USD', name: 'US Dollar', isRGB: false });
-      }
+      // USD always routes through the unified USD aggregator (Liquid USDt + RGB
+      // USDT + Spark) — see generateUsdUnifiedUri, which finds the held RGB USDT
+      // itself. Use the synthetic 'USD' asset (not a specific RGB USDT) so the
+      // behaviour is identical whether or not an RGB USDT is held, and force the
+      // unified view so the aggregator actually runs.
+      setSelectedAsset({ asset_id: 'USD', ticker: 'USD', name: 'US Dollar', isRGB: false });
+      setNetworkType('unified');
     };
 
     const Tab = (
@@ -1518,7 +1541,14 @@ export default function ReceiveScreen({ navigation }: Props) {
     const isRgbAsset = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker) === 'RGB';
     const options: Array<{ id: ReceiveMode; label: string; sub: string }> = [
       ...(canUseAll
-        ? [{ id: 'unified' as ReceiveMode, label: 'All networks', sub: 'On-chain · Lightning · Spark · Arkade' }]
+        ? [{
+            id: 'unified' as ReceiveMode,
+            label: 'All networks',
+            // USD is a different protocol set than BTC — reflect it in the hint.
+            sub: /usd/i.test(selectedAsset.ticker)
+              ? 'Liquid · Spark · RGB'
+              : 'On-chain · Lightning · Spark · Arkade',
+          }]
         : []),
       ...(availableNetworkTypes.includes('onchain')
         ? [{ id: 'onchain' as ReceiveMode, label: isRgbAsset ? 'RGB on-chain' : 'On-chain', sub: isRgbAsset ? 'RGB Layer 1 (L1)' : 'Bitcoin Layer 1' }] : []),
@@ -1613,7 +1643,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             {summary ? 'Requested amount' : required ? 'Amount required' : 'Add amount'}
           </Text>
           <Text style={styles.amountRowValue} numberOfLines={1}>
-            {summary || 'Optional — set in BTC, USD or other fiat'}
+            {summary || 'Optional — tap to set in BTC, USD or fiat'}
           </Text>
         </View>
         <View style={styles.amountEditBtn}>
@@ -1654,38 +1684,49 @@ export default function ReceiveScreen({ navigation }: Props) {
     onCopy: () => void;
     onShare: () => void;
   }) => (
-    <View style={[styles.uriCard, { borderLeftColor: accent }]}>
-      <TouchableOpacity style={styles.uriCardRow} onPress={onCopy} activeOpacity={0.7}>
+    <View style={[styles.uriCard, { borderColor: accent + '40' }]}>
+      {/* Header: method icon + label + the (truncated) value. Tapping copies. */}
+      <TouchableOpacity style={styles.uriCardRow} onPress={onCopy} activeOpacity={0.6}>
         <View style={[styles.uriIconWrap, { backgroundColor: accent + '1A' }]}>{icon}</View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.uriLabel}>{label}</Text>
+          <Text style={[styles.uriLabel, { color: accent }]}>{label}</Text>
           <Text style={styles.uriValue} numberOfLines={1}>{truncMid(value)}</Text>
         </View>
-        <View style={styles.uriCopyBtn}>
-          <Ionicons
-            name={copied ? 'checkmark' : 'copy-outline'}
-            size={18}
-            color={copied ? theme.colors.success[500] : accent}
-          />
-        </View>
+        {onToggle && (
+          <TouchableOpacity
+            onPress={onToggle}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.uriChevronBtn}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={expanded ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={theme.colors.text.tertiary}
+            />
+          </TouchableOpacity>
+        )}
       </TouchableOpacity>
 
       {expanded && onToggle && <Text style={styles.uriFull} selectable>{value}</Text>}
 
+      {/* Primary Copy (accent-filled, inline ✓ feedback) + outline Share. */}
       <View style={styles.uriActions}>
-        {onToggle ? (
-          <TouchableOpacity style={styles.uriActionChip} onPress={onToggle} activeOpacity={0.7}>
-            <Ionicons
-              name={expanded ? 'chevron-up' : 'chevron-down'}
-              size={14}
-              color={theme.colors.text.tertiary}
-            />
-            <Text style={styles.uriActionChipText}>{expanded ? 'Hide' : 'Show full'}</Text>
-          </TouchableOpacity>
-        ) : null}
-        <View style={{ flex: 1 }} />
-        <TouchableOpacity style={styles.uriIconAction} onPress={onShare} activeOpacity={0.7}>
-          <Ionicons name="share-outline" size={18} color={theme.colors.text.secondary} />
+        <TouchableOpacity
+          style={[styles.uriPrimaryBtn, { backgroundColor: copied ? theme.colors.success[500] : accent }]}
+          onPress={onCopy}
+          activeOpacity={0.85}
+        >
+          <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color="#FFFFFF" />
+          <Text style={styles.uriPrimaryBtnText}>{copied ? 'Copied' : 'Copy'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.uriSecondaryBtn, { borderColor: accent + '40' }]}
+          onPress={onShare}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="share-outline" size={16} color={accent} />
+          <Text style={[styles.uriSecondaryBtnText, { color: accent }]}>Share</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -2505,11 +2546,30 @@ const styles = StyleSheet.create({
   addrRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 4,
     paddingVertical: 10,
     paddingHorizontal: 4,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border.light,
+  },
+  // Last row sits directly above the "What are these addresses?" toggle — drop
+  // the divider so the section doesn't read as having a dangling separator.
+  addrRowLast: {
+    borderBottomWidth: 0,
+  },
+  // Tap target covering the dot + label + value (copies the address).
+  addrRowMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 0,
+  },
+  addrIconBtn: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addrDot: {
     width: 8,
@@ -2677,9 +2737,9 @@ const styles = StyleSheet.create({
   // Collapsible receive card (address / unified URI)
   uriCard: {
     width: '100%',
-    backgroundColor: theme.colors.gray[50],
-    borderRadius: theme.borderRadius.lg,
-    borderLeftWidth: 3,
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: 16,
+    borderWidth: 1,
     paddingVertical: theme.spacing[3],
     paddingHorizontal: theme.spacing[3],
     marginBottom: theme.spacing[2],
@@ -2690,9 +2750,9 @@ const styles = StyleSheet.create({
     gap: theme.spacing[3],
   },
   uriIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -2701,21 +2761,18 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    color: theme.colors.text.tertiary,
   },
   uriValue: {
-    fontSize: 12,
+    fontSize: 13,
     color: theme.colors.text.primary,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    marginTop: 2,
+    marginTop: 3,
   },
-  uriCopyBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  uriChevronBtn: {
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.surface.primary,
   },
   uriFull: {
     fontSize: 12,
@@ -2730,28 +2787,38 @@ const styles = StyleSheet.create({
   uriActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: theme.spacing[2],
+    gap: 8,
+    marginTop: theme.spacing[3],
   },
-  uriActionChip: {
+  // Primary "Copy" — accent-filled pill, flips to green ✓ on copy.
+  uriPrimaryBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    borderRadius: 8,
+    justifyContent: 'center',
+    gap: 6,
+    height: 40,
+    borderRadius: 12,
   },
-  uriActionChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: theme.colors.text.tertiary,
+  uriPrimaryBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
-  uriIconAction: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+  // Secondary "Share" — outline pill in the method accent.
+  uriSecondaryBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: theme.colors.surface.primary,
+    gap: 6,
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  uriSecondaryBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
 
   // Asset "+" tab (square add button)

@@ -149,6 +149,9 @@ importers:
       expo-local-authentication:
         specifier: ~17.0.8
         version: 17.0.8(expo@54.0.35)
+      expo-location:
+        specifier: ~19.0.8
+        version: 19.0.8(expo@54.0.35)
       expo-notifications:
         specifier: ~0.32.17
         version: 0.32.17(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3)
@@ -3835,6 +3838,11 @@ packages:
 
   expo-local-authentication@17.0.8:
     resolution: {integrity: sha512-Q5fXHhu6w3pVPlFCibU72SYIAN+9wX7QpFn9h49IUqs0Equ44QgswtGrxeh7fdnDqJrrYGPet5iBzjnE70uolA==}
+    peerDependencies:
+      expo: '*'
+
+  expo-location@19.0.8:
+    resolution: {integrity: sha512-H/FI75VuJ1coodJbbMu82pf+Zjess8X8Xkiv9Bv58ZgPKS/2ztjC1YO1/XMcGz7+s9DrbLuMIw22dFuP4HqneA==}
     peerDependencies:
       expo: '*'
 
@@ -11902,6 +11910,10 @@ snapshots:
     dependencies:
       expo: 54.0.35(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(graphql@16.14.0)(react-native-webview@13.16.1(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3)
       invariant: 2.2.4
+
+  expo-location@19.0.8(expo@54.0.35):
+    dependencies:
+      expo: 54.0.35(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(graphql@16.14.0)(react-native-webview@13.16.1(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3)
 
   expo-manifests@1.0.11(expo@54.0.35):
     dependencies:

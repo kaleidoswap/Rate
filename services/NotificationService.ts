@@ -5,8 +5,43 @@
 // (app fully killed) would need a relay-watching server with APNs/FCM, which is
 // out of scope here. In-app toasts (ToastService) cover the foreground case;
 // this adds the system banner.
-import * as Notifications from 'expo-notifications';
+//
+// IMPORTANT: `expo-notifications` is imported LAZILY (not at module top level).
+// Its `PushTokenManager` does `requireNativeModule('ExpoPushTokenManager')` at
+// import time, which THROWS on a dev client / binary that wasn't built with the
+// expo-notifications native module ("Cannot find native module
+// 'ExpoPushTokenManager'"). A static `import` would crash the whole app at boot
+// before any try/catch could run. Notifications are best-effort, so instead we
+// require the module on first use and degrade to a no-op when it's unavailable.
+// (To actually receive notifications, rebuild the dev client: `expo run:ios` /
+// `expo run:android` so the native module is included.)
 import { Platform } from 'react-native';
+
+// Minimal shape we use from expo-notifications (kept loose; module is `any`).
+type NotificationsModule = typeof import('expo-notifications');
+
+let cachedModule: NotificationsModule | null | undefined;
+
+/**
+ * Lazily load expo-notifications, returning null if its native module isn't
+ * present in this build. Result is cached (including the null/unavailable case)
+ * so we only pay the require + warn once.
+ */
+function getNotifications(): NotificationsModule | null {
+  if (cachedModule !== undefined) return cachedModule;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    cachedModule = require('expo-notifications') as NotificationsModule;
+  } catch (error) {
+    cachedModule = null;
+    console.warn(
+      'NotificationService: expo-notifications native module unavailable — ' +
+        'local notifications disabled. Rebuild the dev client to enable them.',
+      error
+    );
+  }
+  return cachedModule;
+}
 
 class NotificationService {
   private static instance: NotificationService;
@@ -23,11 +58,14 @@ class NotificationService {
   /**
    * Set the foreground presentation behaviour, request permission, and create
    * the Android channel. Safe to call multiple times; only runs once. Never
-   * throws — notifications are best-effort.
+   * throws — notifications are best-effort and a no-op when the native module
+   * isn't available.
    */
   async init(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+    const Notifications = getNotifications();
+    if (!Notifications) return;
     try {
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
@@ -63,6 +101,8 @@ class NotificationService {
     try {
       if (!this.initialized) await this.init();
       if (!this.permissionGranted) return;
+      const Notifications = getNotifications();
+      if (!Notifications) return;
       await Notifications.scheduleNotificationAsync({
         content: { title, body, data: data ?? {}, sound: true },
         trigger: null, // deliver now

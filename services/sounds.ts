@@ -9,11 +9,20 @@
 //
 // These are deliberately quiet, sub-400ms blips meant to ACCOMPANY haptics — see
 // utils/feedback.ts, which fires both together so the wallet is legible through
-// sound and touch, not sight alone. UI sounds respect the hardware mute switch
-// (playsInSilentModeIOS is left at its default of false) so they never surprise
-// anyone in a meeting.
+// sound and touch, not sight alone.
+//
+// AUDIO SESSION: we explicitly configure the iOS/Android audio mode before the
+// first sound (see ensureAudioMode). Two reasons this matters:
+//   1. Without it, an uninitialised session + the iOS mute switch silently drops
+//      every UI sound — the "sounds don't always play" bug. We set
+//      playsInSilentModeIOS:true so the user's "Sound effects" toggle is the
+//      single source of truth (these are intentional, opt-in feedback chimes).
+//   2. The voice/TTS code (services/qvacTts.ts, components/VoiceInput.tsx)
+//      reconfigures the GLOBAL session (DoNotMix / recording). We use
+//      MixWithOthers so we never kill the user's music, and re-assert our mode if
+//      it was clobbered, so UI sounds keep working after using the assistant.
 
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import { File, Directory, Paths } from 'expo-file-system';
 import { Buffer } from 'buffer';
 
@@ -179,10 +188,41 @@ class SoundEngine {
   private enabled = true;
   private sounds = new Map<SoundKey, Audio.Sound>();
   private loading = new Map<SoundKey, Promise<Audio.Sound | null>>();
+  private audioModePromise: Promise<void> | null = null;
 
   /** Mirror the user's "Sound effects" setting. */
   setEnabled(on: boolean): void {
     this.enabled = on;
+  }
+
+  /**
+   * Configure a baseline audio session for short UI feedback sounds, so they
+   * play reliably (including over the iOS mute switch) and never interrupt the
+   * user's other audio. Cached after the first success; safe to call before
+   * every play (re-asserts the mode if the TTS/voice code changed the global
+   * session in the meantime). Best-effort — never throws into the UI.
+   */
+  private ensureAudioMode(): Promise<void> {
+    // Coalesce concurrent callers onto one in-flight setAudioModeAsync, then
+    // clear it so the NEXT play() re-asserts the mode — this is what recovers UI
+    // sound after recording/TTS changed the global session. setAudioModeAsync is
+    // idempotent and cheap, and UI sounds are infrequent, so per-play is fine.
+    if (this.audioModePromise) return this.audioModePromise;
+    this.audioModePromise = Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+      interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+      shouldDuckAndroid: true,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+      playThroughEarpieceAndroid: false,
+    })
+      .catch(() => {
+        /* best-effort — sound is non-critical */
+      })
+      .finally(() => {
+        this.audioModePromise = null;
+      });
+    return this.audioModePromise;
   }
 
   isEnabled(): boolean {
@@ -246,6 +286,9 @@ class SoundEngine {
   async play(key: SoundKey): Promise<void> {
     if (!this.enabled) return;
     try {
+      // Make sure our playback session is active before we play — the global
+      // audio mode may have been changed by recording/TTS since the last sound.
+      await this.ensureAudioMode();
       const sound = await this.load(key);
       if (!sound) return;
       await sound.replayAsync();
@@ -256,7 +299,7 @@ class SoundEngine {
 
   /** Warm the cache so the first interaction isn't delayed by synthesis. */
   async preload(keys: SoundKey[] = ['tap', 'success', 'error']): Promise<void> {
-    await Promise.all(keys.map((k) => this.load(k)));
+    await Promise.all([this.ensureAudioMode(), ...keys.map((k) => this.load(k))]);
   }
 }
 
