@@ -11,7 +11,7 @@ import NDK, {
   generateZapRequest,
   type NDKLnUrlData,
 } from '@nostr-dev-kit/ndk';
-import { getPublicKey, nip19, utils } from 'nostr-tools';
+import { getPublicKey, nip19, utils, nip04, nip44, nip17, nip59 } from 'nostr-tools';
 import { bech32 } from '@scure/base';
 import { HDKey } from '@scure/bip32';
 import { mnemonicToSeedSync } from '@scure/bip39';
@@ -65,6 +65,56 @@ export interface NostrSettings {
   publicKey?: string;
   profile?: NostrProfile;
 }
+
+// Encryption scheme for an encrypted direct message.
+//  - nip17: gift-wrapped private DM (NIP-17 + NIP-59). A kind-14 rumor is sealed
+//    (kind 13) and gift-wrapped (kind 1059) under a throwaway key, hiding sender,
+//    timestamp, and metadata. The modern, recommended default.
+//  - nip44: ChaCha20 + HMAC-SHA256 encryption in a legacy kind-4 event.
+//  - nip04: AES-256-CBC (content suffixed with `?iv=`) in a kind-4 event; the
+//    deprecated original, kept for interop with older clients.
+export type DMScheme = 'nip17' | 'nip44' | 'nip04';
+
+// A payment request embedded in a private DM — see docs/nip-payment-requests.md.
+// Carried as structured tags on a NIP-17 kind-14 rumor (gift-wrapped); the
+// message content also holds a human-readable fallback for non-aware clients.
+export interface ChatPaymentRequest {
+  requestId?: string;   // correlates the later receipt
+  invoice: string;      // payable BOLT11 (BTC, or RGB-over-Lightning)
+  amountMsat?: number;  // BTC amount, NIP-57 style (omit for asset-only)
+  description?: string; // what the payment is for
+  expiry?: number;      // unix seconds
+  asset?: {             // present for RGB-asset requests
+    id: string;
+    ticker?: string;
+    precision?: number;
+    amount?: number;    // whole asset units (display)
+  };
+}
+
+export interface ChatPaymentReceipt {
+  requestId?: string;
+  status: 'paid' | 'declined' | 'expired';
+  preimage?: string;    // proof of payment, when available
+}
+
+export interface DirectMessage {
+  id: string;          // Nostr event id (the kind-14 rumor id for NIP-17)
+  pubkey: string;      // author (sender) pubkey, hex
+  recipient: string;   // recipient pubkey, hex (from the `p` tag)
+  content: string;     // decrypted plaintext
+  createdAt: number;   // unix seconds (the rumor's time for NIP-17)
+  mine: boolean;       // true when authored by the current user
+  scheme: DMScheme;    // how the message was decrypted
+  payment?: ChatPaymentRequest; // structured payment request (NIP-17 only)
+  receipt?: ChatPaymentReceipt; // structured payment receipt (NIP-17 only)
+}
+
+// Legacy NIP-04/NIP-44 encrypted DMs share kind 4. NIP-17 uses kinds 14 (rumor)
+// and 1059 (gift wrap); the gift wrap is what travels over relays.
+const DM_KIND = 4;
+const PRIVATE_DM_KIND = 14; // NIP-17 chat rumor
+const GIFT_WRAP_KIND = 1059; // NIP-59 gift wrap
 
 interface NostrWalletConnectInfo {
   relay: string;
@@ -1015,6 +1065,455 @@ class NostrService {
       console.error('NostrService: LNURL-pay failed:', error);
       return { error: error?.message || 'Failed to fetch a Lightning invoice.' };
     }
+  }
+
+  // ── Encrypted Direct Messages (NIP-17 gift wrap, NIP-04/44 legacy) ─────────
+
+  /** The signing key as hex, or throw when the Nostr identity is locked. */
+  private getPrivateKeyHex(): string {
+    const sk = this.signer?.privateKey;
+    if (!sk) throw new Error('Nostr identity is locked');
+    return sk;
+  }
+
+  /** Encrypt a plaintext message to `recipientPubkey` with a legacy scheme. */
+  private async encryptDM(
+    recipientPubkey: string,
+    plaintext: string,
+    scheme: 'nip04' | 'nip44',
+  ): Promise<string> {
+    const sk = this.getPrivateKeyHex();
+    if (scheme === 'nip44') {
+      const key = nip44.getConversationKey(utils.hexToBytes(sk), recipientPubkey);
+      return nip44.encrypt(plaintext, key);
+    }
+    return nip04.encrypt(sk, recipientPubkey, plaintext);
+  }
+
+  /**
+   * Decrypt a legacy kind-4 payload from/for `counterpartyPubkey`. NIP-04
+   * ciphertext always carries a `?iv=` suffix; NIP-44 (versioned base64) never
+   * does, which lets us auto-detect the scheme. Falls back to NIP-04 if a NIP-44
+   * attempt fails on an unexpected payload shape.
+   */
+  private async decryptDM(
+    counterpartyPubkey: string,
+    content: string,
+  ): Promise<{ text: string; scheme: 'nip04' | 'nip44' }> {
+    const sk = this.getPrivateKeyHex();
+    if (content.includes('?iv=')) {
+      return { text: await nip04.decrypt(sk, counterpartyPubkey, content), scheme: 'nip04' };
+    }
+    try {
+      const key = nip44.getConversationKey(utils.hexToBytes(sk), counterpartyPubkey);
+      return { text: nip44.decrypt(content, key), scheme: 'nip44' };
+    } catch {
+      return { text: await nip04.decrypt(sk, counterpartyPubkey, content), scheme: 'nip04' };
+    }
+  }
+
+  /** Decrypt a raw kind-4 event into a DirectMessage relative to the current user. */
+  private async decryptEvent(event: NDKEvent): Promise<DirectMessage | null> {
+    try {
+      const me = this.user?.pubkey;
+      if (!me) return null;
+      const mine = event.pubkey === me;
+      const recipient = event.tags.find(t => t[0] === 'p')?.[1] || '';
+      // The other side of the conversation: the recipient for messages we sent,
+      // the author for messages we received. ECDH is symmetric so either works
+      // as the decryption counterparty.
+      const counterparty = mine ? recipient : event.pubkey;
+      if (!counterparty) return null;
+
+      const { text, scheme } = await this.decryptDM(counterparty, event.content);
+      return {
+        id: event.id,
+        pubkey: event.pubkey,
+        recipient: recipient || me,
+        content: text,
+        createdAt: event.created_at ?? Math.floor(Date.now() / 1000),
+        mine,
+        scheme,
+      };
+    } catch (error) {
+      console.warn('NostrService: failed to decrypt DM', event.id, error);
+      return null;
+    }
+  }
+
+  // ── NIP-17 helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * Unwrap a kind-1059 gift wrap into its inner kind-14 rumor (the real message).
+   * Returns null when the wrap isn't addressed to us / can't be decrypted, so a
+   * stranger's or malformed wrap is silently skipped.
+   */
+  private unwrapGift(event: NDKEvent): any | null {
+    try {
+      const skBytes = utils.hexToBytes(this.getPrivateKeyHex());
+      const raw = typeof event.rawEvent === 'function' ? event.rawEvent() : event;
+      return nip17.unwrapEvent(raw as any, skBytes);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Convert an unwrapped kind-14 rumor into a DirectMessage for the current user. */
+  private rumorToDirectMessage(rumor: any): DirectMessage | null {
+    const me = this.user?.pubkey;
+    if (!me || !rumor?.id) return null;
+    const mine = rumor.pubkey === me;
+    const tags: string[][] = rumor.tags || [];
+    const pTag = tags.find((t) => t[0] === 'p')?.[1];
+    const recipient = pTag || (mine ? '' : me);
+    return {
+      id: rumor.id,
+      pubkey: rumor.pubkey,
+      recipient: recipient || me,
+      content: rumor.content,
+      createdAt: rumor.created_at,
+      mine,
+      scheme: 'nip17',
+      ...this.parsePaymentTags(tags),
+    };
+  }
+
+  /**
+   * Parse the payment-request / receipt tags defined by the KaleidoSwap payment
+   * NIP (docs/nip-payment-requests.md) from a kind-14 rumor's tags.
+   */
+  private parsePaymentTags(
+    tags: string[][],
+  ): { payment?: ChatPaymentRequest; receipt?: ChatPaymentReceipt } {
+    const val = (name: string) => tags.find((t) => t[0] === name)?.[1];
+    const paymentTag = tags.find((t) => t[0] === 'payment');
+    if (!paymentTag) return {};
+
+    if (paymentTag[1] === 'request') {
+      const assetTag = tags.find((t) => t[0] === 'asset');
+      const amount = val('amount');
+      const expiry = val('expiry');
+      return {
+        payment: {
+          requestId: paymentTag[2] || undefined,
+          invoice: val('bolt11') || '',
+          amountMsat: amount ? Number(amount) : undefined,
+          description: val('description') || undefined,
+          expiry: expiry ? Number(expiry) : undefined,
+          asset: assetTag
+            ? {
+                id: assetTag[1],
+                ticker: assetTag[2] || undefined,
+                precision: assetTag[3] ? Number(assetTag[3]) : undefined,
+                amount: assetTag[4] ? Number(assetTag[4]) : undefined,
+              }
+            : undefined,
+        },
+      };
+    }
+
+    if (paymentTag[1] === 'receipt') {
+      const status = (val('status') as ChatPaymentReceipt['status']) || 'paid';
+      return {
+        receipt: {
+          requestId: paymentTag[2] || undefined,
+          status,
+          preimage: val('preimage') || undefined,
+        },
+      };
+    }
+    return {};
+  }
+
+  /** Publish a pre-signed raw event (e.g. a gift wrap signed by a throwaway key)
+   *  without letting NDK re-sign it. Returns the number of relays that accepted. */
+  private async publishRawEvent(raw: any): Promise<number> {
+    if (!this.ndk) throw new Error('Nostr is not initialized');
+    const event = new NDKEvent(this.ndk, raw);
+    const publishedTo = await event.publish();
+    return publishedTo.size;
+  }
+
+  /**
+   * Send a NIP-17 gift-wrapped private DM (kind 14 → seal 13 → gift wrap 1059)
+   * with optional extra tags (used to carry structured payment requests/receipts).
+   */
+  private async sendGiftWrappedRumor(
+    recipientPubkey: string,
+    content: string,
+    extraTags: string[][] = [],
+  ): Promise<DirectMessage> {
+    const me = this.user!.pubkey;
+    const skBytes = utils.hexToBytes(this.getPrivateKeyHex());
+
+    // Build the unsigned kind-14 rumor (its id is what we key the message on).
+    const rumor = nip59.createRumor(
+      {
+        kind: PRIVATE_DM_KIND,
+        created_at: Math.floor(Date.now() / 1000),
+        tags: [['p', recipientPubkey], ...extraTags],
+        content,
+      } as any,
+      skBytes,
+    );
+
+    // Gift-wrap to the recipient AND to ourselves, so our own sent messages are
+    // retrievable from the relays (NIP-17 §"the sender's own messages").
+    const targets = recipientPubkey === me ? [recipientPubkey] : [recipientPubkey, me];
+    let accepted = 0;
+    for (const target of targets) {
+      const seal = nip59.createSeal(rumor, skBytes, target);
+      const wrap = nip59.createWrap(seal, target);
+      accepted += await this.publishRawEvent(wrap);
+    }
+    if (accepted === 0) throw new Error('No relay accepted the message');
+
+    const message = this.rumorToDirectMessage(rumor);
+    if (!message) throw new Error('Failed to build the message');
+    return message;
+  }
+
+  /** Send a legacy kind-4 DM encrypted with NIP-04 or NIP-44. */
+  private async sendLegacyDM(
+    recipientPubkey: string,
+    text: string,
+    scheme: 'nip04' | 'nip44',
+  ): Promise<DirectMessage> {
+    const event = new NDKEvent(this.ndk!);
+    event.kind = DM_KIND;
+    event.content = await this.encryptDM(recipientPubkey, text, scheme);
+    event.tags = [['p', recipientPubkey]];
+
+    const publishedTo = await event.publish();
+    if (publishedTo.size === 0) {
+      throw new Error('No relay accepted the message');
+    }
+
+    return {
+      id: event.id,
+      pubkey: this.user!.pubkey,
+      recipient: recipientPubkey,
+      content: text,
+      createdAt: event.created_at ?? Math.floor(Date.now() / 1000),
+      mine: true,
+      scheme,
+    };
+  }
+
+  /**
+   * Send an encrypted direct message to `recipientPubkey`. NIP-17 (default) uses
+   * gift wrapping; nip44/nip04 fall back to a legacy kind-4 event. Resolves once
+   * at least one relay has accepted, returning the local DirectMessage.
+   */
+  async sendDirectMessage(
+    recipientPubkey: string,
+    text: string,
+    scheme: DMScheme = 'nip17',
+  ): Promise<DirectMessage> {
+    if (!this.ndk || !this.user) throw new Error('Nostr is not initialized');
+    if (!this.signer) throw new Error('Nostr identity is locked');
+    await this.ensureReady();
+
+    return scheme === 'nip17'
+      ? this.sendGiftWrappedRumor(recipientPubkey, text)
+      : this.sendLegacyDM(recipientPubkey, text, scheme);
+  }
+
+  /**
+   * Send a structured payment request (see docs/nip-payment-requests.md). Under
+   * NIP-17 the request is carried as tags on the gift-wrapped rumor so the UI can
+   * render a rich, stateful card; under legacy schemes it degrades to a plain
+   * message containing the invoice (still detectable + payable by any client).
+   */
+  async sendPaymentRequest(
+    recipientPubkey: string,
+    req: ChatPaymentRequest,
+    scheme: DMScheme = 'nip17',
+  ): Promise<DirectMessage> {
+    if (!this.ndk || !this.user) throw new Error('Nostr is not initialized');
+    if (!this.signer) throw new Error('Nostr identity is locked');
+    await this.ensureReady();
+
+    const summary = req.asset?.amount != null
+      ? `${req.asset.amount} ${req.asset.ticker || 'asset'}`
+      : req.amountMsat
+        ? `${Math.round(req.amountMsat / 1000).toLocaleString()} sats`
+        : '';
+    const lines = [`⚡ Payment request${summary ? ` — ${summary}` : ''}`];
+    if (req.description) lines.push(req.description);
+    lines.push(req.invoice);
+    const content = lines.join('\n');
+
+    if (scheme !== 'nip17') {
+      return this.sendLegacyDM(recipientPubkey, content, scheme);
+    }
+
+    const tags: string[][] = [
+      ['payment', 'request', req.requestId || ''],
+      ['bolt11', req.invoice],
+      ['subject', 'Payment request'],
+    ];
+    if (req.amountMsat != null) tags.push(['amount', String(req.amountMsat)]);
+    if (req.expiry != null) tags.push(['expiry', String(req.expiry)]);
+    if (req.description) tags.push(['description', req.description]);
+    if (req.asset) {
+      tags.push([
+        'asset',
+        req.asset.id,
+        req.asset.ticker || '',
+        String(req.asset.precision ?? 0),
+        req.asset.amount != null ? String(req.asset.amount) : '',
+      ]);
+    }
+    return this.sendGiftWrappedRumor(recipientPubkey, content, tags);
+  }
+
+  /** Send a payment receipt correlated to a prior request's `requestId`. */
+  async sendPaymentReceipt(
+    recipientPubkey: string,
+    receipt: ChatPaymentReceipt,
+    scheme: DMScheme = 'nip17',
+  ): Promise<DirectMessage> {
+    if (!this.ndk || !this.user) throw new Error('Nostr is not initialized');
+    if (!this.signer) throw new Error('Nostr identity is locked');
+    await this.ensureReady();
+
+    const content =
+      receipt.status === 'paid' ? '✅ Paid' : receipt.status === 'declined' ? '🚫 Declined' : '⌛ Expired';
+
+    if (scheme !== 'nip17') {
+      return this.sendLegacyDM(recipientPubkey, content, scheme);
+    }
+
+    const tags: string[][] = [
+      ['payment', 'receipt', receipt.requestId || ''],
+      ['status', receipt.status],
+    ];
+    if (receipt.preimage) tags.push(['preimage', receipt.preimage]);
+    return this.sendGiftWrappedRumor(recipientPubkey, content, tags);
+  }
+
+  /**
+   * Fetch the message history exchanged with `otherPubkey`, across both NIP-17
+   * gift wraps and legacy kind-4 DMs, decrypted, de-duplicated and sorted
+   * oldest-first. Gift wraps can't be filtered by counterparty at the relay
+   * (the wrap author is a throwaway key and the sender is hidden), so the whole
+   * gift-wrap inbox is fetched and filtered after unwrapping.
+   */
+  async fetchConversation(otherPubkey: string, limit = 100): Promise<DirectMessage[]> {
+    if (!this.ndk || !this.user) throw new Error('Nostr is not initialized');
+    await this.ensureReady();
+
+    const me = this.user.pubkey;
+    const byId = new Map<string, DirectMessage>();
+
+    // Legacy kind-4 DMs in both directions.
+    const legacyFilters: NDKFilter[] = [
+      { kinds: [DM_KIND], authors: [me], '#p': [otherPubkey], limit },
+      { kinds: [DM_KIND], authors: [otherPubkey], '#p': [me], limit },
+    ];
+    const legacyEvents = await this.ndk.fetchEvents(legacyFilters, { closeOnEose: true });
+    for (const event of legacyEvents) {
+      const message = await this.decryptEvent(event);
+      if (message) byId.set(message.id, message);
+    }
+
+    // NIP-17 gift wraps addressed to us, filtered to this conversation.
+    const giftEvents = await this.ndk.fetchEvents(
+      { kinds: [GIFT_WRAP_KIND], '#p': [me], limit: Math.max(limit, 200) },
+      { closeOnEose: true },
+    );
+    for (const event of giftEvents) {
+      const rumor = this.unwrapGift(event);
+      if (!rumor || rumor.kind !== PRIVATE_DM_KIND) continue;
+      const message = this.rumorToDirectMessage(rumor);
+      if (!message) continue;
+      const counterparty = message.mine ? message.recipient : message.pubkey;
+      if (counterparty === otherPubkey) byId.set(message.id, message);
+    }
+
+    return Array.from(byId.values()).sort((a, b) => a.createdAt - b.createdAt);
+  }
+
+  /**
+   * Live-subscribe to the conversation with `otherPubkey`. Fires `onMessage` for
+   * every new message in either direction — NIP-17 gift wraps (kind 1059) and
+   * legacy kind-4 DMs alike. Returns a subscription id to pass to `unsubscribe`.
+   */
+  subscribeToConversation(
+    otherPubkey: string,
+    onMessage: (message: DirectMessage) => void,
+  ): string {
+    if (!this.ndk || !this.user) {
+      throw new Error('Nostr is not initialized');
+    }
+
+    const me = this.user.pubkey;
+    const subscriptionId = `dm_${otherPubkey}_${Date.now()}`;
+    const filters: NDKFilter[] = [
+      { kinds: [DM_KIND], authors: [me], '#p': [otherPubkey] },
+      { kinds: [DM_KIND], authors: [otherPubkey], '#p': [me] },
+      { kinds: [GIFT_WRAP_KIND], '#p': [me] },
+    ];
+
+    const subscription = this.ndk.subscribe(filters, { closeOnEose: false });
+    subscription.on('event', async (event: NDKEvent) => {
+      if (event.kind === GIFT_WRAP_KIND) {
+        const rumor = this.unwrapGift(event);
+        if (!rumor || rumor.kind !== PRIVATE_DM_KIND) return;
+        const message = this.rumorToDirectMessage(rumor);
+        if (!message) return;
+        const counterparty = message.mine ? message.recipient : message.pubkey;
+        if (counterparty === otherPubkey) onMessage(message);
+      } else {
+        const message = await this.decryptEvent(event);
+        if (message) onMessage(message);
+      }
+    });
+
+    this.subscriptions.set(subscriptionId, subscription);
+    return subscriptionId;
+  }
+
+  /**
+   * Live-subscribe to ALL incoming direct messages addressed to the current
+   * user (NIP-17 gift wraps + legacy kind-4), regardless of counterparty. Used
+   * by the app-level notifier to surface new messages and keep unread counts.
+   * The callback receives every decrypted message, including the user's own
+   * (via NIP-17 self-wraps); callers should filter on `message.mine`.
+   */
+  subscribeToInbox(onMessage: (message: DirectMessage) => void): string {
+    if (!this.ndk || !this.user) {
+      throw new Error('Nostr is not initialized');
+    }
+
+    const me = this.user.pubkey;
+    const subscriptionId = `dm_inbox_${Date.now()}`;
+    const filters: NDKFilter[] = [
+      { kinds: [GIFT_WRAP_KIND], '#p': [me] },
+      { kinds: [DM_KIND], '#p': [me] },
+    ];
+
+    const subscription = this.ndk.subscribe(filters, { closeOnEose: false });
+    subscription.on('event', async (event: NDKEvent) => {
+      if (event.kind === GIFT_WRAP_KIND) {
+        const rumor = this.unwrapGift(event);
+        if (!rumor || rumor.kind !== PRIVATE_DM_KIND) return;
+        const message = this.rumorToDirectMessage(rumor);
+        if (message) onMessage(message);
+      } else {
+        const message = await this.decryptEvent(event);
+        if (message) onMessage(message);
+      }
+    });
+
+    this.subscriptions.set(subscriptionId, subscription);
+    return subscriptionId;
+  }
+
+  /** Current user's pubkey (hex), or null when no identity is loaded. */
+  get myPubkey(): string | null {
+    return this.user?.pubkey ?? null;
   }
 
   // Save settings to AsyncStorage

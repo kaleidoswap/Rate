@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Image,
   Platform,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -32,6 +33,7 @@ import { theme } from '../theme';
 import { Card, Button, Input, ScreenHeader } from '../components';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
 import { useDepositDetection } from '../hooks/useDepositDetection';
+import { useSparkAutoClaim } from '../hooks/useSparkAutoClaim';
 import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
 import { NetworkIcon } from '../components/NetworkIcon';
@@ -92,8 +94,21 @@ interface Channel {
 export default function ReceiveScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
   const assetsState = useSelector((state: RootState) => state.assets);
-  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  // The receive/deposit flow always denominates BTC in sats (matches rate-extension):
+  // integer-sats input, sats quick-amounts, and a correct ≈USD conversion. The global
+  // BTC/sats display preference intentionally does NOT apply on this screen — otherwise
+  // the amount field would show BTC and the USD estimate (which expects sats) would be
+  // off by 1e8.
+  const bitcoinUnit = 'sats' as 'BTC' | 'sats';
   const { formatSatoshisToUSD } = useBitcoinConversion();
+
+  // Responsive QR sizing. The QR sat at a fixed 200px, which is cramped on small
+  // phones (the QR card barely fits) and undersized on large/landscape screens.
+  // Size it off the viewport, subtracting the horizontal chrome around it:
+  // scrollContent padding (20·2) + qrSection padding (24·2) + qrCodeWrapper padding
+  // (16·2) = 120, then clamp to a sensible range.
+  const { width: screenWidth } = useWindowDimensions();
+  const qrSize = Math.max(176, Math.min(248, Math.round(screenWidth - 120)));
   
   // Safe destructuring with fallbacks
   const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
@@ -177,6 +192,9 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Multi-currency amount editor (BTC / sats / USD / other fiat).
   const [showAmountEditor, setShowAmountEditor] = useState(false);
   const [showDepositSuccess, setShowDepositSuccess] = useState(false);
+  // The Spark single-use BTC L1 deposit address currently on screen (if any).
+  // Spark on-chain deposits must be claimed in — useSparkAutoClaim polls this.
+  const [sparkDepositAddress, setSparkDepositAddress] = useState<string | null>(null);
 
   // Watch for an incoming deposit whenever a receive address / invoice is shown,
   // then celebrate with the success overlay (mirrors rate-extension).
@@ -191,6 +209,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     assetId: selectedAsset?.asset_id,
     invoice: networkType === 'lightning' ? address : undefined,
     onDetected: handleDepositDetected,
+  });
+  // Spark on-chain deposits don't show up via balance polling until claimed —
+  // sweep on mount + poll-claim the on-screen single-use deposit address.
+  useSparkAutoClaim({
+    address: sparkDepositAddress,
+    enabled: !showDepositSuccess,
+    onClaimed: handleDepositDetected,
   });
   const fiatRates = useFiatRates();
 
@@ -357,10 +382,10 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Check if amount is required and valid. RGB invoices (L1 + LN) are open-amount
   // — the sender chooses how much asset to send — so no amount is required for
   // them. Only a plain BTC Lightning invoice needs an amount up front.
-  const isAmountRequired = (): boolean => {
-    if (selectedAsset?.isRGB) return false;
-    return networkType === 'lightning';
-  };
+  // No receive flow strictly requires an amount: BTC Lightning, RGB-LN and RGB-L1
+  // invoices are all open-amount (the sender chooses how much to send). The amount
+  // field is offered as an OPTIONAL convenience (see renderAmountInput's showAmount).
+  const isAmountRequired = (): boolean => false;
 
   const isAmountValid = (): boolean => {
     if (!isAmountRequired()) return true;
@@ -373,6 +398,9 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (!selectedAsset) return;
 
     setError(null);
+    // Cleared up-front; only re-set when this generation yields a Spark single-use
+    // on-chain deposit address (the only case useSparkAutoClaim should act on).
+    setSparkDepositAddress(null);
 
     if (isAmountRequired() && !isAmountValid()) {
       setError('Please enter a valid amount');
@@ -387,15 +415,13 @@ export default function ReceiveScreen({ navigation }: Props) {
       if (networkType === 'spark') {
         try {
           const sparkAdapter = protocolManager.getAdapter('SPARK');
-          if (amount && isAmountValid()) {
-            const cleanAmount = amount.replace(/,/g, '');
-            const numericAmount = parseFloat(cleanAmount);
-            const amountSats = bitcoinUnit === 'BTC'
-              ? Math.round(numericAmount * 1e8)
-              : Math.round(numericAmount);
+          const cleanAmount = amount.replace(/,/g, '');
+          const numericAmount = parseFloat(cleanAmount);
+          if (!isNaN(numericAmount) && numericAmount > 0) {
+            // Amount-bound native Spark invoice (sats).
             const invoice = await sparkAdapter.createInvoice({
-              amount: amountSats,
-              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              amount: Math.round(numericAmount),
+              description: `Receive ${cleanAmount} sats`,
               expirySeconds: 3600,
             });
             result = invoice.invoice;
@@ -432,37 +458,40 @@ export default function ReceiveScreen({ navigation }: Props) {
             const addr = await rgbAdapter.getReceiveAddress();
             result = addr.address;
           } else if (sparkAdapter?.isConnected()) {
-            // Spark can provide a single-use deposit address for on-chain BTC
+            // Spark provides a single-use deposit address for on-chain BTC; the
+            // deposit must be claimed in — track it for useSparkAutoClaim.
             const addr = await sparkAdapter.getReceiveAddress('onchain');
             result = addr.address;
+            setSparkDepositAddress(addr.address);
           } else {
             throw new Error('No wallet connected for on-chain deposit');
           }
         } else {
-          // Lightning invoice for BTC
-          if (!amount || !isAmountValid()) {
-            throw new Error('Amount is required for Lightning invoices');
-          }
+          // BTC Lightning invoice. Open-amount: if the user typed a number we bind
+          // it (in sats); otherwise we mint an amount-less BOLT11 the sender fills in.
           const cleanAmount = amount.replace(/,/g, '');
           const numericAmount = parseFloat(cleanAmount);
-          const amountSats = bitcoinUnit === 'BTC'
-            ? Math.round(numericAmount * 1e8)
-            : Math.round(numericAmount);
+          const amountSats =
+            !isNaN(numericAmount) && numericAmount > 0 ? Math.round(numericAmount) : undefined;
 
-          // Try RGB first (Lightning), then Spark (also supports Lightning)
+          // Try RGB first (Lightning), then Spark (also supports Lightning).
+          // `layer: 'BTC_LN'` is REQUIRED for Spark — without it the Spark adapter
+          // mints a native Spark sats invoice (a `spark…` string), not a BOLT11.
           const rgbLn = protocolManager.getAdapterIfAvailable('RGB');
           const sparkLn = protocolManager.getAdapterIfAvailable('SPARK');
           if (rgbLn?.isConnected()) {
             const invoice = await rgbLn.createInvoice({
-              amount: amountSats,
-              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              layer: 'BTC_LN',
+              ...(amountSats ? { amount: amountSats } : {}),
+              description: amountSats ? `Receive ${cleanAmount} sats` : 'Receive Bitcoin',
               expirySeconds: 3600,
             });
             result = invoice.invoice;
           } else if (sparkLn?.isConnected()) {
             const invoice = await sparkLn.createInvoice({
-              amount: amountSats,
-              description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+              layer: 'BTC_LN',
+              ...(amountSats ? { amount: amountSats } : {}),
+              description: amountSats ? `Receive ${cleanAmount} sats` : 'Receive Bitcoin',
               expirySeconds: 3600,
             });
             result = invoice.invoice;
@@ -615,6 +644,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     setUnifiedUri('');
     setUnifiedMethods([]);
     setUnifiedAddresses([]);
+    setSparkDepositAddress(null); // re-set below only if Spark supplies the on-chain leg
 
     if (unifiedAsset === 'USD') {
       await generateUsdUnifiedUri();
@@ -698,7 +728,11 @@ export default function ReceiveScreen({ navigation }: Props) {
           }
           if (!collected.btcAddress && spark?.isConnected()) {
             const addr = await spark.getReceiveAddress('onchain');
-            if (addr?.address) collected.btcAddress = addr.address;
+            if (addr?.address) {
+              collected.btcAddress = addr.address;
+              // Spark on-chain deposit → needs claim/sweep (useSparkAutoClaim).
+              setSparkDepositAddress(addr.address);
+            }
           }
           if (!collected.btcAddress && arkade?.isConnected()) {
             const addr = await arkade.getReceiveAddress('boarding');
@@ -714,6 +748,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         if (!lnAdapter) return;
         try {
           const invoice = await lnAdapter.createInvoice({
+            layer: 'BTC_LN', // force a BOLT11 (Spark would otherwise mint a native Spark invoice)
             amount: amountSats > 0 ? amountSats : undefined,
             description: 'Unified receive',
             expirySeconds: 3600,
@@ -1117,7 +1152,14 @@ export default function ReceiveScreen({ navigation }: Props) {
   const renderAmountInput = () => {
     if (!selectedAsset) return null;
     
-    const showAmount = isAmountRequired() || selectedAsset.isRGB || networkType === 'unified';
+    // Amount is always optional, but only meaningful for layers that can bind one
+    // into a request: Lightning/Spark invoices, RGB invoices, and the unified QR.
+    // Plain on-chain BTC addresses can't carry an amount, so hide the field there.
+    const showAmount =
+      selectedAsset.isRGB ||
+      networkType === 'unified' ||
+      networkType === 'lightning' ||
+      networkType === 'spark';
     if (!showAmount) return null;
 
     const isRequired = isAmountRequired();
@@ -1251,7 +1293,10 @@ export default function ReceiveScreen({ navigation }: Props) {
               </View>
             )}
             
-            {maxDepositAmount === 0 && (
+            {/* Channel-capacity messaging only applies to RGB/RLN Lightning. Spark
+                brings its own LN liquidity (no local channels), so suppress both the
+                "no channels" error and the max-deposit hint when Spark is connected. */}
+            {maxDepositAmount === 0 && !getProtocolStatus().SPARK && (
               <View style={[styles.warningContainer, styles.errorWarning]}>
                 <Ionicons name="warning" size={16} color={theme.colors.warning[500]} />
                 <Text style={[styles.warningText, styles.errorWarningText]}>
@@ -1259,7 +1304,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                 </Text>
               </View>
             )}
-            
+
             {maxDepositAmount > 0 && (
               <View style={styles.warningContainer}>
                 <Ionicons name="flash" size={16} color={theme.colors.success[500]} />
@@ -1434,7 +1479,10 @@ export default function ReceiveScreen({ navigation }: Props) {
         activeOpacity={0.7}
       >
         {icon}
-        <Text style={[styles.assetTabText, active && { color: accent, fontWeight: '700' }]}>
+        <Text
+          style={[styles.assetTabText, active && { color: accent, fontWeight: '700' }]}
+          numberOfLines={1}
+        >
           {label}
         </Text>
       </TouchableOpacity>
@@ -1647,7 +1695,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const renderQrLoading = (accent: string) => (
     <View style={styles.qrSection}>
       <View style={styles.qrContainer}>
-        <View style={[styles.qrCodeWrapper, styles.qrLoadingBox]}>
+        <View style={[styles.qrCodeWrapper, { width: qrSize + 32, height: qrSize + 32, alignItems: 'center', justifyContent: 'center' }]}>
           <ActivityIndicator size="large" color={accent} />
         </View>
       </View>
@@ -1712,7 +1760,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
         <View style={styles.qrContainer}>
           <View style={styles.qrCodeWrapper}>
-            <QrCode value={unifiedUri} size={200} />
+            <QrCode value={unifiedUri} size={qrSize} />
           </View>
         </View>
 
@@ -1822,7 +1870,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
         <View style={styles.qrContainer}>
           <View style={styles.qrCodeWrapper}>
-            <QrCode value={address} size={200} />
+            <QrCode value={address} size={qrSize} />
           </View>
         </View>
 
@@ -2432,9 +2480,12 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.text.secondary,
+    flexShrink: 1,
   },
   addrListSection: {
-    marginHorizontal: 16,
+    // No horizontal margin: this list lives inside the already-padded scroll
+    // content, so it must align edge-to-edge with the QR card above it (a 16px
+    // margin here left it visibly narrower and offset).
     marginTop: 8,
     backgroundColor: theme.colors.surface.primary,
     borderRadius: 16,
@@ -2621,13 +2672,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: theme.colors.text.tertiary,
     fontWeight: '500',
-  },
-  // Loading placeholder sized to match the QR (200 + 16 padding each side)
-  qrLoadingBox: {
-    width: 232,
-    height: 232,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 
   // Collapsible receive card (address / unified URI)

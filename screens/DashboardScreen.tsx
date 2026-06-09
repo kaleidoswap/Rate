@@ -510,6 +510,19 @@ export default function DashboardScreen({ navigation }: Props) {
     lite.other.some((o: any) => o.id === asset.asset_id)
   );
 
+  // BTC is the wallet's base asset but is filtered out of `rgbAssets` upstream,
+  // so it never reached the dashboard AssetList. Surface it at the top of the
+  // list (matching AssetsScreen's BTC row). Balance is on-chain + Lightning, and
+  // precision follows the BTC/sats display preference so formatAssetAmount renders
+  // it the same way the rest of the wallet does.
+  const btcListEntry = {
+    asset_id: 'BTC',
+    ticker: 'BTC',
+    name: 'Bitcoin',
+    precision: bitcoinUnit === 'BTC' ? 8 : 0,
+    balance: { spendable: getTotalBtcBalance() },
+  } as any;
+
   // Get current hour to determine greeting
   const getGreeting = () => {
     const hour = new Date().getHours();
@@ -751,16 +764,20 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
 
         <AssetList
-          // In lite mode, hide USDt (it's folded into the USD figure above) and
-          // strip the per-asset protocol badge (a network detail).
-          assets={isLite
-            ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
-            : rgbAssets}
+          // BTC always leads the list; in lite mode hide USDt (it's folded into the
+          // USD figure above) and strip the per-asset protocol badge (a network detail).
+          assets={[
+            btcListEntry,
+            ...(isLite
+              ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
+              : rgbAssets),
+          ]}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
           onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
             asset: {
               ...asset,
-              isRGB: true
+              // BTC is the only non-RGB entry in this list.
+              isRGB: asset.asset_id !== 'BTC',
             }
           })}
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}

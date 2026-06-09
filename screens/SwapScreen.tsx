@@ -35,6 +35,7 @@ import {
 } from '../store/slices/swapSlice';
 import { protocolManager } from '../services/protocols';
 import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
+import { syncAssets } from '../store/slices/assetsSlice';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
@@ -42,6 +43,7 @@ import {
   normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
+import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import { theme } from '../theme';
 import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
@@ -97,6 +99,21 @@ export default function SwapScreen({ navigation }: Props) {
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
+  // Set once a swap settles so the confirm modal shows a success screen instead
+  // of silently closing (the Flashnet path had no confirmation at all).
+  const [swapSuccess, setSwapSuccess] = useState<
+    { fromAmount: number; fromTicker: string; toAmount: number; toTicker: string; txid?: string } | null
+  >(null);
+
+  // After any swap, refresh balances everywhere: the global asset list (so a
+  // freshly bought Spark token like USDB appears in Assets/Dashboard), the local
+  // picker list, and the pair list.
+  const refreshAfterSwap = () => {
+    const walletId = walletState?.activeWallet?.id;
+    if (walletId) dispatch(syncAssets(walletId) as any);
+    loadAvailableAssets();
+    loadTradingPairs();
+  };
 
   // Load trading pairs and assets on mount
   useEffect(() => {
@@ -180,9 +197,32 @@ export default function SwapScreen({ navigation }: Props) {
       // Load Flashnet pools (via Spark → Flashnet)
       try {
         if (flashnetClientManager.isInitialized()) {
-          const pools = await flashnetClientManager.getClient().listPools({ sort: 'TVL_DESC' });
+          const client = flashnetClientManager.getClient();
+          const pools = await client.listPools({ sort: 'TVL_DESC' });
           const poolArray = Array.isArray(pools) ? pools : (pools as any)?.pools || [];
-          flashnetPairs = buildFlashnetPairs(poolArray);
+          // listPools returns asset addresses as HEX pubkeys, but USDB (and the
+          // wallet inventory) are keyed by the bech32m btkn1… identifier. Encode
+          // each side so the pair builder can recognise USDB and match holdings.
+          const enriched = poolArray.map((p: any) => {
+            const encode = (addr?: string) => {
+              if (!addr || addr === BTC_ASSET_PUBKEY) return undefined;
+              try { return client.encodeTokenAddress(addr); } catch { return undefined; }
+            };
+            return {
+              ...p,
+              assetABech32Address: p.assetABech32Address || encode(p.assetAAddress),
+              assetBBech32Address: p.assetBBech32Address || encode(p.assetBAddress),
+            };
+          });
+          // Feed held Spark assets so pool addresses resolve to real
+          // ticker/name/precision (the SDK pool payload carries none).
+          const sparkInventory = (rgbAssets || []).map((a: any) => ({
+            asset_id: a.asset_id,
+            ticker: a.ticker,
+            name: a.name,
+            precision: a.precision,
+          }));
+          flashnetPairs = buildFlashnetPairs(enriched, sparkInventory);
           console.log(`[SwapScreen] Loaded ${flashnetPairs.length} Flashnet pairs`);
         }
       } catch (err) {
@@ -197,27 +237,43 @@ export default function SwapScreen({ navigation }: Props) {
     }
   };
 
-  const loadAvailableAssets = async () => {
+  const loadAvailableAssets = () => {
     try {
-      const assets: Asset[] = [
-        {
-          asset_id: 'BTC',
-          ticker: 'BTC',
-          name: 'Bitcoin',
-          // Balance is in the active BTC unit (sats by default) so the MAX
-          // button and the amount field agree with how the input is parsed.
-          balance: satsToBtcDisplay(walletState?.btcBalance?.vanilla?.spendable || 0),
-          precision: bitcoinUnit === 'sats' ? 0 : 8,
-        },
-        ...rgbAssets.map((asset: any) => ({
+      // Keyed by ticker so held-asset balances win over pair-derived placeholders.
+      const byTicker = new Map<string, Asset>();
+      byTicker.set('BTC', {
+        asset_id: 'BTC',
+        ticker: 'BTC',
+        name: 'Bitcoin',
+        // Balance is in the active BTC unit (sats by default) so the MAX
+        // button and the amount field agree with how the input is parsed.
+        balance: satsToBtcDisplay(walletState?.btcBalance?.vanilla?.spendable || 0),
+        precision: bitcoinUnit === 'sats' ? 0 : 8,
+      });
+      for (const asset of rgbAssets as any[]) {
+        byTicker.set(asset.ticker, {
           asset_id: asset.asset_id,
           ticker: asset.ticker,
           name: asset.name,
           balance: (asset.balance?.spendable || 0) / Math.pow(10, asset.precision || 8),
           precision: asset.precision,
-        }))
-      ];
-      setAvailableAssets(assets);
+        });
+      }
+      // Surface every ticker that appears in a loaded pair (e.g. Flashnet's USDB)
+      // even when the wallet holds none yet — otherwise the destination is
+      // unreachable and the pair looks missing.
+      for (const ticker of allTickers(tradingPairs)) {
+        if (byTicker.has(ticker)) continue;
+        const pairAsset = findPairAsset(tradingPairs, ticker);
+        byTicker.set(ticker, {
+          asset_id: pairAsset ? getAssetId(pairAsset) : ticker,
+          ticker,
+          name: pairAsset?.name || ticker,
+          balance: 0,
+          precision: pairAsset?.precision ?? 8,
+        });
+      }
+      setAvailableAssets(Array.from(byTicker.values()));
     } catch (error) {
       console.error('Failed to load available assets:', error);
     }
@@ -228,6 +284,27 @@ export default function SwapScreen({ navigation }: Props) {
     if (venueFilter === 'all') return true;
     return p.venue === venueFilter;
   });
+
+  // Rebuild the selectable asset list whenever the loaded pairs, held assets, or
+  // BTC unit change — so a freshly loaded Flashnet USDB pair becomes selectable.
+  useEffect(() => {
+    loadAvailableAssets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradingPairs, rgbAssets, walletState?.btcBalance?.vanilla?.spendable, bitcoinUnit]);
+
+  // Once pairs load, make sure the from/to selection actually forms a real pair.
+  // A Spark-only wallet (no RLN) has no BTC/USDT pair, so fall back to the first
+  // available pair (preferring BTC as the source) — i.e. Flashnet BTC/USDB.
+  useEffect(() => {
+    if (!tradingPairs.length) return;
+    if (findPair(filteredPairs, swapState.fromAsset, swapState.toAsset)) return;
+    const preferred = filteredPairs.find(p => p.base.ticker === 'BTC') || filteredPairs[0];
+    if (preferred) {
+      dispatch(setFromAsset(preferred.base.ticker));
+      dispatch(setToAsset(preferred.quote.ticker));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradingPairs, venueFilter]);
 
   const getQuote = async () => {
     try {
@@ -419,14 +496,23 @@ export default function SwapScreen({ navigation }: Props) {
         });
 
         setSwapProgress('done');
+        feedback.swap();
         dispatch(updateExecutionStatus({
           rfq_id: quote.rfq_id,
           status: 'completed',
           txid: result?.outboundTransferId || '',
         }));
         dispatch(setExecuting(false));
-        setShowConfirmModal(false);
-        loadAvailableAssets();
+        // Keep the modal open and show a success screen (Flashnet settles
+        // instantly — no status polling — so this is the only confirmation).
+        setSwapSuccess({
+          fromAmount: quote.from_amount,
+          fromTicker: quote.from_asset,
+          toAmount: quote.to_amount,
+          toTicker: quote.to_asset,
+          txid: result?.outboundTransferId || '',
+        });
+        refreshAfterSwap();
       } else {
         // ── Kaleidoswap execution (3-step: init → taker → execute) ──
         if (!kaleidoClientManager.isInitialized()) {
@@ -567,9 +653,22 @@ export default function SwapScreen({ navigation }: Props) {
 
           clearInterval(interval);
           setPollingInterval(null);
-          setShowConfirmModal(false);
           dispatch(setExecuting(false));
-          loadAvailableAssets();
+          if (swapStatus === 'failed') {
+            setShowConfirmModal(false);
+          } else {
+            const q = swapState.currentQuote;
+            if (q) {
+              setSwapSuccess({
+                fromAmount: q.from_amount,
+                fromTicker: q.from_asset,
+                toAmount: q.to_amount,
+                toTicker: q.to_asset,
+                txid: swapState.currentExecution?.txid,
+              });
+            }
+          }
+          refreshAfterSwap();
         }
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
@@ -592,23 +691,32 @@ export default function SwapScreen({ navigation }: Props) {
   const rgbConnected = protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false;
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
 
+  // If the active venue filter points at a disconnected venue, fall back to All.
+  useEffect(() => {
+    if (venueFilter === 'kaleidoswap' && !rgbConnected) setVenueFilter('all');
+    if (venueFilter === 'flashnet' && !sparkConnected) setVenueFilter('all');
+  }, [venueFilter, rgbConnected, sparkConnected]);
+
   const renderVenueFilter = () => {
-    const venues: Array<{ id: SwapVenueFilter; label: string; available: boolean }> = [
-      { id: 'all', label: 'All', available: true },
-      { id: 'kaleidoswap', label: 'KaleidoSwap', available: rgbConnected },
-      { id: 'flashnet', label: 'Flashnet', available: sparkConnected },
+    // Only surface venues whose protocol is actually connected. KaleidoSwap
+    // needs an RLN/RGB node; Flashnet needs Spark. With a single venue there's
+    // nothing to switch between, so hide the strip entirely.
+    const venues: Array<{ id: SwapVenueFilter; label: string }> = [
+      { id: 'all', label: 'All' },
+      ...(rgbConnected ? [{ id: 'kaleidoswap' as const, label: 'KaleidoSwap' }] : []),
+      ...(sparkConnected ? [{ id: 'flashnet' as const, label: 'Flashnet' }] : []),
     ];
+    if (venues.length <= 2) return null;
 
     return (
       <View style={{ flexDirection: 'row', marginBottom: 12, borderRadius: 10, backgroundColor: theme.colors.background.secondary, padding: 3 }}>
         {venues.map(venue => (
           <TouchableOpacity
             key={venue.id}
-            onPress={() => venue.available && setVenueFilter(venue.id)}
+            onPress={() => setVenueFilter(venue.id)}
             style={{
               flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
               backgroundColor: venueFilter === venue.id ? theme.colors.primary[500] : 'transparent',
-              opacity: venue.available ? 1 : 0.35,
             }}
           >
             <Text style={{
@@ -775,6 +883,16 @@ export default function SwapScreen({ navigation }: Props) {
   const renderAssetPicker = () => {
     if (!showAssetPicker) return null;
 
+    // Restrict choices to what's actually tradable: destinations must pair with
+    // the current source; sources are any ticker present in a loaded pair. Falls
+    // back to the full asset list before pairs have loaded.
+    const tickers = showAssetPicker === 'to'
+      ? tradableTickers(filteredPairs, swapState.fromAsset)
+      : allTickers(filteredPairs);
+    const pickerAssets = tickers.length
+      ? tickers.map(t => assetByTicker(t)).filter((a): a is Asset => !!a)
+      : availableAssets;
+
     return (
       <View style={styles.modalOverlay}>
         <View style={styles.assetPickerModal}>
@@ -788,7 +906,7 @@ export default function SwapScreen({ navigation }: Props) {
           </View>
 
           <ScrollView style={styles.assetPickerList}>
-            {availableAssets.map((asset) => (
+            {pickerAssets.map((asset) => (
               <TouchableOpacity
                 key={asset.asset_id}
                 style={styles.assetPickerItem}
@@ -865,6 +983,44 @@ export default function SwapScreen({ navigation }: Props) {
   };
 
   const renderConfirmModal = () => {
+    // Success screen — shown for both venues once a swap settles.
+    if (swapSuccess) {
+      return (
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModal}>
+            <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <View style={[styles.progressDot, styles.progressDotDone, { width: 56, height: 56, borderRadius: 28, marginBottom: 12 }]}>
+                <Ionicons name="checkmark" size={32} color={theme.colors.text.inverse} />
+              </View>
+              <Text style={styles.confirmTitle}>Swap Complete</Text>
+              <Text style={{ color: theme.colors.text.secondary, marginTop: 6, textAlign: 'center' }}>
+                {formatDisplayAmount(swapSuccess.fromAmount, swapSuccess.fromTicker)} {unitLabelFor(swapSuccess.fromTicker)}
+                {'  →  '}
+                {formatDisplayAmount(swapSuccess.toAmount, swapSuccess.toTicker)} {unitLabelFor(swapSuccess.toTicker)}
+              </Text>
+              {!!swapSuccess.txid && (
+                <Text style={{ color: theme.colors.text.tertiary, marginTop: 8, fontSize: 12 }}>
+                  {swapSuccess.txid.substring(0, 18)}…
+                </Text>
+              )}
+            </View>
+            <Button
+              title="Done"
+              variant="primary"
+              fullWidth
+              style={{ marginTop: 16 }}
+              onPress={() => {
+                setSwapSuccess(null);
+                setShowConfirmModal(false);
+                setSwapProgress('idle');
+                dispatch(resetSwap());
+              }}
+            />
+          </View>
+        </View>
+      );
+    }
+
     if (!showConfirmModal || !swapState.currentQuote) return null;
 
     // currentQuote stores tickers (see from_asset: fromTicker in loadQuote).
