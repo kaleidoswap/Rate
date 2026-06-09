@@ -43,6 +43,12 @@ config.resolver.blockList = exclusionList(blockedLinkedModules);
 // Force all shared deps to resolve from rate's node_modules (single copy, correct platform entries)
 config.resolver.extraNodeModules = {
   '@kaleidorg/wallet-engine': walletEngineRoot,
+  // Babel's transform-runtime rewrites helper calls (createClass, inherits, …) to
+  // `require('@babel/runtime/helpers/*')` in EVERY transpiled file. The sibling
+  // watchFolders (wallet-engine, kaleido-ui) don't carry their own @babel/runtime,
+  // so without this mapping their modules can't resolve the helpers and the bundle
+  // fails at index.ts. Pin it to rate's single hoisted copy.
+  '@babel/runtime': path.resolve(__dirname, 'node_modules/@babel/runtime'),
   react: path.resolve(__dirname, 'node_modules/react'),
   'react-native': path.resolve(__dirname, 'node_modules/react-native'),
   'react-native-svg': path.resolve(__dirname, 'node_modules/react-native-svg'),
