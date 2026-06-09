@@ -1,0 +1,53 @@
+name: TestFlight (EAS)
+
+# Build the iOS app on EAS and submit it to TestFlight automatically when:
+#   - a version tag (v*) is pushed, or
+#   - a commit lands on main (e.g. a PR is merged).
+# The actual compile + sign happens on EAS Build servers, so this runs on a
+# cheap Linux runner — it only needs Node + the project's deps to resolve the
+# Expo config plugins and kick off the build.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch: {}
+
+# Never run two TestFlight builds at once; cancel an in-flight one if a newer
+# trigger arrives (autoIncrement build numbers stay monotonic this way).
+concurrency:
+  group: testflight-ios
+  cancel-in-progress: false
+
+jobs:
+  build-submit:
+    name: Build & submit iOS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup EAS / Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+          packager: pnpm
+
+      # Runs the project's postinstall (fetch-lwk-artifacts + sync-qvac-bundle +
+      # sync-mind). node-linker=hoisted is honoured from .npmrc.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build & submit to TestFlight
+        run: eas build --platform ios --profile production --auto-submit --non-interactive
