@@ -13,7 +13,8 @@
     "setup:native": "bash scripts/fetch-lwk-artifacts.sh",
     "bundle-skills": "node node_modules/@kaleidorg/mind/scripts/bundle-skills.mjs --out skills.bundle.json skills",
     "sync-qvac-bundle": "node scripts/sync-qvac-bundle.js",
-    "postinstall": "bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js"
+    "sync-mind": "rsync -a --delete ../kaleido-mind/packages/core/dist/ node_modules/@kaleidorg/mind/dist/ 2>/dev/null || echo 'sync-mind: local core not found, using installed @kaleidorg/mind'",
+    "postinstall": "bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js && npm run sync-mind"
   },
   "dependencies": {
     "@arkade-os/sdk": "^0.4.14",
@@ -26,7 +27,7 @@
     "@getalby/lightning-tools": "^5.2.1",
     "@kaleidorg/kaleido-ui": "npm:kaleido-ui@^0.1.48",
     "@kaleidorg/mind": "^0.1.0",
-    "@kaleidorg/wallet-protocols": "^1.0.0-beta.2",
+    "@kaleidorg/wallet-engine": "^1.0.0-beta.4",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-liquid": "1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-rln": "1.0.0-beta.2",
@@ -63,6 +64,7 @@
     "expo-haptics": "^55.0.14",
     "expo-linear-gradient": "~15.0.8",
     "expo-local-authentication": "~17.0.8",
+    "expo-notifications": "~0.32.17",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "^14.0.8",
     "expo-speech": "~14.0.8",

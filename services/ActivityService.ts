@@ -3,7 +3,7 @@
 // Aggregates wallet activity across every available source into a single,
 // timestamp-sorted list of {@link ActivityItem}. This is the React Native
 // counterpart of the browser extension's `use-activity-data` hook, but it
-// pulls from the shared `@kaleidorg/wallet-protocols` ProtocolManager adapters
+// pulls from the shared `@kaleidorg/wallet-engine` ProtocolManager adapters
 // instead of the extension's background API.
 //
 // Sources, in priority order:

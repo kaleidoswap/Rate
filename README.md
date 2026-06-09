@@ -82,7 +82,7 @@ cd Rate
 pnpm install        # also runs setup:native → fetches the lwk-rn native artifacts
 ```
 
-`pnpm install` resolves the WDK protocol stack (Spark, RLN/RGB, Liquid, Arkade) — several of these are local `file:` siblings (`../wallet-protocols`, `../wdk-wallet-*`, `../arkade-wdk`), so keep those checked out next to this repo.
+`pnpm install` resolves the WDK protocol stack (Spark, RLN/RGB, Liquid, Arkade) — several of these are local `file:` siblings (`../wallet-engine`, `../wdk-wallet-*`, `../arkade-wdk`), so keep those checked out next to this repo.
 
 > ⚠️ **Do not symlink `node_modules`** (e.g. `ln -s` into another checkout). A self-referencing link causes `ELOOP: too many symbolic links`. If you hit it: `rm node_modules && pnpm install`.
 

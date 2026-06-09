@@ -84,7 +84,13 @@
       "@qvac/sdk/expo-plugin",
       "expo-background-task",
       "expo-sqlite",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "color": "#2BEE79"
+        }
+      ]
     ],
     "extra": {
       "eas": {

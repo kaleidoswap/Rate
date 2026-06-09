@@ -1,5 +1,5 @@
 import { useSelector } from 'react-redux';
-import { policyFor, type DisclosurePolicy } from '@kaleidorg/wallet-protocols';
+import { policyFor, type DisclosurePolicy } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 
 /**

@@ -1,5 +1,5 @@
 // screens/ContactsScreen.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,10 @@ import {
   TextInput,
   SectionList,
   Image,
+  Modal,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,14 +25,15 @@ import {
   setSearchQuery,
   setSelectedContact,
 } from '../store/slices/contactsSlice';
-import { loadContactList } from '../store/slices/nostrSlice';
+import { loadContactList, followUser, unfollowUser } from '../store/slices/nostrSlice';
 import { theme } from '../theme';
-import { Button, MainHeader } from '../components';
-import { NostrContact } from '../services/NostrService';
+import { Button, MainHeader, ZapModal, ZapRecipient } from '../components';
+import NostrService, { NostrContact } from '../services/NostrService';
 import { nip19 } from 'nostr-tools';
 
 interface Props {
   navigation: any;
+  route?: any;
 }
 
 // Brand-consistent tinted avatar palette (readable on the dark surface).
@@ -46,13 +51,21 @@ function avatarColors(name: string) {
   return AVATAR_PALETTE[code % AVATAR_PALETTE.length];
 }
 
-export default function ContactsScreen({ navigation }: Props) {
+export default function ContactsScreen({ navigation, route }: Props) {
   const dispatch = useDispatch();
   const { contacts, searchQuery } = useSelector((state: RootState) => state.contacts);
   const nostrState = useSelector((state: RootState) => state.nostr);
+  const unreadByPubkey = useSelector((state: RootState) => state.chat.unreadByPubkey) || {};
   const [showAddForm, setShowAddForm] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [contactSource, setContactSource] = useState<'all' | 'local' | 'nostr'>('all');
-  const [newContact, setNewContact] = useState({ name: '', lightning_address: '', node_pubkey: '', notes: '' });
+  // Single smart-add form: a display name + one identifier (npub / NIP-05 /
+  // Lightning address / node pubkey), auto-detected on submit.
+  const [addName, setAddName] = useState('');
+  const [addInput, setAddInput] = useState('');
+  const [isAdding, setIsAdding] = useState(false);
+  // Zap sheet target (null = closed).
+  const [zapRecipient, setZapRecipient] = useState<ZapRecipient | null>(null);
 
   const convertNostrContact = (nostrContact: NostrContact): Contact => {
     const displayName = nostrContact.profile?.display_name || nostrContact.profile?.name || nostrContact.petname || 'Anonymous';
@@ -91,72 +104,183 @@ export default function ContactsScreen({ navigation }: Props) {
     ...(others.length ? [{ title: favorites.length ? 'All Contacts' : '', data: others }] : []),
   ];
 
-  const handleSyncNostrContacts = async () => {
+  // A QR scanned in contact mode comes back as a navigation param: open the
+  // add form prefilled with the scanned identifier, then clear the param so it
+  // doesn't re-fire on the next focus.
+  useEffect(() => {
+    const scanned = route?.params?.scannedContact;
+    if (scanned) {
+      setAddInput(scanned);
+      setShowAddForm(true);
+      navigation.setParams({ scannedContact: undefined });
+    }
+  }, [route?.params?.scannedContact]);
+
+  const openContactScanner = () => {
+    navigation.navigate('QRScanner', { mode: 'contact', returnScreen: 'Contacts' });
+  };
+
+  const handleRefresh = async () => {
     if (!nostrState.isConnected) {
-      Alert.alert('Not Connected', 'Please connect to Nostr first in Settings');
+      Alert.alert('Not Connected', 'Connect Nostr in Settings to sync your social contacts.');
       return;
     }
+    setIsRefreshing(true);
     try {
       await dispatch(loadContactList() as any);
-      Alert.alert('Success', 'Nostr contacts synced successfully');
     } catch (error) {
-      Alert.alert('Error', 'Failed to sync Nostr contacts');
+      Alert.alert('Error', 'Failed to refresh contacts.');
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
-  const validateContact = (): boolean => {
-    if (!newContact.name.trim()) {
-      Alert.alert('Error', 'Please enter a contact name');
-      return false;
-    }
-    if (!newContact.lightning_address.trim() && !newContact.node_pubkey.trim()) {
-      Alert.alert('Error', 'Please enter either a Lightning address or node pubkey');
-      return false;
-    }
-    if (newContact.lightning_address.trim()) {
-      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-      if (!emailRegex.test(newContact.lightning_address.trim())) {
-        Alert.alert('Error', 'Please enter a valid Lightning address (user@domain.com)');
-        return false;
-      }
-    }
-    if (newContact.node_pubkey.trim()) {
-      const pubkeyRegex = /^[0-9a-fA-F]{66}$/;
-      if (!pubkeyRegex.test(newContact.node_pubkey.trim())) {
-        Alert.alert('Error', 'Please enter a valid node pubkey (66 character hex string)');
-        return false;
-      }
-    }
-    return true;
+  // Lightweight identifier classification (mirrors NostrService.resolveToPubkey
+  // categories) so we can show the user what was detected before submitting.
+  const detectKind = (raw: string): 'nostr' | 'lightning' | 'node' | 'unknown' => {
+    const s = raw.trim().replace(/^nostr:/i, '');
+    if (!s) return 'unknown';
+    if (/^(npub|nprofile)1[0-9a-z]+$/i.test(s)) return 'nostr';
+    if (/^[0-9a-f]{64}$/i.test(s)) return 'nostr'; // 32-byte hex = Nostr pubkey
+    if (/^[0-9a-f]{66}$/i.test(s)) return 'node'; // 33-byte hex = LN node pubkey
+    if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s)) return 'lightning'; // also covers NIP-05
+    return 'unknown';
   };
 
-  const handleAddContact = () => {
-    if (!validateContact()) return;
+  const addLocalContact = (fields: Partial<Contact>) => {
     const contact: Contact = {
       id: `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: newContact.name.trim(),
-      lightning_address: newContact.lightning_address.trim() || undefined,
-      node_pubkey: newContact.node_pubkey.trim() || undefined,
-      notes: newContact.notes.trim() || undefined,
+      name: (fields.name || 'Contact').trim(),
+      lightning_address: fields.lightning_address,
+      node_pubkey: fields.node_pubkey,
       created_at: Date.now(),
       updated_at: Date.now(),
       is_favorite: false,
     };
     dispatch(addContact(contact));
-    setNewContact({ name: '', lightning_address: '', node_pubkey: '', notes: '' });
+  };
+
+  const resetAddForm = () => {
+    setAddName('');
+    setAddInput('');
     setShowAddForm(false);
-    Alert.alert('Success', 'Contact added successfully');
+  };
+
+  // One flow for every kind of contact. npub / NIP-05 follow on Nostr (and the
+  // typed name becomes the petname); Lightning addresses and node pubkeys are
+  // stored as local contacts.
+  const handleSmartAdd = async () => {
+    const identifier = addInput.trim();
+    const name = addName.trim();
+    if (!identifier) {
+      Alert.alert('Error', 'Enter an npub, NIP-05, Lightning address, or node pubkey.');
+      return;
+    }
+
+    const kind = detectKind(identifier);
+    if (kind === 'unknown') {
+      Alert.alert('Unrecognised', 'Use an npub1…, name@domain, a Lightning address, or a 66-char node pubkey.');
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      // Node (LN) pubkey → local contact.
+      if (kind === 'node') {
+        addLocalContact({ name: name || 'Node', node_pubkey: identifier.toLowerCase() });
+        resetAddForm();
+        Alert.alert('Added', 'Contact saved.');
+        return;
+      }
+
+      // npub / NIP-05 → resolve + follow on Nostr when connected. A NIP-05
+      // (name@domain) that fails to resolve falls back to a Lightning-address
+      // local contact, since the two share the same syntax.
+      if (kind === 'nostr' || kind === 'lightning') {
+        if (nostrState.isConnected) {
+          const resolved = await NostrService.getInstance().resolveToPubkey(identifier);
+          if ('pubkey' in resolved) {
+            if (nostrState.contacts.some((c) => c.pubkey === resolved.pubkey)) {
+              Alert.alert('Already following', 'This account is already in your Nostr contacts.');
+              return;
+            }
+            await dispatch(
+              followUser({ pubkey: resolved.pubkey, petname: name || undefined }) as any,
+            ).unwrap();
+            await dispatch(loadContactList() as any);
+            resetAddForm();
+            Alert.alert('Following', 'Account added to your Nostr contacts.');
+            return;
+          }
+          // Could not resolve as a Nostr identity.
+          if (kind === 'nostr') {
+            Alert.alert('Not found', resolved.error || 'Could not resolve that Nostr identity.');
+            return;
+          }
+        } else if (kind === 'nostr') {
+          Alert.alert('Connect Nostr', 'Connect Nostr in Settings to follow accounts.');
+          return;
+        }
+
+        // Lightning address (or unresolved NIP-05) → local contact.
+        addLocalContact({ name: name || identifier.split('@')[0], lightning_address: identifier });
+        resetAddForm();
+        Alert.alert('Added', 'Contact saved.');
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to add contact.');
+    } finally {
+      setIsAdding(false);
+    }
   };
 
   const handleDeleteContact = (contact: Contact) => {
-    Alert.alert('Delete Contact', `Are you sure you want to delete ${contact.name}?`, [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => dispatch(deleteContact(contact.id)) },
-    ]);
+    const isNostr = contact.isNostrContact && contact.node_pubkey;
+    Alert.alert(
+      isNostr ? 'Unfollow' : 'Delete Contact',
+      isNostr
+        ? `Unfollow ${contact.name} on Nostr?`
+        : `Are you sure you want to delete ${contact.name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: isNostr ? 'Unfollow' : 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (isNostr) {
+              try {
+                await dispatch(unfollowUser(contact.node_pubkey!) as any).unwrap();
+                await dispatch(loadContactList() as any);
+              } catch (e: any) {
+                Alert.alert('Error', e?.message || 'Failed to unfollow.');
+                return;
+              }
+            }
+            // Remove any local mirror as well.
+            dispatch(deleteContact(contact.id));
+          },
+        },
+      ],
+    );
   };
 
+  // Tapping a contact: zap (Nostr account or any Lightning address) is the
+  // primary action; otherwise fall back to the full Send screen.
   const handleContactPress = (contact: Contact) => {
     dispatch(setSelectedContact(contact));
+
+    const pubkey = contact.isNostrContact ? contact.node_pubkey : undefined;
+    if (pubkey || contact.lightning_address) {
+      setZapRecipient({
+        name: contact.name,
+        pubkey,
+        lightningAddress: contact.lightning_address,
+        npub: contact.npub,
+        avatarUrl: contact.avatar_url,
+      });
+      return;
+    }
+
     navigation.navigate('Send', {
       address: contact.lightning_address || contact.node_pubkey,
       contactName: contact.name,
@@ -209,57 +333,124 @@ export default function ContactsScreen({ navigation }: Props) {
         })}
       </View>
 
-      {/* Nostr quick actions */}
-      {nostrState.isConnected ? (
-        <View style={styles.nostrActions}>
-          <TouchableOpacity style={styles.nostrActionBtn} onPress={handleSyncNostrContacts} activeOpacity={0.8}>
-            <Ionicons name="sync" size={15} color={theme.colors.primary[500]} />
-            <Text style={styles.nostrActionText}>Sync Nostr</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.nostrActionBtn} onPress={() => navigation.navigate('NostrContacts')} activeOpacity={0.8}>
-            <Ionicons name="planet" size={15} color={theme.colors.primary[500]} />
-            <Text style={styles.nostrActionText}>Manage</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
+      {/* Sync + Profile/Relays now live in the header (refresh + settings).
+          Keep only the onboarding nudge when Nostr isn't connected. */}
+      {!nostrState.isConnected && (
         <TouchableOpacity style={styles.connectBanner} onPress={() => navigation.navigate('Settings')} activeOpacity={0.8}>
           <Ionicons name="planet-outline" size={16} color={theme.colors.text.secondary} />
           <Text style={styles.connectBannerText}>Connect Nostr to sync your social contacts</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
         </TouchableOpacity>
       )}
-
-      {showAddForm && renderAddForm()}
     </View>
   );
 
-  const renderAddForm = () => (
-    <View style={styles.formCard}>
-      <Text style={styles.formTitle}>New Contact</Text>
-      {[
-        { key: 'name', label: 'Name', placeholder: 'Contact name', kbd: 'default' as const },
-        { key: 'lightning_address', label: 'Lightning Address', placeholder: 'user@domain.com', kbd: 'email-address' as const },
-        { key: 'node_pubkey', label: 'Node Pubkey', placeholder: '66-character hex', kbd: 'default' as const },
-      ].map((f) => (
-        <View key={f.key} style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>{f.label}</Text>
-          <TextInput
-            style={styles.input}
-            value={(newContact as any)[f.key]}
-            onChangeText={(text) => setNewContact({ ...newContact, [f.key]: text })}
-            placeholder={f.placeholder}
-            placeholderTextColor={theme.colors.text.tertiary}
-            keyboardType={f.kbd}
-            autoCapitalize={f.key === 'name' ? 'words' : 'none'}
+  // Add-contact form rendered inside a Modal. Hosting it outside the SectionList
+  // (instead of in ListHeaderComponent) keeps the TextInputs mounted across
+  // re-renders, so the name field no longer loses focus on every keystroke.
+  const renderAddModal = () => {
+    const kind = detectKind(addInput);
+    const detected: Record<typeof kind, { label: string; icon: any; color: string }> = {
+      nostr: { label: 'Nostr account', icon: 'planet', color: theme.colors.primary[500] },
+      lightning: { label: 'Lightning / NIP-05', icon: 'flash', color: theme.colors.warning[500] },
+      node: { label: 'Node pubkey', icon: 'git-network', color: theme.colors.text.secondary },
+      unknown: { label: '', icon: 'help', color: theme.colors.text.tertiary },
+    };
+    const d = detected[kind];
+
+    return (
+      <Modal
+        visible={showAddForm}
+        transparent
+        animationType="slide"
+        onRequestClose={() => !isAdding && resetAddForm()}
+      >
+        <View style={styles.modalBackdrop}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => !isAdding && resetAddForm()}
           />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalSheetWrap}
+          >
+            <View style={styles.modalSheet}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHeader}>
+                <Text style={styles.formTitle}>Add Contact</Text>
+                <TouchableOpacity onPress={resetAddForm} disabled={isAdding} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Ionicons name="close" size={24} color={theme.colors.text.secondary} />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity
+                style={styles.scanCta}
+                onPress={() => { setShowAddForm(false); openContactScanner(); }}
+                disabled={isAdding}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.inverse} />
+                <Text style={styles.scanCtaText}>Scan QR code</Text>
+              </TouchableOpacity>
+
+              <View style={styles.orDivider}>
+                <View style={styles.orLine} />
+                <Text style={styles.orText}>or enter manually</Text>
+                <View style={styles.orLine} />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Name (optional)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={addName}
+                  onChangeText={setAddName}
+                  placeholder="Display name"
+                  placeholderTextColor={theme.colors.text.tertiary}
+                  autoCapitalize="words"
+                  returnKeyType="next"
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>npub, NIP-05, Lightning address, or node pubkey</Text>
+                <TextInput
+                  style={styles.input}
+                  value={addInput}
+                  onChangeText={setAddInput}
+                  placeholder="npub1… · name@domain · 66-char pubkey"
+                  placeholderTextColor={theme.colors.text.tertiary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="done"
+                  onSubmitEditing={handleSmartAdd}
+                />
+                {addInput.trim().length > 0 && kind !== 'unknown' && (
+                  <View style={styles.detectRow}>
+                    <Ionicons name={d.icon} size={13} color={d.color} />
+                    <Text style={[styles.detectText, { color: d.color }]}>Detected: {d.label}</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.formActions}>
+                <Button title="Cancel" variant="secondary" onPress={resetAddForm} style={{ flex: 1 }} disabled={isAdding} />
+                <Button
+                  title={isAdding ? 'Adding…' : 'Add'}
+                  variant="primary"
+                  onPress={handleSmartAdd}
+                  style={{ flex: 1 }}
+                  loading={isAdding}
+                  disabled={isAdding}
+                />
+              </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
-      ))}
-      <View style={styles.formActions}>
-        <Button title="Cancel" variant="secondary" onPress={() => { setShowAddForm(false); setNewContact({ name: '', lightning_address: '', node_pubkey: '', notes: '' }); }} style={{ flex: 1 }} />
-        <Button title="Add" variant="primary" onPress={handleAddContact} style={{ flex: 1 }} />
-      </View>
-    </View>
-  );
+      </Modal>
+    );
+  };
 
   const renderContactItem = ({ item: contact }: { item: Contact }) => {
     const ac = avatarColors(contact.name);
@@ -297,6 +488,44 @@ export default function ContactsScreen({ navigation }: Props) {
           </View>
         </View>
 
+        {contact.isNostrContact && contact.node_pubkey && (
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() =>
+              navigation.navigate('Chat', {
+                pubkey: contact.node_pubkey,
+                name: contact.name,
+                npub: contact.npub,
+                avatarUrl: contact.avatar_url,
+              })
+            }
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={`Message ${contact.name}`}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={17} color={theme.colors.primary[500]} />
+            {(unreadByPubkey[contact.node_pubkey] ?? 0) > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadBadgeText}>
+                  {Math.min(unreadByPubkey[contact.node_pubkey], 99)}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+        {(contact.lightning_address || contact.node_pubkey) && (
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() =>
+              navigation.navigate('Send', {
+                address: contact.lightning_address || contact.node_pubkey,
+                contactName: contact.name,
+              })
+            }
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="paper-plane-outline" size={17} color={theme.colors.text.secondary} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           style={styles.iconBtn}
           onPress={() => dispatch(toggleFavorite(contact.id))}
@@ -341,9 +570,31 @@ export default function ContactsScreen({ navigation }: Props) {
         subtitle={`${allContacts.length} ${allContacts.length === 1 ? 'connection' : 'connections'}`}
         icon="people"
         rightAction={
-          <TouchableOpacity style={styles.addButton} onPress={() => setShowAddForm(!showAddForm)}>
-            <Ionicons name={showAddForm ? 'close' : 'add'} size={24} color={theme.colors.text.inverse} />
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={handleRefresh}
+              disabled={isRefreshing}
+              activeOpacity={0.8}
+              accessibilityLabel="Refresh contacts"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              {isRefreshing ? (
+                <ActivityIndicator size="small" color={theme.colors.text.primary} />
+              ) : (
+                <Ionicons name="refresh" size={19} color={theme.colors.text.primary} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.headerIconBtn}
+              onPress={() => navigation.navigate('Settings')}
+              activeOpacity={0.8}
+              accessibilityLabel="Settings"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="settings-outline" size={19} color={theme.colors.text.primary} />
+            </TouchableOpacity>
+          </>
         }
       />
 
@@ -361,6 +612,30 @@ export default function ContactsScreen({ navigation }: Props) {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       />
+
+      {/* Floating add button — scanning lives inside the add sheet. */}
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => setShowAddForm(true)}
+        activeOpacity={0.85}
+        accessibilityLabel="Add contact"
+      >
+        <Ionicons name="add" size={30} color={theme.colors.text.inverse} />
+      </TouchableOpacity>
+
+      {renderAddModal()}
+
+      <ZapModal
+        visible={!!zapRecipient}
+        recipient={zapRecipient}
+        onClose={() => setZapRecipient(null)}
+        onSuccess={({ amountSats, isZap }) =>
+          Alert.alert(
+            isZap ? 'Zap sent ⚡' : 'Payment sent',
+            `${amountSats.toLocaleString()} sats sent to ${zapRecipient?.name ?? 'contact'}.`,
+          )
+        }
+      />
     </View>
   );
 }
@@ -370,17 +645,68 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background.secondary,
   },
-  addButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  headerIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fab: {
+    position: 'absolute',
+    right: theme.spacing[5],
+    bottom: theme.spacing[6],
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: theme.colors.primary[500],
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  scanCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.primary[500],
+    marginBottom: theme.spacing[4],
+  },
+  scanCtaText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '700',
+    color: theme.colors.text.inverse,
+  },
+  orDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    marginBottom: theme.spacing[4],
+  },
+  orLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: theme.colors.border.medium,
+  },
+  orText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '600',
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   listContent: {
     paddingHorizontal: theme.spacing[4],
-    paddingBottom: theme.spacing[10],
+    paddingBottom: 150, // clear the floating action cluster
     flexGrow: 1,
   },
   searchBar: {
@@ -447,28 +773,6 @@ const styles = StyleSheet.create({
   },
   segmentCountTextActive: {
     color: theme.colors.text.inverse,
-  },
-  nostrActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-    marginTop: theme.spacing[3],
-  },
-  nostrActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.primary[50],
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100],
-  },
-  nostrActionText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.primary[500],
   },
   connectBanner: {
     flexDirection: 'row',
@@ -557,22 +861,72 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: theme.colors.surface.tertiary,
   },
-  formCard: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[5],
-    marginTop: theme.spacing[3],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
+  unreadBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: theme.colors.primary[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: theme.colors.surface.primary,
+  },
+  unreadBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: theme.colors.text.inverse,
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  modalSheetWrap: {
+    width: '100%',
+  },
+  modalSheet: {
+    backgroundColor: theme.colors.background.secondary,
+    borderTopLeftRadius: theme.borderRadius['2xl'],
+    borderTopRightRadius: theme.borderRadius['2xl'],
+    paddingHorizontal: theme.spacing[5],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[8],
+  },
+  modalHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: theme.colors.border.medium,
+    marginBottom: theme.spacing[4],
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing[4],
   },
   formTitle: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.text.primary,
-    marginBottom: theme.spacing[4],
   },
   inputGroup: {
     marginBottom: theme.spacing[3],
+  },
+  detectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: theme.spacing[2],
+  },
+  detectText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '600',
   },
   inputLabel: {
     fontSize: theme.typography.fontSize.sm,

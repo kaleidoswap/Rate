@@ -1,5 +1,5 @@
 // screens/SwapScreen.tsx
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   TextInput,
   View,
@@ -35,6 +35,7 @@ import {
 } from '../store/slices/swapSlice';
 import { protocolManager } from '../services/protocols';
 import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
+import { syncAssets } from '../store/slices/assetsSlice';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
@@ -42,6 +43,7 @@ import {
   normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
+import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import { theme } from '../theme';
 import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
@@ -66,8 +68,30 @@ export default function SwapScreen({ navigation }: Props) {
   const walletState = useSelector((state: RootState) => state.wallet);
   const assetsState = useSelector((state: RootState) => state.assets);
   const rgbAssets = (assetsState?.rgbAssets || []);
+  // The wallet is sats-first by default. The BTC-side amount field is therefore
+  // entered/shown in this unit — NOT BTC. Treating the input as BTC (the old
+  // behaviour) multiplied every BTC swap amount by 1e8, blowing past the maker's
+  // max and silently returning no quote.
+  const bitcoinUnit = useSelector((state: RootState) => state.settings?.bitcoinUnit || 'sats');
+
+  // Convert a BTC-side display value (in the active unit) to integer sats, and back.
+  const btcDisplayToSats = (val: number) => (bitcoinUnit === 'sats' ? Math.round(val) : Math.round(val * 1e8));
+  const satsToBtcDisplay = (sats: number) => (bitcoinUnit === 'sats' ? Math.round(sats) : sats / 1e8);
+  // Human label for the BTC side, e.g. "sats" or "BTC".
+  const btcUnitLabel = bitcoinUnit === 'sats' ? 'sats' : 'BTC';
+
+  // Format a display amount for a given ticker: sats render as whole integers,
+  // BTC/tokens trim trailing zeros. Keeps the UI readable in either unit.
+  const formatDisplayAmount = (value: number, ticker: string): string => {
+    if (!Number.isFinite(value)) return '0';
+    if (isBtcTicker(ticker) && bitcoinUnit === 'sats') return Math.round(value).toLocaleString('en-US');
+    return parseFloat(value.toFixed(8)).toString();
+  };
+  // The unit shown next to a ticker (BTC side respects the active unit).
+  const unitLabelFor = (ticker: string) => (isBtcTicker(ticker) ? btcUnitLabel : ticker);
 
   const [showAssetPicker, setShowAssetPicker] = useState<'from' | 'to' | null>(null);
+  const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
@@ -75,26 +99,26 @@ export default function SwapScreen({ navigation }: Props) {
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
+  // Set once a swap settles so the confirm modal shows a success screen instead
+  // of silently closing (the Flashnet path had no confirmation at all).
+  const [swapSuccess, setSwapSuccess] = useState<
+    { fromAmount: number; fromTicker: string; toAmount: number; toTicker: string; txid?: string } | null
+  >(null);
 
-  // Wallet inventory (what the user actually holds), always including BTC — kept
-  // reactive so it reflects balances as the store loads, not just at mount time.
-  const availableAssets: Asset[] = useMemo(() => {
-    const btcSats = walletState?.btcBalance?.vanilla?.spendable || 0;
-    return [
-      { asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', balance: btcSats / 1e8, precision: 8 },
-      ...rgbAssets.map((asset: any) => ({
-        asset_id: asset.asset_id,
-        ticker: asset.ticker,
-        name: asset.name,
-        balance: (asset.balance?.spendable ?? asset.balance ?? 0) / Math.pow(10, asset.precision || 8),
-        precision: asset.precision,
-      })),
-    ];
-  }, [walletState?.btcBalance, rgbAssets]);
+  // After any swap, refresh balances everywhere: the global asset list (so a
+  // freshly bought Spark token like USDB appears in Assets/Dashboard), the local
+  // picker list, and the pair list.
+  const refreshAfterSwap = () => {
+    const walletId = walletState?.activeWallet?.id;
+    if (walletId) dispatch(syncAssets(walletId) as any);
+    loadAvailableAssets();
+    loadTradingPairs();
+  };
 
-  // Load trading pairs on mount
+  // Load trading pairs and assets on mount
   useEffect(() => {
     loadTradingPairs();
+    loadAvailableAssets();
 
     if (!swapState.fromAsset) dispatch(setFromAsset('BTC'));
     if (!swapState.toAsset) dispatch(setToAsset('USDT'));
@@ -173,9 +197,32 @@ export default function SwapScreen({ navigation }: Props) {
       // Load Flashnet pools (via Spark → Flashnet)
       try {
         if (flashnetClientManager.isInitialized()) {
-          const pools = await flashnetClientManager.getClient().listPools({ sort: 'TVL_DESC' });
+          const client = flashnetClientManager.getClient();
+          const pools = await client.listPools({ sort: 'TVL_DESC' });
           const poolArray = Array.isArray(pools) ? pools : (pools as any)?.pools || [];
-          flashnetPairs = buildFlashnetPairs(poolArray);
+          // listPools returns asset addresses as HEX pubkeys, but USDB (and the
+          // wallet inventory) are keyed by the bech32m btkn1… identifier. Encode
+          // each side so the pair builder can recognise USDB and match holdings.
+          const enriched = poolArray.map((p: any) => {
+            const encode = (addr?: string) => {
+              if (!addr || addr === BTC_ASSET_PUBKEY) return undefined;
+              try { return client.encodeTokenAddress(addr); } catch { return undefined; }
+            };
+            return {
+              ...p,
+              assetABech32Address: p.assetABech32Address || encode(p.assetAAddress),
+              assetBBech32Address: p.assetBBech32Address || encode(p.assetBAddress),
+            };
+          });
+          // Feed held Spark assets so pool addresses resolve to real
+          // ticker/name/precision (the SDK pool payload carries none).
+          const sparkInventory = (rgbAssets || []).map((a: any) => ({
+            asset_id: a.asset_id,
+            ticker: a.ticker,
+            name: a.name,
+            precision: a.precision,
+          }));
+          flashnetPairs = buildFlashnetPairs(enriched, sparkInventory);
           console.log(`[SwapScreen] Loaded ${flashnetPairs.length} Flashnet pairs`);
         }
       } catch (err) {
@@ -190,6 +237,47 @@ export default function SwapScreen({ navigation }: Props) {
     }
   };
 
+  const loadAvailableAssets = () => {
+    try {
+      // Keyed by ticker so held-asset balances win over pair-derived placeholders.
+      const byTicker = new Map<string, Asset>();
+      byTicker.set('BTC', {
+        asset_id: 'BTC',
+        ticker: 'BTC',
+        name: 'Bitcoin',
+        // Balance is in the active BTC unit (sats by default) so the MAX
+        // button and the amount field agree with how the input is parsed.
+        balance: satsToBtcDisplay(walletState?.btcBalance?.vanilla?.spendable || 0),
+        precision: bitcoinUnit === 'sats' ? 0 : 8,
+      });
+      for (const asset of rgbAssets as any[]) {
+        byTicker.set(asset.ticker, {
+          asset_id: asset.asset_id,
+          ticker: asset.ticker,
+          name: asset.name,
+          balance: (asset.balance?.spendable || 0) / Math.pow(10, asset.precision || 8),
+          precision: asset.precision,
+        });
+      }
+      // Surface every ticker that appears in a loaded pair (e.g. Flashnet's USDB)
+      // even when the wallet holds none yet — otherwise the destination is
+      // unreachable and the pair looks missing.
+      for (const ticker of allTickers(tradingPairs)) {
+        if (byTicker.has(ticker)) continue;
+        const pairAsset = findPairAsset(tradingPairs, ticker);
+        byTicker.set(ticker, {
+          asset_id: pairAsset ? getAssetId(pairAsset) : ticker,
+          ticker,
+          name: pairAsset?.name || ticker,
+          balance: 0,
+          precision: pairAsset?.precision ?? 8,
+        });
+      }
+      setAvailableAssets(Array.from(byTicker.values()));
+    } catch (error) {
+      console.error('Failed to load available assets:', error);
+    }
+  };
 
   // Get filtered pairs based on venue selection
   const filteredPairs = tradingPairs.filter(p => {
@@ -197,29 +285,26 @@ export default function SwapScreen({ navigation }: Props) {
     return p.venue === venueFilter;
   });
 
-  // Assets the user can SELECT in the swap — sourced from the loaded trading
-  // pairs (like the extension), not just owned inventory, so every tradable
-  // asset is pickable even before balances load. BTC is always first. Owned
-  // balance / precision is joined in from the inventory when available.
-  const selectableAssets: Asset[] = useMemo(() => {
-    const tickers: string[] = ['BTC', ...allTickers(filteredPairs)];
-    const seen = new Set<string>();
-    const out: Asset[] = [];
-    for (const ticker of tickers) {
-      if (!ticker || seen.has(ticker)) continue;
-      seen.add(ticker);
-      const inv = availableAssets.find(a => a.ticker === ticker);
-      const pairAsset = findPairAsset(filteredPairs, ticker);
-      out.push({
-        asset_id: inv?.asset_id ?? ticker,
-        ticker,
-        name: inv?.name ?? pairAsset?.name ?? ticker,
-        balance: inv?.balance ?? 0,
-        precision: inv?.precision ?? pairAsset?.precision ?? 8,
-      });
+  // Rebuild the selectable asset list whenever the loaded pairs, held assets, or
+  // BTC unit change — so a freshly loaded Flashnet USDB pair becomes selectable.
+  useEffect(() => {
+    loadAvailableAssets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradingPairs, rgbAssets, walletState?.btcBalance?.vanilla?.spendable, bitcoinUnit]);
+
+  // Once pairs load, make sure the from/to selection actually forms a real pair.
+  // A Spark-only wallet (no RLN) has no BTC/USDT pair, so fall back to the first
+  // available pair (preferring BTC as the source) — i.e. Flashnet BTC/USDB.
+  useEffect(() => {
+    if (!tradingPairs.length) return;
+    if (findPair(filteredPairs, swapState.fromAsset, swapState.toAsset)) return;
+    const preferred = filteredPairs.find(p => p.base.ticker === 'BTC') || filteredPairs[0];
+    if (preferred) {
+      dispatch(setFromAsset(preferred.base.ticker));
+      dispatch(setToAsset(preferred.quote.ticker));
     }
-    return out;
-  }, [filteredPairs, availableAssets]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradingPairs, venueFilter]);
 
   const getQuote = async () => {
     try {
@@ -251,9 +336,11 @@ export default function SwapScreen({ navigation }: Props) {
           const toAssetId = getAssetId(toAssetSide);
           const fromPrecision = fromAssetSide.precision;
           const toPrecision = toAssetSide.precision;
-          const rawAmount = isBtcTicker(fromTicker) ? Math.round(fromAmount * 1e8) : Math.round(fromAmount * Math.pow(10, fromPrecision));
+          // Flashnet settles in sats (not msats). BTC input is in the active unit.
+          const rawAmount = isBtcTicker(fromTicker) ? btcDisplayToSats(fromAmount) : Math.round(fromAmount * Math.pow(10, fromPrecision));
 
           let toAmount = 0;
+          let toAmountRaw = 0;
           let feeAmount = 0;
           let rate = 0;
           try {
@@ -265,8 +352,10 @@ export default function SwapScreen({ navigation }: Props) {
               maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
             });
             const rawOut = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
-            toAmount = isBtcTicker(toTicker) ? rawOut / 1e8 : rawOut / Math.pow(10, toPrecision);
-            feeAmount = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0) / (isBtcTicker(fromTicker) ? 1e8 : Math.pow(10, fromPrecision));
+            toAmountRaw = rawOut;
+            toAmount = isBtcTicker(toTicker) ? satsToBtcDisplay(rawOut) : rawOut / Math.pow(10, toPrecision);
+            const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
+            feeAmount = isBtcTicker(fromTicker) ? satsToBtcDisplay(rawFee) : rawFee / Math.pow(10, fromPrecision);
             rate = fromAmount > 0 ? toAmount / fromAmount : Number(sim?.executionPrice ?? 0);
           } catch (simErr) {
             console.warn('[SwapScreen] Flashnet simulate failed, showing estimate:', simErr);
@@ -282,6 +371,13 @@ export default function SwapScreen({ navigation }: Props) {
             exchange_rate: rate,
             expiry_timestamp: Date.now() + 30000,
             maker_pubkey: poolId || '',
+            venue: 'flashnet',
+            from_asset_id: fromAssetId,
+            to_asset_id: toAssetId,
+            // Flashnet works in sats (not msats): rawAmount is the exact input,
+            // and the simulated output in smallest units (used verbatim on execute).
+            from_amount_raw: rawAmount,
+            to_amount_raw: toAmountRaw,
           };
 
           dispatch(setCurrentQuote(quote));
@@ -302,8 +398,10 @@ export default function SwapScreen({ navigation }: Props) {
           const fromAssetId = getAssetId(fromAsset);
           const toAssetId = getAssetId(toAsset);
           const fromPrecision = fromAsset.precision;
+          // BTC input is in the active unit (sats by default); the maker quotes
+          // the BTC leg in msats. sats → msats is ×1000.
           const rawFromAmount = isBtcTicker(fromTicker)
-            ? Math.round(fromAmount * 1e8 * 1000) // msats
+            ? btcDisplayToSats(fromAmount) * 1000 // active unit → sats → msats
             : Math.round(fromAmount * Math.pow(10, fromPrecision));
 
           const { fromLayer, toLayer } = getQuoteLayers(pair, fromAssetId, toAssetId);
@@ -314,11 +412,18 @@ export default function SwapScreen({ navigation }: Props) {
             to_asset: { asset_id: toAssetId, layer: toLayer as any },
           }) as any;
 
-          const toAmount = Number(quoteResponse.to_asset?.amount || 0);
+          // Raw, maker-quoted integers (smallest units). The maker echoes the
+          // exact legs it will encode into the swapstring; keep these verbatim
+          // for initSwap + swapstring validation (re-deriving from the rounded
+          // display amount is what previously broke execution).
+          const rawToAmount = Number(quoteResponse.to_asset?.amount || 0);
+          const rawFromAmountQuoted = Number(quoteResponse.from_asset?.amount || rawFromAmount);
+          const quotedFromAssetId = quoteResponse.from_asset?.asset_id || fromAssetId;
+          const quotedToAssetId = quoteResponse.to_asset?.asset_id || toAssetId;
           const toPrecision = toAsset.precision;
           const displayToAmount = isBtcTicker(toTicker)
-            ? toAmount / 1000 / 1e8 // msats → BTC
-            : toAmount / Math.pow(10, toPrecision);
+            ? satsToBtcDisplay(rawToAmount / 1000) // msats → sats → active unit
+            : rawToAmount / Math.pow(10, toPrecision);
 
           const quote: SwapQuote = {
             rfq_id: quoteResponse.rfq_id || `kaleido-${Date.now()}`,
@@ -330,6 +435,10 @@ export default function SwapScreen({ navigation }: Props) {
             exchange_rate: quoteResponse.price || 0,
             expiry_timestamp: quoteResponse.expires_at ? quoteResponse.expires_at * 1000 : Date.now() + 60000,
             maker_pubkey: quoteResponse.maker_pubkey || '',
+            from_asset_id: quotedFromAssetId,
+            to_asset_id: quotedToAssetId,
+            from_amount_raw: rawFromAmountQuoted,
+            to_amount_raw: rawToAmount,
           };
 
           dispatch(setCurrentQuote(quote));
@@ -367,27 +476,43 @@ export default function SwapScreen({ navigation }: Props) {
         const fromAssetId = getAssetId(pair.base.ticker === quote.from_asset ? pair.base : pair.quote);
         const toAssetId = getAssetId(pair.base.ticker === quote.to_asset ? pair.base : pair.quote);
         const fromPrecision = (pair.base.ticker === quote.from_asset ? pair.base : pair.quote).precision;
-        const rawAmount = isBtcTicker(quote.from_asset)
+        const toPrecision = (pair.base.ticker === quote.to_asset ? pair.base : pair.quote).precision;
+        const rawAmount = quote.from_amount_raw ?? (isBtcTicker(quote.from_asset)
           ? Math.round(quote.from_amount * 1e8)
-          : Math.round(quote.from_amount * Math.pow(10, fromPrecision));
+          : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
+        const rawToAmount = quote.to_amount_raw ?? Math.round(isBtcTicker(quote.to_asset)
+          ? quote.to_amount * 1e8
+          : quote.to_amount * Math.pow(10, toPrecision));
 
         const result = await client.executeSwap({
           poolId,
           assetInAddress: fromAssetId,
           assetOutAddress: toAssetId,
           amountIn: String(rawAmount),
-          minAmountOut: '0', // TODO: calculate from slippage
+          // Floor the output at 95% of the quote to bound slippage, matching
+          // rate-extension (a `minAmountOut` of '0' offered no protection).
+          minAmountOut: String(Math.floor(rawToAmount * 0.95)),
           maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
         });
 
         setSwapProgress('done');
+        feedback.swap();
         dispatch(updateExecutionStatus({
           rfq_id: quote.rfq_id,
           status: 'completed',
           txid: result?.outboundTransferId || '',
         }));
         dispatch(setExecuting(false));
-        setShowConfirmModal(false);
+        // Keep the modal open and show a success screen (Flashnet settles
+        // instantly — no status polling — so this is the only confirmation).
+        setSwapSuccess({
+          fromAmount: quote.from_amount,
+          fromTicker: quote.from_asset,
+          toAmount: quote.to_amount,
+          toTicker: quote.to_asset,
+          txid: result?.outboundTransferId || '',
+        });
+        refreshAfterSwap();
       } else {
         // ── Kaleidoswap execution (3-step: init → taker → execute) ──
         if (!kaleidoClientManager.isInitialized()) {
@@ -396,24 +521,36 @@ export default function SwapScreen({ navigation }: Props) {
         const client = kaleidoClientManager.getClient();
         const fromAsset = pair ? (pair.base.ticker === quote.from_asset ? pair.base : pair.quote) : null;
         const toAsset = pair ? (pair.base.ticker === quote.to_asset ? pair.base : pair.quote) : null;
-        const fromAssetId = fromAsset ? getAssetId(fromAsset) : quote.from_asset;
-        const toAssetId = toAsset ? getAssetId(toAsset) : quote.to_asset;
         const fromPrecision = fromAsset?.precision || 8;
         const toPrecision = toAsset?.precision || 8;
-        const rawFromAmount = isBtcTicker(quote.from_asset)
+        // Prefer the exact integers the maker quoted (stored on the quote); only
+        // fall back to re-deriving from the display amount for older quotes that
+        // predate the raw fields. The maker encodes these exact values into the
+        // swapstring, so they MUST match for validateSwapString to pass.
+        const fromAssetId = quote.from_asset_id
+          ?? (fromAsset ? getAssetId(fromAsset) : quote.from_asset);
+        const toAssetId = quote.to_asset_id
+          ?? (toAsset ? getAssetId(toAsset) : quote.to_asset);
+        const rawFromAmount = quote.from_amount_raw ?? (isBtcTicker(quote.from_asset)
           ? Math.round(quote.from_amount * 1e8 * 1000)
-          : Math.round(quote.from_amount * Math.pow(10, fromPrecision));
-        const rawToAmount = isBtcTicker(quote.to_asset)
+          : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
+        const rawToAmount = quote.to_amount_raw ?? (isBtcTicker(quote.to_asset)
           ? Math.round(quote.to_amount * 1e8 * 1000)
-          : Math.round(quote.to_amount * Math.pow(10, toPrecision));
+          : Math.round(quote.to_amount * Math.pow(10, toPrecision)));
 
-        // Step 1: Init swap
+        // Step 1: Init swap. The maker SDK's SwapRequest is a FLAT shape
+        // ({ rfq_id, from_asset, from_amount, to_asset, to_amount }) — passing a
+        // nested { asset_id, amount, layer } object (as the old `as any` cast
+        // did) sent the asset as an object and the amounts as undefined, so the
+        // swap never initialised. Mirrors rate-extension's INIT_SWAP route.
         setSwapProgress('init');
         const initResult = await client.maker.initSwap({
           rfq_id: quote.rfq_id,
-          from_asset: { asset_id: fromAssetId, amount: rawFromAmount, layer: 'RGB_LN' },
-          to_asset: { asset_id: toAssetId, amount: rawToAmount, layer: 'RGB_LN' },
-        } as any) as any;
+          from_asset: fromAssetId,
+          from_amount: rawFromAmount,
+          to_asset: toAssetId,
+          to_amount: rawToAmount,
+        }) as any;
 
         const swapstring = initResult?.swapstring || initResult?.swap_string || '';
         const paymentHash = initResult?.payment_hash || '';
@@ -516,8 +653,22 @@ export default function SwapScreen({ navigation }: Props) {
 
           clearInterval(interval);
           setPollingInterval(null);
-          setShowConfirmModal(false);
           dispatch(setExecuting(false));
+          if (swapStatus === 'failed') {
+            setShowConfirmModal(false);
+          } else {
+            const q = swapState.currentQuote;
+            if (q) {
+              setSwapSuccess({
+                fromAmount: q.from_amount,
+                fromTicker: q.from_asset,
+                toAmount: q.to_amount,
+                toTicker: q.to_asset,
+                txid: swapState.currentExecution?.txid,
+              });
+            }
+          }
+          refreshAfterSwap();
         }
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
@@ -540,23 +691,32 @@ export default function SwapScreen({ navigation }: Props) {
   const rgbConnected = protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false;
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
 
+  // If the active venue filter points at a disconnected venue, fall back to All.
+  useEffect(() => {
+    if (venueFilter === 'kaleidoswap' && !rgbConnected) setVenueFilter('all');
+    if (venueFilter === 'flashnet' && !sparkConnected) setVenueFilter('all');
+  }, [venueFilter, rgbConnected, sparkConnected]);
+
   const renderVenueFilter = () => {
-    const venues: Array<{ id: SwapVenueFilter; label: string; available: boolean }> = [
-      { id: 'all', label: 'All', available: true },
-      { id: 'kaleidoswap', label: 'KaleidoSwap', available: rgbConnected },
-      { id: 'flashnet', label: 'Flashnet', available: sparkConnected },
+    // Only surface venues whose protocol is actually connected. KaleidoSwap
+    // needs an RLN/RGB node; Flashnet needs Spark. With a single venue there's
+    // nothing to switch between, so hide the strip entirely.
+    const venues: Array<{ id: SwapVenueFilter; label: string }> = [
+      { id: 'all', label: 'All' },
+      ...(rgbConnected ? [{ id: 'kaleidoswap' as const, label: 'KaleidoSwap' }] : []),
+      ...(sparkConnected ? [{ id: 'flashnet' as const, label: 'Flashnet' }] : []),
     ];
+    if (venues.length <= 2) return null;
 
     return (
       <View style={{ flexDirection: 'row', marginBottom: 12, borderRadius: 10, backgroundColor: theme.colors.background.secondary, padding: 3 }}>
         {venues.map(venue => (
           <TouchableOpacity
             key={venue.id}
-            onPress={() => venue.available && setVenueFilter(venue.id)}
+            onPress={() => setVenueFilter(venue.id)}
             style={{
               flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
               backgroundColor: venueFilter === venue.id ? theme.colors.primary[500] : 'transparent',
-              opacity: venue.available ? 1 : 0.35,
             }}
           >
             <Text style={{
@@ -592,7 +752,7 @@ export default function SwapScreen({ navigation }: Props) {
             >
               <Text style={styles.maxButtonText}>MAX</Text>
               <Text style={styles.balanceText}>
-                {assetByTicker(swapState.fromAsset)?.balance.toFixed(4) || '0.00'}
+                {formatDisplayAmount(assetByTicker(swapState.fromAsset)?.balance || 0, swapState.fromAsset)} {unitLabelFor(swapState.fromAsset)}
               </Text>
             </TouchableOpacity>
           )}
@@ -650,7 +810,7 @@ export default function SwapScreen({ navigation }: Props) {
               styles.amountText,
               !swapState.currentQuote?.to_amount && styles.amountTextPlaceholder
             ]}>
-              {swapState.currentQuote?.to_amount ? swapState.currentQuote.to_amount.toFixed(6) : '0'}
+              {swapState.currentQuote?.to_amount ? formatDisplayAmount(swapState.currentQuote.to_amount, swapState.toAsset) : '0'}
             </Text>
           )}
 
@@ -723,6 +883,16 @@ export default function SwapScreen({ navigation }: Props) {
   const renderAssetPicker = () => {
     if (!showAssetPicker) return null;
 
+    // Restrict choices to what's actually tradable: destinations must pair with
+    // the current source; sources are any ticker present in a loaded pair. Falls
+    // back to the full asset list before pairs have loaded.
+    const tickers = showAssetPicker === 'to'
+      ? tradableTickers(filteredPairs, swapState.fromAsset)
+      : allTickers(filteredPairs);
+    const pickerAssets = tickers.length
+      ? tickers.map(t => assetByTicker(t)).filter((a): a is Asset => !!a)
+      : availableAssets;
+
     return (
       <View style={styles.modalOverlay}>
         <View style={styles.assetPickerModal}>
@@ -736,14 +906,7 @@ export default function SwapScreen({ navigation }: Props) {
           </View>
 
           <ScrollView style={styles.assetPickerList}>
-            {selectableAssets.length === 0 && (
-              <View style={{ padding: theme.spacing[6], alignItems: 'center' }}>
-                <Text style={styles.assetPickerName}>
-                  No tradable assets yet. Connect your node or wait for pairs to load.
-                </Text>
-              </View>
-            )}
-            {selectableAssets.map((asset) => (
+            {pickerAssets.map((asset) => (
               <TouchableOpacity
                 key={asset.asset_id}
                 style={styles.assetPickerItem}
@@ -820,6 +983,44 @@ export default function SwapScreen({ navigation }: Props) {
   };
 
   const renderConfirmModal = () => {
+    // Success screen — shown for both venues once a swap settles.
+    if (swapSuccess) {
+      return (
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModal}>
+            <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <View style={[styles.progressDot, styles.progressDotDone, { width: 56, height: 56, borderRadius: 28, marginBottom: 12 }]}>
+                <Ionicons name="checkmark" size={32} color={theme.colors.text.inverse} />
+              </View>
+              <Text style={styles.confirmTitle}>Swap Complete</Text>
+              <Text style={{ color: theme.colors.text.secondary, marginTop: 6, textAlign: 'center' }}>
+                {formatDisplayAmount(swapSuccess.fromAmount, swapSuccess.fromTicker)} {unitLabelFor(swapSuccess.fromTicker)}
+                {'  →  '}
+                {formatDisplayAmount(swapSuccess.toAmount, swapSuccess.toTicker)} {unitLabelFor(swapSuccess.toTicker)}
+              </Text>
+              {!!swapSuccess.txid && (
+                <Text style={{ color: theme.colors.text.tertiary, marginTop: 8, fontSize: 12 }}>
+                  {swapSuccess.txid.substring(0, 18)}…
+                </Text>
+              )}
+            </View>
+            <Button
+              title="Done"
+              variant="primary"
+              fullWidth
+              style={{ marginTop: 16 }}
+              onPress={() => {
+                setSwapSuccess(null);
+                setShowConfirmModal(false);
+                setSwapProgress('idle');
+                dispatch(resetSwap());
+              }}
+            />
+          </View>
+        </View>
+      );
+    }
+
     if (!showConfirmModal || !swapState.currentQuote) return null;
 
     // currentQuote stores tickers (see from_asset: fromTicker in loadQuote).
@@ -838,21 +1039,21 @@ export default function SwapScreen({ navigation }: Props) {
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>From:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.from_amount} {fromTicker}
+                {formatDisplayAmount(swapState.currentQuote.from_amount, fromTicker)} {unitLabelFor(fromTicker)}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>To:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.to_amount} {toTicker}
+                {formatDisplayAmount(swapState.currentQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Fee:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.fee_amount} {fromTicker}
+                {swapState.currentQuote.fee_amount} {unitLabelFor(fromTicker)}
               </Text>
             </View>
 

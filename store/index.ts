@@ -14,6 +14,7 @@ import uiReducer from './slices/uiSlice';
 import contactsReducer from './slices/contactsSlice';
 import swapReducer from './slices/swapSlice';
 import nostrReducer from './slices/nostrSlice';
+import chatReducer from './slices/chatSlice';
 
 // Import middleware
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
@@ -30,6 +31,7 @@ const rootReducer = combineReducers({
   contacts: contactsReducer,
   swap: swapReducer,
   nostr: nostrReducer,
+  chat: chatReducer,
 });
 
 // Get the actual state type from the root reducer
@@ -39,11 +41,58 @@ type RootReducerState = ReturnType<typeof rootReducer>;
 const persistConfig: PersistConfig<RootReducerState> = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['settings', 'ui', 'contacts', 'nostr'], // Added nostr to persist non-sensitive nostr data
+  whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: persist decrypted DM history locally
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 1,
+  version: 3,
   migrate: (state: any) => {
-    // Handle migrations if needed
+    // v2: replace the legacy default Nostr relay set with the current one.
+    // The old defaults included relay.snort.social (frequently offline) and
+    // nostr.wine (paid/auth-gated), which made Nostr appear broken. Only swap
+    // when the persisted list is the untouched old default — never clobber a
+    // list the user has customised.
+    const LEGACY_DEFAULT_RELAYS = [
+      'wss://relay.damus.io',
+      'wss://relay.snort.social',
+      'wss://nos.lol',
+      'wss://relay.nostr.band',
+      'wss://nostr.wine',
+    ];
+    const CURRENT_DEFAULT_RELAYS = [
+      'wss://relay.damus.io',
+      'wss://nos.lol',
+      'wss://relay.nostr.band',
+      'wss://relay.primal.net',
+      'wss://purplepag.es',
+    ];
+    try {
+      const relays: string[] | undefined = state?.nostr?.relays;
+      if (
+        Array.isArray(relays) &&
+        relays.length === LEGACY_DEFAULT_RELAYS.length &&
+        relays.every((r, i) => r === LEGACY_DEFAULT_RELAYS[i])
+      ) {
+        state.nostr.relays = [...CURRENT_DEFAULT_RELAYS];
+      }
+    } catch {
+      // Non-fatal: fall through with state unchanged.
+    }
+    // v3: backfill chat fields added after the slice first shipped. Old persisted
+    // `chat` state replaces the slice wholesale on rehydrate (autoMergeLevel1 does
+    // not deep-merge), so without this the new objects are undefined and reads
+    // like `unreadByPubkey[...]` crash.
+    try {
+      if (state?.chat) {
+        const c = state.chat;
+        c.conversations = c.conversations || {};
+        c.loadingByPubkey = c.loadingByPubkey || {};
+        c.unreadByPubkey = c.unreadByPubkey || {};
+        c.paidInvoices = c.paidInvoices || {};
+        if (c.activePubkey === undefined) c.activePubkey = null;
+        if (!c.sendScheme) c.sendScheme = 'nip17';
+      }
+    } catch {
+      // Non-fatal.
+    }
     return Promise.resolve(state);
   },
 };

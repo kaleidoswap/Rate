@@ -1,6 +1,6 @@
 // components/chat/MessageBubble.tsx
-import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, StyleSheet, Animated, TouchableOpacity } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Animated, TouchableOpacity, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Markdown from 'react-native-markdown-display';
@@ -8,6 +8,9 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import type { Theme } from '../../theme';
 import TypingDots from './TypingDots';
 import FunctionResultCard from './FunctionResultCard';
+import { findPayable, stripPayable } from '../../utils/decodeInvoice';
+import { PayableCard } from './PayableCard';
+import { BalanceCard } from './BalanceCard';
 
 export interface ChatMessage {
   id: string;
@@ -17,6 +20,10 @@ export interface ChatMessage {
   functionCalled?: string;
   functionResult?: any;
   streaming?: boolean;
+  /** The model's chain-of-thought for this reply (revealed on tap). */
+  thinking?: string;
+  /** Structured card to render in place of (or alongside) the text. */
+  card?: { type: 'balance' | 'contact' | 'merchant'; data: any };
 }
 
 interface MessageBubbleProps {
@@ -42,7 +49,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
     Animated.spring(enter, { toValue: 1, tension: 120, friction: 9, useNativeDriver: true }).start();
   }, [enter]);
 
+  const [showThinking, setShowThinking] = useState(false);
+
   const isUser = message.isUser;
+  const hasThinking = !isUser && !!message.thinking?.trim();
+  // Detect a Lightning invoice / address / RGB invoice in an AI reply → render a card.
+  const payable = useMemo(() => (!isUser && !message.streaming ? findPayable(message.text) : null), [isUser, message.streaming, message.text]);
 
   return (
     <Animated.View
@@ -51,7 +63,11 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
         isUser ? styles.rowUser : styles.rowAi,
         {
           opacity: enter,
-          transform: [{ translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [16, 0] }) }],
+          transform: [
+            { translateY: enter.interpolate({ inputRange: [0, 1], outputRange: [14, 0] }) },
+            { translateX: enter.interpolate({ inputRange: [0, 1], outputRange: [isUser ? 22 : -22, 0] }) },
+            { scale: enter.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+          ],
         },
       ]}
     >
@@ -80,8 +96,39 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
           </LinearGradient>
         ) : (
           <View>
+            {hasThinking && (
+              <>
+                <Pressable
+                  onPress={() => setShowThinking((v) => !v)}
+                  style={styles.thinkToggle}
+                  hitSlop={6}
+                  accessibilityRole="button"
+                  accessibilityLabel={showThinking ? 'Hide reasoning' : 'Show reasoning'}
+                >
+                  <Ionicons name="sparkles-outline" size={13} color={theme.colors.text.tertiary} />
+                  <Text style={styles.thinkToggleText}>
+                    {showThinking ? 'Hide thinking' : 'Show thinking'}
+                  </Text>
+                  <Ionicons
+                    name={showThinking ? 'chevron-up' : 'chevron-down'}
+                    size={13}
+                    color={theme.colors.text.tertiary}
+                  />
+                </Pressable>
+                {showThinking && <Text style={styles.thinkText}>{message.thinking!.trim()}</Text>}
+              </>
+            )}
             {message.streaming && !message.text.trim() ? (
               <TypingDots />
+            ) : message.card?.type === 'balance' ? (
+              <BalanceCard data={message.card.data} />
+            ) : payable ? (
+              <>
+                {stripPayable(message.text, payable).trim() ? (
+                  <Markdown style={mdStyles}>{stripPayable(message.text, payable)}</Markdown>
+                ) : null}
+                <PayableCard payable={payable} onCopy={onCopy} />
+              </>
             ) : (
               <Markdown style={mdStyles}>{message.text}</Markdown>
             )}
@@ -182,6 +229,27 @@ const makeStyles = (theme: Theme) =>
       marginTop: theme.spacing[2],
       fontWeight: '500',
       color: theme.colors.text.tertiary,
+    },
+    thinkToggle: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[1],
+      marginBottom: theme.spacing[2],
+    },
+    thinkToggleText: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.tertiary,
+      fontWeight: '600',
+    },
+    thinkText: {
+      fontSize: theme.typography.fontSize.sm,
+      fontStyle: 'italic',
+      color: theme.colors.text.secondary,
+      lineHeight: 20,
+      marginBottom: theme.spacing[2],
+      paddingLeft: theme.spacing[2],
+      borderLeftWidth: 2,
+      borderLeftColor: theme.colors.border.medium,
     },
   });
 

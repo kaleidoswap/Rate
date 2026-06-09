@@ -3,6 +3,15 @@
  * Pure functions for pair management, venue detection, amount conversion, and HTLC capacity.
  */
 
+import {
+  BTC_ASSET_PUBKEY,
+  BTC_DECIMALS,
+  USDB_DECIMALS,
+  USDB_NAME,
+  USDB_TICKER,
+  isUsdbTokenAddress,
+} from './flashnet'
+
 // ========================================================================
 // Types
 // ========================================================================
@@ -269,30 +278,116 @@ export function normalizeMakerPairs(rawPairs: any[]): SwapPair[] {
   }))
 }
 
-export function buildFlashnetPairs(pools: any[]): SwapPair[] {
-  return (pools || []).map((pool: any) => {
-    const btcAsset: SwapPairAsset = {
+/**
+ * Light view of a Spark asset the wallet already holds, used to resolve a
+ * Flashnet pool address into real ticker/name/precision. Mirrors the inventory
+ * lookup rate-extension does via its UnifiedAsset list.
+ */
+export interface FlashnetInventoryAsset {
+  asset_id: string
+  ticker: string
+  name: string
+  precision: number
+  icon?: string
+}
+
+function shortenFlashnetAddress(address: string): string {
+  const clean = (address || '').trim()
+  if (clean.length <= 10) return clean.toUpperCase()
+  return `${clean.slice(0, 4)}…${clean.slice(-4)}`.toUpperCase()
+}
+
+/**
+ * Resolve a single Flashnet pool asset address into a display asset.
+ *
+ * The @flashnet/sdk `listPools` response carries ONLY raw addresses + reserves
+ * (no token metadata), so we resolve the ticker/precision ourselves, in order:
+ *   1. BTC sentinel pubkey → "BTC on Spark"
+ *   2. wallet inventory match (held Spark asset) — by hex or bech32m id
+ *   3. USDB alias → canonical USDB metadata (precision 6)
+ *   4. fallback to a shortened address + any pool-provided metadata
+ *
+ * protocol_ids.SPARK is ALWAYS the raw pool address verbatim — that's what the
+ * AMM's simulate/execute expect as assetIn/assetOutAddress (rate-extension
+ * notes a bech32m id here triggers FSAG-1000).
+ */
+export function createFlashnetPairAsset(
+  address: string,
+  inventory: FlashnetInventoryAsset[] = [],
+  fallback?: { name?: string; symbol?: string; precision?: number; icon?: string; bech32Address?: string },
+): SwapPairAsset {
+  const addr = address || ''
+
+  if (addr === BTC_ASSET_PUBKEY) {
+    return {
       ticker: 'BTC',
       name: 'Bitcoin on Spark',
       protocol: 'SPARK',
-      precision: 8,
-      protocol_ids: { SPARK: pool.assetAAddress || pool.lpPublicKey || '' },
+      precision: BTC_DECIMALS,
+      protocol_ids: { SPARK: BTC_ASSET_PUBKEY },
     }
+  }
 
-    const tokenTicker = pool.tokenTicker || pool.assetBTicker || 'USDB'
-    const tokenAsset: SwapPairAsset = {
-      ticker: tokenTicker,
-      name: pool.tokenName || tokenTicker,
+  const bech32Address = fallback?.bech32Address
+  const matched = inventory.find(
+    a => a.asset_id === addr || (bech32Address ? a.asset_id.toLowerCase() === bech32Address.toLowerCase() : false),
+  )
+  if (matched) {
+    return {
+      ticker: matched.ticker,
+      name: matched.name,
+      icon: matched.icon,
       protocol: 'SPARK',
-      precision: pool.tokenPrecision ?? 6,
-      protocol_ids: { SPARK: pool.assetBAddress || '' },
+      precision: matched.precision,
+      protocol_ids: { SPARK: addr },
     }
+  }
+
+  if (isUsdbTokenAddress(addr) || (bech32Address ? isUsdbTokenAddress(bech32Address) : false)) {
+    return {
+      ticker: USDB_TICKER,
+      name: USDB_NAME,
+      icon: fallback?.icon,
+      protocol: 'SPARK',
+      precision: USDB_DECIMALS,
+      protocol_ids: { SPARK: addr },
+    }
+  }
+
+  const symbol = fallback?.symbol?.trim()
+  const ticker = symbol && /^[A-Za-z0-9._-]{2,12}$/.test(symbol) ? symbol.toUpperCase() : shortenFlashnetAddress(addr)
+  return {
+    ticker,
+    name: fallback?.name?.trim() || `Spark asset ${ticker}`,
+    icon: fallback?.icon,
+    protocol: 'SPARK',
+    precision: fallback?.precision ?? USDB_DECIMALS,
+    protocol_ids: { SPARK: addr },
+  }
+}
+
+export function buildFlashnetPairs(pools: any[], inventory: FlashnetInventoryAsset[] = []): SwapPair[] {
+  return (pools || []).map((pool: any) => {
+    const base = createFlashnetPairAsset(pool.assetAAddress || pool.asset_a_pubkey || pool.lpPublicKey || '', inventory, {
+      name: pool.assetAName,
+      symbol: pool.assetASymbol,
+      precision: pool.assetADecimals,
+      icon: pool.assetALogoURI,
+      bech32Address: pool.assetABech32Address,
+    })
+    const quote = createFlashnetPairAsset(pool.assetBAddress || pool.asset_b_pubkey || '', inventory, {
+      name: pool.assetBName,
+      symbol: pool.assetBSymbol,
+      precision: pool.assetBDecimals,
+      icon: pool.assetBLogoURI,
+      bech32Address: pool.assetBBech32Address,
+    })
 
     return {
       id: `flashnet-${pool.lpPublicKey || ''}`,
-      base: btcAsset,
-      quote: tokenAsset,
-      routes: [],
+      base,
+      quote,
+      routes: [{ from_layer: 'SPARK_SPARK', to_layer: 'SPARK_SPARK' }],
       is_active: true,
       venue: 'flashnet' as const,
       poolId: pool.lpPublicKey,

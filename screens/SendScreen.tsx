@@ -10,7 +10,9 @@ import {
   ActivityIndicator,
   Clipboard,
   Image,
+  Modal,
 } from 'react-native';
+import { AmountInput as WdkAmountInput, AssetSelector as WdkAssetSelector } from '@kaleidorg/kaleido-ui/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +21,7 @@ import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { NetworkIcon } from '../components/NetworkIcon';
 import { PressableScale } from '../components/PressableScale';
+import NostrContactsSelector from '../components/NostrContactsSelector';
 import { feedback } from '../utils/feedback';
 import { protocolManager } from '../services/protocols';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
@@ -107,7 +110,7 @@ function SendScreen({ navigation, route }: Props) {
   const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
-  const { formatSatoshisToUSD } = useBitcoinConversion();
+  const { formatSatoshisToUSD, bitcoinPrice } = useBitcoinConversion();
   // In Lite mode the auto-router picks the best route; only Advanced lets the
   // user override it, so the manual route selector is gated.
   const policy = usePolicy();
@@ -134,6 +137,11 @@ function SendScreen({ navigation, route }: Props) {
   const [paymentStep, setPaymentStep] = useState<'input' | 'review' | 'sending'>('input');
   const [sendRoutes, setSendRoutes] = useState<RouteOption[]>([]);
   const [activeRoute, setActiveRoute] = useState<ResolvedSendRoute | null>(null);
+  // Amount entry mode for the WDK AmountInput. Fiat entry is only meaningful
+  // for BTC (RGB assets have no USD price), so it's gated on `canEnterFiat`.
+  const [amountMode, setAmountMode] = useState<'token' | 'fiat'>('token');
+  const [fiatInput, setFiatInput] = useState('');
+  const [showContactPicker, setShowContactPicker] = useState(false);
 
   // All operations via protocolManager
   const getProtocolStatus = useRefreshableProtocolStatus();
@@ -356,12 +364,28 @@ function SendScreen({ navigation, route }: Props) {
     }
   };
 
+  const handleSelectContact = (contact: { name?: string; lightning_address?: string; node_pubkey?: string }) => {
+    const dest = contact.lightning_address || contact.node_pubkey;
+    if (!dest) {
+      Alert.alert('No payment method', 'This contact has no Lightning address or pubkey.');
+      return;
+    }
+    feedback.select();
+    setShowContactPicker(false);
+    setAddress(dest);
+    detectAddressType(dest);
+  };
+
   const getMaxAmount = (): string => {
     if (!selectedAsset) return '0';
     
     if (selectedAsset.asset_id === 'BTC') {
-      const availableBalance = selectedAsset.balance || 0;
-      return (availableBalance / 100000000).toFixed(8);
+      const availableBalance = selectedAsset.balance || 0; // sats
+      // Return in the active entry unit so it matches `amount` (and the
+      // clamp/compare logic) regardless of the sats/BTC setting.
+      return bitcoinUnit === 'sats'
+        ? String(Math.floor(availableBalance))
+        : (availableBalance / 100000000).toFixed(8);
     } else {
       const balance = selectedAsset.balance || 0;
       const precision = selectedAsset.precision || 8;
@@ -400,17 +424,27 @@ function SendScreen({ navigation, route }: Props) {
       return false;
     }
 
-    // Validate balance
+    // Validate balance in the asset's SMALLEST unit. `selectedAsset.balance` is
+    // already raw (sats for BTC, base units for RGB) and `amount` is entered in
+    // the active bitcoinUnit — comparing a sats input against a whole-BTC balance
+    // (the old bug) produced false "Insufficient Balance" errors in sats mode.
     if (selectedAsset) {
-      const inputAmount = parseFloat(amount || '0');
-      const availableBalance = selectedAsset.asset_id === 'BTC' 
-        ? (selectedAsset.balance || 0) / 100000000
-        : (selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8);
+      const isBtc = selectedAsset.asset_id === 'BTC';
+      const precision = selectedAsset.precision || 8;
+      const availableRaw = selectedAsset.balance || 0;
+      const inputRaw = isBtc
+        ? (bitcoinUnit === 'BTC'
+            ? Math.round((parseFloat(amount || '0') || 0) * 1e8)
+            : Math.round(parseFloat(amount || '0') || 0))
+        : Math.round((parseFloat(amount || '0') || 0) * Math.pow(10, precision));
 
-      if (inputAmount > availableBalance) {
+      if (inputRaw > availableRaw) {
+        const availableDisplay = isBtc
+          ? `${formatBitcoinAmount(availableRaw, bitcoinUnit)} ${bitcoinUnit}`
+          : `${(availableRaw / Math.pow(10, precision)).toFixed(precision)} ${selectedAsset.ticker}`;
         Alert.alert(
-          'Insufficient Balance', 
-          `You don't have enough ${selectedAsset.ticker}. Available: ${availableBalance.toFixed(selectedAsset.asset_id === 'BTC' ? 8 : selectedAsset.precision || 8)} ${selectedAsset.ticker}`
+          'Insufficient Balance',
+          `You don't have enough ${selectedAsset.ticker}. Available: ${availableDisplay}`
         );
         return false;
       }
@@ -468,12 +502,20 @@ function SendScreen({ navigation, route }: Props) {
         // On-chain BTC — route to correct protocol
         const feeRateNum = feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate || 2;
         const btcAdapter = protocolManager.getAdapter(protocol);
-        await btcAdapter.sendBtcOnchain?.({ address, amount: parseFloat(amount), feeRate: feeRateNum });
+        // sendBtcOnchain expects sats; convert from the active unit (BTC mode
+        // previously sent e.g. 0.001 instead of 100000 sats).
+        const onchainSats = bitcoinUnit === 'BTC'
+          ? Math.round(parseFloat(amount) * 1e8)
+          : Math.round(parseFloat(amount));
+        await btcAdapter.sendBtcOnchain?.({ address, amount: onchainSats, feeRate: feeRateNum });
         Alert.alert('Payment Sent!', 'Bitcoin transaction broadcasted successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
 
       } else if (addressType === 'rgb') {
         const rgbSendAdapter = protocolManager.getAdapter('RGB');
-        await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: parseFloat(amount) });
+        // RGB amounts are base units (input is whole tokens) — scale by precision,
+        // otherwise "10" would send 10 base units (0.00001 of a precision-6 asset).
+        const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, selectedAsset.precision || 8));
+        await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: rgbBaseUnits });
         Alert.alert('Asset Sent!', 'RGB asset transfer completed successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
       }
       feedback.send();
@@ -524,38 +566,54 @@ function SendScreen({ navigation, route }: Props) {
 
   const renderAddressInput = () => (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Recipient</Text>
+      <Text style={styles.sectionTitle}>Who are you paying?</Text>
       <Text style={styles.sectionDescription}>
-        Enter a Bitcoin address, Lightning invoice, Lightning address, or RGB invoice
+        Paste or scan an address/invoice, or pick a contact. We'll work out the rest.
       </Text>
-      
-      <View style={styles.inputContainer}>
-        <Input
-          placeholder="Paste address or invoice..."
-          value={address}
-          onChangeText={(text) => {
-            setAddress(text);
-            detectAddressType(text);
-          }}
-          multiline={addressType === 'lightning' && address.length > 50}
-          variant="outlined"
-          style={styles.addressInput}
-        />
-        <View style={styles.inputActions}>
+
+      <Input
+        placeholder="Address, invoice, or Lightning address…"
+        value={address}
+        onChangeText={(text) => {
+          setAddress(text);
+          detectAddressType(text);
+        }}
+        multiline={addressType === 'lightning' && address.length > 50}
+        variant="outlined"
+        rightIcon={address ? (
           <TouchableOpacity
-            style={styles.inputActionButton}
-            onPress={handlePasteFromClipboard}
+            onPress={() => { setAddress(''); detectAddressType(''); }}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="clipboard-outline" size={18} color={theme.colors.primary[500]} />
+            <Ionicons name="close-circle" size={20} color={theme.colors.text.muted} />
           </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.inputActionButton}
-            onPress={() => navigation.navigate('QRScanner')}
+        ) : undefined}
+      />
+
+      {/* Empty-state entry methods — the primary way to start a payment.
+          Shown only before a recipient is entered; once `address` is set the
+          input + clear button take over and these collapse. */}
+      {!address && (
+        <View style={styles.entryMethods}>
+          <PressableScale
+            style={styles.entryPrimary}
+            onPress={() => { feedback.select(); navigation.navigate('QRScanner'); }}
           >
-            <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[500]} />
-          </TouchableOpacity>
+            <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.inverse} />
+            <Text style={styles.entryPrimaryText}>Scan QR code</Text>
+          </PressableScale>
+          <View style={styles.entrySecondaryRow}>
+            <PressableScale style={styles.entrySecondary} onPress={handlePasteFromClipboard}>
+              <Ionicons name="clipboard-outline" size={20} color={theme.colors.primary[500]} />
+              <Text style={styles.entrySecondaryText}>Paste</Text>
+            </PressableScale>
+            <PressableScale style={styles.entrySecondary} onPress={() => { feedback.select(); setShowContactPicker(true); }}>
+              <Ionicons name="people-outline" size={20} color={theme.colors.primary[500]} />
+              <Text style={styles.entrySecondaryText}>Contacts</Text>
+            </PressableScale>
+          </View>
         </View>
-      </View>
+      )}
 
       {/* Address Type Indicator */}
       {addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice && (
@@ -715,9 +773,39 @@ function SendScreen({ navigation, route }: Props) {
     return null;
   };
 
+  // ── WDK AssetSelector mapping ──────────────────────────────────────────
+  // CDN → DiceBear logo, matching components/AssetIcon's resolution order.
+  const assetLogoUri = (ticker: string): string => {
+    const norm = ticker.toUpperCase().trim();
+    if (/^[A-Z0-9-]{1,12}$/.test(norm)) {
+      return `https://raw.githubusercontent.com/kaleidoswap/coinmarketcap-icons-cryptos/refs/heads/main/icons/${norm.toLowerCase()}.png`;
+    }
+    return `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(ticker)}&backgroundType=gradientLinear&radius=50`;
+  };
+  const ASSET_COLORS: Record<string, string> = {
+    BTC: '#F7931A', USDT: '#26A17B', USDC: '#2775CA', XAUT: '#D4AF37',
+  };
+
+  const assetToToken = (a: Asset) => {
+    const isBtc = a.asset_id === 'BTC';
+    const balanceStr = isBtc
+      ? `${formatBitcoinAmount(a.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
+      : `${((a.balance || 0) / Math.pow(10, a.precision || 8)).toLocaleString(undefined, { maximumFractionDigits: a.precision || 8 })}`;
+    return {
+      id: a.asset_id,
+      symbol: a.ticker,
+      name: a.name,
+      balance: balanceStr,
+      balanceUSD: isBtc ? `$${formatSatoshisToUSD(a.balance || 0)}` : '',
+      icon: { uri: assetLogoUri(a.ticker) },
+      color: ASSET_COLORS[a.ticker.toUpperCase()] || '#64748B',
+      hasBalance: (a.balance || 0) > 0,
+    };
+  };
+
   const renderAssetSelector = () => {
     // Don't show asset selector if invoice specifies the asset
-    if ((addressType === 'lightning' && decodedInvoice?.asset_id) || 
+    if ((addressType === 'lightning' && decodedInvoice?.asset_id) ||
         (addressType === 'rgb' && decodedRGBInvoice?.asset_id)) {
       return null;
     }
@@ -732,153 +820,172 @@ function SendScreen({ navigation, route }: Props) {
         <Text style={styles.sectionTitle}>Asset</Text>
         <TouchableOpacity
           style={styles.assetSelector}
-          onPress={() => setShowAssetSelector(!showAssetSelector)}
+          onPress={() => { feedback.select(); setShowAssetSelector(true); }}
         >
           <AssetIcon asset={selectedAsset} />
           <View style={styles.assetInfo}>
             <Text style={styles.assetTicker}>{selectedAsset.ticker}</Text>
             <Text style={styles.assetName}>{selectedAsset.name}</Text>
             <Text style={styles.assetBalance}>
-              Balance: {selectedAsset.asset_id === 'BTC' 
-                ? ((selectedAsset.balance || 0) / 100000000).toFixed(8)
-                : ((selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8)
-              } {selectedAsset.ticker}
+              Balance: {selectedAsset.asset_id === 'BTC'
+                ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
+                : `${((selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8)} ${selectedAsset.ticker}`}
             </Text>
           </View>
-          <Ionicons 
-            name={showAssetSelector ? "chevron-up" : "chevron-down"} 
-            size={20} 
-            color={theme.colors.text.secondary} 
-          />
+          <Ionicons name="chevron-down" size={20} color={theme.colors.text.secondary} />
         </TouchableOpacity>
 
-        {showAssetSelector && (
-          <View style={styles.assetDropdown}>
-            <ScrollView style={styles.assetDropdownScroll} nestedScrollEnabled>
-              {allAssets.map((asset, index) => (
-                <TouchableOpacity
-                  key={`asset-${asset.asset_id}-${index}`}
-                  style={[
-                    styles.assetOption,
-                    selectedAsset.asset_id === asset.asset_id && styles.assetOptionSelected
-                  ]}
-                  onPress={() => {
-                    setSelectedAsset(asset);
-                    setShowAssetSelector(false);
-                  }}
-                >
-                  <AssetIcon asset={asset} />
-                  <View style={styles.assetOptionInfo}>
-                    <Text style={styles.assetOptionTicker}>{asset.ticker}</Text>
-                    <Text style={styles.assetOptionName}>{asset.name}</Text>
-                    <Text style={styles.assetOptionBalance}>
-                      Balance: {asset.asset_id === 'BTC' 
-                        ? ((asset.balance || 0) / 100000000).toFixed(8)
-                        : ((asset.balance || 0) / Math.pow(10, asset.precision || 8)).toFixed(asset.precision || 8)
-                      } {asset.ticker}
-                    </Text>
-                  </View>
-                  {selectedAsset.asset_id === asset.asset_id && (
-                    <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
-                  )}
+        <Modal
+          visible={showAssetSelector}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShowAssetSelector(false)}
+        >
+          <View style={styles.assetSheetBackdrop}>
+            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAssetSelector(false)} />
+            <View style={styles.assetSheet}>
+              <View style={styles.assetSheetHandle} />
+              <View style={styles.assetSheetHeader}>
+                <Text style={styles.assetSheetTitle}>Select asset</Text>
+                <TouchableOpacity onPress={() => setShowAssetSelector(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                  <Ionicons name="close" size={24} color={theme.colors.text.secondary} />
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              </View>
+              <WdkAssetSelector
+                tokens={allAssets.map(assetToToken)}
+                recentTokens={['BTC']}
+                onSelectToken={(token) => {
+                  const picked = allAssets.find((a) => a.asset_id === token.id);
+                  if (picked) {
+                    feedback.select();
+                    setSelectedAsset(picked);
+                    setAmountMode('token');
+                  }
+                  setShowAssetSelector(false);
+                }}
+              />
+            </View>
           </View>
-        )}
+        </Modal>
       </View>
     );
+  };
+
+  // Canonical amount (`amount`) is always in the asset's display units (BTC or
+  // sats for BTC per bitcoinUnit; precision-scaled units for RGB). The WDK
+  // AmountInput drives this via token or (BTC-only) fiat entry.
+  const setAmountClamped = (next: string) => {
+    const maxNum = parseFloat(getMaxAmount());
+    setAmount(parseFloat(next || '0') > maxNum ? getMaxAmount() : next);
+  };
+
+  const amountSatsFromBtcUnits = (v: string): number =>
+    bitcoinUnit === 'BTC' ? Math.round((parseFloat(v) || 0) * 1e8) : Math.round(parseFloat(v) || 0);
+
+  const handleAmountChange = (text: string) => {
+    const clean = text.replace(/[^0-9.]/g, '');
+    const parts = clean.split('.');
+    if (parts.length > 2) return; // single decimal point
+
+    if (amountMode === 'fiat') {
+      if (parts[1] && parts[1].length > 2) return; // cents
+      setFiatInput(clean);
+      const usd = parseFloat(clean) || 0;
+      const sats = bitcoinPrice > 0 ? Math.round((usd / bitcoinPrice) * 1e8) : 0;
+      setAmountClamped(bitcoinUnit === 'BTC' ? (sats / 1e8).toFixed(8) : String(sats));
+      return;
+    }
+
+    const maxDecimals = selectedAsset.asset_id === 'BTC'
+      ? (bitcoinUnit === 'BTC' ? 8 : 0)
+      : (selectedAsset.precision || 8);
+    if (parts[1] && parts[1].length > maxDecimals) return;
+    const normalized = selectedAsset.asset_id === 'BTC' ? parseInputAmount(clean, bitcoinUnit) : clean;
+    setAmountClamped(normalized);
   };
 
   const renderAmountInput = () => {
     // Don't show amount input if invoice specifies the amount
     const invoiceHasAmount = (addressType === 'lightning' && decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) ||
                           (addressType === 'rgb' && decodedRGBInvoice?.amount);
-    
+
     if (invoiceHasAmount) {
       return null;
     }
 
+    const isBtc = selectedAsset.asset_id === 'BTC';
+    const canEnterFiat = isBtc && bitcoinPrice > 0;
     const maxAmount = getMaxAmount();
     const maxAmountNum = parseFloat(maxAmount);
 
-    // Calculate quick amount percentages of max
-    const getQuickAmounts = () => {
-      if (selectedAsset.ticker !== 'BTC' || !maxAmountNum) return [];
-      
-      const percentages = [0.25, 0.5, 0.75];
-      return percentages.map(pct => {
-        const amt = maxAmountNum * pct;
-        return bitcoinUnit === 'BTC'
-          ? amt.toFixed(8)
-          : Math.floor(amt).toString();
+    const tokenSymbol = isBtc ? bitcoinUnit : selectedAsset.ticker;
+    const tokenBalance = isBtc
+      ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)}`
+      : `${((selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8)).toLocaleString(undefined, { maximumFractionDigits: selectedAsset.precision || 8 })}`;
+    const tokenBalanceUSD = isBtc ? `$${formatSatoshisToUSD(selectedAsset.balance || 0)}` : '—';
+
+    // Secondary conversion line.
+    const secondary = (() => {
+      if (!amount) return '';
+      if (amountMode === 'token' && isBtc) {
+        return `≈ $${formatSatoshisToUSD(amountSatsFromBtcUnits(amount))} USD`;
+      }
+      if (amountMode === 'fiat') {
+        return `≈ ${formatBitcoinAmount(amountSatsFromBtcUnits(amount), bitcoinUnit)} ${bitcoinUnit}`;
+      }
+      return '';
+    })();
+
+    const onToggleMode = () => {
+      if (!canEnterFiat) return;
+      feedback.select();
+      setAmountMode((m) => {
+        const next = m === 'token' ? 'fiat' : 'token';
+        if (next === 'fiat') {
+          setFiatInput(amount ? formatSatoshisToUSD(amountSatsFromBtcUnits(amount)) : '');
+        }
+        return next;
       });
     };
 
+    const quickPercents = isBtc && maxAmountNum
+      ? [0.25, 0.5, 0.75].map((p) => ({
+          label: `${p * 100}%`,
+          value: bitcoinUnit === 'BTC' ? (maxAmountNum * p).toFixed(8) : String(Math.floor(maxAmountNum * p)),
+        }))
+      : [];
+
     return (
       <View style={styles.section}>
-        <View style={styles.amountHeader}>
-          <Text style={styles.sectionTitle}>Amount ({selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker})</Text>
-          <TouchableOpacity
-            style={styles.maxButton}
-            onPress={() => setAmount(maxAmount)}
-          >
-            <Text style={styles.maxButtonText}>MAX</Text>
-          </TouchableOpacity>
-        </View>
-        
-        <Input
-          placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
-          value={amount}
-          onChangeText={(value) => {
-            // Clean and format the input
-            const cleanValue = value.replace(/[^0-9.]/g, '');
-            const parts = cleanValue.split('.');
-            if (parts.length > 2) return; // Only allow one decimal point
-            
-            // Limit decimal places based on unit
-            const maxDecimals = bitcoinUnit === 'BTC' ? 8 : 0;
-            if (parts[1] && parts[1].length > maxDecimals) return;
-            
-            const newAmount = parseInputAmount(cleanValue, bitcoinUnit);
-            // Validate against max amount
-            if (parseFloat(newAmount || '0') > maxAmountNum) {
-              setAmount(maxAmount);
-            } else {
-              setAmount(newAmount);
-            }
-          }}
-          keyboardType="decimal-pad"
-          variant="outlined"
-          size="lg"
-          style={styles.amountInput}
+        <WdkAmountInput
+          label={`Amount (${amountMode === 'fiat' ? 'USD' : tokenSymbol})`}
+          value={amountMode === 'fiat' ? fiatInput : amount}
+          onChangeText={handleAmountChange}
+          tokenSymbol={tokenSymbol}
+          tokenBalance={tokenBalance}
+          tokenBalanceUSD={tokenBalanceUSD}
+          inputMode={amountMode}
+          onToggleInputMode={onToggleMode}
+          onUseMax={() => { feedback.select(); setAmountMode('token'); setAmount(maxAmount); }}
+          error={validationError || undefined}
+          editable={!loading}
         />
-        
-        {/* Quick amount buttons */}
-        <View style={styles.quickAmounts}>
-                  {getQuickAmounts().map((amt, index) => (
-          <TouchableOpacity
-            key={`quick-amount-${amt}-${index}`}
-            style={styles.quickAmountButton}
-            onPress={() => setAmount(amt)}
-          >
-            <Text style={styles.quickAmountText}>
-              {amt} {bitcoinUnit}
-            </Text>
-          </TouchableOpacity>
-        ))}
-        </View>
-        
-        <View style={styles.balanceInfo}>
-          <Text style={styles.balanceText}>
-            Available: {availableLabel}
-          </Text>
-          {selectedAsset.asset_id === 'BTC' && amount && (
-            <Text style={styles.usdValue}>
-              ≈ ${parseFloat(formatSatoshisToUSD(amount)).toLocaleString()} USD
-            </Text>
-          )}
-        </View>
+
+        {secondary ? <Text style={styles.amountSecondary}>{secondary}</Text> : null}
+
+        {quickPercents.length > 0 && (
+          <View style={styles.quickAmounts}>
+            {quickPercents.map((q) => (
+              <TouchableOpacity
+                key={`quick-${q.label}`}
+                style={styles.quickAmountButton}
+                onPress={() => { feedback.select(); setAmountMode('token'); setAmount(q.value); }}
+              >
+                <Text style={styles.quickAmountText}>{q.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
     );
   };
@@ -946,17 +1053,14 @@ function SendScreen({ navigation, route }: Props) {
     const hasAddress = address && addressType !== 'invalid' && addressType !== 'unknown';
     const hasFixedAmount = (decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) || decodedRGBInvoice?.amount;
     const hasAmount = amount || hasFixedAmount;
-    const canSend = hasAddress && hasAmount;
 
-    // Dynamic button text based on state
-    let buttonTitle = 'Continue';
-    if (!hasAddress) {
-      buttonTitle = 'Enter Address or Scan QR';
-    } else if (!hasAmount) {
-      buttonTitle = 'Enter Amount';
-    } else {
-      buttonTitle = 'Review Payment';
-    }
+    // No recipient yet → the empty-state hero (Scan / Paste / Contacts) owns
+    // entry, so we don't show a dead sticky CTA here. Avoid the previous
+    // duplicate action rows and the non-actionable "Enter Address" button.
+    if (!hasAddress) return null;
+
+    const canSend = hasAmount;
+    const buttonTitle = hasAmount ? 'Review Payment' : 'Enter Amount';
 
     return (
       <View style={styles.sendButtonContainer}>
@@ -969,26 +1073,6 @@ function SendScreen({ navigation, route }: Props) {
           size="lg"
           style={styles.sendButton}
         />
-        
-        {/* Quick actions for better UX */}
-        {!hasAddress && (
-          <View style={styles.quickActionsContainer}>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={() => navigation.navigate('QRScanner')}
-            >
-              <Ionicons name="qr-code-outline" size={20} color={theme.colors.primary[500]} />
-              <Text style={styles.quickActionText}>Scan QR</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={handlePasteFromClipboard}
-            >
-              <Ionicons name="clipboard-outline" size={20} color={theme.colors.primary[500]} />
-              <Text style={styles.quickActionText}>Paste</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
     );
   };
@@ -1082,15 +1166,32 @@ function SendScreen({ navigation, route }: Props) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {renderAddressInput()}
-        {renderAssetSelector()}
-        {renderAmountInput()}
-        {renderFeeSelector()}
+        {paymentStep === 'input' && (
+          <>
+            {renderAddressInput()}
+            {/* Destination-first: only reveal the payment details once we've
+                decoded a valid recipient, so the screen starts focused on
+                paste / scan / pick-a-contact. */}
+            {address && addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice && (
+              <>
+                {renderAssetSelector()}
+                {renderAmountInput()}
+                {renderFeeSelector()}
+              </>
+            )}
+          </>
+        )}
         {renderPaymentReview()}
       </ScrollView>
 
       {renderSendButton()}
-      
+
+      <NostrContactsSelector
+        visible={showContactPicker}
+        onSelectContact={handleSelectContact}
+        onClose={() => setShowContactPicker(false)}
+      />
+
       {/* Loading overlay when sending */}
       {paymentStep === 'sending' && (
         <View style={styles.sendingOverlay}>
@@ -1181,32 +1282,54 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
-  inputContainer: {
-    position: 'relative',
+  entryMethods: {
+    marginTop: theme.spacing[5],
+    gap: theme.spacing[3],
   },
-  
-  addressInput: {
-    paddingRight: theme.spacing[20], // Space for action buttons
-  },
-  
-  inputActions: {
-    position: 'absolute',
-    right: theme.spacing[3],
-    top: '50%',
-    transform: [{ translateY: -16 }],
+
+  entryPrimary: {
     flexDirection: 'row',
-    gap: theme.spacing[2],
-  },
-  
-  inputActionButton: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.primary[50],
     alignItems: 'center',
     justifyContent: 'center',
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.primary[500],
+    minHeight: 56,
+    ...theme.shadows.sm,
   },
-  
+
+  entryPrimaryText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '700',
+    color: theme.colors.text.inverse,
+  },
+
+  entrySecondaryRow: {
+    flexDirection: 'row',
+    gap: theme.spacing[3],
+  },
+
+  entrySecondary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    minHeight: 48,
+  },
+
+  entrySecondaryText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+
   addressTypeIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1323,7 +1446,47 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  
+  assetSheetBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  assetSheet: {
+    maxHeight: '80%',
+    backgroundColor: theme.colors.background.secondary,
+    borderTopLeftRadius: theme.borderRadius['2xl'],
+    borderTopRightRadius: theme.borderRadius['2xl'],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[6],
+  },
+  assetSheetHandle: {
+    alignSelf: 'center',
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: theme.colors.border.medium,
+    marginBottom: theme.spacing[3],
+  },
+  assetSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing[5],
+    marginBottom: theme.spacing[3],
+  },
+  assetSheetTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  amountSecondary: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.tertiary,
+    marginTop: -theme.spacing[2],
+    marginBottom: theme.spacing[2],
+    marginLeft: theme.spacing[1],
+  },
+
   assetIconContainer: {
     width: 32,
     height: 32,
@@ -1640,31 +1803,6 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.primary[700],
     fontWeight: '600',
-  },
-
-  quickActionsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: theme.spacing[4],
-    marginTop: theme.spacing[3],
-  },
-
-  quickActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.primary[50],
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100],
-    gap: theme.spacing[2],
-  },
-
-  quickActionText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[700],
-    fontWeight: '500',
   },
 
   reviewCard: {

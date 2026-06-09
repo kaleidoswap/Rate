@@ -71,13 +71,17 @@ export const QVAC_MODELS: QVACModel[] = [
   entry(QWEN3_600M_INST_Q4, 'Qwen3 0.6B', 'phone'),
   entry(LLAMA_3_2_1B_INST_Q4_0, 'Llama 3.2 1B', 'phone'),
   entry(LLAMA_TOOL_CALLING_1B_INST_Q4_K, 'Llama 1B (tool-calling)', 'phone'),
-  entry(QWEN3_1_7B_INST_Q4, 'Qwen3 1.7B', 'pro'),
+  entry(QWEN3_1_7B_INST_Q4, 'Qwen3 1.7B', 'phone'),
   entry(QWEN3_4B_INST_Q4_K_M, 'Qwen3 4B', 'mac'),
   entry(QWEN3_8B_INST_Q4_K_M, 'Qwen3 8B', 'mac'),
   entry(GPT_OSS_20B_INST_Q4_K_M, 'GPT-OSS 20B', 'mac'),
 ];
 
-export const DEFAULT_MODEL_ID = QVAC_MODELS[0].id;
+// Default chat model: Qwen3 1.7B — the sweet spot on modern iPhones (loads on
+// Metal/GPU, ~1GB). Falls back to the first catalog entry if the descriptor is
+// missing. recommendLocalModel still downgrades to 0.6B on low-RAM devices.
+export const DEFAULT_MODEL_ID =
+  QVAC_MODELS.find((m) => m.descriptor === QWEN3_1_7B_INST_Q4)?.id ?? QVAC_MODELS[0].id;
 
 export function getModelById(id: string | undefined | null): QVACModel {
   return QVAC_MODELS.find(m => m.id === id) ?? QVAC_MODELS[0];
@@ -100,8 +104,10 @@ export function recommendLocalModel(totalMemBytes: number): QVACModel {
   const byDescriptor = (d: any) => QVAC_MODELS.find(m => m.descriptor === d);
   const gb = totalMemBytes / GiB;
   let pick: QVACModel | undefined;
-  if (gb < 3) pick = byDescriptor(QWEN3_600M_INST_Q4);              // tiny, low-end
-  else pick = byDescriptor(QWEN3_600M_INST_Q4);                      // stable iPhone path
+  // 1.7B (~1GB weights) loads comfortably on high-RAM phones (iPhone 15/16/17,
+  // 6GB+); below that, stay on the tiny 0.6B so low-end devices never OOM.
+  if (gb >= 6) pick = byDescriptor(QWEN3_1_7B_INST_Q4);            // high-RAM iPhone
+  else pick = byDescriptor(QWEN3_600M_INST_Q4);                     // tiny, safe default
   // Fall back to any local-capable model (then the first model) if a descriptor
   // is missing or somehow not downloadable.
   return (
@@ -156,7 +162,10 @@ export const QVAC_STT_MODELS: SttModel[] = [
   stt('whisper-large-v3-turbo', 'Whisper Large v3 Turbo', 'multi', 'ggml-large-v3-turbo.bin', 1624555275),
 ];
 
-export const DEFAULT_STT_MODEL_ID = QVAC_STT_MODELS[0].id;
+// Default voice model: Whisper Base — better accuracy than Tiny, still small
+// enough to load quickly on-device.
+export const DEFAULT_STT_MODEL_ID =
+  QVAC_STT_MODELS.find((m) => m.id === 'whisper-base')?.id ?? QVAC_STT_MODELS[0].id;
 
 export function getSttModelById(id: string | undefined | null): SttModel {
   return QVAC_STT_MODELS.find((m) => m.id === id) ?? QVAC_STT_MODELS[0];

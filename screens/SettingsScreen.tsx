@@ -9,21 +9,20 @@ import { RootState } from '../store';
 import {
   setTheme,
   setCurrency,
-  setNetwork,
   setNodeType,
   setRemoteNodeUrl,
-  setBitcoinUnit,
-  cycleDisplayDenomination,
+  setUnitPreference,
   selectDisplayDenomination,
   setDisclosureLevel,
   setSoundEnabled,
   selectDisclosureLevel,
+  type DisplayDenomination,
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
-import { setWalletConnectEnabled } from '../store/slices/nostrSlice';
+import { OptionSheet, type SheetOption } from '../components/OptionSheet';
+import { formatDenominatedAmount, useBitcoinPrice } from '../utils/bitcoinUnits';
 import { setActiveWallet } from '../store/slices/walletSlice';
 import { Button, Input, MainHeader } from '../components';
-import NostrProfileManager from '../components/NostrProfileManager';
 import { theme } from '../theme';
 import { PairingService, type DesktopPairing } from '../services/PairingService';
 import DatabaseService, { type NetworkType } from '../services/DatabaseService';
@@ -115,7 +114,6 @@ export default function SettingsScreen({ navigation }: Props) {
   const disclosureLevel = useSelector(selectDisclosureLevel);
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [tempNodeUrl, setTempNodeUrl] = useState(settings.remoteNodeUrl);
-  const [showNostrSection, setShowNostrSection] = useState(false);
 
   // Per-protocol network (read from / written to the wallet's DB config).
   const activeWallet = useSelector((state: RootState) => state.wallet?.activeWallet);
@@ -229,42 +227,43 @@ export default function SettingsScreen({ navigation }: Props) {
     }
   };
 
-  const handleWalletConnectToggle = (enabled: boolean) => {
-    if (enabled && !nostrState.isConnected) {
-      Alert.alert(
-        'Nostr Connection Required',
-        'You need to connect to Nostr first before enabling Wallet Connect',
-        [{ text: 'OK' }]
-      );
-      return;
-    }
-    if (enabled) {
-      Alert.alert(
-        'Enable Nostr Wallet Connect',
-        'Go to your Nostr profile settings to generate a connection string and configure NWC.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Enable', onPress: () => dispatch(setWalletConnectEnabled(enabled)) },
-        ]
-      );
-    } else {
-      dispatch(setWalletConnectEnabled(enabled));
-    }
-  };
-
-  const handleBitcoinUnitChange = () => {
-    dispatch(setBitcoinUnit(settings.bitcoinUnit === 'BTC' ? 'sats' : 'BTC'));
-  };
-
   const displayDenomination = useSelector(selectDisplayDenomination);
-  const denominationLabel: Record<typeof displayDenomination, string> = {
+  const denominationLabel: Record<DisplayDenomination, string> = {
     sats: 'Sats',
     BTC: 'BTC',
     fiat: settings.currency,
   };
-  const handleDisplayDenominationChange = () => {
-    dispatch(cycleDisplayDenomination());
+
+  // Which settings selector sheet is open (one bottom sheet at a time).
+  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'theme' | 'display'>(null);
+  const btcPrice = useBitcoinPrice();
+
+  // Live previews for the unit selector (sample = 1,234,567 sats), matching
+  // exactly how balances render elsewhere in the app.
+  const PREVIEW_SATS = 1234567;
+  const unitPreview = (d: DisplayDenomination): string => {
+    const f = formatDenominatedAmount(PREVIEW_SATS, {
+      denomination: d,
+      currency: settings.currency,
+      price: btcPrice,
+    });
+    return d === 'fiat' ? f.primary : `${f.primary} ${f.unitLabel}`;
   };
+  const unitOptions: SheetOption[] = [
+    { id: 'sats', label: 'Satoshis', description: 'Show balances in sats', preview: unitPreview('sats'), badge: 'Default' },
+    { id: 'BTC', label: 'Bitcoin (BTC)', description: '8-decimal bitcoin', preview: unitPreview('BTC') },
+    { id: 'fiat', label: `Local currency (${settings.currency})`, description: 'Show values in fiat', preview: btcPrice ? unitPreview('fiat') : '—' },
+  ];
+  const currencyOptions: SheetOption[] = ['USD', 'EUR', 'GBP', 'CHF', 'CAD', 'JPY'].map((c) => ({ id: c, label: c }));
+  const themeOptions: SheetOption[] = [
+    { id: 'light', label: 'Light' },
+    { id: 'dark', label: 'Dark' },
+    { id: 'system', label: 'System' },
+  ];
+  const displayModeOptions: SheetOption[] = [
+    { id: 'lite', label: 'Lite', description: 'BTC, USD & assets only' },
+    { id: 'advanced', label: 'Advanced', description: 'Networks, routes & channels' },
+  ];
 
   // soundEnabled may be undefined in state persisted before this setting existed.
   const soundOn = settings.soundEnabled ?? true;
@@ -272,28 +271,6 @@ export default function SettingsScreen({ navigation }: Props) {
     dispatch(setSoundEnabled(value));
     // Play a confirming chime when turning sound ON so the change is audible.
     if (value) feedback.success();
-  };
-
-  const handleThemeChange = () => {
-    const themes: ('light' | 'dark' | 'system')[] = ['light', 'dark', 'system'];
-    const currentIndex = themes.indexOf(settings.theme);
-    dispatch(setTheme(themes[(currentIndex + 1) % themes.length]));
-  };
-
-  const handleCurrencyChange = () => {
-    const currencies = ['USD', 'EUR', 'GBP'];
-    const currentIndex = currencies.indexOf(settings.currency);
-    dispatch(setCurrency(currencies[(currentIndex + 1) % currencies.length]));
-  };
-
-  const handleDisclosureLevelToggle = () => {
-    dispatch(setDisclosureLevel(disclosureLevel === 'lite' ? 'advanced' : 'lite'));
-  };
-
-  const handleNetworkChange = () => {
-    const networks = ['mainnet', 'testnet', 'regtest'];
-    const currentIndex = networks.indexOf(settings.network);
-    dispatch(setNetwork(networks[(currentIndex + 1) % networks.length]));
   };
 
   const handleRemoveWallet = () => {
@@ -332,20 +309,16 @@ export default function SettingsScreen({ navigation }: Props) {
       <MainHeader title="Settings" onBack={() => navigation.goBack()} />
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
-        {/* Identity & Social */}
-        <SectionLabel>Identity &amp; Social</SectionLabel>
+        {/* Nostr */}
+        <SectionLabel>Nostr</SectionLabel>
         <Group>
-          <TouchableOpacity activeOpacity={0.7} onPress={() => setShowNostrSection(!showNostrSection)}>
-            <View style={styles.row}>
-              <View style={[styles.rowIcon, { backgroundColor: theme.colors.primary[500] + '1A' }]}>
-                <Ionicons name="planet" size={18} color={theme.colors.primary[500]} />
-              </View>
-              <View style={styles.rowText}>
-                <Text style={styles.rowLabel}>Nostr</Text>
-                <Text style={styles.rowDescription}>
-                  {nostrState.isConnected ? 'Connected to relays' : 'Not connected'}
-                </Text>
-              </View>
+          <Row
+            first
+            icon="planet"
+            iconColor={theme.colors.primary[500]}
+            label="Profile, relays &amp; keys"
+            description={nostrState.isConnected ? 'Connected to relays' : 'Not connected'}
+            right={
               <View style={styles.rowRight}>
                 <View style={[styles.statusPill, { backgroundColor: (nostrState.isConnected ? theme.colors.success[500] : theme.colors.gray[400]) + '22' }]}>
                   <View style={[styles.statusDot, { backgroundColor: nostrState.isConnected ? theme.colors.success[500] : theme.colors.gray[400] }]} />
@@ -353,28 +326,11 @@ export default function SettingsScreen({ navigation }: Props) {
                     {nostrState.isConnected ? 'On' : 'Off'}
                   </Text>
                 </View>
-                <Ionicons name={showNostrSection ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.tertiary} />
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
               </View>
-            </View>
-          </TouchableOpacity>
-
-          {showNostrSection && (
-            <View style={styles.nostrContent}>
-              <NostrProfileManager navigation={navigation} />
-              <View style={styles.nwcRow}>
-                <View style={styles.rowText}>
-                  <Text style={styles.rowLabel}>Nostr Wallet Connect</Text>
-                  <Text style={styles.rowDescription}>Let other apps pay via the NWC protocol</Text>
-                </View>
-                <Switch
-                  value={nostrState.walletConnectEnabled}
-                  onValueChange={handleWalletConnectToggle}
-                  disabled={!nostrState.isConnected}
-                  trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
-                />
-              </View>
-            </View>
-          )}
+            }
+            onPress={() => navigation.navigate('NostrSettings')}
+          />
         </Group>
 
         {/* Connectivity */}
@@ -436,15 +392,30 @@ export default function SettingsScreen({ navigation }: Props) {
           {activePairing && (
             <Row icon="cube-outline" iconColor={theme.colors.accent[500]} label="Active model" value={activePairing.model} />
           )}
+          <Row
+            icon="construct-outline"
+            iconColor={theme.colors.accent[500]}
+            label="Design your agent"
+            description="Persona, responses, context, memory & knowledge"
+            onPress={() => navigation.navigate('MindSettings')}
+          />
         </Group>
 
         <SectionLabel>Connections</SectionLabel>
         <Group>
           <Row
             first
-            icon="link-outline"
-            label="Nostr Wallet Connect"
-            description="Connect an external wallet via NWC"
+            icon="flash-outline"
+            iconColor={theme.colors.warning[500]}
+            label="Connect a Lightning wallet"
+            description="Pay & check balances via NWC (Lightning or RGB node)"
+            value={
+              nostrState.connectedWallet
+                ? nostrState.nwcWalletType === 'rln'
+                  ? 'RGB node'
+                  : 'Connected'
+                : undefined
+            }
             onPress={() => navigation.navigate('NWCConnect')}
           />
         </Group>
@@ -452,10 +423,9 @@ export default function SettingsScreen({ navigation }: Props) {
         {/* Preferences */}
         <SectionLabel>Preferences</SectionLabel>
         <Group>
-          <Row first icon="options-outline" label="Display Mode" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={handleDisclosureLevelToggle} />
-          <Row icon="logo-bitcoin" iconColor={theme.colors.warning[500]} label="Bitcoin Unit" value={settings.bitcoinUnit} onPress={handleBitcoinUnitChange} />
-          <Row icon="swap-horizontal-outline" iconColor={theme.colors.primary[500]} label="Balance Display" value={denominationLabel[displayDenomination]} onPress={handleDisplayDenominationChange} />
-          <Row icon="contrast-outline" label="Theme" value={capitalize(settings.theme)} onPress={handleThemeChange} />
+          <Row first icon="options-outline" label="Display Mode" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
+          <Row icon="logo-bitcoin" iconColor={theme.colors.warning[500]} label="Bitcoin Unit" description="How balances &amp; amounts are shown" value={denominationLabel[displayDenomination]} onPress={() => setActiveSheet('unit')} />
+          <Row icon="contrast-outline" label="Theme" value={capitalize(settings.theme)} onPress={() => setActiveSheet('theme')} />
           <Row
             icon="volume-high-outline"
             iconColor={theme.colors.accent[500]}
@@ -469,8 +439,7 @@ export default function SettingsScreen({ navigation }: Props) {
               />
             }
           />
-          <Row icon="cash-outline" iconColor={theme.colors.success[500]} label="Currency" value={settings.currency} onPress={handleCurrencyChange} />
-          <Row icon="git-network-outline" iconColor={theme.colors.accent[500]} label="Network" value={capitalize(settings.network)} onPress={handleNetworkChange} />
+          <Row icon="cash-outline" iconColor={theme.colors.success[500]} label="Currency" description="Fiat used for value display" value={settings.currency} onPress={() => setActiveSheet('currency')} />
         </Group>
 
         {/* Wallet Protocols */}
@@ -531,6 +500,40 @@ export default function SettingsScreen({ navigation }: Props) {
 
         <View style={{ height: theme.spacing[10] }} />
       </ScrollView>
+
+      {/* Settings selectors */}
+      <OptionSheet
+        visible={activeSheet === 'unit'}
+        title="Bitcoin Unit"
+        options={unitOptions}
+        selectedId={displayDenomination}
+        onSelect={(id) => dispatch(setUnitPreference(id as DisplayDenomination))}
+        onClose={() => setActiveSheet(null)}
+      />
+      <OptionSheet
+        visible={activeSheet === 'currency'}
+        title="Currency"
+        options={currencyOptions}
+        selectedId={settings.currency}
+        onSelect={(id) => dispatch(setCurrency(id))}
+        onClose={() => setActiveSheet(null)}
+      />
+      <OptionSheet
+        visible={activeSheet === 'theme'}
+        title="Theme"
+        options={themeOptions}
+        selectedId={settings.theme}
+        onSelect={(id) => dispatch(setTheme(id as 'light' | 'dark' | 'system'))}
+        onClose={() => setActiveSheet(null)}
+      />
+      <OptionSheet
+        visible={activeSheet === 'display'}
+        title="Display Mode"
+        options={displayModeOptions}
+        selectedId={disclosureLevel}
+        onSelect={(id) => dispatch(setDisclosureLevel(id as any))}
+        onClose={() => setActiveSheet(null)}
+      />
     </View>
   );
 }

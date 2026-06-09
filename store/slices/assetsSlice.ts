@@ -3,6 +3,7 @@ import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { AssetRecord } from '../../services/DatabaseService';
 import { protocolManager } from '../../services/protocols';
 import DatabaseService from '../../services/DatabaseService';
+import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../../utils/flashnet';
 
 // Define NiaAsset interface locally since it's not exported from RGBApiService
 interface NiaAsset {
@@ -78,14 +79,19 @@ export const syncAssets = createAsyncThunk<
           const unifiedAssets = await adapter.listAssets();
           const mapped = unifiedAssets
             .filter((a: any) => a.id !== 'BTC')
-            .map((a: any) => ({
-              asset_id: a.id,
-              ticker: a.ticker,
-              name: a.name,
-              precision: a.precision,
-              issued_supply: a.metadata?.issued_supply || 0,
-              balance: { settled: a.balance.total, future: a.balance.pending, spendable: a.balance.available },
-            }));
+            .map((a: any) => {
+              // Spark surfaces USDB under its raw token name/precision; pin it to
+              // canonical metadata so the stablecoin renders consistently.
+              const isUsdb = isUsdbTokenAddress(a.id);
+              return {
+                asset_id: a.id,
+                ticker: isUsdb ? USDB_TICKER : a.ticker,
+                name: isUsdb ? USDB_NAME : a.name,
+                precision: isUsdb ? USDB_DECIMALS : a.precision,
+                issued_supply: a.metadata?.issued_supply || 0,
+                balance: { settled: a.balance.total, future: a.balance.pending, spendable: a.balance.available },
+              };
+            });
           niaAssets.push(...mapped);
         } catch { /* skip */ }
       }

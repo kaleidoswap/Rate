@@ -2,7 +2,7 @@
  * WDK Protocol Wiring — KaleidoSwap App
  * -------------------------------------
  * Parallel to ./index.ts (native adapters), this wires the WDK-backed adapters
- * (@kaleidorg/wallet-protocols `*WdkAdapter`) into a ProtocolManager.
+ * (@kaleidorg/wallet-engine `*WdkAdapter`) into a ProtocolManager.
  *
  * Two RN-specific concerns are handled here:
  *  1. Module loading: WDK adapters call `loadWdkModule()`, which we satisfy with a
@@ -23,14 +23,15 @@ import {
   networkTypeToProtocol,
   kaleidoClientManager,
   flashnetClientManager,
-} from '@kaleidorg/wallet-protocols'
+} from '@kaleidorg/wallet-engine'
+import { NwcRgbAdapter } from '../nwc/NwcRgbAdapter'
 import type {
   ProtocolType,
   SparkAdapterConfig,
   LiquidAdapterConfig,
   RlnAdapterConfig,
   ArkadeAdapterConfig,
-} from '@kaleidorg/wallet-protocols'
+} from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
 
 /**
@@ -47,6 +48,10 @@ import { buildArkadeStorage } from './arkadeStorage'
  */
 const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID !== '0'
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
+// On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
+// drives a remote node via an NWC connection string instead of a direct HTTP
+// nodeUrl). Set EXPO_PUBLIC_RGB_VIA_NWC=0 to use the HTTP WDK RLN adapter.
+const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0'
 
 /**
  * Register static-require loaders for each enabled WDK package (Metro can't follow
@@ -76,7 +81,13 @@ export function getWdkProtocolManager(): ProtocolManager {
     _wdkManager = new ProtocolManager()
     // Spark + RLN: no WASM, SDKs already shipped — always on.
     _wdkManager.registerAdapter(new SparkWdkAdapter())
-    _wdkManager.registerAdapter(new RlnWdkAdapter())
+    // RGB: NWC-backed (remote node over relays) by default on mobile; HTTP WDK
+    // adapter when EXPO_PUBLIC_RGB_VIA_NWC=0.
+    if (RGB_VIA_NWC) {
+      _wdkManager.registerAdapter(new NwcRgbAdapter())
+    } else {
+      _wdkManager.registerAdapter(new RlnWdkAdapter())
+    }
     // Liquid / Arkade: opt-in (see flags above) so the default build stays WASM-free.
     if (LIQUID_ENABLED) _wdkManager.registerAdapter(new LiquidWdkAdapter())
     if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())
@@ -145,7 +156,11 @@ export async function initializeWdkProtocols(
             mnemonic,
             network: arkadeNetwork,
             arkadeConfig: {
-              arkServerUrl: parsed.arkServerUrl || 'https://signet.arkade.sh',
+              // mutinynet.arkade.sh is the live signet/mutinynet Ark server;
+              // signet.arkade.sh is deprecated and silently fails to board/receive
+              // (matches rate-extension's ARKADE_SERVER_URLS.signet).
+              arkServerUrl: parsed.arkServerUrl
+                || (arkadeNetwork === 'mainnet' ? 'https://arkade.computer' : 'https://mutinynet.arkade.sh'),
               esploraUrl: parsed.esploraUrl,
               ...(parsed.arkadeConfig || {}),
               ...(arkadeStorage ? { storage: arkadeStorage } : {}),
@@ -155,6 +170,16 @@ export async function initializeWdkProtocols(
         }
 
         case 'RGB': {
+          // NWC mode (default on mobile): the NwcRgbAdapter drives a remote node over
+          // relays and reads its connection string from SecureStore — no HTTP nodeUrl.
+          if (RGB_VIA_NWC) {
+            config = {
+              protocol: 'RGB',
+              mnemonic,
+              network: parsed.network || 'regtest',
+            } as RlnAdapterConfig
+            break
+          }
           const nodeUrl =
             parsed.type === 'remote' ? parsed.url : parsed.nodeUrl || 'http://127.0.0.1:3000'
           if (!nodeUrl) {

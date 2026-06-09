@@ -9,8 +9,10 @@ import {
   resume,
   suspend,
   VERBOSITY,
+  embed,
   TTS_EN_SUPERTONIC_Q4_0,
   WHISPER_BASE_Q8_0,
+  EMBEDDINGGEMMA_300M_Q4_0,
 } from '@qvac/sdk';
 import { NativeModules, Platform } from 'react-native';
 import { File, Directory, Paths } from 'expo-file-system';
@@ -220,6 +222,8 @@ class QVACService {
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
   private ttsModelId: string | null = null;
+  private embedModelId: string | null = null;
+  private embedLoadPromise: Promise<string> | null = null;
   private ttsLoadPromise: Promise<string> | null = null;
 
   private config: QVACConfig = { ...DEFAULT_CONFIG };
@@ -934,151 +938,6 @@ class QVACService {
   }
 
   /**
-   * Multi-turn agentic chat. Unlike `chat()` (single-shot), this feeds tool
-   * results back to the model so it produces a natural-language answer and can
-   * chain tool calls (e.g. get_balance → reason → pay). Follows the QVAC SDK
-   * multi-turn pattern: push the raw assistant frame + `{role:'tool'}` results
-   * to history, loop until the model stops calling tools.
-   *
-   * Money tools (requiresConfirmation) pause for `onConfirm` — the UI shows a
-   * confirmation sheet and resolves the promise. The handler always runs on
-   * THIS device (the phone), even when inference is delegated to a desktop
-   * provider — keys never leave the device.
-   */
-  async chatAgentic(params: {
-    messages: Array<{ role: string; content: string }>;
-    tools?: QVACTool[];
-    /** Max reasoning↔tool rounds before forcing a stop. Default 5. */
-    maxTurns?: number;
-    /** Visible content tokens as they stream, tagged with the current turn. */
-    onToken?: (token: string, turn: number) => void;
-    /** The live requestId for the current turn (so a stop button can cancel it). */
-    onStart?: (requestId: string, turn: number) => void;
-    /** Fired when the model requests a tool, before it executes. */
-    onToolCall?: (call: { name: string; arguments: Record<string, unknown> }, turn: number) => void;
-    /** Human-in-the-loop gate for money tools. Resolve to approve/decline. */
-    onConfirm?: (call: {
-      name: string;
-      arguments: Record<string, unknown>;
-    }) => Promise<{ approved: boolean; reason?: string }>;
-  }): Promise<{ text: string; turns: number; toolCalls: QVACToolCall[]; requestId: string }> {
-    if (!this.llmModelId) {
-      throw new Error('LLM model not loaded');
-    }
-
-    const tools = params.tools ?? [];
-    const toolsByName = new Map(tools.map((t) => [t.name, t]));
-    const toolDefs = tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-      handler: t.handler,
-    }));
-    const maxTurns = params.maxTurns ?? 5;
-
-    // Work on a copy — we append assistant/tool frames per the SDK pattern.
-    const history: Array<{ role: string; content: string }> = [...params.messages];
-    const executedCalls: QVACToolCall[] = [];
-    let lastRequestId = '';
-    let finalText = '';
-    let turns = 0;
-
-    for (let turn = 1; turn <= maxTurns; turn++) {
-      turns = turn;
-
-      const run = completion({
-        modelId: this.llmModelId,
-        history,
-        stream: true,
-        tools: toolDefs.length ? toolDefs : undefined,
-      });
-      lastRequestId = run.requestId;
-      params.onStart?.(run.requestId, turn);
-
-      let streamed = '';
-      for await (const event of run.events) {
-        if (event.type === 'contentDelta') {
-          streamed += event.text;
-          params.onToken?.(event.text, turn);
-        }
-      }
-
-      const final = await run.final;
-      finalText = cleanAssistantVisibleText(final.contentText || streamed);
-
-      // No tool calls → the model produced its final answer.
-      if (!final.toolCalls || final.toolCalls.length === 0) {
-        break;
-      }
-
-      // Anchor the next turn with the RAW assistant frame (not the cleaned
-      // text) — the model needs its own tool-call framing to continue.
-      history.push({ role: 'assistant', content: final.raw?.fullText ?? finalText });
-
-      for (const call of final.toolCalls) {
-        const def = toolsByName.get(call.name);
-        params.onToolCall?.({ name: call.name, arguments: call.arguments }, turn);
-
-        let result: unknown;
-
-        // Fail-safe: confirm if the tool opted in OR if its name looks like it
-        // moves value. The heuristic catches fund-moving tools that forget to
-        // set `requiresConfirmation` — a missing flag must never auto-execute.
-        const heuristicValueMoving = isLikelyValueMovingToolName(call.name);
-        const mustConfirm = !!def?.requiresConfirmation || heuristicValueMoving;
-        if (mustConfirm && !def?.requiresConfirmation) {
-          console.warn(
-            `[QVAC] Tool "${call.name}" looks value-moving but is not marked ` +
-              `requiresConfirmation — forcing confirmation. Add the flag to its definition.`,
-          );
-        }
-
-        if (mustConfirm) {
-          // Human-in-the-loop for anything that moves money.
-          const decision = params.onConfirm
-            ? await params.onConfirm({ name: call.name, arguments: call.arguments })
-            : { approved: false, reason: 'no confirmation handler available' };
-
-          if (decision.approved) {
-            try {
-              if (call.invoke) {
-                result = await call.invoke();
-              } else if (def?.handler) {
-                result = await def.handler(call.arguments);
-              } else {
-                result = { error: `unknown tool: ${call.name}` };
-              }
-            } catch (err) {
-              result = { error: err instanceof Error ? err.message : String(err) };
-            }
-          } else {
-            result = { declined: true, reason: decision.reason ?? 'user declined' };
-          }
-        } else {
-          // Read / safe-write tools auto-execute on this device.
-          try {
-            result = call.invoke ? await call.invoke() : await def?.handler(call.arguments);
-          } catch (err) {
-            result = { error: err instanceof Error ? err.message : String(err) };
-          }
-        }
-
-        executedCalls.push({ name: call.name, arguments: call.arguments, result });
-        history.push({
-          role: 'tool',
-          content: typeof result === 'string' ? result : JSON.stringify(result),
-        });
-      }
-
-      if (turn === maxTurns && !finalText) {
-        finalText = 'I had to stop after several steps — please try a more specific request.';
-      }
-    }
-
-    return { text: finalText, turns, toolCalls: executedCalls, requestId: lastRequestId };
-  }
-
-  /**
    * One completion turn in the shape the shared @kaleido/mind Engine expects.
    * The Engine owns the agentic loop + tool execution; this just runs a single
    * round and returns the assistant text, the raw frame (for history push-back)
@@ -1086,7 +945,9 @@ class QVACService {
    * the Engine executes them via its ToolSources (so wallet signing stays here
    * on-device even when inference is delegated).
    */
-  async runProviderTurn(input: TurnInput): Promise<TurnOutput> {
+  async runProviderTurn(
+    input: TurnInput & { onThinking?: (token: string) => void; temperature?: number; maxTokens?: number },
+  ): Promise<TurnOutput> {
     if (!this.llmModelId) {
       throw new Error('LLM model not loaded');
     }
@@ -1105,14 +966,25 @@ class QVACService {
       modelId: this.llmModelId,
       history,
       stream: true,
+      // Parse <think> blocks into separate `thinkingDelta` events so the UI can
+      // surface the model's reasoning on demand without it polluting the answer.
+      captureThinking: true,
+      // Cap output so a turn can't ramble to the context limit (slow + battery).
+      // User-tunable via "Design your agent" (default 512). Temperature too.
+      max_tokens: input.maxTokens ?? 512,
+      temperature: input.temperature ?? 0.6,
       tools: toolDefs.length ? (toolDefs as any) : undefined,
-    });
+    } as any);
 
     let streamed = '';
     for await (const event of run.events) {
       if (event.type === 'contentDelta') {
         streamed += event.text;
         input.onToken?.(event.text);
+      } else if (event.type === 'thinkingDelta') {
+        // The model's chain-of-thought, streamed separately from the visible
+        // answer. Surfaced so the UI can show it on demand (collapsed reveal).
+        input.onThinking?.(event.text);
       }
     }
 
@@ -1242,7 +1114,49 @@ class QVACService {
     return { pcm, sampleRate: TTS_SAMPLE_RATE };
   }
 
+  // --- Embeddings (for on-device RAG) ---
+
+  /** Lazily load the embeddings model (EmbeddingGemma-300M) on first use. */
+  private async ensureEmbedModel(): Promise<string> {
+    if (this.embedModelId) return this.embedModelId;
+    if (!this.embedLoadPromise) {
+      this.embedLoadPromise = (async () => {
+        const id: string = await loadModel({
+          modelSrc: EMBEDDINGGEMMA_300M_Q4_0,
+          modelType: 'embeddings',
+          verbosity: VERBOSITY.ERROR,
+        } as any);
+        this.embedModelId = id;
+        return id;
+      })();
+    }
+    return this.embedLoadPromise;
+  }
+
+  /** Embed texts on-device (the QVAC half of RAG). One vector per input text. */
+  async embed(texts: string[]): Promise<number[][]> {
+    const modelId = await this.ensureEmbedModel();
+    const out: number[][] = [];
+    for (const text of texts) {
+      const res: any = await embed({ modelId, text });
+      out.push(res.embedding as number[]);
+    }
+    return out;
+  }
+
   // --- Cleanup ---
+
+  async unloadEmbeddings(): Promise<void> {
+    if (this.embedModelId) {
+      try {
+        await unloadModel({ modelId: this.embedModelId, clearStorage: false });
+      } catch {
+        /* ignore */
+      }
+      this.embedModelId = null;
+      this.embedLoadPromise = null;
+    }
+  }
 
   async unloadTts(): Promise<void> {
     if (this.ttsModelId) {
@@ -1273,7 +1187,7 @@ class QVACService {
   }
 
   async unloadAll(): Promise<void> {
-    await Promise.all([this.unloadLLM(), this.unloadWhisper(), this.unloadTts()]);
+    await Promise.all([this.unloadLLM(), this.unloadWhisper(), this.unloadTts(), this.unloadEmbeddings()]);
   }
 }
 

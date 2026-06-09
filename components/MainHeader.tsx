@@ -39,7 +39,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <View style={[styles.bar, { paddingTop: insets.top + 10 }]}>
+      <View style={[styles.bar, { paddingTop: insets.top + 4 }]}>
         <View style={styles.content}>
           <View style={styles.row}>
             {onBack && (
@@ -101,7 +101,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.primary,
   },
   bar: {
-    paddingBottom: 16,
+    paddingBottom: 12,
     backgroundColor: theme.colors.background.primary,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border.light,

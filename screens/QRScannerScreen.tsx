@@ -16,18 +16,30 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSelector } from 'react-redux';
 import { protocolManager } from '../services/protocols';
 import { classifyWithdrawDestination } from '../utils/account-routing';
 import { theme } from '../theme';
+import type { RootState } from '../store';
 import LottieView from 'lottie-react-native';
 
 const { width, height } = Dimensions.get('window');
 
 interface Props {
   navigation: any;
+  route?: any;
 }
 
-export default function QRScannerScreen({ navigation }: Props) {
+export default function QRScannerScreen({ navigation, route }: Props) {
+  // Contact-capture mode hands the raw scanned string back to the requesting
+  // screen instead of decoding it as a payment (used by the Contacts screen).
+  const captureMode: 'payment' | 'contact' = route?.params?.mode === 'contact' ? 'contact' : 'payment';
+  const returnScreen: string = route?.params?.returnScreen || 'Contacts';
+  // Prefill amounts in the user's chosen entry unit so Send interprets them
+  // correctly (Send reads a BTC amount as sats when bitcoinUnit === 'sats').
+  const bitcoinUnit = useSelector((s: RootState) => s.settings.bitcoinUnit);
+  const btcToEntryUnit = (btc: number): string =>
+    bitcoinUnit === 'sats' ? String(Math.round(btc * 1e8)) : btc.toFixed(8);
   const [processing, setProcessing] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
@@ -75,6 +87,30 @@ export default function QRScannerScreen({ navigation }: Props) {
     setScanned(true);
     setProcessing(true);
     scanLineAnim.stopAnimation();
+
+    // NWC connection string: route to the Connect-a-wallet flow regardless of
+    // the scanner mode (it's neither a payment nor a contact).
+    if (data.trim().toLowerCase().startsWith('nostr+walletconnect://')) {
+      setProcessing(false);
+      setScanSuccess(true);
+      successAnim.current?.play();
+      setTimeout(() => {
+        navigation.navigate('NWCConnect', { scanned: data.trim() });
+      }, 700);
+      return;
+    }
+
+    // Contact-capture mode: don't decode as a payment — return the raw string
+    // to the requesting screen, which classifies it (npub / NIP-05 / LN addr…).
+    if (captureMode === 'contact') {
+      setProcessing(false);
+      setScanSuccess(true);
+      successAnim.current?.play();
+      setTimeout(() => {
+        navigation.navigate(returnScreen, { scannedContact: data.trim() });
+      }, 700);
+      return;
+    }
 
     // Haptic feedback
 
@@ -214,7 +250,7 @@ export default function QRScannerScreen({ navigation }: Props) {
     const paymentData = {
       type: 'bip21' as const,
       address,
-      amount: amount ? amount.toFixed(8) : undefined,
+      amount: amount ? btcToEntryUnit(amount) : undefined,
       label,
       message,
       selectedAsset: {
@@ -270,7 +306,7 @@ export default function QRScannerScreen({ navigation }: Props) {
     if (hasRGBAsset) {
       amount = decodedInvoice.asset_amount?.toString();
     } else if (((decodedInvoice as any).amt_msat ?? decodedInvoice.amountMsat ?? 0) > 0) {
-      amount = amountBTC.toFixed(8);
+      amount = btcToEntryUnit(amountBTC);
     }
 
     const paymentData = {
@@ -445,7 +481,9 @@ export default function QRScannerScreen({ navigation }: Props) {
             Align QR code within the frame
           </Text>
           <Text style={styles.subInstructionText}>
-            Bitcoin • Lightning • RGB Assets
+            {captureMode === 'contact'
+              ? 'npub • NIP-05 • Lightning address • node pubkey'
+              : 'Bitcoin • Lightning • RGB Assets'}
           </Text>
         </View>
       </View>
@@ -456,6 +494,7 @@ export default function QRScannerScreen({ navigation }: Props) {
           <TouchableOpacity
             style={styles.iconButton}
             onPress={() => navigation.goBack()}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           >
             <Ionicons name="close" size={24} color="white" />
           </TouchableOpacity>
@@ -617,7 +656,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 10,
+    // Guarantee clearance from the status bar / sheet grabber so the close
+    // button is always reachable even when the top safe-area inset is 0.
+    paddingTop: 16,
   },
   iconButton: {
     width: 44,

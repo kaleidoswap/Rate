@@ -7,7 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ThemeProvider } from '@react-navigation/native';
@@ -15,6 +15,7 @@ import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
+import ChatNotifications from './components/ChatNotifications';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
 
@@ -39,8 +40,9 @@ import SettingsScreen from './screens/SettingsScreen';
 import AIAssistantScreen from './screens/AIAssistantScreen';
 import MapScreen from './screens/MapScreen';
 import ContactsScreen from './screens/ContactsScreen';
+import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
-import NostrContactsScreen from './screens/NostrContactsScreen';
+import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
@@ -48,6 +50,7 @@ import NostrSetupScreen from './screens/NostrSetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
 import PairDesktopScreen from './screens/PairDesktopScreen';
+import MindSettingsScreen from './screens/MindSettingsScreen';
 import NWCConnectScreen from './screens/NWCConnectScreen';
 
 type RootStackParamList = {
@@ -63,12 +66,12 @@ type RootStackParamList = {
   Settings: undefined;
   Send: { selectedAsset?: any } | undefined;
   Receive: { selectedAsset?: any } | undefined;
-  QRScanner: undefined;
+  QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   PaymentConfirmation: { paymentData: any };
   AIAssistant: undefined;
   Assets: undefined;
   Swap: undefined;
-  NostrContacts: undefined;
+  NostrSettings: undefined;
   AssetDetail: { asset: any };
   History: undefined;
   LSP: undefined;
@@ -76,7 +79,9 @@ type RootStackParamList = {
   IssueAsset: undefined;
   Channels: undefined;
   PairDesktop: undefined;
-  NWCConnect: undefined;
+  MindSettings: undefined;
+  NWCConnect: { scanned?: string } | undefined;
+  Chat: { pubkey: string; name?: string; npub?: string; avatarUrl?: string };
 };
 
 type TabBarIconProps = {
@@ -189,11 +194,7 @@ function DashboardTabs() {
         options={{
           tabBarLabel: 'Mind',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons
-              name={focused ? 'sparkles' : 'sparkles-outline'}
-              size={24}
-              color={color}
-            />
+            <MaterialCommunityIcons name="brain" size={24} color={color} />
           ),
         }}
       />
@@ -233,11 +234,21 @@ function AppNavigator() {
           }}
         />
         <Stack.Screen name="Send" component={SendScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={ReceiveScreen} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+        <Stack.Screen
+          name="QRScanner"
+          component={QRScannerScreen}
+          options={{ presentation: 'modal' }}
+        />
         <Stack.Screen
           name="PairDesktop"
           component={PairDesktopScreen}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen
+          name="MindSettings"
+          component={MindSettingsScreen}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen
@@ -245,20 +256,13 @@ function AppNavigator() {
           component={NWCConnectScreen}
           options={{ presentation: 'modal', headerShown: false }}
         />
+        <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
         <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
         <Stack.Screen name="Assets" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
           name="Swap"
           component={SwapScreen}
-          options={{
-            presentation: 'modal',
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="NostrContacts"
-          component={NostrContactsScreen}
           options={{
             presentation: 'modal',
             headerShown: false,
@@ -334,6 +338,7 @@ export default function App() {
       <Provider store={store}>
         <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
           <QVACEnabledSync />
+          <ChatNotifications />
           <AppThemeProvider>
             <KaleidoThemeProvider>
               <ThemeProvider value={navigationTheme}>

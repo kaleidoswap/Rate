@@ -32,7 +32,7 @@ import {
 } from '../store/slices/settingsSlice';
 import QVACService from '../services/QVACService';
 import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
-import { policyFor, aggregateForLite } from '@kaleidorg/wallet-protocols';
+import { policyFor, aggregateForLite } from '@kaleidorg/wallet-engine';
 
 import { theme } from '../theme';
 import { VoiceAgentFAB } from '../components/voice-agent/VoiceAgentFAB';
@@ -45,6 +45,7 @@ import {
   MainHeader
 } from '../components';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
+import { formatAssetAmount } from '../utils/assetAmount';
 import { BackupHealthCard } from '../components/BackupHealthCard';
 import { useBackupHealth } from '../hooks/useBackupHealth';
 
@@ -354,11 +355,14 @@ export default function DashboardScreen({ navigation }: Props) {
                 issued_supply: a.metadata?.issued_supply || 0,
                 protocol: proto,
                 balance: {
-                  settled: a.balance.total,
+                  settled: a.balance.settled ?? a.balance.total,
                   future: a.balance.pending,
+                  // `available` already folds in on-chain spendable + in-channel
+                  // outbound (see NwcRgbAdapter.mapAssetBalance), so it reflects the
+                  // real holdings even for an asset held purely in a channel.
                   spendable: a.balance.available,
-                  offchain_outbound: a.balance.locked || 0,
-                  offchain_inbound: 0,
+                  offchain_outbound: a.balance.offchain_outbound ?? a.balance.locked ?? 0,
+                  offchain_inbound: a.balance.offchain_inbound ?? 0,
                 },
               }));
             assets.push(...mapped);
@@ -506,14 +510,17 @@ export default function DashboardScreen({ navigation }: Props) {
     lite.other.some((o: any) => o.id === asset.asset_id)
   );
 
-  // BTC is filtered out of `rgbAssets` upstream, but — like the extension — it
-  // should always head the asset list as a first-class entry (shown in BTC).
-  const btcAssetEntry = {
+  // BTC is the wallet's base asset but is filtered out of `rgbAssets` upstream,
+  // so it never reached the dashboard AssetList. Surface it at the top of the
+  // list (matching AssetsScreen's BTC row). Balance is on-chain + Lightning, and
+  // precision follows the BTC/sats display preference so formatAssetAmount renders
+  // it the same way the rest of the wallet does.
+  const btcListEntry = {
     asset_id: 'BTC',
     ticker: 'BTC',
     name: 'Bitcoin',
-    precision: 8,
-    balance: { spendable: totalBalance / 1e8 },
+    precision: bitcoinUnit === 'BTC' ? 8 : 0,
+    balance: { spendable: getTotalBtcBalance() },
   } as any;
 
   // Get current hour to determine greeting
@@ -639,7 +646,12 @@ export default function DashboardScreen({ navigation }: Props) {
               </View>
 
               {/* RGB Asset Liquidity (if applicable) */}
-              {selectedChannel.asset_id && (
+              {selectedChannel.asset_id && (() => {
+                // Channel asset amounts are in base units; divide by the asset's
+                // real precision (USDT=6, XAUT=9, …), not a hardcoded 8.
+                const channelAssetPrecision =
+                  rgbAssets.find((a) => a.asset_id === selectedChannel.asset_id)?.precision ?? 8;
+                return (
                 <View style={styles.modalSection}>
                   <Text style={styles.modalSectionTitle}>RGB Asset Liquidity</Text>
                   <View style={styles.modalLiquidityContainer}>
@@ -651,7 +663,7 @@ export default function DashboardScreen({ navigation }: Props) {
                         <View>
                           <Text style={styles.modalLiquidityLabel}>Local</Text>
                           <Text style={styles.modalLiquidityValue}>
-                            {(selectedChannel.asset_local_amount / Math.pow(10, 8)).toFixed(2)}
+                            {formatAssetAmount(selectedChannel.asset_local_amount, channelAssetPrecision)}
                           </Text>
                         </View>
                       </View>
@@ -662,14 +674,15 @@ export default function DashboardScreen({ navigation }: Props) {
                         <View>
                           <Text style={styles.modalLiquidityLabel}>Remote</Text>
                           <Text style={styles.modalLiquidityValue}>
-                            {(selectedChannel.asset_remote_amount / Math.pow(10, 8)).toFixed(2)}
+                            {formatAssetAmount(selectedChannel.asset_remote_amount, channelAssetPrecision)}
                           </Text>
                         </View>
                       </View>
                     </View>
                   </View>
                 </View>
-              )}
+                );
+              })()}
             </ScrollView>
           )}
         </View>
@@ -751,11 +764,10 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
 
         <AssetList
-          // BTC always leads the list (matches the extension). In lite mode, hide
-          // USDt (folded into the USD figure above) and strip the per-asset
-          // protocol badge (a network detail).
+          // BTC always leads the list; in lite mode hide USDt (it's folded into the
+          // USD figure above) and strip the per-asset protocol badge (a network detail).
           assets={[
-            btcAssetEntry,
+            btcListEntry,
             ...(isLite
               ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
               : rgbAssets),
@@ -764,7 +776,8 @@ export default function DashboardScreen({ navigation }: Props) {
           onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
             asset: {
               ...asset,
-              isRGB: asset.ticker !== 'BTC',
+              // BTC is the only non-RGB entry in this list.
+              isRGB: asset.asset_id !== 'BTC',
             }
           })}
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
@@ -789,7 +802,7 @@ export default function DashboardScreen({ navigation }: Props) {
       </ScrollView>
 
       <VoiceAgentFAB
-        onPress={() => openVoiceAgent(false)}
+        onPress={() => openVoiceAgent(true)}
         onHoldActivate={() => openVoiceAgent(true)}
         bottom={Platform.OS === 'ios' ? 100 : 84}
         right={16}

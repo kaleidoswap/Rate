@@ -954,7 +954,7 @@ export default function NostrProfileManager({ navigation }: Props) {
         <View style={styles.actionButtons}>
           <Button
             title="View Contacts"
-            onPress={() => navigation?.navigate('NostrContacts')}
+            onPress={() => navigation?.navigate('Dashboard', { screen: 'Contacts' })}
             variant="ghost"
             style={styles.actionButton}
           />
@@ -976,7 +976,9 @@ export default function NostrProfileManager({ navigation }: Props) {
       {renderIdentityInfo()}
       {renderProfileSection()}
       {renderRelayManager()}
-      {renderNWCManager()}
+      {/* NWC provider-mode (generate a string for OTHER apps) is intentionally
+          not shown here — connecting an external Lightning wallet lives in the
+          dedicated "Connect a Lightning wallet" flow (NWCConnect). */}
       {renderActions()}
     </ScrollView>
   );
