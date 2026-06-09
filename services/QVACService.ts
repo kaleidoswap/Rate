@@ -465,11 +465,27 @@ class QVACService {
     await this.setDelegate({ enabled, providerPublicKey: this.config.providerPublicKey });
   }
 
-  /** Unload + re-initialize the LLM (after a model/delegation change). */
+  /**
+   * Unload + re-initialize the LLM (after a model/delegation change).
+   *
+   * Only HOT-reloads when the LLM was already running. From a cold state we must
+   * NOT boot it here: this is reached at app startup via the aiMode→delegate sync
+   * (App.tsx QVACEnabledSync → setDelegateEnabled → setDelegate), and cold-booting
+   * the worklet + loading the model at launch means a model-load/worklet crash
+   * bricks the entire app in a restart loop. Cold, we just reset status and let
+   * the model load lazily when the user opens the AI screen (AIAssistantScreen's
+   * useQVAC autoInit on focus). Mirrors the "reload only if already active"
+   * guard in setSttModel.
+   */
   private async reloadLLM(): Promise<void> {
+    const wasActive =
+      !!this.llmModelId ||
+      this.state.llmStatus === 'ready' ||
+      this.state.llmStatus === 'loading' ||
+      this.state.llmStatus === 'downloading';
     await this.unloadLLM().catch(() => {});
     this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, error: null });
-    await this.initializeLLM();
+    if (wasActive) await this.initializeLLM();
   }
 
   /** Switch the speech-to-text (Whisper) model and reload it if it was active. */
