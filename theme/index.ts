@@ -60,6 +60,31 @@ interface Colors {
     dark: string;
     focus: string;
   };
+  // App-specific brand accents (not part of the kaleido-ui token set). Used for
+  // per-protocol tinting of badges, balance breakdowns and action tiles. Prefer
+  // the `protocolColor()` / `protocolTint()` helpers over reading these directly.
+  protocol: {
+    rgb: string;
+    spark: string;
+    arkade: string;
+  };
+  brand: {
+    violet: string;
+  };
+  // Per-network "leg" colors used to colour-code Send/Receive destinations and
+  // the multi-network QR breakdown. Broader than `protocol` — note `rgb` here is
+  // the pink RGB-asset leg (USD aggregator), NOT the green RGB-Lightning accent
+  // in `protocol.rgb`. `bitcoin` is an alias for `onchain`.
+  networks: {
+    onchain: string;
+    bitcoin: string;
+    lightning: string;
+    spark: string;
+    arkade: string;
+    liquid: string;
+    rgb: string;
+    unified: string;
+  };
 }
 
 type FontWeight = '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900' | 'normal' | 'bold';
@@ -344,6 +369,26 @@ export const lightTheme: ThemeType = {
       medium: '#D1E0D8',
       dark: '#A3B8AC',
       focus: k.primary,      // #2BEE79
+    },
+
+    // Per-protocol accents (brand-level, identical across light/dark).
+    protocol: {
+      rgb: k.primary,    // #2BEE79 — RGB Lightning
+      spark: '#60A5FA',  // Spark
+      arkade: '#A855F7', // Arkade
+    },
+    brand: {
+      violet: '#6F32FF', // Secondary brand accent (e.g. the Swap action tile)
+    },
+    networks: {
+      onchain: '#F7931A',   // Bitcoin orange
+      bitcoin: '#F7931A',   // alias for onchain
+      lightning: '#FACC15', // Lightning yellow
+      spark: '#60A5FA',     // Spark blue
+      arkade: '#A855F7',    // Arkade purple
+      liquid: '#22D3EE',    // Liquid cyan (USD aggregator leg)
+      rgb: '#F472B6',       // RGB pink (USD aggregator leg)
+      unified: '#10B981',   // Unified / all-networks green
     },
   },
 
@@ -673,3 +718,44 @@ export function createNavigationTheme() {
 }
 
 export type Theme = typeof theme;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+export type ProtocolKey = 'RGB' | 'SPARK' | 'ARKADE';
+
+/** Resolve a protocol's brand accent (case-insensitive). Falls back to gray. */
+export function protocolColor(p?: string | null): string {
+  switch (String(p ?? '').toUpperCase()) {
+    case 'RGB': return theme.colors.protocol.rgb;
+    case 'SPARK': return theme.colors.protocol.spark;
+    case 'ARKADE': return theme.colors.protocol.arkade;
+    default: return theme.colors.gray[400];
+  }
+}
+
+/** A 2-digit hex alpha suffix (00–FF) for an `alpha` in [0,1]. */
+function hexAlpha(alpha: number): string {
+  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255);
+  return a.toString(16).padStart(2, '0').toUpperCase();
+}
+
+/**
+ * A translucent tint of a protocol's accent — handy for badge/icon backgrounds.
+ * Assumes the protocol colors are 6-digit hex (they are), so the alpha is just
+ * appended. Default ~13% matches the prior inline `+ '20'` usage.
+ */
+export function protocolTint(p?: string | null, alpha = 0.13): string {
+  return protocolColor(p) + hexAlpha(alpha);
+}
+
+/**
+ * Convert a `typography.lineHeight` multiplier (e.g. 1.5) into the absolute
+ * pixel value React Native expects, given a font size. The raw lineHeight
+ * tokens are CSS-style multipliers and are NOT usable directly as RN
+ * `lineHeight` (which is in px) — always go through this helper.
+ */
+export function leading(fontSize: number, multiplier: number = theme.typography.lineHeight.normal): number {
+  return Math.round(fontSize * multiplier);
+}

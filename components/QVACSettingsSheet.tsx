@@ -29,6 +29,8 @@ interface Props {
   onSetDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => void;
   /** Open the QR scanner to pair with a desktop provider. */
   onScanQR: () => void;
+  /** Forget the paired desktop: clears engine delegation + stored pairing. */
+  onDisconnectDesktop?: () => void;
   /** Friendly name of the currently-paired desktop, if any. */
   providerName?: string | null;
   /** Total device RAM in GB (shown next to the model list). */
@@ -77,6 +79,7 @@ export default function QVACSettingsSheet({
   onSelectModel,
   onSetDelegate,
   onScanQR,
+  onDisconnectDesktop,
   providerName,
   deviceMemGb,
   recommendedModelId,
@@ -93,6 +96,17 @@ export default function QVACSettingsSheet({
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const hasProvider = !!config.providerPublicKey;
   const isDownloaded = (id: string) => downloadedModelIds.includes(id);
+
+  const confirmDisconnect = () => {
+    Alert.alert(
+      'Disconnect desktop?',
+      `Forget “${providerName || 'this desktop'}” and stop delegating to it? KaleidoMind will switch back to running on this device. You can pair again anytime.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: () => onDisconnectDesktop?.() },
+      ]
+    );
+  };
 
   const confirmDelete = (id: string, label: string) => {
     Alert.alert(
@@ -184,7 +198,7 @@ export default function QVACSettingsSheet({
           {aiMode === 'delegate' && (
             <Text style={styles.disabledNote}>
               {hasProvider
-                ? `Delegating to ${providerName || 'your desktop'}. Switch to “Off” to disconnect.`
+                ? `Delegating to ${providerName || 'your desktop'}. Use “Disconnect this desktop” below to unpair.`
                 : 'No desktop connected yet — scan the pairing QR, or switch to “Off”.'}
             </Text>
           )}
@@ -345,6 +359,13 @@ export default function QVACSettingsSheet({
                 <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[600]} />
                 <Text style={styles.scanGhostText}>Scan a different desktop</Text>
               </TouchableOpacity>
+
+              {onDisconnectDesktop && (
+                <TouchableOpacity style={styles.disconnectButton} onPress={confirmDisconnect}>
+                  <Ionicons name="unlink-outline" size={18} color={theme.colors.error[500]} />
+                  <Text style={styles.disconnectText}>Disconnect this desktop</Text>
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <TouchableOpacity style={styles.scanButtonPrimary} onPress={onScanQR}>
@@ -542,6 +563,18 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing[1],
   },
   scanGhostText: { color: theme.colors.primary[600], fontWeight: '600', fontSize: theme.typography.fontSize.sm },
+  disconnectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.error[500],
+    paddingVertical: theme.spacing[3],
+    marginTop: theme.spacing[2],
+  },
+  disconnectText: { color: theme.colors.error[500], fontWeight: '600', fontSize: theme.typography.fontSize.sm },
 
   // Paste-pubkey
   pasteToggle: {

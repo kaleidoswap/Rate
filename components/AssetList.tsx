@@ -1,27 +1,22 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, protocolColor } from '../theme';
 import { Card } from './Card';
 import { AssetIcon } from './AssetIcon';
-import { formatAssetAmount } from '../utils/assetAmount';
+import { Badge } from './Badge';
+import { SectionHeader } from './SectionHeader';
+import { AmountText } from './AmountText';
+import { formatAssetAmount, getAssetBaseUnitBalance, type AssetBalanceLike } from '../utils/assetAmount';
 
 interface NiaAsset {
     asset_id: string;
     ticker: string;
     name: string;
     precision: number;
-    balance: {
-        spendable: number;
-    };
+    balance: AssetBalanceLike;
     protocol?: 'RGB' | 'SPARK' | 'ARKADE';
 }
-
-const PROTOCOL_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
-    RGB: { bg: '#2BEE7920', text: '#2BEE79' },
-    SPARK: { bg: '#60A5FA20', text: '#60A5FA' },
-    ARKADE: { bg: '#A855F720', text: '#A855F7' },
-};
 
 interface AssetListProps {
     assets: NiaAsset[];
@@ -40,12 +35,7 @@ export const AssetList: React.FC<AssetListProps> = ({
 }) => {
     return (
         <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Assets</Text>
-                <TouchableOpacity onPress={onViewAll}>
-                    <Text style={styles.sectionAction}>View All</Text>
-                </TouchableOpacity>
-            </View>
+            <SectionHeader title="Assets" actionLabel="View All" onAction={onViewAll} />
 
             {assets.length === 0 ? (
                 <Card style={styles.emptyCard}>
@@ -74,26 +64,16 @@ export const AssetList: React.FC<AssetListProps> = ({
                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                                             <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
                                             {asset.protocol && (
-                                                <View style={{
-                                                    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
-                                                    backgroundColor: PROTOCOL_BADGE_COLORS[asset.protocol]?.bg || '#ffffff10',
-                                                }}>
-                                                    <Text style={{
-                                                        fontSize: 9, fontWeight: '700', letterSpacing: 0.3,
-                                                        color: PROTOCOL_BADGE_COLORS[asset.protocol]?.text || '#999',
-                                                    }}>
-                                                        {asset.protocol}
-                                                    </Text>
-                                                </View>
+                                                <Badge label={asset.protocol} color={protocolColor(asset.protocol)} />
                                             )}
                                         </View>
                                         <Text style={styles.assetVerticalName}>{asset.name}</Text>
                                     </View>
                                 </View>
                                 <View style={styles.assetVerticalRight}>
-                                    <Text style={styles.assetVerticalBalance}>
-                                        {formatAssetAmount(asset.balance.spendable, asset.precision)}
-                                    </Text>
+                                    <AmountText style={styles.assetVerticalBalance}>
+                                        {formatAssetAmount(getAssetBaseUnitBalance(asset.balance), asset.precision)}
+                                    </AmountText>
                                     <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
                                 </View>
                             </View>
@@ -118,22 +98,6 @@ const styles = StyleSheet.create({
     section: {
         marginTop: theme.spacing[6],
         paddingHorizontal: theme.spacing[4],
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: theme.spacing[3],
-    },
-    sectionTitle: {
-        fontSize: theme.typography.fontSize.lg,
-        fontWeight: '700',
-        color: theme.colors.text.primary,
-    },
-    sectionAction: {
-        fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.primary[600],
-        fontWeight: '600',
     },
     emptyCard: {
         padding: theme.spacing[6],

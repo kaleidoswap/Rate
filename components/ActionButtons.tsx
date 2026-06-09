@@ -26,9 +26,6 @@ const ACTION_ITEMS: Array<{
     { key: 'send', label: 'Send', icon: 'arrow-up', tone: 'send', action: 'onSend' },
 ];
 
-// Brand accents (green = primary, violet = protocol/secondary action).
-const VIOLET = '#6F32FF';
-
 function tileStyle(tone: Tone): { backgroundColor: string; glyph: string; border?: string } {
     switch (tone) {
         case 'receive':
@@ -37,7 +34,9 @@ function tileStyle(tone: Tone): { backgroundColor: string; glyph: string; border
             // Tinted surface with a green glyph — visually distinct from Receive's solid fill.
             return { backgroundColor: theme.colors.primary[50]!, glyph: theme.colors.primary[500], border: theme.colors.primary[100]! };
         case 'swap':
-            return { backgroundColor: VIOLET, glyph: '#FFFFFF' };
+            // Violet = secondary brand accent (protocol/secondary action). It's a
+            // dark fill in both themes, so the glyph stays white regardless of theme.
+            return { backgroundColor: theme.colors.brand.violet, glyph: '#FFFFFF' };
         case 'activity':
         default:
             return { backgroundColor: theme.colors.surface.tertiary, glyph: theme.colors.text.secondary, border: theme.colors.border.medium };

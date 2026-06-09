@@ -20,6 +20,16 @@ import chatReducer from './slices/chatSlice';
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
 import { setStore } from './storeProvider';
 
+// The swap slice is otherwise ephemeral (current quote/execution reset each
+// session), but swapHistory should survive restarts so the History screen keeps
+// past swaps. Nest-persist just that key.
+const swapPersistConfig = {
+  key: 'swap',
+  storage: AsyncStorage,
+  whitelist: ['swapHistory'],
+};
+const persistedSwapReducer = persistReducer(swapPersistConfig, swapReducer);
+
 // Combine all reducers first to get proper types
 const rootReducer = combineReducers({
   wallet: walletReducer,
@@ -29,7 +39,7 @@ const rootReducer = combineReducers({
   transactions: transactionsReducer,
   ui: uiReducer,
   contacts: contactsReducer,
-  swap: swapReducer,
+  swap: persistedSwapReducer,
   nostr: nostrReducer,
   chat: chatReducer,
 });

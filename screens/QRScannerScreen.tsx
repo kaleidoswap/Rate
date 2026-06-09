@@ -166,61 +166,69 @@ export default function QRScannerScreen({ navigation, route }: Props) {
     }
   };
 
-  const parseBIP21URI = (uri: string): { address: string; amount?: number; label?: string; message?: string } | null => {
-    try {
-      // Handle bitcoin: URI format
-      if (!uri.startsWith('bitcoin:')) {
-        return null;
-      }
+  const UNRECOGNIZED_ERROR =
+    'The scanned QR code is not a recognized Bitcoin, Lightning, RGB, Spark, or Arkade format.';
 
-      const withoutPrefix = uri.substring(8); // Remove 'bitcoin:'
-      const [address, queryString] = withoutPrefix.split('?');
+  const processScannedData = async (raw: string) => {
+    let data = raw.trim();
 
-      if (!address || !isValidBitcoinAddress(address)) {
-        return null;
-      }
+    // Unwrap a `lightning:` URI scheme (wraps a BOLT11 invoice or LNURL).
+    if (/^lightning:/i.test(data)) {
+      data = data.replace(/^lightning:(\/\/)?/i, '').trim();
+    }
 
-      const result: any = { address };
+    const lower = data.toLowerCase();
 
-      if (queryString) {
-        const params = new URLSearchParams(queryString);
-        if (params.get('amount')) {
-          result.amount = parseFloat(params.get('amount')!);
+    // BIP21 / BIP321 unified Bitcoin URI — may bundle a Lightning invoice.
+    if (lower.startsWith('bitcoin:')) {
+      return await handleBitcoinURI(data);
+    }
+
+    // Use the shared destination classifier so the scanner recognizes the same
+    // formats the Send screen does (Lightning, RGB, Spark, Arkade, LNURL…).
+    const kind = classifyWithdrawDestination(data);
+    switch (kind) {
+      case 'lightning':
+        // Decode here so we can prefill amount; lowercase for case-insensitive
+        // (QR-uppercased) invoices.
+        return await handleLightningInvoice(lower);
+      case 'rgb':
+        return await handleRGBInvoice(data);
+      case 'lnurl-pay':
+      case 'lightning-address':
+        return handlePassthroughAddress(data, 'lightning-address');
+      case 'spark':
+        return handlePassthroughAddress(data, 'spark');
+      case 'arkade':
+        return handlePassthroughAddress(data, 'arkade');
+      case 'bitcoin':
+        return handleBitcoinAddress(data);
+      default:
+        // classifyWithdrawDestination only covers bech32 BTC addresses; fall
+        // back to the broader validator for legacy/testnet base58 addresses.
+        if (isValidBitcoinAddress(data)) {
+          return handleBitcoinAddress(data);
         }
-        if (params.get('label')) {
-          result.label = params.get('label');
-        }
-        if (params.get('message')) {
-          result.message = params.get('message');
-        }
-      }
-
-      return result;
-    } catch (error) {
-      console.error('Error parsing BIP21 URI:', error);
-      return null;
+        throw new Error(UNRECOGNIZED_ERROR);
     }
   };
 
-  const processScannedData = async (data: string) => {
-    // Determine what type of data was scanned and return payment data
-    if (data.startsWith('rgb:')) {
-      // RGB Invoice
-      return await handleRGBInvoice(data);
-    } else if (data.startsWith('lnbc') || data.startsWith('lnbcrt') || data.startsWith('lntb')) {
-      // Lightning Network Invoice
-      return await handleLightningInvoice(data);
-    } else if (data.startsWith('bitcoin:')) {
-      // BIP21 URI
-      return await handleBIP21URI(data);
-    } else if (isValidBitcoinAddress(data)) {
-      // Plain Bitcoin Address
-      return handleBitcoinAddress(data);
-    } else {
-      // Unknown format - throw error to be handled by caller
-      throw new Error('The scanned QR code is not a recognized Bitcoin, Lightning, or RGB format.');
-    }
-  };
+  // Spark / Arkade / Lightning-address destinations need no client-side
+  // decoding — hand the raw string to Send, which re-classifies and routes it.
+  const handlePassthroughAddress = (
+    address: string,
+    type: 'spark' | 'arkade' | 'lightning-address',
+  ) => ({
+    type,
+    address,
+    amount: undefined as string | undefined,
+    selectedAsset: {
+      asset_id: 'BTC',
+      ticker: 'BTC',
+      name: 'Bitcoin',
+      isRGB: false,
+    },
+  });
 
   // Better error message handling
   const getErrorMessage = (error: any): string => {
@@ -239,29 +247,57 @@ export default function QRScannerScreen({ navigation, route }: Props) {
     return 'Unable to process this QR code. Please verify it\'s a valid payment code and try again.';
   };
 
-  const handleBIP21URI = async (uri: string) => {
-    const parsed = parseBIP21URI(uri);
-    if (!parsed) {
-      throw new Error('Invalid BIP21 URI format');
+  const handleBitcoinURI = async (uri: string) => {
+    // bitcoin:<address>?<query> — per BIP21/BIP321 the on-chain address may be
+    // empty and a Lightning invoice (and other instructions) can ride in the
+    // query string.
+    const body = uri.slice(uri.indexOf(':') + 1);
+    const qIndex = body.indexOf('?');
+    let address = (qIndex === -1 ? body : body.slice(0, qIndex)).trim();
+    const queryString = qIndex === -1 ? '' : body.slice(qIndex + 1);
+
+    // Query keys are case-insensitive (QR codes are frequently all-uppercase).
+    const rawParams = new URLSearchParams(queryString);
+    const params = new Map<string, string>();
+    rawParams.forEach((value, key) => params.set(key.toLowerCase(), value));
+
+    // BIP21 default → Lightning: when an invoice is bundled, pay over LN.
+    const lightningParam = params.get('lightning');
+    if (lightningParam) {
+      try {
+        return await handleLightningInvoice(lightningParam.toLowerCase());
+      } catch (error) {
+        // A malformed/unusable bundled invoice shouldn't block the on-chain
+        // fallback below.
+        console.warn('Bundled Lightning invoice unusable, falling back to on-chain:', error);
+      }
     }
 
-    const { address, amount, label, message } = parsed;
+    // Bech32 addresses may be uppercased in QR codes; normalize them. Legacy
+    // base58 addresses are case-sensitive and must be left untouched.
+    if (/^(bc1|tb1|bcrt1)/i.test(address)) {
+      address = address.toLowerCase();
+    }
 
-    const paymentData = {
-      type: 'bip21' as const,
-      address,
-      amount: amount ? btcToEntryUnit(amount) : undefined,
-      label,
-      message,
-      selectedAsset: {
-        asset_id: 'BTC',
-        ticker: 'BTC',
-        name: 'Bitcoin',
-        isRGB: false,
-      },
-    };
+    if (address && isValidBitcoinAddress(address)) {
+      const amountParam = params.get('amount');
+      const amount = amountParam ? parseFloat(amountParam) : undefined;
+      return {
+        type: 'bip21' as const,
+        address,
+        amount: amount && !isNaN(amount) ? btcToEntryUnit(amount) : undefined,
+        label: params.get('label'),
+        message: params.get('message'),
+        selectedAsset: {
+          asset_id: 'BTC',
+          ticker: 'BTC',
+          name: 'Bitcoin',
+          isRGB: false,
+        },
+      };
+    }
 
-    return paymentData;
+    throw new Error(UNRECOGNIZED_ERROR);
   };
 
   const handleRGBInvoice = async (invoice: string) => {
@@ -483,7 +519,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
           <Text style={styles.subInstructionText}>
             {captureMode === 'contact'
               ? 'npub • NIP-05 • Lightning address • node pubkey'
-              : 'Bitcoin • Lightning • RGB Assets'}
+              : 'Bitcoin • Lightning • RGB • Spark • Arkade'}
           </Text>
         </View>
       </View>

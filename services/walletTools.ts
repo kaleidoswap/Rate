@@ -18,6 +18,7 @@ import { protocolManager, type ProtocolType } from './protocols';
 import { getStore } from '../store/storeProvider';
 import { fetchBitcoinPrice } from '../store/slices/walletSlice';
 import NostrService from './NostrService';
+import { resolveLightningAddressToInvoice as resolveLightningAddress } from '../utils/lnurl';
 
 const log = (...a: any[]) => { try { console.log('[AI/wallet]', ...a); } catch { /* noop */ } };
 
@@ -85,33 +86,6 @@ function findContact(name: string): any | undefined {
 const looksLikeDestination = (s: string) => /^(ln(bc|tb|bcrt)|bc1|tb1|[a-z0-9._-]+@)/i.test(s.trim());
 const isLightningAddress = (s: string) => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.trim());
 const isOnchainAddress = (s: string) => /^(bc1|tb1|bcrt1)/i.test(s.trim());
-
-/** LNURL-pay: resolve a Lightning address (user@domain) to a BOLT11 invoice. */
-async function resolveLightningAddress(address: string, amountSats: number, comment = ''): Promise<string> {
-  const [username, domain] = address.trim().split('@');
-  if (!username || !domain) throw new Error(`That doesn't look like a Lightning address: ${address}`);
-  const fetchJson = async (url: string): Promise<any> => {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000);
-    try {
-      const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: ctrl.signal });
-      if (!res.ok) throw new Error(`Lightning address endpoint returned ${res.status}`);
-      return await res.json();
-    } finally {
-      clearTimeout(timer);
-    }
-  };
-  const lnurl = await fetchJson(`https://${domain}/.well-known/lnurlp/${username}`);
-  if (lnurl?.status === 'ERROR') throw new Error(lnurl.reason || 'Lightning address rejected the request.');
-  const msat = amountSats * 1000;
-  if (lnurl?.minSendable && msat < lnurl.minSendable) throw new Error(`Minimum is ${Math.ceil(lnurl.minSendable / 1000)} sats.`);
-  if (lnurl?.maxSendable && msat > lnurl.maxSendable) throw new Error(`Maximum is ${Math.floor(lnurl.maxSendable / 1000)} sats.`);
-  const sep = String(lnurl.callback).includes('?') ? '&' : '?';
-  const inv = await fetchJson(`${lnurl.callback}${sep}amount=${msat}&comment=${encodeURIComponent(comment)}`);
-  if (inv?.status === 'ERROR') throw new Error(inv.reason || 'Could not get an invoice from the Lightning address.');
-  if (!inv?.pr) throw new Error('The Lightning address returned no invoice.');
-  return String(inv.pr);
-}
 
 /** Contract tool → handler. Only the safe, well-understood subset for now;
  *  the rest are bound via `allowMissing` (i.e. simply not exposed yet). */

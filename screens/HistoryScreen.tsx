@@ -13,7 +13,7 @@ import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { RootState } from '../store';
-import { MainHeader } from '../components';
+import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
 import { theme } from '../theme';
 import {
@@ -122,6 +122,11 @@ export default function HistoryScreen() {
             status: s.status,
             created_at: s.created_at,
             txid: s.txid,
+            from_asset: s.from_asset,
+            to_asset: s.to_asset,
+            from_amount: s.from_amount,
+            to_amount: s.to_amount,
+            venue: s.venue,
         }));
         try {
             const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps });
@@ -218,21 +223,13 @@ export default function HistoryScreen() {
             <MainHeader title="Activity" onBack={() => navigation.goBack()} />
 
             {/* Filter tabs */}
-            <View style={styles.filterBar}>
-                {FILTERS.map((f) => {
-                    const active = filter === f.key;
-                    return (
-                        <TouchableOpacity
-                            key={f.key}
-                            style={[styles.filterTab, active && styles.filterTabActive]}
-                            onPress={() => setFilter(f.key)}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>{f.label}</Text>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+            <SegmentedTabs
+                options={FILTERS}
+                value={filter}
+                onChange={setFilter}
+                scrollable={false}
+                style={styles.filterBar}
+            />
 
             {softError && (
                 <View style={styles.errorBanner}>
@@ -278,31 +275,9 @@ const styles = StyleSheet.create({
         backgroundColor: theme.colors.background.secondary,
     },
     filterBar: {
-        flexDirection: 'row',
-        gap: theme.spacing[2],
         paddingHorizontal: theme.spacing[4],
         paddingTop: theme.spacing[3],
         paddingBottom: theme.spacing[2],
-    },
-    filterTab: {
-        paddingHorizontal: theme.spacing[4],
-        paddingVertical: theme.spacing[2],
-        borderRadius: theme.borderRadius.full,
-        backgroundColor: theme.colors.surface.primary,
-        borderWidth: 1,
-        borderColor: theme.colors.border.light,
-    },
-    filterTabActive: {
-        backgroundColor: theme.colors.primary[500],
-        borderColor: theme.colors.primary[500],
-    },
-    filterTabText: {
-        fontSize: theme.typography.fontSize.sm,
-        fontWeight: '600',
-        color: theme.colors.text.secondary,
-    },
-    filterTabTextActive: {
-        color: theme.colors.text.inverse,
     },
     errorBanner: {
         flexDirection: 'row',

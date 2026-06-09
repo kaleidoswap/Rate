@@ -2,6 +2,15 @@ export * from './Button';
 export * from './Card';
 export * from './Input';
 export * from './ListItem';
+// Shared UI primitives — prefer these over hand-rolling pills/tabs/dividers.
+export * from './Badge';
+export * from './SegmentedTabs';
+export * from './CopyButton';
+export * from './SectionHeader';
+export * from './Divider';
+export * from './Callout';
+export * from './AmountText';
+export * from './EmptyState';
 export * from './LoadingScreen';
 export * from './InlineLoading';
 export * from './IssueAssetModal';

@@ -322,6 +322,22 @@ export default function AIAssistantScreen({ navigation }: Props) {
     navigation.navigate('PairDesktop');
   }, [navigation]);
 
+  // Fully disconnect the paired desktop: clear the engine's delegation config
+  // (key + flag), forget the stored pairing, drop the displayed name, and fall
+  // back to on-device mode. Without clearing providerPublicKey + the pairing,
+  // the desktop would keep showing as "Paired" with no way to remove it.
+  const disconnectDesktop = useCallback(async () => {
+    const key = qvac.config.providerPublicKey;
+    try {
+      await qvac.setDelegate({ enabled: false, providerPublicKey: '' });
+      if (key) await PairingService.forget(key);
+    } catch {
+      /* best-effort — still drop the UI state below */
+    }
+    setProviderName(null);
+    dispatch(setAiMode('local'));
+  }, [qvac, dispatch]);
+
   // Header subtitle: which model + whether we're delegating to a desktop.
   const headerSubtitle = useMemo(() => {
     const delegating = qvac.config.delegateEnabled && !!qvac.config.providerPublicKey;
@@ -1203,6 +1219,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSelectModel={(id) => qvac.setModel(id)}
             onSetDelegate={(opts) => qvac.setDelegate(opts)}
             onScanQR={openScanner}
+            onDisconnectDesktop={disconnectDesktop}
             onDesignAgent={() => { setShowSettings(false); navigation.navigate('MindSettings'); }}
             providerName={providerName}
             deviceMemGb={qvac.deviceMemGb}

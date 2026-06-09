@@ -6,19 +6,16 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
   Share,
   Clipboard,
   ActivityIndicator,
-  Image,
+  InteractionManager,
   Platform,
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
-import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
@@ -27,15 +24,15 @@ import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
   getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
-  type AccountId, type NetworkType as ProtocolNetworkType,
+  type NetworkType as ProtocolNetworkType,
 } from '../utils/account-routing';
 import { theme } from '../theme';
-import { Card, Button, Input, ScreenHeader } from '../components';
+import { Input } from '../components';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
 import { useDepositDetection } from '../hooks/useDepositDetection';
 import { useSparkAutoClaim } from '../hooks/useSparkAutoClaim';
 import { AssetIcon } from '../components/AssetIcon';
-import { AssetSelector, type SelectableAsset } from '../components/AssetSelector';
+import { AssetSelector } from '../components/AssetSelector';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { UsdCoinIcon } from '../components/ProtocolIcons';
 import { QrCode } from '@kaleidorg/kaleido-ui/native';
@@ -44,11 +41,25 @@ import { NewAssetSheet, type NewAssetKind } from '../components/NewAssetSheet';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { PressableScale } from '../components/PressableScale';
 import { feedback } from '../utils/feedback';
-import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { useBitcoinConversion } from '../utils/bitcoinUnits';
 
 // Sentinel asset id for receiving an RGB asset the user doesn't hold yet
 // (generates a blind RGB invoice with no specific asset_id).
 const NEW_RGB_ASSET_ID = 'RGB_NEW';
+// Verbose receive logging is opt-in even in dev. In an Expo dev client every
+// console.log is a bridge round-trip, and the unified flow emits ~12+ lines per
+// generation plus one on every tap — enough to visibly stall the JS thread while
+// the screen is generating. Set `global.__RECEIVE_DEBUG__ = true` to trace.
+const RECEIVE_DEBUG = (globalThis as any).__RECEIVE_DEBUG__ === true;
+const nowMs = () => (globalThis.performance?.now ? globalThis.performance.now() : Date.now());
+const receiveLog = (event: string, details?: Record<string, unknown>) => {
+  if (!RECEIVE_DEBUG) return;
+  if (details) {
+    console.log(`[ReceiveScreen] ${event}`, details);
+  } else {
+    console.log(`[ReceiveScreen] ${event}`);
+  }
+};
 
 interface Props {
   navigation: any;
@@ -91,9 +102,50 @@ interface Channel {
   asset_remote_amount: number;
 }
 
+const DeferredQrCode = React.memo(function DeferredQrCode({ value, size }: { value: string; size: number }) {
+  const [renderValue, setRenderValue] = useState('');
+  const scheduledAtRef = React.useRef(0);
+
+  useEffect(() => {
+    setRenderValue('');
+    scheduledAtRef.current = nowMs();
+    receiveLog('qr.schedule', { length: value.length, size });
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      timeoutId = setTimeout(() => setRenderValue(value), 0);
+    });
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      interaction.cancel();
+    };
+  }, [value]);
+
+  useEffect(() => {
+    if (!renderValue) return;
+    receiveLog('qr.render', {
+      length: renderValue.length,
+      size,
+      waitedMs: Math.round(nowMs() - scheduledAtRef.current),
+    });
+  }, [renderValue, size]);
+
+  if (!renderValue) {
+    return (
+      <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="small" color={theme.colors.primary[500]} />
+      </View>
+    );
+  }
+
+  return <QrCode value={renderValue} size={size} />;
+});
+
 export default function ReceiveScreen({ navigation }: Props) {
-  const walletState = useSelector((state: RootState) => state.wallet);
-  const assetsState = useSelector((state: RootState) => state.assets);
+  // Narrow selectors: subscribe to ONLY the two fields this screen reads. The
+  // previous coarse `state.wallet` / `state.assets` selectors re-rendered this
+  // ~3k-line component on any unrelated change (price ticks, tx history, etc.).
+  const btcBalance = useSelector((state: RootState) => state.wallet?.btcBalance);
+  const rgbAssetsRaw = useSelector((state: RootState) => state.assets?.rgbAssets);
   // The receive/deposit flow always denominates BTC in sats (matches rate-extension):
   // integer-sats input, sats quick-amounts, and a correct ≈USD conversion. The global
   // BTC/sats display preference intentionally does NOT apply on this screen — otherwise
@@ -111,8 +163,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const qrSize = Math.max(176, Math.min(248, Math.round(screenWidth - 120)));
   
   // Safe destructuring with fallbacks
-  const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
-  const btcBalance = walletState?.btcBalance;
+  const rgbAssets = (rgbAssetsRaw || []) as RGBAsset[];
   
 
   
@@ -195,6 +246,25 @@ export default function ReceiveScreen({ navigation }: Props) {
   // The Spark single-use BTC L1 deposit address currently on screen (if any).
   // Spark on-chain deposits must be claimed in — useSparkAutoClaim polls this.
   const [sparkDepositAddress, setSparkDepositAddress] = useState<string | null>(null);
+  // The Lightning invoice embedded in the unified QR's LN leg (if any). The
+  // unified QR has no "lightning" tab, so this is what lets deposit detection
+  // watch an incoming LN payment in unified mode.
+  const [unifiedLnInvoice, setUnifiedLnInvoice] = useState<string | null>(null);
+  const unifiedGenerationRef = React.useRef(0);
+  // Caches the non-Lightning legs (on-chain / Spark / Arkade / Liquid addresses)
+  // from the fast first pass so the follow-up "add Lightning" pass can reuse them
+  // instead of re-deriving every address — halving the adapter/Spark-crypto work
+  // (and JS-thread stalls) on mount. See generateUnifiedUri's two-pass flow.
+  const unifiedCollectedRef = React.useRef<{
+    collected: {
+      btcAddress?: string;
+      lightningInvoice?: string;
+      sparkAddress?: string;
+      arkadeAddress?: string;
+      liquidAddress?: string;
+    };
+    sparkDeposit: string | null;
+  } | null>(null);
 
   // Watch for an incoming deposit whenever a receive address / invoice is shown,
   // then celebrate with the success overlay (mirrors rate-extension).
@@ -203,11 +273,19 @@ export default function ReceiveScreen({ navigation }: Props) {
     feedback.swap();
     setShowDepositSuccess(true);
   }, []);
+  // The Lightning invoice to watch: the lightning tab's invoice, or the LN leg
+  // of the unified QR. Either way an incoming LN payment is detected.
+  const lnInvoiceToWatch =
+    networkType === 'lightning'
+      ? address
+      : networkType === 'unified'
+        ? unifiedLnInvoice ?? undefined
+        : undefined;
   useDepositDetection({
     enabled: !!receiveTarget && !showDepositSuccess,
     networkType,
     assetId: selectedAsset?.asset_id,
-    invoice: networkType === 'lightning' ? address : undefined,
+    invoice: lnInvoiceToWatch,
     onDetected: handleDepositDetected,
   });
   // Spark on-chain deposits don't show up via balance polling until claimed —
@@ -397,6 +475,13 @@ export default function ReceiveScreen({ navigation }: Props) {
   const generateAddress = async () => {
     if (!selectedAsset) return;
 
+    const startedAt = nowMs();
+    receiveLog('address.start', {
+      networkType,
+      asset: selectedAsset.ticker,
+      amount,
+      arkadeSubMode,
+    });
     setError(null);
     // Cleared up-front; only re-set when this generation yields a Spark single-use
     // on-chain deposit address (the only case useSparkAutoClaim should act on).
@@ -546,11 +631,22 @@ export default function ReceiveScreen({ navigation }: Props) {
       if (validatedResult) {
         setAddress(validatedResult);
         setError(null);
+        receiveLog('address.complete', {
+          networkType,
+          asset: selectedAsset.ticker,
+          length: validatedResult.length,
+          ms: Math.round(nowMs() - startedAt),
+        });
       } else {
         throw new Error('Unable to generate a valid address or invoice. Please try again.');
       }
     } catch (error) {
       console.error('Failed to generate address:', error);
+      receiveLog('address.error', {
+        networkType,
+        asset: selectedAsset.ticker,
+        ms: Math.round(nowMs() - startedAt),
+      });
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
       if (errorMessage.includes('No uncolored UTXOs')) {
         setError('No uncolored UTXOs available. Please create UTXOs first or try a different network.');
@@ -567,12 +663,20 @@ export default function ReceiveScreen({ navigation }: Props) {
   // USD unified receive: a BIP321 QR (address-less) embedding the ways to receive
   // USD (USDt) across protocols — Liquid USDt, an RGB USDT invoice (RGB-LN or
   // RGB-L1), and the Spark address. Caller has already reset loading/error state.
-  const generateUsdUnifiedUri = async () => {
+  const generateUsdUnifiedUri = async (generationId: number) => {
+    const isCurrentGeneration = () => unifiedGenerationRef.current === generationId;
+    const startedAt = nowMs();
+    receiveLog('unified.usd.start', { generationId });
     const rgb = protocolManager.getAdapterIfAvailable('RGB');
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
     const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
+    receiveLog('unified.usd.adapters', {
+      generationId,
+      rgb: !!rgb?.isConnected(),
+      spark: !!spark?.isConnected(),
+      liquid: !!liquid?.isConnected(),
+    });
 
-    const methods: string[] = [];
     let sparkAddress: string | undefined;
     let liquidAddress: string | undefined;
     let rgbInvoice: string | undefined;
@@ -581,33 +685,74 @@ export default function ReceiveScreen({ navigation }: Props) {
     const usdtRgb = rgbAssets.find((a) => /usdt/i.test(a.ticker));
 
     try {
-      // 1) Liquid USDt — assets ride on the same confidential address.
-      if (liquid?.isConnected()) {
-        try {
-          const addr = await liquid.getReceiveAddress();
-          if (addr?.address) { liquidAddress = addr.address; methods.push('Liquid USDt'); }
-        } catch (e) { console.warn('USD: Liquid address failed', e); }
-      }
-      // 2) RGB USDT invoice (covers RGB-LN and RGB on-chain L1).
-      if (rgb?.isConnected() && usdtRgb?.asset_id && rgb.createRgbInvoice) {
-        try {
-          const inv: any = await rgb.createRgbInvoice({ assetId: usdtRgb.asset_id });
-          const invoice = inv?.invoice ?? inv?.recipient_id;
-          if (invoice) { rgbInvoice = invoice; methods.push('RGB USDT'); }
-        } catch (e) { console.warn('USD: RGB invoice failed', e); }
-      }
-      // 3) Spark address (for a Spark USD token transfer).
-      if (spark?.isConnected()) {
-        try {
-          const addr = await spark.getReceiveAddress();
-          if (addr?.address) { sparkAddress = addr.address; methods.push('Spark'); }
-        } catch (e) { console.warn('USD: Spark address failed', e); }
-      }
+      await Promise.allSettled([
+        // 1) Liquid USDt — assets ride on the same confidential address.
+        (async () => {
+          const taskStartedAt = nowMs();
+          if (!liquid?.isConnected()) return;
+          try {
+            const addr = await liquid.getReceiveAddress();
+            if (addr?.address) liquidAddress = addr.address;
+            receiveLog('unified.usd.liquid.done', {
+              generationId,
+              ok: !!addr?.address,
+              ms: Math.round(nowMs() - taskStartedAt),
+            });
+          } catch (e) { console.warn('USD: Liquid address failed', e); }
+        })(),
+
+        // 2) RGB USDT invoice (covers RGB-LN and RGB on-chain L1).
+        (async () => {
+          const taskStartedAt = nowMs();
+          if (!rgb?.isConnected() || !usdtRgb?.asset_id || !rgb.createRgbInvoice) return;
+          try {
+            const inv: any = await rgb.createRgbInvoice({ assetId: usdtRgb.asset_id });
+            const invoice = inv?.invoice ?? inv?.recipient_id;
+            if (invoice) rgbInvoice = invoice;
+            receiveLog('unified.usd.rgb.done', {
+              generationId,
+              ok: !!invoice,
+              ms: Math.round(nowMs() - taskStartedAt),
+            });
+          } catch (e) { console.warn('USD: RGB invoice failed', e); }
+        })(),
+
+        // 3) Spark address (for a Spark USD token transfer).
+        (async () => {
+          const taskStartedAt = nowMs();
+          if (!spark?.isConnected()) return;
+          try {
+            const addr = await spark.getReceiveAddress();
+            if (addr?.address) sparkAddress = addr.address;
+            receiveLog('unified.usd.spark.done', {
+              generationId,
+              ok: !!addr?.address,
+              ms: Math.round(nowMs() - taskStartedAt),
+            });
+          } catch (e) { console.warn('USD: Spark address failed', e); }
+        })(),
+      ]);
 
       if (!sparkAddress && !liquidAddress && !rgbInvoice) {
-        setUnifiedError('No USD receive method available. Connect Liquid, an RGB node, or Spark.');
+        if (isCurrentGeneration()) {
+          receiveLog('unified.usd.empty', {
+            generationId,
+            ms: Math.round(nowMs() - startedAt),
+          });
+          setUnifiedError('No USD receive method available. Connect Liquid, an RGB node, or Spark.');
+        }
         return;
       }
+
+      if (!isCurrentGeneration()) {
+        receiveLog('unified.usd.stale', { generationId, activeGenerationId: unifiedGenerationRef.current });
+        return;
+      }
+
+      const methods: string[] = [];
+      if (liquidAddress) methods.push('Liquid USDt');
+      if (rgbInvoice) methods.push('RGB USDT');
+      if (sparkAddress) methods.push('Spark');
 
       setUnifiedAddresses(
         [
@@ -626,11 +771,21 @@ export default function ReceiveScreen({ navigation }: Props) {
       });
       setUnifiedUri(uri);
       setUnifiedMethods(methods);
+      receiveLog('unified.usd.complete', {
+        generationId,
+        methods,
+        uriLength: uri.length,
+        ms: Math.round(nowMs() - startedAt),
+      });
     } catch (e: any) {
       console.error('USD: unified receive failed', e);
-      setUnifiedError(e?.message || 'Failed to build USD receive code.');
+      if (isCurrentGeneration()) {
+        setUnifiedError(e?.message || 'Failed to build USD receive code.');
+      }
     } finally {
-      setUnifiedLoading(false);
+      if (isCurrentGeneration()) {
+        setUnifiedLoading(false);
+      }
     }
   };
 
@@ -638,16 +793,41 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Defensive — each adapter call is wrapped so a missing/disconnected
   // protocol is silently skipped rather than failing the whole QR.
   // ──────────────────────────────────────────────────────────────────────
-  const generateUnifiedUri = async () => {
+  const generateUnifiedUri = async ({
+    includeLightning = true,
+    preserveExisting = false,
+    reason = 'manual',
+  }: {
+    includeLightning?: boolean;
+    preserveExisting?: boolean;
+    reason?: string;
+  } = {}) => {
+    const startedAt = nowMs();
+    const generationId = unifiedGenerationRef.current + 1;
+    unifiedGenerationRef.current = generationId;
+    const isCurrentGeneration = () => unifiedGenerationRef.current === generationId;
+    receiveLog('unified.start', {
+      generationId,
+      unifiedAsset,
+      amount,
+      networkType,
+      includeLightning,
+      preserveExisting,
+      reason,
+    });
+
     setUnifiedError(null);
     setUnifiedLoading(true);
-    setUnifiedUri('');
-    setUnifiedMethods([]);
-    setUnifiedAddresses([]);
-    setSparkDepositAddress(null); // re-set below only if Spark supplies the on-chain leg
+    if (!preserveExisting) {
+      setUnifiedUri('');
+      setUnifiedMethods([]);
+      setUnifiedAddresses([]);
+      setSparkDepositAddress(null); // re-set below only if Spark supplies the on-chain leg
+      setUnifiedLnInvoice(null); // re-set below only if a Lightning leg is minted
+    }
 
     if (unifiedAsset === 'USD') {
-      await generateUsdUnifiedUri();
+      await generateUsdUnifiedUri(generationId);
       return;
     }
 
@@ -655,6 +835,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
     const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
     const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
+    receiveLog('unified.adapters', {
+      generationId,
+      rgb: !!rgb?.isConnected(),
+      spark: !!spark?.isConnected(),
+      arkade: !!arkade?.isConnected(),
+      liquid: !!liquid?.isConnected(),
+    });
 
     // Optional amount (in sats) for the Lightning leg / BIP21 amount.
     let amountSats = 0;
@@ -668,59 +855,34 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
     }
 
-    // Progressive collection: every adapter is queried in PARALLEL, and as each
-    // method resolves we rebuild the QR + address list so the user sees whatever
-    // is ready first instead of waiting for the slowest protocol.
+    // Query every adapter in parallel, then publish one final QR. Updating the
+    // QR progressively for each method made the screen feel frozen on mobile:
+    // each new URI forces a full QR matrix rebuild and SVG reconciliation.
+    //
+    // The two-pass flow (fast pass without Lightning, then a follow-up that adds
+    // the LN invoice) used to re-derive ALL addresses on the second pass. The
+    // on-chain/Spark/Arkade/Liquid addresses don't change between passes, so when
+    // this is the LN-upgrade pass (preserveExisting + includeLightning) we reuse
+    // the cached legs and only mint the Lightning invoice — halving the adapter
+    // work and Spark-crypto JS-thread stalls on mount.
+    const cached = unifiedCollectedRef.current;
+    const reuseAddrs = preserveExisting && includeLightning && !!cached;
     const collected: {
       btcAddress?: string;
       lightningInvoice?: string;
       sparkAddress?: string;
       arkadeAddress?: string;
       liquidAddress?: string;
-    } = {};
-    let anyShown = false;
+    } = reuseAddrs ? { ...cached!.collected, lightningInvoice: undefined } : {};
+    // When reusing, carry the Spark single-use deposit address forward so the
+    // final setSparkDepositAddress() doesn't wipe what the fast pass detected.
+    let nextSparkDepositAddress: string | null = reuseAddrs ? cached!.sparkDeposit : null;
+    let nextLnInvoice: string | null = null;
 
-    const rebuild = () => {
-      const methods: string[] = [];
-      if (collected.btcAddress) methods.push('On-chain');
-      if (collected.lightningInvoice) methods.push('Lightning');
-      if (collected.sparkAddress) methods.push('Spark');
-      if (collected.arkadeAddress) methods.push('Arkade');
-      if (collected.liquidAddress) methods.push('Liquid');
-      if (methods.length === 0) return;
-
-      setUnifiedAddresses(
-        [
-          collected.btcAddress && { key: 'onchain', label: 'Bitcoin on-chain', value: collected.btcAddress },
-          collected.lightningInvoice && { key: 'lightning', label: 'Lightning invoice', value: collected.lightningInvoice },
-          collected.sparkAddress && { key: 'spark', label: 'Spark', value: collected.sparkAddress },
-          collected.arkadeAddress && { key: 'arkade', label: 'Arkade', value: collected.arkadeAddress },
-          collected.liquidAddress && { key: 'liquid', label: 'Liquid', value: collected.liquidAddress },
-        ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
-      );
-      setUnifiedMethods(methods);
-
-      try {
-        const uri = buildUnifiedReceiveURI({
-          btcAddress: collected.btcAddress,
-          lightningInvoice: collected.lightningInvoice,
-          sparkAddress: collected.sparkAddress,
-          arkadeAddress: collected.arkadeAddress,
-          liquidAddress: collected.liquidAddress,
-          amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
-          label: 'KaleidoSwap',
-        });
-        setUnifiedUri(uri);
-        // Hide the spinner as soon as we have something scannable.
-        if (!anyShown) { anyShown = true; setUnifiedLoading(false); }
-      } catch (e: any) {
-        console.error('Unified: buildUnifiedReceiveURI failed', e);
-      }
-    };
-
-    const tasks: Promise<void>[] = [
+    const addressTasks: Promise<void>[] = reuseAddrs ? [] : [
       // 1) BTC on-chain — prefer RGB, then Spark single-use deposit, then Arkade boarding.
       (async () => {
+        const taskStartedAt = nowMs();
         try {
           if (rgb?.isConnected()) {
             const addr = await rgb.getReceiveAddress();
@@ -731,71 +893,168 @@ export default function ReceiveScreen({ navigation }: Props) {
             if (addr?.address) {
               collected.btcAddress = addr.address;
               // Spark on-chain deposit → needs claim/sweep (useSparkAutoClaim).
-              setSparkDepositAddress(addr.address);
+              nextSparkDepositAddress = addr.address;
             }
           }
           if (!collected.btcAddress && arkade?.isConnected()) {
             const addr = await arkade.getReceiveAddress('boarding');
             if (addr?.address) collected.btcAddress = addr.address;
           }
-        } catch (e) { console.warn('Unified: on-chain address failed', e); }
-        if (collected.btcAddress) rebuild();
-      })(),
-
-      // 2) Lightning invoice (RGB node first, then Spark).
-      (async () => {
-        const lnAdapter = rgb?.isConnected() ? rgb : spark?.isConnected() ? spark : undefined;
-        if (!lnAdapter) return;
-        try {
-          const invoice = await lnAdapter.createInvoice({
-            layer: 'BTC_LN', // force a BOLT11 (Spark would otherwise mint a native Spark invoice)
-            amount: amountSats > 0 ? amountSats : undefined,
-            description: 'Unified receive',
-            expirySeconds: 3600,
+          receiveLog('unified.onchain.done', {
+            generationId,
+            ok: !!collected.btcAddress,
+            ms: Math.round(nowMs() - taskStartedAt),
           });
-          if (invoice?.invoice) { collected.lightningInvoice = invoice.invoice; rebuild(); }
-        } catch (e) { console.warn('Unified: Lightning invoice failed', e); }
+        } catch (e) { console.warn('Unified: on-chain address failed', e); }
       })(),
 
-      // 3) Spark native address.
+      // 2) Spark native address.
       (async () => {
+        const taskStartedAt = nowMs();
         if (!spark?.isConnected()) return;
         try {
           const addr = await spark.getReceiveAddress();
-          if (addr?.address) { collected.sparkAddress = addr.address; rebuild(); }
+          if (addr?.address) collected.sparkAddress = addr.address;
+          receiveLog('unified.spark.done', {
+            generationId,
+            ok: !!addr?.address,
+            ms: Math.round(nowMs() - taskStartedAt),
+          });
         } catch (e) { console.warn('Unified: Spark address failed', e); }
       })(),
 
       // 4) Arkade native (ark) address.
       (async () => {
+        const taskStartedAt = nowMs();
         if (!arkade?.isConnected()) return;
         try {
           const addr = await arkade.getReceiveAddress();
-          if (addr?.address) { collected.arkadeAddress = addr.address; rebuild(); }
+          if (addr?.address) collected.arkadeAddress = addr.address;
+          receiveLog('unified.arkade.done', {
+            generationId,
+            ok: !!addr?.address,
+            ms: Math.round(nowMs() - taskStartedAt),
+          });
         } catch (e) { console.warn('Unified: Arkade address failed', e); }
       })(),
 
       // 5) Liquid (L-BTC / USDt) address.
       (async () => {
+        const taskStartedAt = nowMs();
         if (!liquid?.isConnected()) return;
         try {
           const addr = await liquid.getReceiveAddress();
-          if (addr?.address) { collected.liquidAddress = addr.address; rebuild(); }
+          if (addr?.address) collected.liquidAddress = addr.address;
+          receiveLog('unified.liquid.done', {
+            generationId,
+            ok: !!addr?.address,
+            ms: Math.round(nowMs() - taskStartedAt),
+          });
         } catch (e) { console.warn('Unified: Liquid address failed', e); }
       })(),
     ];
 
-    await Promise.allSettled(tasks);
+    // The Lightning invoice mint is the one leg that depends on `amount` and is
+    // the slowest call, so it always runs when requested — even on the reuse pass
+    // (which skips every address derivation above).
+    const lightningTasks: Promise<void>[] = includeLightning
+      ? [
+          (async () => {
+            const taskStartedAt = nowMs();
+            const lnAdapter = rgb?.isConnected() ? rgb : spark?.isConnected() ? spark : undefined;
+            if (!lnAdapter) return;
+            try {
+              const invoice = await lnAdapter.createInvoice({
+                layer: 'BTC_LN', // force a BOLT11 (Spark would otherwise mint a native Spark invoice)
+                amount: amountSats > 0 ? amountSats : undefined,
+                description: 'Unified receive',
+                expirySeconds: 3600,
+              });
+              if (invoice?.invoice) {
+                collected.lightningInvoice = invoice.invoice;
+                // Surface the LN leg so deposit detection can poll its status.
+                nextLnInvoice = invoice.invoice;
+              }
+              receiveLog('unified.lightning.done', {
+                generationId,
+                ok: !!invoice?.invoice,
+                ms: Math.round(nowMs() - taskStartedAt),
+              });
+            } catch (e) { console.warn('Unified: Lightning invoice failed', e); }
+          })(),
+        ]
+      : [];
 
-    // BIP321 allows an address-less URI, so a single method is enough.
-    if (!anyShown) {
+    await Promise.allSettled([...addressTasks, ...lightningTasks]);
+    if (!isCurrentGeneration()) {
+      receiveLog('unified.stale', { generationId, activeGenerationId: unifiedGenerationRef.current });
+      return;
+    }
+
+    const methods: string[] = [];
+    if (collected.btcAddress) methods.push('On-chain');
+    if (collected.lightningInvoice) methods.push('Lightning');
+    if (collected.sparkAddress) methods.push('Spark');
+    if (collected.arkadeAddress) methods.push('Arkade');
+    if (collected.liquidAddress) methods.push('Liquid');
+
+    if (methods.length === 0) {
+      receiveLog('unified.empty', {
+        generationId,
+        ms: Math.round(nowMs() - startedAt),
+      });
       setUnifiedError('No receive method available. Connect a wallet (RGB, Spark, Arkade, or Liquid) to use unified receive.');
+      setUnifiedLoading(false);
+      return;
+    }
+
+    try {
+      const uri = buildUnifiedReceiveURI({
+        btcAddress: collected.btcAddress,
+        lightningInvoice: collected.lightningInvoice,
+        sparkAddress: collected.sparkAddress,
+        arkadeAddress: collected.arkadeAddress,
+        liquidAddress: collected.liquidAddress,
+        amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
+        label: 'KaleidoSwap',
+      });
+
+      // Cache the legs so the follow-up "add Lightning" pass can reuse them
+      // instead of re-deriving every address (see reuseAddrs above).
+      unifiedCollectedRef.current = {
+        collected: { ...collected },
+        sparkDeposit: nextSparkDepositAddress,
+      };
+
+      setSparkDepositAddress(nextSparkDepositAddress);
+      setUnifiedLnInvoice(nextLnInvoice);
+      setUnifiedAddresses(
+        [
+          collected.btcAddress && { key: 'onchain', label: 'Bitcoin on-chain', value: collected.btcAddress },
+          collected.lightningInvoice && { key: 'lightning', label: 'Lightning invoice', value: collected.lightningInvoice },
+          collected.sparkAddress && { key: 'spark', label: 'Spark', value: collected.sparkAddress },
+          collected.arkadeAddress && { key: 'arkade', label: 'Arkade', value: collected.arkadeAddress },
+          collected.liquidAddress && { key: 'liquid', label: 'Liquid', value: collected.liquidAddress },
+        ].filter(Boolean) as Array<{ key: string; label: string; value: string }>
+      );
+      setUnifiedMethods(methods);
+      setUnifiedUri(uri);
+      receiveLog('unified.complete', {
+        generationId,
+        methods,
+        uriLength: uri.length,
+        ms: Math.round(nowMs() - startedAt),
+      });
+    } catch (e: any) {
+      console.error('Unified: buildUnifiedReceiveURI failed', e);
+      setUnifiedError(e?.message || 'Failed to build receive code.');
     }
     setUnifiedLoading(false);
   };
 
   const copyUnifiedUri = async () => {
     if (!unifiedUri) return;
+    receiveLog('tap.copyUnified', { length: unifiedUri.length });
     await Clipboard.setString(unifiedUri);
     // Inline checkmark on the card (matches the address list) — no modal Alert.
     feedback.select();
@@ -804,12 +1063,26 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   // Generate the unified URI when that mode is selected, or amount changes.
+  // Two passes: a fast one (on-chain + Spark address) so a QR appears quickly,
+  // then a follow-up that mints the Lightning invoice and merges it in (reusing
+  // the already-derived addresses — see reuseAddrs in generateUnifiedUri).
+  //
+  // Each adapter call is an NWC request = synchronous Nostr crypto on the JS
+  // thread, so the two passes are spaced well apart: the fast pass after the
+  // nav-transition settles, and the LN pass much later, leaving a clear window in
+  // between where the screen is fully interactive instead of one long stall.
   useEffect(() => {
     if (networkType !== 'unified') return;
     const timeoutId = setTimeout(() => {
-      generateUnifiedUri();
-    }, 300);
-    return () => clearTimeout(timeoutId);
+      generateUnifiedUri({ includeLightning: false, reason: 'auto-fast' });
+    }, 450);
+    const lightningTimeoutId = setTimeout(() => {
+      generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'auto-lightning' });
+    }, 3000);
+    return () => {
+      clearTimeout(timeoutId);
+      clearTimeout(lightningTimeoutId);
+    };
   }, [networkType, amount, unifiedAsset]);
 
   // Keep the unified BTC/USD asset in sync with the selected asset tab.
@@ -831,11 +1104,14 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   }, [selectedAsset, networkType]);
 
-  // Load channels on mount AND when the network type changes. Mounting needs them
-  // so the network selector can decide whether RGB-LN is offered (a channel for
-  // the asset must exist) before the user ever taps Lightning.
+  // Load channels on mount AND when the network type changes. The network
+  // selector uses them to decide whether RGB-LN is offered (a channel for the
+  // asset must exist). listChannels() is an NWC call (synchronous JS-thread
+  // crypto), and the default mode is the unified QR which doesn't need channels
+  // up front — so defer it past the open burst to keep the screen interactive.
   useEffect(() => {
-    loadChannels();
+    const t = setTimeout(() => loadChannels(), 1200);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
@@ -935,6 +1211,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyToClipboard = async () => {
     if (!address) return;
+    receiveLog('tap.copyAddress', { length: address.length, networkType });
     await Clipboard.setString(address);
     feedback.select();
     setCopied(true);
@@ -943,6 +1220,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   const shareAddress = async () => {
     if (!address) return;
+    receiveLog('tap.shareAddress', { length: address.length, networkType });
     try {
       await Share.share({
         message: address,
@@ -984,70 +1262,9 @@ export default function ReceiveScreen({ navigation }: Props) {
       : unit;
   };
 
-  const renderHeader = () => (
-    <View>
-      <ScreenHeader title="Receive" showBack={true} />
-
-      {/* Asset Selector — below header, above network tabs */}
-      <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 }}>
-        {selectedAsset && (
-          <TouchableOpacity
-            onPress={() => setShowAssetSelector(true)}
-            activeOpacity={0.7}
-            style={{
-              flexDirection: 'row', alignItems: 'center',
-              backgroundColor: theme.colors.surface.primary,
-              borderRadius: 14, padding: 12,
-              shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 8, elevation: 2,
-            }}
-          >
-            <AssetIcon ticker={selectedAsset.ticker} protocol={selectedAsset.isRGB ? 'RGB' : undefined} size={36} showBadge={false} />
-            <View style={{ flex: 1, marginLeft: 12 }}>
-              <Text style={{ fontSize: 16, fontWeight: '600', color: theme.colors.text.primary }}>{selectedAsset.ticker}</Text>
-              <Text style={{ fontSize: 12, color: theme.colors.text.tertiary }}>{selectedAsset.name}</Text>
-            </View>
-            <Ionicons name="chevron-down" size={18} color={theme.colors.gray[400]} />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      {/* Asset Selector Modal */}
-      <AssetSelector
-        visible={showAssetSelector}
-        onClose={() => setShowAssetSelector(false)}
-        onSelect={(asset) => {
-          setSelectedAsset({
-            asset_id: asset.asset_id,
-            ticker: asset.ticker,
-            name: asset.name,
-            isRGB: asset.isRGB || asset.protocol === 'RGB',
-            balance: asset.balance,
-          });
-        }}
-        assets={allAssets.map(a => ({
-          asset_id: a.asset_id,
-          ticker: a.ticker,
-          name: a.name,
-          balance: a.balance,
-          isRGB: a.isRGB,
-          protocol: a.isRGB ? 'RGB' as const : undefined,
-        }))}
-        selectedAssetId={selectedAsset?.asset_id}
-        title="Select Asset"
-      />
-    </View>
-  );
-
-  // Network color coding (matches rate-extension)
-  const NETWORK_COLORS: Record<string, string> = {
-    'onchain': '#F7931A', // Bitcoin orange
-    'lightning': '#FACC15', // Lightning yellow
-    'spark': '#60A5FA',     // Spark blue
-    'arkade': '#A855F7',    // Arkade purple
-    'liquid': '#22D3EE',    // Liquid cyan (USD aggregator leg)
-    'rgb': '#F472B6',       // RGB pink (USD aggregator leg)
-    'unified': '#10B981',   // Unified / all-networks green
-  };
+  // Network color coding — sourced from the shared theme tokens so Send and
+  // Receive stay in sync (matches rate-extension).
+  const NETWORK_COLORS: Record<string, string> = theme.colors.networks;
 
   const NETWORK_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
     'onchain': 'link',
@@ -1359,6 +1576,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           const isCopied = copiedKey === a.key;
           const isLast = idx === unifiedAddresses.length - 1;
           const copyAddr = async () => {
+            receiveLog('tap.copyUnifiedMethod', { key: a.key, length: a.value.length });
             await Clipboard.setString(a.value);
             feedback.select();
             setCopiedKey(a.key);
@@ -1572,7 +1790,11 @@ export default function ReceiveScreen({ navigation }: Props) {
       <View style={styles.netSelectorWrap}>
         <TouchableOpacity
           style={[styles.netSelector, showNetworkDropdown && { borderColor: color }]}
-          onPress={() => { feedback.select(); setShowNetworkDropdown((v) => !v); }}
+          onPress={() => {
+            receiveLog('tap.networkSelector', { current: current.id, open: !showNetworkDropdown });
+            feedback.select();
+            setShowNetworkDropdown((v) => !v);
+          }}
           activeOpacity={0.7}
         >
           <View style={[styles.netGlyph, { backgroundColor: color + '1A' }]}>
@@ -1599,6 +1821,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                   key={o.id}
                   style={[styles.netOption, active && { backgroundColor: c + '12' }]}
                   onPress={() => {
+                    receiveLog('tap.networkOption', { from: networkType, to: o.id });
                     feedback.select();
                     setNetworkType(o.id);
                     setShowNetworkDropdown(false);
@@ -1632,7 +1855,10 @@ export default function ReceiveScreen({ navigation }: Props) {
     return (
       <TouchableOpacity
         style={styles.amountRow}
-        onPress={() => setShowAmountEditor(true)}
+        onPress={() => {
+          receiveLog('tap.amountRow', { amount, networkType, asset: selectedAsset.ticker });
+          setShowAmountEditor(true);
+        }}
         activeOpacity={0.7}
       >
         <View style={styles.amountRowIcon}>
@@ -1755,7 +1981,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color={theme.colors.error[500]} />
           <Text style={styles.errorText}>{unifiedError}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={generateUnifiedUri} activeOpacity={0.7}>
+          <TouchableOpacity style={styles.retryButton} onPress={() => generateUnifiedUri()} activeOpacity={0.7}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
@@ -1769,7 +1995,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           <Text style={styles.promptText}>
             Generate a single QR that any wallet can pay — on-chain, Lightning, Spark and Arkade combined.
           </Text>
-          <TouchableOpacity style={[styles.generateButton, { backgroundColor: accent }]} onPress={generateUnifiedUri} activeOpacity={0.7}>
+          <TouchableOpacity style={[styles.generateButton, { backgroundColor: accent }]} onPress={() => generateUnifiedUri()} activeOpacity={0.7}>
             <Text style={styles.generateButtonText}>Generate</Text>
           </TouchableOpacity>
         </View>
@@ -1790,7 +2016,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             <View style={{ flex: 1 }} />
           )}
           <TouchableOpacity
-            onPress={generateUnifiedUri}
+            onPress={() => generateUnifiedUri()}
             style={styles.qrRefreshBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
@@ -1801,7 +2027,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
         <View style={styles.qrContainer}>
           <View style={styles.qrCodeWrapper}>
-            <QrCode value={unifiedUri} size={qrSize} />
+            <DeferredQrCode value={unifiedUri} size={qrSize} />
           </View>
         </View>
 
@@ -1911,7 +2137,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
         <View style={styles.qrContainer}>
           <View style={styles.qrCodeWrapper}>
-            <QrCode value={address} size={qrSize} />
+            <DeferredQrCode value={address} size={qrSize} />
           </View>
         </View>
 
@@ -1930,14 +2156,24 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      <ScreenHeader title="Receive" showBack={true} />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
+      <View style={styles.receiveHeader}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.receiveBackButton}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="arrow-back" size={26} color={theme.colors.text.primary} />
+        </TouchableOpacity>
+        <Text style={styles.receiveHeaderTitle}>Receive</Text>
+      </View>
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+        keyboardShouldPersistTaps="always"
         keyboardDismissMode="on-drag"
       >
         {renderAssetTabs()}
@@ -1991,7 +2227,10 @@ export default function ReceiveScreen({ navigation }: Props) {
         rates={fiatRates}
         bitcoinUnit={bitcoinUnit}
         balanceSats={btcBalance?.vanilla?.spendable || 0}
-        onConfirm={applyAmountSats}
+        onConfirm={(sats) => {
+          receiveLog('amount.confirm', { sats, previousAmount: amount, networkType });
+          applyAmountSats(sats);
+        }}
       />
 
       <DepositSuccessOverlay
@@ -2011,6 +2250,36 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.secondary,
+  },
+
+  receiveHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[5],
+    paddingTop: theme.spacing[3],
+    paddingBottom: theme.spacing[3],
+    backgroundColor: theme.colors.background.secondary,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border.light,
+  },
+
+  receiveBackButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  receiveHeaderTitle: {
+    flex: 1,
+    fontSize: 28,
+    fontWeight: '800',
+    color: theme.colors.text.primary,
   },
   
   headerContainer: {

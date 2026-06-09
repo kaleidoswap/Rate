@@ -76,6 +76,12 @@ export const syncAssets = createAsyncThunk<
       const adapter = protocolManager.getAdapterIfAvailable(proto);
       if (adapter?.isConnected()) {
         try {
+          // Reconcile with the network first so pending/unclaimed transfers
+          // settle before we read balances. On Spark this runs
+          // experimental_syncWallet(), which is what surfaces tokens (e.g. USDB
+          // just received from a Flashnet swap) that getBalance() would
+          // otherwise report as still-incoming. Best-effort: never block listing.
+          try { await (adapter as any).refreshBalances?.(); } catch { /* non-fatal */ }
           const unifiedAssets = await adapter.listAssets();
           const mapped = unifiedAssets
             .filter((a: any) => a.id !== 'BTC')

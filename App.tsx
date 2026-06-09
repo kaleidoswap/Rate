@@ -45,6 +45,7 @@ import SwapScreen from './screens/SwapScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
+import PaymentSuccessScreen, { PaymentSuccessParams } from './screens/PaymentSuccessScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import NostrSetupScreen from './screens/NostrSetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
@@ -68,6 +69,7 @@ type RootStackParamList = {
   Receive: { selectedAsset?: any } | undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   PaymentConfirmation: { paymentData: any };
+  PaymentSuccess: PaymentSuccessParams;
   AIAssistant: undefined;
   Assets: undefined;
   Swap: undefined;
@@ -258,6 +260,11 @@ function AppNavigator() {
         />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
         <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
+        <Stack.Screen
+          name="PaymentSuccess"
+          component={PaymentSuccessScreen}
+          options={{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false }}
+        />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
         <Stack.Screen name="Assets" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen

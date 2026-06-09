@@ -36,6 +36,7 @@ import {
 import { protocolManager } from '../services/protocols';
 import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
 import { syncAssets } from '../store/slices/assetsSlice';
+import { getAssetDisplayBalance } from '../utils/assetAmount';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
@@ -107,12 +108,43 @@ export default function SwapScreen({ navigation }: Props) {
 
   // After any swap, refresh balances everywhere: the global asset list (so a
   // freshly bought Spark token like USDB appears in Assets/Dashboard), the local
-  // picker list, and the pair list.
+  // picker list, and the pair list. Spark inbound token transfers can settle a
+  // few seconds AFTER executeSwap returns, so force a wallet sync + re-poll a
+  // couple of times rather than reading a single (possibly pre-settlement) value.
   const refreshAfterSwap = () => {
     const walletId = walletState?.activeWallet?.id;
-    if (walletId) dispatch(syncAssets(walletId) as any);
-    loadAvailableAssets();
+    const sync = () => {
+      if (walletId) dispatch(syncAssets(walletId) as any);
+      loadAvailableAssets();
+    };
+    const sparkAdapter: any = protocolManager.getAdapterIfAvailable('SPARK');
+    Promise.resolve(sparkAdapter?.refreshBalances?.()).catch(() => {}).finally(sync);
+    setTimeout(sync, 4000);
+    setTimeout(sync, 12000);
     loadTradingPairs();
+  };
+
+  // Build a history entry from a settled quote so swaps (both venues) show up in
+  // the History screen with real amounts.
+  const recordSwapHistory = (
+    q: SwapQuote,
+    status: SwapExecution['status'],
+    txid?: string,
+    swapString?: string,
+  ) => {
+    dispatch(addToHistory({
+      rfq_id: q.rfq_id,
+      swap_string: swapString || '',
+      status,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      txid,
+      from_asset: q.from_asset,
+      to_asset: q.to_asset,
+      from_amount: q.from_amount,
+      to_amount: q.to_amount,
+      venue: q.venue,
+    }));
   };
 
   // Load trading pairs and assets on mount
@@ -255,7 +287,7 @@ export default function SwapScreen({ navigation }: Props) {
           asset_id: asset.asset_id,
           ticker: asset.ticker,
           name: asset.name,
-          balance: (asset.balance?.spendable || 0) / Math.pow(10, asset.precision || 8),
+          balance: getAssetDisplayBalance(asset.balance, asset.precision || 0),
           precision: asset.precision,
         });
       }
@@ -478,7 +510,7 @@ export default function SwapScreen({ navigation }: Props) {
         const fromPrecision = (pair.base.ticker === quote.from_asset ? pair.base : pair.quote).precision;
         const toPrecision = (pair.base.ticker === quote.to_asset ? pair.base : pair.quote).precision;
         const rawAmount = quote.from_amount_raw ?? (isBtcTicker(quote.from_asset)
-          ? Math.round(quote.from_amount * 1e8)
+          ? btcDisplayToSats(quote.from_amount)
           : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
         const rawToAmount = quote.to_amount_raw ?? Math.round(isBtcTicker(quote.to_asset)
           ? quote.to_amount * 1e8
@@ -502,6 +534,8 @@ export default function SwapScreen({ navigation }: Props) {
           status: 'completed',
           txid: result?.outboundTransferId || '',
         }));
+        // Flashnet settles instantly (no status polling), so record history here.
+        recordSwapHistory(quote, 'completed', result?.outboundTransferId || '');
         dispatch(setExecuting(false));
         // Keep the modal open and show a success screen (Flashnet settles
         // instantly — no status polling — so this is the only confirmation).
@@ -644,7 +678,15 @@ export default function SwapScreen({ navigation }: Props) {
             error_message: swapStatus === 'failed' ? 'Swap failed' : undefined,
           }));
 
-          if (swapState.currentExecution) {
+          // Record an enriched history entry (amounts/tickers from the quote).
+          if (swapState.currentQuote) {
+            recordSwapHistory(
+              swapState.currentQuote,
+              swapStatus === 'failed' ? 'failed' : 'completed',
+              swapState.currentExecution?.txid,
+              swapState.currentExecution?.swap_string,
+            );
+          } else if (swapState.currentExecution) {
             dispatch(addToHistory({
               ...swapState.currentExecution,
               status: swapStatus === 'failed' ? 'failed' : 'completed',

@@ -62,6 +62,10 @@
 	<string>Allow KaleidoSwap to use Face ID for secure wallet access.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>KaleidoSwap uses the local network to download and sync the on-device AI models peer-to-peer.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allow KaleidoSwap to use the microphone for on-device voice commands to the AI assistant.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

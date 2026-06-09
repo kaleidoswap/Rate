@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, protocolColor } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
 import { Skeleton } from './Skeleton';
+import { AmountText } from './AmountText';
 
 interface ProtocolBalance {
     confirmed: number;
@@ -39,9 +40,9 @@ interface BalanceCardProps {
 }
 
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
-    { key: 'RGB', label: 'RLN', color: '#2BEE79' },
-    { key: 'SPARK', label: 'Spark', color: '#60A5FA' },
-    { key: 'ARKADE', label: 'Arkade', color: '#A855F7' },
+    { key: 'RGB', label: 'RLN', color: protocolColor('RGB') },
+    { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
+    { key: 'ARKADE', label: 'Arkade', color: protocolColor('ARKADE') },
 ];
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({
@@ -83,24 +84,24 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}. Tap to change denomination.`}
                     >
                         <View style={styles.balanceRow}>
-                            <Text style={styles.balanceAmount}>{primaryText}</Text>
+                            <AmountText style={styles.balanceAmount}>{primaryText}</AmountText>
                             {!!primaryUnitLabel && (
                                 <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
                             )}
                         </View>
-                        <Text style={styles.balanceUsd}>{secondaryText ?? ''}</Text>
+                        <AmountText style={styles.balanceUsd}>{secondaryText ?? ''}</AmountText>
                     </TouchableOpacity>
                 ) : (
                     <>
                         <View style={styles.balanceRow}>
-                            <Text style={styles.balanceAmount}>
+                            <AmountText style={styles.balanceAmount}>
                                 {formatSatoshis(totalBalance)}
-                            </Text>
+                            </AmountText>
                             <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
                         </View>
-                        <Text style={styles.balanceUsd}>
+                        <AmountText style={styles.balanceUsd}>
                             {formatUSD(totalBalance) !== '0.00' ? `$${formatUSD(totalBalance)} USD` : ''}
-                        </Text>
+                        </AmountText>
                     </>
                 )}
             </View>
@@ -133,9 +134,9 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                                     </View>
                                     <View style={styles.breakdownText}>
                                         <Text style={styles.breakdownLabel}>{proto.label}</Text>
-                                        <Text style={styles.breakdownValue}>
+                                        <AmountText style={styles.breakdownValue}>
                                             {formatSatoshis(bal.total)} <Text style={styles.breakdownUnit}>{bitcoinUnit}</Text>
-                                        </Text>
+                                        </AmountText>
                                     </View>
                                 </View>
                             </React.Fragment>

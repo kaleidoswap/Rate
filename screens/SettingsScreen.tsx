@@ -7,7 +7,6 @@ import { NetworkIcon } from '../components/NetworkIcon';
 import { NetworkBadge } from '../components/NetworkBadge';
 import { RootState } from '../store';
 import {
-  setTheme,
   setCurrency,
   setNodeType,
   setRemoteNodeUrl,
@@ -26,6 +25,8 @@ import { Button, Input, MainHeader } from '../components';
 import { theme } from '../theme';
 import { PairingService, type DesktopPairing } from '../services/PairingService';
 import DatabaseService, { type NetworkType } from '../services/DatabaseService';
+import SecurityService from '../services/SecurityService';
+import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
 
 // Networks each protocol supports (mirrors the adapter network unions).
 const PROTO_SUPPORTED_NETWORKS: Record<'RGB' | 'SPARK' | 'ARKADE', string[]> = {
@@ -117,6 +118,48 @@ export default function SettingsScreen({ navigation }: Props) {
 
   // Per-protocol network (read from / written to the wallet's DB config).
   const activeWallet = useSelector((state: RootState) => state.wallet?.activeWallet);
+  const isWalletUnlocked = useSelector((state: RootState) => state.wallet?.isUnlocked);
+  const [revealedMnemonic, setRevealedMnemonic] = useState<string | null>(null);
+  const [showRevealModal, setShowRevealModal] = useState(false);
+
+  const handleRecoverMnemonic = async () => {
+    const walletId = (activeWallet as any)?.id;
+    if (!walletId) {
+      Alert.alert('No wallet found', 'Create or restore a wallet before recovering a recovery phrase.');
+      return;
+    }
+    if (!isWalletUnlocked) {
+      Alert.alert('Unlock wallet first', 'Unlock your wallet before recovering the recovery phrase.');
+      return;
+    }
+
+    try {
+      const mnemonic = await SecurityService.getInstance().revealMnemonic(walletId);
+      if (mnemonic === null) return;
+      if (!mnemonic) {
+        Alert.alert('Unavailable', 'No recovery phrase is stored for this wallet on this device.');
+        return;
+      }
+      setRevealedMnemonic(mnemonic);
+      setShowRevealModal(true);
+    } catch (e: any) {
+      Alert.alert('Security required', e?.message || 'Could not authenticate this device.');
+    }
+  };
+
+  const handlePasskeySuggestion = () => {
+    Alert.alert(
+      'Passkey unlock',
+      'Recommended next step: add passkey unlock with a platform FIDO2/WebAuthn credential, then use that assertion to release the wallet key after app launch. Keep the current PIN or device passcode as a recovery fallback.',
+      [{ text: 'Got it' }],
+    );
+  };
+
+  const closeRevealModal = () => {
+    setShowRevealModal(false);
+    setRevealedMnemonic(null);
+  };
+
   const [protoNetworks, setProtoNetworks] = useState<Record<string, string>>({});
   useEffect(() => {
     (async () => {
@@ -235,7 +278,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   // Which settings selector sheet is open (one bottom sheet at a time).
-  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'theme' | 'display'>(null);
+  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'display'>(null);
   const btcPrice = useBitcoinPrice();
 
   // Live previews for the unit selector (sample = 1,234,567 sats), matching
@@ -255,11 +298,6 @@ export default function SettingsScreen({ navigation }: Props) {
     { id: 'fiat', label: `Local currency (${settings.currency})`, description: 'Show values in fiat', preview: btcPrice ? unitPreview('fiat') : '—' },
   ];
   const currencyOptions: SheetOption[] = ['USD', 'EUR', 'GBP', 'CHF', 'CAD', 'JPY'].map((c) => ({ id: c, label: c }));
-  const themeOptions: SheetOption[] = [
-    { id: 'light', label: 'Light' },
-    { id: 'dark', label: 'Dark' },
-    { id: 'system', label: 'System' },
-  ];
   const displayModeOptions: SheetOption[] = [
     { id: 'lite', label: 'Lite', description: 'BTC, USD & assets only' },
     { id: 'advanced', label: 'Advanced', description: 'Networks, routes & channels' },
@@ -301,8 +339,6 @@ export default function SettingsScreen({ navigation }: Props) {
       ]
     );
   };
-
-  const capitalize = (s: string) => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 
   return (
     <View style={styles.container}>
@@ -420,12 +456,36 @@ export default function SettingsScreen({ navigation }: Props) {
           />
         </Group>
 
+        {/* Security */}
+        <SectionLabel>Security</SectionLabel>
+        <Group>
+          <Row
+            first
+            icon="key-outline"
+            iconColor={theme.colors.warning[500]}
+            label="Recover recovery phrase"
+            description="Requires unlocked wallet and device authentication"
+            value={isWalletUnlocked ? 'Unlocked' : 'Locked'}
+            onPress={handleRecoverMnemonic}
+          />
+          <Row
+            icon="shield-checkmark-outline"
+            iconColor={theme.colors.success[500]}
+            label="Passkey unlock"
+            description="Suggested upgrade for passwordless wallet unlock"
+            value="Recommended"
+            onPress={handlePasskeySuggestion}
+          />
+        </Group>
+
         {/* Preferences */}
         <SectionLabel>Preferences</SectionLabel>
         <Group>
           <Row first icon="options-outline" label="Display Mode" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
           <Row icon="logo-bitcoin" iconColor={theme.colors.warning[500]} label="Bitcoin Unit" description="How balances &amp; amounts are shown" value={denominationLabel[displayDenomination]} onPress={() => setActiveSheet('unit')} />
-          <Row icon="contrast-outline" label="Theme" value={capitalize(settings.theme)} onPress={() => setActiveSheet('theme')} />
+          {/* Theme picker intentionally omitted: the app is dark-only for now —
+              screens import the static dark theme, so a Light/System toggle had
+              no visible effect. Re-add once screens consume useAppTheme(). */}
           <Row
             icon="volume-high-outline"
             iconColor={theme.colors.accent[500]}
@@ -519,20 +579,17 @@ export default function SettingsScreen({ navigation }: Props) {
         onClose={() => setActiveSheet(null)}
       />
       <OptionSheet
-        visible={activeSheet === 'theme'}
-        title="Theme"
-        options={themeOptions}
-        selectedId={settings.theme}
-        onSelect={(id) => dispatch(setTheme(id as 'light' | 'dark' | 'system'))}
-        onClose={() => setActiveSheet(null)}
-      />
-      <OptionSheet
         visible={activeSheet === 'display'}
         title="Display Mode"
         options={displayModeOptions}
         selectedId={disclosureLevel}
         onSelect={(id) => dispatch(setDisclosureLevel(id as any))}
         onClose={() => setActiveSheet(null)}
+      />
+      <RevealMnemonicModal
+        visible={showRevealModal}
+        mnemonic={revealedMnemonic}
+        onClose={closeRevealModal}
       />
     </View>
   );

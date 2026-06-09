@@ -144,7 +144,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const renderHeader = () => {
     const balance = isBTC
       ? walletState.btcBalance?.vanilla?.spendable || 0
-      : assetDetails.balance?.spendable || 0;
+      : (typeof assetDetails.balance === 'number'
+          ? assetDetails.balance
+          : (assetDetails.balance?.spendable ?? (assetDetails.balance as any)?.available ?? 0));
 
     // Balances arrive in smallest units (sats for BTC, base units for RGB).
     // Divide by 10^precision before display, and render BTC in the user's
@@ -228,11 +230,20 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
       );
     }
 
-    if (assetDetails.balance) {
+    // `balance` may be a number (DB AssetRecord), a partial object (the BTC card
+    // passes only { spendable }), or a full { settled, future, spendable }.
+    // Read every field defensively — a missing one used to crash
+    // (undefined.toLocaleString()) when tapping the BTC / a Spark asset card.
+    if (assetDetails.balance != null) {
+      const bal: any = assetDetails.balance;
+      const isNum = typeof bal === 'number';
+      const settled = isNum ? bal : (bal.settled ?? 0);
+      const future = isNum ? bal : (bal.future ?? 0);
+      const spendable = isNum ? bal : (bal.spendable ?? bal.available ?? 0);
       details.push(
-        { label: 'Settled Balance', value: assetDetails.balance.settled.toLocaleString() },
-        { label: 'Future Balance', value: assetDetails.balance.future.toLocaleString() },
-        { label: 'Spendable Balance', value: assetDetails.balance.spendable.toLocaleString() }
+        { label: 'Settled Balance', value: Number(settled).toLocaleString() },
+        { label: 'Future Balance', value: Number(future).toLocaleString() },
+        { label: 'Spendable Balance', value: Number(spendable).toLocaleString() }
       );
     }
 

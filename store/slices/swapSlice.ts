@@ -33,6 +33,13 @@ export interface SwapExecution {
   updated_at: number;
   txid?: string;
   error_message?: string;
+  // Display metadata so the History screen can show "X BTC → Y USDB" without
+  // re-deriving from the (already-cleared) quote.
+  from_asset?: string;
+  to_asset?: string;
+  from_amount?: number;
+  to_amount?: number;
+  venue?: SwapVenue;
 }
 
 interface SwapState {

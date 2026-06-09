@@ -21,7 +21,7 @@ interface Props {
 export default function WalletSettingsScreen({ navigation, route }: Props) {
     const { walletId } = route.params;
     const dispatch = useDispatch();
-    const { wallets } = useSelector((state: RootState) => state.wallet);
+    const { wallets, isUnlocked } = useSelector((state: RootState) => state.wallet);
     const wallet = wallets.find((w: WalletRecord) => w.id === walletId);
 
     const [rlnRemoteUrl, setRlnRemoteUrl] = useState('');
@@ -29,36 +29,27 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
     const [revealedMnemonic, setRevealedMnemonic] = useState<string | null>(null);
     const [showRevealModal, setShowRevealModal] = useState(false);
 
-    // Auth-gated recovery-phrase reveal: require device authentication (biometric
-    // or passcode) before reading the seed from the secure enclave. When no device
-    // lock exists, warn explicitly before showing it.
+    // Auth-gated recovery-phrase reveal: the wallet must already be unlocked,
+    // then the OS must authenticate the user again before the words leave
+    // SecureStore.
     const handleViewMnemonic = async () => {
         if (typeof walletId !== 'number') return;
-        const security = SecurityService.getInstance();
-        const reveal = async () => {
-            const mnemonic = await security.getMnemonic(walletId);
+        if (!isUnlocked) {
+            Alert.alert('Unlock wallet first', 'Unlock this wallet before recovering the recovery phrase.');
+            return;
+        }
+
+        try {
+            const mnemonic = await SecurityService.getInstance().revealMnemonic(walletId);
+            if (mnemonic === null) return;
             if (!mnemonic) {
                 Alert.alert('Unavailable', 'No recovery phrase is stored for this wallet on this device.');
                 return;
             }
             setRevealedMnemonic(mnemonic);
             setShowRevealModal(true);
-        };
-
-        const canAuth = await security.isDeviceAuthAvailable();
-        if (canAuth) {
-            const ok = await security.authenticateForReveal();
-            if (!ok) return;
-            await reveal();
-        } else {
-            Alert.alert(
-                'No device lock',
-                'Your device has no biometric or passcode lock, so your recovery phrase cannot be protected here. Make sure no one is watching before continuing.',
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Show anyway', style: 'destructive', onPress: reveal },
-                ],
-            );
+        } catch (error: any) {
+            Alert.alert('Security required', error?.message || 'Could not authenticate this device.');
         }
     };
 
@@ -247,7 +238,7 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
                             <View style={[styles.iconContainer, { backgroundColor: theme.colors.secondary[100] }]}>
                                 <Ionicons name="key" size={20} color={theme.colors.secondary[600]} />
                             </View>
-                            <Text style={styles.menuItemText}>View Mnemonic Phrase</Text>
+                            <Text style={styles.menuItemText}>Recover recovery phrase</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={20} color={theme.colors.gray[400]} />
                     </TouchableOpacity>

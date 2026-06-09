@@ -76,7 +76,16 @@ Utility files:
 
 ### Theming
 
-`theme/index.ts` exports design tokens (colors, typography, spacing). Use `ThemeProvider.tsx` context via the `useTheme()` hook — do not hardcode colors or spacing.
+`theme/index.ts` exports design tokens (colors, typography, spacing) — do not hardcode colors or spacing. Most screens `import { theme }` (the static **dark** theme; dark is the brand default). A context path also exists (`useAppTheme()` from `theme/ThemeProvider.tsx`) but is not yet used app-wide.
+
+**Dark-only for now.** Because screens import the static dark `theme`, a Light/System toggle has no visible effect, so the Settings theme picker is intentionally omitted. `lightTheme` and the `useAppTheme()` path are kept for a future migration — to make light mode real, screens must consume `useAppTheme()` instead of the static import.
+
+Token helpers in `theme/index.ts`:
+- `protocolColor(p)` / `protocolTint(p, alpha)` — per-protocol accents (`theme.colors.protocol`). Never re-hardcode protocol hexes.
+- `theme.colors.networks` — per-network "leg" colors for Send/Receive destination coding (shared so the two screens can't drift). `theme.colors.brand.violet` is the secondary brand accent.
+- `leading(fontSize, multiplier)` — convert a `typography.lineHeight` multiplier to the absolute px RN needs (the raw `lineHeight` tokens are CSS-style multipliers and are NOT usable directly).
+
+Shared UI primitives live in `components/` and are exported from `components/index.ts`: `Button`, `Card`, `Input`, `Badge`, `SegmentedTabs`, `CopyButton`, `SectionHeader`, `Divider`, `Callout`, `AmountText` (tabular-nums for balances/amounts), `EmptyState`. Prefer these over hand-rolling pills/tabs/dividers/copy affordances.
 
 ### Key Patterns
 

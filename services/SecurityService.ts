@@ -11,6 +11,13 @@ const SECURITY_KEYS = {
   MNEMONIC_PREFIX: 'rate_wallet_mnemonic_',
 };
 
+const MNEMONIC_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
+  // Keep seeds device-bound and unavailable while the device is locked. We do
+  // not use requireAuthentication here yet because normal wallet startup still
+  // reads the seed for protocol initialization.
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+};
+
 export interface SecuritySettings {
   pinEnabled: boolean;
   biometricEnabled: boolean;
@@ -195,7 +202,7 @@ export class SecurityService {
   /** Store a wallet's seed phrase in the secure enclave. */
   async storeMnemonic(walletId: number, mnemonic: string): Promise<boolean> {
     try {
-      await SecureStore.setItemAsync(this.mnemonicKey(walletId), mnemonic);
+      await SecureStore.setItemAsync(this.mnemonicKey(walletId), mnemonic, MNEMONIC_STORE_OPTIONS);
       return true;
     } catch (error) {
       console.error('Failed to store mnemonic securely:', error);
@@ -206,11 +213,27 @@ export class SecurityService {
   /** Read a wallet's seed phrase from the secure enclave (null if absent). */
   async getMnemonic(walletId: number): Promise<string | null> {
     try {
-      return await SecureStore.getItemAsync(this.mnemonicKey(walletId));
+      return await SecureStore.getItemAsync(this.mnemonicKey(walletId), MNEMONIC_STORE_OPTIONS);
     } catch (error) {
       console.error('Failed to read mnemonic from secure storage:', error);
       return null;
     }
+  }
+
+  /**
+   * Authenticated recovery path for UI reveal. Callers should use this instead
+   * of getMnemonic whenever plaintext words are shown to the user.
+   */
+  async revealMnemonic(walletId: number): Promise<string | null> {
+    const canAuth = await this.isDeviceAuthAvailable();
+    if (!canAuth) {
+      throw new Error('Set a device passcode or biometric lock before revealing your recovery phrase.');
+    }
+
+    const authenticated = await this.authenticateForReveal();
+    if (!authenticated) return null;
+
+    return this.getMnemonic(walletId);
   }
 
   /** Remove a wallet's seed phrase from the secure enclave. */
@@ -225,6 +248,12 @@ export class SecurityService {
   /** True when the device can challenge the user (biometric or device passcode). */
   async isDeviceAuthAvailable(): Promise<boolean> {
     try {
+      const getEnrolledLevel = (LocalAuthentication as any).getEnrolledLevelAsync;
+      if (typeof getEnrolledLevel === 'function') {
+        const level = await getEnrolledLevel();
+        return level > LocalAuthentication.SecurityLevel.NONE;
+      }
+
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const enrolled = await LocalAuthentication.isEnrolledAsync();
       return hasHardware && enrolled;
@@ -322,5 +351,3 @@ export class SecurityService {
 }
 
 export default SecurityService;
-
-

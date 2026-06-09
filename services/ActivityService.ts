@@ -62,6 +62,11 @@ export interface SwapActivityInput {
   status: 'completed' | 'pending' | 'failed' | 'whitelisted' | 'executing';
   created_at: number;
   txid?: string;
+  from_asset?: string;
+  to_asset?: string;
+  from_amount?: number;
+  to_amount?: number;
+  venue?: 'kaleidoswap' | 'flashnet';
 }
 
 // ---------------------------------------------------------------------------
@@ -257,17 +262,25 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
     }
   }
 
-  // 4. KaleidoSwap atomic swaps (from Redux history)
+  // 4. Swaps (KaleidoSwap atomic + Flashnet AMM) from Redux history
   for (const swap of swaps) {
+    const trimNum = (n: number) => parseFloat(n.toFixed(8)).toString();
+    const hasLegs =
+      swap.from_asset != null && swap.to_asset != null &&
+      swap.from_amount != null && swap.to_amount != null;
+    const amount = hasLegs
+      ? `${trimNum(swap.from_amount as number)} ${swap.from_asset} → ${trimNum(swap.to_amount as number)} ${swap.to_asset}`
+      : '';
+    const venueName = swap.venue === 'flashnet' ? 'Flashnet Swap' : 'Atomic Swap';
     items.push({
       id: `swap-${swap.rfq_id}`,
       type: 'swap',
       source: 'swap',
-      asset: 'BTC',
-      assetName: 'Atomic Swap',
-      assetTicker: '',
+      asset: swap.to_asset || 'BTC',
+      assetName: hasLegs ? `${swap.from_asset} → ${swap.to_asset}` : venueName,
+      assetTicker: swap.to_asset || '',
       assetPrecision: 0,
-      amount: '',
+      amount,
       status: normalizeSwapStatus(swap.status),
       timestamp: swap.created_at,
       txid: swap.txid || swap.rfq_id,

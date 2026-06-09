@@ -1,0 +1,14 @@
+diff --git a/dist/adapters/SparkAdapter.js b/dist/adapters/SparkAdapter.js
+index 3b34f5f..3529e98 100644
+--- a/dist/adapters/SparkAdapter.js
++++ b/dist/adapters/SparkAdapter.js
+@@ -229,6 +229,9 @@ export class SparkAdapter {
+                 result = await wallet.payLightningInvoice({
+                     invoice: request.invoice,
+                     maxFeeSats: DEFAULT_MAX_FEE_SATS,
++                    // Required by the Spark SDK for 0-amount (amountless) invoices; for
++                    // invoices that already carry an amount this must be omitted.
++                    ...(request.amount && request.amount > 0 ? { amountSatsToSend: request.amount } : {}),
+                 });
+             }
+             else {

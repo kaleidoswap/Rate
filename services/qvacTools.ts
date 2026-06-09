@@ -38,14 +38,18 @@ export function createQVACTools(functions: AIAssistantFunctions): QVACTool[] {
     {
       name: 'find_merchant_locations',
       description:
-        'Find merchant locations in Lugano that accept Bitcoin payments. Use when the user wants to find, search, or list merchants, restaurants, shops, or businesses.',
+        "Find Bitcoin-accepting merchants near the user's real location using live BTC Map data. Defaults to the device's current GPS location. Use when the user wants merchants, shops, restaurants, cafes, or places to spend Bitcoin nearby.",
       parameters: z.object({
-        query: z.string().optional().describe('Search query for merchant name, type, or location'),
+        query: z.string().optional().describe('Optional filter for merchant name or type (e.g. "coffee")'),
         category: z
           .string()
           .optional()
-          .describe('Merchant category (restaurant, storefront, local_bar, local_cafe)'),
-        near_address: z.string().optional().describe('Find merchants near this address'),
+          .describe('Optional category filter (restaurant, cafe, bar, shop, grocery, lodging, atm)'),
+        near_address: z
+          .string()
+          .optional()
+          .describe('Optional address/city to search around instead of the current location'),
+        radius_km: z.number().optional().describe('Search radius in km (0.25–50, default 5)'),
         limit: z.number().optional().default(10).describe('Maximum number of results (1-20)'),
       }),
       handler: async (args) => functions.findMerchantLocations(args as any),

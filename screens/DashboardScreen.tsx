@@ -45,7 +45,8 @@ import {
   MainHeader
 } from '../components';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
-import { formatAssetAmount } from '../utils/assetAmount';
+import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
+import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
 import { BackupHealthCard } from '../components/BackupHealthCard';
 import { useBackupHealth } from '../hooks/useBackupHealth';
 
@@ -347,24 +348,27 @@ export default function DashboardScreen({ navigation }: Props) {
             const unifiedAssets = await adapter.listAssets();
             const mapped = unifiedAssets
               .filter((a: any) => a.id !== 'BTC')
-              .map((a: any) => ({
-                asset_id: a.id,
-                ticker: a.ticker,
-                name: a.name,
-                precision: a.precision,
-                issued_supply: a.metadata?.issued_supply || 0,
-                protocol: proto,
-                balance: {
-                  settled: a.balance.settled ?? a.balance.total,
-                  future: a.balance.pending,
-                  // `available` already folds in on-chain spendable + in-channel
-                  // outbound (see NwcRgbAdapter.mapAssetBalance), so it reflects the
-                  // real holdings even for an asset held purely in a channel.
-                  spendable: a.balance.available,
-                  offchain_outbound: a.balance.offchain_outbound ?? a.balance.locked ?? 0,
-                  offchain_inbound: a.balance.offchain_inbound ?? 0,
-                },
-              }));
+              .map((a: any) => {
+                const isUsdb = isUsdbTokenAddress(a.id);
+                return {
+                  asset_id: a.id,
+                  ticker: isUsdb ? USDB_TICKER : a.ticker,
+                  name: isUsdb ? USDB_NAME : a.name,
+                  precision: isUsdb ? USDB_DECIMALS : a.precision,
+                  issued_supply: a.metadata?.issued_supply || 0,
+                  protocol: proto,
+                  balance: {
+                    settled: a.balance.settled ?? a.balance.total,
+                    future: a.balance.pending,
+                    // `available` already folds in on-chain spendable + in-channel
+                    // outbound (see NwcRgbAdapter.mapAssetBalance), so it reflects the
+                    // real holdings even for an asset held purely in a channel.
+                    spendable: a.balance.available,
+                    offchain_outbound: a.balance.offchain_outbound ?? a.balance.locked ?? 0,
+                    offchain_inbound: a.balance.offchain_inbound ?? 0,
+                  },
+                };
+              });
             assets.push(...mapped);
           } catch (e) { console.warn('Asset fetch error:', e); }
         }
@@ -378,7 +382,7 @@ export default function DashboardScreen({ navigation }: Props) {
         name: asset.name,
         precision: asset.precision,
         issued_supply: asset.issued_supply,
-        balance: asset.balance?.spendable || asset.balance?.available || 0,
+        balance: getAssetBaseUnitBalance(asset.balance),
         last_updated: Date.now()
       }));
       dispatch(setRgbAssets(assetRecords));
@@ -477,15 +481,20 @@ export default function DashboardScreen({ navigation }: Props) {
   // which network each lives on. BTC is filtered out of `rgbAssets` upstream, so
   // its true total comes from `totalBalance` (on-chain + Lightning). USDt assets
   // bucket into `usd`; everything else stays in `other`.
+  const assetTotalBaseUnits = (asset: any): number => {
+    const balance = asset?.balance;
+    if (typeof balance === 'number') return balance;
+    return (
+      Number(balance?.settled ?? balance?.total ?? getAssetBaseUnitBalance(balance)) +
+      Number(balance?.offchain_inbound ?? 0) +
+      Number(balance?.offchain_outbound ?? 0)
+    );
+  };
+
   const liteAssets = rgbAssets.map((asset) => ({
     id: asset.asset_id,
     ticker: asset.ticker,
-    balance: {
-      total:
-        asset.balance.settled +
-        (asset.balance.offchain_inbound ?? 0) +
-        (asset.balance.offchain_outbound ?? 0),
-    },
+    balance: { total: assetTotalBaseUnits(asset) },
   })) as any;
   const lite = aggregateForLite(liteAssets);
   // The aggregated USD figure is in base units; convert each contributing asset
@@ -498,10 +507,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const liteUsdDisplay = rgbAssets
     .filter((asset) => liteUsdAssetIds.has(asset.asset_id))
     .reduce((sum, asset) => {
-      const total =
-        asset.balance.settled +
-        (asset.balance.offchain_inbound ?? 0) +
-        (asset.balance.offchain_outbound ?? 0);
+      const total = assetTotalBaseUnits(asset);
       return sum + total / Math.pow(10, asset.precision ?? 0);
     }, 0);
   // Assets the AssetList should show in lite mode: drop USDt (folded into the USD

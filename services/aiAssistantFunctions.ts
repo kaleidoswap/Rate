@@ -10,7 +10,16 @@ const premaiClient = new PremAI({
   apiKey: '', // Your existing PremAI key
 });
 
-// Location data from Lugano merchants
+// Live Bitcoin-merchant lookups (real device location + BTC Map / OSM data).
+import {
+  getUserLocation,
+  geocodeAddress,
+  findNearbyMerchants,
+  type BtcMapMerchant,
+} from './btcmapService';
+
+// Offline fallback: a static Lugano merchant dump, used only when the live
+// BTC Map query can't be reached.
 import LUGANO_MERCHANTS_DATA from '../assets/lugano-merchants.json';
 const LUGANO_MERCHANTS = LUGANO_MERCHANTS_DATA;
 
@@ -132,21 +141,25 @@ export const AI_FUNCTIONS = [
   },
   {
     name: 'find_merchant_locations',
-    description: 'Find merchant locations in Lugano that accept Bitcoin payments with fuzzy search capabilities',
+    description: "Find Bitcoin-accepting merchants near the user's real location using live BTC Map data. Defaults to the device's current GPS location.",
     parameters: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Search query for merchant name, type, or location (min 2 characters)'
+          description: 'Optional filter for merchant name or type (e.g. "coffee", "pizza")'
         },
         category: {
           type: 'string',
-          description: 'Merchant category (restaurant, storefront, local_bar, local_cafe, etc.)'
+          description: 'Optional category filter (restaurant, cafe, bar, shop, grocery, lodging, atm, …)'
         },
         near_address: {
           type: 'string',
-          description: 'Find merchants near this address'
+          description: 'Optional address/city to search around instead of the current location'
+        },
+        radius_km: {
+          type: 'number',
+          description: 'Search radius in kilometres (0.25–50, default 5)'
         },
         limit: {
           type: 'number',
@@ -845,69 +858,124 @@ _The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sur
     query,
     category,
     near_address,
+    radius_km,
     limit = 10
   }: {
     query?: string;
     category?: string;
     near_address?: string;
+    radius_km?: number;
     limit?: number;
   } = {}) {
+    limit = Math.max(1, Math.min(20, limit || 10));
+    const radiusMeters = Math.max(0.25, Math.min(50, radius_km || 5)) * 1000;
+
+    // Resolve the search centre: an explicit address (geocoded) wins, otherwise
+    // the user's real device location, otherwise the Lugano fallback.
+    let center = null as { lat: number; lng: number } | null;
+    let centerLabel: string | undefined;
+    let precise = false;
+
     try {
-      console.log('🏪 Searching merchants:', { query, category, near_address, limit });
+      if (near_address && near_address.trim().length >= 2) {
+        center = await geocodeAddress(near_address);
+        centerLabel = near_address;
+        precise = !!center;
+      }
+      if (!center) {
+        const loc = await getUserLocation();
+        center = loc.coords;
+        centerLabel = loc.label;
+        precise = loc.precise;
+      }
+    } catch (locErr) {
+      console.warn('📍 Location resolution failed:', locErr);
+    }
 
-      // Validate limit
-      limit = Math.max(1, Math.min(20, limit || 10));
+    // Live BTC Map (OSM) query around the resolved centre.
+    if (center) {
+      try {
+        console.log('🏪 BTC Map search:', { center, query, category, radiusMeters, limit });
+        const found = await findNearbyMerchants({
+          center,
+          radiusMeters,
+          query,
+          category,
+          limit,
+        });
 
+        const where = centerLabel || (precise ? 'your location' : 'Lugano (default)');
+        return {
+          success: true,
+          source: 'btcmap',
+          precise_location: precise,
+          center,
+          merchants: found.map((m: BtcMapMerchant) => ({
+            id: m.id,
+            name: m.name,
+            address: m.address,
+            category: m.category,
+            icon: m.icon,
+            lat: m.lat,
+            lon: m.lon,
+            distance_m: m.distance_m,
+            phone: m.phone,
+            website: m.website,
+            opening_hours: m.opening_hours,
+            accepts_bitcoin: m.accepts_onchain,
+            accepts_lightning: m.accepts_lightning,
+          })),
+          total_found: found.length,
+          search_params: { query, category, radius_km: radiusMeters / 1000, limit },
+          message:
+            found.length > 0
+              ? `🏪 Found ${found.length} Bitcoin merchant${found.length === 1 ? '' : 's'} near ${where}${query ? ` matching "${query}"` : ''}`
+              : `No Bitcoin merchants found within ${radiusMeters / 1000} km of ${where}. Try widening the radius.`,
+          timestamp: new Date().toISOString(),
+        };
+      } catch (apiErr) {
+        console.warn('🏪 BTC Map query failed, falling back to offline list:', apiErr);
+        // fall through to the offline Lugano list
+      }
+    }
+
+    // Offline fallback — static Lugano dump (used when geolocation and the live
+    // BTC Map query are both unavailable, e.g. no network).
+    try {
       let filteredMerchants = [...LUGANO_MERCHANTS];
-      let searchResults: Array<{ merchant: any; score: number }> = [];
 
-      // Filter by category first
       if (category) {
         const categoryLower = category.toLowerCase();
-        filteredMerchants = filteredMerchants.filter(merchant => 
-          merchant.icon === category || 
+        filteredMerchants = filteredMerchants.filter(merchant =>
+          merchant.icon === category ||
           merchant.icon === categoryLower ||
           merchant.name.toLowerCase().includes(categoryLower)
         );
       }
 
-      // Apply fuzzy search if query provided
       if (query && validateInput.merchantQuery(query)) {
         const queryLower = query.toLowerCase();
-        
-        searchResults = filteredMerchants.map(merchant => {
-          let score = 0;
-          
-          // Name matching (highest weight)
-          score += fuzzySearch(queryLower, merchant.name) * 3;
-          
-          // Address matching
-          score += fuzzySearch(queryLower, merchant.address) * 2;
-          
-          // Website matching
-          if (merchant.website) {
-            score += fuzzySearch(queryLower, merchant.website) * 1;
-          }
-          
-          // Category/icon matching
-          score += fuzzySearch(queryLower, merchant.icon || '') * 1.5;
-          
-          return { merchant, score };
-        })
-        .filter(result => result.score > 0.3) // Filter out very low matches
-        .sort((a, b) => b.score - a.score); // Sort by score descending
-        
-        filteredMerchants = searchResults.map(result => result.merchant);
+        filteredMerchants = filteredMerchants
+          .map(merchant => {
+            let score = 0;
+            score += fuzzySearch(queryLower, merchant.name) * 3;
+            score += fuzzySearch(queryLower, merchant.address) * 2;
+            if (merchant.website) score += fuzzySearch(queryLower, merchant.website) * 1;
+            score += fuzzySearch(queryLower, merchant.icon || '') * 1.5;
+            return { merchant, score };
+          })
+          .filter(result => result.score > 0.3)
+          .sort((a, b) => b.score - a.score)
+          .map(result => result.merchant);
       }
 
-      // Limit results
       const results = filteredMerchants.slice(0, limit);
-
-      console.log(`✅ Found ${results.length} merchants out of ${filteredMerchants.length} matches`);
 
       return {
         success: true,
-        merchants: results.map((merchant, index) => ({
+        source: 'offline',
+        precise_location: false,
+        merchants: results.map(merchant => ({
           id: merchant.id,
           name: merchant.name,
           address: merchant.address,
@@ -915,25 +983,22 @@ _The invoice will expire in ${Math.floor(expiry_seconds / 60)} minutes. Make sur
           phone: merchant.phone,
           website: merchant.website,
           opening_hours: merchant.opening_hours,
-          relevance_score: searchResults[index]?.score,
           accepts_bitcoin: true,
-          accepts_lightning: true
+          accepts_lightning: true,
         })),
         total_found: filteredMerchants.length,
         total_available: LUGANO_MERCHANTS.length,
         search_params: { query, category, limit },
-        message: `🏪 Found ${results.length} merchants${query ? ` matching "${query}"` : ''}${category ? ` in category "${category}"` : ''} in Lugano`,
-        timestamp: new Date().toISOString()
+        message: `🏪 Showing ${results.length} Lugano merchant${results.length === 1 ? '' : 's'} (offline list — couldn't reach BTC Map or your location)`,
+        timestamp: new Date().toISOString(),
       };
     } catch (error) {
       console.error('❌ Merchant search error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Search failed';
-      
       return {
         success: false,
-        error: errorMessage,
+        error: error instanceof Error ? error.message : 'Search failed',
         message: '❌ Failed to search merchants. Please try again.',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
     }
   }

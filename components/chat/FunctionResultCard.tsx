@@ -1,9 +1,74 @@
 // components/chat/FunctionResultCard.tsx
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking, Platform } from 'react-native';
 import InvoiceQRCode from '../InvoiceQRCode';
 import { useAppTheme } from '../../theme/ThemeProvider';
+import { formatDistance } from '../../services/btcmapService';
 import type { Theme } from '../../theme';
+
+/** Open a merchant in the native maps app — by coordinates if we have them,
+ *  otherwise by a search query on its name/address. */
+const openMaps = (merchant: { name?: string; address?: string; lat?: number; lon?: number }) => {
+  let url: string;
+  if (typeof merchant.lat === 'number' && typeof merchant.lon === 'number') {
+    const label = encodeURIComponent(merchant.name || 'Merchant');
+    url =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?ll=${merchant.lat},${merchant.lon}&q=${label}`
+        : `geo:${merchant.lat},${merchant.lon}?q=${merchant.lat},${merchant.lon}(${label})`;
+  } else {
+    const q = encodeURIComponent([merchant.name, merchant.address].filter(Boolean).join(' '));
+    url = `https://www.openstreetmap.org/search?query=${q}`;
+  }
+  Linking.openURL(url).catch(() => {});
+};
+
+/** A single merchant row used by both the list and the detail cards. */
+const MerchantRow: React.FC<{
+  merchant: any;
+  styles: ReturnType<typeof makeStyles>;
+  onOpenLink: (url: string) => void;
+  openMaps: typeof openMaps;
+  expanded?: boolean;
+}> = ({ merchant, styles, onOpenLink, openMaps, expanded }) => (
+  <View style={styles.merchantItem}>
+    <View style={styles.merchantHeader}>
+      <Text style={styles.merchantName} numberOfLines={2}>
+        {merchant.icon ? `${merchant.icon} ` : ''}
+        {merchant.name}
+      </Text>
+      {typeof merchant.distance_m === 'number' && (
+        <Text style={styles.merchantDistance}>{formatDistance(merchant.distance_m)}</Text>
+      )}
+    </View>
+    {!!merchant.address && <Text style={styles.merchantAddress}>{merchant.address}</Text>}
+    {!!merchant.opening_hours && (
+      <Text style={styles.merchantHours}>🕒 {merchant.opening_hours}</Text>
+    )}
+    {(merchant.accepts_lightning || merchant.accepts_bitcoin) && (
+      <Text style={styles.merchantPay}>
+        {merchant.accepts_lightning ? '⚡ Lightning' : ''}
+        {merchant.accepts_lightning && merchant.accepts_bitcoin ? '  ·  ' : ''}
+        {merchant.accepts_bitcoin ? '₿ On-chain' : ''}
+      </Text>
+    )}
+    <View style={styles.merchantActions}>
+      <TouchableOpacity onPress={() => openMaps(merchant)} style={styles.mapsButton}>
+        <Text style={styles.mapsButtonText}>🗺️ Map</Text>
+      </TouchableOpacity>
+      {!!merchant.phone && (
+        <TouchableOpacity onPress={() => Linking.openURL(`tel:${merchant.phone}`)}>
+          <Text style={styles.merchantLink}>📞 {expanded ? merchant.phone : 'Call'}</Text>
+        </TouchableOpacity>
+      )}
+      {!!merchant.website && (
+        <TouchableOpacity onPress={() => onOpenLink(merchant.website)}>
+          <Text style={styles.merchantLink}>🌐 Website</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  </View>
+);
 
 interface FunctionResultCardProps {
   functionCalled: string;
@@ -79,57 +144,57 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
       );
     }
 
-    case 'find_merchant_locations':
+    case 'find_merchant_locations': {
+      const merchants: any[] = functionResult.merchants ?? [];
       return (
         <View style={styles.card}>
-          <Text style={styles.title}>🏪 Merchants Found</Text>
+          <Text style={styles.title}>
+            🏪 {merchants.length} Bitcoin Merchant{merchants.length === 1 ? '' : 's'} Nearby
+          </Text>
           {functionResult.success ? (
-            <ScrollView style={styles.merchantList} nestedScrollEnabled>
-              {functionResult.merchants.map((merchant: any) => (
-                <View key={merchant.id} style={styles.merchantItem}>
-                  <Text style={styles.merchantName}>{merchant.name}</Text>
-                  <Text style={styles.merchantAddress}>{merchant.address}</Text>
-                  {merchant.phone && (
-                    <TouchableOpacity onPress={() => Linking.openURL(`tel:${merchant.phone}`)}>
-                      <Text style={styles.merchantLink}>📞 {merchant.phone}</Text>
-                    </TouchableOpacity>
-                  )}
-                  {merchant.website && (
-                    <TouchableOpacity onPress={() => onOpenLink(merchant.website)}>
-                      <Text style={styles.merchantLink}>🌐 Website</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
-              ))}
-            </ScrollView>
+            merchants.length === 0 ? (
+              <Text style={styles.invoiceText}>
+                No Bitcoin merchants found in range. Try a wider radius.
+              </Text>
+            ) : (
+              <>
+                <ScrollView style={styles.merchantList} nestedScrollEnabled>
+                  {merchants.map((merchant: any) => (
+                    <MerchantRow
+                      key={`${merchant.id}`}
+                      merchant={merchant}
+                      styles={styles}
+                      onOpenLink={onOpenLink}
+                      openMaps={openMaps}
+                    />
+                  ))}
+                </ScrollView>
+                <Text style={styles.attribution}>
+                  {functionResult.source === 'offline'
+                    ? '⚠︎ Offline list — couldn’t reach BTC Map or your location'
+                    : `via BTC Map${functionResult.precise_location ? ' · near your location' : ' · default area'}`}
+                </Text>
+              </>
+            )
           ) : (
             <Text style={styles.errorText}>❌ {functionResult.error}</Text>
           )}
         </View>
       );
+    }
 
     case 'get_merchant_info':
       return (
         <View style={styles.card}>
           <Text style={styles.title}>📍 Merchant Info</Text>
           {functionResult.success ? (
-            <View style={styles.merchantItem}>
-              <Text style={styles.merchantName}>{functionResult.merchant.name}</Text>
-              <Text style={styles.merchantAddress}>{functionResult.merchant.address}</Text>
-              {functionResult.merchant.opening_hours && (
-                <Text style={styles.merchantHours}>🕒 {functionResult.merchant.opening_hours}</Text>
-              )}
-              {functionResult.merchant.phone && (
-                <TouchableOpacity onPress={() => Linking.openURL(`tel:${functionResult.merchant.phone}`)}>
-                  <Text style={styles.merchantLink}>📞 {functionResult.merchant.phone}</Text>
-                </TouchableOpacity>
-              )}
-              {functionResult.merchant.website && (
-                <TouchableOpacity onPress={() => onOpenLink(functionResult.merchant.website)}>
-                  <Text style={styles.merchantLink}>🌐 Website</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <MerchantRow
+              merchant={functionResult.merchant}
+              styles={styles}
+              onOpenLink={onOpenLink}
+              openMaps={openMaps}
+              expanded
+            />
           ) : (
             <Text style={styles.errorText}>❌ {functionResult.error}</Text>
           )}
@@ -261,7 +326,7 @@ const makeStyles = (theme: Theme) =>
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
       fontWeight: '500',
     },
-    merchantList: { maxHeight: 180 },
+    merchantList: { maxHeight: 280 },
     merchantItem: {
       padding: theme.spacing[2],
       backgroundColor: theme.colors.surface.primary,
@@ -270,12 +335,54 @@ const makeStyles = (theme: Theme) =>
       borderWidth: 1,
       borderColor: theme.colors.border.light,
     },
+    merchantHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: theme.spacing[2],
+    },
     merchantName: {
+      flex: 1,
       fontSize: theme.typography.fontSize.sm,
       fontWeight: '600',
       color: theme.colors.text.primary,
       marginBottom: theme.spacing[1],
       lineHeight: 20,
+    },
+    merchantDistance: {
+      fontSize: theme.typography.fontSize.xs,
+      fontWeight: '700',
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
+    },
+    merchantPay: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.success[500] ?? theme.colors.success[600],
+      fontWeight: '500',
+      marginBottom: theme.spacing[1],
+    },
+    merchantActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: theme.spacing[3],
+      marginTop: theme.spacing[1],
+    },
+    mapsButton: {
+      paddingVertical: theme.spacing[1],
+      paddingHorizontal: theme.spacing[2],
+      backgroundColor: theme.colors.primary[100] ?? theme.colors.surface.secondary,
+      borderRadius: theme.borderRadius.sm,
+    },
+    mapsButtonText: {
+      fontSize: theme.typography.fontSize.xs,
+      fontWeight: '600',
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
+    },
+    attribution: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.tertiary,
+      marginTop: theme.spacing[1],
+      fontStyle: 'italic',
     },
     merchantAddress: {
       fontSize: theme.typography.fontSize.xs,
