@@ -28,6 +28,17 @@ export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# --- Load App Store Connect creds from a gitignored file ----------------------
+# Put ASC_KEY_P8 / ASC_KEY_ID / ASC_ISSUER_ID / TEAM_ID in .env.testflight.local
+# (gitignored — see .env.testflight.example) so a deploy is a single command.
+# The file is the source of truth; comment a line out to fall back to the env.
+if [ -f "$ROOT/.env.testflight.local" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "$ROOT/.env.testflight.local"
+  set +a
+fi
+
 WORKSPACE="ios/KaleidoSwap.xcworkspace"
 SCHEME="KaleidoSwap"
 CONFIG="Release"
@@ -49,6 +60,19 @@ KEY_DEST="$KEY_DEST_DIR/AuthKey_${ASC_KEY_ID}.p8"
 # Skip the copy when the key is already at the destination (cp would error on an identical file).
 if [ ! "$ASC_KEY_P8" -ef "$KEY_DEST" ]; then
   cp "$ASC_KEY_P8" "$KEY_DEST"
+fi
+
+# --- Bump the iOS build number (CFBundleVersion) ------------------------------
+# TestFlight rejects a build number it has already seen, so bump before every
+# upload. The project uses apple-generic versioning, so agvtool bumps it across
+# all configs + Info.plist. Set SKIP_BUMP=1 to upload the current number as-is.
+if [ "${SKIP_BUMP:-0}" != "1" ]; then
+  echo "==> bump build number"
+  ( cd ios && agvtool next-version -all >/dev/null )
+  NEW_BUILD="$(cd ios && agvtool what-version -terse)"
+  # Keep app.json's (cosmetic, native value is authoritative) in sync.
+  node -e "const f='app.json',a=require('./'+f);a.expo.ios.buildNumber=String($NEW_BUILD);require('fs').writeFileSync(f,JSON.stringify(a,null,2)+'\n')"
+  echo "    build number is now $NEW_BUILD — commit ios/ + app.json after a successful upload"
 fi
 
 # --- Install CocoaPods deps ---------------------------------------------------
