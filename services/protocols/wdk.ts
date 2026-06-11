@@ -241,8 +241,13 @@ export async function initializeWdkProtocols(
           const sparkAdapter = manager.getAdapterIfAvailable('SPARK') as any
           const sparkWallet = sparkAdapter?.getUnderlyingSparkWallet?.()
           if (sparkWallet) {
-            await flashnetClientManager.initialize(sparkWallet, parsed.network || 'MAINNET')
-            console.log('[initializeWdkProtocols] flashnet (Spark DEX) initialized')
+            // Must be the SAME network the SparkWallet was created with (config.network,
+            // i.e. the Spark default of 'regtest'). flashnet only supports lowercase
+            // 'mainnet'/'regtest' — the previous 'MAINNET' default both mismatched the
+            // regtest wallet and failed the case-sensitive check, throwing on every init.
+            const sparkNetwork = (config as SparkAdapterConfig).network || 'regtest'
+            await flashnetClientManager.initialize(sparkWallet, sparkNetwork)
+            console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`)
           } else {
             console.log('[initializeWdkProtocols] no SparkWallet exposed → flashnet disabled')
           }
