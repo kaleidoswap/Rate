@@ -2,10 +2,10 @@
 //
 // On-device QVAC text-to-speech playback. QVACService.synthesizeSpeech returns
 // 16-bit PCM samples; here we wrap them in a WAV container, write it to a cache
-// file and play it through expo-av. If QVAC TTS is unavailable or fails, the
+// file and play it through expo-audio. If QVAC TTS is unavailable or fails, the
 // caller falls back to the system voice (services/speech.ts).
 
-import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { File, Directory, Paths } from 'expo-file-system';
 import { Buffer } from 'buffer';
 import QVACService from './QVACService';
@@ -38,7 +38,7 @@ function pcmToWav(samples: number[], sampleRate: number): Uint8Array {
   return new Uint8Array(buf);
 }
 
-let currentSound: Audio.Sound | null = null;
+let currentSound: AudioPlayer | null = null;
 
 const LIGHTNING_INVOICE_RE = /\b(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{40,}\b/gi;
 const LNURL_RE = /\blnurl[0-9a-z]{40,}\b/gi;
@@ -72,19 +72,19 @@ function sanitizeForSupertonic(text: string): string {
  * This must run before every utterance: the voice recorder leaves the session
  * in PlayAndRecord, which (a) routes audio to the earpiece, not the speaker,
  * and (b) applies voice-processing that makes speech sound thin/robotic. Setting
- * `allowsRecordingIOS: false` switches the category back to Playback (loud
+ * `allowsRecording: false` switches the category back to Playback (loud
  * speaker, no processing). Not cached — recording can flip it back at any time.
  */
 async function setSpeakerPlaybackMode(): Promise<void> {
   try {
-    await Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-      shouldDuckAndroid: true,
-      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-      playThroughEarpieceAndroid: false,
+    await setAudioModeAsync({
+      allowsRecording: false,
+      playsInSilentMode: true,
+      shouldPlayInBackground: false,
+      // doNotMix: speak exclusively/clearly (matches the prior iOS DoNotMix; the
+      // unified mode now applies on Android too, where it was DuckOthers before).
+      interruptionMode: 'doNotMix',
+      shouldRouteThroughEarpiece: false,
     });
   } catch {
     /* non-fatal */
@@ -96,8 +96,9 @@ export async function stopQvacSpeak(): Promise<void> {
   const s = currentSound;
   currentSound = null;
   if (s) {
-    try { await s.stopAsync(); } catch { /* ignore */ }
-    try { await s.unloadAsync(); } catch { /* ignore */ }
+    // expo-audio: pause() halts playback, remove() frees the native player.
+    try { s.pause(); } catch { /* ignore */ }
+    try { s.remove(); } catch { /* ignore */ }
   }
 }
 
@@ -123,14 +124,16 @@ async function qvacSpeak(text: string): Promise<boolean> {
   await setSpeakerPlaybackMode();
   await stopQvacSpeak();
 
-  const { sound } = await Audio.Sound.createAsync({ uri: file.uri }, { shouldPlay: true });
+  const sound = createAudioPlayer({ uri: file.uri });
   currentSound = sound;
+  sound.play();
 
   return new Promise<boolean>((resolve) => {
-    sound.setOnPlaybackStatusUpdate((status: any) => {
-      if (!status?.isLoaded) return;
+    const sub = sound.addListener('playbackStatusUpdate', (status) => {
+      if (!status.isLoaded) return;
       if (status.didJustFinish) {
-        void sound.unloadAsync();
+        sub.remove();
+        try { sound.remove(); } catch { /* already freed */ }
         if (currentSound === sound) currentSound = null;
         resolve(true);
       }

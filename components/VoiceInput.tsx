@@ -1,20 +1,60 @@
 // components/VoiceInput.tsx
 import React, { useRef, useImperativeHandle, forwardRef, useState, useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
-import { Audio } from 'expo-av';
+import {
+  AudioModule,
+  setAudioModeAsync,
+  requestRecordingPermissionsAsync,
+  IOSOutputFormat,
+  AudioQuality,
+  type AudioRecorder,
+  type RecordingOptions,
+} from 'expo-audio';
 import { File } from 'expo-file-system';
 import QVACService from '../services/QVACService';
 
-// expo-av exposes a SINGLE native recorder for the whole process: only one
-// Audio.Recording can be prepared at a time, app-wide. Multiple VoiceInput
+// 16 kHz mono 16-bit PCM WAV — the format Whisper expects. iOS records LINEARPCM
+// directly; Android records its default encoder into a .wav container. Channel
+// count and bit rate are top-level in expo-audio's RecordingOptions; the per-OS
+// blocks carry only the format/codec specifics.
+const RECORDING_OPTIONS: RecordingOptions = {
+  isMeteringEnabled: false,
+  extension: '.wav',
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 256000,
+  android: {
+    extension: '.wav',
+    outputFormat: 'default',
+    audioEncoder: 'default',
+    sampleRate: 16000,
+  },
+  ios: {
+    extension: '.wav',
+    outputFormat: IOSOutputFormat.LINEARPCM,
+    audioQuality: AudioQuality.HIGH,
+    sampleRate: 16000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: {},
+};
+
+// Stop (if recording) and free the native recorder. expo-audio splits what
+// expo-av's stopAndUnloadAsync() did into stop() + release(); never throws.
+async function disposeRecorder(rec: AudioRecorder): Promise<void> {
+  try { await rec.stop(); } catch { /* not recording / already stopped */ }
+  try { rec.release(); } catch { /* already released */ }
+}
+
+// We serialise recording to ONE AudioRecorder at a time. Multiple VoiceInput
 // instances can be mounted simultaneously on the tab navigator (the AI chat
-// screen's mic + the dashboard voice-agent overlay), so per-instance refs are
-// not enough — without coordination a second instance calls prepareToRecordAsync
-// while the first still owns the native recorder and throws
-// "Only one Recording object can be prepared at a given time." This module-level
-// handle mirrors the native singleton so every instance shares one source of
-// truth and we can always release it (on stop, error, or unmount).
-let activeRecording: Audio.Recording | null = null;
+// screen's mic + the dashboard voice-agent overlay), and they share the single
+// hardware microphone — without coordination a second instance starts capturing
+// while the first still holds the mic. This module-level handle is the shared
+// source of truth so any instance can release it (on stop, error, or unmount).
+let activeRecording: AudioRecorder | null = null;
 // Synchronous reservation so two instances starting in the same tick can't both
 // pass the activeRecording check (there are awaits before it's assigned) and
 // race into prepareToRecordAsync. Set before the first await, cleared in finally.
@@ -35,7 +75,7 @@ export interface VoiceInputRef {
 
 const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
   ({ onResult, onPartialResult, onError, onStart, onEnd }, ref) => {
-    const recorderRef = useRef<Audio.Recording | null>(null);
+    const recorderRef = useRef<AudioRecorder | null>(null);
     const startingRef = useRef(false);
     const isRecordingRef = useRef(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -57,9 +97,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         startingRef.current = false;
         if (rec) {
           if (activeRecording === rec) activeRecording = null;
-          rec.stopAndUnloadAsync().catch(() => {
-            /* already released */
-          });
+          void disposeRecorder(rec);
         }
       },
       []
@@ -71,61 +109,33 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
       // recorder can't be prepared twice). The owner will finish or release it.
       if (recorderStarting) return;
 
-      let recording: Audio.Recording | null = null;
+      let recording: AudioRecorder | null = null;
       startingRef.current = true;
       recorderStarting = true;
       try {
-        // Another VoiceInput instance (or a closed overlay) may have left the
-        // app-wide native recorder prepared. Only one can exist at a time, so
-        // tear down the stale one before preparing ours — otherwise
-        // prepareToRecordAsync throws "Only one Recording object can be prepared
-        // at a given time."
+        // Another VoiceInput instance (or a closed overlay) may still hold the
+        // shared recorder. Tear it down before we start ours so two instances
+        // don't both capture from the one hardware microphone.
         if (activeRecording) {
           const stale = activeRecording;
           activeRecording = null;
-          try {
-            await stale.stopAndUnloadAsync();
-          } catch {
-            /* already released */
-          }
+          await disposeRecorder(stale);
         }
 
-        const { status } = await Audio.requestPermissionsAsync();
-        if (status !== 'granted') {
+        const { granted } = await requestRecordingPermissionsAsync();
+        if (!granted) {
           onError('not-allowed');
           return;
         }
 
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
+        await setAudioModeAsync({
+          allowsRecording: true,
+          playsInSilentMode: true,
         });
 
-        recording = new Audio.Recording();
-        await recording.prepareToRecordAsync({
-          isMeteringEnabled: false,
-          android: {
-            extension: '.wav',
-            outputFormat: Audio.AndroidOutputFormat.DEFAULT,
-            audioEncoder: Audio.AndroidAudioEncoder.DEFAULT,
-            sampleRate: 16000,
-            numberOfChannels: 1,
-            bitRate: 256000,
-          },
-          ios: {
-            extension: '.wav',
-            outputFormat: Audio.IOSOutputFormat.LINEARPCM,
-            audioQuality: Audio.IOSAudioQuality.HIGH,
-            sampleRate: 16000,
-            numberOfChannels: 1,
-            bitRate: 256000,
-            linearPCMBitDepth: 16,
-            linearPCMIsBigEndian: false,
-            linearPCMIsFloat: false,
-          },
-          web: {},
-        });
-        await recording.startAsync();
+        recording = new AudioModule.AudioRecorder(RECORDING_OPTIONS);
+        await recording.prepareToRecordAsync();
+        recording.record();
 
         recorderRef.current = recording;
         activeRecording = recording;
@@ -135,11 +145,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         console.log('🎤 QVAC VoiceInput: recording started');
       } catch (err) {
         if (recording) {
-          try {
-            await recording.stopAndUnloadAsync();
-          } catch {
-            /* ignore cleanup */
-          }
+          await disposeRecorder(recording);
         }
         if (activeRecording === recording) activeRecording = null;
         recorderRef.current = null;
@@ -162,11 +168,13 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         setIsRecording(false);
         recorderRef.current = null;
 
-        await recording.stopAndUnloadAsync();
+        await recording.stop();
         if (activeRecording === recording) activeRecording = null;
-        const uri = recording.getURI();
+        // Read the file path before release() detaches the native object.
+        const uri = recording.uri;
+        try { recording.release(); } catch { /* already freed */ }
 
-        await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+        await setAudioModeAsync({ allowsRecording: false });
 
         onEnd();
 

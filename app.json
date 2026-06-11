@@ -98,6 +98,12 @@
         {
           "color": "#2BEE79"
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow KaleidoSwap to use the microphone for on-device voice commands to the AI assistant."
+        }
       ]
     ],
     "extra": {

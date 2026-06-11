@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@kaleidorg/wallet-engine@1.0.0-beta.4':
+    hash: 53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1
+    path: patches/@kaleidorg__wallet-engine@1.0.0-beta.4.patch
+
 importers:
 
   .:
@@ -40,7 +45,7 @@ importers:
         version: 0.1.0
       '@kaleidorg/wallet-engine':
         specifier: ^1.0.0-beta.4
-        version: 1.0.0-beta.4(0034e19555df349dc615af7a283f9fc6)
+        version: 1.0.0-beta.4(patch_hash=53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1)(0034e19555df349dc615af7a283f9fc6)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.9(bare-tcp@2.2.13(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))
@@ -110,9 +115,9 @@ importers:
       expo:
         specifier: ^54.0.29
         version: 54.0.35(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(graphql@16.14.0)(react-native-webview@13.16.1(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3)
-      expo-av:
-        specifier: ~16.0.8
-        version: 16.0.8(expo@54.0.35)(react-native-web@0.21.2(react-dom@19.1.4(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
+      expo-audio:
+        specifier: ~1.1.1
+        version: 1.1.1(expo-asset@12.0.13(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3))(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       expo-background-task:
         specifier: ~1.0.10
         version: 1.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
@@ -194,9 +199,6 @@ importers:
       openai:
         specifier: ^5.23.2
         version: 5.23.2(ws@8.21.0)(zod@4.4.3)
-      premai:
-        specifier: ^0.9.3
-        version: 0.9.3
       react:
         specifier: ^19.1.4
         version: 19.1.4
@@ -3722,16 +3724,13 @@ packages:
       react: '*'
       react-native: '*'
 
-  expo-av@16.0.8:
-    resolution: {integrity: sha512-cmVPftGR/ca7XBgs7R6ky36lF3OC0/MM/lpgX/yXqfv0jASTsh7AYX9JxHCwFmF+Z6JEB1vne9FDx4GiLcGreQ==}
+  expo-audio@1.1.1:
+    resolution: {integrity: sha512-CPCpJ+0AEHdzWROc0f00Zh6e+irLSl2ALos/LPvxEeIcJw1APfBa4DuHPkL4CQCWsVe7EnUjFpdwpqsEUWcP0g==}
     peerDependencies:
       expo: '*'
+      expo-asset: '*'
       react: '*'
       react-native: '*'
-      react-native-web: '*'
-    peerDependenciesMeta:
-      react-native-web:
-        optional: true
 
   expo-background-task@1.0.10:
     resolution: {integrity: sha512-EbPnuf52Ps/RJiaSFwqKGT6TkvMChv7bI0wF42eADbH3J2EMm5y5Qvj0oFmF1CBOwc3mUhqj63o7Pl6OLkGPZQ==}
@@ -5543,9 +5542,6 @@ packages:
   postcss@8.4.49:
     resolution: {integrity: sha512-OCVPnIObs4N29kxTjzLfUryOkvZEq+pf8jTF0lg8E7uETuWHA+v7j3c/xJmiqpX450191LlmZfUKkXxkTry7nA==}
     engines: {node: ^10 || ^12 || >=14}
-
-  premai@0.9.3:
-    resolution: {integrity: sha512-KdDlBfGAWQZobKGG+VGV3sixFOm8ljX8wuPId7MnLvBVC9NmGdsVGyjHpk7xcDb24NnbubWVfAN1IyxRmlMWeQ==}
 
   pretty-bytes@5.6.0:
     resolution: {integrity: sha512-FFw039TmrBqFK8ma/7OL3sDz/VytdtJr044/QUJtH0wK9lb9jLq9tJyIxUwtQJHwar2BqtiA4iCWSwo9JLkzFg==}
@@ -8707,7 +8703,7 @@ snapshots:
 
   '@kaleidorg/mind@0.1.0': {}
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.4(0034e19555df349dc615af7a283f9fc6)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.4(patch_hash=53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1)(0034e19555df349dc615af7a283f9fc6)':
     dependencies:
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
@@ -11786,13 +11782,12 @@ snapshots:
       - supports-color
       - typescript
 
-  expo-av@16.0.8(expo@54.0.35)(react-native-web@0.21.2(react-dom@19.1.4(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
+  expo-audio@1.1.1(expo-asset@12.0.13(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3))(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:
       expo: 54.0.35(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(graphql@16.14.0)(react-native-webview@13.16.1(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3)
+      expo-asset: 12.0.13(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3)
       react: 19.1.4
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
-    optionalDependencies:
-      react-native-web: 0.21.2(react-dom@19.1.4(react@19.1.4))(react@19.1.4)
 
   expo-background-task@1.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)):
     dependencies:
@@ -14315,8 +14310,6 @@ snapshots:
       nanoid: 3.3.12
       picocolors: 1.1.1
       source-map-js: 1.2.1
-
-  premai@0.9.3: {}
 
   pretty-bytes@5.6.0: {}
 
