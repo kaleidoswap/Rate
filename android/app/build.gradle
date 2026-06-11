@@ -87,9 +87,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.rate.rgbwallet'
+    namespace 'com.kaleidoswap.wallet'
     defaultConfig {
-        applicationId 'com.rate.rgbwallet'
+        applicationId 'com.kaleidoswap.wallet'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

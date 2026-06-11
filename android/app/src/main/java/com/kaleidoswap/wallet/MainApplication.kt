@@ -1,4 +1,4 @@
-package com.rate.rgbwallet
+package com.kaleidoswap.wallet
 
 import android.app.Application
 import android.content.res.Configuration
