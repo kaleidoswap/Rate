@@ -13,25 +13,21 @@
 // changing them never rebuilds the engine or drops the RAG index.
 
 import {
-  Funnel,
+  Engine,
   ToolRegistry,
-  InMemoryMemoryStore,
-  createMemoryToolSource,
-  createL402ToolSource,
+  SkillRegistry,
+  createSkillReferenceToolSource,
   skillsFromBundle,
-  type FunnelCallbacks,
-  type FunnelResult,
-  type FunnelSettings,
+  type AgenticResult,
   type LLMProvider,
+  type Message,
   type Skill,
   type SkillBundle,
+  type ToolResult,
 } from '@kaleidorg/mind';
 import skillBundle from '../skills.bundle.json';
 import { buildWalletToolSource } from './walletTools';
 import { buildMerchantToolSource } from './merchantTools';
-import { buildKnowledgeToolSource } from './aiKnowledge';
-import { asyncStorageMemoryIO } from './aiMemory';
-import { protocolManager } from './protocols';
 import type QVACService from './QVACService';
 
 const SOUL =
@@ -43,18 +39,36 @@ const SOUL =
   'report what it returns. All BTC amounts are in satoshis. Keep replies ' +
   'short and friendly.';
 
-/** Per-user agent settings (FunnelSettings + mobile sampling knobs). */
-export interface MindAgentSettings extends FunnelSettings {
+/** Per-user agent settings. Newer settings are kept optional for compatibility. */
+export interface MindAgentSettings {
   temperature?: number;
   maxTokens?: number;
+  disabledSkills?: string[];
+  enabledSkills?: string[];
+  maxTurns?: number;
 }
 
-export interface RunTurnCallbacks extends FunnelCallbacks {
+export interface RunTurnCallbacks {
+  history?: { role: 'user' | 'assistant' | 'system' | 'tool'; content: string }[];
+  onStart?: (requestId: string, turn?: number) => void;
+  onToken?: (token: string, turn: number) => void;
+  onToolCall?: (
+    call: { name: string; arguments: Record<string, unknown> },
+    info: { requiresConfirmation?: boolean; turn: number }
+  ) => void;
+  onConfirm?: (call: {
+    name: string;
+    arguments: Record<string, unknown>;
+  }) => Promise<{ approved: boolean; reason?: string }>;
+  onStep?: (name: string) => void;
   /** The model's chain-of-thought, streamed as it reasons (shown on demand). */
   onThinking?: (token: string) => void;
 }
 
-export type MindTurnResult = FunnelResult;
+export type MindTurnResult =
+  | (AgenticResult & { tier: 'agentic'; toolCalls: ToolResult[] })
+  | { tier: 'fast'; text: string; intent?: string; data?: unknown; toolCalls?: ToolResult[] }
+  | { tier: 'recipe'; text: string; toolCalls?: ToolResult[] };
 
 export interface MindAgent {
   runTurn(text: string, cbs?: RunTurnCallbacks): Promise<MindTurnResult>;
@@ -62,21 +76,10 @@ export interface MindAgent {
   listSkills(): Skill[];
 }
 
-/** Pay a BOLT11 with the on-device Lightning wallet (Spark preferred, RLN
- *  fallback) — the shared spend path for L402 (and future paid sources). */
-async function payInvoiceOnDevice(invoice: string): Promise<{ preimage: string }> {
-  const spark = protocolManager.getAdapterIfAvailable('SPARK');
-  const rln = protocolManager.getAdapterIfAvailable('RGB');
-  const adapter: any = spark?.isConnected() ? spark : rln?.isConnected() ? rln : null;
-  if (!adapter) throw new Error('No Lightning wallet connected to pay the invoice');
-  const r: any = await adapter.sendPayment({ invoice });
-  return { preimage: r?.preimage ?? r?.paymentPreimage ?? r?.payment_preimage ?? '' };
-}
-
 /**
- * Build the shared agent. Stable for the lifetime of a QVACService instance —
- * tool sources, the Funnel and the RAG retriever are built once; user settings
- * flow in per turn through `getSettings`.
+ * Build the shared agent. This branch consumes the published @kaleidorg/mind
+ * 0.1 engine surface; newer Funnel/RAG/memory helpers are not in that package
+ * yet, so keep this wrapper on Engine until the dependency is bumped.
  */
 export function createMindAgent(
   qvac: QVACService,
@@ -99,37 +102,67 @@ export function createMindAgent(
     cancel: (id) => qvac.cancelRequest(id),
   };
 
-  const memoryStore = new InMemoryMemoryStore({ io: asyncStorageMemoryIO() });
-  const funnel = new Funnel({
+  const skills = skillsFromBundle(skillBundle as SkillBundle);
+  const skillRegistry = new SkillRegistry(skills);
+  const tools = new ToolRegistry([
+    buildWalletToolSource(),
+    buildMerchantToolSource(),
+    createSkillReferenceToolSource(skillRegistry),
+  ]);
+  const engine = new Engine({
     provider,
-    tools: new ToolRegistry([
-      buildWalletToolSource(),
-      buildMerchantToolSource(),
-      createMemoryToolSource(memoryStore),
-      buildKnowledgeToolSource(qvac),
-      createL402ToolSource({
-        payInvoice: payInvoiceOnDevice,
-        maxAutoPaySats: 1000,
-        requiresConfirmation: false,
-        log: (m: string) => console.log('[L402]', m),
-      }),
-    ]),
-    skills: skillsFromBundle(skillBundle as SkillBundle),
-    system: SOUL,
-    getSettings,
-    log: (m) => console.log('[AI]', m),
-  });
+    tools,
+    defaultSystem: SOUL,
+    defaultMaxTurns: 5,
+  } as any);
 
   return {
     async runTurn(text, cbs: RunTurnCallbacks = {}) {
       // Make this turn's reasoning available to the provider closure.
       thinkingSink = cbs.onThinking;
       try {
-        return await funnel.runTurn(text, cbs);
+        cbs.onStep?.('thinking');
+        const settings = getSettings();
+        const activeSkill = selectSkill(text, skillRegistry, settings);
+        const composed = skillRegistry.compose(SOUL, activeSkill);
+        const messages: Message[] = [
+          { role: 'system', content: composed.system },
+          ...(cbs.history ?? []),
+          { role: 'user' as const, content: text },
+        ];
+        const result = await engine.runAgentic(messages, {
+          maxTurns: settings.maxTurns ?? 5,
+          allowedTools: composed.allowedTools,
+          onStart: cbs.onStart,
+          onToken: cbs.onToken,
+          onConfirm: cbs.onConfirm,
+          onToolCall: async (
+            call: { name: string; arguments: Record<string, unknown> },
+            turn: number
+          ) => {
+            const def = await tools.getDef(call.name);
+            cbs.onToolCall?.(call, { requiresConfirmation: def?.requiresConfirmation, turn });
+          },
+        } as any);
+        return { ...result, tier: 'agentic' as const, toolCalls: result.toolCalls ?? [] };
       } finally {
         thinkingSink = undefined;
       }
     },
-    listSkills: () => funnel.listSkills(),
+    listSkills: () => skillRegistry.list(),
   };
+}
+
+function selectSkill(
+  query: string,
+  registry: SkillRegistry,
+  settings: MindAgentSettings
+): Skill | null {
+  const disabled = new Set(settings.disabledSkills ?? []);
+  const enabled = settings.enabledSkills ? new Set(settings.enabledSkills) : null;
+  const selected = registry.select(query);
+  if (!selected) return null;
+  if (disabled.has(selected.name)) return null;
+  if (enabled && !enabled.has(selected.name)) return null;
+  return selected;
 }
