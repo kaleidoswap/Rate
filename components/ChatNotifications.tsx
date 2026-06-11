@@ -74,31 +74,61 @@ export default function ChatNotifications() {
     const startedAt = Math.floor(Date.now() / 1000);
     const notified = new Set<string>();
     let subId: string | null = null;
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    try {
-      subId = NostrService.getInstance().subscribeToInbox((message: DirectMessage) => {
-        const counterparty = message.mine ? message.recipient : message.pubkey;
-        if (!counterparty) return;
+    const handleMessage = (message: DirectMessage) => {
+      const counterparty = message.mine ? message.recipient : message.pubkey;
+      if (!counterparty) return;
 
-        // Relays replay stored events on (re)connect; only treat recent ones as
-        // live so old history doesn't spam notifications or inflate unread.
-        const isLive = message.createdAt >= startedAt - 120;
-        dispatch(receiveMessage({ pubkey: counterparty, message, countUnread: isLive }));
+      // Relays replay stored events on (re)connect; only treat recent ones as
+      // live so old history doesn't spam notifications or inflate unread.
+      const isLive = message.createdAt >= startedAt - 120;
+      dispatch(receiveMessage({ pubkey: counterparty, message, countUnread: isLive }));
 
-        if (message.mine || !isLive) return;
-        if (counterparty === activeRef.current) return; // thread is open on screen
-        if (notified.has(message.id)) return; // de-dupe across relays
-        notified.add(message.id);
+      if (message.mine || !isLive) return;
+      if (counterparty === activeRef.current) return; // thread is open on screen
+      if (notified.has(message.id)) return; // de-dupe across relays
+      notified.add(message.id);
 
-        const name = resolveName(counterparty, contactsRef.current);
-        ToastService.getInstance().info(`${name}: ${preview(message.content)}`);
-        void NotificationService.getInstance().notifyMessage(name, message.content, counterparty);
-      });
-    } catch (e) {
-      console.warn('ChatNotifications: failed to start inbox subscription', e);
-    }
+      const name = resolveName(counterparty, contactsRef.current);
+      ToastService.getInstance().info(`${name}: ${preview(message.content)}`);
+      void NotificationService.getInstance().notifyMessage(name, message.content, counterparty);
+    };
+
+    // The persisted `isConnected` flag can already be true on cold start, before
+    // the NostrService singleton has (re)initialized its NDK/user — in that window
+    // subscribeToInbox() throws, and since the flag never transitions the effect
+    // won't re-run on its own. So retry until the service is genuinely ready (or we
+    // give up after ~30s). A failed restore flips isConnected → false, which tears
+    // this effect down and cancels the loop.
+    const MAX_ATTEMPTS = 30;
+    let attempts = 0;
+    const trySubscribe = () => {
+      if (cancelled || subId) return;
+      const nostr = NostrService.getInstance();
+      const ready = nostr.connected && nostr.ndkInstance && nostr.currentUser;
+      if (ready) {
+        try {
+          subId = nostr.subscribeToInbox(handleMessage);
+          return;
+        } catch (e) {
+          // fall through to retry — readiness can race with NDK teardown
+          console.warn('ChatNotifications: inbox subscription attempt failed', e);
+        }
+      }
+      if (++attempts >= MAX_ATTEMPTS) {
+        console.warn('ChatNotifications: gave up starting inbox subscription (Nostr not ready)');
+        return;
+      }
+      retryTimer = setTimeout(trySubscribe, 1000);
+    };
+
+    trySubscribe();
 
     return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
       if (subId) NostrService.getInstance().unsubscribe(subId);
     };
   }, [isConnected, dispatch]);
