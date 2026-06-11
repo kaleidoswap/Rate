@@ -16,7 +16,7 @@ import {
   Clipboard,
 } from 'react-native';
 import { useDispatch } from 'react-redux';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -41,6 +41,7 @@ interface Props {
 type SetupStep = 'welcome' | 'mode' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
 
 export default function WalletSetupScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
   const [step, setStep] = useState<SetupStep>('welcome');
   const [name, setName] = useState('');
@@ -127,9 +128,15 @@ export default function WalletSetupScreen({ navigation }: Props) {
       // Persist the chosen disclosure level; reversible later in Settings.
       dispatch(setDisclosureLevel(mode));
       if (mode === 'lite') {
-        // Lite hides network management — enable Spark + Arkade + Liquid on their
-        // default test networks. RLN stays governed by the next (NWC) step.
-        setNetworks((prev) => ({ ...prev, spark: true, arkade: true, liquid: true }));
+        // Lite hides network management. On Android, only enable Spark by default
+        // because Liquid (lwk-rn JNI) and Arkade can crash at initialization on
+        // first launch. Users can enable them later in Settings.
+        setNetworks((prev) => ({
+          ...prev,
+          spark: true,
+          arkade: Platform.OS !== 'android',
+          liquid: Platform.OS !== 'android',
+        }));
       }
       // Both modes go through the RLN-over-NWC step (skippable).
       animateTransition('rln');
@@ -737,7 +744,11 @@ export default function WalletSetupScreen({ navigation }: Props) {
   );
 
   const renderSuccessStep = () => (
-    <View style={styles.centerContent}>
+    <ScrollView
+      style={styles.stepContent}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={[styles.centerContent, { paddingBottom: insets.bottom + 24 }]}
+    >
       <Animated.View style={[
         styles.successIconContainer,
         { transform: [{ scale: scaleAnim }] }
@@ -778,7 +789,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           </TouchableOpacity>
         </View>
       </View>
-    </View>
+    </ScrollView>
   );
 
   const getButtonTitle = () => {

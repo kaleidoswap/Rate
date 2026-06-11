@@ -7,16 +7,22 @@ const path = require('path');
 const config = getDefaultConfig(__dirname);
 
 // Allow Metro to resolve local packages still linked via file:
-// @kaleidorg/wallet-engine is a local file: sibling (not yet published under the new
-// name), so Metro watches it and resolves it from ../wallet-engine (its built dist/).
-const walletEngineRoot = path.resolve(__dirname, '../wallet-engine');
+// @kaleidorg/wallet-engine is a local file: sibling when present; fall back to
+// the npm version in node_modules when the sibling doesn't exist (CI / fresh clone).
+const fs = require('fs');
+const localWalletEngine = path.resolve(__dirname, '../wallet-engine');
+const walletEngineRoot = fs.existsSync(localWalletEngine)
+  ? localWalletEngine
+  : path.resolve(__dirname, 'node_modules/@kaleidorg/wallet-engine');
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 // @kaleidorg/mind — the shared agentic engine, also published to npm as
 // @kaleidorg/mind. Linked via file: for fast local dev (pure JS dist/, no
 // native deps). To consume the published version instead, set its dep to
 // `^0.0.1` and drop this watchFolder.
 const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
-config.watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot];
+const watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot]
+  .filter(p => fs.existsSync(p));
+config.watchFolders = watchFolders;
 config.resolver.nodeModulesPaths = [
   path.resolve(__dirname, 'node_modules'),
   path.resolve(kaleidoUiRoot, 'node_modules'),

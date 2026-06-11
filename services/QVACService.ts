@@ -627,9 +627,10 @@ class QVACService {
 
   // --- LLM lifecycle ---
 
-  // Whether to try GPU (Metal) offload for local inference before CPU. Cached
-  // per session so we don't repeatedly attempt a Metal context that can't init.
-  private static PREFER_GPU = true;
+  // Whether to try GPU offload for local inference before CPU. Metal on iOS;
+  // not attempted on Android (Vulkan path in llamacpp is not stable on all
+  // devices — CPU inference is reliable and fast enough on arm64).
+  private static PREFER_GPU = Platform.OS === 'ios';
 
   /**
    * Load the local llamacpp model with Metal/GPU offload when possible, falling
