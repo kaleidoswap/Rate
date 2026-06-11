@@ -27,7 +27,6 @@ import {
   type NetworkType as ProtocolNetworkType,
 } from '../utils/account-routing';
 import { theme } from '../theme';
-import { Input } from '../components';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
 import { useDepositDetection } from '../hooks/useDepositDetection';
 import { useSparkAutoClaim } from '../hooks/useSparkAutoClaim';
@@ -236,7 +235,6 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [maxDepositAmount, setMaxDepositAmount] = useState<number>(0);
-  const [isUserTyping, setIsUserTyping] = useState(false);
   const [arkadeSubMode, setArkadeSubMode] = useState<'ark' | 'boarding'>('ark');
   // Network selector dropdown (All selected by default; specific networks hidden).
   const [showNetworkDropdown, setShowNetworkDropdown] = useState(false);
@@ -462,7 +460,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // them. Only a plain BTC Lightning invoice needs an amount up front.
   // No receive flow strictly requires an amount: BTC Lightning, RGB-LN and RGB-L1
   // invoices are all open-amount (the sender chooses how much to send). The amount
-  // field is offered as an OPTIONAL convenience (see renderAmountInput's showAmount).
+  // is offered as an OPTIONAL convenience via the amount row + AmountEditorModal.
   const isAmountRequired = (): boolean => false;
 
   const isAmountValid = (): boolean => {
@@ -1179,18 +1177,14 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   }, [selectedAsset, networkType]);
 
-  // Generate address when amount changes for lightning (only when user stops typing)
+  // Regenerate the Lightning invoice a moment after the amount changes (the amount
+  // is set via the AmountEditorModal, so debounce to avoid re-minting mid-edit).
   useEffect(() => {
-    if (networkType === 'lightning' && amount && isAmountValid() && !isUserTyping) {
-      const timeoutId = setTimeout(() => {
-        if (!isUserTyping) { // Double check user isn't typing
-          generateAddress();
-        }
-      }, 2000);
-      
+    if (networkType === 'lightning' && amount && isAmountValid()) {
+      const timeoutId = setTimeout(() => generateAddress(), 2000);
       return () => clearTimeout(timeoutId);
     }
-  }, [amount, isUserTyping]);
+  }, [amount]);
 
   // Regenerate address when channels change (for lightning network)
   useEffect(() => {
@@ -1373,182 +1367,6 @@ export default function ReceiveScreen({ navigation }: Props) {
               Only Bitcoin available. Open RGB Lightning channels to receive RGB assets.
             </Text>
           </View>
-        )}
-      </View>
-    );
-  };
-
-  const renderAmountInput = () => {
-    if (!selectedAsset) return null;
-    
-    // Amount is always optional, but only meaningful for layers that can bind one
-    // into a request: Lightning/Spark invoices, RGB invoices, and the unified QR.
-    // Plain on-chain BTC addresses can't carry an amount, so hide the field there.
-    const showAmount =
-      selectedAsset.isRGB ||
-      networkType === 'unified' ||
-      networkType === 'lightning' ||
-      networkType === 'spark';
-    if (!showAmount) return null;
-
-    const isRequired = isAmountRequired();
-
-    // Quick amount buttons for BTC
-    const renderQuickAmounts = () => {
-      if (selectedAsset.ticker !== 'BTC') return null;
-      
-      const quickAmounts = bitcoinUnit === 'BTC' 
-        ? ['0.001', '0.005', '0.01'] 
-        : ['1000', '5000', '10000'];
-      
-      return (
-        <View style={styles.quickAmounts}>
-          {quickAmounts.map((amt) => (
-            <TouchableOpacity
-              key={amt}
-              style={[
-                styles.quickAmountButton,
-                amount === amt && styles.quickAmountButtonSelected
-              ]}
-              onPress={() => setAmount(amt)}
-            >
-              <Text style={[
-                styles.quickAmountText,
-                amount === amt && styles.quickAmountTextSelected
-              ]}>
-                {amt} {bitcoinUnit}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      );
-    };
-
-    return (
-      <View style={styles.amountSection}>
-        <Text style={styles.sectionTitle}>
-          Amount {isRequired ? '(Required)' : '(Optional)'}
-        </Text>
-        <Text style={styles.sectionDescription}>
-          {selectedAsset.isRGB 
-            ? networkType === 'lightning'
-              ? `Enter the amount of ${selectedAsset.ticker} to receive via Lightning`
-              : `Specify the amount of ${selectedAsset.ticker} for the RGB invoice`
-            : isRequired
-              ? `Enter the amount of ${bitcoinUnit} to receive`
-              : 'Leave empty for any amount or specify a fixed amount'
-          }
-        </Text>
-        
-        {/* Error message for amount */}
-        {isRequired && amount && !isAmountValid() && (
-          <View style={styles.errorMessage}>
-            <Ionicons name="warning" size={16} color={theme.colors.error[500]} />
-            <Text style={styles.errorMessageText}>Please enter a valid amount</Text>
-          </View>
-        )}
-        
-        <View style={styles.inputContainer}>
-          <Input
-            placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
-            value={amount}
-            onChangeText={(value) => {
-              // Set typing flag to prevent interference
-              setIsUserTyping(true);
-              
-              // Clear typing flag after user stops typing
-              setTimeout(() => setIsUserTyping(false), 3000);
-              
-              // Simplified input handling to prevent focus issues
-              let cleanValue = value.replace(/[^\d.,]/g, '');
-              
-              // Remove extra commas
-              cleanValue = cleanValue.replace(/,/g, '');
-              
-              // Handle multiple decimal points
-              const parts = cleanValue.split('.');
-              if (parts.length > 2) {
-                cleanValue = parts[0] + '.' + parts.slice(1).join('');
-              }
-              
-              // Basic precision limit
-              const precision = getAssetPrecision(selectedAsset.ticker);
-              const decimalParts = cleanValue.split('.');
-              if (decimalParts.length === 2 && decimalParts[1].length > precision) {
-                return; // Don't update if exceeds precision
-              }
-              
-              // Quick max amount check for lightning (without complex formatting)
-              if (networkType === 'lightning' && maxDepositAmount > 0) {
-                const numValue = parseFloat(cleanValue);
-                if (!isNaN(numValue) && numValue > maxDepositAmount) {
-                  return; // Don't update if exceeds max
-                }
-              }
-
-              setAmount(cleanValue);
-            }}
-            onFocus={() => setIsUserTyping(true)}
-            onBlur={() => {
-              setTimeout(() => setIsUserTyping(false), 100);
-            }}
-            keyboardType="decimal-pad"
-            variant="outlined"
-            style={
-              isRequired && amount && !isAmountValid() 
-                ? { ...styles.amountInput, ...styles.amountInputError }
-                : styles.amountInput
-            }
-            autoFocus={false}
-          />
-          <View style={styles.currencyLabel}>
-            <Text style={styles.currencyText}>
-              {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
-            </Text>
-          </View>
-        </View>
-        
-        {renderQuickAmounts()}
-        
-        {/* Lightning warnings and limits */}
-        {networkType === 'lightning' && (
-          <View style={styles.lightningWarnings}>
-            {selectedAsset.isRGB && (
-              <View style={styles.warningContainer}>
-                <Ionicons name="information-circle" size={16} color={theme.colors.primary[500]} />
-                <Text style={styles.warningText}>
-                  3,000 sats required for RGB asset transfers via Lightning
-                </Text>
-              </View>
-            )}
-            
-            {/* Channel-capacity messaging only applies to RGB/RLN Lightning. Spark
-                brings its own LN liquidity (no local channels), so suppress both the
-                "no channels" error and the max-deposit hint when Spark is connected. */}
-            {maxDepositAmount === 0 && !getProtocolStatus().SPARK && (
-              <View style={[styles.warningContainer, styles.errorWarning]}>
-                <Ionicons name="warning" size={16} color={theme.colors.warning[500]} />
-                <Text style={[styles.warningText, styles.errorWarningText]}>
-                  No active Lightning channels found. Lightning deposits are not available.
-                </Text>
-              </View>
-            )}
-
-            {maxDepositAmount > 0 && (
-              <View style={styles.warningContainer}>
-                <Ionicons name="flash" size={16} color={theme.colors.success[500]} />
-                <Text style={styles.warningText}>
-                  Max Lightning deposit: {formatAssetAmount(maxDepositAmount, selectedAsset.ticker)} {selectedAsset.ticker}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
-        
-        {selectedAsset.ticker === 'BTC' && amount && isAmountValid() && (
-          <Text style={styles.approximateValue}>
-            ≈ ${parseFloat(formatSatoshisToUSD(amount.replace(/,/g, ''))).toLocaleString()} USD
-          </Text>
         )}
       </View>
     );

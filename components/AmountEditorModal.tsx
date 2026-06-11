@@ -201,12 +201,20 @@ export const AmountEditorModal: React.FC<Props> = ({
               </TouchableOpacity>
             </View>
 
-            {/* WDK amount input (BTC ↔ USD toggle) */}
+            {/* WDK amount input (sats|BTC ↔ USD toggle) */}
             <AmountInput
               label="Amount to receive"
               value={value}
-              onChangeText={(t) => setValue(t.replace(/[^\d.,]/g, ''))}
-              tokenSymbol="BTC"
+              onChangeText={(t) =>
+                // sats are whole numbers — strip decimals in sats token mode;
+                // BTC and fiat keep the decimal separators.
+                setValue(
+                  unitIsSats && inputMode === 'token'
+                    ? t.replace(/[^\d]/g, '')
+                    : t.replace(/[^\d.,]/g, ''),
+                )
+              }
+              tokenSymbol={unitIsSats ? 'sats' : 'BTC'}
               tokenBalance={tokenBalance}
               tokenBalanceUSD={tokenBalanceUSD}
               inputMode={inputMode}
