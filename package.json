@@ -80,7 +80,6 @@
     "metro-core": "^0.83.3",
     "nostr-tools": "^2.19.3",
     "openai": "^5.23.2",
-    "premai": "^0.9.3",
     "react": "^19.1.4",
     "react-dom": "^19.1.4",
     "react-native": "^0.81.5",

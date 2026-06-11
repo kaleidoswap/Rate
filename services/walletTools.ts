@@ -10,7 +10,6 @@
 
 import {
   bindWalletTools,
-  walletTools,
   type WalletHandler,
   type WalletLayer,
 } from '@kaleidorg/mind';
@@ -247,12 +246,4 @@ const HANDLERS: Record<string, WalletHandler> = {
 export function buildWalletToolSource() {
   const layers: WalletLayer[] = ['spark', 'rln', 'arkade', 'core'];
   return bindWalletTools(HANDLERS, { layers, includeCore: true, allowMissing: true, id: 'wallet' });
-}
-
-/** The contract tool names this binding currently implements (for skill scoping). */
-export function implementedWalletToolNames(): string[] {
-  const names = new Set(Object.keys(HANDLERS));
-  return walletTools({ layers: [...connectedLayers(), 'core'] })
-    .map((t) => t.name)
-    .filter((n) => names.has(n));
 }

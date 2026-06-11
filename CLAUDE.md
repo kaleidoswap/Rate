@@ -58,7 +58,7 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 - `NostrService.ts` / `NWCService.ts` – Nostr protocol + NIP-47 Wallet Connect
 - `SecurityService.ts` – biometric auth, SecureStore encryption
 - `QVACService.ts` – on-device AI model lifecycle (LLM + Whisper via @qvac/sdk)
-- `qvacTools.ts` – QVAC tool definitions mapping to AIAssistantFunctions
+- `mindAgent.ts` – the ONE KaleidoMind agent runner (fast-path → recipe → agentic funnel) shared by chat and voice; `walletTools.ts` / `merchantTools.ts` / `aiMemory.ts` / `aiKnowledge.ts` are its tool-source bindings
 
 ### Protocol Layer (shared library)
 
@@ -94,7 +94,7 @@ Shared UI primitives live in `components/` and are exported from `components/ind
 - Multi-protocol wallet via `protocolManager` (Spark, Arkade, RGB); screens use `protocolManager.getAdapter('PROTOCOL')` with legacy `RGBApiService` fallback
 - RGB Lightning node accessed via kaleido-sdk through the shared `@kaleidorg/wallet-engine` library
 - Swaps support two venues: KaleidoSwap (maker-based atomic swaps) and Flashnet (Spark AMM pools)
-- AI assistant uses QVAC SDK for on-device LLM (QWEN3 600M) and Whisper transcription — see `services/QVACService.ts`, `services/qvacTools.ts`, and `services/aiAssistantFunctions.ts`
+- AI assistant uses QVAC SDK for on-device LLM (QWEN3 600M) and Whisper transcription, driven through the shared `@kaleidorg/mind` engine — see `services/mindAgent.ts` (single runner for chat + voice), `services/QVACService.ts` (model lifecycle), and `services/walletTools.ts` (wallet tool contract binding, unit-tested in `walletTools.test.ts`)
 - Voice input uses `components/VoiceInput.tsx` (QVAC Whisper) instead of WebView-based speech recognition
 - QVAC models require physical devices (no emulator support); first launch downloads models (~400MB LLM + ~40MB Whisper)
 - Sensitive keys use `expo-secure-store`; environment variables via `react-native-dotenv` from `.env`

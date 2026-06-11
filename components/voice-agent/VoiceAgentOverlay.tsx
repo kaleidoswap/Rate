@@ -19,10 +19,12 @@ import Animated, {
   interpolate,
   cancelAnimation,
 } from 'react-native-reanimated';
+import { useSelector } from 'react-redux';
 import { theme } from '../../theme';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
+import { selectMindConfig } from '../../store/slices/settingsSlice';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 interface Bubble {
@@ -56,9 +58,16 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
 
 const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
   const qvac = useQVAC();
-  // Same KaleidoMind funnel as the chat screen — fast-path, recipes, contract
-  // wallet tools, memory + on-device RAG, confirm gate.
-  const agent = useMemo(() => createMindAgent(qvac.service), [qvac.service]);
+  // Same KaleidoMind funnel AND settings as the chat screen — fast-path,
+  // recipes, contract wallet tools, memory + on-device RAG, confirm gate,
+  // persona/sampling/toggles. Settings are read per turn through the ref.
+  const mindConfig = useSelector(selectMindConfig);
+  const mindConfigRef = useRef(mindConfig);
+  mindConfigRef.current = mindConfig;
+  const agent = useMemo(
+    () => createMindAgent(qvac.service, () => mindConfigRef.current),
+    [qvac.service],
+  );
   const voiceRef = useRef<VoiceInputRef>(null);
   const scrollRef = useRef<ScrollView>(null);
 
