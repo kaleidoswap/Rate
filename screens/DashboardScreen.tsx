@@ -211,15 +211,21 @@ export default function DashboardScreen({ navigation }: Props) {
 
       const anyConnected = Array.from(results.values()).some(r => r.success);
 
-      // Report which protocols failed (non-blocking)
+      // Report which protocols failed (non-blocking). A `skipped:` error is an
+      // expected unconfigured state (e.g. RGB with no NWC node paired), not a
+      // failure — keep it out of the warning so a fresh wallet logs clean.
       const failed: string[] = [];
+      const skipped: string[] = [];
       for (const [proto, result] of results) {
-        if (!result.success) {
-          failed.push(`${proto}: ${result.error || 'failed'}`);
-        }
+        if (result.success) continue;
+        const entry = `${proto}: ${result.error || 'failed'}`;
+        (result.error?.startsWith('skipped:') ? skipped : failed).push(entry);
       }
       if (failed.length > 0) {
         console.warn('[Dashboard] Protocol failures:', failed.join(', '));
+      }
+      if (skipped.length > 0) {
+        console.log('[Dashboard] Protocols skipped:', skipped.join(', '));
       }
 
       if (anyConnected) {
@@ -243,9 +249,11 @@ export default function DashboardScreen({ navigation }: Props) {
         }
       }
 
-      // Nothing connected — show error with details
-      if (failed.length > 0) {
-        setConnectionError(`Failed to connect:\n${failed.join('\n')}`);
+      // Nothing connected — show error with details (include skipped reasons so
+      // the user knows what still needs configuring).
+      const details = [...failed, ...skipped];
+      if (details.length > 0) {
+        setConnectionError(`Failed to connect:\n${details.join('\n')}`);
       } else {
         setConnectionError('No wallet protocols connected. Please configure a wallet.');
       }

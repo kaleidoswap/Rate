@@ -36,7 +36,9 @@ import type {
 
 import { NWCClient, parseNwcUri } from './NWCExternalClient';
 
-const NWC_CONNECTION_KEY = 'nwc_connection_string';
+/** SecureStore key holding the RGB wallet's NWC connection string. Exported so
+ *  protocol init can soft-skip RGB when the user hasn't paired a node yet. */
+export const NWC_CONNECTION_KEY = 'nwc_connection_string';
 
 const anyRec = (v: unknown): Record<string, any> =>
   v && typeof v === 'object' ? (v as Record<string, any>) : {};

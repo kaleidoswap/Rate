@@ -24,7 +24,8 @@ import {
   kaleidoClientManager,
   flashnetClientManager,
 } from '@kaleidorg/wallet-engine'
-import { NwcRgbAdapter } from '../nwc/NwcRgbAdapter'
+import * as SecureStore from 'expo-secure-store'
+import { NwcRgbAdapter, NWC_CONNECTION_KEY } from '../nwc/NwcRgbAdapter'
 import type {
   ProtocolType,
   SparkAdapterConfig,
@@ -173,6 +174,14 @@ export async function initializeWdkProtocols(
           // NWC mode (default on mobile): the NwcRgbAdapter drives a remote node over
           // relays and reads its connection string from SecureStore — no HTTP nodeUrl.
           if (RGB_VIA_NWC) {
+            // No paired node yet → soft-skip instead of letting connect() throw, so a
+            // fresh wallet doesn't log a scary ERROR for an expected unconfigured state
+            // (mirrors the HTTP "no node URL configured" skip below).
+            const nwcUri = await SecureStore.getItemAsync(NWC_CONNECTION_KEY)
+            if (!nwcUri) {
+              results.set(protocol, { success: false, error: 'skipped: no NWC connection string configured' })
+              continue
+            }
             config = {
               protocol: 'RGB',
               mnemonic,
