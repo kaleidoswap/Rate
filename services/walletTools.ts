@@ -9,15 +9,17 @@
 // so the Engine pauses for the UI confirm sheet before any send.
 
 import {
-  bindWalletTools,
-  type WalletHandler,
-  type WalletLayer,
+  InProcessToolSource,
+  type InProcessTool,
 } from '@kaleidorg/mind';
 import { protocolManager, type ProtocolType } from './protocols';
 import { getStore } from '../store/storeProvider';
 import { fetchBitcoinPrice } from '../store/slices/walletSlice';
 import NostrService from './NostrService';
 import { resolveLightningAddressToInvoice as resolveLightningAddress } from '../utils/lnurl';
+
+type WalletHandler = (args: Record<string, unknown>) => Promise<unknown>;
+type WalletLayer = 'spark' | 'rln' | 'arkade' | 'core';
 
 const log = (...a: any[]) => { try { console.log('[AI/wallet]', ...a); } catch { /* noop */ } };
 
@@ -244,6 +246,98 @@ const HANDLERS: Record<string, WalletHandler> = {
  * handler yet (per-layer *_send, swaps, Liquid) are simply not exposed.
  */
 export function buildWalletToolSource() {
-  const layers: WalletLayer[] = ['spark', 'rln', 'arkade', 'core'];
-  return bindWalletTools(HANDLERS, { layers, includeCore: true, allowMissing: true, id: 'wallet' });
+  const tools: InProcessTool[] = Object.entries(HANDLERS).map(([name, handler]) => ({
+    name,
+    description: describeWalletTool(name),
+    parameters: paramsForWalletTool(name),
+    requiresConfirmation: requiresConfirmation(name),
+    handler,
+  }));
+  return new InProcessToolSource('wallet', tools);
+}
+
+function requiresConfirmation(name: string): boolean {
+  return /(^send_payment$|_pay_invoice$|_send_asset$)/.test(name);
+}
+
+function describeWalletTool(name: string): string {
+  const descriptions: Record<string, string> = {
+    get_balances: 'Get BTC and asset balances across connected wallet layers.',
+    spark_get_balance: 'Get the Spark BTC balance.',
+    rln_get_balances: 'Get RLN/RGB BTC and RGB asset balances.',
+    arkade_get_balance: 'Get the Arkade BTC balance.',
+    spark_get_address: 'Create or fetch a Spark receive address.',
+    arkade_get_address: 'Create or fetch an Arkade receive address.',
+    spark_create_invoice: 'Create a Spark invoice for receiving BTC.',
+    rln_create_ln_invoice: 'Create a Lightning invoice on the RLN wallet.',
+    rln_create_rgb_invoice: 'Create an RGB asset invoice on the RLN wallet.',
+    create_invoice: 'Create a receive invoice for BTC or an RGB asset.',
+    get_swap_quote: 'Describe where a swap quote can be obtained.',
+    get_price: 'Get the cached or freshly fetched BTC price.',
+    fiat_to_sats: 'Convert a fiat amount to satoshis using the BTC price.',
+    resolve_contact: 'Resolve a local or Nostr contact to a Lightning address.',
+    rln_pay_invoice: 'Pay a Lightning invoice from the connected wallet.',
+    rln_send_asset: 'Send an RGB asset to a provided RGB invoice.',
+    send_payment: 'Pay a Lightning invoice, Lightning address, or contact.',
+  };
+  return descriptions[name] ?? `Run wallet action ${name}.`;
+}
+
+function paramsForWalletTool(name: string): Record<string, unknown> {
+  const stringProp = (description: string) => ({ type: 'string', description });
+  const numberProp = (description: string) => ({ type: 'number', description });
+  const object = (properties: Record<string, unknown>, required: string[] = []) => ({
+    type: 'object',
+    properties,
+    required,
+  });
+
+  switch (name) {
+    case 'get_balances':
+      return object({ layer: stringProp('Optional layer: spark, rln, arkade, or core.') });
+    case 'spark_create_invoice':
+    case 'rln_create_ln_invoice':
+      return object({ amount_sats: numberProp('Optional amount in satoshis.') });
+    case 'rln_create_rgb_invoice':
+      return object({
+        asset: stringProp('RGB asset ticker or id.'),
+        amount: numberProp('Asset amount to receive.'),
+      }, ['asset', 'amount']);
+    case 'create_invoice':
+      return object({
+        asset: stringProp('Asset to receive, defaults to BTC.'),
+        amount: numberProp('Amount to receive.'),
+        layer: stringProp('Optional layer: spark, rln, or arkade.'),
+      });
+    case 'get_swap_quote':
+      return object({
+        from_asset: stringProp('Asset being sold.'),
+        to_asset: stringProp('Asset being bought.'),
+        amount: numberProp('Amount to quote.'),
+      }, ['from_asset', 'to_asset', 'amount']);
+    case 'get_price':
+      return object({ fiat: stringProp('Fiat currency, defaults to USD.') });
+    case 'fiat_to_sats':
+      return object({
+        amount: numberProp('Fiat amount.'),
+        currency: stringProp('Fiat currency, defaults to USD.'),
+      }, ['amount']);
+    case 'resolve_contact':
+      return object({ name: stringProp('Contact name to resolve.') }, ['name']);
+    case 'rln_pay_invoice':
+      return object({ invoice: stringProp('BOLT11 invoice to pay.') }, ['invoice']);
+    case 'rln_send_asset':
+      return object({
+        asset: stringProp('RGB asset ticker or id.'),
+        amount: numberProp('Asset amount.'),
+        to: stringProp('RGB invoice destination.'),
+      }, ['asset', 'amount', 'to']);
+    case 'send_payment':
+      return object({
+        to: stringProp('Invoice, Lightning address, or contact name.'),
+        amount_sats: numberProp('Amount in satoshis for Lightning addresses.'),
+      }, ['to']);
+    default:
+      return object({});
+  }
 }
