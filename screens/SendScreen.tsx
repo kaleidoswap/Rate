@@ -363,7 +363,13 @@ function SendScreen({ navigation, route }: Props) {
       } else if (input.startsWith('rgb')) {
         // RGB invoice
         try {
-          const rgbAdapterRgb = protocolManager.getAdapter('RGB');
+          const rgbAdapterRgb = protocolManager.getAdapterIfAvailable('RGB');
+          // Decoding requires the RGB/NWC node — don't call it offline.
+          if (!rgbAdapterRgb?.isConnected()) {
+            setAddressType('invalid');
+            setValidationError('RGB node not connected. Please connect it in Settings.');
+            return;
+          }
           const decoded = await rgbAdapterRgb.decodeRgbInvoice?.({ invoice: input }) as any;
           
           // Extract amount from assignment if it's a fungible assignment
@@ -607,7 +613,11 @@ function SendScreen({ navigation, route }: Props) {
         successType = 'bitcoin';
 
       } else if (addressType === 'rgb') {
-        const rgbSendAdapter = protocolManager.getAdapter('RGB');
+        const rgbSendAdapter = protocolManager.getAdapterIfAvailable('RGB');
+        // Don't attempt an RGB send over a node that isn't connected.
+        if (!rgbSendAdapter?.isConnected()) {
+          throw new Error('RGB node not connected. Please connect it in Settings.');
+        }
         // RGB amounts are base units (input is whole tokens) — scale by precision,
         // otherwise "10" would send 10 base units (0.00001 of a precision-6 asset).
         const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, selectedAsset.precision || 8));

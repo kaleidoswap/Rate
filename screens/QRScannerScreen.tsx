@@ -50,7 +50,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   const successAnim = useRef<LottieView>(null);
   const errorAnim = useRef<LottieView>(null);
 
-  const rgbAdapter = protocolManager.getAdapter('RGB');
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
 
   useEffect(() => {
     if (!permission) {
@@ -301,6 +301,10 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const handleRGBInvoice = async (invoice: string) => {
+    // Decoding an RGB invoice requires the RGB/NWC node — don't call it offline.
+    if (!rgbAdapter?.isConnected()) {
+      throw new Error('RGB node not connected. Please connect it in Settings to scan RGB invoices.');
+    }
     // Decode RGB invoice
     const decodedInvoice = await rgbAdapter.decodeRgbInvoice!({ invoice });
 
@@ -332,6 +336,10 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const handleLightningInvoice = async (invoice: string) => {
+    // Decoding goes through the RGB/NWC node — don't call it offline.
+    if (!rgbAdapter?.isConnected()) {
+      throw new Error('RGB node not connected. Please connect it in Settings to scan invoices.');
+    }
     // Decode Lightning invoice
     const decodedInvoice = await rgbAdapter.decodeInvoice(invoice);
 

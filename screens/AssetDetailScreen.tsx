@@ -67,7 +67,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const [assetDetails, setAssetDetails] = useState(asset);
   const [refreshing, setRefreshing] = useState(false);
   
-  const rgbAdapter = protocolManager.getAdapter('RGB');
+  // getAdapterIfAvailable (not getAdapter, which throws) + the isConnected() guard
+  // below ensure we never call the RGB/NWC node when it isn't connected.
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
   const isBTC = asset.asset_id === 'BTC';
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   }, []);
 
   const loadAssetDetails = async () => {
-    if (isBTC || !rgbAdapter) return;
+    if (isBTC || !rgbAdapter?.isConnected()) return;
     
     try {
       setLoading(true);

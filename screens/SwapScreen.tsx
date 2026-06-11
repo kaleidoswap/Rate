@@ -424,7 +424,7 @@ export default function SwapScreen({ navigation }: Props) {
             dispatch(setError('KaleidoSwap requires an RGB node connection. Please configure in Settings.'));
             return;
           }
-          const rgbAdapter = protocolManager.getAdapter('RGB');
+          // (RGB connectivity already gated above via kaleidoClientManager.isInitialized().)
           const fromAsset = pair.base.ticker === fromTicker ? pair.base : pair.quote;
           const toAsset = pair.base.ticker === toTicker ? pair.base : pair.quote;
           const fromAssetId = getAssetId(fromAsset);
