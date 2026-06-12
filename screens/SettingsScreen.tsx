@@ -1,5 +1,5 @@
 // screens/SettingsScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Switch, Alert, Text, TouchableOpacity } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,41 +20,30 @@ import {
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
 import { formatDenominatedAmount, useBitcoinPrice } from '../utils/bitcoinUnits';
-import { setActiveWallet } from '../store/slices/walletSlice';
+import { loadBtcBalance, setActiveWallet } from '../store/slices/walletSlice';
 import { Button, Input, MainHeader } from '../components';
 import { theme } from '../theme';
 import { PairingService, type DesktopPairing } from '../services/PairingService';
 import DatabaseService, { type NetworkType } from '../services/DatabaseService';
 import SecurityService from '../services/SecurityService';
 import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
-
-// Networks each protocol supports (mirrors the adapter network unions).
-const PROTO_SUPPORTED_NETWORKS: Record<'RGB' | 'SPARK' | 'ARKADE', string[]> = {
-  SPARK: ['regtest', 'testnet', 'signet', 'mainnet'],
-  ARKADE: ['signet', 'mainnet'],
-  RGB: ['regtest', 'testnet', 'signet'],
-};
-const PROTO_TO_NETWORK_TYPE: Record<'RGB' | 'SPARK' | 'ARKADE', NetworkType> = {
-  RGB: 'rln',
-  SPARK: 'spark',
-  ARKADE: 'arkade',
-};
-const PROTO_DEFAULT_NETWORK: Record<string, string> = {
-  spark: 'regtest',
-  arkade: 'signet',
-  rln: 'regtest',
-  liquid: 'testnet',
-};
-const NETWORK_LABEL: Record<string, string> = {
-  mainnet: 'Mainnet',
-  testnet: 'Testnet',
-  regtest: 'Regtest',
-  signet: 'Mutinynet',
-};
+import { initializeProtocols, protocolManager } from '../services/protocols';
+import {
+  NETWORK_LABEL,
+  PROTOCOL_DEFAULT_NETWORK,
+  PROTOCOL_SUPPORTED_NETWORKS,
+  PROTOCOL_TO_NETWORK_TYPE,
+  buildDefaultNetworkConfig,
+  buildNetworkConfig,
+  type ProtocolNetwork,
+} from '../services/protocols/networkConfig';
 
 interface Props {
   navigation: any;
 }
+
+type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
+const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
 
 // ---------------------------------------------------------------------------
 // Reusable building blocks — consistent, fully-themed rows so nothing renders
@@ -161,6 +150,27 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const [protoNetworks, setProtoNetworks] = useState<Record<string, string>>({});
+  const [protocolStatus, setProtocolStatus] = useState<Record<WalletProtocol, boolean>>({
+    RGB: false,
+    SPARK: false,
+    ARKADE: false,
+  });
+  const [protocolConnecting, setProtocolConnecting] = useState<Partial<Record<WalletProtocol, boolean>>>({});
+  const [protocolErrors, setProtocolErrors] = useState<Partial<Record<WalletProtocol, string>>>({});
+  const refreshProtocolStatus = useCallback(() => {
+    setProtocolStatus({
+      RGB: protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false,
+      SPARK: protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false,
+      ARKADE: protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected() ?? false,
+    });
+  }, []);
+
+  useEffect(() => {
+    refreshProtocolStatus();
+    const unsubscribe = navigation.addListener?.('focus', refreshProtocolStatus);
+    return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
+  }, [navigation, refreshProtocolStatus]);
+
   useEffect(() => {
     (async () => {
       const id = (activeWallet as any)?.id;
@@ -169,7 +179,7 @@ export default function SettingsScreen({ navigation }: Props) {
         const nets = await DatabaseService.getInstance().getWalletNetworks(id);
         const map: Record<string, string> = {};
         for (const n of nets) {
-          let net = PROTO_DEFAULT_NETWORK[n.type] ?? 'regtest';
+          let net = PROTOCOL_DEFAULT_NETWORK[n.type] ?? 'regtest';
           try {
             if (n.config) net = JSON.parse(n.config).network || net;
           } catch { /* keep default */ }
@@ -180,40 +190,72 @@ export default function SettingsScreen({ navigation }: Props) {
     })();
   }, [activeWallet]);
 
-  const changeProtocolNetwork = (proto: 'RGB' | 'SPARK' | 'ARKADE', network: string) => {
+  const changeProtocolNetwork = (proto: WalletProtocol, network: ProtocolNetwork) => {
     const id = (activeWallet as any)?.id;
-    const type = PROTO_TO_NETWORK_TYPE[proto];
+    const type = PROTOCOL_TO_NETWORK_TYPE[proto];
     if (!id) return;
     (async () => {
+      setProtocolConnecting((prev) => ({ ...prev, [proto]: true }));
+      setProtocolErrors((prev) => ({ ...prev, [proto]: undefined }));
       try {
         const db = DatabaseService.getInstance();
         const nets = await db.getWalletNetworks(id);
         const existing = nets.find((n) => n.type === type);
-        const cfg = existing?.config ? JSON.parse(existing.config) : {};
-        cfg.network = network;
-        await db.updateNetworkConfig(id, type, { config: JSON.stringify(cfg) });
+        const cfg = existing?.config ? JSON.parse(existing.config) : JSON.parse(buildDefaultNetworkConfig(type));
+        const nextConfig = buildNetworkConfig(type, network, cfg);
+        if (existing) {
+          await db.updateNetworkConfig(id, type, { enabled: true, config: nextConfig });
+        } else {
+          await db.addNetworkToWallet(id, { type, enabled: true, config: nextConfig });
+        }
+
+        await protocolManager.disconnect(proto);
+        const refreshedWallet = await db.getActiveWallet();
+        const updatedNetwork = refreshedWallet?.networks?.find((n) => n.type === type);
+        const mnemonic = refreshedWallet?.encrypted_mnemonic;
+        if (!updatedNetwork || !mnemonic) {
+          throw new Error('Wallet seed or network config is unavailable.');
+        }
+
+        const results = await initializeProtocols(mnemonic, [updatedNetwork]);
+        const result = results.get(proto);
+        if (!result?.success) {
+          throw new Error(result?.error || `${proto} did not connect.`);
+        }
+
+        if (refreshedWallet) dispatch(setActiveWallet(refreshedWallet));
         setProtoNetworks((prev) => ({ ...prev, [type]: network }));
+        refreshProtocolStatus();
+        dispatch(loadBtcBalance() as any);
         Alert.alert(
-          'Network updated',
-          `${proto} will connect on ${NETWORK_LABEL[network] ?? network} the next time you open the app.`,
+          'Network connected',
+          `${proto} is now connected on ${NETWORK_LABEL[network] ?? network}.`,
         );
       } catch (e: any) {
-        Alert.alert('Could not update network', e?.message ?? 'Please try again.');
+        refreshProtocolStatus();
+        setProtoNetworks((prev) => ({ ...prev, [type]: network }));
+        setProtocolErrors((prev) => ({ ...prev, [proto]: e?.message ?? 'Connection failed' }));
+        Alert.alert('Network saved, connection failed', e?.message ?? 'Please try again.');
+      } finally {
+        setProtocolConnecting((prev) => ({ ...prev, [proto]: false }));
       }
     })();
   };
 
-  const pickProtocolNetwork = (proto: 'RGB' | 'SPARK' | 'ARKADE') => {
-    const type = PROTO_TO_NETWORK_TYPE[proto];
-    const current = protoNetworks[type] ?? PROTO_DEFAULT_NETWORK[type];
-    const options = PROTO_SUPPORTED_NETWORKS[proto];
+  const pickProtocolNetwork = (proto: WalletProtocol) => {
+    const type = PROTOCOL_TO_NETWORK_TYPE[proto];
+    const current = (protoNetworks[type] ?? PROTOCOL_DEFAULT_NETWORK[type]) as ProtocolNetwork;
+    const connected = protocolStatus[proto];
+    const options = PROTOCOL_SUPPORTED_NETWORKS[proto];
     Alert.alert(
       `${proto} network`,
       `Currently ${NETWORK_LABEL[current] ?? current}. Choose a network:`,
       [
         ...options.map((n) => ({
           text: `${NETWORK_LABEL[n] ?? n}${n === current ? '  ✓' : ''}`,
-          onPress: () => n !== current && changeProtocolNetwork(proto, n),
+          onPress: () => {
+            if (n !== current || !connected) changeProtocolNetwork(proto, n);
+          },
         })),
         { text: 'Cancel', style: 'cancel' as const },
       ],
@@ -505,10 +547,10 @@ export default function SettingsScreen({ navigation }: Props) {
         {/* Wallet Protocols */}
         <SectionLabel>Wallet Protocols</SectionLabel>
         <Group>
-          {(['RGB', 'SPARK', 'ARKADE'] as const).map((proto, idx) => {
-            const { protocolManager: pm } = require('../services/protocols');
-            const adapter = pm.getAdapterIfAvailable(proto);
-            const connected = adapter?.isConnected() ?? false;
+          {WALLET_PROTOCOLS.map((proto, idx) => {
+            const connected = protocolStatus[proto];
+            const connecting = protocolConnecting[proto] ?? false;
+            const error = protocolErrors[proto];
             const colors: Record<string, string> = { RGB: '#2BEE79', SPARK: '#60A5FA', ARKADE: '#A855F7' };
             const labels: Record<string, string> = { RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade' };
             const descs: Record<string, string> = {
@@ -524,16 +566,21 @@ export default function SettingsScreen({ navigation }: Props) {
                 <View style={styles.rowText}>
                   <Text style={styles.rowLabel}>{labels[proto]}</Text>
                   <Text style={styles.rowDescription} numberOfLines={1}>{descs[proto]}</Text>
+                  {!!error && !connecting && (
+                    <Text style={[styles.rowDescription, { color: theme.colors.error[500] }]} numberOfLines={1}>
+                      {error}
+                    </Text>
+                  )}
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 4 }}>
                   <NetworkBadge
-                    network={protoNetworks[PROTO_TO_NETWORK_TYPE[proto]] ?? PROTO_DEFAULT_NETWORK[PROTO_TO_NETWORK_TYPE[proto]]}
+                    network={protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]]}
                     interactive
-                    onPress={() => pickProtocolNetwork(proto)}
+                    onPress={() => !connecting && pickProtocolNetwork(proto)}
                     accessibilityLabel={`Change ${proto} network`}
                   />
                   <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.text.tertiary }}>
-                    {connected ? 'Connected' : 'Offline'}
+                    {connecting ? 'Connecting...' : connected ? 'Connected' : error ? 'Error' : 'Offline'}
                   </Text>
                 </View>
               </View>

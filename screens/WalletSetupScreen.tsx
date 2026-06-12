@@ -26,6 +26,7 @@ import { setDisclosureLevel } from '../store/slices/settingsSlice';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
+import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
@@ -128,13 +129,13 @@ export default function WalletSetupScreen({ navigation }: Props) {
       // Persist the chosen disclosure level; reversible later in Settings.
       dispatch(setDisclosureLevel(mode));
       if (mode === 'lite') {
-        // Lite hides network management. On Android, only enable Spark by default
-        // because Liquid (lwk-rn JNI) and Arkade can crash at initialization on
-        // first launch. Users can enable them later in Settings.
+        // Lite hides network management, but Spark and Arkade are both WDK-backed
+        // and should be available on Android. Liquid remains disabled by default
+        // because it requires the native lwk-rn binding.
         setNetworks((prev) => ({
           ...prev,
           spark: true,
-          arkade: Platform.OS !== 'android',
+          arkade: true,
           liquid: Platform.OS !== 'android',
         }));
       }
@@ -252,16 +253,14 @@ export default function WalletSetupScreen({ navigation }: Props) {
     try {
       const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [];
 
-      // Default per-protocol networks (changeable later in Settings):
-      //   Spark → regtest, Arkade → signet (Mutinynet), Liquid → testnet.
       if (networks.spark) {
-        selectedNetworks.push({ type: 'spark', enabled: true, config: JSON.stringify({ network: 'regtest' }) });
+        selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
       }
       if (networks.liquid) {
-        selectedNetworks.push({ type: 'liquid', enabled: true, config: JSON.stringify({ network: 'testnet' }) });
+        selectedNetworks.push({ type: 'liquid', enabled: true, config: buildDefaultNetworkConfig('liquid') });
       }
       if (networks.arkade) {
-        selectedNetworks.push({ type: 'arkade', enabled: true, config: JSON.stringify({ network: 'signet' }) });
+        selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
       }
       // RLN is reached over NWC: enable it only when the user connected a node.
       // The NwcRgbAdapter reads the connection string from SecureStore.
