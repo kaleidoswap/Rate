@@ -19,7 +19,7 @@ import NostrService from './NostrService';
 import { resolveLightningAddressToInvoice as resolveLightningAddress } from '../utils/lnurl';
 
 type WalletHandler = (args: Record<string, unknown>) => Promise<unknown>;
-type WalletLayer = 'spark' | 'rln' | 'arkade' | 'core';
+type WalletLayer = 'spark' | 'rln' | 'arkade';
 
 const log = (...a: any[]) => { try { console.log('[AI/wallet]', ...a); } catch { /* noop */ } };
 
@@ -294,7 +294,7 @@ function paramsForWalletTool(name: string): Record<string, unknown> {
 
   switch (name) {
     case 'get_balances':
-      return object({ layer: stringProp('Optional layer: spark, rln, arkade, or core.') });
+      return object({ layer: stringProp('Optional layer: spark, rln, or arkade.') });
     case 'spark_create_invoice':
     case 'rln_create_ln_invoice':
       return object({ amount_sats: numberProp('Optional amount in satoshis.') });

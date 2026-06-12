@@ -44,7 +44,7 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
             ),
           ]);
         } catch (e) {
-          console.warn('Protocol init skipped:', (e as Error).message);
+          console.warn('Protocol init skipped:', e instanceof Error ? e.message : String(e));
         }
 
         dispatch(setInitialized(true));
