@@ -6,8 +6,8 @@ module.exports = {
     '^.+\\.(js|jsx|ts|tsx)$': 'babel-jest',
   },
   transformIgnorePatterns: [
-    // @kaleidorg/mind ships ESM-only — babel must transform it for Jest.
-    'node_modules/(?!(react-native|@react-native|@react-navigation|expo|@expo|@react-native-community|@nostr-dev-kit|nostr-tools|react-redux|@reduxjs|@testing-library|@kaleidorg)/)'
+    // @kaleidorg/mind and @scure ship ESM-only — babel must transform them for Jest.
+    'node_modules/(?!(react-native|@react-native|@react-navigation|expo|@expo|@react-native-community|@nostr-dev-kit|nostr-tools|react-redux|@reduxjs|@testing-library|@kaleidorg|@scure)/)'
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   testMatch: ['**/__tests__/**/*.test.[jt]s?(x)', '**/?(*.)+(spec|test).[jt]s?(x)'],
