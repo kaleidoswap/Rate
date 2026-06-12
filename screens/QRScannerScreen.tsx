@@ -19,6 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSelector } from 'react-redux';
 import { protocolManager } from '../services/protocols';
 import { classifyWithdrawDestination } from '../utils/account-routing';
+import { decodeBolt11 } from '../utils/decodeInvoice';
 import { theme } from '../theme';
 import type { RootState } from '../store';
 import LottieView from 'lottie-react-native';
@@ -336,20 +337,37 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const handleLightningInvoice = async (invoice: string) => {
-    // Decoding goes through the RGB/NWC node — don't call it offline.
-    if (!rgbAdapter?.isConnected()) {
-      throw new Error('RGB node not connected. Please connect it in Settings to scan invoices.');
-    }
-    // Decode Lightning invoice
-    const decodedInvoice = await rgbAdapter.decodeInvoice(invoice);
+    // Decode the BOLT11 locally first — this is node-independent, so a
+    // Lightning invoice scans on any wallet (e.g. Spark-only), not just when
+    // the RGB node is connected (same approach as the Send screen).
+    const local = decodeBolt11(invoice);
+    const decodedInvoice: any = {
+      amt_msat: local.amountSats ? local.amountSats * 1000 : 0,
+      description: local.description || '',
+      expiry_sec: local.expirySec || 0,
+      asset_id: undefined,
+      asset_amount: undefined,
+    };
 
-    const amountBTC = ((decodedInvoice as any).amt_msat ?? decodedInvoice.amountMsat ?? 0) / 100000000000; // Convert msat to BTC
+    // Enrich with RGB-over-LN details (asset_id / asset_amount) only when the
+    // RGB node is available — best-effort, never blocks the scan.
+    if (rgbAdapter?.isConnected()) {
+      try {
+        const r: any = await rgbAdapter.decodeInvoice(invoice);
+        decodedInvoice.amt_msat = r.amt_msat ?? r.amountMsat ?? decodedInvoice.amt_msat;
+        decodedInvoice.asset_id = r.asset_id ?? decodedInvoice.asset_id;
+        decodedInvoice.asset_amount = r.asset_amount ?? decodedInvoice.asset_amount;
+        decodedInvoice.description = r.description || decodedInvoice.description;
+      } catch { /* keep the local decode */ }
+    }
+
+    const amountBTC = (decodedInvoice.amt_msat ?? 0) / 100000000000; // Convert msat to BTC
     const hasRGBAsset = decodedInvoice.asset_id && decodedInvoice.asset_amount;
 
     let amount: string | undefined = undefined;
     if (hasRGBAsset) {
       amount = decodedInvoice.asset_amount?.toString();
-    } else if (((decodedInvoice as any).amt_msat ?? decodedInvoice.amountMsat ?? 0) > 0) {
+    } else if ((decodedInvoice.amt_msat ?? 0) > 0) {
       amount = btcToEntryUnit(amountBTC);
     }
 
