@@ -8,7 +8,7 @@ import { createNewWallet } from '../store/slices/walletSlice';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Input } from '../components';
-import { protocolManager } from '../services/protocols';
+import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
 
 interface Props {
     navigation: any;
@@ -63,13 +63,13 @@ export default function AddWalletScreen({ navigation }: Props) {
             const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [];
 
             if (networks.spark) {
-                selectedNetworks.push({ type: 'spark', enabled: true, config: '{}' });
+                selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
             }
             if (networks.liquid) {
-                selectedNetworks.push({ type: 'liquid', enabled: true, config: '{}' });
+                selectedNetworks.push({ type: 'liquid', enabled: true, config: buildDefaultNetworkConfig('liquid') });
             }
             if (networks.arkade) {
-                selectedNetworks.push({ type: 'arkade', enabled: true, config: '{}' });
+                selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
             }
             if (networks.rln) {
                 selectedNetworks.push({

@@ -34,6 +34,7 @@ import type {
   ArkadeAdapterConfig,
 } from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
+import { getDefaultArkadeServerUrl } from './networkConfig'
 
 /**
  * Mobile rollout gates.
@@ -127,8 +128,7 @@ export async function initializeWdkProtocols(
           config = {
             protocol: 'SPARK',
             mnemonic,
-            // Default Spark to regtest (test network); changeable per-account.
-            network: parsed.network || 'regtest',
+            network: parsed.network || 'testnet',
           } as SparkAdapterConfig
           break
 
@@ -157,13 +157,12 @@ export async function initializeWdkProtocols(
             mnemonic,
             network: arkadeNetwork,
             arkadeConfig: {
+              ...(parsed.arkadeConfig || {}),
               // mutinynet.arkade.sh is the live signet/mutinynet Ark server;
               // signet.arkade.sh is deprecated and silently fails to board/receive
               // (matches rate-extension's ARKADE_SERVER_URLS.signet).
-              arkServerUrl: parsed.arkServerUrl
-                || (arkadeNetwork === 'mainnet' ? 'https://arkade.computer' : 'https://mutinynet.arkade.sh'),
+              arkServerUrl: parsed.arkServerUrl || getDefaultArkadeServerUrl(arkadeNetwork),
               esploraUrl: parsed.esploraUrl,
-              ...(parsed.arkadeConfig || {}),
               ...(arkadeStorage ? { storage: arkadeStorage } : {}),
             },
           } as ArkadeAdapterConfig
@@ -241,13 +240,13 @@ export async function initializeWdkProtocols(
           const sparkAdapter = manager.getAdapterIfAvailable('SPARK') as any
           const sparkWallet = sparkAdapter?.getUnderlyingSparkWallet?.()
           if (sparkWallet) {
-            // Must be the SAME network the SparkWallet was created with (config.network,
-            // i.e. the Spark default of 'regtest'). flashnet only supports lowercase
-            // 'mainnet'/'regtest' — the previous 'MAINNET' default both mismatched the
-            // regtest wallet and failed the case-sensitive check, throwing on every init.
             const sparkNetwork = (config as SparkAdapterConfig).network || 'regtest'
-            await flashnetClientManager.initialize(sparkWallet, sparkNetwork)
-            console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`)
+            if (sparkNetwork === 'mainnet' || sparkNetwork === 'regtest') {
+              await flashnetClientManager.initialize(sparkWallet, sparkNetwork)
+              console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`)
+            } else {
+              console.log(`[initializeWdkProtocols] flashnet disabled on Spark ${sparkNetwork}`)
+            }
           } else {
             console.log('[initializeWdkProtocols] no SparkWallet exposed → flashnet disabled')
           }
