@@ -238,6 +238,28 @@ const HANDLERS: Record<string, WalletHandler> = {
 };
 
 /**
+ * Pay a BOLT11 invoice on the Lightning rail and return its preimage. Used by
+ * the L402 paid-data tool, which needs the preimage to build the `Authorization:
+ * L402 <macaroon>:<preimage>` header that unlocks the resource. Spark/RLN
+ * adapters surface the preimage on PaymentResult; if one doesn't, we fail loudly
+ * rather than return an unusable success.
+ */
+export async function payLightningInvoice(
+  invoice: string,
+  amountSats?: number,
+): Promise<{ preimage: string }> {
+  const r: any = await lightningAdapter().sendPayment({
+    invoice: String(invoice),
+    ...(amountSats ? { amountSats } : {}),
+  });
+  const preimage = r?.preimage ?? r?.payment_preimage;
+  if (!preimage) {
+    throw new Error('Payment went through but no preimage was returned — cannot unlock the paid resource.');
+  }
+  return { preimage: String(preimage) };
+}
+
+/**
  * Build the wallet ToolSource for the engine: all implemented contract tools
  * (Spark/RLN/Arkade + core helpers), bound to the WDK adapters. The tool surface
  * is STABLE regardless of connection state — each handler checks its adapter at
