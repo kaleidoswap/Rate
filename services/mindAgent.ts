@@ -31,6 +31,8 @@ import {
 import skillBundle from '../skills.bundle.json';
 import { buildWalletToolSource } from './walletTools';
 import { buildMerchantToolSource } from './merchantTools';
+import { buildSwapToolSource } from './swapTools';
+import { buildLspToolSource } from './lspTools';
 import { buildPaidDataToolSource } from './aiPaidData';
 import { buildKnowledgeToolSource } from './aiKnowledge';
 import { asyncStorageMemoryIO } from './aiMemory';
@@ -122,15 +124,18 @@ export async function clearMindMemory(): Promise<void> {
 }
 
 /**
- * The exact tool sources the mobile agent mounts — wallet/WDK, merchants, paid
- * data (L402), memory, RAG, and the skill-reference reader. Exported so the
- * skill-connection test asserts every bundled skill scopes to tools that
- * actually exist here (no skill can point at a missing tool).
+ * The exact tool sources the mobile agent mounts — wallet/WDK, merchants,
+ * KaleidoSwap swaps, LSPS1 channel orders, paid data (L402), memory, RAG, and
+ * the skill-reference reader. All execute ON-DEVICE (no P2P delegation).
+ * Exported so the skill-connection test asserts every bundled skill scopes to
+ * tools that actually exist here (no skill can point at a missing tool).
  */
 export function buildMindToolSources(qvac: QVACService): ToolSource[] {
   return [
     buildWalletToolSource(),
     buildMerchantToolSource(),
+    buildSwapToolSource(),
+    buildLspToolSource(),
     buildPaidDataToolSource(),
     memorySource(),
     knowledgeSource(qvac),

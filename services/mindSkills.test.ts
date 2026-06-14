@@ -19,6 +19,7 @@ import skillBundle from '../skills.bundle.json';
 // tool *names* and skill selection, never execute a handler.
 jest.mock('./protocols', () => ({
   protocolManager: { getAdapterIfAvailable: jest.fn(() => null) },
+  kaleidoClientManager: { isInitialized: jest.fn(() => false), getClient: jest.fn() },
 }));
 jest.mock('../store/storeProvider', () => ({ getStore: jest.fn() }));
 jest.mock('../store/slices/walletSlice', () => ({
@@ -49,7 +50,10 @@ describe('skill bundle', () => {
 
   it('ships the expected skills, all with names and triggers', () => {
     const names = skills.map((s) => s.name).sort();
-    expect(names).toEqual(['bitrefill', 'merchant-finder', 'paid-data', 'wallet-assistant']);
+    expect(names).toEqual([
+      'bitrefill', 'kaleido-lsps', 'kaleido-trading',
+      'merchant-finder', 'paid-data', 'wallet-assistant',
+    ]);
     for (const s of skills) {
       expect(s.name).toBeTruthy();
       expect((s.triggers ?? []).length).toBeGreaterThan(0);
@@ -81,6 +85,9 @@ describe('skill ↔ tool connection', () => {
       'get_balances', 'send_payment', 'rln_pay_invoice', 'create_invoice',
       'get_price', 'fiat_to_sats', 'resolve_contact',
       'find_merchant_locations', 'get_merchant_info',
+      'kaleidoswap_get_pairs', 'kaleidoswap_get_quote', 'kaleidoswap_place_order',
+      'kaleidoswap_get_order_status',
+      'lsp_get_info', 'lsp_estimate_fees', 'lsp_create_order', 'lsp_get_order',
       'fetch_paid_resource', 'remember', 'recall', 'search_knowledge',
     ]) {
       expect(available.has(t)).toBe(true);
@@ -97,6 +104,9 @@ describe('skill selection (keyword router)', () => {
     ['find a coffee shop that accepts bitcoin', 'merchant-finder'],
     ['unlock the premium data feed', 'paid-data'],
     ['buy a gift card with bitcoin', 'bitrefill'],
+    ['quote 100k sats to USDT', 'kaleido-trading'],
+    ['swap btc for usdt', 'kaleido-trading'],
+    ['I need inbound liquidity for a channel', 'kaleido-lsps'],
   ];
 
   it.each(cases)('routes %p → %p', (query, expected) => {
