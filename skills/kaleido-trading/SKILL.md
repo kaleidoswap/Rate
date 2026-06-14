@@ -1,8 +1,8 @@
 ---
 name: kaleido-trading
-description: "Trade on KaleidoSwap — quote and execute swaps between BTC and RGB assets (USDT, XAUT). Get assets and pairs, pull an executable quote, place a market order, or track an atomic swap end-to-end. Triggers when the user wants a price, a quote, to swap or trade assets, or to rebalance between BTC and stablecoins."
+description: "Quote and execute swaps between BTC and other assets on whichever venue has the pair — KaleidoSwap (RGB assets: USDT, XAUT) or Flashnet (Spark: USDB). Get assets and pairs, pull an executable quote, place a market order, or track it. Triggers when the user wants a price, a quote, to swap or trade assets, or to rebalance between BTC and stablecoins."
 tools: get_price, fiat_to_sats, kaleidoswap_get_assets, kaleidoswap_get_pairs, kaleidoswap_get_quote, kaleidoswap_get_nodeinfo, kaleidoswap_place_order, kaleidoswap_get_order_status, kaleidoswap_get_order_history
-triggers: quote, swap, trade, rebalance, slippage, pair, pairs, usdt, xaut, kaleidoswap, rfq
+triggers: quote, swap, trade, rebalance, slippage, pair, pairs, usdt, xaut, usdb, kaleidoswap, flashnet, spark, rfq
 metadata:
   author: kaleidoswap
   version: "0.3.0"
@@ -10,9 +10,17 @@ metadata:
 
 # KaleidoSwap trading
 
-Quote and execute swaps on the KaleidoSwap maker. The model picks tools by
-name; the host binds them through whichever transport it runs over (WDK on
-mobile, HTTP/MCP/CLI on desktop).
+Quote and execute swaps. The model picks tools by name; the host binds them
+through whichever transport it runs over (WDK on mobile, HTTP/MCP/CLI on
+desktop).
+
+**Venue is automatic — you don't choose it.** The same tools quote + execute on
+whichever venue lists the pair: **KaleidoSwap** (RGB assets `USDT`/`XAUT` over
+the Lightning node) or **Flashnet** (Spark pool, `USDB`). The result carries a
+`venue` field; just call the tools and report what they return. The venues use
+different stablecoins (`USDT` = KaleidoSwap, `USDB` = Flashnet) — never swap one
+for the other. If a pair isn't listed by `kaleidoswap_get_pairs`, that venue
+isn't connected; say so rather than guessing.
 
 ## Critical rules — these override everything else
 

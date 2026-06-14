@@ -20,6 +20,7 @@ import skillBundle from '../skills.bundle.json';
 jest.mock('./protocols', () => ({
   protocolManager: { getAdapterIfAvailable: jest.fn(() => null) },
   kaleidoClientManager: { isInitialized: jest.fn(() => false), getClient: jest.fn() },
+  flashnetClientManager: { isInitialized: jest.fn(() => false), getClient: jest.fn(), getPoolId: jest.fn() },
 }));
 jest.mock('../store/storeProvider', () => ({ getStore: jest.fn() }));
 jest.mock('../store/slices/walletSlice', () => ({
@@ -51,7 +52,7 @@ describe('skill bundle', () => {
   it('ships the expected skills, all with names and triggers', () => {
     const names = skills.map((s) => s.name).sort();
     expect(names).toEqual([
-      'bitrefill', 'kaleido-lsps', 'kaleido-trading',
+      'bitrefill', 'kaleido-trading',
       'merchant-finder', 'paid-data', 'wallet-assistant',
     ]);
     for (const s of skills) {
@@ -87,7 +88,6 @@ describe('skill ↔ tool connection', () => {
       'find_merchant_locations', 'get_merchant_info',
       'kaleidoswap_get_pairs', 'kaleidoswap_get_quote', 'kaleidoswap_place_order',
       'kaleidoswap_get_order_status',
-      'lsp_get_info', 'lsp_estimate_fees', 'lsp_create_order', 'lsp_get_order',
       'fetch_paid_resource', 'remember', 'recall', 'search_knowledge',
     ]) {
       expect(available.has(t)).toBe(true);
@@ -106,7 +106,7 @@ describe('skill selection (keyword router)', () => {
     ['buy a gift card with bitcoin', 'bitrefill'],
     ['quote 100k sats to USDT', 'kaleido-trading'],
     ['swap btc for usdt', 'kaleido-trading'],
-    ['I need inbound liquidity for a channel', 'kaleido-lsps'],
+    ['swap btc for usdb on flashnet', 'kaleido-trading'],
   ];
 
   it.each(cases)('routes %p → %p', (query, expected) => {
