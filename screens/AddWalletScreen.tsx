@@ -1,10 +1,10 @@
 // screens/AddWalletScreen.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert, Switch, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
-import { useDispatch } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { createNewWallet } from '../store/slices/walletSlice';
+import { useAppDispatch } from '../store/hooks';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Input } from '../components';
@@ -15,7 +15,7 @@ interface Props {
 }
 
 export default function AddWalletScreen({ navigation }: Props) {
-    const dispatch = useDispatch();
+    const dispatch = useAppDispatch();
     const [name, setName] = useState('');
     const [mnemonic, setMnemonic] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
@@ -79,7 +79,6 @@ export default function AddWalletScreen({ navigation }: Props) {
                 });
             }
 
-            // @ts-ignore
             await dispatch(createNewWallet({
                 name,
                 mnemonic,
