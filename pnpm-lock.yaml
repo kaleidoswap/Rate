@@ -41,8 +41,8 @@ importers:
         specifier: npm:kaleido-ui@^0.1.50
         version: kaleido-ui@0.1.50(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@kaleidorg/mind':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.0
+        version: 0.3.0
       '@kaleidorg/wallet-engine':
         specifier: ^1.0.0-beta.4
         version: 1.0.0-beta.4(patch_hash=53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1)(0034e19555df349dc615af7a283f9fc6)
@@ -1580,8 +1580,8 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
-  '@kaleidorg/mind@0.2.0':
-    resolution: {integrity: sha512-9cNDqmDP24ekXJtg/2JVRh05wMGWFQe/4wmG7BkmQkpCcFK5g/CGWRVmfhFovOxmqpwboptqRcrbkV7Vwpq5xw==}
+  '@kaleidorg/mind@0.3.0':
+    resolution: {integrity: sha512-9oQtAy+u6Cq+glTGJJWjIdOOGeaeT/wzsEgoMqqV+piv0Qn9amc8scUHP4KLxAVmS1U8HLkKE6xAJLuJCa/QLA==}
 
   '@kaleidorg/wallet-engine@1.0.0-beta.4':
     resolution: {integrity: sha512-MsMXDYSl++iyOPyNNGrr79gsGL7UJquRmGF1ZmCnR0FAfXuntGaiO/PuKRXtnJIkSI0rWyPyxFQTlGUYFuvg5g==}
@@ -8701,7 +8701,7 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@kaleidorg/mind@0.2.0': {}
+  '@kaleidorg/mind@0.3.0': {}
 
   '@kaleidorg/wallet-engine@1.0.0-beta.4(patch_hash=53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1)(0034e19555df349dc615af7a283f9fc6)':
     dependencies:
