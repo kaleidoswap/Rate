@@ -140,7 +140,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const qvac = useQVAC(aiEnabled);
   // Shared KaleidoMind agent — the SAME funnel the voice overlay uses (fast-path
-  // → recipes → skill-scoped agentic loop over wallet/merchant/memory/RAG/L402
+  // → recipes → skill-scoped agentic loop over wallet/merchant/memory/RAG/skill
   // tools). User settings are read per turn through the ref, so tweaking them
   // in the sheet never rebuilds the engine or drops the in-memory RAG index.
   const mindConfigRef = useRef(mindConfig);

@@ -2,10 +2,10 @@
 //
 // The tier routing (T0 fast-path → T2 recipe → T1 skill-scoped agentic), the
 // confirm gate, history trimming, persona/ambient-tool settings — all live in
-// @kaleidorg/mind's Funnel now, shared with desktop. This file only supplies
-// what is mobile-specific:
+// @kaleidorg/mind's Funnel, shared with desktop. This file only supplies what
+// is mobile-specific:
 //   - the QVAC LLM provider (with per-turn temperature/maxTokens + thinking)
-//   - the tool sources (wallet/WDK, merchant, memory, RAG, L402)
+//   - the tool sources (wallet/WDK, merchant, memory, RAG, skill references)
 //   - AsyncStorage persistence for memory
 //
 // ONE agent used by BOTH the chat screen and the voice overlay, so they
@@ -13,22 +13,31 @@
 // changing them never rebuilds the engine or drops the RAG index.
 
 import {
-  Engine,
+  Funnel,
   ToolRegistry,
   SkillRegistry,
+  InMemoryMemoryStore,
+  createMemoryToolSource,
   createSkillReferenceToolSource,
   skillsFromBundle,
-  type AgenticResult,
+  type FunnelResult,
+  type FunnelSettings,
   type LLMProvider,
   type Message,
   type Skill,
   type SkillBundle,
-  type ToolResult,
+  type ToolSource,
 } from '@kaleidorg/mind';
 import skillBundle from '../skills.bundle.json';
 import { buildWalletToolSource } from './walletTools';
 import { buildMerchantToolSource } from './merchantTools';
+import { buildPaidDataToolSource } from './aiPaidData';
+import { buildKnowledgeToolSource } from './aiKnowledge';
+import { asyncStorageMemoryIO } from './aiMemory';
 import type QVACService from './QVACService';
+
+/** Skills shipped with the app, rehydrated from the build-time bundle. */
+const SKILLS: Skill[] = skillsFromBundle(skillBundle as SkillBundle);
 
 const SOUL =
   'You are KaleidoSwap, a concise, privacy-first assistant running fully ' +
@@ -39,36 +48,47 @@ const SOUL =
   'report what it returns. All BTC amounts are in satoshis. Keep replies ' +
   'short and friendly.';
 
-/** Per-user agent settings. Newer settings are kept optional for compatibility. */
+/** Per-user agent settings (the persisted MindConfig satisfies this shape). */
 export interface MindAgentSettings {
+  /** Extra instructions appended to the system prompt. */
+  persona?: string;
+  /** Sampling temperature, applied per turn in the provider closure. */
   temperature?: number;
+  /** Max tokens per reply, applied per turn in the provider closure. */
   maxTokens?: number;
+  /** History messages to keep in the prompt (small models overflow fast). */
+  historyLength?: number;
+  /** Expose the search_knowledge (RAG) tool. */
+  ragEnabled?: boolean;
+  /** Expose the remember/recall (memory) tools. */
+  memoryEnabled?: boolean;
+  /** Skill names the user turned off. */
   disabledSkills?: string[];
-  enabledSkills?: string[];
+  /** Max reasoning↔tool rounds in the agentic tier. */
   maxTurns?: number;
 }
 
+/** Callbacks the host wires to the chat/voice UI. The Funnel owns all of these
+ *  except `onThinking`, which the provider streams via the closure below. */
 export interface RunTurnCallbacks {
-  history?: { role: 'user' | 'assistant' | 'system' | 'tool'; content: string }[];
-  onStart?: (requestId: string, turn?: number) => void;
+  history?: Message[];
+  onStart?: (requestId: string) => void;
   onToken?: (token: string, turn: number) => void;
   onToolCall?: (
     call: { name: string; arguments: Record<string, unknown> },
-    info: { requiresConfirmation?: boolean; turn: number }
+    info: { requiresConfirmation: boolean }
   ) => void;
   onConfirm?: (call: {
     name: string;
     arguments: Record<string, unknown>;
   }) => Promise<{ approved: boolean; reason?: string }>;
+  /** A recipe step is executing (deterministic tier). */
   onStep?: (name: string) => void;
   /** The model's chain-of-thought, streamed as it reasons (shown on demand). */
   onThinking?: (token: string) => void;
 }
 
-export type MindTurnResult =
-  | (AgenticResult & { tier: 'agentic'; toolCalls: ToolResult[] })
-  | { tier: 'fast'; text: string; intent?: string; data?: unknown; toolCalls?: ToolResult[] }
-  | { tier: 'recipe'; text: string; toolCalls?: ToolResult[] };
+export type MindTurnResult = FunnelResult;
 
 export interface MindAgent {
   runTurn(text: string, cbs?: RunTurnCallbacks): Promise<MindTurnResult>;
@@ -76,10 +96,53 @@ export interface MindAgent {
   listSkills(): Skill[];
 }
 
+// Memory has no per-agent deps, so a single store is shared across chat + voice
+// → both see the same recall within a session (and persist to one AsyncStorage
+// key). The RAG source is memoized too so its on-device index is built once.
+let sharedMemory: ToolSource | null = null;
+let sharedMemoryStore: InMemoryMemoryStore | null = null;
+let sharedKnowledge: ToolSource | null = null;
+function memorySource(): ToolSource {
+  if (!sharedMemory) {
+    sharedMemoryStore = new InMemoryMemoryStore({ io: asyncStorageMemoryIO() });
+    sharedMemory = createMemoryToolSource(sharedMemoryStore);
+  }
+  return sharedMemory;
+}
+function knowledgeSource(qvac: QVACService): ToolSource {
+  if (!sharedKnowledge) sharedKnowledge = buildKnowledgeToolSource(qvac);
+  return sharedKnowledge;
+}
+
+/** Wipe long-term memory — the live in-RAM store AND the persisted copy, so the
+ *  "Clear memory" action takes effect immediately (not just after a restart). */
+export async function clearMindMemory(): Promise<void> {
+  if (sharedMemoryStore) await sharedMemoryStore.clear();
+  else await asyncStorageMemoryIO().save([]);
+}
+
 /**
- * Build the shared agent. This branch consumes the published @kaleidorg/mind
- * 0.1 engine surface; newer Funnel/RAG/memory helpers are not in that package
- * yet, so keep this wrapper on Engine until the dependency is bumped.
+ * The exact tool sources the mobile agent mounts — wallet/WDK, merchants, paid
+ * data (L402), memory, RAG, and the skill-reference reader. Exported so the
+ * skill-connection test asserts every bundled skill scopes to tools that
+ * actually exist here (no skill can point at a missing tool).
+ */
+export function buildMindToolSources(qvac: QVACService): ToolSource[] {
+  return [
+    buildWalletToolSource(),
+    buildMerchantToolSource(),
+    buildPaidDataToolSource(),
+    memorySource(),
+    knowledgeSource(qvac),
+    createSkillReferenceToolSource(new SkillRegistry(SKILLS)),
+  ];
+}
+
+/**
+ * Build the shared agent. Drives @kaleidorg/mind's Funnel so mobile runs the
+ * SAME tiered routing as desktop: deterministic fast-path and recipes first
+ * (reliable on a 0.6B), skill-scoped agentic loop for the rest, with the
+ * spend-confirmation gate enforced by the contract.
  */
 export function createMindAgent(
   qvac: QVACService,
@@ -102,67 +165,45 @@ export function createMindAgent(
     cancel: (id) => qvac.cancelRequest(id),
   };
 
-  const skills = skillsFromBundle(skillBundle as SkillBundle);
-  const skillRegistry = new SkillRegistry(skills);
-  const tools = new ToolRegistry([
-    buildWalletToolSource(),
-    buildMerchantToolSource(),
-    createSkillReferenceToolSource(skillRegistry),
-  ]);
-  const engine = new Engine({
+  const tools = new ToolRegistry(buildMindToolSources(qvac));
+
+  const funnel = new Funnel({
     provider,
     tools,
-    defaultSystem: SOUL,
-    defaultMaxTurns: 5,
-  } as any);
+    skills: SKILLS,
+    system: SOUL,
+    maxTurns: getSettings().maxTurns ?? 5,
+    // Read fresh each turn — persona/history/memory/RAG/disabled-skill toggles
+    // take effect immediately without rebuilding the funnel or the RAG index.
+    getSettings: (): FunnelSettings => {
+      const s = getSettings();
+      return {
+        persona: s.persona || undefined,
+        historyLength: s.historyLength,
+        memoryEnabled: s.memoryEnabled,
+        ragEnabled: s.ragEnabled,
+        disabledSkills: s.disabledSkills,
+      };
+    },
+  });
 
   return {
     async runTurn(text, cbs: RunTurnCallbacks = {}) {
       // Make this turn's reasoning available to the provider closure.
       thinkingSink = cbs.onThinking;
       try {
-        cbs.onStep?.('thinking');
-        const settings = getSettings();
-        const activeSkill = selectSkill(text, skillRegistry, settings);
-        const composed = skillRegistry.compose(SOUL, activeSkill);
-        const messages: Message[] = [
-          { role: 'system', content: composed.system },
-          ...(cbs.history ?? []),
-          { role: 'user' as const, content: text },
-        ];
-        const result = await engine.runAgentic(messages, {
-          maxTurns: settings.maxTurns ?? 5,
-          allowedTools: composed.allowedTools,
+        return await funnel.runTurn(text, {
+          history: cbs.history,
           onStart: cbs.onStart,
           onToken: cbs.onToken,
+          onStep: cbs.onStep,
+          onToolCall: cbs.onToolCall,
           onConfirm: cbs.onConfirm,
-          onToolCall: async (
-            call: { name: string; arguments: Record<string, unknown> },
-            turn: number
-          ) => {
-            const def = await tools.getDef(call.name);
-            cbs.onToolCall?.(call, { requiresConfirmation: def?.requiresConfirmation, turn });
-          },
-        } as any);
-        return { ...result, tier: 'agentic' as const, toolCalls: result.toolCalls ?? [] };
+        });
       } finally {
         thinkingSink = undefined;
       }
     },
-    listSkills: () => skillRegistry.list(),
+    listSkills: () => funnel.listSkills(),
   };
-}
-
-function selectSkill(
-  query: string,
-  registry: SkillRegistry,
-  settings: MindAgentSettings
-): Skill | null {
-  const disabled = new Set(settings.disabledSkills ?? []);
-  const enabled = settings.enabledSkills ? new Set(settings.enabledSkills) : null;
-  const selected = registry.select(query);
-  if (!selected) return null;
-  if (disabled.has(selected.name)) return null;
-  if (enabled && !enabled.has(selected.name)) return null;
-  return selected;
 }

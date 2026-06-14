@@ -5,12 +5,11 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, Switch, Pressable, Alert, Modal } from 'react-native';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { skillsFromBundle } from '@kaleidorg/mind';
 import { theme } from '../theme';
 import { ScreenHeader } from '../components';
 import { selectMindConfig, setMindConfig, resetMindConfig, type MindConfig } from '../store/slices/settingsSlice';
-import { MEMORY_KEY } from '../services/aiMemory';
+import { clearMindMemory } from '../services/mindAgent';
 import skillBundle from '../skills.bundle.json';
 
 const TONES: Array<{ label: string; text: string }> = [
@@ -42,7 +41,7 @@ export default function MindSettingsScreen() {
   const clearMemory = () =>
     Alert.alert('Clear memory', "This erases everything the agent has remembered. This can't be undone.", [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: async () => { try { await AsyncStorage.removeItem(MEMORY_KEY); } catch {} } },
+      { text: 'Clear', style: 'destructive', onPress: async () => { try { await clearMindMemory(); } catch {} } },
     ]);
   const resetAll = () =>
     Alert.alert('Reset to defaults', 'Restore the default agent configuration?', [
