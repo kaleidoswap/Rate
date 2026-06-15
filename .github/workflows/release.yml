@@ -109,10 +109,15 @@ jobs:
   # ---------------------------------------------------------------------------
   ios:
     name: iOS TestFlight
-    runs-on: macos-14
+    runs-on: macos-15
     needs: version
     steps:
       - uses: actions/checkout@v4
+
+      # React Native requires Xcode >= 16.1; pin the newest stable Xcode on the
+      # runner rather than relying on the image default.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with: { xcode-version: latest-stable }
 
       - uses: pnpm/action-setup@v4
         with: { version: 10 }

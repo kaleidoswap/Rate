@@ -232,9 +232,6 @@ importers:
       react-native-markdown-display:
         specifier: ^7.0.2
         version: 7.0.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
-      react-native-picker:
-        specifier: ^4.3.7
-        version: 4.3.7
       react-native-qrcode-svg:
         specifier: ^6.3.21
         version: 6.3.21(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
@@ -5775,9 +5772,6 @@ packages:
     peerDependencies:
       react: '>=16.2.0'
       react-native: '>=0.50.4'
-
-  react-native-picker@4.3.7:
-    resolution: {integrity: sha512-bqY0FOsgNe/svnlV7CTvDKjqca5iZr0E0h4gYO8LDh9alxGK7P6bTvqSx6VwDR144moHAG7dsKGrSH2r8bTx2Q==}
 
   react-native-qr-svg@1.5.0:
     resolution: {integrity: sha512-Pk/QeZ9OHiDgbhU0xSCoXAn5/EIbhVJ5nNpZQ5AJ+uoFbmkwLndPdQXE6deSsYAXY7mZReQuftPRR5N4iJd3WQ==}
@@ -14610,8 +14604,6 @@ snapshots:
       react: 19.1.4
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
       react-native-fit-image: 1.5.5
-
-  react-native-picker@4.3.7: {}
 
   react-native-qr-svg@1.5.0(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:
