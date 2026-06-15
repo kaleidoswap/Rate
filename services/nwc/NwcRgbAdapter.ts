@@ -371,7 +371,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     // a minimal descriptor — pay_invoice honours the amount embedded in the
     // BOLT11, so payment still works without an explicit decode.
     if (!this.isRln) {
-      return { paymentHash: '', destination: invoice };
+      return { paymentHash: '', destination: invoice, expiresAt: 0 };
     }
     const isRgb = invoice.toLowerCase().includes('rgb');
     if (isRgb) {

@@ -230,7 +230,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     transform: [
       { scale: interpolate(pulse.value, [0, 1], [1, phase === 'listening' ? 1.18 : 1.08]) },
       { rotate: `${interpolate(spin.value, [0, 1], [0, 360])}deg` },
-    ],
+    ] as const,
   }));
   const ringStyle = useAnimatedStyle(() => ({
     opacity: interpolate(pulse.value, [0, 1], [0.4, 0]),

@@ -9,6 +9,8 @@ import {
   Share,
   Clipboard,
   ActivityIndicator,
+  Animated,
+  Easing,
   InteractionManager,
   Platform,
   useWindowDimensions,
@@ -28,7 +30,12 @@ import {
 } from '../utils/account-routing';
 import { theme } from '../theme';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
-import { useDepositDetection } from '../hooks/useDepositDetection';
+import {
+  useDepositDetection,
+  type DepositDetectionEvent,
+  type DepositDetectionStatus,
+  type DepositLayer,
+} from '../hooks/useDepositDetection';
 import { useSparkAutoClaim } from '../hooks/useSparkAutoClaim';
 import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector } from '../components/AssetSelector';
@@ -101,6 +108,36 @@ interface Channel {
   asset_remote_amount: number;
 }
 
+type DepositMonitorStatus = 'idle' | 'generating' | DepositDetectionStatus;
+
+interface DepositMonitorState {
+  status: DepositMonitorStatus;
+  layer?: DepositLayer;
+  message?: string;
+  updatedAt?: number;
+}
+
+function formatDepositLayer(layer?: DepositLayer): string {
+  switch (layer) {
+    case 'all':
+      return 'all layers';
+    case 'onchain':
+      return 'Bitcoin L1';
+    case 'lightning':
+      return 'Lightning';
+    case 'rgb':
+      return 'RGB';
+    case 'spark':
+      return 'Spark';
+    case 'arkade':
+      return 'Arkade';
+    case 'liquid':
+      return 'Liquid';
+    default:
+      return 'all layers';
+  }
+}
+
 const DeferredQrCode = React.memo(function DeferredQrCode({ value, size }: { value: string; size: number }) {
   const [renderValue, setRenderValue] = useState('');
   const scheduledAtRef = React.useRef(0);
@@ -138,6 +175,117 @@ const DeferredQrCode = React.memo(function DeferredQrCode({ value, size }: { val
 
   return <QrCode value={renderValue} size={size} />;
 });
+
+function DepositMonitorCard({
+  visible,
+  status,
+  layer,
+  message,
+  accent,
+}: {
+  visible: boolean;
+  status: DepositMonitorStatus;
+  layer?: DepositLayer;
+  message?: string;
+  accent: string;
+}) {
+  const pulse = React.useRef(new Animated.Value(0)).current;
+  const rotate = React.useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!visible) return;
+    pulse.setValue(0);
+    rotate.setValue(0);
+    const pulseLoop = Animated.loop(
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: 1400,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      })
+    );
+    const rotateLoop = Animated.loop(
+      Animated.timing(rotate, {
+        toValue: 1,
+        duration: 1600,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    );
+    pulseLoop.start();
+    rotateLoop.start();
+    return () => {
+      pulseLoop.stop();
+      rotateLoop.stop();
+    };
+  }, [visible, pulse, rotate]);
+
+  if (!visible) return null;
+
+  const layerLabel = formatDepositLayer(layer);
+  const title =
+    status === 'generating'
+      ? 'Preparing receive code'
+      : status === 'pending'
+        ? `Pending deposit on ${layerLabel}`
+        : status === 'claimed'
+          ? `Claimed deposit on ${layerLabel}`
+          : status === 'failed'
+            ? `Deposit failed on ${layerLabel}`
+            : status === 'expired'
+              ? `Invoice expired on ${layerLabel}`
+              : `Watching ${layerLabel}`;
+  const subtitle =
+    message ||
+    (status === 'generating'
+      ? 'Building the QR and payment routes'
+      : status === 'pending'
+        ? 'Waiting for confirmation'
+        : status === 'claimed'
+          ? 'Refreshing wallet balance'
+          : status === 'failed' || status === 'expired'
+            ? 'Generate a fresh code when you are ready'
+            : 'Checking connected layers for incoming deposits');
+  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.45] });
+  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
+  const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+  const isProblem = status === 'failed' || status === 'expired';
+  const iconName: keyof typeof Ionicons.glyphMap = isProblem ? 'alert-circle' : status === 'claimed' ? 'checkmark-circle' : 'sync';
+  const iconColor = isProblem ? theme.colors.warning[500] : status === 'claimed' ? theme.colors.success[500] : accent;
+
+  return (
+    <View style={[styles.depositMonitorCard, { borderColor: iconColor + '30' }]}>
+      <View style={styles.depositMonitorIconWrap}>
+        <Animated.View
+          style={[
+            styles.depositMonitorPulse,
+            {
+              borderColor: iconColor,
+              opacity: pulseOpacity,
+              transform: [{ scale: pulseScale }],
+            },
+          ]}
+        />
+        <Animated.View
+          style={[
+            styles.depositMonitorIcon,
+            { backgroundColor: iconColor + '18' },
+            iconName === 'sync' && { transform: [{ rotate: spin }] },
+          ]}
+        >
+          <Ionicons name={iconName} size={18} color={iconColor} />
+        </Animated.View>
+      </View>
+      <View style={styles.depositMonitorText}>
+        <Text style={styles.depositMonitorTitle} numberOfLines={1}>{title}</Text>
+        <Text style={styles.depositMonitorSubtitle} numberOfLines={2}>{subtitle}</Text>
+      </View>
+      {status !== 'failed' && status !== 'expired' && status !== 'claimed' && (
+        <ActivityIndicator size="small" color={iconColor} />
+      )}
+    </View>
+  );
+}
 
 export default function ReceiveScreen({ navigation }: Props) {
   // Narrow selectors: subscribe to ONLY the two fields this screen reads. The
@@ -241,6 +389,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Multi-currency amount editor (BTC / sats / USD / other fiat).
   const [showAmountEditor, setShowAmountEditor] = useState(false);
   const [showDepositSuccess, setShowDepositSuccess] = useState(false);
+  const [depositMonitor, setDepositMonitor] = useState<DepositMonitorState>({ status: 'idle' });
   // The Spark single-use BTC L1 deposit address currently on screen (if any).
   // Spark on-chain deposits must be claimed in — useSparkAutoClaim polls this.
   const [sparkDepositAddress, setSparkDepositAddress] = useState<string | null>(null);
@@ -249,6 +398,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // watch an incoming LN payment in unified mode.
   const [unifiedLnInvoice, setUnifiedLnInvoice] = useState<string | null>(null);
   const unifiedGenerationRef = React.useRef(0);
+  const addressGenerationRef = React.useRef(0);
   // Caches the non-Lightning legs (on-chain / Spark / Arkade / Liquid addresses)
   // from the fast first pass so the follow-up "add Lightning" pass can reuse them
   // instead of re-deriving every address — halving the adapter/Spark-crypto work
@@ -264,11 +414,47 @@ export default function ReceiveScreen({ navigation }: Props) {
     sparkDeposit: string | null;
   } | null>(null);
 
+  const cancelReceiveWork = React.useCallback(() => {
+    unifiedGenerationRef.current += 1;
+    addressGenerationRef.current += 1;
+    setUnifiedLoading(false);
+    setLoading(false);
+  }, []);
+
+  const resetReceiveSurface = React.useCallback(() => {
+    cancelReceiveWork();
+    setShowNetworkDropdown(false);
+    setError(null);
+    setUnifiedError(null);
+    setAddress('');
+    setUnifiedUri('');
+    setUnifiedMethods([]);
+    setUnifiedAddresses([]);
+    setUnifiedLnInvoice(null);
+    setSparkDepositAddress(null);
+    setDepositMonitor({ status: 'idle' });
+    unifiedCollectedRef.current = null;
+  }, [cancelReceiveWork]);
+
   // Watch for an incoming deposit whenever a receive address / invoice is shown,
   // then celebrate with the success overlay (mirrors rate-extension).
   const receiveTarget = unifiedUri || address;
-  const handleDepositDetected = React.useCallback(() => {
+  const handleDepositStatus = React.useCallback((event: DepositDetectionEvent) => {
+    setDepositMonitor({
+      status: event.status,
+      layer: event.layer,
+      message: event.message,
+      updatedAt: Date.now(),
+    });
+  }, []);
+  const handleDepositDetected = React.useCallback((event?: DepositDetectionEvent) => {
     feedback.swap();
+    setDepositMonitor({
+      status: event?.status === 'claimed' ? 'claimed' : 'confirmed',
+      layer: event?.layer ?? 'all',
+      message: event?.message,
+      updatedAt: Date.now(),
+    });
     setShowDepositSuccess(true);
   }, []);
   // The Lightning invoice to watch: the lightning tab's invoice, or the LN leg
@@ -285,6 +471,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     assetId: selectedAsset?.asset_id,
     invoice: lnInvoiceToWatch,
     onDetected: handleDepositDetected,
+    onStatus: handleDepositStatus,
   });
   // Spark on-chain deposits don't show up via balance polling until claimed —
   // sweep on mount + poll-claim the on-screen single-use deposit address.
@@ -292,6 +479,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     address: sparkDepositAddress,
     enabled: !showDepositSuccess,
     onClaimed: handleDepositDetected,
+    onStatus: handleDepositStatus,
   });
   const fiatRates = useFiatRates();
 
@@ -473,8 +661,12 @@ export default function ReceiveScreen({ navigation }: Props) {
   const generateAddress = async () => {
     if (!selectedAsset) return;
 
+    const generationId = addressGenerationRef.current + 1;
+    addressGenerationRef.current = generationId;
+    const isCurrentGeneration = () => addressGenerationRef.current === generationId;
     const startedAt = nowMs();
     receiveLog('address.start', {
+      generationId,
       networkType,
       asset: selectedAsset.ticker,
       amount,
@@ -545,7 +737,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             // deposit must be claimed in — track it for useSparkAutoClaim.
             const addr = await sparkAdapter.getReceiveAddress('onchain');
             result = addr.address;
-            setSparkDepositAddress(addr.address);
+            if (isCurrentGeneration()) setSparkDepositAddress(addr.address);
           } else {
             throw new Error('No wallet connected for on-chain deposit');
           }
@@ -626,6 +818,10 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
 
       const validatedResult = validateAddressOrInvoice(result);
+      if (!isCurrentGeneration()) {
+        receiveLog('address.stale', { generationId, activeGenerationId: addressGenerationRef.current });
+        return;
+      }
       if (validatedResult) {
         setAddress(validatedResult);
         setError(null);
@@ -639,8 +835,13 @@ export default function ReceiveScreen({ navigation }: Props) {
         throw new Error('Unable to generate a valid address or invoice. Please try again.');
       }
     } catch (error) {
+      if (!isCurrentGeneration()) {
+        receiveLog('address.staleError', { generationId, activeGenerationId: addressGenerationRef.current });
+        return;
+      }
       console.error('Failed to generate address:', error);
       receiveLog('address.error', {
+        generationId,
         networkType,
         asset: selectedAsset.ticker,
         ms: Math.round(nowMs() - startedAt),
@@ -653,7 +854,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
       setAddress('');
     } finally {
-      setLoading(false);
+      if (isCurrentGeneration()) setLoading(false);
     }
   };
 
@@ -822,6 +1023,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       setUnifiedAddresses([]);
       setSparkDepositAddress(null); // re-set below only if Spark supplies the on-chain leg
       setUnifiedLnInvoice(null); // re-set below only if a Lightning leg is minted
+      unifiedCollectedRef.current = null;
     }
 
     if (unifiedAsset === 'USD') {
@@ -1071,15 +1273,24 @@ export default function ReceiveScreen({ navigation }: Props) {
   // between where the screen is fully interactive instead of one long stall.
   useEffect(() => {
     if (networkType !== 'unified') return;
-    const timeoutId = setTimeout(() => {
-      generateUnifiedUri({ includeLightning: false, reason: 'auto-fast' });
-    }, 450);
-    const lightningTimeoutId = setTimeout(() => {
-      generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'auto-lightning' });
-    }, 3000);
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let lightningTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    const fastInteraction = InteractionManager.runAfterInteractions(() => {
+      timeoutId = setTimeout(() => {
+        generateUnifiedUri({ includeLightning: false, reason: 'auto-fast' });
+      }, 450);
+    });
+    const lightningInteraction = InteractionManager.runAfterInteractions(() => {
+      lightningTimeoutId = setTimeout(() => {
+        generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'auto-lightning' });
+      }, 5000);
+    });
     return () => {
-      clearTimeout(timeoutId);
-      clearTimeout(lightningTimeoutId);
+      fastInteraction.cancel();
+      lightningInteraction.cancel();
+      if (timeoutId) clearTimeout(timeoutId);
+      if (lightningTimeoutId) clearTimeout(lightningTimeoutId);
+      unifiedGenerationRef.current += 1;
     };
   }, [networkType, amount, unifiedAsset]);
 
@@ -1259,6 +1470,23 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Network color coding — sourced from the shared theme tokens so Send and
   // Receive stay in sync (matches rate-extension).
   const NETWORK_COLORS: Record<string, string> = theme.colors.networks;
+  const currentAccent = NETWORK_COLORS[networkType] || theme.colors.primary[500];
+  const isGeneratingReceive =
+    (networkType === 'unified' && unifiedLoading && !unifiedUri) ||
+    (networkType !== 'unified' && loading && !address);
+  const selectedNetworkLayer: DepositLayer =
+    networkType === 'unified'
+      ? 'all'
+      : networkType === 'onchain'
+        ? selectedAsset.isRGB ? 'rgb' : 'onchain'
+        : networkType;
+  const monitorLayer = depositMonitor.layer ?? selectedNetworkLayer;
+  const monitorStatus: DepositMonitorStatus =
+    isGeneratingReceive ? 'generating' : depositMonitor.status === 'idle' ? 'watching' : depositMonitor.status;
+  const monitorVisible =
+    isGeneratingReceive ||
+    (!!receiveTarget && !showDepositSuccess) ||
+    ['pending', 'claimed', 'failed', 'expired'].includes(depositMonitor.status);
 
   const NETWORK_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
     'onchain': 'link',
@@ -1485,6 +1713,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // chosen protocol (Spark / Arkade address, or a blind RGB invoice).
   const handleNewAsset = (kind: NewAssetKind) => {
     feedback.select();
+    resetReceiveSurface();
     if (kind === 'spark') {
       setSelectedAsset({ asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false, balance: btcBalance?.vanilla?.spendable || 0 });
       setNetworkType('spark');
@@ -1508,18 +1737,25 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     const selectBtc = () => {
       feedback.select();
+      if (isBtc && networkType === 'unified') return;
+      resetReceiveSurface();
+      setUnifiedAsset('BTC');
       setSelectedAsset({
         asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
         balance: btcBalance?.vanilla?.spendable || 0,
       });
+      setNetworkType('unified');
     };
     const selectUsd = () => {
       feedback.select();
+      if (isUsd && networkType === 'unified') return;
+      resetReceiveSurface();
       // USD always routes through the unified USD aggregator (Liquid USDt + RGB
       // USDT + Spark) — see generateUsdUnifiedUri, which finds the held RGB USDT
       // itself. Use the synthetic 'USD' asset (not a specific RGB USDT) so the
       // behaviour is identical whether or not an RGB USDT is held, and force the
       // unified view so the aggregator actually runs.
+      setUnifiedAsset('USD');
       setSelectedAsset({ asset_id: 'USD', ticker: 'USD', name: 'US Dollar', isRGB: false });
       setNetworkType('unified');
     };
@@ -1641,6 +1877,11 @@ export default function ReceiveScreen({ navigation }: Props) {
                   onPress={() => {
                     receiveLog('tap.networkOption', { from: networkType, to: o.id });
                     feedback.select();
+                    if (active) {
+                      setShowNetworkDropdown(false);
+                      return;
+                    }
+                    resetReceiveSurface();
                     setNetworkType(o.id);
                     setShowNetworkDropdown(false);
                   }}
@@ -1977,7 +2218,10 @@ export default function ReceiveScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
       <View style={styles.receiveHeader}>
         <TouchableOpacity
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            cancelReceiveWork();
+            navigation.goBack();
+          }}
           style={styles.receiveBackButton}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           activeOpacity={0.7}
@@ -1997,6 +2241,13 @@ export default function ReceiveScreen({ navigation }: Props) {
         {renderAssetTabs()}
         {renderNetworkDropdown()}
         {renderAmountRow()}
+        <DepositMonitorCard
+          visible={monitorVisible}
+          status={monitorStatus}
+          layer={monitorLayer}
+          message={depositMonitor.message}
+          accent={currentAccent}
+        />
         {renderContent()}
       </ScrollView>
 
@@ -2005,6 +2256,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         visible={showAssetSelector}
         onClose={() => setShowAssetSelector(false)}
         onSelect={(asset) => {
+          resetReceiveSurface();
           setSelectedAsset({
             asset_id: asset.asset_id,
             ticker: asset.ticker,
@@ -2054,9 +2306,10 @@ export default function ReceiveScreen({ navigation }: Props) {
       <DepositSuccessOverlay
         visible={showDepositSuccess}
         ticker={selectedAsset?.ticker || 'BTC'}
-        network={networkType === 'unified' ? undefined : networkType}
+        network={depositMonitor.layer ? formatDepositLayer(depositMonitor.layer) : networkType === 'unified' ? undefined : networkType}
         onDone={() => {
           setShowDepositSuccess(false);
+          setDepositMonitor({ status: 'idle' });
           navigation.goBack();
         }}
       />
@@ -2080,6 +2333,8 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.secondary,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border.light,
+    zIndex: 30,
+    elevation: 30,
   },
 
   receiveBackButton: {
@@ -2342,6 +2597,7 @@ const styles = StyleSheet.create({
   
   scrollView: {
     flex: 1,
+    zIndex: 0,
   },
   
   scrollContent: {
@@ -2591,11 +2847,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: theme.spacing[2],
     marginBottom: theme.spacing[3],
+    zIndex: 20,
+    elevation: 20,
   },
   assetTab: {
     flex: 1,
     flexDirection: 'row',
     gap: theme.spacing[2],
+    minHeight: 44,
     paddingVertical: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1.5,
@@ -2726,6 +2985,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 6.27,
     elevation: 10,
+    zIndex: 0,
   },
 
   qrHeader: {
@@ -2911,6 +3171,7 @@ const styles = StyleSheet.create({
   // Asset "+" tab (square add button)
   assetAddTab: {
     width: 44,
+    minHeight: 44,
     paddingVertical: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
     borderWidth: 1.5,
@@ -2923,6 +3184,8 @@ const styles = StyleSheet.create({
   // Network selector + dropdown
   netSelectorWrap: {
     marginBottom: theme.spacing[4],
+    zIndex: 15,
+    elevation: 15,
   },
   netSelector: {
     flexDirection: 'row',
@@ -2977,6 +3240,53 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
+  },
+
+  depositMonitorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    marginBottom: theme.spacing[4],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+  },
+  depositMonitorIconWrap: {
+    width: 42,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  depositMonitorPulse: {
+    position: 'absolute',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+  },
+  depositMonitorIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  depositMonitorText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  depositMonitorTitle: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  depositMonitorSubtitle: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+    marginTop: 2,
+    lineHeight: 16,
   },
 
   // Amount row with pencil edit

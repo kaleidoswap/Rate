@@ -73,7 +73,7 @@ export const BrandIntro: React.FC<BrandIntroProps> = ({
   const screenStyle = useAnimatedStyle(() => ({ opacity: screen.value }));
   const markStyle = useAnimatedStyle(() => ({
     opacity: markOpacity.value,
-    transform: [{ scale: markScale.value }, { rotate: `${markRotate.value}deg` }],
+    transform: [{ scale: markScale.value }, { rotate: `${markRotate.value}deg` }] as const,
   }));
   const glowStyle = useAnimatedStyle(() => ({
     opacity: interpolate(glow.value, [0, 1], [0.25, 0.55]),

@@ -17,6 +17,7 @@
 
 import { useEffect, useRef } from 'react';
 import { protocolManager } from '../services/protocols';
+import type { DepositDetectionEvent } from './useDepositDetection';
 
 // The new optional claim/sweep surface on the Spark adapter. Typed locally
 // because rate resolves @kaleidorg/wallet-engine's *published* types (which may
@@ -40,7 +41,8 @@ interface UseSparkAutoClaimArgs {
   // the on-screen receive isn't a Spark on-chain deposit.
   address: string | null;
   enabled: boolean;
-  onClaimed: () => void;
+  onClaimed: (event?: DepositDetectionEvent) => void;
+  onStatus?: (event: DepositDetectionEvent) => void;
 }
 
 const CLAIM_POLL_MS = 10_000;
@@ -49,12 +51,20 @@ function getSparkAdapter(): SparkClaimAdapter | null {
   return (protocolManager.getAdapterIfAvailable('SPARK') as unknown as SparkClaimAdapter) || null;
 }
 
-export function useSparkAutoClaim({ address, enabled, onClaimed }: UseSparkAutoClaimArgs): void {
+export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: UseSparkAutoClaimArgs): void {
   // Address we've already claimed (stop polling it) and the address we've swept.
   const claimedRef = useRef<string | null>(null);
   const sweptRef = useRef<string | null>(null);
+  const statusKeyRef = useRef<string | null>(null);
 
   const active = enabled && !!address && claimedRef.current !== address;
+
+  const emitStatus = (event: DepositDetectionEvent) => {
+    const key = `${event.layer}:${event.status}:${event.message ?? ''}`;
+    if (statusKeyRef.current === key) return;
+    statusKeyRef.current = key;
+    onStatus?.(event);
+  };
 
   // One-shot sweep when a Spark on-chain address first appears.
   useEffect(() => {
@@ -68,7 +78,15 @@ export function useSparkAutoClaim({ address, enabled, onClaimed }: UseSparkAutoC
       if (!adapter?.sweepL1Deposits) return;
       try {
         const res = await adapter.sweepL1Deposits();
-        if (!cancelled && res.claimedTxids.length > 0) onClaimed();
+        if (!cancelled && res.claimedTxids.length > 0) {
+          const event: DepositDetectionEvent = {
+            layer: 'spark',
+            status: 'claimed',
+            message: 'Recovered a pending Spark deposit',
+          };
+          emitStatus(event);
+          onClaimed(event);
+        }
       } catch (err) {
         console.warn('Spark deposit sweep failed:', err);
       }
@@ -77,7 +95,7 @@ export function useSparkAutoClaim({ address, enabled, onClaimed }: UseSparkAutoC
     return () => {
       cancelled = true;
     };
-  }, [active, address, onClaimed]);
+  }, [active, address, onClaimed, onStatus]);
 
   // Continuous claim polling of the on-screen address.
   useEffect(() => {
@@ -90,10 +108,23 @@ export function useSparkAutoClaim({ address, enabled, onClaimed }: UseSparkAutoC
       if (!adapter?.claimL1Deposit) return;
       try {
         const res = await adapter.claimL1Deposit(address);
-        if (!cancelled && res.status === 'claimed') {
+        if (cancelled) return;
+        if (res.status === 'awaiting') {
+          emitStatus({
+            layer: 'spark',
+            status: 'pending',
+            message: 'Waiting for Spark on-chain confirmation',
+          });
+        } else if (res.status === 'claimed') {
           claimedRef.current = address;
           clearInterval(id);
-          onClaimed();
+          const event: DepositDetectionEvent = {
+            layer: 'spark',
+            status: 'claimed',
+            message: 'Claimed Spark on-chain deposit',
+          };
+          emitStatus(event);
+          onClaimed(event);
         }
       } catch (err) {
         console.warn('Spark auto-claim poll failed:', err);
@@ -105,5 +136,5 @@ export function useSparkAutoClaim({ address, enabled, onClaimed }: UseSparkAutoC
       cancelled = true;
       clearInterval(id);
     };
-  }, [active, address, onClaimed]);
+  }, [active, address, onClaimed, onStatus]);
 }

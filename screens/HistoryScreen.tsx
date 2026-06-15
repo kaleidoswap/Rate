@@ -226,7 +226,7 @@ export default function HistoryScreen() {
             <SegmentedTabs
                 options={FILTERS}
                 value={filter}
-                onChange={setFilter}
+                onChange={(key) => setFilter(key)}
                 scrollable={false}
                 style={styles.filterBar}
             />
