@@ -116,6 +116,14 @@ IPA="$(ls "$EXPORT_DIR"/*.ipa | head -1)"
 echo "==> built: $IPA"
 
 # --- Upload to App Store Connect / TestFlight ---------------------------------
+# SKIP_UPLOAD=1 archives + exports the signed .ipa but stops short of uploading
+# — used by the CI dry-run to validate the native build & signing without
+# pushing a build to TestFlight.
+if [ "${SKIP_UPLOAD:-0}" = "1" ]; then
+  echo "==> SKIP_UPLOAD=1 — built and signed $IPA, skipping TestFlight upload"
+  exit 0
+fi
+
 echo "==> upload to TestFlight"
 xcrun altool --upload-app \
   --type ios \
