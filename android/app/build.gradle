@@ -143,6 +143,11 @@ android {
             def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
             useLegacyPackaging enableLegacyPackaging.toBoolean()
                     excludes += "/lib/**/libOpenCL.so"
+            // Drop static archives (e.g. lwk-rn's liblwk.a, ~166 MB for arm64-v8a)
+            // from the APK. CMake links these .a files into their runtime .so at
+            // build time, so Android never loads the .a itself — packaging it is
+            // pure dead weight. This alone shrinks the release APK by ~166 MB.
+            excludes += ["**/*.a"]
         }
     }
     androidResources {

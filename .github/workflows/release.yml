@@ -83,9 +83,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # The app ships arm64-v8a only (ndk.abiFilters). lwk-rn bundles 606 MB of
-      # static libs across 4 ABIs — drop the unused 3 so the jniLib merge stays
-      # within the runner disk. The final APK is identical (other ABIs are
-      # filtered out anyway).
+      # static libs across 4 ABIs — drop the unused 3 so lwk-rn's source-set
+      # merge (:lwk-rn:mergeReleaseJniLibFolders) stays within the runner disk.
+      # This is a BUILD-TIME disk concern only and is distinct from the APK-size
+      # exclude in android/app/build.gradle: the kept arm64-v8a liblwk.a is still
+      # needed here so CMake can link it into the runtime .so, but it (and any
+      # other static archive) is then excluded from the final APK by
+      # packagingOptions.jniLibs.excludes. The merge runs upstream of packaging,
+      # so that exclude cannot replace this trim. The final APK is identical
+      # (other ABIs are filtered out anyway).
       - name: Trim native libs to arm64-v8a
         run: rm -rf node_modules/lwk-rn/android/src/main/jniLibs/x86 node_modules/lwk-rn/android/src/main/jniLibs/x86_64 node_modules/lwk-rn/android/src/main/jniLibs/armeabi-v7a
 
