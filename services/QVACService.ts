@@ -3,6 +3,7 @@ import {
   loadModel,
   completion,
   transcribe,
+  transcribeStream,
   textToSpeech,
   unloadModel,
   cancel,
@@ -35,6 +36,13 @@ import {
   type TtsEngine,
 } from './qvacModels';
 import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
+import {
+  createQvacProvider,
+  createQvacVoice,
+  buildDelegateConfig,
+  cleanAssistantVisibleText,
+  sanitizeForSupertonic,
+} from '@kaleidorg/mind/qvac';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 
 // CPU baseline config for the local llamacpp model. Used as the GPU fallback
@@ -114,49 +122,8 @@ function isPhoneRuntime(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
-function sanitizeForSupertonic(text: string): string {
-  const normalized = text
-    .replace(/\b(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{40,}\b/gi, 'Lightning invoice')
-    .replace(/\blnurl[0-9a-z]{40,}\b/gi, 'Lightning payment link')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/[\u0060\u00B4\u02CB\u2032*_~#<>|[\]{}]/g, ' ')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[•·]/g, '. ')
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
-    .replace(/\s+/g, ' ');
-
-  return Array.from(normalized)
-    .filter((ch) => {
-      const code = ch.charCodeAt(0);
-      return (code === 0x09 || code === 0x0A || code === 0x0D || (code >= 0x20 && code <= 0x7E)) &&
-        code !== 0x60;
-    })
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function cleanAssistantVisibleText(text: string): string {
-  let cleaned = text
-    // Qwen-style reasoning sometimes arrives in contentText. Never show/speak it.
-    .replace(/<think\b[\s\S]*?<\/think>/gi, ' ')
-    .replace(/<think\b[\s\S]*$/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // Some small local models emit a tool-call object as plain text. Drop the
-  // leading fragment and keep any natural-language sentence that follows.
-  const toolPrefix = cleaned.match(/^\s*\{?\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*/i);
-  if (toolPrefix) {
-    cleaned = cleaned.slice(toolPrefix[0].length).replace(/^\s*\{?\s*/, '').trim();
-  }
-
-  return cleaned
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// `sanitizeForSupertonic` + `cleanAssistantVisibleText` now live in
+// @kaleidorg/mind/qvac (imported above) — one implementation, shared with desktop.
 
 const CONFIG_KEY = 'qvac.config.v1';
 
@@ -246,6 +213,29 @@ class QVACService {
   // App.tsx syncs this from the persisted KaleidoMind mode (settings.aiMode), so the
   // worklet can never start until the user explicitly opts in.
   private enabled = false;
+
+  // All completion + tool-call parsing lives in @kaleidorg/mind-qvac (shared with
+  // desktop). We inject the raw SDK fns + a model-id resolver; this host keeps
+  // model lifecycle (load/unload, GPU/delegate) below. Defaults mirror the prior
+  // inline turn (0.6 temperature, 512-token cap), overridable per turn.
+  private readonly mindProvider = createQvacProvider({
+    completion,
+    cancel,
+    getModelId: () => this.llmModelId,
+    defaultTemperature: 0.6,
+    defaultMaxTokens: 512,
+  });
+
+  // Shared voice orchestration (transcribe + synth, and the VAD session for
+  // hands-free mode). The SDK fns are injected; this host owns model lifecycle
+  // (load/unload below) via the model-id resolvers.
+  private readonly mindVoice = createQvacVoice({
+    transcribe,
+    textToSpeech,
+    transcribeStream,
+    getWhisperModelId: () => this.whisperModelId,
+    getTtsModelId: () => this.ttsModelId,
+  });
 
   private constructor() {}
 
@@ -733,10 +723,7 @@ class QVACService {
             modelSrc,
             modelType: 'llamacpp-completion',
             modelConfig: { ...DELEGATE_LLM_CONFIG },
-            delegate: {
-              providerPublicKey: this.config.providerPublicKey,
-              fallbackToLocal: false,
-            },
+            delegate: buildDelegateConfig(this.config.providerPublicKey),
           } as any);
         } else {
           // Local: try Metal/GPU offload first, fall back to CPU.
@@ -803,10 +790,7 @@ class QVACService {
             modelSrc: WHISPER_BASE_Q8_0,
             modelType: 'whispercpp-transcription',
             modelConfig: { language: deviceWhisperLanguage(), strategy: 'greedy', audio_format: 's16le' } as any,
-            delegate: {
-              providerPublicKey: this.config.providerPublicKey,
-              fallbackToLocal: false,
-            },
+            delegate: buildDelegateConfig(this.config.providerPublicKey),
           } as any);
           this.setState({ whisperStatus: 'ready' });
           console.log('[QVAC] Whisper ready (delegated):', this.whisperModelId);
@@ -965,89 +949,36 @@ class QVACService {
   async runProviderTurn(
     input: TurnInput & { onThinking?: (token: string) => void; temperature?: number; maxTokens?: number },
   ): Promise<TurnOutput> {
-    if (!this.llmModelId) {
-      throw new Error('LLM model not loaded');
-    }
-
-    const history = input.system
-      ? [{ role: 'system', content: input.system }, ...input.messages]
-      : input.messages;
-
-    const toolDefs = input.tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-    }));
-
-    const run = completion({
-      modelId: this.llmModelId,
-      history,
-      stream: true,
-      // Parse <think> blocks into separate `thinkingDelta` events so the UI can
-      // surface the model's reasoning on demand without it polluting the answer.
-      captureThinking: true,
-      // Cap output so a turn can't ramble to the context limit (slow + battery).
-      // User-tunable via "Design your agent" (default 512). Temperature too.
-      max_tokens: input.maxTokens ?? 512,
-      temperature: input.temperature ?? 0.6,
-      tools: toolDefs.length ? (toolDefs as any) : undefined,
-    } as any);
-
-    let streamed = '';
-    for await (const event of run.events) {
-      if (event.type === 'contentDelta') {
-        streamed += event.text;
-        input.onToken?.(event.text);
-      } else if (event.type === 'thinkingDelta') {
-        // The model's chain-of-thought, streamed separately from the visible
-        // answer. Surfaced so the UI can show it on demand (collapsed reveal).
-        input.onThinking?.(event.text);
-      }
-    }
-
-    const final = await run.final;
-    // Strip <think>…</think> reasoning from the user-visible text; keep the raw
-    // frame (with framing) for the engine's history push-back.
-    const rawText = final.contentText || streamed;
-    const text = cleanAssistantVisibleText(rawText);
-
-    return {
-      text,
-      rawContent: final.raw?.fullText ?? rawText,
-      toolCalls: (final.toolCalls || []).map((c: any) => ({
-        id: c.id,
-        name: c.name,
-        arguments: c.arguments ?? {},
-      })),
-      requestId: run.requestId,
-    };
+    // The shared provider runs completion + streams tokens (contentDelta →
+    // onToken, thinkingDelta → onThinking) + parses the final frame. It reads the
+    // model id via the `getModelId` closure above, so this stays a thin binding.
+    return this.mindProvider.runTurn(input);
   }
 
   /** Cancel an in-flight completion by its requestId (for a stop button). */
   async cancelRequest(requestId: string): Promise<void> {
-    try {
-      await cancel({ requestId });
-    } catch (err) {
-      console.warn('QVAC cancel failed:', err);
-    }
+    await this.mindProvider.cancel?.(requestId);
   }
 
   // --- Transcription ---
 
   async transcribeAudio(audioUri: string): Promise<string> {
-    if (this.workletBlocked() || !this.whisperModelId) {
-      throw new Error('Whisper model not loaded');
-    }
+    if (this.workletBlocked()) throw new Error('Whisper model not loaded');
+    // The file:// strip + transcribe call live in the shared voice helper (it
+    // also throws if the Whisper model id isn't resolved yet).
+    return this.mindVoice.transcribeAudio(audioUri);
+  }
 
-    // The QVAC SDK's native file reader expects a plain filesystem path, not a
-    // `file://` URI — same as the model-loading paths above. Passing the raw
-    // URI causes AUDIO_FILE_NOT_FOUND even though the file exists.
-    const audioPath = audioUri.replace('file://', '');
-
-    return await transcribe({
-      modelId: this.whisperModelId,
-      audioChunk: audioPath,
-    });
+  /**
+   * Open a hands-free VAD transcription session for continuous voice. The caller
+   * feeds raw PCM via `session.write()` and drives it with `runVoiceAssistant`
+   * (both from @kaleidorg/mind/qvac). Requires the Whisper model loaded and
+   * @qvac/sdk ≥ 0.13.1 (the VAD conversation session). The one-shot
+   * `transcribeAudio` path above still works on 0.12.x.
+   */
+  async openVoiceSession() {
+    if (this.workletBlocked()) throw new Error('on-device AI unavailable on this device');
+    return this.mindVoice.openVoiceSession();
   }
 
   // --- Text-to-speech (on-device, QVAC SUPERTONIC-2) ---
@@ -1086,7 +1017,7 @@ class QVACService {
           ttsNumInferenceSteps: 5,
         },
         ...(delegating
-          ? { delegate: { providerPublicKey: this.config.providerPublicKey, fallbackToLocal: false } }
+          ? { delegate: buildDelegateConfig(this.config.providerPublicKey) }
           : {}),
       } as any);
       this.ttsModelId = id;
@@ -1109,26 +1040,14 @@ class QVACService {
    */
   async synthesizeSpeech(text: string): Promise<{ pcm: number[]; sampleRate: number } | null> {
     if (this.workletBlocked()) return null;
-    const trimmed = sanitizeForSupertonic(text);
-    if (!trimmed) return null;
-    if (trimmed !== text.trim()) {
-      console.log('[QVAC] TTS: sanitized unsupported characters before synthesis');
-    }
-    if (Array.from(trimmed).some((ch) => ch.charCodeAt(0) === 0x60)) {
-      console.warn('[QVAC] TTS: refusing Supertonic input with U+0060 after sanitize');
-      return null;
-    }
-    console.log('[QVAC] TTS: synth input chars', Array.from(trimmed).map((ch) => ch.charCodeAt(0)).join(','));
-
-    const modelId = await this.ensureTtsLoaded();
-    const result: any = textToSpeech({
-      modelId,
-      text: trimmed,
-      inputType: 'text',
-      stream: false,
-    } as any);
-    const pcm: number[] = await result.buffer;
-    return { pcm, sampleRate: TTS_SAMPLE_RATE };
+    // Early-out before loading the TTS model: the shared helper sanitizes +
+    // refuses unspeakable input internally, but we check here too so we never
+    // spin up the neural voice for empty/redacted text.
+    if (!sanitizeForSupertonic(text)) return null;
+    await this.ensureTtsLoaded();
+    // sanitize + U+0060 refusal + textToSpeech → 16-bit PCM live in the helper
+    // (44.1 kHz SUPERTONIC default).
+    return this.mindVoice.synthesizeSpeech(text);
   }
 
   // --- Embeddings (for on-device RAG) ---

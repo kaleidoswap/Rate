@@ -39,4 +39,10 @@ if [ ! -d "$DEST" ]; then
 fi
 
 rsync -a --delete "$SRC/dist/" "$DEST/"
-echo "sync-mind: overlaid local @kaleidorg/mind ($SRC/dist) → $DEST"
+# Also overlay package.json so its `exports` map matches the working tree — e.g.
+# the `./qvac` subpath (the QVAC adapter, which ships inside core's dist) won't
+# resolve via tsc/Metro until the installed package.json advertises it.
+cp "$SRC/package.json" "node_modules/@kaleidorg/mind/package.json"
+echo "sync-mind: overlaid local @kaleidorg/mind ($SRC/dist + package.json) → $DEST"
+# The QVAC adapter ships as the @kaleidorg/mind/qvac subpath inside core's dist,
+# so this single overlay already carries it — no separate sync needed.

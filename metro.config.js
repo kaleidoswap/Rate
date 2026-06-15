@@ -20,6 +20,8 @@ const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 // native deps). To consume the published version instead, set its dep to
 // `^0.0.1` and drop this watchFolder.
 const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
+// The QVAC adapter ships as the @kaleidorg/mind/qvac subpath inside core, so
+// watching core covers it too — no separate watchFolder needed.
 const watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot]
   .filter(p => fs.existsSync(p));
 config.watchFolders = watchFolders;

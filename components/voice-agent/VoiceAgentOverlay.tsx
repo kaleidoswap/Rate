@@ -24,6 +24,7 @@ import { theme } from '../../theme';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
+import { startHandsFreeVoice, type HandsFreeController } from '../../services/handsFreeVoice';
 import { selectMindConfig } from '../../store/slices/settingsSlice';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -78,6 +79,15 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // Which assistant bubbles have their reasoning expanded (tap to reveal).
   const [openThinking, setOpenThinking] = useState<Record<string, boolean>>({});
 
+  // Continuous hands-free mode (Whisper VAD streaming) — distinct from the
+  // push-to-talk orb, which keeps working when this is off.
+  const [handsFree, setHandsFree] = useState(false);
+  const handsFreeRef = useRef<HandsFreeController | null>(null);
+  // Latest bubbles, read inside the hands-free respond closure (created once
+  // when the loop starts) to build turn history without a stale snapshot.
+  const bubblesRef = useRef(bubbles);
+  bubblesRef.current = bubbles;
+
   // True while the session is mounted — guards the speak→listen loop so a late
   // TTS callback can't start the recorder after the overlay has closed.
   const aliveRef = useRef(true);
@@ -111,6 +121,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     () => () => {
       void stopSpeak();
       voiceRef.current?.stopListening?.();
+      handsFreeRef.current?.stop();
     },
     []
   );
@@ -224,6 +235,77 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       void stopSpeak();
       voiceRef.current?.startListening();
     }
+  };
+
+  // ── Hands-free (continuous VAD) ─────────────────────────────────────────────
+  // Resolve when the spoken reply finishes playing (onDone), so the loop's mic
+  // re-gate + cooldown timing stays correct.
+  const speakHandsFree = (text: string): Promise<void> =>
+    new Promise((resolve) => {
+      void stopSpeak();
+      void qvacSpeak(text, { onDone: () => resolve(), onError: () => resolve() });
+    });
+
+  // Run one turn for a transcribed utterance and return the reply text — same
+  // agent/settings/confirm-gate as chat + push-to-talk, streamed into a bubble.
+  const respondHandsFree = async (transcript: string): Promise<string> => {
+    appendBubble('user', transcript);
+    const priorHistory = bubblesRef.current.map((b) => ({ role: b.role, content: b.text }));
+    const assistantId = appendBubble('assistant', '');
+    let streamed = '';
+    let reasoning = '';
+    const res = await agent.runTurn(transcript, {
+      history: priorHistory,
+      onToken: (tok) => {
+        streamed += tok;
+        patchBubble(assistantId, { text: streamed });
+        scrollToEnd();
+      },
+      onThinking: (tok) => {
+        reasoning += tok;
+        patchBubble(assistantId, { thinking: reasoning });
+      },
+      onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
+    });
+    const finalText = (res.text || streamed || 'Done.').trim();
+    patchBubble(assistantId, { text: finalText });
+    scrollToEnd();
+    return finalText;
+  };
+
+  const stopHandsFree = () => {
+    handsFreeRef.current?.stop();
+    handsFreeRef.current = null;
+    setHandsFree(false);
+    setPhase('idle');
+  };
+
+  const startHandsFree = async () => {
+    if (handsFreeRef.current || !qvac.isReady) return;
+    setError(null);
+    setHandsFree(true);
+    void stopSpeak();
+    voiceRef.current?.stopListening?.(); // never run both mic paths at once
+    try {
+      handsFreeRef.current = await startHandsFreeVoice({
+        respond: respondHandsFree,
+        speak: speakHandsFree,
+        onState: (s) => setPhase(s),
+        onError: (e) => {
+          setError(e instanceof Error ? e.message : 'Voice loop stopped.');
+          stopHandsFree();
+        },
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start hands-free voice.');
+      setHandsFree(false);
+      setPhase('idle');
+    }
+  };
+
+  const toggleHandsFree = () => {
+    if (handsFree) stopHandsFree();
+    else void startHandsFree();
   };
 
   const orbStyle = useAnimatedStyle(() => ({
@@ -354,6 +436,35 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             </View>
           )}
           <Text style={styles.status}>{statusText}</Text>
+
+          {/* Hands-free (continuous VAD) toggle. Needs @qvac/sdk ≥ 0.13.1 + the
+              react-native-live-audio-stream native module (see services/micStream.ts);
+              the orb above is the one-shot push-to-talk path and works without them. */}
+          <Pressable
+            onPress={toggleHandsFree}
+            disabled={!qvac.isReady && qvac.llmStatus !== 'error'}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 10,
+              opacity: qvac.isReady ? 1 : 0.4,
+            }}
+          >
+            <Ionicons
+              name={handsFree ? 'infinite' : 'infinite-outline'}
+              size={16}
+              color={handsFree ? theme.colors.brand.violet : theme.colors.text.secondary}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                color: handsFree ? theme.colors.brand.violet : theme.colors.text.secondary,
+              }}
+            >
+              {handsFree ? 'Hands-free on' : 'Hands-free'}
+            </Text>
+          </Pressable>
 
           {/* Hidden recorder */}
           <View style={{ height: 0, overflow: 'hidden' }}>
