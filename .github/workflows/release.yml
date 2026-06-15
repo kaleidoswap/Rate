@@ -58,6 +58,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: version
     steps:
+      # The jniLib merge is disk-hungry; reclaim space from preinstalled tooling
+      # we don't use (≈15 GB) so the runner doesn't run out mid-build.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/lib/android/sdk/ndk || true
+          df -h / | tail -1
+
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
@@ -74,6 +81,13 @@ jobs:
       # Runs postinstall (fetch-lwk-artifacts pulls the Android jniLibs).
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # The app ships arm64-v8a only (ndk.abiFilters). lwk-rn bundles 606 MB of
+      # static libs across 4 ABIs — drop the unused 3 so the jniLib merge stays
+      # within the runner disk. The final APK is identical (other ABIs are
+      # filtered out anyway).
+      - name: Trim native libs to arm64-v8a
+        run: rm -rf node_modules/lwk-rn/android/src/main/jniLibs/x86 node_modules/lwk-rn/android/src/main/jniLibs/x86_64 node_modules/lwk-rn/android/src/main/jniLibs/armeabi-v7a
 
       - name: Decode release keystore
         env:
