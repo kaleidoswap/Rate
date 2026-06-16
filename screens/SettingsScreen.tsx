@@ -35,6 +35,7 @@ import {
   PROTOCOL_TO_NETWORK_TYPE,
   buildDefaultNetworkConfig,
   buildNetworkConfig,
+  normalizeSparkNetwork,
   type ProtocolNetwork,
 } from '../services/protocols/networkConfig';
 
@@ -183,6 +184,7 @@ export default function SettingsScreen({ navigation }: Props) {
           try {
             if (n.config) net = JSON.parse(n.config).network || net;
           } catch { /* keep default */ }
+          if (n.type === 'spark') net = normalizeSparkNetwork(net);
           map[n.type] = net;
         }
         setProtoNetworks(map);
@@ -203,6 +205,7 @@ export default function SettingsScreen({ navigation }: Props) {
         const existing = nets.find((n) => n.type === type);
         const cfg = existing?.config ? JSON.parse(existing.config) : JSON.parse(buildDefaultNetworkConfig(type));
         const nextConfig = buildNetworkConfig(type, network, cfg);
+        const effectiveNetwork = JSON.parse(nextConfig).network as ProtocolNetwork;
         if (existing) {
           await db.updateNetworkConfig(id, type, { enabled: true, config: nextConfig });
         } else {
@@ -224,16 +227,17 @@ export default function SettingsScreen({ navigation }: Props) {
         }
 
         if (refreshedWallet) dispatch(setActiveWallet(refreshedWallet));
-        setProtoNetworks((prev) => ({ ...prev, [type]: network }));
+        setProtoNetworks((prev) => ({ ...prev, [type]: effectiveNetwork }));
         refreshProtocolStatus();
         dispatch(loadBtcBalance() as any);
         Alert.alert(
           'Network connected',
-          `${proto} is now connected on ${NETWORK_LABEL[network] ?? network}.`,
+          `${proto} is now connected on ${NETWORK_LABEL[effectiveNetwork] ?? effectiveNetwork}.`,
         );
       } catch (e: any) {
         refreshProtocolStatus();
-        setProtoNetworks((prev) => ({ ...prev, [type]: network }));
+        const effectiveNetwork = type === 'spark' ? normalizeSparkNetwork(network) : network;
+        setProtoNetworks((prev) => ({ ...prev, [type]: effectiveNetwork }));
         setProtocolErrors((prev) => ({ ...prev, [proto]: e?.message ?? 'Connection failed' }));
         Alert.alert('Network saved, connection failed', e?.message ?? 'Please try again.');
       } finally {

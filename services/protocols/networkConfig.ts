@@ -1,9 +1,12 @@
 import type { NetworkType } from '../DatabaseService';
 
 export type ProtocolNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
+export type SparkProtocolNetwork = Extract<ProtocolNetwork, 'mainnet' | 'regtest'>;
 
 export const PROTOCOL_SUPPORTED_NETWORKS: Record<'RGB' | 'SPARK' | 'ARKADE', ProtocolNetwork[]> = {
-  SPARK: ['mainnet', 'testnet', 'regtest', 'signet'],
+  // Spark SDK 0.7.x only ships hosted defaults for MAINNET and REGTEST.
+  // TESTNET/SIGNET fall through to LOCAL service URLs and fail auth on mobile.
+  SPARK: ['mainnet', 'regtest'],
   ARKADE: ['mainnet', 'signet'],
   RGB: ['regtest', 'testnet', 'signet'],
 };
@@ -15,7 +18,7 @@ export const PROTOCOL_TO_NETWORK_TYPE: Record<'RGB' | 'SPARK' | 'ARKADE', Networ
 };
 
 export const PROTOCOL_DEFAULT_NETWORK: Record<NetworkType, ProtocolNetwork> = {
-  spark: 'testnet',
+  spark: 'regtest',
   arkade: 'signet',
   rln: 'regtest',
   liquid: 'testnet',
@@ -32,6 +35,10 @@ export function getDefaultArkadeServerUrl(network: ProtocolNetwork): string {
   return network === 'mainnet' ? 'https://arkade.computer' : 'https://mutinynet.arkade.sh';
 }
 
+export function normalizeSparkNetwork(network?: string | null): SparkProtocolNetwork {
+  return network === 'mainnet' ? 'mainnet' : 'regtest';
+}
+
 export function buildNetworkConfig(
   type: NetworkType,
   network: ProtocolNetwork = PROTOCOL_DEFAULT_NETWORK[type],
@@ -41,7 +48,7 @@ export function buildNetworkConfig(
     ...previous,
     network: PROTOCOL_DEFAULT_NETWORK[type],
   };
-  config.network = network;
+  config.network = type === 'spark' ? normalizeSparkNetwork(network) : network;
 
   if (type === 'arkade') {
     const previousUrl = typeof previous.arkServerUrl === 'string' ? previous.arkServerUrl : undefined;
