@@ -25,6 +25,7 @@ import {
     type AssetMeta,
 } from '../services/ActivityService';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 
 type FilterTab = 'all' | 'receive' | 'send' | 'swap';
 
@@ -109,6 +110,7 @@ export default function HistoryScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [softError, setSoftError] = useState<string | null>(null);
     const [filter, setFilter] = useState<FilterTab>('all');
+    const [selectedItem, setSelectedItem] = useState<ActivityItem | null>(null);
 
     const fetchActivity = useCallback(async () => {
         const assets: AssetMeta[] = (rgbAssets || []).map((a: any) => ({
@@ -176,7 +178,7 @@ export default function HistoryScreen() {
         const st = statusVisual[item.status];
         const hasAmount = item.amount !== '';
         return (
-            <TouchableOpacity activeOpacity={0.7} style={styles.row}>
+            <TouchableOpacity activeOpacity={0.7} style={styles.row} onPress={() => setSelectedItem(item)}>
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={20} color={v.color} />
                 </View>
@@ -265,6 +267,8 @@ export default function HistoryScreen() {
                     }
                 />
             )}
+
+            <ActivityDetailSheet item={selectedItem} onClose={() => setSelectedItem(null)} />
         </View>
     );
 }
