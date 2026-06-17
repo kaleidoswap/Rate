@@ -321,10 +321,6 @@ PODS:
     - ReactNativeDependencies
     - uniffi-bindgen-react-native (= 0.28.3-3)
     - Yoga
-  - Picker (4.3.7):
-    - Picker/Core (= 4.3.7)
-  - Picker/Core (4.3.7):
-    - React
   - RCTDeprecation (0.81.6)
   - RCTRequired (0.81.6)
   - RCTTypeSafety (0.81.6):
@@ -1604,7 +1600,7 @@ PODS:
     - React-RCTFBReactNativeSpec
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
-  - react-native-bare-kit (0.12.3):
+  - react-native-bare-kit (0.14.4):
     - hermes-engine
     - RCTRequired
     - RCTTypeSafety
@@ -2206,6 +2202,8 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - RNLiveAudioStream (1.1.1):
+    - React
   - RNReanimated (4.1.7):
     - hermes-engine
     - RCTRequired
@@ -2514,7 +2512,6 @@ DEPENDENCIES:
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - lottie-react-native (from `../node_modules/lottie-react-native`)
   - lwk-rn (from `../node_modules/lwk-rn`)
-  - Picker (from `../node_modules/react-native-picker`)
   - RCTDeprecation (from `../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)
   - RCTRequired (from `../node_modules/react-native/Libraries/Required`)
   - RCTTypeSafety (from `../node_modules/react-native/Libraries/TypeSafety`)
@@ -2590,6 +2587,7 @@ DEPENDENCIES:
   - "RNCPicker (from `../node_modules/@react-native-picker/picker`)"
   - RNDeviceInfo (from `../node_modules/react-native-device-info`)
   - RNGestureHandler (from `../node_modules/react-native-gesture-handler`)
+  - RNLiveAudioStream (from `../node_modules/react-native-live-audio-stream`)
   - RNReanimated (from `../node_modules/react-native-reanimated`)
   - RNScreens (from `../node_modules/react-native-screens`)
   - RNShare (from `../node_modules/react-native-share`)
@@ -2677,8 +2675,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/lottie-react-native"
   lwk-rn:
     :path: "../node_modules/lwk-rn"
-  Picker:
-    :path: "../node_modules/react-native-picker"
   RCTDeprecation:
     :path: "../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -2827,6 +2823,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native-device-info"
   RNGestureHandler:
     :path: "../node_modules/react-native-gesture-handler"
+  RNLiveAudioStream:
+    :path: "../node_modules/react-native-live-audio-stream"
   RNReanimated:
     :path: "../node_modules/react-native-reanimated"
   RNScreens:
@@ -2883,7 +2881,6 @@ SPEC CHECKSUMS:
   lottie-ios: a881093fab623c467d3bce374367755c272bdd59
   lottie-react-native: cbe3d931a7c24f7891a8e8032c2bb9b2373c4b9c
   lwk-rn: ebf394bfbd3140bfec17dda3729505a29b1b8f63
-  Picker: 94d2218a9f89c063154da89f0187e8e4e9de3346
   RCTDeprecation: ff38238d8b6ddfe1fcfeb2718d1c14da9564c1c3
   RCTRequired: 5916f53ff05efcc2bf095b0de01a0e5b00112a55
   RCTTypeSafety: bfbd8d69504a7459a65040705fc6ce10806c383b
@@ -2917,7 +2914,7 @@ SPEC CHECKSUMS:
   React-logger: 6655e8067cf5b86a8b165fecb0395f65ddddfe6b
   React-Mapbuffer: 90837747b018e7061eca67d45bc7e5dab93c4a06
   React-microtasksnativemodule: f86ccf2ec5f619f6df1dd06ae770c326e3eca0b8
-  react-native-bare-kit: 0e0151938ce3d9b2dec865e6f1b88e37a9a37c42
+  react-native-bare-kit: a9618bbde4340e0fd53a3bf437d63409be6d5351
   react-native-get-random-values: d16467cf726c618e9c7a8c3c39c31faa2244bbba
   react-native-maps: 3c765513d6993ab5f330fb170ebb57caf2f2048d
   react-native-netinfo: f852c868bf5175e46165c7e4db48a204a95c3800
@@ -2958,6 +2955,7 @@ SPEC CHECKSUMS:
   RNCPicker: a7170edbcbf8288de8edb2502e08e7fc757fa755
   RNDeviceInfo: bcce8752b5043a623fe3c26789679b473f705d3c
   RNGestureHandler: 2914750df066d89bf9d8f48a10ad5f0051108ac3
+  RNLiveAudioStream: 93ac2bb6065be9018d0b00157b220f11cebc1513
   RNReanimated: 41f496c18437fd0aa841234917af84e98fd5b9a2
   RNScreens: d8d6f1792f6e7ac12b0190d33d8d390efc0c1845
   RNShare: bedb237f4fc22851d14d4d30dee152950b289274
