@@ -106,11 +106,6 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
         }
     }, [rgbAssets, swapHistory]);
 
-    useEffect(() => {
-        setLoading(true);
-        fetchRecent().finally(() => setLoading(false));
-    }, [fetchRecent]);
-
     // Refresh when the Dashboard tab regains focus.
     useFocusEffect(
         useCallback(() => {
