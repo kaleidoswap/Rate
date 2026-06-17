@@ -35,7 +35,7 @@ import {
   PROTOCOL_TO_NETWORK_TYPE,
   buildDefaultNetworkConfig,
   buildNetworkConfig,
-  normalizeSparkNetwork,
+  resolveSparkNetwork,
   type ProtocolNetwork,
 } from '../services/protocols/networkConfig';
 
@@ -184,7 +184,7 @@ export default function SettingsScreen({ navigation }: Props) {
           try {
             if (n.config) net = JSON.parse(n.config).network || net;
           } catch { /* keep default */ }
-          if (n.type === 'spark') net = normalizeSparkNetwork(net);
+          if (n.type === 'spark') net = resolveSparkNetwork(net);
           map[n.type] = net;
         }
         setProtoNetworks(map);
@@ -236,7 +236,7 @@ export default function SettingsScreen({ navigation }: Props) {
         );
       } catch (e: any) {
         refreshProtocolStatus();
-        const effectiveNetwork = type === 'spark' ? normalizeSparkNetwork(network) : network;
+        const effectiveNetwork = type === 'spark' ? resolveSparkNetwork(network) : network;
         setProtoNetworks((prev) => ({ ...prev, [type]: effectiveNetwork }));
         setProtocolErrors((prev) => ({ ...prev, [proto]: e?.message ?? 'Connection failed' }));
         Alert.alert('Network saved, connection failed', e?.message ?? 'Please try again.');

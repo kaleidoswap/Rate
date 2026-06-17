@@ -2,7 +2,7 @@
 //
 // Dashboard snippet: shows the last 3 activity items with a "View All" link.
 // Tapping a row opens the ActivityDetailSheet inline.
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
@@ -114,7 +114,14 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
     // Refresh when the Dashboard tab regains focus.
     useFocusEffect(
         useCallback(() => {
-            fetchRecent();
+            let active = true;
+            setLoading(true);
+            fetchRecent().finally(() => {
+                if (active) setLoading(false);
+            });
+            return () => {
+                active = false;
+            };
         }, [fetchRecent])
     );
 

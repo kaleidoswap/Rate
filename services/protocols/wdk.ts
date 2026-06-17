@@ -34,7 +34,7 @@ import type {
   ArkadeAdapterConfig,
 } from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
-import { getDefaultArkadeServerUrl, normalizeSparkNetwork } from './networkConfig'
+import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 
 /**
  * Mobile rollout gates.
@@ -128,7 +128,7 @@ export async function initializeWdkProtocols(
           config = {
             protocol: 'SPARK',
             mnemonic,
-            network: normalizeSparkNetwork(parsed.network),
+            network: resolveSparkNetwork(parsed.network),
           } as SparkAdapterConfig
           break
 

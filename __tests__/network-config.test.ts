@@ -2,20 +2,20 @@ import {
   PROTOCOL_DEFAULT_NETWORK,
   PROTOCOL_SUPPORTED_NETWORKS,
   buildNetworkConfig,
-  normalizeSparkNetwork,
+  resolveSparkNetwork,
 } from '../services/protocols/networkConfig';
 
 describe('protocol network config', () => {
-  it('limits Spark to hosted SDK networks', () => {
+  it('uses Spark regtest as the single app-supported test environment', () => {
     expect(PROTOCOL_DEFAULT_NETWORK.spark).toBe('regtest');
     expect(PROTOCOL_SUPPORTED_NETWORKS.SPARK).toEqual(['mainnet', 'regtest']);
   });
 
-  it('normalizes unsupported Spark networks to regtest', () => {
-    expect(normalizeSparkNetwork('mainnet')).toBe('mainnet');
-    expect(normalizeSparkNetwork('testnet')).toBe('regtest');
-    expect(normalizeSparkNetwork('signet')).toBe('regtest');
-    expect(normalizeSparkNetwork(undefined)).toBe('regtest');
+  it('falls back legacy Spark network config to regtest', () => {
+    expect(resolveSparkNetwork('mainnet')).toBe('mainnet');
+    expect(resolveSparkNetwork('testnet')).toBe('regtest');
+    expect(resolveSparkNetwork('signet')).toBe('regtest');
+    expect(resolveSparkNetwork(undefined)).toBe('regtest');
   });
 
   it('builds Spark configs with a reachable network', () => {
