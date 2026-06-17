@@ -35,3 +35,5 @@ export * from './ErrorBoundary';
 export * from './Toast';
 export * from './LoadingSkeleton';
 export * from './ScreenHeader';
+export * from './ActivityDetailSheet';
+export * from './RecentActivityWidget';

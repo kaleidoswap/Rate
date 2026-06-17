@@ -1,9 +1,13 @@
 import type { NetworkType } from '../DatabaseService';
 
 export type ProtocolNetwork = 'mainnet' | 'testnet' | 'regtest' | 'signet';
+export type SparkProtocolNetwork = Extract<ProtocolNetwork, 'mainnet' | 'regtest'>;
+export const SPARK_TEST_NETWORK: SparkProtocolNetwork = 'regtest';
 
 export const PROTOCOL_SUPPORTED_NETWORKS: Record<'RGB' | 'SPARK' | 'ARKADE', ProtocolNetwork[]> = {
-  SPARK: ['mainnet', 'testnet', 'regtest', 'signet'],
+  // Spark uses one hosted test environment in this app: REGTEST.
+  // Arkade's signet/Mutinynet setting is a different protocol/network.
+  SPARK: ['mainnet', SPARK_TEST_NETWORK],
   ARKADE: ['mainnet', 'signet'],
   RGB: ['regtest', 'testnet', 'signet'],
 };
@@ -15,7 +19,7 @@ export const PROTOCOL_TO_NETWORK_TYPE: Record<'RGB' | 'SPARK' | 'ARKADE', Networ
 };
 
 export const PROTOCOL_DEFAULT_NETWORK: Record<NetworkType, ProtocolNetwork> = {
-  spark: 'testnet',
+  spark: 'regtest',
   arkade: 'signet',
   rln: 'regtest',
   liquid: 'testnet',
@@ -32,6 +36,18 @@ export function getDefaultArkadeServerUrl(network: ProtocolNetwork): string {
   return network === 'mainnet' ? 'https://arkade.computer' : 'https://mutinynet.arkade.sh';
 }
 
+export function isSupportedSparkNetwork(network?: string | null): network is SparkProtocolNetwork {
+  return network === 'mainnet' || network === SPARK_TEST_NETWORK;
+}
+
+export function resolveSparkNetwork(network?: string | null): SparkProtocolNetwork {
+  // Older wallet records may contain Spark "testnet" or "signet" values from
+  // broader protocol UI choices. Spark only has one app-supported test network,
+  // so those legacy values fall back to REGTEST instead of hitting broken SDK
+  // LOCAL endpoints during authentication.
+  return isSupportedSparkNetwork(network) ? network : SPARK_TEST_NETWORK;
+}
+
 export function buildNetworkConfig(
   type: NetworkType,
   network: ProtocolNetwork = PROTOCOL_DEFAULT_NETWORK[type],
@@ -41,7 +57,7 @@ export function buildNetworkConfig(
     ...previous,
     network: PROTOCOL_DEFAULT_NETWORK[type],
   };
-  config.network = network;
+  config.network = type === 'spark' ? resolveSparkNetwork(network) : network;
 
   if (type === 'arkade') {
     const previousUrl = typeof previous.arkServerUrl === 'string' ? previous.arkServerUrl : undefined;
