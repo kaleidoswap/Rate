@@ -15,7 +15,7 @@
     "bundle-skills": "node node_modules/@kaleidorg/mind/scripts/bundle-skills.mjs --out skills.bundle.json skills",
     "sync-qvac-bundle": "node scripts/sync-qvac-bundle.js",
     "sync-mind": "bash scripts/sync-mind.sh",
-    "postinstall": "bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js && npm run sync-mind"
+    "postinstall": "bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js && node scripts/patch-bare-kit-linker.js && npm run sync-mind"
   },
   "dependencies": {
     "@arkade-os/sdk": "^0.4.36",
