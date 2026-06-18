@@ -1,5 +1,17 @@
 // theme/index.ts
-import { colors as k } from '@kaleidorg/kaleido-ui/tokens'
+//
+// Single source of truth: leaf values are sourced from the shared `kaleido-ui`
+// design tokens wherever a canonical token exists, so this app stays visually
+// in sync with the web (rate-extension) and any other KaleidoSwap surface.
+// `k` is the flat web-facing palette (brand/intent colors, text/border ladders);
+// `kdDark` is the runtime dark palette (`makeTheme`) whose surface/text/border
+// values are the RN-shaped twins the web mirrors. Only genuinely app-specific
+// values (shade ramps, per-protocol/per-network leg colors) remain as literals
+// below — those are flagged as candidates to promote into kaleido-ui.
+import { colors as k, makeTheme } from '@kaleidorg/kaleido-ui/tokens'
+
+/** Resolved dark palette from the shared design system (brand default). */
+const kdDark = makeTheme('dark')
 
 // Define types for nested color objects
 type ColorGradient = [string, string];
@@ -242,7 +254,7 @@ export const lightTheme: ThemeType = {
       700: '#15803D',
       800: '#166534',
       900: '#14532D',
-      950: k.primaryFg,    // #102217
+      950: k.primaryFg,    // #051B10
       gradient: [k.primary, '#1FA855'] as [string, string],
     },
 
@@ -291,7 +303,7 @@ export const lightTheme: ThemeType = {
     warning: {
       50: '#FFFBEB',
       100: '#FEF3C7',
-      500: k.warning,      // #F59E0B
+      500: k.warning,      // #FACC15
       600: '#D97706',
       700: '#B45309',
       gradient: [k.warning, '#FBBF24'] as [string, string],
@@ -303,10 +315,10 @@ export const lightTheme: ThemeType = {
       200: '#FECACA',
       300: '#FCA5A5',
       400: '#F87171',
-      500: k.error,        // #F94040
+      500: k.danger,       // #F94040 — canonical danger token (k.error is a deprecated hsl alias)
       600: '#DC2626',
       700: '#B91C1C',
-      gradient: [k.error, '#F87171'] as [string, string],
+      gradient: [k.danger, '#F87171'] as [string, string],
     },
 
     info: {
@@ -636,33 +648,33 @@ export const darkTheme: ThemeType = {
     info: { ...lightTheme.colors.info, 50: 'rgba(66, 144, 255, 0.12)', 100: 'rgba(66, 144, 255, 0.18)' },
     gray: { ...lightTheme.colors.gray, 50: '#121C16', 100: '#16241B', 200: '#1B2C21', 300: '#243429' },
     background: {
-      primary: '#0D1813',
-      secondary: '#0F1C15',
-      tertiary: '#16241B',
-      modal: '#121C16',
-      backdrop: 'rgba(0, 0, 0, 0.7)',
+      primary: kdDark.background,    // #0D1813
+      secondary: '#0F1C15',          // app-local mid-tone (no shared token)
+      tertiary: '#16241B',           // app-local mid-tone (no shared token)
+      modal: kdDark.card,            // #121C16
+      backdrop: kdDark.surface.scrim, // rgba(0, 0, 0, 0.70)
     },
     text: {
-      primary: '#FFFFFF',
-      secondary: 'rgba(255, 255, 255, 0.64)',
-      tertiary: 'rgba(255, 255, 255, 0.45)',
-      muted: 'rgba(255, 255, 255, 0.42)',
-      inverse: '#0D1813',
+      primary: kdDark.text.primary,     // #FFFFFF
+      secondary: kdDark.text.secondary, // rgba(255,255,255,0.64)
+      tertiary: k.text.muted,           // rgba(255,255,255,0.45)
+      muted: kdDark.text.muted,         // rgba(255,255,255,0.42)
+      inverse: '#0D1813',               // dark text for use on light fills
       inverseSecondary: '#16241B',
-      disabled: 'rgba(255, 255, 255, 0.26)',
+      disabled: kdDark.text.disabled,   // rgba(255,255,255,0.26)
       link: k.primary,
     },
     surface: {
-      primary: '#121C16',
-      secondary: '#16241B',
-      tertiary: '#1B2C21',
-      elevated: '#17231C',
-      highlight: '#16301F',
+      primary: kdDark.card,          // #121C16
+      secondary: '#16241B',          // app-local (no shared token)
+      tertiary: '#1B2C21',           // app-local (no shared token)
+      elevated: kdDark.cardElevated, // #17231C
+      highlight: '#16301F',          // app-local tinted-green highlight
     },
     border: {
-      light: 'rgba(255, 255, 255, 0.06)',
-      medium: 'rgba(255, 255, 255, 0.10)',
-      dark: 'rgba(255, 255, 255, 0.16)',
+      light: kdDark.border.subtle,   // rgba(255,255,255,0.06)
+      medium: kdDark.border.default, // rgba(255,255,255,0.10)
+      dark: kdDark.border.strong,    // rgba(255,255,255,0.16)
       focus: k.primary,
     },
   },
