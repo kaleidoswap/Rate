@@ -44,6 +44,7 @@ import type { Message as MindMessage } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface Props {
   navigation: any;
@@ -84,6 +85,7 @@ const WELCOME_TEXT =
   'Try: _"what\'s my balance"_, _"create an invoice for 5000 sats"_, or _"pay alice 3 eur"_.';
 
 const toast = () => ToastService.getInstance();
+const AI_HISTORY_KEY = '@kaleido/mind-chat-history/v1';
 
 export default function AIAssistantScreen({ navigation }: Props) {
   const theme = useAppTheme();
@@ -97,6 +99,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
   }, []);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -162,6 +165,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // Friendly name of the paired desktop (for the settings chip + header).
   const [providerName, setProviderName] = useState<string | null>(null);
+  const [providerModel, setProviderModel] = useState<string | null>(null);
 
   const isEmpty = messages.length === 0;
 
@@ -177,8 +181,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
       try {
         const active = await PairingService.getActive();
         setProviderName(active?.name ?? null);
+        setProviderModel(active?.model || null);
       } catch {
         setProviderName(null);
+        setProviderModel(null);
       }
     };
     refresh();
@@ -205,6 +211,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       /* best-effort — still drop the UI state below */
     }
     setProviderName(null);
+    setProviderModel(null);
     dispatch(setAiMode('local'));
   }, [qvac, dispatch]);
 
@@ -213,10 +220,24 @@ export default function AIAssistantScreen({ navigation }: Props) {
     const delegating = qvac.config.delegateEnabled && !!qvac.config.providerPublicKey;
     const modelLabel = getModelById(qvac.config.modelId)?.label ?? 'On-device AI';
     if (delegating) {
-      return `${modelLabel} · via ${providerName || 'Desktop'}`;
+      const actualModel = providerModel || 'Desktop model';
+      const tps = qvac.tokensPerSecond ? ` · ${qvac.tokensPerSecond.toFixed(1)} tok/s` : '';
+      const link = qvac.providerReachable === true ? 'connected' : qvac.providerReachable === false ? 'offline' : 'checking';
+      return `${actualModel} · ${providerName || 'Desktop'} ${link}${tps}`;
     }
-    return `${modelLabel} · on this device`;
-  }, [qvac.config.delegateEnabled, qvac.config.providerPublicKey, qvac.config.modelId, providerName]);
+    const device = qvac.inferenceDevice === 'metal' ? 'Metal' : qvac.inferenceDevice === 'cpu' ? 'CPU' : 'this device';
+    const tps = qvac.tokensPerSecond ? ` · ${qvac.tokensPerSecond.toFixed(1)} tok/s` : '';
+    return `${modelLabel} · ${device}${tps}`;
+  }, [
+    qvac.config.delegateEnabled,
+    qvac.config.providerPublicKey,
+    qvac.config.modelId,
+    qvac.tokensPerSecond,
+    qvac.inferenceDevice,
+    qvac.providerReachable,
+    providerName,
+    providerModel,
+  ]);
 
   const nostrState = useSelector((state: RootState) => state.nostr);
 
@@ -260,6 +281,41 @@ export default function AIAssistantScreen({ navigation }: Props) {
     setTimeout(() => scrollToBottom(true), 100);
   }, [scrollToBottom]);
 
+  useEffect(() => {
+    let active = true;
+    AsyncStorage.getItem(AI_HISTORY_KEY)
+      .then((raw) => {
+        if (!active) return;
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) {
+            setMessages(
+              parsed.slice(-100).map((m: ChatMessage) => ({
+                ...m,
+                timestamp: new Date(m.timestamp),
+                streaming: false,
+              })),
+            );
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setHistoryLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!historyLoaded || !messages.length) return;
+    void AsyncStorage.setItem(
+      AI_HISTORY_KEY,
+      JSON.stringify(messages.filter((m) => !m.streaming).slice(-100)),
+    );
+  }, [historyLoaded, messages]);
+
   const updateMessage = useCallback((id: string, patch: (m: ChatMessage) => Partial<ChatMessage>) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch(m) } : m)));
   }, []);
@@ -267,10 +323,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // Greet the user with a contextual welcome the first time the chat is ready.
   const welcomed = useRef(false);
   useEffect(() => {
-    if (welcomed.current || !qvac.isReady || messages.length > 0) return;
+    if (welcomed.current || !historyLoaded || !qvac.isReady || messages.length > 0) return;
     welcomed.current = true;
     addMessage({ id: nextId(), text: WELCOME_TEXT, isUser: false, timestamp: new Date() });
-  }, [qvac.isReady, messages.length, addMessage]);
+  }, [historyLoaded, qvac.isReady, messages.length, addMessage]);
 
   // ---- Voice handlers ----
   const handleSpeechStart = () => {
@@ -562,7 +618,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
         // If an invoice was just generated, remember it (so "share" can act on
         // it) and offer to share it if the model didn't already mention it.
-        let finalText = res.text?.trim() || 'Done.';
+        let finalText =
+          res.text?.trim() ||
+          (lastCall
+            ? 'The action returned no readable result. Please check your wallet activity before retrying.'
+            : 'I did not receive a response. Please try again.');
         const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
         const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;
         if (invResult?.invoice) {
@@ -1018,6 +1078,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             catalog={qvac.catalog}
             config={qvac.config}
             llmStatus={qvac.llmStatus}
+            providerReachable={qvac.providerReachable}
             combinedProgress={qvac.combinedProgress}
             onSelectModel={(id) => qvac.setModel(id)}
             onSetDelegate={(opts) => qvac.setDelegate(opts)}
@@ -1025,6 +1086,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onDisconnectDesktop={disconnectDesktop}
             onDesignAgent={() => { setShowSettings(false); navigation.navigate('MindSettings'); }}
             providerName={providerName}
+            providerModel={providerModel}
             deviceMemGb={qvac.deviceMemGb}
             recommendedModelId={qvac.recommendedModelId}
             aiMode={aiMode}

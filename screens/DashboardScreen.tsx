@@ -49,7 +49,6 @@ import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
 import { BackupHealthCard } from '../components/BackupHealthCard';
 import { useBackupHealth } from '../hooks/useBackupHealth';
-import { RecentActivityWidget } from '../components/RecentActivityWidget';
 
 const { width } = Dimensions.get('window');
 
@@ -796,10 +795,6 @@ export default function DashboardScreen({ navigation }: Props) {
             }
           })}
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
-        />
-
-        <RecentActivityWidget
-          onViewAll={() => navigation.getParent()?.navigate('History')}
         />
 
         {policy.showChannelManagement && (

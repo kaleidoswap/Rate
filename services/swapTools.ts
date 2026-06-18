@@ -63,6 +63,17 @@ function requireSwaps(): void {
     throw new Error('Connect your RGB Lightning or Spark wallet to swap.');
   }
 }
+function requireVenueForAssets(...assets: string[]): void {
+  const normalized = assets.map((a) => a.toUpperCase());
+  if (normalized.some((a) => a === 'USDT' || a === 'XAUT') && !rgbAvailable()) {
+    throw new Error(
+      'USDT and XAUT swaps require a connected RGB Lightning Node (RLN). Connect RLN, then request a fresh quote.',
+    );
+  }
+  if (normalized.includes('USDB') && !flashnetAvailable()) {
+    throw new Error('USDB swaps require a connected Spark wallet with Flashnet available.');
+  }
+}
 function maker(): any { return kaleidoClientManager.getClient().maker; }
 function rln(): any { return kaleidoClientManager.getClient().rln; }
 function flashnet(): any { return flashnetClientManager.getClient(); }
@@ -132,6 +143,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     requireSwaps();
     const from = String(from_asset ?? '').toUpperCase();
     const to = String(to_asset ?? '').toUpperCase();
+    requireVenueForAssets(from, to);
     const amt = Number(amount);
     if (!from || !to) throw new Error('from_asset and to_asset are required.');
     if (!amt || Number.isNaN(amt) || amt <= 0) throw new Error('A positive amount is required.');

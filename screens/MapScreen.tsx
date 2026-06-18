@@ -17,6 +17,7 @@ import * as Location from 'expo-location';
 import { theme } from '../theme';
 import { MainHeader } from '../components';
 import { BrandMark } from '../components/BrandMark';
+import { getUserLocation } from '../services/btcmapService';
 
 interface Props {
   navigation: any;
@@ -86,25 +87,27 @@ export default function MapScreen({ navigation }: Props) {
   const [permission, setPermission] = useState<'unknown' | 'granted' | 'denied'>('unknown');
   const [locating, setLocating] = useState(true);
   const [webLoading, setWebLoading] = useState(true);
+  const [webError, setWebError] = useState<string | null>(null);
   // Bumping this remounts the WebView so it recenters on fresh coordinates.
   const [reloadToken, setReloadToken] = useState(0);
 
   const fetchLocation = useCallback(async (recenter = false) => {
     setLocating(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setPermission('denied');
-        return;
-      }
+      const current = await Location.getForegroundPermissionsAsync();
+      const status =
+        current.status === 'granted'
+          ? current.status
+          : (await Location.requestForegroundPermissionsAsync()).status;
+      if (status !== 'granted') throw new Error('location permission denied');
       setPermission('granted');
-      const pos = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      const loc = await getUserLocation();
+      setCoords(loc.coords);
       if (recenter) setReloadToken((t) => t + 1);
-    } catch {
-      // Network/GPS hiccup — quietly keep whatever center we already have.
+    } catch (error) {
+      if (String(error).toLowerCase().includes('permission')) {
+        setPermission('denied');
+      }
     } finally {
       setLocating(false);
     }
@@ -142,7 +145,19 @@ export default function MapScreen({ navigation }: Props) {
           style={styles.webview}
           injectedJavaScript={INJECTED_BRANDING}
           onLoadStart={() => setWebLoading(true)}
-          onLoadEnd={() => setWebLoading(false)}
+          onLoadEnd={() => {
+            setWebLoading(false);
+            setWebError(null);
+          }}
+          onError={(event) => {
+            setWebLoading(false);
+            setWebError(event.nativeEvent.description || 'BTC Map could not load.');
+          }}
+          onHttpError={(event) => {
+            setWebLoading(false);
+            setWebError(`BTC Map returned HTTP ${event.nativeEvent.statusCode}.`);
+          }}
+          originWhitelist={['https://*']}
           startInLoadingState={false}
           javaScriptEnabled
           domStorageEnabled
@@ -163,6 +178,23 @@ export default function MapScreen({ navigation }: Props) {
             </Text>
             <TouchableOpacity onPress={() => Linking.openSettings()} hitSlop={8}>
               <Text style={styles.bannerAction}>Enable</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+        {webError && (
+          <View style={[styles.banner, { top: permission === 'denied' ? 78 : 12 }]}>
+            <Ionicons name="cloud-offline-outline" size={16} color={theme.colors.warning[500]} />
+            <Text style={styles.bannerText} numberOfLines={2}>
+              {webError}
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                setWebError(null);
+                setReloadToken((t) => t + 1);
+              }}
+              hitSlop={8}
+            >
+              <Text style={styles.bannerAction}>Retry</Text>
             </TouchableOpacity>
           </View>
         )}

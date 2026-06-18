@@ -134,6 +134,7 @@ export class NWCService {
 
       // Initialize NDK for NWC
       const defaultRelays = relays || [
+        'wss://relay.kaleidoswap.com',
         'wss://relay.damus.io',
         'wss://relay.snort.social',
         'wss://nos.lol',

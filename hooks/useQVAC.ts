@@ -142,6 +142,15 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     setDownloadedModelIds(service.getDownloadedModelIds());
   }, [service, state.llmStatus, state.whisperStatus]);
 
+  useEffect(() => {
+    if (!autoInit || !config.delegateEnabled || !config.providerPublicKey) return;
+    void service.checkProviderConnection();
+    const timer = setInterval(() => {
+      void service.checkProviderConnection();
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [autoInit, config.delegateEnabled, config.providerPublicKey, service]);
+
   const initialize = useMemo(
     () => async () => {
       await service.initializeLLM();

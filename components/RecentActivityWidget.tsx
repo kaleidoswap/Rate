@@ -2,7 +2,7 @@
 //
 // Dashboard snippet: shows the last 3 activity items with a "View All" link.
 // Tapping a row opens the ActivityDetailSheet inline.
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     View,
     Text,

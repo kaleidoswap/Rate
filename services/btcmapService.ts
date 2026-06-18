@@ -16,9 +16,6 @@
 
 import * as Location from 'expo-location';
 
-/** KaleidoSwap home base (Lugano) — only used when we can't get a real fix. */
-export const FALLBACK_COORDS: Coords = { lat: 46.00607, lng: 8.95201 };
-
 const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -27,6 +24,8 @@ const OVERPASS_ENDPOINTS = [
 const DEFAULT_RADIUS_M = 5000; // 5 km — a sensible "near me" walking/transit radius
 const MAX_RADIUS_M = 50000;
 const REQUEST_TIMEOUT_MS = 20000;
+const LOCATION_TIMEOUT_MS = 12000;
+const LAST_KNOWN_MAX_AGE_MS = 10 * 60 * 1000;
 
 export interface Coords {
   lat: number;
@@ -52,48 +51,79 @@ export interface BtcMapMerchant {
 
 export interface UserLocation {
   coords: Coords;
-  /** true when we used the device GPS, false when we fell back to Lugano. */
+  /** true when coordinates came from the device location provider. */
   precise: boolean;
   label?: string; // reverse-geocoded "City, Region" when available
+}
+
+function permissionGranted(status: Location.PermissionStatus | string | undefined): boolean {
+  return status === Location.PermissionStatus.GRANTED || status === 'granted';
+}
+
+async function reverseGeocodeLabel(coords: Coords): Promise<string | undefined> {
+  try {
+    const [place] = await Location.reverseGeocodeAsync({
+      latitude: coords.lat,
+      longitude: coords.lng,
+    });
+    if (!place) return undefined;
+    return [place.city ?? place.subregion, place.region].filter(Boolean).join(', ') || undefined;
+  } catch {
+    // reverse-geocode is a nicety, not required
+    return undefined;
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+function toCoords(position: Location.LocationObject): Coords {
+  return { lat: position.coords.latitude, lng: position.coords.longitude };
 }
 
 /**
  * Resolve where the user actually is. Asks for foreground location permission,
  * reads one balanced-accuracy fix, and (best-effort) reverse-geocodes it to a
- * human label. Falls back to Lugano if permission is denied or the fix fails so
- * callers always get usable coordinates.
+ * human label. Throws when the real device location is unavailable.
  */
 export async function getUserLocation(): Promise<UserLocation> {
   try {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') {
-      return { coords: FALLBACK_COORDS, precise: false };
+    let permission = await Location.getForegroundPermissionsAsync();
+    if (!permissionGranted(permission.status) && permission.canAskAgain !== false) {
+      permission = await Location.requestForegroundPermissionsAsync();
     }
 
-    const pos = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
+    if (!permissionGranted(permission.status)) {
+      throw new Error(`Location permission ${permission.status}`);
+    }
+
+    const lastKnown = await Location.getLastKnownPositionAsync({
+      maxAge: LAST_KNOWN_MAX_AGE_MS,
+      requiredAccuracy: 5000,
     });
-    const coords: Coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-
-    let label: string | undefined;
-    try {
-      const [place] = await Location.reverseGeocodeAsync({
-        latitude: coords.lat,
-        longitude: coords.lng,
-      });
-      if (place) {
-        label = [place.city ?? place.subregion, place.region]
-          .filter(Boolean)
-          .join(', ') || undefined;
-      }
-    } catch {
-      // reverse-geocode is a nicety, not required
+    if (lastKnown) {
+      const coords = toCoords(lastKnown);
+      return { coords, precise: true, label: await reverseGeocodeLabel(coords) };
     }
 
-    return { coords, precise: true, label };
+    const pos = await withTimeout(
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      LOCATION_TIMEOUT_MS,
+      'Location lookup',
+    );
+    const coords = toCoords(pos);
+
+    return { coords, precise: true, label: await reverseGeocodeLabel(coords) };
   } catch (err) {
-    console.warn('📍 getUserLocation failed, using fallback:', err);
-    return { coords: FALLBACK_COORDS, precise: false };
+    console.warn('[btcmap] getUserLocation failed:', err);
+    throw err instanceof Error ? err : new Error('Location lookup failed');
   }
 }
 
@@ -104,7 +134,7 @@ export async function geocodeAddress(address: string): Promise<Coords | null> {
     if (!hit) return null;
     return { lat: hit.latitude, lng: hit.longitude };
   } catch (err) {
-    console.warn('📍 geocodeAddress failed:', err);
+    console.warn('[btcmap] geocodeAddress failed:', err);
     return null;
   }
 }
@@ -200,8 +230,7 @@ export interface FindNearbyParams {
 
 /**
  * Find Bitcoin-accepting merchants near `center` from the BTC Map (OSM) dataset,
- * sorted nearest-first. Throws if every Overpass mirror is unreachable — callers
- * should catch and fall back (e.g. to an offline list) for graceful degradation.
+ * sorted nearest-first. Throws if every Overpass mirror is unreachable.
  */
 export async function findNearbyMerchants({
   center,

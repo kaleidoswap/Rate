@@ -15,6 +15,7 @@
 // react-native-live-audio-stream. See micStream.ts for setup.
 
 import { runVoiceAssistant, type VoiceAssistantState } from '@kaleidorg/mind/qvac';
+import { requestRecordingPermissionsAsync } from 'expo-audio';
 import QVACService from './QVACService';
 import { startMicStream, type MicStream } from './micStream';
 
@@ -43,6 +44,10 @@ export interface HandsFreeController {
  */
 export async function startHandsFreeVoice(handlers: HandsFreeHandlers): Promise<HandsFreeController> {
   const qvac = QVACService.getInstance();
+  const permission = await requestRecordingPermissionsAsync();
+  if (!permission.granted) {
+    throw new Error('Microphone access is required for hands-free voice.');
+  }
 
   // The session needs the Whisper model resident.
   if (qvac.getState().whisperStatus !== 'ready') {

@@ -12,8 +12,8 @@ metadata:
 # Merchant finder
 
 Discover places that accept Bitcoin payments — cafés, restaurants, bars, shops,
-and ATMs. Live BTC Map data when the host injects a fetcher + location;
-otherwise a small offline list keeps the skill answerable.
+and ATMs. Use live BTC Map data around the device's real location, or around an
+explicit city/address the user provides.
 
 ## Critical rule — never answer from memory
 
@@ -79,9 +79,9 @@ reuse or adapt a previous answer. Never invent a merchant.
 
 - Be concise. One line per merchant works:
   `Name — category, address (X m away, accepts: lightning, onchain)`.
-- If the result `source` is `offline`, say so plainly — it means the live
-  BTC Map fetch wasn't available, so the list is limited.
+- If `find_merchant_locations` returns `success: false`, explain the error
+  plainly. Do not invent places and do not substitute another city.
 - If `find_merchant_locations` returns zero merchants, say so — don't invent
   places. Suggest widening `radius_km` or trying `near_address`.
-- When the user says "near me" and `precise_location` is false, mention which
-  fallback location was used so they know it's not their actual GPS.
+- When the user says "near me" and location is unavailable, ask them to enable
+  location access or provide a city/address.

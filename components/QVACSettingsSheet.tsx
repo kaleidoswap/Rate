@@ -24,6 +24,7 @@ interface Props {
   catalog: QVACModel[];
   config: QVACConfig;
   llmStatus: ModelStatus;
+  providerReachable?: boolean | null;
   combinedProgress: number;
   onSelectModel: (id: string) => void;
   onSetDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => void;
@@ -33,6 +34,8 @@ interface Props {
   onDisconnectDesktop?: () => void;
   /** Friendly name of the currently-paired desktop, if any. */
   providerName?: string | null;
+  /** Model advertised by the desktop when it generated the pairing QR. */
+  providerModel?: string | null;
   /** Total device RAM in GB (shown next to the model list). */
   deviceMemGb?: number;
   /** Model id recommended for this device — badged in the list. */
@@ -75,12 +78,14 @@ export default function QVACSettingsSheet({
   catalog,
   config,
   llmStatus,
+  providerReachable,
   combinedProgress,
   onSelectModel,
   onSetDelegate,
   onScanQR,
   onDisconnectDesktop,
   providerName,
+  providerModel,
   deviceMemGb,
   recommendedModelId,
   aiMode,
@@ -343,15 +348,29 @@ export default function QVACSettingsSheet({
           {hasProvider ? (
             <>
               <View style={styles.providerChip}>
-                <View style={[styles.dot, config.delegateEnabled ? styles.dotOn : styles.dotOff]} />
+                <View
+                  style={[
+                    styles.dot,
+                    providerReachable === true ? styles.dotOn : styles.dotOff,
+                  ]}
+                />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.providerName} numberOfLines={1}>
                     {providerName || 'Desktop provider'}
                   </Text>
                   <Text style={styles.providerKey}>{shortKey}</Text>
+                  {!!providerModel && (
+                    <Text style={styles.providerKey}>Model: {providerModel}</Text>
+                  )}
                 </View>
                 <View style={styles.activePill}>
-                  <Text style={styles.activePillText}>{config.delegateEnabled ? 'Active' : 'Paired'}</Text>
+                  <Text style={styles.activePillText}>
+                    {providerReachable === true
+                      ? 'Connected'
+                      : providerReachable === false
+                        ? 'Offline'
+                        : 'Checking'}
+                  </Text>
                 </View>
               </View>
 

@@ -185,7 +185,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           onConfirm: (call) =>
             new Promise((resolve) => setConfirm({ call, resolve })),
         });
-        const finalText = (res.text || streamed || 'Done.').trim();
+        const finalText = (
+          res.text ||
+          streamed ||
+          'I did not receive a result. Please check the wallet before retrying.'
+        ).trim();
         patchBubble(assistantId, { text: finalText });
         scrollToEnd();
         // Speak the reply with on-device QVAC TTS (falls back to the system
@@ -267,7 +271,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       },
       onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
     });
-    const finalText = (res.text || streamed || 'Done.').trim();
+    const finalText = (
+      res.text ||
+      streamed ||
+      'I did not receive a result. Please check the wallet before retrying.'
+    ).trim();
     patchBubble(assistantId, { text: finalText });
     scrollToEnd();
     return finalText;
@@ -518,7 +526,18 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
 function humanizeCall(call: { name: string; arguments: Record<string, unknown> }): string {
   const a = call.arguments || {};
-  if (call.name === 'pay_lightning_invoice') return `Pay a Lightning invoice${a.amount ? ` (${a.amount} sats)` : ''}?`;
+  if (call.name === 'send_payment') {
+    return `Send ${Number(a.amount_sats || 0).toLocaleString()} sats to ${String(a.to || 'this destination')}?`;
+  }
+  if (call.name === 'rln_pay_invoice' || call.name === 'pay_lightning_invoice') {
+    return 'Pay this Lightning invoice? The wallet will verify the invoice before sending.';
+  }
+  if (call.name === 'rln_send_asset') {
+    return `Send ${String(a.amount ?? '')} ${String(a.asset ?? '').toUpperCase()} to ${String(a.to ?? 'this destination')}?`;
+  }
+  if (call.name === 'kaleidoswap_place_order' || call.name === 'execute_swap') {
+    return 'Execute this swap using the quote you just reviewed?';
+  }
   if (call.name === 'pay_nostr_contact') return `Send ${a.amount ?? ''} sats to ${a.contact ?? 'a contact'}?`;
   return `Run "${call.name}" with ${JSON.stringify(a)}?`;
 }

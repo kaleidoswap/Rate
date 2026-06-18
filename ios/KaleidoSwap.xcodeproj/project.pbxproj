@@ -8,25 +8,25 @@
 
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		18E37C9DA46968B05E0A2F51 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5404022BB1F9498E5A9419C8 /* ExpoModulesProvider.swift */; };
+		3A9993F885CFB166F424706B /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 700E87B9A2D5DEC9627560BA /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
-		68849880F465997AE4523FA3 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9AC8835317CB922D49AC80B9 /* PrivacyInfo.xcprivacy */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		D39C2D92EAA3E41F47C4B6B2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 74EDDF414781D42C37503748 /* PrivacyInfo.xcprivacy */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		F66467975FA88392EC62E9B6 /* libPods-KaleidoSwap.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5728EFA6D3F4E4D3356C3613 /* libPods-KaleidoSwap.a */; };
+		FC13D5C8CB849FB2951DBE7B /* libPods-KaleidoSwap.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 9D6458AA1312A9F78E883400 /* libPods-KaleidoSwap.a */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		13B07F961A680F5B00A75B9A /* KaleidoSwap.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KaleidoSwap.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = KaleidoSwap/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = KaleidoSwap/Info.plist; sourceTree = "<group>"; };
-		3C4C5D5D57B68BEB5DE4785C /* Pods-KaleidoSwap.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-KaleidoSwap.release.xcconfig"; path = "Target Support Files/Pods-KaleidoSwap/Pods-KaleidoSwap.release.xcconfig"; sourceTree = "<group>"; };
-		5404022BB1F9498E5A9419C8 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-KaleidoSwap/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
-		5728EFA6D3F4E4D3356C3613 /* libPods-KaleidoSwap.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-KaleidoSwap.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		9AC8835317CB922D49AC80B9 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = KaleidoSwap/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		3FAF3AA43474534D8C610DB6 /* Pods-KaleidoSwap.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-KaleidoSwap.debug.xcconfig"; path = "Target Support Files/Pods-KaleidoSwap/Pods-KaleidoSwap.debug.xcconfig"; sourceTree = "<group>"; };
+		700E87B9A2D5DEC9627560BA /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-KaleidoSwap/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		74EDDF414781D42C37503748 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = KaleidoSwap/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		9D6458AA1312A9F78E883400 /* libPods-KaleidoSwap.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-KaleidoSwap.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		A87FA2798CB1CB927677235D /* Pods-KaleidoSwap.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-KaleidoSwap.release.xcconfig"; path = "Target Support Files/Pods-KaleidoSwap/Pods-KaleidoSwap.release.xcconfig"; sourceTree = "<group>"; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = KaleidoSwap/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		C5249B24BDC65308D9460F2C /* Pods-KaleidoSwap.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-KaleidoSwap.debug.xcconfig"; path = "Target Support Files/Pods-KaleidoSwap/Pods-KaleidoSwap.debug.xcconfig"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = KaleidoSwap/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* KaleidoSwap-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "KaleidoSwap-Bridging-Header.h"; path = "KaleidoSwap/KaleidoSwap-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -37,7 +37,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F66467975FA88392EC62E9B6 /* libPods-KaleidoSwap.a in Frameworks */,
+				FC13D5C8CB849FB2951DBE7B /* libPods-KaleidoSwap.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -53,7 +53,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				9AC8835317CB922D49AC80B9 /* PrivacyInfo.xcprivacy */,
+				74EDDF414781D42C37503748 /* PrivacyInfo.xcprivacy */,
 			);
 			name = KaleidoSwap;
 			sourceTree = "<group>";
@@ -62,27 +62,17 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				5728EFA6D3F4E4D3356C3613 /* libPods-KaleidoSwap.a */,
+				9D6458AA1312A9F78E883400 /* libPods-KaleidoSwap.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		3CC8A95929E9945B3A0E337C /* Pods */ = {
+		54ED86007621D2DD408EA79F /* ExpoModulesProviders */ = {
 			isa = PBXGroup;
 			children = (
-				C5249B24BDC65308D9460F2C /* Pods-KaleidoSwap.debug.xcconfig */,
-				3C4C5D5D57B68BEB5DE4785C /* Pods-KaleidoSwap.release.xcconfig */,
+				DB2D054FAD5BF644874D6D1A /* KaleidoSwap */,
 			);
-			name = Pods;
-			path = Pods;
-			sourceTree = "<group>";
-		};
-		3D067589A4113F9985FDC64F /* KaleidoSwap */ = {
-			isa = PBXGroup;
-			children = (
-				5404022BB1F9498E5A9419C8 /* ExpoModulesProvider.swift */,
-			);
-			name = KaleidoSwap;
+			name = ExpoModulesProviders;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -99,8 +89,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				3CC8A95929E9945B3A0E337C /* Pods */,
-				CEDE18DBD120733C6050526D /* ExpoModulesProviders */,
+				B758076A7ED95A508EC8CB9B /* Pods */,
+				54ED86007621D2DD408EA79F /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -115,6 +105,16 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		B758076A7ED95A508EC8CB9B /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				3FAF3AA43474534D8C610DB6 /* Pods-KaleidoSwap.debug.xcconfig */,
+				A87FA2798CB1CB927677235D /* Pods-KaleidoSwap.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
 			isa = PBXGroup;
 			children = (
@@ -124,12 +124,12 @@
 			path = KaleidoSwap/Supporting;
 			sourceTree = "<group>";
 		};
-		CEDE18DBD120733C6050526D /* ExpoModulesProviders */ = {
+		DB2D054FAD5BF644874D6D1A /* KaleidoSwap */ = {
 			isa = PBXGroup;
 			children = (
-				3D067589A4113F9985FDC64F /* KaleidoSwap */,
+				700E87B9A2D5DEC9627560BA /* ExpoModulesProvider.swift */,
 			);
-			name = ExpoModulesProviders;
+			name = KaleidoSwap;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,13 +140,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "KaleidoSwap" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				0060205CC1E107CF1188EB37 /* [Expo] Configure project */,
+				D2638C1E288AF49842DBA549 /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				1487BB16B553C1081A102018 /* [CP] Embed Pods Frameworks */,
+				7019D2664F778FB10F8F3615 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -198,37 +198,13 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				68849880F465997AE4523FA3 /* PrivacyInfo.xcprivacy in Resources */,
+				D39C2D92EAA3E41F47C4B6B2 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		0060205CC1E107CF1188EB37 /* [Expo] Configure project */ = {
-			isa = PBXShellScriptBuildPhase;
-			alwaysOutOfDate = 1;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputFileListPaths = (
-			);
-			inputPaths = (
-				"$(SRCROOT)/.xcode.env",
-				"$(SRCROOT)/.xcode.env.local",
-				"$(SRCROOT)/KaleidoSwap/KaleidoSwap.entitlements",
-				"$(SRCROOT)/Pods/Target Support Files/Pods-KaleidoSwap/expo-configure-project.sh",
-			);
-			name = "[Expo] Configure project";
-			outputFileListPaths = (
-			);
-			outputPaths = (
-				"$(SRCROOT)/Pods/Target Support Files/Pods-KaleidoSwap/ExpoModulesProvider.swift",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-KaleidoSwap/expo-configure-project.sh\"\n";
-		};
 		00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -268,7 +244,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		1487BB16B553C1081A102018 /* [CP] Embed Pods Frameworks */ = {
+		7019D2664F778FB10F8F3615 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -281,37 +257,32 @@
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/BareKit.framework/BareKit",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-abort.2.0.13.framework/bare-abort.2.0.13",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-buffer.3.6.1.framework/bare-buffer.3.6.1",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-channel.5.2.3.framework/bare-channel.5.2.3",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-crypto.1.14.0.framework/bare-crypto.1.14.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-crypto.1.15.3.framework/bare-crypto.1.15.3",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-dns.2.1.4.framework/bare-dns.2.1.4",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-ffmpeg.1.2.2.framework/bare-ffmpeg.1.2.2",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-fs.4.7.1.framework/bare-fs.4.7.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-ffmpeg.1.2.3.framework/bare-ffmpeg.1.2.3",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-fs.4.7.2.framework/bare-fs.4.7.2",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-hrtime.2.1.1.framework/bare-hrtime.2.1.1",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-inspect.3.1.4.framework/bare-inspect.3.1.4",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-module-lexer.1.4.7.framework/bare-module-lexer.1.4.7",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-module.6.2.0.framework/bare-module.6.2.0",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-os.3.9.1.framework/bare-os.3.9.1",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-pipe.4.1.5.framework/bare-pipe.4.1.5",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-pipe.4.2.2.framework/bare-pipe.4.2.2",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-signals.4.2.0.framework/bare-signals.4.2.0",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-stdio.1.0.2.framework/bare-stdio.1.0.2",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-structured-clone.1.5.5.framework/bare-structured-clone.1.5.5",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tcp.2.2.13.framework/bare-tcp.2.2.13",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-thread.1.2.2.framework/bare-thread.1.2.2",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tls.3.1.5.framework/bare-tls.3.1.5",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tty.5.1.0.framework/bare-tty.5.1.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tcp.2.5.1.framework/bare-tcp.2.5.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tls.3.1.7.framework/bare-tls.3.1.7",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-tty.5.1.1.framework/bare-tty.5.1.1",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-type.1.1.0.framework/bare-type.1.1.0",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-url.2.4.3.framework/bare-url.2.4.3",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-zlib.1.3.4.framework/bare-zlib.1.3.4",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-url.2.4.5.framework/bare-url.2.4.5",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/bare-zlib.1.4.0.framework/bare-zlib.1.4.0",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/fs-native-extensions.1.5.0.framework/fs-native-extensions.1.5.0",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/quickbit-native.2.4.8.framework/quickbit-native.2.4.8",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__llm-llamacpp.0.22.1.framework/qvac__llm-llamacpp.0.22.1",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__transcription-whispercpp.0.7.0.framework/qvac__transcription-whispercpp.0.7.0",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__tts-ggml.0.1.4.framework/qvac__tts-ggml.0.1.4",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__llm-llamacpp.0.24.0.framework/qvac__llm-llamacpp.0.24.0",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__transcription-whispercpp.0.9.1.framework/qvac__transcription-whispercpp.0.9.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/qvac__tts-ggml.0.2.4.framework/qvac__tts-ggml.0.2.4",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/rabin-native.2.0.0.framework/rabin-native.2.0.0",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/rocksdb-native.3.15.1.framework/rocksdb-native.3.15.1",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/rocksdb-native.3.16.0.framework/rocksdb-native.3.16.0",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/simdle-native.1.3.9.framework/simdle-native.1.3.9",
 				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/sodium-native.5.1.0.framework/sodium-native.5.1.0",
-				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/udx-native.1.19.2.framework/udx-native.1.19.2",
+				"${PODS_XCFRAMEWORKS_BUILD_DIR}/react-native-bare-kit/udx-native.1.20.7.framework/udx-native.1.20.7",
 			);
 			name = "[CP] Embed Pods Frameworks";
 			outputPaths = (
@@ -321,37 +292,32 @@
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/BareKit.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-abort.2.0.13.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-buffer.3.6.1.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-channel.5.2.3.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-crypto.1.14.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-crypto.1.15.3.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-dns.2.1.4.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-ffmpeg.1.2.2.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-fs.4.7.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-ffmpeg.1.2.3.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-fs.4.7.2.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-hrtime.2.1.1.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-inspect.3.1.4.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-module-lexer.1.4.7.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-module.6.2.0.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-os.3.9.1.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-pipe.4.1.5.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-pipe.4.2.2.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-signals.4.2.0.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-stdio.1.0.2.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-structured-clone.1.5.5.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tcp.2.2.13.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-thread.1.2.2.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tls.3.1.5.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tty.5.1.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tcp.2.5.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tls.3.1.7.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-tty.5.1.1.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-type.1.1.0.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-url.2.4.3.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-zlib.1.3.4.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-url.2.4.5.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/bare-zlib.1.4.0.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/fs-native-extensions.1.5.0.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/quickbit-native.2.4.8.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__llm-llamacpp.0.22.1.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__transcription-whispercpp.0.7.0.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__tts-ggml.0.1.4.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__llm-llamacpp.0.24.0.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__transcription-whispercpp.0.9.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/qvac__tts-ggml.0.2.4.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/rabin-native.2.0.0.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/rocksdb-native.3.15.1.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/rocksdb-native.3.16.0.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/simdle-native.1.3.9.framework",
 				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/sodium-native.5.1.0.framework",
-				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/udx-native.1.19.2.framework",
+				"${TARGET_BUILD_DIR}/${FRAMEWORKS_FOLDER_PATH}/udx-native.1.20.7.framework",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -406,6 +372,30 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-KaleidoSwap/Pods-KaleidoSwap-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
+		D2638C1E288AF49842DBA549 /* [Expo] Configure project */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.xcode.env",
+				"$(SRCROOT)/.xcode.env.local",
+				"$(SRCROOT)/KaleidoSwap/KaleidoSwap.entitlements",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-KaleidoSwap/expo-configure-project.sh",
+			);
+			name = "[Expo] Configure project";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Pods/Target Support Files/Pods-KaleidoSwap/ExpoModulesProvider.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-KaleidoSwap/expo-configure-project.sh\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -414,7 +404,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				18E37C9DA46968B05E0A2F51 /* ExpoModulesProvider.swift in Sources */,
+				3A9993F885CFB166F424706B /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -423,14 +413,14 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = C5249B24BDC65308D9460F2C /* Pods-KaleidoSwap.debug.xcconfig */;
+			baseConfigurationReference = 3FAF3AA43474534D8C610DB6 /* Pods-KaleidoSwap.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = KaleidoSwap/KaleidoSwap.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 644JA45Z2S;
 				ENABLE_BITCODE = NO;
 				GCC_PREPROCESSOR_DEFINITIONS = (
@@ -462,14 +452,14 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 3C4C5D5D57B68BEB5DE4785C /* Pods-KaleidoSwap.release.xcconfig */;
+			baseConfigurationReference = A87FA2798CB1CB927677235D /* Pods-KaleidoSwap.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
 				CODE_SIGN_ENTITLEMENTS = KaleidoSwap/KaleidoSwap.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 10;
+				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 644JA45Z2S;
 				INFOPLIST_FILE = KaleidoSwap/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;

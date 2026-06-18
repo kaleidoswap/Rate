@@ -9,6 +9,7 @@ import {
   cancel,
   resume,
   suspend,
+  heartbeat,
   VERBOSITY,
   embed,
   TTS_EN_SUPERTONIC_Q4_0,
@@ -158,6 +159,12 @@ export interface QVACState {
   llmDownloadProgress: number;
   whisperDownloadProgress: number;
   error: string | null;
+  /** Measured throughput for the latest completion. */
+  tokensPerSecond: number | null;
+  /** Where the active LLM is actually running. */
+  inferenceDevice: 'metal' | 'cpu' | 'desktop' | null;
+  /** Reachability of the configured desktop provider. */
+  providerReachable: boolean | null;
 }
 
 export interface QVACTool {
@@ -203,6 +210,9 @@ class QVACService {
     llmDownloadProgress: 0,
     whisperDownloadProgress: 0,
     error: null,
+    tokensPerSecond: null,
+    inferenceDevice: null,
+    providerReachable: null,
   };
 
   private listeners = new Set<StateListener>();
@@ -436,8 +446,31 @@ class QVACService {
       delegateEnabled: opts.enabled,
       providerPublicKey: opts.providerPublicKey.trim(),
     };
+    this.setState({ providerReachable: null });
     await this.saveConfig();
     await this.reloadLLM();
+  }
+
+  async checkProviderConnection(): Promise<boolean> {
+    await this.loadConfig();
+    if (!this.config.delegateEnabled || !this.config.providerPublicKey || this.workletBlocked()) {
+      this.setState({ providerReachable: null });
+      return false;
+    }
+    try {
+      await heartbeat({
+        delegate: {
+          providerPublicKey: this.config.providerPublicKey,
+          timeout: 4000,
+          healthCheckTimeout: 4000,
+        },
+      });
+      this.setState({ providerReachable: true });
+      return true;
+    } catch {
+      this.setState({ providerReachable: false });
+      return false;
+    }
   }
 
   /**
@@ -637,6 +670,7 @@ class QVACService {
           modelConfig: { ...LOCAL_LLM_CONFIG_GPU },
         } as any);
         console.log('[QVAC] LLM loaded with Metal/GPU offload');
+        this.setState({ inferenceDevice: 'metal' });
         return id;
       } catch (gpuErr) {
         // Metal failed to init the llamacpp context — don't try it again this
@@ -654,6 +688,7 @@ class QVACService {
       modelConfig: { ...LOCAL_LLM_CONFIG },
     } as any);
     console.log('[QVAC] LLM loaded on CPU');
+    this.setState({ inferenceDevice: 'cpu' });
     return id;
   }
 
@@ -725,6 +760,8 @@ class QVACService {
             modelConfig: { ...DELEGATE_LLM_CONFIG },
             delegate: buildDelegateConfig(this.config.providerPublicKey),
           } as any);
+          this.setState({ inferenceDevice: 'desktop' });
+          this.setState({ providerReachable: true });
         } else {
           // Local: try Metal/GPU offload first, fall back to CPU.
           this.llmModelId = await this.loadLocalLLM(modelSrc);
@@ -741,6 +778,7 @@ class QVACService {
         );
         const local = recommendLocalModel(await this.getDeviceMemoryBytes());
         this.config = { ...this.config, modelId: local.id, delegateEnabled: false };
+        this.setState({ providerReachable: false });
         await this.saveConfig();
         this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
         const localUrl = hfUrlFromDescriptor(local.descriptor)!;
@@ -952,7 +990,18 @@ class QVACService {
     // The shared provider runs completion + streams tokens (contentDelta →
     // onToken, thinkingDelta → onThinking) + parses the final frame. It reads the
     // model id via the `getModelId` closure above, so this stays a thin binding.
-    return this.mindProvider.runTurn(input);
+    const startedAt = Date.now();
+    const output = await this.mindProvider.runTurn(input);
+    const elapsedSeconds = Math.max((Date.now() - startedAt) / 1000, 0.001);
+    const generatedText = output.rawContent || output.text || '';
+    const estimatedTokens = Math.max(
+      1,
+      Math.round(generatedText.length / 4),
+    );
+    this.setState({
+      tokensPerSecond: Number((estimatedTokens / elapsedSeconds).toFixed(1)),
+    });
+    return output;
   }
 
   /** Cancel an in-flight completion by its requestId (for a stop button). */
@@ -1110,7 +1159,12 @@ class QVACService {
     if (this.llmModelId) {
       await unloadModel({ modelId: this.llmModelId, clearStorage: false });
       this.llmModelId = null;
-      this.setState({ llmStatus: 'not_downloaded' });
+      this.setState({
+        llmStatus: 'not_downloaded',
+        tokensPerSecond: null,
+        inferenceDevice: null,
+        providerReachable: null,
+      });
     }
   }
 

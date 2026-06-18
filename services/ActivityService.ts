@@ -235,13 +235,32 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
     hadConnectedAdapter = true;
     try {
       const txs = await adapter.listTransactions({ limit: 50 });
-      for (const tx of txs) {
+      for (const [txIndex, tx] of txs.entries()) {
         if (tx.type !== 'send' && tx.type !== 'receive') continue;
         const ticker = tx.asset?.ticker;
         const isBtc = !ticker || ticker === 'BTC';
         const precision = tx.asset?.precision ?? 0;
+        const protocolId =
+          tx.id ||
+          tx.protocolData?.txid ||
+          tx.protocolData?.paymentHash ||
+          tx.protocolData?.payment_hash ||
+          tx.protocolData?.transferId ||
+          tx.protocolData?.transfer_id;
+        // Some Arkade records currently arrive with an empty `id`, which made
+        // every row use the literal React key "arkade-". Keep a deterministic
+        // composite fallback, with the source index as a final collision guard.
+        const activityId = [
+          proto.toLowerCase(),
+          protocolId || 'tx',
+          tx.timestamp || 0,
+          tx.type,
+          tx.asset?.id || 'BTC',
+          tx.amount,
+          txIndex,
+        ].join('-');
         items.push({
-          id: `${proto.toLowerCase()}-${tx.id}`,
+          id: activityId,
           type: tx.type,
           source: 'payment',
           asset: tx.asset?.id ?? 'BTC',
@@ -252,7 +271,7 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           rawSats: isBtc ? tx.amount : undefined,
           status: normalizePaymentStatus(tx.status),
           timestamp: tx.timestamp,
-          txid: tx.id,
+          txid: protocolId || '',
           layer: proto === 'SPARK' ? 'Spark' : 'Arkade',
         });
       }

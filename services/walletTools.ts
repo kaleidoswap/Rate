@@ -54,6 +54,39 @@ function connectedLayers(): WalletLayer[] {
   return (Object.keys(LAYER_PROTO) as (keyof typeof LAYER_PROTO)[]).filter((l) => adapter(LAYER_PROTO[l]));
 }
 
+function verifiedPaymentResult(result: any): Record<string, unknown> {
+  if (!result || typeof result !== 'object') {
+    throw new Error('The wallet returned no payment receipt. Check activity before retrying.');
+  }
+  const status = String(result.status ?? '').toLowerCase();
+  if (status === 'failed' || status === 'cancelled' || status === 'rejected') {
+    throw new Error(
+      String(result.error ?? result.message ?? `Payment ${status}. No success was recorded.`),
+    );
+  }
+  if (status === 'pending' || status === 'processing') {
+    throw new Error(
+      'The payment was submitted but is not confirmed yet. Check wallet activity; do not retry until its status is known.',
+    );
+  }
+  const hasSettlementProof =
+    status === 'confirmed' ||
+    status === 'completed' ||
+    status === 'success' ||
+    !!result.preimage ||
+    !!result.payment_preimage;
+  if (!hasSettlementProof) {
+    throw new Error(
+      'The wallet did not return confirmation or a payment preimage. Check activity before retrying.',
+    );
+  }
+  return { ...result, success: true, settled: true };
+}
+
+async function sendAndVerify(adapter: any, request: Record<string, unknown>) {
+  return verifiedPaymentResult(await adapter.sendPayment(request));
+}
+
 function btcPriceUsd(): number {
   return Number((getStore().getState() as any)?.wallet?.btcPriceUSD ?? 0);
 }
@@ -204,14 +237,15 @@ const HANDLERS: Record<string, WalletHandler> = {
   },
 
   // ── Spend (confirmation-gated by the contract) ──
-  rln_pay_invoice: async ({ invoice }) => lightningAdapter().sendPayment({ invoice: String(invoice) }),
+  rln_pay_invoice: async ({ invoice }) =>
+    sendAndVerify(lightningAdapter(), { invoice: String(invoice) }),
   // RGB asset send. RGB transfers go to an RGB/Lightning invoice (which carries
   // the asset); a contact's plain Lightning address can't receive an asset, so
   // we guide the user to get their RGB invoice rather than silently mis-send.
   rln_send_asset: async ({ asset, amount, to }) => {
     const target = String(to ?? '').trim();
     if (/^(rgb:|ln(bc|tb|bcrt))/i.test(target)) {
-      return requireLayer('rln').sendPayment({ invoice: target });
+      return sendAndVerify(requireLayer('rln'), { invoice: target });
     }
     throw new Error(`To send ${amount ?? ''} ${String(asset).toUpperCase()} to "${to}", ask them for an RGB invoice and paste it here.`);
   },
@@ -233,7 +267,10 @@ const HANDLERS: Record<string, WalletHandler> = {
       throw new Error("On-chain sends from the assistant aren't supported yet — use the Send screen.");
     }
     // Pay the BOLT11 invoice on the Lightning rail (Spark preferred, RLN fallback).
-    return lightningAdapter().sendPayment({ invoice: target, ...(sats ? { amountSats: sats } : {}) });
+    return sendAndVerify(lightningAdapter(), {
+      invoice: target,
+      ...(sats ? { amountSats: sats } : {}),
+    });
   },
 };
 

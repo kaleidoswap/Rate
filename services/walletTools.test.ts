@@ -47,7 +47,7 @@ function makeAdapter(overrides: Partial<Record<keyof MockAdapter, unknown>> = {}
     listAssets: jest.fn(async () => []),
     getReceiveAddress: jest.fn(async () => ({ address: 'tb1qmock' })),
     createInvoice: jest.fn(async () => ({ invoice: 'lnbc1mock' })),
-    sendPayment: jest.fn(async () => ({ preimage: 'abc' })),
+    sendPayment: jest.fn(async () => ({ preimage: 'abc', status: 'confirmed' })),
     ...(overrides as Partial<MockAdapter>),
   };
 }
@@ -290,6 +290,24 @@ describe('send_payment', () => {
     await expect(source().execute('send_payment', { to: '' })).rejects.toThrow(
       'A destination (invoice, address, or contact) is required.',
     );
+  });
+
+  it('does not report a pending payment as completed', async () => {
+    const spark = makeAdapter({
+      sendPayment: jest.fn(async () => ({ status: 'pending', paymentHash: 'hash' })),
+    });
+    setAdapters({ SPARK: spark });
+    await expect(
+      source().execute('send_payment', { to: 'lnbc500n1pmock' }),
+    ).rejects.toThrow(/not confirmed yet/i);
+  });
+
+  it('rejects a receipt without confirmation evidence', async () => {
+    const spark = makeAdapter({ sendPayment: jest.fn(async () => ({ paymentHash: 'hash' })) });
+    setAdapters({ SPARK: spark });
+    await expect(
+      source().execute('send_payment', { to: 'lnbc500n1pmock' }),
+    ).rejects.toThrow(/did not return confirmation/i);
   });
 });
 
