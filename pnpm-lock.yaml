@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@kaleidorg/wallet-engine@1.0.0-beta.4':
-    hash: 53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1
+    hash: 23270024b7eabbe93af52ba75abd59d83595a90189aed696ea53f535cd8e3ebb
     path: patches/@kaleidorg__wallet-engine@1.0.0-beta.4.patch
 
 importers:
