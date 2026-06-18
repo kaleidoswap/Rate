@@ -11,13 +11,19 @@ export interface BalanceData {
   layers: Array<{ layer: string; btc_sats: number; assets?: Array<{ ticker?: string; balance?: number; amount?: number; settled?: number }> }>;
 }
 
-const LAYER_META: Record<string, { label: string; icon: string; color: string }> = {
-  spark: { label: 'Spark', icon: 'flash', color: '#ff8a3d' },
-  rln: { label: 'Lightning / RGB', icon: 'flash-outline', color: '#7c5cff' },
-  arkade: { label: 'Arkade', icon: 'cube', color: '#3dd6a4' },
-  liquid: { label: 'Liquid', icon: 'water', color: '#3d9bff' },
+// Layer dot colors map to the app's per-network "leg" palette
+// (theme.colors.networks) so the chat balance card stays consistent with
+// Send/Receive and the dashboard breakdown instead of an ad-hoc palette.
+const LAYER_META: Record<string, { label: string; icon: string; net: string }> = {
+  spark: { label: 'Spark', icon: 'flash', net: 'spark' },
+  rln: { label: 'Lightning / RGB', icon: 'flash-outline', net: 'lightning' },
+  arkade: { label: 'Arkade', icon: 'cube', net: 'arkade' },
+  liquid: { label: 'Liquid', icon: 'water', net: 'liquid' },
 };
-const meta = (l: string) => LAYER_META[l] ?? { label: l, icon: 'wallet', color: '#9aa0a6' };
+const meta = (t: Theme, l: string) => {
+  const m = LAYER_META[l] ?? { label: l, icon: 'wallet', net: 'unified' };
+  return { label: m.label, icon: m.icon, color: (t as any)?.colors?.networks?.[m.net] ?? '#9aa0a6' };
+};
 const usdOf = (sats: number, price?: number) => (price ? (sats / 1e8) * price : 0);
 const assetAmt = (a: any) => Number(a?.balance ?? a?.amount ?? a?.settled ?? 0);
 
@@ -41,7 +47,7 @@ export const BalanceCard: React.FC<{ data: BalanceData }> = ({ data }) => {
         </LinearGradient>
         <View style={s.layers}>
           {data.layers.map((l) => {
-            const m = meta(l.layer);
+            const m = meta(theme, l.layer);
             return (
               <View key={l.layer} style={s.layerRow}>
                 <View style={[s.dot, { backgroundColor: m.color }]} />
@@ -74,7 +80,7 @@ const BalanceDetailModal: React.FC<{ visible: boolean; data: BalanceData; onClos
           {usd > 0 && <Text style={s.sheetUsd}>≈ ${usd.toFixed(2)}{data.priceUsd ? ` · BTC $${Math.round(data.priceUsd).toLocaleString()}` : ''}</Text>}
           <ScrollView style={{ alignSelf: 'stretch', marginTop: 16 }}>
             {data.layers.map((l) => {
-              const m = meta(l.layer);
+              const m = meta(theme, l.layer);
               const assets = (l.assets ?? []).filter((a) => a?.ticker && assetAmt(a) > 0);
               return (
                 <View key={l.layer} style={s.detLayer}>

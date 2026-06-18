@@ -72,8 +72,8 @@ export const CardDetailModal: React.FC<{
 };
 
 const tx = (t: Theme, k: 'primary' | 'secondary' | 'tertiary') => (t as any)?.colors?.text?.[k] ?? (k === 'primary' ? '#fff' : '#9aa0a6');
-const accent = (t: Theme) => (t as any)?.colors?.primary?.main ?? '#7c5cff';
-const gradient = (t: Theme): [string, string] => (t as any)?.colors?.primary?.gradient ?? ['#7c5cff', '#5b8cff'];
+const accent = (t: Theme) => (t as any)?.colors?.primary?.[500] ?? '#2BEE79';
+const gradient = (t: Theme): [string, string] => (t as any)?.colors?.primary?.gradient ?? ['#2BEE79', '#2BEE79'];
 
 const makeStyles = (t: Theme) => {
   const c = (t as any)?.colors ?? {};

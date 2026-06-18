@@ -61,7 +61,7 @@ export const PayableCard: React.FC<{ payable: Payable; onCopy: (text: string, la
   );
 };
 
-const accent = (t: Theme) => (t as any)?.colors?.primary?.main ?? '#7c5cff';
+const accent = (t: Theme) => (t as any)?.colors?.primary?.[500] ?? '#2BEE79';
 const muted = (t: Theme) => (t as any)?.colors?.text?.secondary ?? '#9aa0a6';
 
 const makeStyles = (t: Theme) => {
