@@ -12,3 +12,96 @@ index 3b34f5f..3529e98 100644
                  });
              }
              else {
+diff --git a/dist/adapters/wdk/ArkadeWdkAdapter.js b/dist/adapters/wdk/ArkadeWdkAdapter.js
+index 69be5e1..b6d889b 100644
+--- a/dist/adapters/wdk/ArkadeWdkAdapter.js
++++ b/dist/adapters/wdk/ArkadeWdkAdapter.js
+@@ -18,6 +18,7 @@ import { ProtocolError, } from '../../types/base';
+ import { getCapabilities } from '../../capabilities';
+ import { loadWdkModule } from './moduleLoader';
+ import { decodeBolt11, isBolt11 } from '../../lib/bolt11';
++const isBitcoinAddress = (value) => /^(bc1|tb1|bcrt1)/i.test(value.trim());
+ export class ArkadeWdkAdapter {
+     constructor() {
+         this.protocolName = 'ARKADE';
+@@ -142,14 +143,33 @@ export class ArkadeWdkAdapter {
+         }
+         // Off-chain Ark transfer to an Ark address.
+         const r = await this.account.sendTransaction({ to: dest, value: request.amount });
++        const hash = r?.hash ?? '';
+         return {
+-            paymentHash: r?.hash ?? '',
++            paymentHash: hash,
++            txid: hash,
+             amount: request.amount,
+             fee: Number(r?.fee ?? 0),
+-            status: 'confirmed',
++            status: isBitcoinAddress(dest) ? 'pending' : 'confirmed',
+             timestamp: Date.now(),
+         };
+     }
++    /** Arkade BTC send/offboard. Bitcoin destinations settle on-chain asynchronously. */
++    async sendBtcOnchain(params) {
++        this.assertConnected();
++        const r = await this.account.sendTransaction({ to: params.address.trim(), value: params.amount });
++        const hash = r?.hash ?? '';
++        if (!hash) {
++            throw new ProtocolError('Arkade offboard did not return a transaction ID', 'ARKADE', 'SEND_ERROR');
++        }
++        return {
++            txid: hash,
++            paymentHash: hash,
++            amount: params.amount,
++            fee: Number(r?.fee ?? 0),
++            status: 'pending',
++            timestamp: Date.now(),
++        };
++    }
+     /** Arkade asset transfer (token). */
+     async sendAsset(params) {
+         this.assertConnected();
+diff --git a/dist/adapters/wdk/SparkWdkAdapter.js b/dist/adapters/wdk/SparkWdkAdapter.js
+index 3c119f7..23e5f61 100644
+--- a/dist/adapters/wdk/SparkWdkAdapter.js
++++ b/dist/adapters/wdk/SparkWdkAdapter.js
+@@ -288,6 +288,40 @@ export class SparkWdkAdapter {
+             timestamp,
+         };
+     }
++    /** Spark cooperative exit to an on-chain Bitcoin address. Requires a fee quote. */
++    async sendBtcOnchain(params) {
++        this.assertConnected();
++        const feeQuote = await this.account.quoteWithdraw({
++            withdrawalAddress: params.address.trim(),
++            amountSats: params.amount,
++        });
++        if (!feeQuote) {
++            throw new ProtocolError('Spark withdrawal fee quote failed', 'SPARK', 'FEE_QUOTE');
++        }
++        const fee = Number(feeQuote.l1BroadcastFeeMedium?.originalValue ?? 0) +
++            Number(feeQuote.userFeeMedium?.originalValue ?? 0);
++        const balance = await this.getBtcBalance();
++        if (Number.isFinite(balance.total) && params.amount + fee > balance.total) {
++            throw new ProtocolError(`Insufficient Spark balance. This withdrawal needs ${params.amount.toLocaleString()} sats plus a ${fee.toLocaleString()} sats network fee.`, 'SPARK', 'INSUFFICIENT_BALANCE');
++        }
++        const r = await this.account.withdraw({
++            onchainAddress: params.address.trim(),
++            amountSats: params.amount,
++            exitSpeed: 'MEDIUM',
++        });
++        const hash = r?.id ?? r?.txid ?? r?.requestId ?? r?.coopExitRequestId ?? '';
++        if (!hash) {
++            throw new ProtocolError('Spark withdrawal did not return a transaction ID', 'SPARK', 'SEND_ERROR');
++        }
++        return {
++            txid: hash,
++            paymentHash: hash,
++            amount: params.amount,
++            fee,
++            status: 'pending',
++            timestamp: Date.now(),
++        };
++    }
+     /** Conservative default LN fee cap: 0.5% of amount, min 5 sats. */
+     defaultMaxFeeSats(amount) {
+         if (!amount || amount <= 0)
