@@ -68,6 +68,7 @@ const persistConfig: PersistConfig<RootReducerState> = {
       'wss://nostr.wine',
     ];
     const CURRENT_DEFAULT_RELAYS = [
+      'wss://relay.kaleidoswap.com',
       'wss://relay.damus.io',
       'wss://nos.lol',
       'wss://relay.nostr.band',

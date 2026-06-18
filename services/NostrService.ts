@@ -137,6 +137,7 @@ class NostrService {
   // is an indexer optimised for profile (kind 0) and relay-list (kind 10002)
   // lookups, which speeds up contact resolution under the outbox model.
   private defaultRelays = [
+    'wss://relay.kaleidoswap.com',
     'wss://relay.damus.io',
     'wss://nos.lol',
     'wss://relay.nostr.band',

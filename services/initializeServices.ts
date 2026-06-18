@@ -57,6 +57,7 @@ export async function initializeNostrWalletConnect() {
     if (!nostrService.connected) {
       await nostrService.initialize({
         relays: [
+          'wss://relay.kaleidoswap.com',
           'wss://relay.damus.io',
           'wss://relay.snort.social',
           'wss://nos.lol',
