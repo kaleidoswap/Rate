@@ -735,7 +735,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
     {
       icon: 'people',
       label: 'Contacts',
-      gradient: ['#8B5CF6', '#A855F7'],
+      gradient: [theme.colors.brand.violet, theme.colors.protocol.arkade],
       onPress: () => setShowContactsSelector(true),
     },
     {

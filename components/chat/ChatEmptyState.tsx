@@ -48,7 +48,7 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onSuggestion, onContact
       icon: 'people-outline' as const,
       title: 'Pay a contact',
       subtitle: 'From your Nostr contacts',
-      gradient: ['#8B5CF6', '#A855F7'] as [string, string],
+      gradient: [theme.colors.brand.violet, theme.colors.protocol.arkade] as [string, string],
       onPress: onContacts,
     },
     {
