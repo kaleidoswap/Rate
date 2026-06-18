@@ -255,7 +255,12 @@ export const lightTheme: ThemeType = {
       800: '#166534',
       900: '#14532D',
       950: k.primaryFg,    // #051B10
-      gradient: [k.primary, '#1FA855'] as [string, string],
+      // Flat fill per DESIGN.md: "the brand green is a flat #2BEE79 signal,
+      // never a decorative gradient." Both stops are k.primary so every
+      // primary-green surface (buttons, avatars, bubbles, tiles, send button)
+      // renders solid. The pair shape is retained so the ~7 LinearGradient
+      // consumers keep working; they can later drop the wrapper for a flat View.
+      gradient: [k.primary, k.primary] as [string, string],
     },
 
     // Secondary: Deep Green Surfaces
