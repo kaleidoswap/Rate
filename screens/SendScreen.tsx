@@ -562,10 +562,14 @@ function SendScreen({ navigation, route }: Props) {
         const amountSats = bitcoinUnit === 'BTC'
           ? Math.round(parseFloat(amount) * 1e8)
           : Math.round(parseFloat(amount));
-        if (method === 'boarding') {
-          result = await arkadeAdapter.sendBtcOnchain?.({ address, amount: amountSats });
-        } else {
-          result = await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
+
+        const feeSats = await assertArkadeFeeCovered(arkadeAdapter, address, amountSats);
+        result = method === 'boarding' && typeof arkadeAdapter.sendBtcOnchain === 'function'
+          ? await arkadeAdapter.sendBtcOnchain({ address, amount: amountSats })
+          : await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
+        ensureSuccessfulArkadeResult(result);
+        if (result.fee == null || Number(result.fee) === 0) {
+          result = { ...result, fee: feeSats };
         }
         successType = method === 'boarding' ? 'boarding' : 'arkade';
 
@@ -609,7 +613,11 @@ function SendScreen({ navigation, route }: Props) {
         const onchainSats = bitcoinUnit === 'BTC'
           ? Math.round(parseFloat(amount) * 1e8)
           : Math.round(parseFloat(amount));
-        result = await btcAdapter.sendBtcOnchain?.({ address, amount: onchainSats, feeRate: feeRateNum });
+        if (typeof btcAdapter.sendBtcOnchain !== 'function') {
+          throw new Error(`${protocol} does not support Bitcoin on-chain withdrawals from this wallet version.`);
+        }
+        result = await btcAdapter.sendBtcOnchain({ address, amount: onchainSats, feeRate: feeRateNum });
+        ensureSuccessfulProtocolResult(result, `${protocol} on-chain withdrawal`);
         successType = 'bitcoin';
 
       } else if (addressType === 'rgb') {
@@ -639,6 +647,60 @@ function SendScreen({ navigation, route }: Props) {
     }
   };
 
+  const assertArkadeFeeCovered = async (
+    arkadeAdapter: any,
+    destination: string,
+    amountSats: number,
+  ): Promise<number> => {
+    const quote = await arkadeAdapter.executeProtocolOperation?.('quoteSendTransaction', {
+      to: destination,
+      value: amountSats,
+    });
+    const feeSats = Number(quote?.fee);
+    if (!Number.isFinite(feeSats)) {
+      throw new Error('Could not estimate the Arkade network fee. Please try again.');
+    }
+
+    const balance = await arkadeAdapter.getBtcBalance?.();
+    const availableSats = Number(balance?.total ?? balance?.confirmed ?? 0);
+    if (!Number.isFinite(availableSats)) {
+      throw new Error('Could not read your Arkade balance. Please try again.');
+    }
+    if (amountSats + feeSats > availableSats) {
+      throw new Error(
+        `Insufficient Arkade balance. This payment needs ${amountSats.toLocaleString()} sats plus a ${feeSats.toLocaleString()} sats network fee.`
+      );
+    }
+
+    return feeSats;
+  };
+
+  const ensureSuccessfulArkadeResult = (result: any) => {
+    if (!result) {
+      throw new Error('Arkade did not return a payment result.');
+    }
+    if (result.status === 'failed' || result.error) {
+      throw new Error(result.error || 'Arkade payment failed.');
+    }
+    const reference = result.txid || result.txId || result.paymentHash || result.payment_hash || result.hash;
+    if (!reference || (typeof reference === 'string' && reference.trim() === '')) {
+      throw new Error('Arkade did not return a transaction ID. The payment was not confirmed.');
+    }
+  };
+
+  const ensureSuccessfulProtocolResult = (result: any, label: string) => {
+    if (!result) {
+      throw new Error(`${label} did not return a payment result.`);
+    }
+    if (result.status === 'failed' || result.error) {
+      throw new Error(result.error || `${label} failed.`);
+    }
+    const reference = result.txid || result.txId || result.paymentHash || result.payment_hash || result.hash;
+    if (!reference || (typeof reference === 'string' && reference.trim() === '')) {
+      throw new Error(`${label} did not return a transaction ID.`);
+    }
+  };
+
   // Builds the display payload from current state and routes to the clean
   // success screen (which owns the success haptic + chime). `result` is the
   // adapter return value, mined for a txid / payment hash / preimage reference.
@@ -651,7 +713,7 @@ function SendScreen({ navigation, route }: Props) {
 
     const reference =
       result?.txid || result?.txId || result?.payment_hash ||
-      result?.paymentHash || result?.preimage || undefined;
+      result?.paymentHash || result?.hash || result?.preimage || undefined;
     const referenceLabel =
       paymentType === 'lightning' ? 'Payment hash'
       : paymentType === 'rgb' ? 'Transaction'
@@ -659,7 +721,9 @@ function SendScreen({ navigation, route }: Props) {
 
     // Surface the on-chain fee rate on the receipt for on-chain sends only
     // (same rule as the fee selector).
-    const fee = (addressType === 'bitcoin' || addressType === 'rgb')
+    const fee = result?.fee != null && Number.isFinite(Number(result.fee))
+      ? `${Number(result.fee).toLocaleString()} sats`
+      : (addressType === 'bitcoin' || addressType === 'rgb')
       ? `${feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB`
       : undefined;
 
@@ -669,6 +733,7 @@ function SendScreen({ navigation, route }: Props) {
       fiat,
       recipient: address,
       paymentType,
+      status: result?.status === 'pending' ? 'pending' : 'confirmed',
       fee,
       reference: typeof reference === 'string' ? reference : undefined,
       referenceLabel,

@@ -37,6 +37,8 @@ export interface PaymentSuccessParams {
   /** Recipient address / invoice — truncated for display. */
   recipient: string;
   paymentType: PaymentType;
+  /** `pending` means the transfer was accepted/submitted but not fully settled. */
+  status?: 'confirmed' | 'pending';
   /** Optional network-fee line, pre-formatted (e.g. "2 sat/vB"). */
   fee?: string;
   /** Optional reference (txid / payment hash / preimage) with a copy affordance. */
@@ -60,15 +62,23 @@ const TYPE_META: Record<PaymentType, {
   rgb: { label: 'Asset Sent', sub: 'RGB asset transferred', network: 'rgb', networkLabel: 'RGB' },
   spark: { label: 'Payment Sent', sub: 'Transferred over Spark', network: 'spark', networkLabel: 'Spark' },
   arkade: { label: 'Payment Sent', sub: 'Transferred over Arkade', network: 'arkade', networkLabel: 'Arkade' },
-  boarding: { label: 'Payment Sent', sub: 'Sent on-chain from Arkade', network: 'arkade', networkLabel: 'Arkade · on-chain' },
+  boarding: { label: 'Payment Submitted', sub: 'Arkade offboard is awaiting settlement', network: 'arkade', networkLabel: 'Arkade · on-chain' },
 };
 
 const truncate = (s: string): string =>
   s.length > 24 ? `${s.slice(0, 10)}…${s.slice(-10)}` : s;
 
 export default function PaymentSuccessScreen({ navigation, route }: Props) {
-  const { amount, unit, fiat, recipient, paymentType, fee, reference, referenceLabel } = route.params;
-  const meta = TYPE_META[paymentType] ?? TYPE_META.lightning;
+  const { amount, unit, fiat, recipient, paymentType, status = 'confirmed', fee, reference, referenceLabel } = route.params;
+  const baseMeta = TYPE_META[paymentType] ?? TYPE_META.lightning;
+  const isPending = status === 'pending';
+  const meta = isPending
+    ? {
+        ...baseMeta,
+        label: paymentType === 'boarding' ? 'Withdrawal Submitted' : 'Payment Submitted',
+        sub: paymentType === 'boarding' ? 'Awaiting on-chain settlement' : 'Awaiting network settlement',
+      }
+    : baseMeta;
 
   const checkAnim = useRef<LottieView>(null);
   const scale = useRef(new Animated.Value(0.6)).current;
@@ -85,9 +95,13 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
   );
 
   useEffect(() => {
-    // Fire the multi-modal success cue (haptic + chime) exactly as the screen
-    // appears, then play the check animation and stagger the details in.
-    feedback.send();
+    // Confirmed payments get the full success cue. Pending offboard/settlement
+    // flows use a lighter cue so they are not presented as final completion.
+    if (isPending) {
+      feedback.select();
+    } else {
+      feedback.send();
+    }
     checkAnim.current?.play();
 
     Animated.parallel([
@@ -121,7 +135,7 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
       }),
     ).start();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isPending]);
 
   const handleDone = () => {
     feedback.tap();
@@ -172,7 +186,11 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
         <Animated.View style={{ opacity, alignItems: 'center' }}>
           <Text style={styles.title}>{meta.label}</Text>
           <View style={styles.typeRow}>
-            <Ionicons name="checkmark-circle" size={14} color={theme.colors.success[500]} />
+            <Ionicons
+              name={isPending ? 'time-outline' : 'checkmark-circle'}
+              size={14}
+              color={isPending ? theme.colors.warning[500] : theme.colors.success[500]}
+            />
             <Text style={styles.typeSub}>{meta.sub}</Text>
           </View>
         </Animated.View>
@@ -204,6 +222,16 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
             <Text style={styles.rowLabel}>Network</Text>
             <Text style={styles.rowValue}>{meta.networkLabel}</Text>
           </View>
+
+          {isPending && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Status</Text>
+                <Text style={styles.rowValue}>Pending settlement</Text>
+              </View>
+            </>
+          )}
 
           {!!fee && (
             <>
