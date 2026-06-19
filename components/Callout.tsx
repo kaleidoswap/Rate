@@ -69,11 +69,11 @@ const styles = StyleSheet.create({
   },
   body: {
     flex: 1,
-    gap: 2,
+    gap: theme.spacing[0.5],
   },
   title: {
     fontSize: theme.typography.fontSize.sm,
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
   },
   message: {
     fontSize: theme.typography.fontSize.sm,

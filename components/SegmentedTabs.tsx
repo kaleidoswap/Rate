@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   tabTextActive: {
     color: theme.colors.text.inverse,

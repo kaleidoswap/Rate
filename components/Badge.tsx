@@ -73,24 +73,24 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.full,
   },
   sm: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: theme.spacing[1.5],
+    paddingVertical: theme.spacing[0.5],
   },
   md: {
     paddingHorizontal: 9,
-    paddingVertical: 4,
+    paddingVertical: theme.spacing[1],
   },
   icon: {
     marginRight: 3,
   },
   textSm: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
     letterSpacing: 0.3,
   },
   textMd: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
     letterSpacing: 0.2,
   },
 });
