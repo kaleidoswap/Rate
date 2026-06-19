@@ -53,18 +53,18 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.text.primary,
   },
   action: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
+    gap: theme.spacing[0.5],
   },
   actionText: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.primary[600],
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
   },
 });
 

@@ -82,35 +82,35 @@ const ToastItem: React.FC<ToastProps> = ({ toast, onDismiss }) => {
           background: theme.colors.success[50],
           border: theme.colors.success[500],
           icon: theme.colors.success[500],
-          text: theme.colors.success[900] || theme.colors.success[800],
+          text: theme.colors.text.primary,
         };
       case 'error':
         return {
           background: theme.colors.error[50],
           border: theme.colors.error[500],
           icon: theme.colors.error[500],
-          text: theme.colors.error[900] || theme.colors.error[800],
+          text: theme.colors.text.primary,
         };
       case 'warning':
         return {
           background: theme.colors.warning[50],
           border: theme.colors.warning[500],
           icon: theme.colors.warning[500],
-          text: theme.colors.warning[900] || theme.colors.warning[800],
+          text: theme.colors.text.primary,
         };
       case 'info':
         return {
           background: theme.colors.info[50],
           border: theme.colors.info[500],
           icon: theme.colors.info[500],
-          text: theme.colors.info[900] || theme.colors.info[800],
+          text: theme.colors.text.primary,
         };
       default:
         return {
-          background: theme.colors.gray[100],
-          border: theme.colors.gray[400],
-          icon: theme.colors.gray[600],
-          text: theme.colors.gray[900],
+          background: theme.colors.surface.elevated,
+          border: theme.colors.border.medium,
+          icon: theme.colors.text.secondary,
+          text: theme.colors.text.primary,
         };
     }
   };

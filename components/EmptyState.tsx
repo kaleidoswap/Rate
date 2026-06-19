@@ -2,6 +2,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { theme as staticTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
 interface EmptyStateProps {
@@ -41,7 +42,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: staticTheme.spacing[10],
     paddingVertical: 60,
   },
   iconCircle: {
@@ -50,28 +51,28 @@ const styles = StyleSheet.create({
     borderRadius: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: staticTheme.spacing[5],
   },
   title: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: staticTheme.typography.fontSize.lg,
+    fontWeight: staticTheme.typography.fontWeight.semibold,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: staticTheme.spacing[2],
   },
   message: {
-    fontSize: 14,
+    fontSize: staticTheme.typography.fontSize.sm,
     textAlign: 'center',
     lineHeight: 20,
   },
   actionButton: {
-    marginTop: 24,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 12,
+    marginTop: staticTheme.spacing[6],
+    paddingHorizontal: staticTheme.spacing[6],
+    paddingVertical: staticTheme.spacing[3],
+    borderRadius: staticTheme.borderRadius.md,
   },
   actionLabel: {
-    color: '#FFFFFF',
+    color: staticTheme.colors.text.inverse,
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: staticTheme.typography.fontWeight.semibold,
   },
 });
