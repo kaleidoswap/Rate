@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
 import { loadContactList } from '../store/slices/nostrSlice';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import { NostrContact } from '../types/nostr';
 import { nip19 } from 'nostr-tools';
 
@@ -377,7 +377,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: theme.colors.background.backdrop,
   },
   modalContainer: {
     justifyContent: 'flex-end',
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: theme.colors.brand.violet,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
@@ -551,7 +551,7 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.secondary,
     textAlign: 'center',
-    lineHeight: theme.typography.lineHeight.relaxed,
+    lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.relaxed),
     marginBottom: theme.spacing[6],
   },
   connectButton: {

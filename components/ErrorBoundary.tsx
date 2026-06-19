@@ -73,7 +73,7 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <View style={styles.container}>
           <LinearGradient
-            colors={['#EF4444', '#DC2626']}
+            colors={theme.colors.error.gradient ?? [theme.colors.error[500], theme.colors.error[500]]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.header}

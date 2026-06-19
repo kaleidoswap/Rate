@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking, Platform
 import InvoiceQRCode from '../InvoiceQRCode';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { formatDistance } from '../../services/btcmapService';
-import type { Theme } from '../../theme';
+import { leading, type Theme } from '../../theme';
 
 /** Open a merchant in the native maps app — by coordinates if we have them,
  *  otherwise by a search query on its name/address. */
@@ -291,7 +291,7 @@ const makeStyles = (theme: Theme) =>
     },
     title: {
       fontSize: theme.typography.fontSize.sm,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
       marginBottom: theme.spacing[2],
       letterSpacing: 0.5,
@@ -299,17 +299,17 @@ const makeStyles = (theme: Theme) =>
     successText: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.success[500] ?? theme.colors.success[600],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
       marginBottom: theme.spacing[1],
     },
     errorText: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.error[400] ?? theme.colors.error[500],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
     invoiceText: {
       fontSize: theme.typography.fontSize.sm,
-      lineHeight: 20,
+      lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
       color: theme.colors.text.secondary,
       marginBottom: theme.spacing[2],
     },
@@ -324,7 +324,7 @@ const makeStyles = (theme: Theme) =>
     copyText: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
     merchantList: { maxHeight: 280 },
     merchantItem: {
@@ -344,20 +344,20 @@ const makeStyles = (theme: Theme) =>
     merchantName: {
       flex: 1,
       fontSize: theme.typography.fontSize.sm,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
       color: theme.colors.text.primary,
       marginBottom: theme.spacing[1],
-      lineHeight: 20,
+      lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
     },
     merchantDistance: {
       fontSize: theme.typography.fontSize.xs,
-      fontWeight: '700',
+      fontWeight: theme.typography.fontWeight.bold,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
     },
     merchantPay: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.success[500] ?? theme.colors.success[600],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
       marginBottom: theme.spacing[1],
     },
     merchantActions: {
@@ -375,7 +375,7 @@ const makeStyles = (theme: Theme) =>
     },
     mapsButtonText: {
       fontSize: theme.typography.fontSize.xs,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
     },
     attribution: {
@@ -388,24 +388,24 @@ const makeStyles = (theme: Theme) =>
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.text.secondary,
       marginBottom: theme.spacing[1],
-      lineHeight: 16,
+      lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.snug),
     },
     merchantLink: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
       marginBottom: theme.spacing[1],
-      fontWeight: '500',
-      lineHeight: 16,
+      fontWeight: theme.typography.fontWeight.medium,
+      lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.snug),
     },
     merchantHours: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.success[500] ?? theme.colors.success[600],
       marginBottom: theme.spacing[1],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
     balanceAmount: {
       fontSize: theme.typography.fontSize.xl,
-      fontWeight: '700',
+      fontWeight: theme.typography.fontWeight.bold,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
     },
     balanceSub: {
@@ -423,7 +423,7 @@ const makeStyles = (theme: Theme) =>
     },
     assetTicker: {
       fontSize: theme.typography.fontSize.sm,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
       color: theme.colors.text.primary,
     },
     assetBalance: {
@@ -433,7 +433,7 @@ const makeStyles = (theme: Theme) =>
     addressText: {
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.primary,
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
       marginBottom: theme.spacing[1],
     },
     txRow: {
@@ -446,12 +446,12 @@ const makeStyles = (theme: Theme) =>
     txDirection: {
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.secondary,
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
     txAmount: {
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.primary,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
     },
   });
 

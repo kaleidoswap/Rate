@@ -68,24 +68,25 @@ const makeStyles = (t: Theme) => {
   const c = (t as any)?.colors ?? {};
   return StyleSheet.create({
     card: {
-      marginTop: 8,
-      borderRadius: 14,
+      marginTop: t.spacing[2],
+      borderRadius: t.borderRadius.md,
       borderWidth: StyleSheet.hairlineWidth,
-      borderColor: c?.border?.subtle ?? c?.border?.default ?? 'rgba(255,255,255,0.12)',
-      backgroundColor: c?.surface?.elevated ?? c?.background?.secondary ?? 'rgba(255,255,255,0.04)',
-      padding: 12,
+      borderColor: c?.border?.subtle ?? c?.border?.default ?? c?.border?.medium,
+      backgroundColor: c?.surface?.elevated ?? c?.background?.secondary,
+      padding: t.spacing[3],
     },
     cardPressed: { opacity: 0.85, transform: [{ scale: 0.985 }] },
     head: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-    iconWrap: { width: 24, height: 24, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(124,92,255,0.14)' },
-    label: { color: c?.text?.primary ?? '#fff', fontSize: 13, fontWeight: '600', flex: 1 },
-    amount: { color: accent(t), fontSize: 13, fontWeight: '700' },
-    desc: { color: c?.text?.secondary ?? '#c2c6cc', fontSize: 12, marginTop: 6 },
-    mono: { color: c?.text?.tertiary ?? '#8a9099', fontSize: 11, fontFamily: 'Courier', marginTop: 6 },
-    row: { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 8 },
+    // Violet-tinted icon/action chips — a deliberate secondary-brand-accent (brand.violet) card tint; kept as inline rgba so the alpha levels stay tunable.
+    iconWrap: { width: 24, height: 24, borderRadius: t.borderRadius.sm, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(124,92,255,0.14)' },
+    label: { color: c?.text?.primary ?? '#fff', fontSize: t.typography.fontSize.sm, fontWeight: t.typography.fontWeight.semibold, flex: 1 },
+    amount: { color: accent(t), fontSize: t.typography.fontSize.sm, fontWeight: t.typography.fontWeight.bold },
+    desc: { color: c?.text?.secondary ?? '#c2c6cc', fontSize: t.typography.fontSize.xs, marginTop: t.spacing[1.5] },
+    mono: { color: c?.text?.tertiary ?? '#8a9099', fontSize: 11, fontFamily: 'Courier', marginTop: t.spacing[1.5] },
+    row: { flexDirection: 'row', alignItems: 'center', marginTop: t.spacing[2.5], gap: t.spacing[2] },
     meta: { color: c?.text?.tertiary ?? '#8a9099', fontSize: 11 },
-    btn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 5, paddingHorizontal: 10, borderRadius: 9, backgroundColor: 'rgba(124,92,255,0.12)' },
+    btn: { flexDirection: 'row', alignItems: 'center', gap: t.spacing[1], paddingVertical: 5, paddingHorizontal: t.spacing[2.5], borderRadius: t.borderRadius.base, backgroundColor: 'rgba(124,92,255,0.12)' },
     btnPressed: { backgroundColor: 'rgba(124,92,255,0.22)' },
-    btnText: { color: muted(t), fontSize: 12, fontWeight: '600' },
+    btnText: { color: muted(t), fontSize: t.typography.fontSize.xs, fontWeight: t.typography.fontWeight.semibold },
   });
 };

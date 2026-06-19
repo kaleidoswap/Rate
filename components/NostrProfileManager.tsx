@@ -28,7 +28,7 @@ import {
   setWalletConnectEnabled,
 } from '../store/slices/nostrSlice';
 import NostrService from '../services/NostrService';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import { Card } from './Card';
 import { Button } from './Button';
 import { Input } from './Input';
@@ -1002,7 +1002,7 @@ const styles = StyleSheet.create({
 
   cardTitle: {
     fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.primary,
   },
 
@@ -1020,7 +1020,7 @@ const styles = StyleSheet.create({
 
   errorText: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[600],
+    color: theme.colors.error[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
     marginBottom: theme.spacing[3],
   },
 
@@ -1033,7 +1033,7 @@ const styles = StyleSheet.create({
     color: theme.colors.text.secondary,
     textAlign: 'center',
     marginBottom: theme.spacing[4],
-    lineHeight: 22,
+    lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.snug),
   },
 
   setupButtons: {
@@ -1060,7 +1060,7 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     marginBottom: theme.spacing[4],
-    lineHeight: 20,
+    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
   },
 
   keyInputContainer: {
@@ -1144,7 +1144,7 @@ const styles = StyleSheet.create({
 
   profileDisplayName: {
     fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.text.primary,
   },
 
@@ -1156,7 +1156,7 @@ const styles = StyleSheet.create({
   profileAbout: {
     fontSize: theme.typography.fontSize.base,
     color: theme.colors.text.primary,
-    lineHeight: 22,
+    lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.snug),
   },
 
   profileWebsite: {
@@ -1175,8 +1175,8 @@ const styles = StyleSheet.create({
 
   lightningAddressText: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.warning[600],
-    fontWeight: '500',
+    color: theme.colors.warning[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
+    fontWeight: theme.typography.fontWeight.medium,
   },
 
   noProfile: {
@@ -1245,8 +1245,8 @@ const styles = StyleSheet.create({
 
   relayCountText: {
     fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.primary[700], // Fixed: use 700 instead of 800
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.primary[500], // [500] not [700]: dark theme only overrides intent ramps at 50/100
   },
 
   relayPreview: {
@@ -1345,15 +1345,15 @@ const styles = StyleSheet.create({
 
   nwcEnabledText: {
     fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.success[600], // Fixed: use 600 instead of 700
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.success[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
   },
 
   nwcDescription: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     marginBottom: theme.spacing[4],
-    lineHeight: 20,
+    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
   },
 
   nwcDisabledContent: {
@@ -1415,6 +1415,6 @@ const styles = StyleSheet.create({
   relayConnectionText: {
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.secondary,
-    fontWeight: '500',
+    fontWeight: theme.typography.fontWeight.medium,
   },
 }); 

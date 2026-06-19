@@ -10,7 +10,7 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 
 interface RevealMnemonicModalProps {
   visible: boolean;
@@ -102,15 +102,15 @@ export const RevealMnemonicModal: React.FC<RevealMnemonicModalProps> = ({ visibl
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: theme.colors.background.backdrop,
     justifyContent: 'center',
-    padding: 20,
+    padding: theme.spacing[5],
   },
   sheet: {
     backgroundColor: theme.colors.background.secondary,
-    borderRadius: 20,
-    padding: 20,
-    gap: 14,
+    borderRadius: theme.borderRadius.lg,
+    padding: theme.spacing[5],
+    gap: theme.spacing[3.5],
   },
   header: {
     flexDirection: 'row',
@@ -118,23 +118,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   title: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.text.primary,
   },
   warning: {
     flexDirection: 'row',
-    gap: 8,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: theme.colors.warning[500] + '14',
+    gap: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.warning[50],
     borderWidth: 1,
-    borderColor: theme.colors.warning[500] + '40',
+    borderColor: theme.colors.warning[500] + '40', // ~25% warning tint border — no static token for this alpha
   },
   warningText: {
     flex: 1,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: theme.typography.fontSize.xs,
+    lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.normal),
     color: theme.colors.text.secondary,
   },
   gridWrap: {
@@ -144,64 +144,64 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: theme.spacing[2],
     justifyContent: 'space-between',
   },
   wordChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: theme.spacing[1.5],
     width: '48%',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: theme.colors.background.tertiary || 'rgba(255,255,255,0.05)',
+    paddingVertical: theme.spacing[2.5],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.background.tertiary,
   },
   wordIndex: {
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.tertiary,
     minWidth: 18,
   },
   wordText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.primary,
   },
   blurCover: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.colors.background.secondary + 'F2',
-    borderRadius: 12,
+    backgroundColor: theme.colors.background.secondary + 'F2', // ~95% opaque cover so the seed stays hidden until tapped
+    borderRadius: theme.borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: theme.spacing[1.5],
   },
   blurText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.secondary,
   },
   copyButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 10,
+    gap: theme.spacing[1.5],
+    paddingVertical: theme.spacing[2.5],
   },
   copyText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.primary[500],
   },
   doneButton: {
-    paddingVertical: 14,
-    borderRadius: 12,
+    paddingVertical: theme.spacing[3.5],
+    borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.primary[500],
     alignItems: 'center',
   },
   doneText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.bold,
+    color: theme.colors.text.inverse, // dark navy text on green primary fill (correct contrast)
   },
 });
