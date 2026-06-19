@@ -13,7 +13,7 @@ index 3b34f5ff04b84ddae8ab75a2b3d0483aaedfafd8..3529e9842b4ac9005b42a356097a68fd
              }
              else {
 diff --git a/dist/adapters/wdk/ArkadeWdkAdapter.js b/dist/adapters/wdk/ArkadeWdkAdapter.js
-index 810f8e39ba5f16a82ee06eab475170f28b87ff50..bd93a95a3895db6a65d415650774bcab97cf0386 100644
+index 810f8e39ba5f16a82ee06eab475170f28b87ff50..54b8a33f726b0d78ce09bcb9c598d023c07d31b5 100644
 --- a/dist/adapters/wdk/ArkadeWdkAdapter.js
 +++ b/dist/adapters/wdk/ArkadeWdkAdapter.js
 @@ -22,6 +22,7 @@ import { ProtocolError, } from '../../types/base';
@@ -87,7 +87,7 @@ index 810f8e39ba5f16a82ee06eab475170f28b87ff50..bd93a95a3895db6a65d415650774bcab
 +            return {
 +                id,
 +                type: isSend ? 'send' : 'receive',
-+                status: t?.settled ? 'confirmed' : 'pending',
++                status: t?.settled || (!isSend && !key.boardingTxid) ? 'confirmed' : 'pending',
 +                timestamp: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : 0,
 +                amount: Math.abs(Number(t?.amount ?? 0)),
 +                amountDisplay: '',
@@ -99,7 +99,7 @@ index 810f8e39ba5f16a82ee06eab475170f28b87ff50..bd93a95a3895db6a65d415650774bcab
      async getTransaction(txId) {
          const all = await this.listTransactions();
 diff --git a/dist/adapters/wdk/SparkWdkAdapter.js b/dist/adapters/wdk/SparkWdkAdapter.js
-index da28b93ba88658492eb76776b96a77745597d7b6..206a58820b4391f4511f7284c68748b6440f83ca 100644
+index da28b93ba88658492eb76776b96a77745597d7b6..5eda932d0c703ab374fd30f1f2d40a16da34b24f 100644
 --- a/dist/adapters/wdk/SparkWdkAdapter.js
 +++ b/dist/adapters/wdk/SparkWdkAdapter.js
 @@ -26,6 +26,22 @@ import { ProtocolError, } from '../../types/base';
@@ -125,7 +125,20 @@ index da28b93ba88658492eb76776b96a77745597d7b6..206a58820b4391f4511f7284c68748b6
  /** Map a spark-sdk Transfer proto status → domain TransactionStatus. */
  function mapSparkStatus(s) {
      const v = String(s ?? '').toUpperCase();
-@@ -50,6 +66,10 @@ export class SparkWdkAdapter {
+@@ -35,6 +51,12 @@ function mapSparkStatus(s) {
+         return 'failed';
+     return 'pending';
+ }
++function isDirectSparkTransfer(t) {
++    const type = String(t?.type ?? t?.transferType ?? t?.sparkTransactionType ?? '').toUpperCase();
++    const hasUserRequest = t?.userRequest != null || t?.userRequestId != null;
++    const hasTransferShape = t?.receiverIdentityPublicKey != null || t?.senderIdentityPublicKey != null || t?.totalValue != null;
++    return type === 'TRANSFER' || type === '2' || (!hasUserRequest && hasTransferShape);
++}
+ const SPARK_NETWORK_MAP = {
+     mainnet: 'MAINNET',
+     testnet: 'TESTNET',
+@@ -50,6 +72,10 @@ export class SparkWdkAdapter {
          this.account = null;
          this.connected = false;
          this.network = 'mainnet';
@@ -136,7 +149,7 @@ index da28b93ba88658492eb76776b96a77745597d7b6..206a58820b4391f4511f7284c68748b6
      }
      // --- Connection ---------------------------------------------------------
      async connect(config) {
-@@ -66,6 +86,12 @@ export class SparkWdkAdapter {
+@@ -66,6 +92,12 @@ export class SparkWdkAdapter {
              network: SPARK_NETWORK_MAP[this.network] ?? 'MAINNET',
          });
          this.account = await this.manager.getAccount(cfg.accountIndex ?? 0);
@@ -149,7 +162,7 @@ index da28b93ba88658492eb76776b96a77745597d7b6..206a58820b4391f4511f7284c68748b6
          this.connected = true;
      }
      async disconnect() {
-@@ -386,8 +412,21 @@ export class SparkWdkAdapter {
+@@ -386,8 +418,21 @@ export class SparkWdkAdapter {
      }
      /** Map a spark-sdk Transfer (proto) → domain UnifiedTransaction (fields read defensively). */
      toUnifiedTx(t) {
@@ -173,3 +186,12 @@ index da28b93ba88658492eb76776b96a77745597d7b6..206a58820b4391f4511f7284c68748b6
          const tsRaw = t?.createdTime ?? t?.updatedTime ?? t?.createdAt;
          const timestamp = typeof tsRaw === 'number'
              ? tsRaw
+@@ -399,7 +444,7 @@ export class SparkWdkAdapter {
+         return {
+             id: t?.id ?? t?.sparkId ?? '',
+             type: isReceive ? 'receive' : 'send',
+-            status: mapSparkStatus(t?.status),
++            status: isDirectSparkTransfer(t) ? 'confirmed' : mapSparkStatus(t?.status),
+             timestamp,
+             amount: Number(t?.totalValue ?? t?.value ?? 0),
+             amountDisplay: '',

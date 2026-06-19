@@ -91,9 +91,41 @@ export function formatAssetAmount(amount: number, precision: number): string {
 
 function normalizePaymentStatus(status?: string): ActivityStatus {
   const s = (status || '').toLowerCase();
-  if (s === 'succeeded' || s === 'success' || s === 'settled' || s === 'completed') return 'confirmed';
+  if (s === 'confirmed' || s === 'succeeded' || s === 'success' || s === 'settled' || s === 'completed') return 'confirmed';
   if (s === 'failed' || s === 'error' || s === 'expired') return 'failed';
   return 'pending';
+}
+
+function normalizeProtocolTransactionStatus(
+  proto: 'SPARK' | 'ARKADE',
+  tx: any,
+): ActivityStatus {
+  const status = normalizePaymentStatus(tx?.status);
+  if (status !== 'pending') return status;
+
+  const raw = tx?.protocolData ?? tx ?? {};
+  if (proto === 'SPARK' && tx?.type === 'receive') {
+    const rawType = String(raw.type ?? raw.transferType ?? raw.sparkTransactionType ?? '').toUpperCase();
+    const hasUserRequest = raw.userRequest != null || raw.userRequestId != null;
+    const hasTransferShape =
+      raw.receiverIdentityPublicKey != null ||
+      raw.senderIdentityPublicKey != null ||
+      raw.totalValue != null;
+
+    // Direct Spark transfers are spendable as Spark balance even when the raw SDK
+    // transfer status is still an intermediate key-tweak state. Lightning/on-chain
+    // receives carry a userRequest and should keep their actual pending state.
+    if (rawType === 'TRANSFER' || rawType === '2' || (!hasUserRequest && hasTransferShape)) {
+      return 'confirmed';
+    }
+  }
+
+  if (proto === 'ARKADE' && tx?.type === 'receive') {
+    const key = raw.key ?? {};
+    if (raw.settled || !key.boardingTxid) return 'confirmed';
+  }
+
+  return status;
 }
 
 function normalizeTransferStatus(status?: string): ActivityStatus {
@@ -250,7 +282,7 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           assetPrecision: precision,
           amount: !isBtc && precision > 0 ? formatAssetAmount(tx.amount, precision) : formatSats(tx.amount),
           rawSats: isBtc ? tx.amount : undefined,
-          status: normalizePaymentStatus(tx.status),
+          status: normalizeProtocolTransactionStatus(proto, tx),
           timestamp: tx.timestamp,
           txid: tx.id,
           layer: proto === 'SPARK' ? 'Spark' : 'Arkade',

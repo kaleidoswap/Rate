@@ -6,7 +6,7 @@ settings:
 
 patchedDependencies:
   '@kaleidorg/wallet-engine@1.0.0-beta.4':
-    hash: 23270024b7eabbe93af52ba75abd59d83595a90189aed696ea53f535cd8e3ebb
+    hash: 26a1f9261c0df1cf064727fdc8e5c0f7011bc0df18c34c445fcae316d1f0389b
     path: patches/@kaleidorg__wallet-engine@1.0.0-beta.4.patch
 
 importers:
@@ -38,14 +38,14 @@ importers:
         specifier: ^5.2.1
         version: 5.2.1
       '@kaleidorg/kaleido-ui':
-        specifier: npm:kaleido-ui@^0.1.50
-        version: kaleido-ui@0.1.50(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
+        specifier: npm:kaleido-ui@^0.1.56
+        version: kaleido-ui@0.1.56(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@kaleidorg/mind':
         specifier: ^0.5.1
         version: 0.5.1(@qvac/sdk@0.13.3(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.35))(expo-device@8.0.10(expo@54.0.35))(expo-file-system@19.0.23(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.4(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(sodium-javascript@0.8.0))
       '@kaleidorg/wallet-engine':
         specifier: 1.0.0-beta.4
-        version: 1.0.0-beta.4(patch_hash=53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1)(3763d8736b82a27bdf993654aa232178)
+        version: 1.0.0-beta.4(patch_hash=26a1f9261c0df1cf064727fdc8e5c0f7011bc0df18c34c445fcae316d1f0389b)(3763d8736b82a27bdf993654aa232178)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))
@@ -4627,8 +4627,8 @@ packages:
     resolution: {integrity: sha512-NCb5fHEjqJf5vwPj6mSvRjtq+v4Y1XqdkldiT2L8k/Gq66gGPPn6Tt8ixDbw6B2LpWmqbk+RM3H5p+joLtWD0Q==}
     engines: {node: '>=18.0.0'}
 
-  kaleido-ui@0.1.50:
-    resolution: {integrity: sha512-reJsh0zi5TniZQbrW53QzOPx/qIcBy4Kr/sKKj93tSFqCGKbddoq0B8xFLKMSHHU/AO7u1CkqzS3wE51+lE10g==}
+  kaleido-ui@0.1.56:
+    resolution: {integrity: sha512-E8TK/a6YpoAH5iECn0tpINZk6HgdYmjzcSEkXbyE2z96DVKA7WxjPUhHAHZb15gcIRhuIhLRSaAwZ6VpQmXZbg==}
     peerDependencies:
       '@radix-ui/react-dialog': ^1.1.0
       '@radix-ui/react-label': ^2.1.0
@@ -8614,7 +8614,7 @@ snapshots:
     optionalDependencies:
       '@qvac/sdk': 0.13.3(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.35))(expo-device@8.0.10(expo@54.0.35))(expo-file-system@19.0.23(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.4(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(sodium-javascript@0.8.0)
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.4(patch_hash=53803a84b847704328f3579f401e7f62fbdc6b50a397394af7839de4767c22d1)(3763d8736b82a27bdf993654aa232178)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.4(patch_hash=26a1f9261c0df1cf064727fdc8e5c0f7011bc0df18c34c445fcae316d1f0389b)(3763d8736b82a27bdf993654aa232178)':
     dependencies:
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
@@ -12974,7 +12974,7 @@ snapshots:
     dependencies:
       openapi-fetch: 0.15.2
 
-  kaleido-ui@0.1.50(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
+  kaleido-ui@0.1.56(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:
       '@tetherto/wdk-uikit-react-native': 1.0.0-beta.2(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       qr: 0.5.5
