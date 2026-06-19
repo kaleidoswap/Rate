@@ -35,6 +35,11 @@ type AnyComponent = React.ComponentType<{ style?: unknown }> & {
   __satoshiWrapped?: boolean;
 };
 
+type DefaultModule = { default?: AnyComponent };
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const RN = require('react-native') as Record<string, AnyComponent>;
+
 function createFontWrapper(Original: AnyComponent, label: string): AnyComponent {
   // Plain function component: in React 19 `ref` arrives as a regular prop, so
   // spreading props forwards it to the underlying component untouched (keeps
@@ -57,12 +62,11 @@ function createFontWrapper(Original: AnyComponent, label: string): AnyComponent 
 
 /**
  * Re-point `react-native`'s `Text` / `TextInput` at a font-injecting wrapper.
- * `internalPath` is the component's own module, whose default export the index
- * getter reads through — reassigning it covers interop that copies the getter.
+ * `mod` is the component's own module (default export read through by the index
+ * getter) — reassigning it covers interop that copies the getter. It may be
+ * null if the internal path can't be resolved; the index getter alone suffices.
  */
-function applySatoshi(key: 'Text' | 'TextInput', internalPath: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const RN = require('react-native') as Record<string, AnyComponent>;
+function applySatoshi(key: 'Text' | 'TextInput', mod: DefaultModule | null): void {
   const Original = RN[key];
   if (!Original || Original.__satoshiWrapped) return;
 
@@ -81,15 +85,31 @@ function applySatoshi(key: 'Text' | 'TextInput', internalPath: string): void {
 
   // Belt-and-suspenders: reassign the component's own module default export.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const mod = require(internalPath) as { default?: AnyComponent };
     if (mod && mod.default && !mod.default.__satoshiWrapped) {
       mod.default = Wrapped;
     }
   } catch {
-    // internal path may differ across RN versions — the index getter above is enough
+    // default may be a read-only getter — the index getter above is enough
   }
 }
 
-applySatoshi('Text', 'react-native/Libraries/Text/Text');
-applySatoshi('TextInput', 'react-native/Libraries/Components/TextInput/TextInput');
+// Metro requires static string literals for require(); resolve the internal
+// modules defensively so a path change in a future RN version can't crash boot.
+function safeRequire(loader: () => DefaultModule): DefaultModule | null {
+  try {
+    return loader();
+  } catch {
+    return null;
+  }
+}
+
+applySatoshi(
+  'Text',
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  safeRequire(() => require('react-native/Libraries/Text/Text')),
+);
+applySatoshi(
+  'TextInput',
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  safeRequire(() => require('react-native/Libraries/Components/TextInput/TextInput')),
+);
