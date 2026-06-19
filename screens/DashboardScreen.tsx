@@ -823,7 +823,11 @@ export default function DashboardScreen({ navigation }: Props) {
       <VoiceAgentFAB
         onPress={() => openVoiceAgent(true)}
         onHoldActivate={() => openVoiceAgent(true)}
-        bottom={Platform.OS === 'ios' ? 100 : 84}
+        // Sit snug in the bottom-right corner just above the tab bar. Screens
+        // render above the (non-absolute) tab bar, so a small offset keeps the
+        // orb out of the scrollable content instead of floating over the
+        // activity rows. scrollContent's paddingBottom gives the list clearance.
+        bottom={Platform.OS === 'ios' ? 24 : 18}
         right={16}
       />
       <VoiceAgentOverlay

@@ -152,6 +152,9 @@ const styles = StyleSheet.create({
     assetVerticalLeft: {
         flexDirection: 'row',
         alignItems: 'center',
+        gap: theme.spacing[3],
+        flex: 1,
+        minWidth: 0,
     },
     assetIconContainer: {
         width: 40,
