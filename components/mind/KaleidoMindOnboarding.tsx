@@ -2,7 +2,7 @@ import React from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../../theme';
+import { theme, leading } from '../../theme';
 
 export interface MindAvailability {
   /** The QVAC worklet can run on this device at all (false on the Simulator). */
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
   heroIcon: {
     width: 64,
     height: 64,
-    borderRadius: 20,
+    borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.background.secondary,
     borderWidth: 1,
     borderColor: theme.colors.border.medium,
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '800',
+    fontWeight: theme.typography.fontWeight.extrabold,
     color: theme.colors.text.primary,
     marginBottom: theme.spacing[2],
   },
@@ -168,7 +168,7 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     textAlign: 'center',
-    lineHeight: 21,
+    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.normal),
   },
   notice: {
     flexDirection: 'row',
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
     padding: theme.spacing[3],
     marginBottom: theme.spacing[4],
   },
-  noticeText: { flex: 1, fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, lineHeight: 18 },
+  noticeText: { flex: 1, fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.normal) },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
   optionIcon: {
     width: 44,
     height: 44,
-    borderRadius: 12,
+    borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.background.tertiary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -205,22 +205,22 @@ const styles = StyleSheet.create({
   optionIconRecommended: { backgroundColor: theme.colors.primary[500] },
   optionBody: { flex: 1 },
   optionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], marginBottom: 2 },
-  optionTitle: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.primary },
-  optionSubtitle: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, lineHeight: 17 },
+  optionTitle: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.primary },
+  optionSubtitle: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.snug) },
   recPill: {
     backgroundColor: theme.colors.primary[500],
     borderRadius: theme.borderRadius.full,
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 1,
   },
-  recPillText: { fontSize: 10, fontWeight: '700', color: theme.colors.text.inverse },
+  recPillText: { fontSize: 10, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.inverse }, // dark text on green primary pill (correct contrast)
   badge: {
     backgroundColor: theme.colors.background.tertiary,
     borderRadius: theme.borderRadius.full,
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 1,
   },
-  badgeText: { fontSize: 10, fontWeight: '700', color: theme.colors.text.tertiary },
+  badgeText: { fontSize: 10, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.tertiary },
   footnote: {
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.tertiary,

@@ -316,7 +316,7 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: theme.colors.background.backdrop,
   },
   backdropTouch: {
     ...StyleSheet.absoluteFillObject,
@@ -336,7 +336,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     width: 40,
     height: 4,
-    borderRadius: 2,
+    borderRadius: theme.borderRadius.sm,
     backgroundColor: theme.colors.border.medium,
     marginBottom: theme.spacing[4],
   },
@@ -373,7 +373,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.text.primary,
   },
   subtitle: {
@@ -411,11 +411,11 @@ const styles = StyleSheet.create({
   },
   presetText: {
     fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.secondary,
   },
   presetTextActive: {
-    color: '#0B0B0B',
+    color: '#0B0B0B', // near-black text on the bright warning-yellow zap fill (deliberate dark-on-yellow contrast)
   },
   comment: {
     backgroundColor: theme.colors.surface.primary,
@@ -442,7 +442,7 @@ const styles = StyleSheet.create({
   },
   ctaText: {
     fontSize: theme.typography.fontSize.base,
-    fontWeight: '700',
-    color: '#0B0B0B',
+    fontWeight: theme.typography.fontWeight.bold,
+    color: '#0B0B0B', // near-black text on the bright warning-yellow zap CTA (deliberate dark-on-yellow contrast)
   },
 });

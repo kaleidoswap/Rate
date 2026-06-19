@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Markdown from 'react-native-markdown-display';
 import { ChatBubble } from '@kaleidorg/kaleido-ui/native';
 import { useAppTheme } from '../../theme/ThemeProvider';
-import type { Theme } from '../../theme';
+import { leading, type Theme } from '../../theme';
 import TypingDots from './TypingDots';
 import FunctionResultCard from './FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
@@ -130,13 +130,13 @@ const makeMarkdownStyles = (theme: Theme) => ({
   body: {
     color: theme.colors.text.primary,
     fontSize: theme.typography.fontSize.base,
-    lineHeight: 24,
+    lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.normal),
   },
   code_inline: {
     backgroundColor: theme.colors.surface.secondary,
     color: theme.colors.primary[400] ?? theme.colors.primary[500],
-    borderRadius: 4,
-    paddingHorizontal: 4,
+    borderRadius: theme.borderRadius.sm,
+    paddingHorizontal: theme.spacing[1],
   },
   fence: {
     backgroundColor: theme.colors.surface.secondary,
@@ -154,7 +154,7 @@ const makeStyles = (theme: Theme) =>
     avatar: {
       width: 32,
       height: 32,
-      borderRadius: 16,
+      borderRadius: theme.borderRadius.full,
       justifyContent: 'center',
       alignItems: 'center',
       marginHorizontal: theme.spacing[3],
@@ -162,9 +162,9 @@ const makeStyles = (theme: Theme) =>
     },
     userText: {
       fontSize: theme.typography.fontSize.base,
-      lineHeight: 24,
-      color: theme.colors.text.inverse,
-      fontWeight: '500',
+      lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.normal),
+      color: theme.colors.text.inverse, // dark text on the green user bubble fill (correct contrast)
+      fontWeight: theme.typography.fontWeight.medium,
     },
     thinkToggle: {
       flexDirection: 'row',
@@ -175,13 +175,13 @@ const makeStyles = (theme: Theme) =>
     thinkToggleText: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.text.tertiary,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
     },
     thinkText: {
       fontSize: theme.typography.fontSize.sm,
       fontStyle: 'italic',
       color: theme.colors.text.secondary,
-      lineHeight: 20,
+      lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
       marginBottom: theme.spacing[2],
       paddingLeft: theme.spacing[2],
       borderLeftWidth: 2,

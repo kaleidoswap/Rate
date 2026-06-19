@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import type { BackupHealth } from '../hooks/useBackupHealth';
 
 interface BackupHealthCardProps {
@@ -82,43 +82,43 @@ export const BackupHealthCard: React.FC<BackupHealthCardProps> = ({ health, onLe
 const styles = StyleSheet.create({
   container: {
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    marginHorizontal: 16,
-    marginTop: 8,
-    gap: 6,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[3.5],
+    marginHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[2],
+    gap: theme.spacing[1.5],
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: theme.spacing[2],
   },
   title: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.bold,
   },
   body: {
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: theme.typography.fontSize.sm,
+    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.snug),
     color: theme.colors.text.secondary,
   },
   atRisk: {
-    fontSize: 12,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.tertiary,
     marginTop: 2,
   },
   atRiskStrong: {
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.text.secondary,
   },
   learnMore: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 2,
-    marginTop: 4,
+    marginTop: theme.spacing[1],
   },
   learnMoreText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
 });

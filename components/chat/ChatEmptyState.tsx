@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppTheme } from '../../theme/ThemeProvider';
+import { theme as tokens } from '../../theme';
 import SuggestionCard from './SuggestionCard';
 
 interface ChatEmptyStateProps {
@@ -93,8 +94,9 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onSuggestion, onContact
       </Text>
 
       <View style={[styles.privacyPill, { backgroundColor: theme.colors.surface.highlight }]}>
-        <Ionicons name="lock-closed" size={13} color={theme.colors.primary[600]} />
-        <Text style={[styles.privacyText, { color: theme.colors.primary[700] ?? theme.colors.primary[600] }]}>
+        {/* primary[500] (not [600]/[700]): dark theme only overrides intent ramps at 50/100, so use the base green for on-dark visibility */}
+        <Ionicons name="lock-closed" size={13} color={theme.colors.primary[500]} />
+        <Text style={[styles.privacyText, { color: theme.colors.primary[500] }]}>
           Runs fully on-device · nothing leaves your phone
         </Text>
       </View>
@@ -129,36 +131,36 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 32,
+    paddingHorizontal: tokens.spacing[5],
+    paddingVertical: tokens.spacing[8],
   },
   avatar: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: tokens.borderRadius.full,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 18,
+    marginBottom: tokens.spacing[4],
   },
   headline: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: tokens.typography.fontSize['2xl'],
+    fontWeight: tokens.typography.fontWeight.bold,
     letterSpacing: 0.2,
     textAlign: 'center',
   },
   privacyPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 999,
-    marginTop: 12,
+    gap: tokens.spacing[1.5],
+    paddingVertical: tokens.spacing[1.5],
+    paddingHorizontal: tokens.spacing[3],
+    borderRadius: tokens.borderRadius.full,
+    marginTop: tokens.spacing[3],
   },
-  privacyText: { fontSize: 12, fontWeight: '600' },
-  prompt: { fontSize: 13, marginTop: 16, marginBottom: 20, textAlign: 'center' },
-  grid: { width: '100%', gap: 12 },
-  gridRow: { flexDirection: 'row', gap: 12 },
+  privacyText: { fontSize: tokens.typography.fontSize.xs, fontWeight: tokens.typography.fontWeight.semibold },
+  prompt: { fontSize: tokens.typography.fontSize.sm, marginTop: tokens.spacing[4], marginBottom: tokens.spacing[5], textAlign: 'center' },
+  grid: { width: '100%', gap: tokens.spacing[3] },
+  gridRow: { flexDirection: 'row', gap: tokens.spacing[3] },
 });
 
 export default ChatEmptyState;
