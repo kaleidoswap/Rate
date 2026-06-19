@@ -97,6 +97,30 @@ interface Colors {
     rgb: string;
     unified: string;
   };
+  // Per-network chip background + readable text, sourced from kaleido-ui so
+  // Send/Receive/activity chips stay contrast-safe and match the web exactly.
+  networkChip: {
+    bitcoin: string;
+    rgb: string;
+    arkade: string;
+    spark: string;
+    lightning: string;
+    liquid: string;
+  };
+  networkText: {
+    bitcoin: string;
+    rgb: string;
+    arkade: string;
+    spark: string;
+    lightning: string;
+    liquid: string;
+  };
+  // Transaction-direction colors (shared with web) — used by the activity feed.
+  tx: {
+    sent: string;
+    receive: string;
+    swap: string;
+  };
 }
 
 type FontWeight = '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900' | 'normal' | 'bold';
@@ -388,25 +412,31 @@ export const lightTheme: ThemeType = {
       focus: k.primary,      // #2BEE79
     },
 
-    // Per-protocol accents (brand-level, identical across light/dark).
+    // Per-protocol accents — sourced from the shared kaleido-ui network tokens
+    // so they match the web exactly (single source of truth).
     protocol: {
-      rgb: k.primary,    // #2BEE79 — RGB Lightning
-      spark: '#60A5FA',  // Spark
-      arkade: '#A855F7', // Arkade
+      rgb: k.network.rgb,      // #DD352E
+      spark: k.network.spark,  // #FF6D00
+      arkade: k.network.arkade, // #7C3AED
     },
     brand: {
-      violet: '#6F32FF', // Secondary brand accent (e.g. the Swap action tile)
+      violet: kdDark.violet, // #6F32FF — secondary brand accent (Swap action tile)
     },
+    // Per-network "leg" colors — all sourced from kaleido-ui tokens. `onchain`
+    // is an alias for `bitcoin`; `unified` (all-networks) stays the brand green.
     networks: {
-      onchain: '#F7931A',   // Bitcoin orange
-      bitcoin: '#F7931A',   // alias for onchain
-      lightning: '#FACC15', // Lightning yellow
-      spark: '#60A5FA',     // Spark blue
-      arkade: '#A855F7',    // Arkade purple
-      liquid: '#22D3EE',    // Liquid cyan (USD aggregator leg)
-      rgb: '#F472B6',       // RGB pink (USD aggregator leg)
-      unified: '#10B981',   // Unified / all-networks green
+      onchain: k.network.bitcoin,
+      bitcoin: k.network.bitcoin,     // #F7931A
+      lightning: k.network.lightning, // #F6C343
+      spark: k.network.spark,         // #FF6D00
+      arkade: k.network.arkade,       // #7C3AED
+      liquid: k.network.liquid,       // #22e1c9
+      rgb: k.network.rgb,             // #DD352E
+      unified: k.primary,             // #2BEE79 — all-networks brand green
     },
+    networkChip: { ...k.networkChip },
+    networkText: { ...k.networkText },
+    tx: { ...k.tx },
   },
 
   typography: {
