@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import { Button, ScreenHeader } from '../components';
 import { RootState } from '../store';
 import NostrService from '../services/NostrService';
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
         fontSize: theme.typography.fontSize.base,
         color: theme.colors.text.secondary,
         textAlign: 'center',
-        lineHeight: 22,
+        lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.snug),
         paddingHorizontal: theme.spacing[2],
     },
     optionList: {
@@ -308,7 +308,7 @@ const styles = StyleSheet.create({
     optionDesc: {
         fontSize: theme.typography.fontSize.sm,
         color: theme.colors.text.secondary,
-        lineHeight: 18,
+        lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.snug),
     },
     inputLabel: {
         fontSize: theme.typography.fontSize.sm,

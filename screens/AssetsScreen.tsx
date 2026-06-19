@@ -261,7 +261,7 @@ export default function AssetsScreen({ navigation }: Props) {
       activeOpacity={0.8}
     >
       <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
+        colors={[theme.colors.brand.violet, theme.colors.brand.violet] as [string, string]}
         style={styles.floatingButtonGradient}
       >
         <Ionicons name="add" size={24} color={theme.colors.text.inverse} />

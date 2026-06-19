@@ -191,7 +191,7 @@ export default function LSPScreen({ navigation }: Props) {
           value={connectionUrl}
           onChangeText={setConnectionUrl}
           placeholder="Enter LSP connection URL"
-          placeholderTextColor={theme.colors.gray[400]}
+          placeholderTextColor={theme.colors.text.muted}
         />
         <Button
           title={isConnected ? "Continue" : "Connect to LSP"}
@@ -214,7 +214,7 @@ export default function LSPScreen({ navigation }: Props) {
           onChangeText={(value) => setFormData({ ...formData, capacitySat: value })}
           placeholder="Channel Capacity (sats)"
           keyboardType="numeric"
-          placeholderTextColor={theme.colors.gray[400]}
+          placeholderTextColor={theme.colors.text.muted}
         />
         <TextInput
           style={styles.input}
@@ -222,7 +222,7 @@ export default function LSPScreen({ navigation }: Props) {
           onChangeText={(value) => setFormData({ ...formData, clientBalanceSat: value })}
           placeholder="Local Balance (sats)"
           keyboardType="numeric"
-          placeholderTextColor={theme.colors.gray[400]}
+          placeholderTextColor={theme.colors.text.muted}
         />
         <Button
           title="Create Order"

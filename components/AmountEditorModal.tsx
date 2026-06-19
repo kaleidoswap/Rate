@@ -255,7 +255,7 @@ export const AmountEditorModal: React.FC<Props> = ({
 const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: theme.colors.background.backdrop },
   backdropTouch: { ...StyleSheet.absoluteFillObject },
   sheetScroll: {
     width: '100%',
@@ -268,11 +268,11 @@ const styles = StyleSheet.create({
   },
   sheet: {
     backgroundColor: theme.colors.surface.primary,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 32,
+    borderTopLeftRadius: theme.borderRadius.xl,
+    borderTopRightRadius: theme.borderRadius.xl,
+    paddingHorizontal: theme.spacing[5],
+    paddingTop: theme.spacing[2.5],
+    paddingBottom: theme.spacing[8],
   },
   handle: {
     alignSelf: 'center',
@@ -280,26 +280,26 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: theme.colors.border.medium,
-    marginBottom: 14,
+    marginBottom: theme.spacing[3.5],
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: theme.spacing[4],
   },
-  title: { fontSize: 18, fontWeight: '700', color: theme.colors.text.primary },
+  title: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
   secondary: {
     marginTop: 2,
     fontSize: 13,
     color: theme.colors.text.secondary,
     fontFamily: mono,
   },
-  actions: { flexDirection: 'row', gap: 12, marginTop: 26 },
+  actions: { flexDirection: 'row', gap: theme.spacing[3], marginTop: 26 },
   clearBtn: {
-    paddingHorizontal: 20,
+    paddingHorizontal: theme.spacing[5],
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: theme.borderRadius.md,
     borderWidth: 1.5,
     borderColor: theme.colors.border.medium,
     alignItems: 'center',
@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
   confirmBtn: {
     flex: 1,
     paddingVertical: 14,
-    borderRadius: 14,
+    borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.primary[500],
     alignItems: 'center',
     justifyContent: 'center',

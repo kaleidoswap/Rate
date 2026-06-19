@@ -483,7 +483,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           activeOpacity={0.7}
         >
           <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: '#FEF3C7' }]}>
+            <View style={[styles.iconContainer, { backgroundColor: theme.colors.networkChip.spark }]}>
               <NetworkIcon network="spark" size={24} />
             </View>
             <View style={styles.networkTextContainer}>
@@ -507,8 +507,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
           activeOpacity={0.7}
         >
           <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: '#E0F2FE' }]}>
-              <Ionicons name="water" size={22} color="#0EA5E9" />
+            <View style={[styles.iconContainer, { backgroundColor: theme.colors.networkChip.liquid }]}>
+              <Ionicons name="water" size={22} color={theme.colors.networks.liquid} />
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>Liquid</Text>
@@ -531,7 +531,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           activeOpacity={0.7}
         >
           <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: '#E0E7FF' }]}>
+            <View style={[styles.iconContainer, { backgroundColor: theme.colors.networkChip.arkade }]}>
               <NetworkIcon network="arkade" size={24} />
             </View>
             <View style={styles.networkTextContainer}>
@@ -559,7 +559,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
       contentContainerStyle={styles.scrollContent}
     >
       <View style={styles.iconHeader}>
-        <View style={[styles.welcomeIconContainer, { backgroundColor: '#D1FAE5' }]}>
+        <View style={[styles.welcomeIconContainer, { backgroundColor: theme.colors.primary[50] }]}>
           <NetworkIcon network="rgb" size={32} />
         </View>
       </View>
@@ -590,7 +590,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
       </View>
 
       <TouchableOpacity style={styles.scanButton} onPress={handleOpenScanner} disabled={rlnConnecting}>
-        <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[600]} />
+        <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[500]} />
         <Text style={styles.scanButtonText}>Scan QR code</Text>
       </TouchableOpacity>
 
@@ -753,7 +753,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         { transform: [{ scale: scaleAnim }] }
       ]}>
         <LinearGradient
-          colors={['#10B981', '#059669']}
+          colors={theme.colors.success.gradient || [theme.colors.success[500], theme.colors.success[500]]}
           style={styles.successGradient}
         >
           <Ionicons name="checkmark" size={48} color="white" />
@@ -940,13 +940,13 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.5)',
+    borderColor: theme.colors.border.medium,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepDotActive: {
-    backgroundColor: 'white',
-    borderColor: 'white',
+    backgroundColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[500],
   },
   stepDotInactive: {
     backgroundColor: 'transparent',
@@ -957,10 +957,10 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
   },
   stepLineActive: {
-    backgroundColor: 'white',
+    backgroundColor: theme.colors.primary[500],
   },
   stepLineInactive: {
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: theme.colors.border.medium,
   },
   keyboardAvoid: {
     flex: 1,
@@ -1032,7 +1032,7 @@ const styles = StyleSheet.create({
   tipText: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.warning[700] || theme.colors.warning[600],
+    color: theme.colors.text.secondary,
     lineHeight: 20,
   },
   networkCard: {
@@ -1072,7 +1072,7 @@ const styles = StyleSheet.create({
   recommendedText: {
     fontSize: theme.typography.fontSize.xs,
     fontWeight: '600',
-    color: theme.colors.primary[600],
+    color: theme.colors.primary[500],
   },
   modeRadio: {
     width: 24,
@@ -1138,7 +1138,7 @@ const styles = StyleSheet.create({
   experimentalText: {
     fontSize: theme.typography.fontSize.xs,
     fontWeight: '700',
-    color: theme.colors.warning[700] || theme.colors.warning[600],
+    color: theme.colors.warning[500],
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -1150,14 +1150,14 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[3],
     borderRadius: theme.borderRadius.md,
     borderWidth: 1.5,
-    borderColor: theme.colors.primary[200],
+    borderColor: theme.colors.primary[500],
     backgroundColor: theme.colors.primary[50],
     marginTop: theme.spacing[3],
   },
   scanButtonText: {
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
-    color: theme.colors.primary[600],
+    color: theme.colors.primary[500],
   },
   rlnErrorBox: {
     flexDirection: 'row',
@@ -1168,7 +1168,7 @@ const styles = StyleSheet.create({
   rlnErrorText: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[600] || theme.colors.error[500],
+    color: theme.colors.error[500],
     lineHeight: 20,
   },
   scannerOverlay: {
@@ -1223,7 +1223,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 50,
     borderWidth: 3,
-    borderColor: theme.colors.primary[200],
+    borderColor: theme.colors.border.medium,
   },
   loadingRing1: {
     width: 100,
@@ -1262,7 +1262,7 @@ const styles = StyleSheet.create({
     borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#10B981',
+    shadowColor: theme.colors.success[500],
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 16,
@@ -1347,7 +1347,7 @@ const styles = StyleSheet.create({
   warningText: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.warning[700] || theme.colors.warning[600],
+    color: theme.colors.text.secondary,
     lineHeight: 20,
   },
   mnemonicCard: {
@@ -1388,12 +1388,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary[50],
     borderRadius: theme.borderRadius.md,
     borderWidth: 1,
-    borderColor: theme.colors.primary[200],
+    borderColor: theme.colors.primary[500],
   },
   copyButtonText: {
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
-    color: theme.colors.primary[600],
+    color: theme.colors.primary[500],
   },
   copyButtonTextSuccess: {
     color: theme.colors.success[600],

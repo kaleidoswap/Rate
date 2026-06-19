@@ -555,7 +555,14 @@ export default function SettingsScreen({ navigation }: Props) {
             const connected = protocolStatus[proto];
             const connecting = protocolConnecting[proto] ?? false;
             const error = protocolErrors[proto];
-            const colors: Record<string, string> = { RGB: '#2BEE79', SPARK: '#60A5FA', ARKADE: '#A855F7' };
+            // RGB-Lightning uses the brand green accent (primary[500] === #2BEE79);
+            // Spark maps to accent[400] (=== #60A5FA). Arkade's purple has no exact
+            // token equivalent (brand.violet differs), so it stays a literal.
+            const colors: Record<string, string> = {
+              RGB: theme.colors.primary[500],
+              SPARK: theme.colors.accent[400] || '#60A5FA',
+              ARKADE: '#A855F7',
+            };
             const labels: Record<string, string> = { RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade' };
             const descs: Record<string, string> = {
               RGB: 'On-chain, Lightning, RGB assets',
@@ -576,7 +583,7 @@ export default function SettingsScreen({ navigation }: Props) {
                     </Text>
                   )}
                 </View>
-                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                <View style={{ alignItems: 'flex-end', gap: theme.spacing[1] }}>
                   <NetworkBadge
                     network={protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]]}
                     interactive

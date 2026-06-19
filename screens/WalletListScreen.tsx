@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: theme.borderRadius.base,
-        backgroundColor: theme.colors.gray[100],
+        backgroundColor: theme.colors.surface.secondary,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -235,14 +235,14 @@ const styles = StyleSheet.create({
         gap: theme.spacing[2],
     },
     networkBadge: {
-        backgroundColor: 'rgba(0, 0, 0, 0.1)',
+        backgroundColor: 'rgba(255, 255, 255, 0.12)',
         paddingHorizontal: theme.spacing[2],
         paddingVertical: 2,
         borderRadius: theme.borderRadius.sm,
     },
     networkBadgeText: {
         fontSize: theme.typography.fontSize.xs,
-        color: theme.colors.text.primary, // Or white if active, but simpler to keep generic or adjust
+        color: theme.colors.text.primary,
     },
     settingsButton: {
         padding: theme.spacing[2],

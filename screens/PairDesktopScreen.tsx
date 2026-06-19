@@ -20,7 +20,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { useDispatch } from 'react-redux';
 import { setAiMode } from '../store/slices/settingsSlice';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import {
   PairingError,
   PairingService,
@@ -260,7 +260,7 @@ export default function PairDesktopScreen({ navigation }: Props) {
       {stage.kind === 'paired' && (
         <View pointerEvents="none" style={styles.modalRoot}>
           <View style={[styles.card, styles.cardSuccess]}>
-            <Ionicons name="checkmark-circle" size={42} color="#15E99A" />
+            <Ionicons name="checkmark-circle" size={42} color={theme.colors.success[500]} />
             <Text style={styles.cardTitle}>Connected</Text>
             <Text style={styles.cardName}>{stage.name}</Text>
           </View>
@@ -270,7 +270,7 @@ export default function PairDesktopScreen({ navigation }: Props) {
       {stage.kind === 'error' && (
         <View pointerEvents="box-none" style={styles.modalRoot}>
           <View style={[styles.card, styles.cardError]}>
-            <Ionicons name="alert-circle" size={42} color="#F87171" />
+            <Ionicons name="alert-circle" size={42} color={theme.colors.error[500]} />
             <Text style={styles.cardTitle}>Pairing failed</Text>
             <Text style={styles.cardMeta}>{stage.message}</Text>
             <View style={styles.cardActions}>
@@ -303,29 +303,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingHorizontal: theme.spacing[4],
+    paddingTop: theme.spacing[2],
   },
   iconBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: theme.borderRadius.full,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.4)',
   },
-  title: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  title: { color: '#fff', fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold },
 
   frameContainer: { alignItems: 'center', justifyContent: 'center' },
   frame: {
-    borderRadius: 16,
+    borderRadius: theme.borderRadius.md,
     overflow: 'hidden',
   },
   corner: {
     position: 'absolute',
     width: 28,
     height: 28,
-    borderColor: '#15E99A',
+    borderColor: theme.colors.primary[500],
   },
   cornerTL: { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 16 },
   cornerTR: { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 16 },
@@ -334,76 +334,76 @@ const styles = StyleSheet.create({
 
   scanLine: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    left: theme.spacing[4],
+    right: theme.spacing[4],
     height: 2,
-    backgroundColor: '#15E99A',
-    shadowColor: '#15E99A',
+    backgroundColor: theme.colors.primary[500],
+    shadowColor: theme.colors.primary[500],
     shadowOpacity: 0.8,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 0 },
   },
 
-  bottomBar: { paddingHorizontal: 24, paddingBottom: 24, alignItems: 'center', gap: 16 },
-  subtitle: { color: '#fff', fontSize: 14, textAlign: 'center', opacity: 0.85 },
+  bottomBar: { paddingHorizontal: theme.spacing[6], paddingBottom: theme.spacing[6], alignItems: 'center', gap: theme.spacing[4] },
+  subtitle: { color: '#fff', fontSize: theme.typography.fontSize.sm, textAlign: 'center', opacity: 0.85 },
   cancelBtn: {
-    paddingHorizontal: 28,
-    paddingVertical: 12,
-    borderRadius: 24,
+    paddingHorizontal: theme.spacing[7],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.xl,
     backgroundColor: 'rgba(0,0,0,0.55)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
   },
-  cancelBtnLabel: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  cancelBtnLabel: { color: '#fff', fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
 
   // Permission screen
-  permissionView: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
-  permissionTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginTop: 16 },
+  permissionView: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: theme.spacing[6] },
+  permissionTitle: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.xl, fontWeight: theme.typography.fontWeight.bold, marginTop: theme.spacing[4] },
   permissionBody: {
-    color: '#9A9A94',
-    fontSize: 14,
+    color: theme.colors.text.secondary,
+    fontSize: theme.typography.fontSize.sm,
     textAlign: 'center',
-    marginTop: 12,
-    marginBottom: 28,
-    lineHeight: 20,
+    marginTop: theme.spacing[3],
+    marginBottom: theme.spacing[7],
+    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.normal),
   },
   primaryBtn: {
-    backgroundColor: '#15E99A',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 10,
+    backgroundColor: theme.colors.primary[500],
+    paddingHorizontal: theme.spacing[6],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.base,
   },
-  primaryBtnLabel: { color: '#0D1813', fontWeight: '700' },
-  secondaryLink: { color: '#9A9A94', marginTop: 18 },
+  primaryBtnLabel: { color: '#0D1813', fontWeight: theme.typography.fontWeight.bold },
+  secondaryLink: { color: theme.colors.text.secondary, marginTop: theme.spacing[5] },
 
   // Confirmation/result cards
   modalRoot: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: theme.spacing[6],
+    backgroundColor: theme.colors.background.backdrop,
   },
   card: {
     width: '100%',
     maxWidth: 340,
-    backgroundColor: '#111110',
-    borderColor: '#3D3D3A',
+    backgroundColor: theme.colors.surface.elevated,
+    borderColor: theme.colors.border.dark,
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 22,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing[6],
     alignItems: 'center',
   },
-  cardSuccess: { borderColor: '#15E99A' },
-  cardError: { borderColor: '#F87171' },
-  cardTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginTop: 12 },
-  cardName: { color: '#fff', fontSize: 16, marginTop: 6, fontWeight: '600' },
-  cardMeta: { color: '#9A9A94', fontSize: 13, marginTop: 4, textAlign: 'center' },
-  cardKey: { color: '#15E99A', fontFamily: 'Courier', fontSize: 12, marginTop: 10 },
-  cardActions: { flexDirection: 'row', gap: 12, marginTop: 18, width: '100%' },
-  cardBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
-  cardBtnPrimary: { backgroundColor: '#15E99A' },
-  cardBtnPrimaryLabel: { color: '#0D1813', fontWeight: '700' },
-  cardBtnSecondary: { borderWidth: 1, borderColor: '#3D3D3A' },
-  cardBtnSecondaryLabel: { color: '#fff' },
+  cardSuccess: { borderColor: theme.colors.success[500] },
+  cardError: { borderColor: theme.colors.error[500] },
+  cardTitle: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.bold, marginTop: theme.spacing[3] },
+  cardName: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base, marginTop: theme.spacing[1.5], fontWeight: theme.typography.fontWeight.semibold },
+  cardMeta: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.xs, marginTop: theme.spacing[1], textAlign: 'center' },
+  cardKey: { color: theme.colors.primary[500], fontFamily: 'Courier', fontSize: theme.typography.fontSize.xs, marginTop: theme.spacing[2.5] },
+  cardActions: { flexDirection: 'row', gap: theme.spacing[3], marginTop: theme.spacing[5], width: '100%' },
+  cardBtn: { flex: 1, paddingVertical: theme.spacing[3], borderRadius: theme.borderRadius.base, alignItems: 'center' },
+  cardBtnPrimary: { backgroundColor: theme.colors.primary[500] },
+  cardBtnPrimaryLabel: { color: '#0D1813', fontWeight: theme.typography.fontWeight.bold },
+  cardBtnSecondary: { borderWidth: 1, borderColor: theme.colors.border.dark },
+  cardBtnSecondaryLabel: { color: theme.colors.text.primary },
 });

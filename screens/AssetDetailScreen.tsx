@@ -123,7 +123,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     if (isBTC) {
       return (
         <View style={styles.iconContainer}>
-          <Ionicons name="logo-bitcoin" size={48} color="#F7931A" />
+          <Ionicons name="logo-bitcoin" size={48} color={theme.colors.networks.bitcoin} />
         </View>
       );
     }
@@ -558,7 +558,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: theme.spacing[3],
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.gray[100],
+    borderBottomColor: theme.colors.border.light,
   },
   
   detailLabel: {

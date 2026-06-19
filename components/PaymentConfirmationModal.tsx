@@ -185,7 +185,7 @@ export default function PaymentConfirmationModal({
             {/* Payment Details */}
             <View style={styles.paymentCard}>
               <LinearGradient
-                colors={['#667eea', '#764ba2']}
+                colors={[theme.colors.brand.violet, theme.colors.brand.violet]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.amountGradient}
@@ -279,7 +279,7 @@ export default function PaymentConfirmationModal({
                 disabled={loading}
               >
                 <LinearGradient
-                  colors={loading ? ['#9CA3AF', '#9CA3AF'] : ['#667eea', '#764ba2']}
+                  colors={loading ? [theme.colors.gray[400], theme.colors.gray[400]] : theme.colors.primary.gradient!}
                   style={styles.confirmGradient}
                 >
                   {loading ? (
@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: theme.colors.background.backdrop,
   },
   modalContainer: {
     justifyContent: 'flex-end',

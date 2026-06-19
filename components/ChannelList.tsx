@@ -173,7 +173,7 @@ const styles = StyleSheet.create({
     },
     sectionAction: {
         fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.primary[600],
+        color: theme.colors.primary[500],
         fontWeight: '600',
     },
     emptyCard: {
@@ -310,7 +310,7 @@ const styles = StyleSheet.create({
     },
     viewMoreText: {
         fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.primary[600],
+        color: theme.colors.primary[500],
         fontWeight: '500',
         marginRight: theme.spacing[1],
     },

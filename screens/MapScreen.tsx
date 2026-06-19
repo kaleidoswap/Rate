@@ -14,7 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import { MainHeader } from '../components';
 import { BrandMark } from '../components/BrandMark';
 
@@ -156,7 +156,7 @@ export default function MapScreen({ navigation }: Props) {
 
         {/* Permission-denied hint — non-blocking, sits above the fallback map. */}
         {permission === 'denied' && (
-          <View style={[styles.banner, { top: 12 }]}>
+          <View style={[styles.banner, { top: theme.spacing[3] }]}>
             <Ionicons name="location-outline" size={16} color={theme.colors.warning[500]} />
             <Text style={styles.bannerText} numberOfLines={2}>
               Location is off — showing the default area. Enable it to find venues around you.
@@ -168,7 +168,7 @@ export default function MapScreen({ navigation }: Props) {
         )}
 
         {/* Attribution chip */}
-        <View style={[styles.attribution, { bottom: insets.bottom + 16 }]}>
+        <View style={[styles.attribution, { bottom: insets.bottom + theme.spacing[4] }]}>
           <View style={styles.attrDot} />
           <Text style={styles.attrText}>Powered by BTC Map</Text>
         </View>
@@ -177,7 +177,7 @@ export default function MapScreen({ navigation }: Props) {
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={onLocatePress}
-          style={[styles.fab, { bottom: insets.bottom + 16 }]}
+          style={[styles.fab, { bottom: insets.bottom + theme.spacing[4] }]}
           accessibilityLabel="Center map on my location"
         >
           <LinearGradient
@@ -187,12 +187,12 @@ export default function MapScreen({ navigation }: Props) {
             style={styles.fabInner}
           >
             {locating ? (
-              <ActivityIndicator size="small" color="#051B10" />
+              <ActivityIndicator size="small" color={theme.colors.primary[950]} />
             ) : (
               <Ionicons
                 name={permission === 'denied' ? 'location-outline' : 'locate'}
                 size={22}
-                color="#051B10"
+                color={theme.colors.primary[950]}
               />
             )}
           </LinearGradient>
@@ -208,7 +208,7 @@ export default function MapScreen({ navigation }: Props) {
             <View style={styles.loadingMark}>
               <BrandMark size={64} />
             </View>
-            <ActivityIndicator color={theme.colors.primary[500]} style={{ marginTop: 20 }} />
+            <ActivityIndicator color={theme.colors.primary[500]} style={{ marginTop: theme.spacing[5] }} />
             <Text style={styles.loadingText}>
               {locating ? 'Finding venues near you…' : 'Loading the map…'}
             </Text>
@@ -235,14 +235,14 @@ const styles = StyleSheet.create({
 
   banner: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: theme.spacing[3],
+    right: theme.spacing[3],
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 14,
+    gap: theme.spacing[2.5],
+    paddingVertical: theme.spacing[2.5],
+    paddingHorizontal: theme.spacing[3.5],
+    borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.surface.elevated,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border.medium,
@@ -251,25 +251,25 @@ const styles = StyleSheet.create({
   bannerText: {
     flex: 1,
     color: theme.colors.text.secondary,
-    fontSize: 12,
-    fontWeight: '500',
-    lineHeight: 16,
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.medium,
+    lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.tight),
   },
   bannerAction: {
     color: theme.colors.primary[500],
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.bold,
   },
 
   attribution: {
     position: 'absolute',
-    left: 12,
+    left: theme.spacing[3],
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 11,
-    borderRadius: 999,
+    gap: theme.spacing[1.5],
+    paddingVertical: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.full,
     backgroundColor: 'rgba(13, 24, 19, 0.78)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border.light,
@@ -282,14 +282,14 @@ const styles = StyleSheet.create({
   },
   attrText: {
     color: theme.colors.text.tertiary,
-    fontSize: 11,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
     letterSpacing: 0.2,
   },
 
   fab: {
     position: 'absolute',
-    right: 16,
+    right: theme.spacing[4],
     width: 54,
     height: 54,
     borderRadius: 27,
@@ -313,9 +313,9 @@ const styles = StyleSheet.create({
     opacity: 0.95,
   },
   loadingText: {
-    marginTop: 16,
+    marginTop: theme.spacing[4],
     color: theme.colors.text.secondary,
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.medium,
   },
 });

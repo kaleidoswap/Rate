@@ -5,15 +5,16 @@
 import React from 'react'
 import { View, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
+import { theme } from '../theme'
 
 export type ProtocolKey = 'RGB' | 'SPARK' | 'ARKADE' | 'BTC' | 'LIGHTNING'
 
 export const PROTOCOL_COLORS: Record<ProtocolKey, string> = {
-  BTC: '#F7931A',       // Bitcoin orange
-  LIGHTNING: '#FACC15',  // Lightning yellow
-  RGB: '#2BEE79',       // KaleidoSwap green (primary)
-  SPARK: '#60A5FA',     // Spark blue
-  ARKADE: '#A855F7',    // Arkade purple
+  BTC: theme.colors.networks.bitcoin,       // Bitcoin orange
+  LIGHTNING: theme.colors.networks.lightning,  // Lightning yellow
+  RGB: theme.colors.networks.unified,       // KaleidoSwap green (primary)
+  SPARK: theme.colors.networks.spark,     // Spark accent
+  ARKADE: theme.colors.networks.arkade,    // Arkade purple
 }
 
 export const PROTOCOL_ICONS: Record<ProtocolKey, keyof typeof Ionicons.glyphMap> = {

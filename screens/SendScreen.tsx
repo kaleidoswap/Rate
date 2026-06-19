@@ -1598,15 +1598,15 @@ const styles = StyleSheet.create({
   },
   
   lightningIcon: {
-    backgroundColor: '#f59e0b',
+    backgroundColor: theme.colors.networks.lightning,
   },
-  
+
   bitcoinIcon: {
-    backgroundColor: '#F7931A',
+    backgroundColor: theme.colors.networks.bitcoin,
   },
-  
+
   rgbIcon: {
-    backgroundColor: '#10b981',
+    backgroundColor: theme.colors.primary[500],
   },
   
   addressTypeText: {

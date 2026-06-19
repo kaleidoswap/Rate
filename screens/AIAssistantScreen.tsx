@@ -28,6 +28,7 @@ import { RootState } from '../store';
 import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
+import { leading } from '../theme';
 import { MainHeader } from '../components';
 import { ChatEmptyState, MessageBubble, TypingDots } from '../components/chat';
 import type { ChatMessage } from '../components/chat';
@@ -1084,15 +1085,15 @@ const makeStyles = (theme: Theme) =>
     container: { flex: 1, backgroundColor: theme.colors.background.primary },
     chatContainer: { flex: 1 },
     background: { flex: 1 },
-    skillsBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-    skillsSheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 36 },
-    skillsHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'center', marginBottom: 14 },
-    skillsTitle: { color: theme.colors.text.primary, fontSize: 17, fontWeight: '700' },
-    skillsHint: { color: theme.colors.text.tertiary, fontSize: 12, marginTop: 4, marginBottom: 12 },
-    skillItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
-    skillItemIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primary[500] + '1A' },
-    skillItemName: { color: theme.colors.text.primary, fontSize: 15, fontWeight: '600', textTransform: 'capitalize' },
-    skillItemDesc: { color: theme.colors.text.tertiary, fontSize: 12, marginTop: 2, lineHeight: 16 },
+    skillsBackdrop: { flex: 1, backgroundColor: theme.colors.background.backdrop, justifyContent: 'flex-end' },
+    skillsSheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: theme.borderRadius.xl, borderTopRightRadius: theme.borderRadius.xl, padding: theme.spacing[5], paddingBottom: theme.spacing[9] },
+    skillsHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: theme.colors.border.medium, alignSelf: 'center', marginBottom: theme.spacing[3.5] },
+    skillsTitle: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.bold },
+    skillsHint: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: theme.spacing[1], marginBottom: theme.spacing[3] },
+    skillItem: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingVertical: theme.spacing[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
+    skillItemIcon: { width: 34, height: 34, borderRadius: theme.borderRadius.base, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primary[500] + '1A' },
+    skillItemName: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold, textTransform: 'capitalize' },
+    skillItemDesc: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 2, lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.tight) },
     content: { flex: 1 },
     contentInner: { flex: 1 },
     messagesContainer: { flex: 1 },

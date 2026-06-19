@@ -101,28 +101,28 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.primary,
   },
   bar: {
-    paddingBottom: 12,
+    paddingBottom: theme.spacing[3],
     backgroundColor: theme.colors.background.primary,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border.light,
   },
   content: {
-    paddingHorizontal: 16,
+    paddingHorizontal: theme.spacing[4],
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: 44,
-    gap: 12,
+    gap: theme.spacing[3],
   },
   titleArea: {
     flex: 1,
   },
   greeting: {
-    fontSize: 13,
+    fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     marginBottom: 3,
-    fontWeight: '500',
+    fontWeight: theme.typography.fontWeight.medium,
   },
   titleRow: {
     flexDirection: 'row',
@@ -131,20 +131,20 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 21,
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
     letterSpacing: -0.3,
     color: theme.colors.text.primary,
   },
   subtitle: {
-    fontSize: 12,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.secondary,
     marginTop: 3,
-    fontWeight: '500',
+    fontWeight: theme.typography.fontWeight.medium,
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: theme.spacing[2],
   },
   iconBtn: {
     width: 38,
@@ -169,6 +169,6 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.background.primary,
   },
   childrenArea: {
-    marginTop: 16,
+    marginTop: theme.spacing[4],
   },
 });

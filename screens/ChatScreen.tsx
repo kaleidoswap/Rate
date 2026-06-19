@@ -44,7 +44,7 @@ import ToastService from '../services/ToastService';
 import { findPayable, stripPayable, Payable } from '../utils/decodeInvoice';
 import { PayableCard } from '../components/chat/PayableCard';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 
 interface Props {
   navigation: any;
@@ -860,7 +860,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: 'rgba(43,238,121,0.16)',
+    backgroundColor: theme.colors.primary[100],
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -911,7 +911,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border.light,
     borderBottomLeftRadius: theme.borderRadius.sm,
   },
-  msgText: { fontSize: theme.typography.fontSize.base, lineHeight: 22, color: theme.colors.text.primary },
+  msgText: { fontSize: theme.typography.fontSize.base, lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.snug), color: theme.colors.text.primary },
   msgTextMine: { color: theme.colors.text.inverse },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-end', marginTop: theme.spacing[1] },
   time: { fontSize: 10, color: theme.colors.text.tertiary },
@@ -926,7 +926,7 @@ const styles = StyleSheet.create({
     width: 26,
     height: 26,
     borderRadius: 13,
-    backgroundColor: 'rgba(43,238,121,0.14)',
+    backgroundColor: theme.colors.primary[50],
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1019,7 +1019,7 @@ const styles = StyleSheet.create({
   },
   connectBtnText: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.inverse },
   // Sheets
-  sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
+  sheetBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: theme.colors.background.backdrop },
   sheet: {
     backgroundColor: theme.colors.background.secondary,
     borderTopLeftRadius: theme.borderRadius['2xl'],
@@ -1121,7 +1121,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border.light,
     marginTop: theme.spacing[3],
   },
-  schemeRowActive: { borderColor: theme.colors.primary[500], backgroundColor: 'rgba(43,238,121,0.06)' },
+  schemeRowActive: { borderColor: theme.colors.primary[500], backgroundColor: theme.colors.primary[50] },
   schemeRowHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   schemeName: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.primary },
   schemeBadge: {
@@ -1130,9 +1130,9 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.surface.tertiary,
   },
-  schemeBadgeRec: { backgroundColor: 'rgba(43,238,121,0.16)' },
+  schemeBadgeRec: { backgroundColor: theme.colors.primary[100] },
   schemeBadgeText: { fontSize: 9, fontWeight: '800', color: theme.colors.text.tertiary, textTransform: 'uppercase' },
   schemeBadgeTextRec: { color: theme.colors.primary[500] },
   schemeTagline: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2, fontWeight: '600' },
-  schemeDesc: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, marginTop: 4, lineHeight: 18 },
+  schemeDesc: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, marginTop: 4, lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.snug) },
 });
