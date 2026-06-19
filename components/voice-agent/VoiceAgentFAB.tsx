@@ -28,6 +28,14 @@ interface VoiceAgentFABProps {
 // over exactly this window so the visual and the gesture stay in lock-step.
 const HOLD_MS = 450;
 const SIZE = 60;
+// Transparent breathing room around the orb. The idle halo (1.6×) and hold
+// ripple (2.1×) scale well beyond SIZE; without this padding the round glow is
+// clipped to the FAB's square box on Android (overflow:'visible' isn't reliably
+// honored there for children drawn outside the parent bounds). The wrap is
+// enlarged by GLOW_PAD on every side and its anchor is shifted by the same
+// amount so the orb itself stays in exactly the same on-screen position.
+const GLOW_PAD = 36;
+const BOX = SIZE + GLOW_PAD * 2;
 
 /**
  * Floating "Talk to KaleidoMind" button.
@@ -120,7 +128,7 @@ export const VoiceAgentFAB: React.FC<VoiceAgentFABProps> = ({ onPress, onHoldAct
   }));
 
   return (
-    <View style={[styles.wrap, { bottom, right }]} pointerEvents="box-none">
+    <View style={[styles.wrap, { bottom: bottom - GLOW_PAD, right: right - GLOW_PAD }]} pointerEvents="box-none">
       <Animated.View style={[styles.halo, haloStyle]} pointerEvents="none" />
       <Animated.View style={[styles.ripple, rippleStyle]} pointerEvents="none" />
       <Animated.View style={[styles.chargeRing, chargeRingStyle]} pointerEvents="none" />
@@ -147,14 +155,17 @@ export const VoiceAgentFAB: React.FC<VoiceAgentFABProps> = ({ onPress, onHoldAct
 const styles = StyleSheet.create({
   wrap: {
     position: 'absolute',
-    width: SIZE,
-    height: SIZE,
+    width: BOX,
+    height: BOX,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
     zIndex: 50,
   },
   halo: {
     position: 'absolute',
+    top: GLOW_PAD,
+    left: GLOW_PAD,
     width: SIZE,
     height: SIZE,
     borderRadius: SIZE / 2,
@@ -162,6 +173,8 @@ const styles = StyleSheet.create({
   },
   ripple: {
     position: 'absolute',
+    top: GLOW_PAD,
+    left: GLOW_PAD,
     width: SIZE,
     height: SIZE,
     borderRadius: SIZE / 2,
@@ -169,6 +182,8 @@ const styles = StyleSheet.create({
   },
   chargeRing: {
     position: 'absolute',
+    top: GLOW_PAD,
+    left: GLOW_PAD,
     width: SIZE,
     height: SIZE,
     borderRadius: SIZE / 2,
