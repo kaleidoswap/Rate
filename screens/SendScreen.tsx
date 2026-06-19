@@ -1285,9 +1285,18 @@ function SendScreen({ navigation, route }: Props) {
   const renderPaymentReview = () => {
     if (paymentStep !== 'review') return null;
 
-    const effectiveAmount = amount || 
+    const effectiveAmount = amount ||
       (decodedInvoice?.amt_msat ? (decodedInvoice.amt_msat / 100000000000).toFixed(8) : '0') ||
       (decodedRGBInvoice?.amount ? (decodedRGBInvoice.amount / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8) : '0');
+
+    // USD conversion needs SATS, not the display string. `amount` is in the
+    // active unit (BTC or sats) so route it through amountSatsFromBtcUnits;
+    // an amountless typed send falls back to the invoice's msat value.
+    const effectiveAmountSats = amount
+      ? amountSatsFromBtcUnits(amount)
+      : decodedInvoice?.amt_msat
+        ? Math.round(decodedInvoice.amt_msat / 1000)
+        : 0;
 
     return (
       <View style={styles.section}>
@@ -1328,11 +1337,11 @@ function SendScreen({ navigation, route }: Props) {
               </View>
             )}
 
-            {selectedAsset.ticker === 'BTC' && effectiveAmount && (
+            {selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
               <View style={styles.reviewRow}>
                 <Text style={styles.reviewLabel}>USD Value</Text>
                 <Text style={styles.reviewValue}>
-                  ≈ ${parseFloat(formatSatoshisToUSD(effectiveAmount)).toLocaleString()}
+                  ≈ ${parseFloat(formatSatoshisToUSD(effectiveAmountSats)).toLocaleString()}
                 </Text>
               </View>
             )}
