@@ -634,7 +634,7 @@ export const lightTheme: ThemeType = {
 
 /**
  * Dark theme — KaleidoSwap's brand-default. Built from the light theme with
- * dark-green surfaces, white-on-dark text and darker shadows/components.
+ * dark-blue (navy) surfaces, white-on-dark text and darker shadows/components.
  */
 export const darkTheme: ThemeType = {
   ...lightTheme,
@@ -651,12 +651,12 @@ export const darkTheme: ThemeType = {
     warning: { ...lightTheme.colors.warning, 50: 'rgba(250, 204, 21, 0.12)', 100: 'rgba(250, 204, 21, 0.18)' },
     error: { ...lightTheme.colors.error, 50: 'rgba(249, 64, 64, 0.12)', 100: 'rgba(249, 64, 64, 0.18)' },
     info: { ...lightTheme.colors.info, 50: 'rgba(66, 144, 255, 0.12)', 100: 'rgba(66, 144, 255, 0.18)' },
-    gray: { ...lightTheme.colors.gray, 50: '#121C16', 100: '#16241B', 200: '#1B2C21', 300: '#243429' },
+    gray: { ...lightTheme.colors.gray, 50: '#0F1C33', 100: '#11203B', 200: '#18294C', 300: '#20335C' },
     background: {
-      primary: kdDark.background,    // #0D1813
-      secondary: '#0F1C15',          // app-local mid-tone (no shared token)
-      tertiary: '#16241B',           // app-local mid-tone (no shared token)
-      modal: kdDark.card,            // #121C16
+      primary: kdDark.background,    // #0A1326
+      secondary: '#0C1730',          // app-local mid-tone (no shared token)
+      tertiary: '#11203B',           // app-local mid-tone (no shared token)
+      modal: kdDark.card,            // #0F1C33
       backdrop: kdDark.surface.scrim, // rgba(0, 0, 0, 0.70)
     },
     text: {
@@ -664,17 +664,17 @@ export const darkTheme: ThemeType = {
       secondary: kdDark.text.secondary, // rgba(255,255,255,0.64)
       tertiary: k.text.muted,           // rgba(255,255,255,0.45)
       muted: kdDark.text.muted,         // rgba(255,255,255,0.42)
-      inverse: '#0D1813',               // dark text for use on light fills
-      inverseSecondary: '#16241B',
+      inverse: '#0A1326',               // dark text for use on light fills
+      inverseSecondary: '#11203B',
       disabled: kdDark.text.disabled,   // rgba(255,255,255,0.26)
       link: k.primary,
     },
     surface: {
-      primary: kdDark.card,          // #121C16
-      secondary: '#16241B',          // app-local (no shared token)
-      tertiary: '#1B2C21',           // app-local (no shared token)
-      elevated: kdDark.cardElevated, // #17231C
-      highlight: '#16301F',          // app-local tinted-green highlight
+      primary: kdDark.card,          // #0F1C33
+      secondary: '#11203B',          // app-local (no shared token)
+      tertiary: '#18294C',           // app-local (no shared token)
+      elevated: kdDark.cardElevated, // #16273F
+      highlight: '#17315A',          // app-local tinted-green highlight
     },
     border: {
       light: kdDark.border.subtle,   // rgba(255,255,255,0.06)
@@ -696,18 +696,18 @@ export const darkTheme: ThemeType = {
     ...lightTheme.components,
     button: {
       ...lightTheme.components.button,
-      secondary: { ...lightTheme.components.button.secondary, backgroundColor: '#1B2C21', borderColor: 'rgba(255,255,255,0.10)' },
+      secondary: { ...lightTheme.components.button.secondary, backgroundColor: '#18294C', borderColor: 'rgba(255,255,255,0.10)' },
       ghost: { ...lightTheme.components.button.ghost, backgroundColor: 'transparent' },
     },
     card: {
       ...lightTheme.components.card,
-      default: { ...lightTheme.components.card.default, backgroundColor: '#121C16', shadowColor: '#000000', shadowOpacity: 0.3 },
-      elevated: { ...lightTheme.components.card.elevated, backgroundColor: '#17231C', shadowColor: '#000000', shadowOpacity: 0.4 },
+      default: { ...lightTheme.components.card.default, backgroundColor: '#0F1C33', shadowColor: '#000000', shadowOpacity: 0.3 },
+      elevated: { ...lightTheme.components.card.elevated, backgroundColor: '#16273F', shadowColor: '#000000', shadowOpacity: 0.4 },
     },
     input: {
       ...lightTheme.components.input,
-      default: { ...lightTheme.components.input.default, backgroundColor: '#16241B', borderColor: 'rgba(255,255,255,0.10)' },
-      focused: { borderColor: k.primary, backgroundColor: '#121C16' },
+      default: { ...lightTheme.components.input.default, backgroundColor: '#11203B', borderColor: 'rgba(255,255,255,0.10)' },
+      focused: { borderColor: k.primary, backgroundColor: '#0F1C33' },
     },
   },
 };
