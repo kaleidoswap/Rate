@@ -4,11 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-patchedDependencies:
-  '@kaleidorg/wallet-engine@1.0.0-beta.4':
-    hash: 26a1f9261c0df1cf064727fdc8e5c0f7011bc0df18c34c445fcae316d1f0389b
-    path: patches/@kaleidorg__wallet-engine@1.0.0-beta.4.patch
-
 importers:
 
   .:
@@ -44,8 +39,8 @@ importers:
         specifier: ^0.5.1
         version: 0.5.1(@qvac/sdk@0.13.3(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.35))(expo-device@8.0.10(expo@54.0.35))(expo-file-system@19.0.23(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.4(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(sodium-javascript@0.8.0))
       '@kaleidorg/wallet-engine':
-        specifier: 1.0.0-beta.4
-        version: 1.0.0-beta.4(patch_hash=26a1f9261c0df1cf064727fdc8e5c0f7011bc0df18c34c445fcae316d1f0389b)(3763d8736b82a27bdf993654aa232178)
+        specifier: npm:@kaleidorg/wallet-protocols@1.0.0-beta.5
+        version: '@kaleidorg/wallet-protocols@1.0.0-beta.5(3763d8736b82a27bdf993654aa232178)'
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))
@@ -1592,8 +1587,8 @@ packages:
       '@qvac/sdk':
         optional: true
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.4':
-    resolution: {integrity: sha512-MsMXDYSl++iyOPyNNGrr79gsGL7UJquRmGF1ZmCnR0FAfXuntGaiO/PuKRXtnJIkSI0rWyPyxFQTlGUYFuvg5g==}
+  '@kaleidorg/wallet-protocols@1.0.0-beta.5':
+    resolution: {integrity: sha512-QrEB3/WdWQnNfeyEoS6uy4tJ9JtEtS5M6V4lDrXODcBjc+xY/UBmmicU+qmPUeiXb26AZusQLsBgWEyKPzXnog==}
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.2':
     resolution: {integrity: sha512-rRU5OcBRp6jeY0kGffqT2jezFFVuAPX519Qc99jcHEo+qLJuNqM8sSHMfO5x8bx4zrF0AXhN3CEpsSHPHDHUaA==}
@@ -8614,7 +8609,7 @@ snapshots:
     optionalDependencies:
       '@qvac/sdk': 0.13.3(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.35))(expo-device@8.0.10(expo@54.0.35))(expo-file-system@19.0.23(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.4(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(sodium-javascript@0.8.0)
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.4(patch_hash=26a1f9261c0df1cf064727fdc8e5c0f7011bc0df18c34c445fcae316d1f0389b)(3763d8736b82a27bdf993654aa232178)':
+  '@kaleidorg/wallet-protocols@1.0.0-beta.5(3763d8736b82a27bdf993654aa232178)':
     dependencies:
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0

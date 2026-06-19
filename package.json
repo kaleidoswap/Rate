@@ -28,7 +28,7 @@
     "@getalby/lightning-tools": "^5.2.1",
     "@kaleidorg/kaleido-ui": "npm:kaleido-ui@^0.1.56",
     "@kaleidorg/mind": "^0.5.1",
-    "@kaleidorg/wallet-engine": "1.0.0-beta.4",
+    "@kaleidorg/wallet-engine": "npm:@kaleidorg/wallet-protocols@1.0.0-beta.5",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-liquid": "1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-rln": "1.0.0-beta.2",
@@ -125,10 +125,5 @@
     "react-test-renderer": "19.1.4",
     "typescript": "~5.9.3"
   },
-  "private": true,
-  "pnpm": {
-    "patchedDependencies": {
-      "@kaleidorg/wallet-engine@1.0.0-beta.4": "patches/@kaleidorg__wallet-engine@1.0.0-beta.4.patch"
-    }
-  }
+  "private": true
 }
