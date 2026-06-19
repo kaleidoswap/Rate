@@ -36,15 +36,16 @@ const FILTERS: { key: FilterTab; label: string }[] = [
     { key: 'swap', label: 'Swaps' },
 ];
 
-// Per-type visual identity: icon + accent colour.
+// Per-type visual identity: icon + accent colour. Direction colours come from
+// the shared `tx` tokens (sent/receive/swap) so the activity feed matches web.
 function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
     switch (type) {
         case 'receive':
-            return { icon: 'arrow-down', color: theme.colors.success[500] };
+            return { icon: 'arrow-down', color: theme.colors.tx.receive };
         case 'send':
-            return { icon: 'arrow-up', color: theme.colors.error[500] };
+            return { icon: 'arrow-up', color: theme.colors.tx.sent };
         case 'swap':
-            return { icon: 'swap-horizontal', color: '#A78BFA' };
+            return { icon: 'swap-horizontal', color: theme.colors.tx.swap };
         case 'issuance':
             return { icon: 'add-circle-outline', color: theme.colors.accent[500] };
         case 'channel_open':
@@ -65,6 +66,28 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
     'Arkade': 'Arkade',
     'Swap': 'Swap',
 };
+
+// Map an activity layer to a per-network chip colour pair (background + text)
+// sourced from the shared kaleido-ui tokens, so the chips stay contrast-safe
+// and match the web. Layers without a network token fall back to the neutral
+// surface chip.
+function layerChipColors(layer: ActivityLayer): { bg: string; text: string } {
+    switch (layer) {
+        case 'L1':
+            return { bg: theme.colors.networkChip.bitcoin, text: theme.colors.networkText.bitcoin };
+        case 'RGB-L1':
+        case 'RGB-LN':
+            return { bg: theme.colors.networkChip.rgb, text: theme.colors.networkText.rgb };
+        case 'LN':
+            return { bg: theme.colors.networkChip.lightning, text: theme.colors.networkText.lightning };
+        case 'Spark':
+            return { bg: theme.colors.networkChip.spark, text: theme.colors.networkText.spark };
+        case 'Arkade':
+            return { bg: theme.colors.networkChip.arkade, text: theme.colors.networkText.arkade };
+        default:
+            return { bg: theme.colors.surface.tertiary, text: theme.colors.text.secondary };
+    }
+}
 
 function typeLabel(item: ActivityItem): string {
     switch (item.type) {
@@ -176,6 +199,7 @@ export default function HistoryScreen() {
     const renderItem = ({ item }: { item: ActivityItem }) => {
         const v = typeVisual(item.type);
         const st = statusVisual[item.status];
+        const chip = layerChipColors(item.layer);
         const hasAmount = item.amount !== '';
         return (
             <TouchableOpacity activeOpacity={0.7} style={styles.row} onPress={() => setSelectedItem(item)}>
@@ -190,7 +214,7 @@ export default function HistoryScreen() {
                             <Text
                                 style={[
                                     styles.rowAmount,
-                                    { color: item.type === 'receive' || item.type === 'issuance' ? theme.colors.success[500] : theme.colors.text.primary },
+                                    { color: item.type === 'receive' || item.type === 'issuance' ? theme.colors.tx.receive : theme.colors.text.primary },
                                 ]}
                                 numberOfLines={1}
                             >
@@ -200,8 +224,8 @@ export default function HistoryScreen() {
                     </View>
                     <View style={styles.rowBottomLine}>
                         <View style={styles.metaRow}>
-                            <View style={styles.layerChip}>
-                                <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
+                            <View style={[styles.layerChip, { backgroundColor: chip.bg }]}>
+                                <Text style={[styles.layerChipText, { color: chip.text }]}>{LAYER_LABEL[item.layer]}</Text>
                             </View>
                             {item.timestamp != null && (
                                 <Text style={styles.timeText}>
@@ -344,7 +368,7 @@ const styles = StyleSheet.create({
     },
     rowBody: {
         flex: 1,
-        gap: 4,
+        gap: theme.spacing[1],
     },
     rowTopLine: {
         flexDirection: 'row',

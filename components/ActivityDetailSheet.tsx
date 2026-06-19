@@ -25,9 +25,9 @@ interface Props {
 
 function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
     switch (type) {
-        case 'receive': return { icon: 'arrow-down', color: theme.colors.success[500] };
-        case 'send': return { icon: 'arrow-up', color: theme.colors.error[500] };
-        case 'swap': return { icon: 'swap-horizontal', color: '#A78BFA' };
+        case 'receive': return { icon: 'arrow-down', color: theme.colors.tx.receive };
+        case 'send': return { icon: 'arrow-up', color: theme.colors.tx.sent };
+        case 'swap': return { icon: 'swap-horizontal', color: theme.colors.tx.swap };
         case 'issuance': return { icon: 'add-circle-outline', color: theme.colors.accent[500] };
         case 'channel_open': return { icon: 'git-branch-outline', color: theme.colors.accent[500] };
         case 'channel_close': return { icon: 'close-circle-outline', color: theme.colors.warning[500] };
@@ -89,7 +89,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
                     </View>
                     <Text style={styles.typeLabel}>{typeLabel(item)}</Text>
                     {hasAmount && (
-                        <Text style={[styles.amount, { color: isIncoming ? theme.colors.success[500] : theme.colors.text.primary }]}>
+                        <Text style={[styles.amount, { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary }]}>
                             {amountPrefix(item.type)}{item.amount} {item.assetTicker}
                         </Text>
                     )}

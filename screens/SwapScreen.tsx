@@ -751,19 +751,21 @@ export default function SwapScreen({ navigation }: Props) {
     if (venues.length <= 2) return null;
 
     return (
-      <View style={{ flexDirection: 'row', marginBottom: 12, borderRadius: 10, backgroundColor: theme.colors.background.secondary, padding: 3 }}>
+      <View style={{ flexDirection: 'row', marginBottom: theme.spacing[3], borderRadius: theme.borderRadius.base, backgroundColor: theme.colors.background.secondary, padding: 3 }}>
         {venues.map(venue => (
           <TouchableOpacity
             key={venue.id}
             onPress={() => setVenueFilter(venue.id)}
             style={{
-              flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+              flex: 1, paddingVertical: theme.spacing[2], borderRadius: theme.spacing[2], alignItems: 'center',
               backgroundColor: venueFilter === venue.id ? theme.colors.primary[500] : 'transparent',
             }}
           >
             <Text style={{
-              fontSize: 13, fontWeight: venueFilter === venue.id ? '600' : '400',
-              color: venueFilter === venue.id ? '#fff' : theme.colors.text.secondary,
+              fontSize: theme.typography.fontSize.sm, fontWeight: venueFilter === venue.id ? '600' : '400',
+              // Selected tab fills with bright brand green; text.inverse (dark navy)
+              // is the readable on-green colour (plain white reads as low-contrast).
+              color: venueFilter === venue.id ? theme.colors.text.inverse : theme.colors.text.secondary,
             }}>
               {venue.label}
             </Text>
@@ -1251,7 +1253,9 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing[4],
     backgroundColor: theme.colors.error[50],
     borderWidth: 1,
-    borderColor: theme.colors.error[200],
+    // error[100] is the dark-theme translucent red tint; [200] is a light-theme
+    // value that reads as a bright pink border on the dark canvas.
+    borderColor: theme.colors.error[100],
   },
 
   errorContent: {
@@ -1264,7 +1268,8 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[700],
+    // error[700] is a light-theme dark red; error[500] is the on-dark readable red.
+    color: theme.colors.error[500],
   },
 
   swapContainer: {
@@ -1301,7 +1306,8 @@ const styles = StyleSheet.create({
   maxButtonText: {
     fontSize: theme.typography.fontSize.xs,
     fontWeight: '700',
-    color: theme.colors.primary[600],
+    // primary[600] is a light-theme dark green; primary[500] is the on-dark accent.
+    color: theme.colors.primary[500],
     backgroundColor: theme.colors.primary[50],
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 2,
@@ -1467,7 +1473,8 @@ const styles = StyleSheet.create({
 
   statusProgressText: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[700],
+    // primary[700] is a light-theme dark green; primary[500] reads on dark.
+    color: theme.colors.primary[500],
     fontWeight: '500',
   },
 

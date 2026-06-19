@@ -246,7 +246,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: theme.borderRadius.base,
-        backgroundColor: theme.colors.gray[100],
+        backgroundColor: theme.colors.surface.secondary,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
         marginBottom: theme.spacing[2],
     },
     mnemonicContainer: {
-        backgroundColor: theme.colors.gray[50],
+        backgroundColor: theme.colors.surface.secondary,
         padding: theme.spacing[3],
         borderRadius: theme.borderRadius.base,
         marginBottom: theme.spacing[3],

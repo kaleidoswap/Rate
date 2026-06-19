@@ -429,7 +429,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
         { transform: [{ scale: scaleAnim }] }
       ]}>
         <LinearGradient
-          colors={['#10B981', '#059669']}
+          colors={theme.colors.success.gradient || [theme.colors.success[500], theme.colors.success[500]]}
           style={styles.completeGradient}
         >
           <Ionicons name="checkmark" size={48} color="white" />

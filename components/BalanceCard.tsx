@@ -115,7 +115,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                 <Ionicons
                     name="refresh"
                     size={16}
-                    color="rgba(255,255,255,0.8)"
+                    color={theme.colors.text.secondary}
                     style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
                 />
             </TouchableOpacity>
@@ -150,47 +150,47 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 
 const styles = StyleSheet.create({
     container: {
-        paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 16,
+        paddingHorizontal: theme.spacing[4],
+        paddingTop: theme.spacing[2],
+        paddingBottom: theme.spacing[4],
     },
     totalBalanceContainer: {
         alignItems: 'center',
-        marginBottom: 16,
+        marginBottom: theme.spacing[4],
     },
     balanceLabel: {
-        fontSize: 13,
-        color: 'rgba(255,255,255,0.7)',
-        marginBottom: 4,
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.text.secondary,
+        marginBottom: theme.spacing[1],
     },
     balanceRow: {
         flexDirection: 'row',
         alignItems: 'baseline',
-        marginBottom: 4,
+        marginBottom: theme.spacing[1],
     },
     balanceAmount: {
-        fontSize: 36,
-        fontWeight: '800',
-        color: '#fff',
-        marginRight: 8,
+        fontSize: theme.typography.fontSize['4xl'],
+        fontWeight: theme.typography.fontWeight.extrabold,
+        color: theme.colors.text.primary,
+        marginRight: theme.spacing[2],
     },
     balanceCurrency: {
-        fontSize: 18,
-        fontWeight: '500',
-        color: 'rgba(255,255,255,0.85)',
+        fontSize: theme.typography.fontSize.lg,
+        fontWeight: theme.typography.fontWeight.medium,
+        color: theme.colors.text.secondary,
     },
     balanceUsd: {
-        fontSize: 14,
-        color: 'rgba(255,255,255,0.65)',
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.text.tertiary,
         minHeight: 18,
     },
     refreshButton: {
         position: 'absolute',
-        top: 8,
-        right: 16,
+        top: theme.spacing[2],
+        right: theme.spacing[4],
         width: 36,
         height: 36,
-        borderRadius: 18,
+        borderRadius: theme.borderRadius.full,
         backgroundColor: 'rgba(255,255,255,0.12)',
         justifyContent: 'center',
         alignItems: 'center',
@@ -198,9 +198,9 @@ const styles = StyleSheet.create({
     balanceBreakdown: {
         flexDirection: 'row',
         backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 14,
-        paddingVertical: 12,
-        paddingHorizontal: 8,
+        borderRadius: theme.borderRadius.md,
+        paddingVertical: theme.spacing[3],
+        paddingHorizontal: theme.spacing[2],
     },
     breakdownItem: {
         flex: 1,
@@ -214,29 +214,29 @@ const styles = StyleSheet.create({
         borderRadius: 15,
         justifyContent: 'center',
         alignItems: 'center',
-        marginRight: 8,
+        marginRight: theme.spacing[2],
     },
     breakdownText: {
         justifyContent: 'center',
     },
     breakdownLabel: {
-        fontSize: 11,
-        color: 'rgba(255,255,255,0.6)',
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.tertiary,
         marginBottom: 1,
     },
     breakdownValue: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#fff',
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: theme.typography.fontWeight.semibold,
+        color: theme.colors.text.primary,
     },
     breakdownUnit: {
         fontSize: 10,
-        fontWeight: '400',
-        color: 'rgba(255,255,255,0.5)',
+        fontWeight: theme.typography.fontWeight.normal,
+        color: theme.colors.text.muted,
     },
     breakdownDivider: {
         width: 1,
         backgroundColor: 'rgba(255,255,255,0.12)',
-        marginHorizontal: 4,
+        marginHorizontal: theme.spacing[1],
     },
 });

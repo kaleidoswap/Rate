@@ -1544,7 +1544,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                     borderRadius: 12,
                     backgroundColor: isActive ? net.color + '20' : theme.colors.background.secondary,
                     borderWidth: isActive ? 1.5 : 1,
-                    borderColor: isActive ? net.color : theme.colors.background.tertiary || 'rgba(255,255,255,0.08)',
+                    borderColor: isActive ? net.color : theme.colors.border.light,
                     opacity: net.available ? 1 : 0.4,
                   }}
                 >
@@ -1590,7 +1590,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         {/* Warning for Lightning with limited assets */}
         {networkType === 'lightning' && lightningAssets.length === 1 && (
           <View style={styles.networkWarning}>
-            <Ionicons name="information-circle" size={16} color={theme.colors.warning?.[500] || '#EAB308'} />
+            <Ionicons name="information-circle" size={16} color={theme.colors.warning[500]} />
             <Text style={styles.networkWarningText}>
               Only Bitcoin available. Open RGB Lightning channels to receive RGB assets.
             </Text>

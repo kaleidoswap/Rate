@@ -6,7 +6,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Button, Input, MainHeader } from '../components';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import { RootState } from '../store';
 import { protocolManager } from '../services/protocols';
 import DatabaseService from '../services/DatabaseService';
@@ -358,8 +358,8 @@ const styles = StyleSheet.create({
   },
   intro: {
     color: theme.colors.text.secondary,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: theme.typography.fontSize.sm,
+    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.normal),
   },
   inputActions: {
     flexDirection: 'row',
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
   actionChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: theme.spacing[1.5],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: theme.spacing[2],
     borderRadius: theme.borderRadius.full,
@@ -379,12 +379,12 @@ const styles = StyleSheet.create({
   },
   actionChipText: {
     color: theme.colors.primary[500],
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   card: {
     backgroundColor: theme.colors.surface.primary,
-    borderRadius: 16,
+    borderRadius: theme.borderRadius.md,
     padding: theme.spacing[4],
     gap: theme.spacing[4],
     marginTop: theme.spacing[2],
@@ -397,24 +397,24 @@ const styles = StyleSheet.create({
   typeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: theme.spacing[1.5],
     paddingHorizontal: theme.spacing[3],
     paddingVertical: 5,
     borderRadius: theme.borderRadius.full,
   },
   typeBadgeText: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.bold,
   },
   connectedHint: {
-    fontSize: 12,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.success[500],
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   connectedDesc: {
     color: theme.colors.text.secondary,
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: theme.typography.fontSize.xs,
+    lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.normal),
     marginTop: -theme.spacing[2],
   },
   statsRow: {
@@ -426,13 +426,13 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     color: theme.colors.text.muted,
-    fontSize: 12,
-    marginBottom: 4,
+    fontSize: theme.typography.fontSize.xs,
+    marginBottom: theme.spacing[1],
   },
   statValue: {
     color: theme.colors.text.primary,
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.bold,
   },
   disconnect: {
     marginTop: theme.spacing[6],

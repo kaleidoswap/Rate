@@ -32,9 +32,9 @@ interface AssetSelectorProps {
 }
 
 const PROTOCOL_BADGE: Record<string, { label: string; color: string }> = {
-  RGB: { label: 'RGB', color: '#2BEE79' },
-  SPARK: { label: 'Spark', color: '#60A5FA' },
-  ARKADE: { label: 'Arkade', color: '#A855F7' },
+  RGB: { label: 'RGB', color: theme.colors.networks.unified },
+  SPARK: { label: 'Spark', color: theme.colors.networks.spark },
+  ARKADE: { label: 'Arkade', color: theme.colors.networks.arkade },
 };
 
 export const AssetSelector: React.FC<AssetSelectorProps> = ({
@@ -162,41 +162,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[3],
   },
   title: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: theme.typography.fontSize.xl,
+    fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.text.primary,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.background.secondary,
-    marginHorizontal: 20,
-    marginBottom: 12,
+    marginHorizontal: theme.spacing[5],
+    marginBottom: theme.spacing[3],
     borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: theme.spacing[3.5],
+    paddingVertical: theme.spacing[2.5],
   },
   searchInput: {
     flex: 1,
-    marginLeft: 10,
+    marginLeft: theme.spacing[2.5],
     fontSize: 15,
     color: theme.colors.text.primary,
   },
   list: {
-    paddingHorizontal: 12,
-    paddingBottom: 40,
+    paddingHorizontal: theme.spacing[3],
+    paddingBottom: theme.spacing[10],
   },
   assetRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    marginBottom: 2,
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing[0.5],
   },
   assetRowSelected: {
     backgroundColor: theme.colors.primary[500] + '10',
@@ -205,58 +205,58 @@ const styles = StyleSheet.create({
   },
   assetInfo: {
     flex: 1,
-    marginLeft: 12,
-    marginRight: 8,
+    marginLeft: theme.spacing[3],
+    marginRight: theme.spacing[2],
   },
   assetTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: theme.spacing[1.5],
   },
   assetTicker: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.primary,
   },
   assetName: {
-    fontSize: 12,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.tertiary,
     marginTop: 2,
   },
   assetBalance: {
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.medium,
     color: theme.colors.text.secondary,
   },
   protocolBadge: {
-    paddingHorizontal: 6,
+    paddingHorizontal: theme.spacing[1.5],
     paddingVertical: 1,
     borderRadius: 4,
   },
   protocolBadgeText: {
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: theme.typography.fontWeight.bold,
     letterSpacing: 0.3,
   },
   currentBadge: {
-    paddingHorizontal: 6,
+    paddingHorizontal: theme.spacing[1.5],
     paddingVertical: 1,
     borderRadius: 4,
     backgroundColor: theme.colors.primary[500] + '15',
   },
   currentBadgeText: {
     fontSize: 9,
-    fontWeight: '600',
+    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.primary[500],
   },
   emptyState: {
     alignItems: 'center',
-    paddingTop: 60,
+    paddingTop: theme.spacing[16],
   },
   emptyText: {
-    fontSize: 14,
+    fontSize: theme.typography.fontSize.sm,
     color: theme.colors.gray[400],
-    marginTop: 8,
+    marginTop: theme.spacing[2],
   },
 });
 

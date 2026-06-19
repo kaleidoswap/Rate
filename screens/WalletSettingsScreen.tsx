@@ -236,7 +236,7 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
                     >
                         <View style={styles.menuItemLeft}>
                             <View style={[styles.iconContainer, { backgroundColor: theme.colors.secondary[100] }]}>
-                                <Ionicons name="key" size={20} color={theme.colors.secondary[600]} />
+                                <Ionicons name="key" size={20} color={theme.colors.brand.violet} />
                             </View>
                             <Text style={styles.menuItemText}>Recover recovery phrase</Text>
                         </View>
@@ -369,7 +369,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        backgroundColor: theme.colors.gray[50],
+        backgroundColor: theme.colors.surface.secondary,
         padding: theme.spacing[3],
         borderRadius: theme.borderRadius.base,
         borderWidth: 1,
@@ -413,7 +413,7 @@ const styles = StyleSheet.create({
         color: theme.colors.text.primary,
     },
     dangerCard: {
-        borderColor: theme.colors.error[200],
+        borderColor: theme.colors.error[500],
         borderWidth: 1,
         backgroundColor: theme.colors.error[50],
     },
@@ -422,15 +422,15 @@ const styles = StyleSheet.create({
     },
     dangerText: {
         fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.error[700],
+        color: theme.colors.text.secondary,
         lineHeight: 20,
     },
     deleteButton: {
-        backgroundColor: 'white',
-        borderColor: theme.colors.error[300],
+        backgroundColor: theme.colors.surface.primary,
+        borderColor: theme.colors.error[500],
     },
     deleteButtonText: {
-        color: theme.colors.error[600],
+        color: theme.colors.error[500],
     },
     footerSpacer: {
         height: 40,

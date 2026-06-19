@@ -371,7 +371,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
         { transform: [{ scale: scaleAnim }] }
       ]}>
         <LinearGradient
-          colors={['#10B981', '#059669']}
+          colors={theme.colors.success.gradient || [theme.colors.success[500], theme.colors.success[500]]}
           style={styles.successGradient}
         >
           <Ionicons name="checkmark" size={48} color="white" />
@@ -622,7 +622,7 @@ const styles = StyleSheet.create({
   warningText: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.info[700] || theme.colors.info[600],
+    color: theme.colors.text.secondary,
     lineHeight: 20,
   },
   networkCard: {
@@ -651,7 +651,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     borderRadius: 50,
     borderWidth: 3,
-    borderColor: theme.colors.primary[200],
+    borderColor: theme.colors.border.medium,
   },
   loadingRing1: {
     width: 100,
@@ -690,7 +690,7 @@ const styles = StyleSheet.create({
     borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#10B981',
+    shadowColor: theme.colors.success[500],
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 16,

@@ -61,7 +61,7 @@ export const AssetList: React.FC<AssetListProps> = ({
                                 <View style={styles.assetVerticalLeft}>
                                     <AssetIcon ticker={asset.ticker} protocol={asset.protocol} size={36} />
                                     <View style={styles.assetVerticalInfo}>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] }}>
                                             <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
                                             {asset.protocol && (
                                                 <Badge label={asset.protocol} color={protocolColor(asset.protocol)} />

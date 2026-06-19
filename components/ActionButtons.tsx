@@ -94,17 +94,17 @@ export const ActionButtons: React.FC<ActionButtonsProps> = (props) => {
 
 const styles = StyleSheet.create({
     container: {
-        paddingHorizontal: 16,
-        marginTop: -20,
-        marginBottom: 16,
+        paddingHorizontal: theme.spacing[4],
+        marginTop: -theme.spacing[5],
+        marginBottom: theme.spacing[4],
     },
     actionButtons: {
         flexDirection: 'row',
         justifyContent: 'space-around',
         backgroundColor: theme.colors.surface.primary,
-        borderRadius: 20,
+        borderRadius: theme.borderRadius.xl,
         paddingVertical: 18,
-        paddingHorizontal: 8,
+        paddingHorizontal: theme.spacing[2],
         borderWidth: 1,
         borderColor: theme.colors.border.light,
         ...theme.shadows.md,
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     actionButton: {
         alignItems: 'center',
         flex: 1,
-        gap: 8,
+        gap: theme.spacing[2],
     },
     actionButtonTile: {
         width: 52,
@@ -122,8 +122,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     actionButtonText: {
-        fontSize: 12,
-        fontWeight: '600',
+        fontSize: theme.typography.fontSize.xs,
+        fontWeight: theme.typography.fontWeight.semibold,
         color: theme.colors.text.primary,
         letterSpacing: 0.2,
     },
@@ -131,14 +131,14 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
-        marginTop: 10,
-        paddingVertical: 10,
-        borderRadius: 14,
+        gap: theme.spacing[1.5],
+        marginTop: theme.spacing[2.5],
+        paddingVertical: theme.spacing[2.5],
+        borderRadius: theme.borderRadius.md,
     },
     activityButtonText: {
-        fontSize: 13,
-        fontWeight: '600',
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: theme.typography.fontWeight.semibold,
         color: theme.colors.text.secondary,
         letterSpacing: 0.2,
     },
