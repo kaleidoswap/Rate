@@ -25,6 +25,10 @@ import QVACService from './services/QVACService';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import { KaleidoThemeProvider } from '@kaleidorg/kaleido-ui/native';
+import { useFonts } from 'expo-font';
+import { kaleidoFonts } from '@kaleidorg/kaleido-ui/native/fonts';
+// Side effect: apply Satoshi to every <Text>/<TextInput> app-wide.
+import './theme/satoshiText';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
 import WalletRestoreScreen from './screens/WalletRestoreScreen';
@@ -324,6 +328,9 @@ function AppLoadingScreen() {
 export default function App() {
   const navigationTheme = createNavigationTheme();
   const [introDone, setIntroDone] = React.useState(false);
+  // Load the Satoshi brand typeface (shipped by kaleido-ui) before first paint
+  // so the app-wide Text patch resolves real faces rather than the system fallback.
+  const [fontsLoaded] = useFonts(kaleidoFonts);
 
   React.useEffect(() => {
     // Initialize network monitoring
@@ -339,6 +346,11 @@ export default function App() {
       networkService.cleanup();
     };
   }, []);
+
+  // Hold on the branded loader until Satoshi is registered (all hooks above run first).
+  if (!fontsLoaded) {
+    return <AppLoadingScreen />;
+  }
 
   return (
     <ErrorBoundary>

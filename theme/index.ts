@@ -441,11 +441,13 @@ export const lightTheme: ThemeType = {
 
   typography: {
     fontFamily: {
-      regular: 'System',
-      medium: 'System',
-      semibold: 'System',
-      bold: 'System',
-      mono: 'System', // Fallback
+      // Satoshi brand typeface, shipped + loaded via kaleido-ui (see App.tsx).
+      // No dedicated 600 face ships, so semibold maps onto the bold cut.
+      regular: 'Satoshi-Regular',
+      medium: 'Satoshi-Medium',
+      semibold: 'Satoshi-Bold',
+      bold: 'Satoshi-Bold',
+      mono: 'System', // Satoshi isn't monospaced; keep system for tabular numerics
     },
 
     fontSize: {
