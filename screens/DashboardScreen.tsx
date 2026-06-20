@@ -372,6 +372,7 @@ export default function DashboardScreen({ navigation }: Props) {
                   precision: isUsdb ? USDB_DECIMALS : a.precision,
                   issued_supply: a.metadata?.issued_supply || 0,
                   protocol: proto,
+                  icon: a.icon,
                   balance: {
                     settled: a.balance.settled ?? a.balance.total,
                     future: a.balance.pending,
@@ -492,7 +493,24 @@ export default function DashboardScreen({ navigation }: Props) {
     0
   );
 
-  const totalBalance = offChainBalance + getTotalBtcBalance();
+  // Aggregate priced tokens into a sats-equivalent and fold them into the total,
+  // matching the extension (totalBTC = btc across protocols + tokenValueSats).
+  // Only assets with a known USD price contribute (USDB = $1); BTC is already
+  // counted via getTotalBtcBalance()/offChainBalance.
+  const btcPriceUSD = useSelector((state: RootState) => state.wallet.btcPriceUSD);
+  const tokenValueSats = (() => {
+    if (!btcPriceUSD || btcPriceUSD <= 0) return 0;
+    let sats = 0;
+    for (const a of rgbAssets as any[]) {
+      const usd = a?.ticker === USDB_TICKER ? 1 : null;
+      if (usd == null) continue;
+      const display = getAssetBaseUnitBalance(a.balance) / Math.pow(10, a.precision || 0);
+      sats += Math.round(((display * usd) / btcPriceUSD) * 100_000_000);
+    }
+    return sats;
+  })();
+
+  const totalBalance = offChainBalance + getTotalBtcBalance() + tokenValueSats;
   const denominatedTotal = formatDisplayAmount(totalBalance);
 
   // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
