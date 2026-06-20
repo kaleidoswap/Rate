@@ -11,7 +11,7 @@ import {
   Dimensions,
   StatusBar,
   Modal,
-  Platform,
+  DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -35,7 +35,6 @@ import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind
 import { policyFor, aggregateForLite } from '@kaleidorg/wallet-engine';
 
 import { theme } from '../theme';
-import { VoiceAgentFAB } from '../components/voice-agent/VoiceAgentFAB';
 import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
 import {
   BalanceCard,
@@ -156,6 +155,13 @@ export default function DashboardScreen({ navigation }: Props) {
       .catch(() => {})
       .finally(() => setMindOnboardingOpen(true));
   }, [aiEnabled]);
+
+  // The bottom-nav island's green mic button (in App.tsx, global across tabs)
+  // emits this event; it focuses the Wallet tab first so this screen is active.
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('rate.openVoice', () => openVoiceAgent(true));
+    return () => sub.remove();
+  }, [openVoiceAgent]);
 
   // First run: probe whether KaleidoMind can run here, then show the one-time
   // setup so the user decides once (local / delegate / off). Never boots the
@@ -538,16 +544,6 @@ export default function DashboardScreen({ navigation }: Props) {
     balance: { spendable: getTotalBtcBalance() },
   } as any;
 
-  // Get current hour to determine greeting
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good morning';
-    if (hour < 17) return 'Good afternoon';
-    return 'Good evening';
-  };
-
-
-
   const renderChannelModal = () => (
     <Modal
       visible={channelModalVisible}
@@ -709,6 +705,14 @@ export default function DashboardScreen({ navigation }: Props) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
+      {/* Sticky header: lives outside the ScrollView so it stays fixed while
+          content scrolls beneath it. `elevated` gives it a downward shadow. */}
+      <MainHeader
+        brandLogo
+        showSettings
+        elevated
+      />
+
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -721,20 +725,8 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         }
       >
-        <MainHeader
-          greeting={getGreeting()}
-          title="KaleidoSwap Wallet"
-          subtitle={(() => {
-            // Network/protocol attribution is an "advanced" detail — hide it in lite mode.
-            if (!policy.showNetworks) return undefined;
-            const connected: string[] = [];
-            if (protocolManager.getAdapterIfAvailable('SPARK')?.isConnected()) connected.push('Spark');
-            if (protocolManager.getAdapterIfAvailable('RGB')?.isConnected()) connected.push('RLN');
-            if (protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected()) connected.push('Arkade');
-            return connected.length > 0 ? connected.join(' · ') : undefined;
-          })()}
-          showSettings
-        >
+        {/* Unified wallet card: balance + per-network breakdown + action buttons. */}
+        <View style={styles.walletCard}>
           <BalanceCard
             totalBalance={totalBalance}
             bitcoinUnit={bitcoinUnit}
@@ -748,19 +740,20 @@ export default function DashboardScreen({ navigation }: Props) {
             onCycleDenomination={cycleDenomination}
             onChainBalance={getTotalBtcBalance()}
             lightningBalance={offChainBalance}
-            // Per-protocol balance breakdown is a network detail — only in advanced mode.
-            byProtocol={policy.showNetworks ? (btcBalance as any)?.byProtocol : undefined}
+            // Always provide the per-network breakdown; it stays collapsed behind
+            // the chevron so it doesn't clutter lite mode.
+            byProtocol={(btcBalance as any)?.byProtocol}
             // Shimmer the balance while first connecting (before any data lands).
             loading={(isConnecting || loading) && totalBalance === 0 && !refreshing}
+            footer={
+              <ActionButtons
+                onSend={() => navigation.getParent()?.navigate('Send')}
+                onReceive={() => navigation.getParent()?.navigate('Receive')}
+                onSwap={() => navigation.getParent()?.navigate('Swap')}
+              />
+            }
           />
-        </MainHeader>
-
-        <ActionButtons
-          onSend={() => navigation.getParent()?.navigate('Send')}
-          onReceive={() => navigation.getParent()?.navigate('Receive')}
-          onSwap={() => navigation.getParent()?.navigate('Swap')}
-          onHistory={() => navigation.getParent()?.navigate('History')}
-        />
+        </View>
 
         {/* Honest recovery status: loud when RGB assets/channels can't be
             restored from the seed alone. Renders nothing for plain-BTC wallets. */}
@@ -820,16 +813,8 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
       </ScrollView>
 
-      <VoiceAgentFAB
-        onPress={() => openVoiceAgent(true)}
-        onHoldActivate={() => openVoiceAgent(true)}
-        // Sit snug in the bottom-right corner just above the tab bar. Screens
-        // render above the (non-absolute) tab bar, so a small offset keeps the
-        // orb out of the scrollable content instead of floating over the
-        // activity rows. scrollContent's paddingBottom gives the list clearance.
-        bottom={Platform.OS === 'ios' ? 24 : 18}
-        right={16}
-      />
+      {/* Voice is triggered from the green mic button in the bottom nav island,
+          which emits 'rate.openVoice' (see the listener effect above). */}
       <VoiceAgentOverlay
         visible={voiceAgentOpen}
         autoListen={voiceAutoListen}
@@ -852,10 +837,18 @@ export default function DashboardScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background.secondary,
+    backgroundColor: theme.colors.background.primary,
   },
   scrollContent: {
-    paddingBottom: theme.spacing[24],
+    // Clear the floating (absolutely-positioned) nav island so the last rows
+    // stay reachable above it.
+    paddingBottom: theme.spacing[32],
+  },
+  walletCard: {
+    // The unified balance + actions card sits just below the sticky header.
+    marginHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[4],
+    marginBottom: theme.spacing[4],
   },
   liteUsdCard: {
     flexDirection: 'row',

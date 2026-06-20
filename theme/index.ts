@@ -10,6 +10,12 @@
 // below — those are flagged as candidates to promote into kaleido-ui.
 import { colors as k, makeTheme } from '@kaleidorg/kaleido-ui/tokens'
 
+// Equivalent/tabular balances render in Geist Mono — the same monospaced face
+// the web/extension references via `--font-mono`. Shipped by kaleido-ui and
+// loaded in App.tsx via useFonts(kaleidoFonts); the global Satoshi text patch
+// leaves non-Satoshi families (this one) untouched.
+const MONO_FONT = 'GeistMono'
+
 /** Resolved dark palette from the shared design system (brand default). */
 const kdDark = makeTheme('dark')
 
@@ -447,7 +453,7 @@ export const lightTheme: ThemeType = {
       medium: 'Satoshi-Medium',
       semibold: 'Satoshi-Bold',
       bold: 'Satoshi-Bold',
-      mono: 'System', // Satoshi isn't monospaced; keep system for tabular numerics
+      mono: MONO_FONT, // system monospace, matching the extension's mono balances
     },
 
     fontSize: {
@@ -757,7 +763,10 @@ export function createNavigationTheme() {
     dark: theme.dark,
     colors: {
       primary: theme.colors.primary[600],
-      background: theme.colors.background.secondary,
+      // Match the extension's page background (kaleido-ui makeTheme('dark').background
+      // = #0A1326). background.secondary (#0C1730) is an app-local mid-tone, not a
+      // shared token, and made the app look bluer/lighter than the extension.
+      background: theme.colors.background.primary,
       card: theme.colors.surface.primary,
       text: theme.colors.text.primary,
       border: theme.colors.border.light,

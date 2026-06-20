@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { theme, protocolColor } from '../theme';
 import { Card } from './Card';
 import { AssetIcon } from './AssetIcon';
@@ -35,7 +36,7 @@ export const AssetList: React.FC<AssetListProps> = ({
 }) => {
     return (
         <View style={styles.section}>
-            <SectionHeader title="Assets" actionLabel="View All" onAction={onViewAll} />
+            <SectionHeader title="Assets" eyebrow actionLabel="View All" onAction={onViewAll} />
 
             {assets.length === 0 ? (
                 <Card style={styles.emptyCard}>
@@ -50,13 +51,36 @@ export const AssetList: React.FC<AssetListProps> = ({
                     </View>
                 </Card>
             ) : (
+                <View style={styles.assetsListWrapper}>
                 <View style={styles.assetsVerticalContainer}>
-                    {assets.slice(0, 3).map((asset) => (
+                    {assets.slice(0, 3).map((asset) => {
+                      // Per-asset accent gradient (extension parity): BTC → bitcoin
+                      // orange, RGB/Spark/Arkade → their protocol color. Navy fills
+                      // the left ~third, then fades into a muted accent on the right.
+                      const accent =
+                        asset.ticker === 'BTC'
+                          ? theme.colors.networks.bitcoin
+                          : protocolColor(asset.protocol);
+                      return (
                         <TouchableOpacity
                             key={asset.asset_id}
-                            style={styles.assetVerticalCard}
+                            style={styles.assetCardWrapper}
                             onPress={() => onAssetPress(asset)}
                         >
+                          <LinearGradient
+                            // Mirrors the extension exactly:
+                            // linear-gradient(135deg, card 30%, accent@55 75%, accent@b3 100%)
+                            colors={[
+                              theme.colors.surface.primary,
+                              theme.colors.surface.primary,
+                              `${accent}55`,
+                              `${accent}B3`,
+                            ]}
+                            locations={[0, 0.3, 0.75, 1]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.assetVerticalCard}
+                          >
                             <View style={styles.assetVerticalContent}>
                                 <View style={styles.assetVerticalLeft}>
                                     <AssetIcon ticker={asset.ticker} protocol={asset.protocol} size={36} />
@@ -77,8 +101,10 @@ export const AssetList: React.FC<AssetListProps> = ({
                                     <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
                                 </View>
                             </View>
+                          </LinearGradient>
                         </TouchableOpacity>
-                    ))}
+                      );
+                    })}
                     {assets.length > 3 && (
                         <TouchableOpacity
                             style={styles.viewMoreButton}
@@ -88,6 +114,21 @@ export const AssetList: React.FC<AssetListProps> = ({
                             <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
                         </TouchableOpacity>
                     )}
+                </View>
+                {assets.length > 2 && (
+                    <View pointerEvents="none" style={styles.fadeOverlay}>
+                        <LinearGradient
+                            colors={[
+                                `${theme.colors.background.primary}00`,
+                                theme.colors.background.primary,
+                            ]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 0, y: 1 }}
+                            pointerEvents="none"
+                            style={styles.fadeGradient}
+                        />
+                    </View>
+                )}
                 </View>
             )}
         </View>
@@ -134,15 +175,29 @@ const styles = StyleSheet.create({
     emptyButton: {
         minWidth: 120,
     },
+    assetsListWrapper: {
+        position: 'relative',
+    },
     assetsVerticalContainer: {
         gap: theme.spacing[3],
     },
-    assetVerticalCard: {
-        backgroundColor: theme.colors.surface.primary,
+    fadeOverlay: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: 130,
+    },
+    fadeGradient: {
+        flex: 1,
+    },
+    assetCardWrapper: {
+        // Clip the gradient to the rounded card shape. No border (extension parity).
         borderRadius: theme.borderRadius.xl,
+        overflow: 'hidden',
+    },
+    assetVerticalCard: {
         padding: theme.spacing[3],
-        borderWidth: 1,
-        borderColor: theme.colors.border.light,
     },
     assetVerticalContent: {
         flexDirection: 'row',

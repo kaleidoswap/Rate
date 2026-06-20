@@ -29,7 +29,7 @@
  */
 import * as React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
-import { satoshiFamilyForWeight } from '@kaleidorg/kaleido-ui/native/fonts';
+import { satoshiFamilyForWeight, satoshiFontFamily } from '@kaleidorg/kaleido-ui/native/fonts';
 
 type AnyComponent = React.ComponentType<{ style?: unknown }> & {
   __satoshiWrapped?: boolean;
@@ -40,16 +40,39 @@ type DefaultModule = { default?: AnyComponent };
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const RN = require('react-native') as Record<string, AnyComponent>;
 
+// The Satoshi faces we ship. A custom single-weight family on Android falls
+// back to the system font if it's paired with a (non-normal) fontWeight — the
+// weight has no matching variant — so once we pick a face we must neutralize
+// fontWeight. Non-Satoshi families (icon fonts) are left completely alone.
+const SATOSHI_FAMILIES = new Set<string>(Object.values(satoshiFontFamily));
+
 function createFontWrapper(Original: AnyComponent, label: string): AnyComponent {
   // Plain function component: in React 19 `ref` arrives as a regular prop, so
   // spreading props forwards it to the underlying component untouched (keeps
   // TextInput.focus() and friends working).
   const Wrapped = ((props: { style?: unknown }) => {
     const flat = (StyleSheet.flatten(props.style as TextStyle) || {}) as TextStyle;
-    const base: TextStyle = { fontFamily: satoshiFamilyForWeight(flat.fontWeight) };
+    const explicit = flat.fontFamily;
+
+    // An explicit non-Satoshi family (Ionicons, MaterialCommunityIcons, …) —
+    // leave it entirely untouched, including its fontWeight.
+    if (explicit && !SATOSHI_FAMILIES.has(explicit)) {
+      return React.createElement(Original, props);
+    }
+
+    // Pick the face: honour an already-Satoshi family, else map from weight.
+    const family =
+      explicit && SATOSHI_FAMILIES.has(explicit)
+        ? explicit
+        : satoshiFamilyForWeight(flat.fontWeight);
+
+    // Override (append) so the face + neutral weight win over the incoming
+    // style. fontWeight:'normal' is essential: the weight is baked into the
+    // face name, and leaving a numeric/bold weight makes Android drop Satoshi.
+    const override: TextStyle = { fontFamily: family, fontWeight: 'normal' };
     return React.createElement(Original, {
       ...props,
-      style: [base, props.style],
+      style: [props.style, override],
     });
   }) as AnyComponent;
 

@@ -15,6 +15,8 @@ interface SectionHeaderProps {
   onAction?: () => void;
   /** Show a chevron after the action label (default true when an action exists). */
   actionChevron?: boolean;
+  /** Render the title as an uppercase, wide-tracked, dimmed eyebrow (extension parity). */
+  eyebrow?: boolean;
   style?: ViewStyle;
 }
 
@@ -23,10 +25,11 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   actionLabel,
   onAction,
   actionChevron = true,
+  eyebrow = false,
   style,
 }) => (
   <View style={[styles.header, style]}>
-    <Text style={styles.title}>{title}</Text>
+    <Text style={[styles.title, eyebrow && styles.eyebrow]}>{title}</Text>
     {actionLabel && onAction && (
       <PressableScale
         onPress={onAction}
@@ -55,6 +58,12 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.lg,
     fontWeight: theme.typography.fontWeight.bold,
     color: theme.colors.text.primary,
+  },
+  eyebrow: {
+    fontSize: theme.typography.fontSize.xs,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    color: theme.colors.text.secondary,
   },
   action: {
     flexDirection: 'row',
