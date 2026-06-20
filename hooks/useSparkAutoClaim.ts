@@ -18,6 +18,7 @@
 import { useEffect, useRef } from 'react';
 import { protocolManager } from '../services/protocols';
 import type { DepositDetectionEvent } from './useDepositDetection';
+import { runReceiveOperation } from '../utils/receive-session';
 
 // The new optional claim/sweep surface on the Spark adapter. Typed locally
 // because rate resolves @kaleidorg/wallet-engine's *published* types (which may
@@ -73,11 +74,17 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
     sweptRef.current = address;
 
     let cancelled = false;
+    const operationController = new AbortController();
     void (async () => {
       const adapter = getSparkAdapter();
       if (!adapter?.sweepL1Deposits) return;
       try {
-        const res = await adapter.sweepL1Deposits();
+        const res = await runReceiveOperation(
+          'Sweep Spark L1 deposits',
+          () => adapter.sweepL1Deposits!(),
+          8_000,
+          operationController.signal,
+        );
         if (!cancelled && res.claimedTxids.length > 0) {
           const event: DepositDetectionEvent = {
             layer: 'spark',
@@ -94,6 +101,7 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
 
     return () => {
       cancelled = true;
+      operationController.abort(new Error('Spark deposit sweep stopped'));
     };
   }, [active, address, onClaimed, onStatus]);
 
@@ -102,12 +110,18 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
     if (!active || !address) return;
 
     let cancelled = false;
+    const operationController = new AbortController();
     const tick = async () => {
       if (cancelled) return;
       const adapter = getSparkAdapter();
       if (!adapter?.claimL1Deposit) return;
       try {
-        const res = await adapter.claimL1Deposit(address);
+        const res = await runReceiveOperation(
+          'Claim Spark L1 deposit',
+          () => adapter.claimL1Deposit!(address),
+          8_000,
+          operationController.signal,
+        );
         if (cancelled) return;
         if (res.status === 'awaiting') {
           // 'awaiting' simply means there is no confirmed, claimable UTXO at this
@@ -119,7 +133,7 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
           // only react to a genuine claim below.
         } else if (res.status === 'claimed') {
           claimedRef.current = address;
-          clearInterval(id);
+          if (nextTickTimer) clearTimeout(nextTickTimer);
           const event: DepositDetectionEvent = {
             layer: 'spark',
             status: 'claimed',
@@ -133,10 +147,20 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
       }
     };
 
-    const id = setInterval(tick, CLAIM_POLL_MS);
+    let nextTickTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleTick = () => {
+      nextTickTimer = setTimeout(() => {
+        if (cancelled || claimedRef.current === address) return;
+        void tick().finally(() => {
+          if (!cancelled && claimedRef.current !== address) scheduleTick();
+        });
+      }, CLAIM_POLL_MS);
+    };
+    scheduleTick();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      operationController.abort(new Error('Spark deposit claim stopped'));
+      if (nextTickTimer) clearTimeout(nextTickTimer);
     };
   }, [active, address, onClaimed, onStatus]);
 }
