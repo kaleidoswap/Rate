@@ -167,11 +167,16 @@ export default function MapScreen({ navigation }: Props) {
           </View>
         )}
 
-        {/* Attribution chip */}
-        <View style={[styles.attribution, { bottom: insets.bottom + theme.spacing[4] }]}>
-          <View style={styles.attrDot} />
-          <Text style={styles.attrText}>Powered by BTC Map</Text>
-        </View>
+        {/* Attribution chip — pinned to the TOP of the map. btcmap.org renders its
+            own merchant info panel + attribution along the BOTTOM, so a bottom chip
+            sat on top of (and obscured) that content. Hidden while the
+            permission-denied banner occupies the top to avoid double-stacking. */}
+        {permission !== 'denied' && (
+          <View style={[styles.attribution, { top: theme.spacing[3] }]}>
+            <View style={styles.attrDot} />
+            <Text style={styles.attrText}>Powered by BTC Map</Text>
+          </View>
+        )}
 
         {/* Locate-me FAB */}
         <TouchableOpacity
@@ -263,7 +268,7 @@ const styles = StyleSheet.create({
 
   attribution: {
     position: 'absolute',
-    left: theme.spacing[3],
+    right: theme.spacing[3],
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing[1.5],

@@ -12,7 +12,6 @@ import {
   VERBOSITY,
   embed,
   TTS_EN_SUPERTONIC_Q4_0,
-  WHISPER_BASE_Q8_0,
   EMBEDDINGGEMMA_300M_Q4_0,
 } from '@qvac/sdk';
 import { NativeModules, Platform } from 'react-native';
@@ -777,32 +776,14 @@ class QVACService {
     try {
       await this.loadConfig();
 
-      // Delegated: transcription runs on the remote provider's Whisper model
-      // (the same desktop provider the LLM delegates to). The phone downloads no
-      // weights — we pass an SDK descriptor + `delegate`, and the bound modelId
-      // then makes every transcribeAudio() call route over P2P. If the provider
-      // is unreachable we fall through to the local download/load path below.
-      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
-      if (delegating) {
-        this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100, error: null });
-        try {
-          this.whisperModelId = await loadModel({
-            modelSrc: WHISPER_BASE_Q8_0,
-            modelType: 'whispercpp-transcription',
-            modelConfig: { language: deviceWhisperLanguage(), strategy: 'greedy', audio_format: 's16le' } as any,
-            delegate: buildDelegateConfig(this.config.providerPublicKey),
-          } as any);
-          this.setState({ whisperStatus: 'ready' });
-          console.log('[QVAC] Whisper ready (delegated):', this.whisperModelId);
-          return;
-        } catch (delErr) {
-          console.warn(
-            '[QVAC] Whisper delegation failed; falling back to local model:',
-            delErr instanceof Error ? delErr.message : String(delErr)
-          );
-        }
-      }
-
+      // Transcription ALWAYS runs on-device, even when the LLM is delegated to a
+      // desktop. The @qvac/sdk only registers a `delegatedHandler` for completion
+      // (the LLM) — `transcribe`/`textToSpeech` have none, so a Whisper model
+      // loaded with a `delegate` config becomes a delegated registry entry and
+      // every transcribeAudio() call throws "Model … is a delegated model and
+      // cannot be accessed directly", breaking voice mode the moment a desktop is
+      // paired. Whisper-base is tiny (~40 MB) and runs fine locally on any phone,
+      // so we keep STT on-device and delegate only the heavy LLM.
       this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
 
       // Use the user-selected Whisper variant, but keep the phone voice loop
@@ -997,12 +978,15 @@ class QVACService {
     if (this.ttsLoadPromise) return this.ttsLoadPromise;
 
     this.ttsLoadPromise = (async () => {
-      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
-      console.log(`[QVAC] TTS: loading Supertonic GGML model${delegating ? ' (delegated)' : ''}`);
-      // On-device only: free the Whisper weights before loading the neural voice
-      // so the phone never holds both in RAM. When delegating, both models live
-      // on the remote provider, so there's nothing local to unload.
-      if (!delegating && this.whisperModelId) {
+      console.log('[QVAC] TTS: loading Supertonic GGML model');
+      // TTS ALWAYS runs on-device, even when the LLM is delegated. The @qvac/sdk
+      // only forwards completion (the LLM) to a P2P provider — `textToSpeech` has
+      // no delegated handler, so a TTS model loaded with `delegate` throws
+      // "Model … is a delegated model and cannot be accessed directly" on every
+      // synthesize call. The Supertonic model is small, so we keep it local and
+      // delegate only the LLM. Free the Whisper weights first so the phone never
+      // holds both neural voices in RAM at once.
+      if (this.whisperModelId) {
         console.log('[QVAC] TTS: unloading Whisper before neural voice load');
         await this.unloadWhisper().catch(() => {});
       }
@@ -1016,9 +1000,6 @@ class QVACService {
           ttsSpeed: 1.05,
           ttsNumInferenceSteps: 5,
         },
-        ...(delegating
-          ? { delegate: buildDelegateConfig(this.config.providerPublicKey) }
-          : {}),
       } as any);
       this.ttsModelId = id;
       console.log('[QVAC] TTS ready:', id);
