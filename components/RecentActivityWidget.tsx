@@ -13,6 +13,7 @@ import {
 import { useSelector } from 'react-redux';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import { theme } from '../theme';
 import { SectionHeader } from './SectionHeader';
@@ -86,6 +87,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
             ticker: a.ticker,
             name: a.name,
             precision: a.precision ?? 0,
+            protocol: a.protocol,
         }));
         const swaps = (swapHistory || []).map((s: any) => ({
             rfq_id: s.rfq_id,
@@ -126,7 +128,8 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
     return (
         <View style={styles.container}>
             <SectionHeader
-                title="Recent Activity"
+                title="Activity"
+                eyebrow
                 actionLabel="View All"
                 onAction={onViewAll}
                 style={styles.sectionHeader}
@@ -137,7 +140,9 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                     <ActivityIndicator size="small" color={theme.colors.primary[500]} />
                 </View>
             ) : (
-                items.map((item) => {
+                <View style={styles.listWrap}>
+                <View style={styles.list}>
+                {items.map((item) => {
                     const v = typeVisual(item.type);
                     const st = ACTIVITY_STATUS_VISUAL[item.status];
                     const hasAmount = item.amount !== '';
@@ -178,7 +183,18 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                             )}
                         </TouchableOpacity>
                     );
-                })
+                })}
+                </View>
+                {items.length > 2 && (
+                    <LinearGradient
+                        colors={[`${theme.colors.background.primary}00`, theme.colors.background.primary]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0, y: 1 }}
+                        pointerEvents="none"
+                        style={styles.fade}
+                    />
+                )}
+                </View>
             )}
 
             <ActivityDetailSheet item={selected} onClose={() => setSelected(null)} />
@@ -189,7 +205,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
 const styles = StyleSheet.create({
     container: {
         marginTop: theme.spacing[6],
-        marginHorizontal: theme.spacing[4],
+        paddingHorizontal: theme.spacing[4],
     },
     sectionHeader: {
         marginBottom: theme.spacing[3],
@@ -198,15 +214,25 @@ const styles = StyleSheet.create({
         paddingVertical: theme.spacing[6],
         alignItems: 'center',
     },
+    listWrap: {
+        position: 'relative',
+    },
+    list: {
+        gap: theme.spacing[3],
+    },
+    fade: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: 130,
+    },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: theme.colors.surface.primary,
-        borderRadius: theme.borderRadius.lg,
+        borderRadius: theme.borderRadius.xl,
         padding: theme.spacing[3],
-        marginBottom: theme.spacing[2],
-        borderWidth: 1,
-        borderColor: theme.colors.border.light,
     },
     iconWrap: {
         width: 36,

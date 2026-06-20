@@ -3,8 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, StatusBar } from 'react-nativ
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../theme';
 import { BrandMark } from './BrandMark';
+import { BrandLogo } from './brand/BrandLogo';
 
 interface MainHeaderProps {
   title?: string;
@@ -12,12 +14,20 @@ interface MainHeaderProps {
   greeting?: string;
   /** Show the KaleidoSwap mark before the title (defaults on when a greeting is set). */
   showLogo?: boolean;
+  /** Render the full horizontal KaleidoSwap logo (extension parity) instead of greeting/title. */
+  brandLogo?: boolean;
   showNotification?: boolean;
   showSettings?: boolean;
   rightAction?: React.ReactNode;
   icon?: keyof typeof Ionicons.glyphMap;
   onBack?: () => void;
   children?: React.ReactNode;
+  /**
+   * Give the header a downward shadow (and drop the bottom hairline) so content
+   * scrolling beneath a sticky header reads as passing under it. Off by default
+   * so other screens that embed MainHeader inline are unaffected.
+   */
+  elevated?: boolean;
 }
 
 export const MainHeader: React.FC<MainHeaderProps> = ({
@@ -25,21 +35,23 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   subtitle,
   greeting,
   showLogo,
+  brandLogo,
   showNotification,
   showSettings,
   rightAction,
   icon,
   onBack,
   children,
+  elevated,
 }) => {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const withLogo = showLogo ?? !!greeting;
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, elevated && styles.containerElevated]}>
       <StatusBar barStyle="light-content" />
-      <View style={[styles.bar, { paddingTop: insets.top + 4 }]}>
+      <View style={[styles.bar, elevated && styles.barElevated, { paddingTop: insets.top + 4 }]}>
         <View style={styles.content}>
           <View style={styles.row}>
             {onBack && (
@@ -53,19 +65,25 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
             )}
 
             <View style={styles.titleArea}>
-              {greeting && <Text style={styles.greeting}>{greeting}</Text>}
-              <View style={styles.titleRow}>
-                {withLogo && <BrandMark size={24} />}
-                {icon && !withLogo && (
-                  <Ionicons name={icon} size={20} color={theme.colors.text.primary} style={{ marginRight: 8, opacity: 0.9 }} />
-                )}
-                {title && (
-                  <Text style={styles.title} numberOfLines={1}>
-                    {title}
-                  </Text>
-                )}
-              </View>
-              {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+              {brandLogo ? (
+                <BrandLogo height={36} />
+              ) : (
+                <>
+                  {greeting && <Text style={styles.greeting}>{greeting}</Text>}
+                  <View style={styles.titleRow}>
+                    {withLogo && <BrandMark size={24} />}
+                    {icon && !withLogo && (
+                      <Ionicons name={icon} size={20} color={theme.colors.text.primary} style={{ marginRight: 8, opacity: 0.9 }} />
+                    )}
+                    {title && (
+                      <Text style={styles.title} numberOfLines={1}>
+                        {title}
+                      </Text>
+                    )}
+                  </View>
+                  {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+                </>
+              )}
             </View>
 
             <View style={styles.actions}>
@@ -92,6 +110,15 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
           {children && <View style={styles.childrenArea}>{children}</View>}
         </View>
       </View>
+      {elevated && (
+        <LinearGradient
+          colors={['rgba(0,0,0,0.22)', 'rgba(0,0,0,0)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          pointerEvents="none"
+          style={styles.shadowStrip}
+        />
+      )}
     </View>
   );
 };
@@ -100,11 +127,25 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: theme.colors.background.primary,
   },
+  containerElevated: {
+    // Downward shadow so scroll content appears to pass beneath a sticky header.
+    // Tuned to mirror the extension header's `box-shadow: 0 10px 24px rgba(0,0,0,0.22)`.
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 12,
+    zIndex: 10,
+  },
   bar: {
     paddingBottom: theme.spacing[3],
     backgroundColor: theme.colors.background.primary,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: theme.colors.border.light,
+  },
+  barElevated: {
+    // The shadow alone conveys depth — drop the hairline so it doesn't double up.
+    borderBottomWidth: 0,
   },
   content: {
     paddingHorizontal: theme.spacing[4],
@@ -170,5 +211,14 @@ const styles = StyleSheet.create({
   },
   childrenArea: {
     marginTop: theme.spacing[4],
+  },
+  shadowStrip: {
+    // Cross-platform gradient "shadow" spilling below the header, since RN
+    // native box-shadows are unreliable on Android.
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: '100%',
+    height: 16,
   },
 });

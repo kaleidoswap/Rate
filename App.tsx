@@ -8,8 +8,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { View, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView, DeviceEventEmitter } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { ThemeProvider } from '@react-navigation/native';
 import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
@@ -25,6 +27,10 @@ import QVACService from './services/QVACService';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import { KaleidoThemeProvider } from '@kaleidorg/kaleido-ui/native';
+import { useFonts } from 'expo-font';
+import { kaleidoFonts } from '@kaleidorg/kaleido-ui/native/fonts';
+// Side effect: apply Satoshi to every <Text>/<TextInput> app-wide.
+import './theme/satoshiText';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
 import WalletRestoreScreen from './screens/WalletRestoreScreen';
@@ -95,11 +101,177 @@ type TabBarIconProps = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
 
+/**
+ * Floating "island" tab bar (extension parity): a rounded, detached bar with a
+ * lighter rounded pill behind the selected item's icon. The pill uses the same
+ * rounded language as the island so the selection reads as part of it.
+ */
+function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const insets = useSafeAreaInsets();
+  const routes = state.routes;
+  // Split the tabs so a gap opens in the middle for the floating mic button.
+  const mid = Math.ceil(routes.length / 2);
+
+  const onMicPress = () => {
+    // The voice overlay lives on the Wallet/dashboard screen — focus it, then open.
+    navigation.navigate(routes[0].name);
+    DeviceEventEmitter.emit('rate.openVoice');
+  };
+
+  const renderItem = (route: typeof routes[number], index: number) => {
+    const { options } = descriptors[route.key];
+    const rawLabel = options.tabBarLabel ?? options.title ?? route.name;
+    const label = typeof rawLabel === 'string' ? rawLabel : route.name;
+    const focused = state.index === index;
+    const color = focused ? theme.colors.primary[500] : theme.colors.text.muted;
+    const onPress = () => {
+      const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+      if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
+    };
+    return (
+      <TouchableOpacity
+        key={route.key}
+        accessibilityRole="button"
+        accessibilityState={focused ? { selected: true } : {}}
+        onPress={onPress}
+        activeOpacity={0.7}
+        style={[islandStyles.item, focused && islandStyles.itemActive]}
+      >
+        {options.tabBarIcon?.({ focused, color, size: 22 })}
+        <Text style={[islandStyles.label, { color }]} numberOfLines={1}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
+
+  return (
+    // box-none: the bar floats over the scene (absolute), so let touches pass
+    // through everywhere except the actual island/mic/tabs below.
+    <View pointerEvents="box-none" style={[islandStyles.outer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+      {/* "Scroll-out" gradient: sits BEHIND the island, fading from transparent
+          at the top to the page background at the bottom, so content appears to
+          scroll out of the page behind the floating nav. Never blocks touches. */}
+      <LinearGradient
+        colors={[`${theme.colors.background.primary}00`, theme.colors.background.primary]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        pointerEvents="none"
+        style={islandStyles.scrollOutGradient}
+      />
+      <View style={islandStyles.island}>
+        {routes.slice(0, mid).map((r, i) => renderItem(r, i))}
+        <View style={islandStyles.centerGap} />
+        {routes.slice(mid).map((r, i) => renderItem(r, i + mid))}
+      </View>
+      {/* Green mic button — centered over the gap, overflowing the island top. */}
+      <View pointerEvents="box-none" style={islandStyles.micWrap}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="Voice assistant"
+          activeOpacity={0.85}
+          onPress={onMicPress}
+          style={islandStyles.mic}
+        >
+          <Ionicons name="mic" size={26} color={theme.colors.primary[950]} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const islandStyles = StyleSheet.create({
+  outer: {
+    // Float the nav so scene content scrolls UNDERNEATH it. Transparent so the
+    // content + scroll-out gradient show through (no solid background here).
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    // Just enough room above the island for the top third of the mic to overflow.
+    paddingTop: 22,
+  },
+  // Fades from transparent (top) to the page background (bottom), beginning the
+  // fade ABOVE the island so content reads as scrolling out behind the nav.
+  scrollOutGradient: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 160,
+  },
+  island: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    alignSelf: 'center',
+    width: '92%',
+    maxWidth: 360,
+    // Fully-rounded pill (extension `rounded-full`), translucent card (card/60),
+    // shadow, no border.
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 6,
+    backgroundColor: `${theme.colors.surface.primary}`,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  item: {
+    // Active item nearly fills the island interior so the fully-rounded pill
+    // reads as concentric with the island's curve (extension `h-52` in a `py-2`).
+    width: 60,
+    height: 58,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
+  itemActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+  },
+  centerGap: {
+    width: 64,
+  },
+  label: {
+    fontSize: 10,
+    fontWeight: theme.typography.fontWeight.semibold,
+    marginTop: 1,
+  },
+  micWrap: {
+    position: 'absolute',
+    // Mic top sits at the outer's top edge, giving ~22px of overflow above the
+    // island (the rest of the 60px mic overlaps/sits within it).
+    top: 27,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  mic: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: theme.colors.primary[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: theme.colors.primary[500],
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 10,
+  },
+});
+
 function DashboardTabs() {
   const theme = useAppTheme();
 
   return (
     <Tab.Navigator
+      tabBar={(props) => <IslandTabBar {...props} />}
       screenOptions={{
         tabBarActiveTintColor: theme.colors.primary[600],
         tabBarInactiveTintColor: theme.colors.gray[400],
@@ -130,10 +302,10 @@ function DashboardTabs() {
         name="DashboardTab"
         component={DashboardScreen}
         options={{
-          tabBarLabel: 'Home',
+          tabBarLabel: 'Wallet',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons
-              name={focused ? 'home' : 'home-outline'}
+              name={focused ? 'wallet' : 'wallet-outline'}
               size={24}
               color={color}
             />
@@ -153,28 +325,6 @@ function DashboardTabs() {
             />
           ),
         }}
-      />
-      <Tab.Screen
-        name="Scan"
-        component={QRScannerScreen}
-        options={({ navigation }) => ({
-          tabBarLabel: '',
-          tabBarIcon: ({ focused }) => (
-            <TouchableOpacity
-              style={styles.scanButton}
-              onPress={() => navigation.navigate('QRScanner')}
-            >
-              <LinearGradient
-                colors={theme.colors.primary.gradient as [string, string]}
-                style={styles.scanButtonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Ionicons name="qr-code" size={28} color="white" />
-              </LinearGradient>
-            </TouchableOpacity>
-          ),
-        })}
       />
       <Tab.Screen
         name="Map"
@@ -215,7 +365,7 @@ function AppNavigator() {
         screenOptions={{
           headerShown: false,
           gestureEnabled: false,
-          contentStyle: { backgroundColor: theme.colors.background.secondary },
+          contentStyle: { backgroundColor: theme.colors.background.primary },
         }}
       >
         <Stack.Screen name="InitialLoad" component={InitialLoadScreen} />
@@ -324,6 +474,9 @@ function AppLoadingScreen() {
 export default function App() {
   const navigationTheme = createNavigationTheme();
   const [introDone, setIntroDone] = React.useState(false);
+  // Load the Satoshi brand typeface (shipped by kaleido-ui) before first paint
+  // so the app-wide Text patch resolves real faces rather than the system fallback.
+  const [fontsLoaded] = useFonts(kaleidoFonts);
 
   React.useEffect(() => {
     // Initialize network monitoring
@@ -339,6 +492,11 @@ export default function App() {
       networkService.cleanup();
     };
   }, []);
+
+  // Hold on the branded loader until Satoshi is registered (all hooks above run first).
+  if (!fontsLoaded) {
+    return <AppLoadingScreen />;
+  }
 
   return (
     <ErrorBoundary>
@@ -362,24 +520,4 @@ export default function App() {
   );
 }
 
-const styles = StyleSheet.create({
-  scanButton: {
-    top: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    height: 56,
-  },
-  scanButtonGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-});
 
