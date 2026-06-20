@@ -20,6 +20,7 @@ import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
 import { formatAssetAmount } from '../utils/assetAmount';
 import { useAssetIcon } from '../utils';
+import { AssetIcon as SharedAssetIcon } from '../components/AssetIcon';
 import { theme } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
 import { IssueAssetModal } from '../components/IssueAssetModal';
@@ -44,24 +45,21 @@ export default function AssetsScreen({ navigation }: Props) {
   const policy = usePolicy();
   const canIssue = policy.showExperimental;
 
-  // Asset Icon Component
-  const AssetIcon = ({ ticker }: { ticker: string }) => {
-    const { iconUrl } = useAssetIcon(ticker);
-    
-    if (iconUrl) {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
-        </View>
-      );
-    }
-    
-    return (
-      <View style={styles.assetIconContainer}>
-        <Ionicons name="diamond" size={24} color={theme.colors.primary[500]} />
-      </View>
-    );
-  };
+  // Asset Icon — uses the shared icon (logoUri → CDN → fallback) so Arkade/Spark
+  // token icons (and the asset's own icon metadata) render here too.
+  const AssetIcon = ({
+    ticker,
+    logoUri,
+    protocol,
+  }: {
+    ticker: string;
+    logoUri?: string;
+    protocol?: 'RGB' | 'SPARK' | 'ARKADE';
+  }) => (
+    <View style={styles.assetIconContainer}>
+      <SharedAssetIcon ticker={ticker} logoUri={logoUri} protocol={protocol} size={40} />
+    </View>
+  );
 
   useEffect(() => {
     if (activeWallet) {
@@ -100,7 +98,7 @@ export default function AssetsScreen({ navigation }: Props) {
   const renderHeader = () => (
     <View style={styles.headerContainer}>
       <ScreenHeader
-        title="RGB Assets"
+        title="Assets"
         showBack={true}
         rightAction={
           canIssue ? (
@@ -179,7 +177,7 @@ export default function AssetsScreen({ navigation }: Props) {
     >
       <View style={styles.assetCardHeader}>
         <View style={styles.assetCardLeft}>
-          <AssetIcon ticker={asset.ticker} />
+          <AssetIcon ticker={asset.ticker} logoUri={(asset as any).icon} protocol={(asset as any).protocol} />
           <View style={styles.assetInfo}>
             <Text style={styles.assetTicker}>{asset.ticker}</Text>
             <Text style={styles.assetName}>{asset.name}</Text>
