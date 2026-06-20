@@ -733,6 +733,24 @@ export default function SwapScreen({ navigation }: Props) {
   const rgbConnected = protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false;
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
 
+  // The KaleidoSwap maker URL this wallet trades against, read from its RGB (RLN)
+  // network config — the same value initializeWdkProtocols feeds into the maker
+  // client. Surfacing it on the create screen lets the user see which provider is
+  // serving pairs (and spot a missing/misconfigured maker when a pair like
+  // BTC/USD turns up empty).
+  const makerProviderUrl = React.useMemo<string | null>(() => {
+    const rln: any = walletState?.activeWallet?.networks?.find(
+      (n: any) => n.type === 'rln' && n.enabled,
+    );
+    if (!rln?.config) return null;
+    try {
+      const cfg = typeof rln.config === 'string' ? JSON.parse(rln.config) : rln.config;
+      return cfg?.makerUrl || cfg?.baseUrl || cfg?.url || null;
+    } catch {
+      return null;
+    }
+  }, [walletState?.activeWallet]);
+
   // If the active venue filter points at a disconnected venue, fall back to All.
   useEffect(() => {
     if (venueFilter === 'kaleidoswap' && !rgbConnected) setVenueFilter('all');
@@ -779,6 +797,18 @@ export default function SwapScreen({ navigation }: Props) {
     <View style={styles.swapContainer}>
       {/* Venue filter tabs */}
       {renderVenueFilter()}
+
+      {/* KaleidoSwap maker provider — shows which maker is serving pairs so an
+          empty pair list (e.g. "No trading pair found for BTC/USD") is debuggable. */}
+      {rgbConnected && venueFilter !== 'flashnet' && (
+        <View style={styles.makerInfoRow}>
+          <Ionicons name="server-outline" size={13} color={theme.colors.text.tertiary} />
+          <Text style={styles.makerInfoLabel}>Maker</Text>
+          <Text style={styles.makerInfoUrl} numberOfLines={1}>
+            {makerProviderUrl || 'not configured'}
+          </Text>
+        </View>
+      )}
 
       {/* From Section */}
       <View style={styles.swapInputContainer}>
@@ -1274,6 +1304,28 @@ const styles = StyleSheet.create({
 
   swapContainer: {
     gap: theme.spacing[2],
+  },
+
+  makerInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.background.secondary,
+  },
+  makerInfoLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  makerInfoUrl: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.secondary,
   },
 
   swapInputContainer: {
