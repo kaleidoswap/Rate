@@ -46,8 +46,6 @@ import {
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
-import { BackupHealthCard } from '../components/BackupHealthCard';
-import { useBackupHealth } from '../hooks/useBackupHealth';
 import { RecentActivityWidget } from '../components/RecentActivityWidget';
 
 const { width } = Dimensions.get('window');
@@ -123,8 +121,6 @@ export default function DashboardScreen({ navigation }: Props) {
   const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const [loading, setLoading] = useState(true);
   const [channels, setChannels] = useState<Channel[]>([]);
-  // Seed-only recovery covers BTC; RGB assets + channels need node-state backup.
-  const backupHealth = useBackupHealth({ channelCount: channels.length });
   const [btcBalance, setBtcBalanceState] = useState<{
     vanilla: { settled: number; future: number; spendable: number };
     colored: { settled: number; future: number; spendable: number };
@@ -776,9 +772,6 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         </View>
 
-        {/* Honest recovery status: loud when RGB assets/channels can't be
-            restored from the seed alone. Renders nothing for plain-BTC wallets. */}
-        <BackupHealthCard health={backupHealth} />
 
         {isLite && liteUsdDisplay > 0 && (
           <View style={styles.liteUsdCard}>
