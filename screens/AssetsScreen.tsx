@@ -21,7 +21,8 @@ import { AssetRecord } from '../services/DatabaseService';
 import { formatAssetAmount } from '../utils/assetAmount';
 import { useAssetIcon } from '../utils';
 import { AssetIcon as SharedAssetIcon } from '../components/AssetIcon';
-import { theme } from '../theme';
+import { getAssetFamily } from '../utils/account-routing';
+import { theme, protocolColor, protocolTint } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
 import { IssueAssetModal } from '../components/IssueAssetModal';
 import { usePolicy } from '../hooks/usePolicy';
@@ -164,14 +165,20 @@ export default function AssetsScreen({ navigation }: Props) {
     );
   };
 
-  const renderAssetItem = (asset: AssetRecord, index: number) => (
+  const renderAssetItem = (asset: AssetRecord, index: number) => {
+    // The list holds assets from every protocol (RGB, Spark tokens, Arkade), so
+    // classify by id/ticker rather than assuming RGB — this drives the badge and
+    // ensures a Spark token isn't routed through the RGB detail/send flow.
+    const family = getAssetFamily(asset.asset_id, asset.ticker);
+    return (
     <TouchableOpacity
       key={asset.asset_id}
       style={[styles.assetCard, index === 0 && styles.firstAssetCard]}
-      onPress={() => navigation.navigate('AssetDetail', { 
+      onPress={() => navigation.navigate('AssetDetail', {
         asset: {
           ...asset,
-          isRGB: true
+          isRGB: family === 'RGB',
+          protocol: family,
         }
       })}
     >
@@ -179,7 +186,12 @@ export default function AssetsScreen({ navigation }: Props) {
         <View style={styles.assetCardLeft}>
           <AssetIcon ticker={asset.ticker} logoUri={(asset as any).icon} protocol={(asset as any).protocol} />
           <View style={styles.assetInfo}>
-            <Text style={styles.assetTicker}>{asset.ticker}</Text>
+            <View style={styles.assetTickerRow}>
+              <Text style={styles.assetTicker}>{asset.ticker}</Text>
+              <View style={[styles.protocolBadge, { backgroundColor: protocolTint(family) }]}>
+                <Text style={[styles.protocolBadgeText, { color: protocolColor(family) }]}>{family}</Text>
+              </View>
+            </View>
             <Text style={styles.assetName}>{asset.name}</Text>
           </View>
         </View>
@@ -207,7 +219,8 @@ export default function AssetsScreen({ navigation }: Props) {
         </View>
       </View>
     </TouchableOpacity>
-  );
+    );
+  };
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
@@ -451,11 +464,29 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
+  assetTickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[1],
+  },
+
   assetTicker: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.primary[500],
-    marginBottom: theme.spacing[1],
+  },
+
+  protocolBadge: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+  },
+
+  protocolBadgeText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   
   assetName: {

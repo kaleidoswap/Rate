@@ -182,12 +182,14 @@ function DepositMonitorCard({
   layer,
   message,
   accent,
+  methodCount,
 }: {
   visible: boolean;
   status: DepositMonitorStatus;
   layer?: DepositLayer;
   message?: string;
   accent: string;
+  methodCount?: number;
 }) {
   const pulse = React.useRef(new Animated.Value(0)).current;
   const rotate = React.useRef(new Animated.Value(0)).current;
@@ -252,6 +254,21 @@ function DepositMonitorCard({
   const isProblem = status === 'failed' || status === 'expired';
   const iconName: keyof typeof Ionicons.glyphMap = isProblem ? 'alert-circle' : status === 'claimed' ? 'checkmark-circle' : 'sync';
   const iconColor = isProblem ? theme.colors.warning[500] : status === 'claimed' ? theme.colors.success[500] : accent;
+  const isQuietReadyState = status === 'watching' && !message;
+
+  if (isQuietReadyState) {
+    const methodsLabel = methodCount
+      ? `${methodCount} ${methodCount === 1 ? 'method' : 'methods'}`
+      : layerLabel;
+    return (
+      <View style={styles.depositReadyRow}>
+        <View style={[styles.depositReadyDot, { backgroundColor: theme.colors.success[500] }]} />
+        <Text style={styles.depositReadyText}>Ready to receive</Text>
+        <Text style={styles.depositReadyMeta}>· {methodsLabel}</Text>
+        <Ionicons name="radio-outline" size={15} color={theme.colors.text.tertiary} />
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.depositMonitorCard, { borderColor: iconColor + '30' }]}>
@@ -301,13 +318,11 @@ export default function ReceiveScreen({ navigation }: Props) {
   const bitcoinUnit = 'sats' as 'BTC' | 'sats';
   const { formatSatoshisToUSD } = useBitcoinConversion();
 
-  // Responsive QR sizing. The QR sat at a fixed 200px, which is cramped on small
-  // phones (the QR card barely fits) and undersized on large/landscape screens.
-  // Size it off the viewport, subtracting the horizontal chrome around it:
-  // scrollContent padding (20·2) + qrSection padding (24·2) + qrCodeWrapper padding
-  // (16·2) = 120, then clamp to a sensible range.
+  // Keep the complete primary task (QR + Copy/Share) visible on common phone
+  // heights. The previous 248px maximum pushed the actions below the fold even
+  // though a ~220px high-contrast QR remains comfortably scannable.
   const { width: screenWidth } = useWindowDimensions();
-  const qrSize = Math.max(176, Math.min(248, Math.round(screenWidth - 120)));
+  const qrSize = Math.max(172, Math.min(220, Math.round(screenWidth - 144)));
   
   // Safe destructuring with fallbacks
   const rgbAssets = (rgbAssetsRaw || []) as RGBAsset[];
@@ -362,6 +377,10 @@ export default function ReceiveScreen({ navigation }: Props) {
     Array<{ key: string; label: string; value: string }>
   >([]);
   const [showAddressInfo, setShowAddressInfo] = useState(false);
+  // The raw address breakdown is hidden behind a collapsed section by default —
+  // the QR (and its single "Copy" affordance) is the primary way to receive, so
+  // the list of individual addresses only appears when the user expands it.
+  const [showAddresses, setShowAddresses] = useState(false);
   // Per-address "show full" toggles in the unified address list (keyed by row).
   const [expandedAddrs, setExpandedAddrs] = useState<Record<string, boolean>>({});
   // Collapse/expand the full address inside the single-network receive card.
@@ -1614,10 +1633,29 @@ export default function ReceiveScreen({ navigation }: Props) {
     const colorFor = (key: string): string =>
       (NETWORK_COLORS as Record<string, string>)[key] ?? theme.colors.primary[500];
     const trunc = (v: string) => (v.length > 30 ? `${v.slice(0, 16)}…${v.slice(-10)}` : v);
+    const rgbConnected = !!getProtocolStatus().RGB;
     return (
       <View style={styles.addrListSection}>
-        <Text style={styles.addrListTitle}>Addresses</Text>
-        {unifiedAddresses.map((a, idx) => {
+        {/* Collapsed by default — the QR above is the primary receive surface, so
+            the raw per-method addresses stay tucked away until tapped. */}
+        <TouchableOpacity
+          style={styles.addrListHeader}
+          onPress={() => setShowAddresses((v) => !v)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.addrListTitle}>Addresses</Text>
+          <View style={styles.addrListHeaderRight}>
+            <Text style={styles.addrListCount}>
+              {unifiedAddresses.length} {unifiedAddresses.length === 1 ? 'address' : 'addresses'}
+            </Text>
+            <Ionicons
+              name={showAddresses ? 'chevron-up' : 'chevron-down'}
+              size={18}
+              color={theme.colors.text.tertiary}
+            />
+          </View>
+        </TouchableOpacity>
+        {showAddresses && unifiedAddresses.map((a, idx) => {
           const isOpen = !!expandedAddrs[a.key];
           const isCopied = copiedKey === a.key;
           const isLast = idx === unifiedAddresses.length - 1;
@@ -1673,38 +1711,46 @@ export default function ReceiveScreen({ navigation }: Props) {
           );
         })}
 
-        <TouchableOpacity
-          style={styles.addrInfoToggle}
-          onPress={() => setShowAddressInfo((v) => !v)}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="information-circle-outline" size={16} color={theme.colors.text.tertiary} />
-          <Text style={styles.addrInfoToggleText}>What are these addresses?</Text>
-          <Ionicons
-            name={showAddressInfo ? 'chevron-up' : 'chevron-down'}
-            size={16}
-            color={theme.colors.text.tertiary}
-          />
-        </TouchableOpacity>
-        {showAddressInfo && (
-          <Text style={styles.addrInfoBody}>
-            The single QR above carries several ways to be paid — a sender's wallet automatically picks
-            whichever it supports: Bitcoin on-chain, Lightning (instant, low fee), Spark, Arkade or
-            Liquid. You can also copy any individual address above.
-          </Text>
+        {showAddresses && (
+          <>
+            <TouchableOpacity
+              style={styles.addrInfoToggle}
+              onPress={() => setShowAddressInfo((v) => !v)}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="information-circle-outline" size={16} color={theme.colors.text.tertiary} />
+              <Text style={styles.addrInfoToggleText}>What are these addresses?</Text>
+              <Ionicons
+                name={showAddressInfo ? 'chevron-up' : 'chevron-down'}
+                size={16}
+                color={theme.colors.text.tertiary}
+              />
+            </TouchableOpacity>
+            {showAddressInfo && (
+              <Text style={styles.addrInfoBody}>
+                The single QR above carries several ways to be paid — a sender's wallet automatically picks
+                whichever it supports: Bitcoin on-chain, Lightning (instant, low fee), Spark, Arkade or
+                Liquid. You can also copy any individual address above.
+              </Text>
+            )}
+          </>
         )}
 
-        <TouchableOpacity
-          style={styles.addRgbBtn}
-          activeOpacity={0.7}
-          onPress={() => {
-            setShowAllNetworks(true);
-            setShowAssetSelector(true);
-          }}
-        >
-          <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
-          <Text style={styles.addRgbText}>Add RGB address</Text>
-        </TouchableOpacity>
+        {/* Only offer an RGB receive when an RGB node is actually connected —
+            otherwise there is no RGB address to add. */}
+        {rgbConnected && (
+          <TouchableOpacity
+            style={styles.addRgbBtn}
+            activeOpacity={0.7}
+            onPress={() => {
+              setShowAllNetworks(true);
+              setShowAssetSelector(true);
+            }}
+          >
+            <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
+            <Text style={styles.addRgbText}>Add RGB address</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -1940,12 +1986,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   const renderUnifiedContent = () => {
     const accent = NETWORK_COLORS['unified'];
-    return (
-      <>
-        {renderUnifiedBody(accent)}
-        {renderUnifiedAddressList()}
-      </>
-    );
+    return renderUnifiedBody(accent);
   };
 
   // Middle-truncate a long address/invoice for the collapsed card.
@@ -2063,17 +2104,20 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     return (
       <View style={styles.qrSection}>
-        {/* Small refresh tucked top-right — the methods are already listed in the
-            network selector above, so no duplicate methods chip here. */}
+        {/* Explain the universal request in plain language. This gives the user
+            confidence that one QR intentionally covers several Bitcoin rails. */}
         <View style={styles.qrTopBar}>
-          {unifiedLoading ? (
-            <View style={styles.qrStreamHint}>
-              <ActivityIndicator size="small" color={theme.colors.text.tertiary} />
-              <Text style={styles.qrStreamHintText}>Adding more methods…</Text>
+          <View style={styles.universalRequestHeading}>
+            <View style={[styles.universalRequestIcon, { backgroundColor: accent + '1A' }]}>
+              <Ionicons name="apps" size={16} color={accent} />
             </View>
-          ) : (
-            <View style={{ flex: 1 }} />
-          )}
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.universalRequestTitle}>Universal payment request</Text>
+              <Text style={styles.universalRequestSubtitle} numberOfLines={1}>
+                Automatically routes supported Bitcoin payments
+              </Text>
+            </View>
+          </View>
           <TouchableOpacity
             onPress={() => generateUnifiedUri()}
             style={styles.qrRefreshBtn}
@@ -2083,6 +2127,13 @@ export default function ReceiveScreen({ navigation }: Props) {
             <Ionicons name="refresh" size={15} color={theme.colors.text.tertiary} />
           </TouchableOpacity>
         </View>
+
+        {unifiedLoading && (
+          <View style={styles.qrStreamHint}>
+            <ActivityIndicator size="small" color={accent} />
+            <Text style={styles.qrStreamHintText}>Adding another payment method…</Text>
+          </View>
+        )}
 
         <View style={styles.qrContainer}>
           <View style={styles.qrCodeWrapper}>
@@ -2241,14 +2292,16 @@ export default function ReceiveScreen({ navigation }: Props) {
         {renderAssetTabs()}
         {renderNetworkDropdown()}
         {renderAmountRow()}
+        {renderContent()}
         <DepositMonitorCard
           visible={monitorVisible}
           status={monitorStatus}
           layer={monitorLayer}
           message={depositMonitor.message}
           accent={currentAccent}
+          methodCount={networkType === 'unified' ? unifiedMethods.length : 1}
         />
-        {renderContent()}
+        {networkType === 'unified' && renderUnifiedAddressList()}
       </ScrollView>
 
       {/* Asset picker (opened by the "+" tab) */}
@@ -2602,7 +2655,7 @@ const styles = StyleSheet.create({
   
   scrollContent: {
     paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[3],
+    paddingTop: theme.spacing[2],
     paddingBottom: theme.spacing[10],
   },
   
@@ -2873,12 +2926,28 @@ const styles = StyleSheet.create({
     // No horizontal margin: this list lives inside the already-padded scroll
     // content, so it must align edge-to-edge with the QR card above it (a 16px
     // margin here left it visibly narrower and offset).
-    marginTop: 8,
+    marginTop: 4,
     backgroundColor: theme.colors.surface.primary,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: theme.colors.border.light,
-    padding: 12,
+    padding: 10,
+  },
+  addrListHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  addrListHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  addrListCount: {
+    fontSize: 12,
+    color: theme.colors.text.tertiary,
   },
   addrListTitle: {
     fontSize: 11,
@@ -2886,8 +2955,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     textTransform: 'uppercase',
     color: theme.colors.text.tertiary,
-    marginBottom: 6,
-    paddingHorizontal: 4,
   },
   addrRow: {
     flexDirection: 'row',
@@ -2971,20 +3038,11 @@ const styles = StyleSheet.create({
     color: theme.colors.primary[500],
   },
   qrSection: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    paddingHorizontal: theme.spacing[6],
-    paddingTop: theme.spacing[4],
-    paddingBottom: theme.spacing[5],
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingTop: theme.spacing[1],
+    paddingBottom: theme.spacing[2],
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 6.27,
-    elevation: 10,
     zIndex: 0,
   },
 
@@ -3016,7 +3074,7 @@ const styles = StyleSheet.create({
   
   qrContainer: {
     alignItems: 'center',
-    marginBottom: theme.spacing[5],
+    marginBottom: theme.spacing[3],
   },
   
   qrCodeWrapper: {
@@ -3056,8 +3114,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     width: '100%',
     gap: theme.spacing[2],
-    marginBottom: theme.spacing[4],
-    minHeight: 30,
+    marginBottom: theme.spacing[3],
+    minHeight: 42,
   },
   qrRefreshBtn: {
     width: 30,
@@ -3070,15 +3128,42 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border.light,
   },
   qrStreamHint: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    alignSelf: 'flex-start',
+    marginTop: -theme.spacing[2],
+    marginBottom: theme.spacing[2],
+    paddingLeft: theme.spacing[1],
   },
   qrStreamHintText: {
     fontSize: 11,
-    color: theme.colors.text.tertiary,
+    color: theme.colors.text.secondary,
     fontWeight: '500',
+  },
+  universalRequestHeading: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    minWidth: 0,
+  },
+  universalRequestIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  universalRequestTitle: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  universalRequestSubtitle: {
+    fontSize: 11,
+    color: theme.colors.text.secondary,
+    marginTop: 2,
   },
 
   // Collapsible receive card (address / unified URI)
@@ -3089,7 +3174,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingVertical: theme.spacing[3],
     paddingHorizontal: theme.spacing[3],
-    marginBottom: theme.spacing[2],
+    marginBottom: theme.spacing[1],
   },
   uriCardRow: {
     flexDirection: 'row',
@@ -3287,6 +3372,35 @@ const styles = StyleSheet.create({
     color: theme.colors.text.tertiary,
     marginTop: 2,
     lineHeight: 16,
+  },
+  depositReadyRow: {
+    width: '100%',
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing[3],
+    marginBottom: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+  },
+  depositReadyDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginRight: theme.spacing[2],
+  },
+  depositReadyText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  depositReadyMeta: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+    marginLeft: 4,
   },
 
   // Amount row with pencil edit

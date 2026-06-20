@@ -159,9 +159,14 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
             ) : (
               <>
                 <ScrollView style={styles.merchantList} nestedScrollEnabled>
-                  {merchants.map((merchant: any) => (
+                  {merchants.map((merchant: any, index: number) => (
                     <MerchantRow
-                      key={`${merchant.id}`}
+                      // OSM ids are only unique WITHIN an element type, so a node and
+                      // a way can share the same numeric id (BTC Map's `nwr` query
+                      // returns all three). Fold in the list index so the React key is
+                      // always unique — otherwise duplicate ids collide and React
+                      // omits/duplicates rows ("two children with the same key").
+                      key={`${merchant.id ?? 'm'}-${index}`}
                       merchant={merchant}
                       styles={styles}
                       onOpenLink={onOpenLink}
