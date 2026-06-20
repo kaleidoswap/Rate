@@ -4,7 +4,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme, protocolColor } from '../theme';
 import { Card } from './Card';
-import { AssetIcon } from './AssetIcon';
+import { AssetIcon, assetIconColor, resolveAssetIconUri } from './AssetIcon';
+import { useAverageIconColor } from '../utils/iconAverageColor';
 import { Badge } from './Badge';
 import { SectionHeader } from './SectionHeader';
 import { AmountText } from './AmountText';
@@ -28,6 +29,54 @@ interface AssetListProps {
 }
 
 // AssetIcon imported from ./AssetIcon
+
+/**
+ * Single asset card. Its own component so it can derive the gradient accent
+ * from the *average color of the asset's icon* (sampled dynamically), falling
+ * back to the per-ticker brand color until/unless that resolves.
+ */
+const AssetRow: React.FC<{ asset: NiaAsset; onPress: () => void }> = ({ asset, onPress }) => {
+    const iconUri = resolveAssetIconUri(asset.ticker, asset.icon);
+    const accent = useAverageIconColor(iconUri, assetIconColor(asset.ticker));
+    return (
+        <TouchableOpacity style={styles.assetCardWrapper} onPress={onPress}>
+            <LinearGradient
+                // 135deg: navy card 30% → accent@55 75% → accent@b3 100%.
+                colors={[
+                    theme.colors.surface.primary,
+                    theme.colors.surface.primary,
+                    `${accent}55`,
+                    `${accent}B3`,
+                ]}
+                locations={[0, 0.3, 0.75, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.assetVerticalCard}
+            >
+                <View style={styles.assetVerticalContent}>
+                    <View style={styles.assetVerticalLeft}>
+                        <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={36} />
+                        <View style={styles.assetVerticalInfo}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] }}>
+                                <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
+                                {asset.protocol && (
+                                    <Badge label={asset.protocol} color={protocolColor(asset.protocol)} />
+                                )}
+                            </View>
+                            <Text style={styles.assetVerticalName}>{asset.name}</Text>
+                        </View>
+                    </View>
+                    <View style={styles.assetVerticalRight}>
+                        <AmountText style={styles.assetVerticalBalance}>
+                            {formatAssetAmount(getAssetBaseUnitBalance(asset.balance), asset.precision)}
+                        </AmountText>
+                        <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
+                    </View>
+                </View>
+            </LinearGradient>
+        </TouchableOpacity>
+    );
+};
 
 export const AssetList: React.FC<AssetListProps> = ({
     assets,
@@ -54,58 +103,9 @@ export const AssetList: React.FC<AssetListProps> = ({
             ) : (
                 <View style={styles.assetsListWrapper}>
                 <View style={styles.assetsVerticalContainer}>
-                    {assets.slice(0, 3).map((asset) => {
-                      // Per-asset accent gradient (extension parity): BTC → bitcoin
-                      // orange, RGB/Spark/Arkade → their protocol color. Navy fills
-                      // the left ~third, then fades into a muted accent on the right.
-                      const accent =
-                        asset.ticker === 'BTC'
-                          ? theme.colors.networks.bitcoin
-                          : protocolColor(asset.protocol);
-                      return (
-                        <TouchableOpacity
-                            key={asset.asset_id}
-                            style={styles.assetCardWrapper}
-                            onPress={() => onAssetPress(asset)}
-                        >
-                          <LinearGradient
-                            // Mirrors the extension exactly:
-                            // linear-gradient(135deg, card 30%, accent@55 75%, accent@b3 100%)
-                            colors={[
-                              theme.colors.surface.primary,
-                              theme.colors.surface.primary,
-                              `${accent}55`,
-                              `${accent}B3`,
-                            ]}
-                            locations={[0, 0.3, 0.75, 1]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.assetVerticalCard}
-                          >
-                            <View style={styles.assetVerticalContent}>
-                                <View style={styles.assetVerticalLeft}>
-                                    <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={36} />
-                                    <View style={styles.assetVerticalInfo}>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] }}>
-                                            <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
-                                            {asset.protocol && (
-                                                <Badge label={asset.protocol} color={protocolColor(asset.protocol)} />
-                                            )}
-                                        </View>
-                                        <Text style={styles.assetVerticalName}>{asset.name}</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.assetVerticalRight}>
-                                    <AmountText style={styles.assetVerticalBalance}>
-                                        {formatAssetAmount(getAssetBaseUnitBalance(asset.balance), asset.precision)}
-                                    </AmountText>
-                                    <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
-                                </View>
-                            </View>
-                          </LinearGradient>
-                        </TouchableOpacity>
-                      );
-                    })}
+                    {assets.slice(0, 3).map((asset) => (
+                      <AssetRow key={asset.asset_id} asset={asset} onPress={() => onAssetPress(asset)} />
+                    ))}
                     {assets.length > 3 && (
                         <TouchableOpacity
                             style={styles.viewMoreButton}

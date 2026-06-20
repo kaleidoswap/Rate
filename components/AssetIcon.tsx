@@ -34,6 +34,12 @@ const ASSET_COLORS: Record<string, string> = {
   DEFAULT: theme.colors.gray[500],
 };
 
+/** The brand color an asset's icon uses — so other surfaces (e.g. the asset
+ *  card gradient) can tint to match the icon rather than the protocol. */
+export function assetIconColor(ticker?: string): string {
+  return ASSET_COLORS[(ticker ?? '').toUpperCase().trim()] ?? ASSET_COLORS.DEFAULT;
+}
+
 function getCdnUrl(ticker: string): string {
   const normalized = ticker.toUpperCase().trim();
   if (!/^[A-Z0-9-]{1,12}$/.test(normalized)) return '';
@@ -42,6 +48,13 @@ function getCdnUrl(ticker: string): string {
 
 function getFallbackUrl(ticker: string): string {
   return `${DICEBEAR_BASE}?seed=${encodeURIComponent(ticker)}&backgroundType=gradientLinear&radius=50`;
+}
+
+/** The actual image URI the icon renders (asset logo → CDN by ticker). Empty
+ *  string when neither resolves. Shared so other surfaces (e.g. the gradient
+ *  average-color sampler) read the exact same image the icon shows. */
+export function resolveAssetIconUri(ticker: string, logoUri?: string): string {
+  return logoUri || getCdnUrl(ticker);
 }
 
 interface AssetIconProps {
