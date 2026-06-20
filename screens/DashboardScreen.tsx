@@ -397,6 +397,9 @@ export default function DashboardScreen({ navigation }: Props) {
         name: asset.name,
         precision: asset.precision,
         issued_supply: asset.issued_supply,
+        // Carry the owning protocol so downstream (activity, asset detail) can
+        // tell Spark/Arkade tokens apart from RGB instead of treating all as RGB.
+        protocol: asset.protocol,
         balance: getAssetBaseUnitBalance(asset.balance),
         last_updated: Date.now()
       }));
@@ -784,8 +787,9 @@ export default function DashboardScreen({ navigation }: Props) {
           onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
             asset: {
               ...asset,
-              // BTC is the only non-RGB entry in this list.
-              isRGB: asset.asset_id !== 'BTC',
+              // Only true RGB assets are RGB — Spark/Arkade tokens carry their own
+              // protocol and must not be routed through the RGB detail/transfer path.
+              isRGB: asset.asset_id !== 'BTC' && (asset.protocol ?? 'RGB') === 'RGB',
             }
           })}
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}

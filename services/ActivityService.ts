@@ -55,6 +55,8 @@ export interface AssetMeta {
   ticker: string;
   name: string;
   precision: number;
+  /** Owning protocol. Spark/Arkade tokens must NOT be queried via the RGB adapter. */
+  protocol?: 'RGB' | 'SPARK' | 'ARKADE';
 }
 
 export interface SwapActivityInput {
@@ -224,9 +226,12 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
     }
   }
 
-  // 2. RGB on-chain transfers — one call per known RGB asset
+  // 2. RGB on-chain transfers — one call per known RGB asset.
+  // Spark/Arkade tokens live in the same asset list but must never be queried
+  // through the RGB adapter (their txs come from listTransactions in step 3).
   if (rgbConnected) {
     for (const meta of assets) {
+      if (meta.protocol && meta.protocol !== 'RGB') continue;
       try {
         const res: any = await (rgb as any).listTransfers({ asset_id: meta.asset_id });
         const transfers: any[] = res?.transfers || res || [];

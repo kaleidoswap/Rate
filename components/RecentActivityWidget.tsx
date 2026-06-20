@@ -87,6 +87,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
             ticker: a.ticker,
             name: a.name,
             precision: a.precision ?? 0,
+            protocol: a.protocol,
         }));
         const swaps = (swapHistory || []).map((s: any) => ({
             rfq_id: s.rfq_id,
