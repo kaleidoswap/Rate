@@ -110,11 +110,13 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
         const res = await adapter.claimL1Deposit(address);
         if (cancelled) return;
         if (res.status === 'awaiting') {
-          emitStatus({
-            layer: 'spark',
-            status: 'pending',
-            message: 'Waiting for Spark on-chain confirmation',
-          });
+          // 'awaiting' simply means there is no confirmed, claimable UTXO at this
+          // single-use address yet — it fires on EVERY poll while nothing has been
+          // sent. Surfacing it as a "Waiting for on-chain confirmation" deposit
+          // would wrongly imply an incoming Spark deposit is pending, even when the
+          // user is actually receiving a Spark token/native transfer (which settle
+          // instantly and are caught by the balance watcher). Stay silent here and
+          // only react to a genuine claim below.
         } else if (res.status === 'claimed') {
           claimedRef.current = address;
           clearInterval(id);

@@ -13,7 +13,7 @@ index 3b34f5ff04b84ddae8ab75a2b3d0483aaedfafd8..3529e9842b4ac9005b42a356097a68fd
              }
              else {
 diff --git a/dist/adapters/wdk/ArkadeWdkAdapter.js b/dist/adapters/wdk/ArkadeWdkAdapter.js
-index 810f8e39ba5f16a82ee06eab475170f28b87ff50..54b8a33f726b0d78ce09bcb9c598d023c07d31b5 100644
+index 810f8e39ba5f16a82ee06eab475170f28b87ff50..6741634908142073487b879f76fed1081e711e95 100644
 --- a/dist/adapters/wdk/ArkadeWdkAdapter.js
 +++ b/dist/adapters/wdk/ArkadeWdkAdapter.js
 @@ -22,6 +22,7 @@ import { ProtocolError, } from '../../types/base';
@@ -99,7 +99,7 @@ index 810f8e39ba5f16a82ee06eab475170f28b87ff50..54b8a33f726b0d78ce09bcb9c598d023
      async getTransaction(txId) {
          const all = await this.listTransactions();
 diff --git a/dist/adapters/wdk/SparkWdkAdapter.js b/dist/adapters/wdk/SparkWdkAdapter.js
-index da28b93ba88658492eb76776b96a77745597d7b6..5eda932d0c703ab374fd30f1f2d40a16da34b24f 100644
+index da28b93ba88658492eb76776b96a77745597d7b6..46a04ae6e7261ccdf2956eef31b10bdd856e09fe 100644
 --- a/dist/adapters/wdk/SparkWdkAdapter.js
 +++ b/dist/adapters/wdk/SparkWdkAdapter.js
 @@ -26,6 +26,22 @@ import { ProtocolError, } from '../../types/base';
@@ -162,7 +162,62 @@ index da28b93ba88658492eb76776b96a77745597d7b6..5eda932d0c703ab374fd30f1f2d40a16
          this.connected = true;
      }
      async disconnect() {
-@@ -386,8 +418,21 @@ export class SparkWdkAdapter {
+@@ -228,8 +260,52 @@ export class SparkWdkAdapter {
+                 supportsOnchain: true,
+             },
+         };
+-        // TODO(Phase 2): enumerate Spark tokens from account.getBalance() token map.
+-        return [btc];
++        const assets = [btc];
++        // Enumerate Spark tokens (e.g. a token just received on Spark, or USDB
++        // bought on the Flashnet AMM). The WDK account.getBalance() only returns
++        // BTC sats, so read the richer { balance, tokenBalances } map off the
++        // underlying spark-sdk wallet. tokenBalances is keyed by the bech32m token
++        // identifier (btkn1…).
++        try {
++            const wallet = this.getUnderlyingSparkWallet();
++            const res = wallet ? await this.withRetry(() => wallet.getBalance()) : null;
++            const tokenBalances = res?.tokenBalances;
++            if (tokenBalances && typeof tokenBalances.forEach === 'function') {
++                tokenBalances.forEach((info, tokenId) => {
++                    const meta = info?.tokenMetadata ?? info?.tokenInfo ?? {};
++                    const owned = Number(info?.ownedBalance ?? info?.balance ?? 0);
++                    const available = Number(info?.availableToSendBalance ?? info?.ownedBalance ?? info?.balance ?? 0);
++                    const precision = Number(meta?.decimals ?? meta?.tokenDecimals ?? 0);
++                    assets.push({
++                        id: tokenId,
++                        name: meta?.tokenName ?? meta?.name ?? tokenId,
++                        ticker: meta?.tokenTicker ?? meta?.symbol ?? '',
++                        precision,
++                        protocol: 'SPARK',
++                        layer: 'SPARK_SPARK',
++                        balance: {
++                            total: owned,
++                            available,
++                            pending: 0,
++                            totalDisplay: String(owned),
++                            availableDisplay: String(available),
++                        },
++                        capabilities: {
++                            canSend: true,
++                            canReceive: true,
++                            canSwap: true,
++                            supportsLightning: false,
++                            supportsOnchain: false,
++                        },
++                    });
++                });
++            }
++        }
++        catch (err) {
++            // Non-fatal: token enumeration must not break the BTC listing.
++            console.warn('[SparkWdkAdapter] token enumeration failed:', err);
++        }
++        return assets;
+     }
+     async getAssetBalance(assetId) {
+         const assets = await this.listAssets();
+@@ -386,8 +462,21 @@ export class SparkWdkAdapter {
      }
      /** Map a spark-sdk Transfer (proto) → domain UnifiedTransaction (fields read defensively). */
      toUnifiedTx(t) {
@@ -186,7 +241,7 @@ index da28b93ba88658492eb76776b96a77745597d7b6..5eda932d0c703ab374fd30f1f2d40a16
          const tsRaw = t?.createdTime ?? t?.updatedTime ?? t?.createdAt;
          const timestamp = typeof tsRaw === 'number'
              ? tsRaw
-@@ -399,7 +444,7 @@ export class SparkWdkAdapter {
+@@ -399,7 +488,7 @@ export class SparkWdkAdapter {
          return {
              id: t?.id ?? t?.sparkId ?? '',
              type: isReceive ? 'receive' : 'send',

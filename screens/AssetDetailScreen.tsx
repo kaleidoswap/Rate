@@ -41,6 +41,7 @@ interface Props {
           spendable: number;
         };
         isRGB?: boolean;
+        protocol?: 'BTC' | 'RGB' | 'SPARK' | 'ARKADE';
       };
     };
   };
@@ -71,6 +72,19 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   // below ensure we never call the RGB/NWC node when it isn't connected.
   const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
   const isBTC = asset.asset_id === 'BTC';
+  // Honor the protocol classified by the caller (RGB vs Spark token vs Arkade);
+  // only fall back to the old "non-BTC ⇒ RGB" assumption when it wasn't provided,
+  // so a Spark token is not pushed through the RGB send/receive flow.
+  const isRGB = asset.isRGB ?? !isBTC;
+  // Human label for the asset type chip — protocol-aware so a Spark token is not
+  // mislabelled "RGB Asset".
+  const assetTypeLabel = isBTC
+    ? 'Bitcoin'
+    : asset.protocol === 'SPARK'
+      ? 'Spark Token'
+      : asset.protocol === 'ARKADE'
+        ? 'Arkade Asset'
+        : 'RGB Asset';
 
   useEffect(() => {
     loadAssetDetails();
@@ -98,23 +112,23 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   };
 
   const handleSend = () => {
-    navigation.navigate('Send', { 
+    navigation.navigate('Send', {
       selectedAsset: {
         asset_id: assetDetails.asset_id,
         ticker: assetDetails.ticker,
         name: assetDetails.name,
-        isRGB: !isBTC,
+        isRGB,
       }
     });
   };
 
   const handleReceive = () => {
-    navigation.navigate('Receive', { 
+    navigation.navigate('Receive', {
       selectedAsset: {
         asset_id: assetDetails.asset_id,
         ticker: assetDetails.ticker,
         name: assetDetails.name,
-        isRGB: !isBTC,
+        isRGB,
       }
     });
   };
@@ -182,7 +196,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
               <Text style={styles.assetName}>{assetDetails.name}</Text>
               <View style={styles.assetTypeContainer}>
                 <Text style={styles.assetType}>
-                  {isBTC ? 'Bitcoin' : 'RGB Asset'}
+                  {assetTypeLabel}
                 </Text>
               </View>
             </View>
