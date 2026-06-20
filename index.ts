@@ -40,6 +40,25 @@ if (globalAny?.HermesInternal?.hasPromise?.() && globalAny.HermesInternal.enable
   });
 }
 
+// Silence the Arkade ContractWatcher's recoverable reconnect noise. The watcher
+// (in @arkade-os/sdk) logs `ContractWatcher connection failed: …` (often
+// "subscription not found" — the indexer expired the SSE subscription) on every
+// failed re-subscribe, then immediately schedules a reconnect AND runs failsafe
+// polling, so Arkade funds are still detected. The per-attempt error is therefore
+// non-actionable churn that floods the console. We drop only that exact line and
+// pass everything else (including the watcher's terminal "Max reconnection
+// attempts reached" error) straight through.
+{
+  const originalConsoleError = console.error.bind(console);
+  console.error = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === 'string' && first.startsWith('ContractWatcher connection failed')) {
+      return;
+    }
+    originalConsoleError(...args);
+  };
+}
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';

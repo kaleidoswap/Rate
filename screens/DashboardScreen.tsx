@@ -46,6 +46,7 @@ import {
 } from '../components';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
+import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
 import { RecentActivityWidget } from '../components/RecentActivityWidget';
 
@@ -777,16 +778,28 @@ export default function DashboardScreen({ navigation }: Props) {
             btcListEntry,
             ...(isLite
               ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
-              : rgbAssets),
+              // The list mixes protocols (RGB, Spark tokens, Arkade), so tag each
+              // asset with its real family for the badge instead of leaving it bare.
+              : rgbAssets.map((a) => ({
+                  ...a,
+                  // rgbAssets never contains BTC (filtered upstream), so the family
+                  // is always one of the badge-able protocols.
+                  protocol: getAssetFamily(a.asset_id, a.ticker) as 'RGB' | 'SPARK' | 'ARKADE',
+                }))),
           ]}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
-          onAssetPress={(asset) => navigation.getParent()?.navigate('AssetDetail', {
-            asset: {
-              ...asset,
-              // BTC is the only non-RGB entry in this list.
-              isRGB: asset.asset_id !== 'BTC',
-            }
-          })}
+          onAssetPress={(asset) => {
+            const family = getAssetFamily(asset.asset_id, asset.ticker);
+            navigation.getParent()?.navigate('AssetDetail', {
+              asset: {
+                ...asset,
+                // Only RGB assets route through the RGB detail/send flow; Spark
+                // tokens and BTC must not be treated as RGB.
+                isRGB: family === 'RGB',
+                protocol: family,
+              }
+            });
+          }}
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 

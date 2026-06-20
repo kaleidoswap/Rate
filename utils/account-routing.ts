@@ -56,6 +56,13 @@ export const METHOD_META: Record<TransferMethod, MethodMeta> = {
 
 export function getAssetFamily(assetId: string, ticker?: string | null): AssetFamily {
   if (assetId === 'BTC') return 'BTC'
+  // Classify by asset-id format first — it's authoritative across all tickers.
+  // Spark BTKN token identifiers are bech32m (btkn1…); RGB contract ids are
+  // rgb:…/rgb1…; Arkade asset ids are bech32m (ark…). A Spark stablecoin like
+  // USDB has a plain ticker, so ticker-only classification would wrongly tag it RGB.
+  const id = (assetId || '').trim().toLowerCase()
+  if (id.startsWith('btkn')) return 'SPARK'
+  if (id.startsWith('rgb:') || id.startsWith('rgb1')) return 'RGB'
   const normalized = (ticker || '').trim().toUpperCase()
   if (normalized.startsWith('SPARK')) return 'SPARK'
   if (normalized.startsWith('ARK')) return 'ARKADE'
