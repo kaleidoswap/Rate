@@ -347,7 +347,9 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[700],
+    // primary[700] is a light-theme dark-green that reads as low-contrast on the
+    // dark green tint; text.secondary is the readable on-dark body colour.
+    color: theme.colors.text.secondary,
     lineHeight: 20,
   },
   
@@ -395,14 +397,16 @@ const styles = StyleSheet.create({
   
   previewLabel: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.success[600],
+    // success[600] is a light-theme dark-green; success[500] is the bright
+    // on-dark brand green that stays legible against the dark success tint.
+    color: theme.colors.success[500],
     marginBottom: theme.spacing[1],
   },
-  
+
   previewAmount: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
-    color: theme.colors.success[600],
+    color: theme.colors.success[500],
   },
   
   footer: {

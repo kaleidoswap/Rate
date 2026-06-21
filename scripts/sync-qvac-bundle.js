@@ -1,48 +1,77 @@
 #!/usr/bin/env node
 /**
- * Restore the QVAC mobile worker bundle into the SDK package.
+ * Generate and sync the QVAC mobile worker bundle.
  *
- * The `@qvac/sdk/expo-plugin` (withMobileBundle) generates `qvac/worker.bundle.js`
- * during `expo prebuild` and copies it to
- * `node_modules/@qvac/sdk/dist/worker.mobile.bundle.js` — which the SDK then
- * `require()`s at runtime. That copy lives inside node_modules, so any
- * `npm/pnpm install` wipes it and the app crashes with:
- *   "Cannot find module '@qvac/sdk/worker.mobile.bundle'".
- *
- * This script re-copies the already-generated, verified bundle after install.
- * It no-ops (exit 0) when the source bundle hasn't been generated yet — run
- * `expo prebuild` once to produce it.
+ * The worker bundle embeds native addon identifiers such as bare-url.2.4.5.
+ * If node_modules changes and we only copy an old bundle back into @qvac/sdk,
+ * the worker can request addon versions that are no longer present in the iOS
+ * app and crash with ADDON_NOT_FOUND. Regenerating here keeps the JS worker
+ * bundle and native linked addons in lockstep after installs.
  */
 const fs = require('fs');
 const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..');
-const src = path.join(projectRoot, 'qvac', 'worker.bundle.js');
+const hosts = ['android-arm64', 'ios-arm64', 'ios-arm64-simulator', 'ios-x64-simulator'];
 
-function resolveSdkDistDir() {
+function resolveSdkDir() {
   try {
-    // Resolve the SDK package.json, then its dist dir.
-    const pkgJson = require.resolve('@qvac/sdk/package.json', { paths: [projectRoot] });
-    return path.join(path.dirname(pkgJson), 'dist');
+    const pluginEntry = require.resolve('@qvac/sdk/expo-plugin', { paths: [projectRoot] });
+    return path.resolve(path.dirname(pluginEntry), '..', '..', '..');
   } catch {
-    return path.join(projectRoot, 'node_modules', '@qvac', 'sdk', 'dist');
+    return null;
   }
 }
 
-const dest = path.join(resolveSdkDistDir(), 'worker.mobile.bundle.js');
+async function main() {
+  const sdkPath = resolveSdkDir();
+  if (!sdkPath) {
+    console.log('[sync-qvac-bundle] @qvac/sdk not installed. Skipping.');
+    return;
+  }
 
-if (!fs.existsSync(src)) {
-  console.log('[sync-qvac-bundle] qvac/worker.bundle.js not generated yet — run `expo prebuild`. Skipping.');
-  process.exit(0);
-}
-if (fs.existsSync(dest) && fs.statSync(dest).size === fs.statSync(src).size) {
-  process.exit(0); // already in place
-}
-try {
+  const sdkPackagePath = path.join(sdkPath, 'package.json');
+  const sdkPackage = JSON.parse(fs.readFileSync(sdkPackagePath, 'utf8'));
+  const configPath = path.join(projectRoot, 'qvac.config.json');
+  const bundleOptions = {
+    projectRoot,
+    sdkPath,
+    hosts,
+    defer: ['expo-file-system', 'react-native-bare-kit', `${sdkPackage.name}/worker.mobile.bundle`],
+    quiet: false,
+  };
+
+  if (fs.existsSync(configPath)) {
+    bundleOptions.configPath = configPath;
+  }
+
+  const {
+    bundleSdk,
+    verifyBundle,
+    hasErrors,
+    formatVerifyBundleResult,
+  } = await import('@qvac/sdk/commands');
+
+  const result = await bundleSdk(bundleOptions);
+  const verification = await verifyBundle({
+    projectRoot,
+    addonsSource: result.bundlePath,
+    hosts,
+    ...(bundleOptions.configPath ? { configPath: bundleOptions.configPath } : {}),
+  });
+
+  if (hasErrors(verification)) {
+    console.error(formatVerifyBundleResult(verification));
+    throw new Error('QVAC worker bundle verification failed');
+  }
+
+  const dest = path.join(sdkPath, 'dist', 'worker.mobile.bundle.js');
   fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-  console.log(`[sync-qvac-bundle] restored worker.mobile.bundle.js (${fs.statSync(dest).size} bytes)`);
-} catch (e) {
-  console.warn('[sync-qvac-bundle] could not restore bundle:', e.message);
-  // Don't fail the install — the plugin / prebuild can still produce it.
+  fs.copyFileSync(result.bundlePath, dest);
+  console.log(`[sync-qvac-bundle] generated and synced ${path.relative(projectRoot, dest)}`);
 }
+
+main().catch((error) => {
+  console.error('[sync-qvac-bundle] failed:', error && error.stack ? error.stack : error);
+  process.exit(1);
+});

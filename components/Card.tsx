@@ -262,9 +262,9 @@ const styles = StyleSheet.create({
   },
   
   errorContent: {
-    backgroundColor: '#fee2e2',
-    borderRadius: 4,
-    padding: 8,
+    backgroundColor: theme.colors.error[50],
+    borderRadius: theme.borderRadius.sm,
+    padding: theme.spacing[2],
     minHeight: 20,
   },
 });

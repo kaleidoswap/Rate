@@ -6,17 +6,25 @@ const path = require('path');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// Allow Metro to resolve local packages still linked via file:
-// @kaleidorg/wallet-engine is a local file: sibling (not yet published under the new
-// name), so Metro watches it and resolves it from ../wallet-engine (its built dist/).
-const walletEngineRoot = path.resolve(__dirname, '../wallet-engine');
+// Allow Metro to resolve local packages still linked from siblings:
+// @kaleidorg/wallet-engine is a local sibling when present; fall back to
+// the npm version in node_modules when the sibling doesn't exist (CI / fresh clone).
+const fs = require('fs');
+const localWalletEngine = path.resolve(__dirname, '../wallet-engine');
+const walletEngineRoot = fs.existsSync(localWalletEngine)
+  ? localWalletEngine
+  : path.resolve(__dirname, 'node_modules/@kaleidorg/wallet-engine');
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 // @kaleidorg/mind — the shared agentic engine, also published to npm as
-// @kaleidorg/mind. Linked via file: for fast local dev (pure JS dist/, no
+// @kaleidorg/mind. Linked from a sibling for fast local dev (pure JS dist/, no
 // native deps). To consume the published version instead, set its dep to
 // `^0.0.1` and drop this watchFolder.
 const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
-config.watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot];
+// The QVAC adapter ships as the @kaleidorg/mind/qvac subpath inside core, so
+// watching core covers it too — no separate watchFolder needed.
+const watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot]
+  .filter(p => fs.existsSync(p));
+config.watchFolders = watchFolders;
 config.resolver.nodeModulesPaths = [
   path.resolve(__dirname, 'node_modules'),
   path.resolve(kaleidoUiRoot, 'node_modules'),
@@ -43,6 +51,12 @@ config.resolver.blockList = exclusionList(blockedLinkedModules);
 // Force all shared deps to resolve from rate's node_modules (single copy, correct platform entries)
 config.resolver.extraNodeModules = {
   '@kaleidorg/wallet-engine': walletEngineRoot,
+  // Babel's transform-runtime rewrites helper calls (createClass, inherits, …) to
+  // `require('@babel/runtime/helpers/*')` in EVERY transpiled file. The sibling
+  // watchFolders (wallet-engine, kaleido-ui) don't carry their own @babel/runtime,
+  // so without this mapping their modules can't resolve the helpers and the bundle
+  // fails at index.ts. Pin it to rate's single hoisted copy.
+  '@babel/runtime': path.resolve(__dirname, 'node_modules/@babel/runtime'),
   react: path.resolve(__dirname, 'node_modules/react'),
   'react-native': path.resolve(__dirname, 'node_modules/react-native'),
   'react-native-svg': path.resolve(__dirname, 'node_modules/react-native-svg'),
@@ -73,7 +87,7 @@ config.resolver.alias = {
 // The WDK wallet modules now come from npm (published versions) / a github dep, so
 // they resolve from node_modules normally — no sibling watchFolders needed. Keep the
 // shared @tetherto/wdk-wallet base as a single copy to avoid duplicate instances
-// (only @kaleidorg/wallet-engine remains a file: sibling, watched above).
+// (only @kaleidorg/wallet-engine remains a linked sibling, watched above).
 config.resolver.extraNodeModules['@tetherto/wdk-wallet'] = path.resolve(
   __dirname,
   'node_modules/@tetherto/wdk-wallet'

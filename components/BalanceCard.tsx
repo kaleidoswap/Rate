@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, protocolColor } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
 import { Skeleton } from './Skeleton';
+import { AmountText } from './AmountText';
 
 interface ProtocolBalance {
     confirmed: number;
@@ -36,12 +37,18 @@ interface BalanceCardProps {
     primaryUnitLabel?: string;
     secondaryText?: string;
     onCycleDenomination?: () => void;
+    /**
+     * Rendered inside the card, below the balance/breakdown and separated by an
+     * inset divider line. Used to host the action buttons (Receive/Swap/Send) so
+     * the whole wallet header reads as one unified card (extension parity).
+     */
+    footer?: React.ReactNode;
 }
 
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
-    { key: 'RGB', label: 'RLN', color: '#2BEE79' },
-    { key: 'SPARK', label: 'Spark', color: '#60A5FA' },
-    { key: 'ARKADE', label: 'Arkade', color: '#A855F7' },
+    { key: 'RGB', label: 'RLN', color: protocolColor('RGB') },
+    { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
+    { key: 'ARKADE', label: 'Arkade', color: protocolColor('ARKADE') },
 ];
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({
@@ -51,18 +58,72 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     refreshing,
     formatSatoshis,
     formatUSD,
+    lightningBalance,
     byProtocol,
     loading,
     primaryText,
     primaryUnitLabel,
     secondaryText,
     onCycleDenomination,
+    footer,
 }) => {
     const useDenominated = primaryText !== undefined;
     // Filter to only protocols with balance data
     const activeProtocols = byProtocol
         ? PROTOCOL_DISPLAY.filter(p => byProtocol[p.key as keyof typeof byProtocol])
         : [];
+    // Per-network balances are collapsed behind a chevron (extension parity).
+    const [showBreakdown, setShowBreakdown] = useState(false);
+
+    // Vertical breakdown rows. On-chain is always present; the protocol legs
+    // (RLN / Spark / Arkade) appear only when that key exists in `byProtocol`,
+    // mirroring the `activeProtocols` presence logic as individual rows.
+    const breakdownRows: Array<{
+        key: 'BITCOIN' | 'RGB' | 'SPARK' | 'ARKADE';
+        name: string;
+        subtitle: string;
+        accent: string;
+        value: number;
+    }> = [
+        {
+            key: 'BITCOIN',
+            name: 'BTC on-chain',
+            subtitle: 'Standard Bitcoin balance',
+            accent: theme.colors.networks.bitcoin,
+            // On-chain = the RGB/RLN node's L1 balance (mirrors the extension's
+            // `btcOnchain = onchainData.confirmedSat`). `onChainBalance` is the
+            // aggregate spendable total, so it can't be used for this row.
+            value: byProtocol?.RGB?.total ?? 0,
+        },
+    ];
+    if (byProtocol && 'RGB' in byProtocol) {
+        breakdownRows.push({
+            key: 'RGB',
+            name: 'BTC on RLN',
+            subtitle: 'RLN balance',
+            accent: protocolColor('RGB'),
+            // RLN = Lightning channel balance (extension's `btcLightning`).
+            value: lightningBalance,
+        });
+    }
+    if (byProtocol && 'SPARK' in byProtocol) {
+        breakdownRows.push({
+            key: 'SPARK',
+            name: 'BTC on Spark',
+            subtitle: 'Spark balance',
+            accent: protocolColor('SPARK'),
+            value: byProtocol?.SPARK?.total ?? 0,
+        });
+    }
+    if (byProtocol && 'ARKADE' in byProtocol) {
+        breakdownRows.push({
+            key: 'ARKADE',
+            name: 'BTC on Arkade',
+            subtitle: 'Arkade balance',
+            accent: protocolColor('ARKADE'),
+            value: byProtocol?.ARKADE?.total ?? 0,
+        });
+    }
 
     return (
         <View style={styles.container}>
@@ -83,65 +144,106 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}. Tap to change denomination.`}
                     >
                         <View style={styles.balanceRow}>
-                            <Text style={styles.balanceAmount}>{primaryText}</Text>
+                            <AmountText style={styles.balanceAmount}>{primaryText}</AmountText>
                             {!!primaryUnitLabel && (
                                 <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
                             )}
                         </View>
-                        <Text style={styles.balanceUsd}>{secondaryText ?? ''}</Text>
+                        <AmountText style={styles.balanceUsd}>{secondaryText ?? ''}</AmountText>
                     </TouchableOpacity>
                 ) : (
                     <>
                         <View style={styles.balanceRow}>
-                            <Text style={styles.balanceAmount}>
+                            <AmountText style={styles.balanceAmount}>
                                 {formatSatoshis(totalBalance)}
-                            </Text>
+                            </AmountText>
                             <Text style={styles.balanceCurrency}>{bitcoinUnit}</Text>
                         </View>
-                        <Text style={styles.balanceUsd}>
+                        <AmountText style={styles.balanceUsd}>
                             {formatUSD(totalBalance) !== '0.00' ? `$${formatUSD(totalBalance)} USD` : ''}
-                        </Text>
+                        </AmountText>
                     </>
                 )}
             </View>
 
-            {/* Refresh button */}
-            <TouchableOpacity
-                style={styles.refreshButton}
-                onPress={onRefresh}
-                disabled={refreshing}
-            >
-                <Ionicons
-                    name="refresh"
-                    size={16}
-                    color="rgba(255,255,255,0.8)"
-                    style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
-                />
-            </TouchableOpacity>
+            {/* Top-right controls: refresh + (optional) network-balance toggle */}
+            <View style={styles.topControls}>
+                <TouchableOpacity
+                    style={styles.controlButton}
+                    onPress={onRefresh}
+                    disabled={refreshing}
+                    accessibilityLabel="Refresh balance"
+                >
+                    <Ionicons
+                        name="refresh"
+                        size={16}
+                        color={theme.colors.text.secondary}
+                        style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
+                    />
+                </TouchableOpacity>
+                {activeProtocols.length > 0 && (
+                    <TouchableOpacity
+                        style={styles.controlButton}
+                        onPress={() => setShowBreakdown(v => !v)}
+                        accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
+                    >
+                        <Ionicons
+                            name={showBreakdown ? 'chevron-up' : 'chevron-down'}
+                            size={16}
+                            color={theme.colors.text.secondary}
+                        />
+                    </TouchableOpacity>
+                )}
+            </View>
 
-            {/* Per-protocol breakdown (only show protocols with data) */}
-            {activeProtocols.length > 0 && (
-                <View style={styles.balanceBreakdown}>
-                    {activeProtocols.map((proto, idx) => {
-                        const bal = (byProtocol as any)[proto.key] as ProtocolBalance;
-                        return (
-                            <React.Fragment key={proto.key}>
-                                {idx > 0 && <View style={styles.breakdownDivider} />}
-                                <View style={styles.breakdownItem}>
-                                    <View style={[styles.breakdownIcon, { backgroundColor: proto.color + '25' }]}>
-                                        <NetworkIcon network={proto.key} size={16} color={proto.color} />
-                                    </View>
-                                    <View style={styles.breakdownText}>
-                                        <Text style={styles.breakdownLabel}>{proto.label}</Text>
-                                        <Text style={styles.breakdownValue}>
-                                            {formatSatoshis(bal.total)} <Text style={styles.breakdownUnit}>{bitcoinUnit}</Text>
-                                        </Text>
-                                    </View>
+            {/* Per-network breakdown — vertical row list, collapsed behind the
+                chevron above. Mirrors the extension's BITCOIN section. */}
+            {activeProtocols.length > 0 && showBreakdown && (
+                <View style={styles.breakdownSection}>
+                    <View style={styles.breakdownHairline} />
+                    <Text style={styles.breakdownEyebrow}>Bitcoin</Text>
+                    <View style={styles.breakdownList}>
+                        {breakdownRows.map((row) => (
+                            <View
+                                key={row.key}
+                                style={[styles.networkRow, row.value === 0 && styles.networkRowDimmed]}
+                            >
+                                <View style={[styles.networkAccentBar, { backgroundColor: row.accent }]} />
+                                <View style={[styles.networkIconChip, { backgroundColor: row.accent + '22' }]}>
+                                    {row.key === 'BITCOIN' ? (
+                                        <Ionicons name="link" size={15} color={row.accent} />
+                                    ) : row.key === 'RGB' ? (
+                                        <Ionicons name="flash" size={15} color={row.accent} />
+                                    ) : (
+                                        <NetworkIcon network={row.key} size={15} color={row.accent} />
+                                    )}
                                 </View>
-                            </React.Fragment>
-                        );
-                    })}
+                                <View style={styles.networkTextBlock}>
+                                    <Text style={styles.networkName}>{row.name}</Text>
+                                    <Text style={styles.networkSubtitle}>{row.subtitle}</Text>
+                                </View>
+                                <View style={styles.networkValueBlock}>
+                                    <AmountText style={styles.networkValueFiat}>
+                                        {`$${formatUSD(row.value)}`}
+                                    </AmountText>
+                                    <AmountText style={styles.networkValueSats}>
+                                        {`${formatSatoshis(row.value)} ${bitcoinUnit}`}
+                                    </AmountText>
+                                </View>
+                            </View>
+                        ))}
+                    </View>
                 </View>
+            )}
+
+            {/* Inset divider + footer (action buttons) — turns the balance + actions
+                into a single unified card, matching the extension. The divider sits
+                within the card's padding so it stops short of the card edges. */}
+            {footer !== undefined && footer !== null && (
+                <>
+                    <View style={styles.footerDivider} />
+                    {footer}
+                </>
             )}
         </View>
     );
@@ -149,93 +251,143 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 
 const styles = StyleSheet.create({
     container: {
-        paddingHorizontal: 16,
-        paddingTop: 8,
-        paddingBottom: 16,
+        // Distinct rounded card surface, matching the extension's TOTAL BALANCE
+        // card (#0F1C33, 16px radius, hairline border on the navy background).
+        backgroundColor: theme.colors.surface.primary,
+        borderRadius: 16,
+        padding: theme.spacing[4],
     },
     totalBalanceContainer: {
-        alignItems: 'center',
-        marginBottom: 16,
+        // Left-aligned to match the extension's TOTAL BALANCE card.
+        alignItems: 'flex-start',
+        marginBottom: theme.spacing[4],
     },
     balanceLabel: {
-        fontSize: 13,
-        color: 'rgba(255,255,255,0.7)',
-        marginBottom: 4,
+        // Eyebrow label — matches the extension: uppercase, dimmed, wide tracking.
+        fontSize: 11,
+        fontWeight: theme.typography.fontWeight.semibold,
+        letterSpacing: 1.4,
+        textTransform: 'uppercase',
+        color: theme.colors.text.muted,
+        marginBottom: theme.spacing[1],
     },
     balanceRow: {
         flexDirection: 'row',
         alignItems: 'baseline',
-        marginBottom: 4,
+        marginBottom: theme.spacing[1],
     },
     balanceAmount: {
-        fontSize: 36,
-        fontWeight: '800',
-        color: '#fff',
-        marginRight: 8,
+        // Large display headline, black (900 — Satoshi Black face via the global
+        // text patch), tight tracking — matches the extension's prominent
+        // TOTAL BALANCE figure.
+        fontSize: 44,
+        fontWeight: '900',
+        letterSpacing: -0.9,
+        color: theme.colors.text.primary,
+        marginRight: theme.spacing[2],
     },
     balanceCurrency: {
-        fontSize: 18,
-        fontWeight: '500',
-        color: 'rgba(255,255,255,0.85)',
+        fontSize: theme.typography.fontSize.lg,
+        fontWeight: theme.typography.fontWeight.medium,
+        color: theme.colors.text.secondary,
     },
     balanceUsd: {
-        fontSize: 14,
-        color: 'rgba(255,255,255,0.65)',
+        // Equivalent balance (e.g. "0.00003652 BTC") — monospaced like the extension.
+        fontFamily: theme.typography.fontFamily.mono,
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.text.tertiary,
         minHeight: 18,
     },
-    refreshButton: {
+    topControls: {
         position: 'absolute',
-        top: 8,
-        right: 16,
+        top: theme.spacing[4],
+        right: theme.spacing[4],
+        flexDirection: 'row',
+        gap: theme.spacing[2],
+    },
+    controlButton: {
         width: 36,
         height: 36,
-        borderRadius: 18,
+        borderRadius: theme.borderRadius.full,
         backgroundColor: 'rgba(255,255,255,0.12)',
         justifyContent: 'center',
         alignItems: 'center',
     },
-    balanceBreakdown: {
-        flexDirection: 'row',
-        backgroundColor: 'rgba(255,255,255,0.1)',
-        borderRadius: 14,
-        paddingVertical: 12,
-        paddingHorizontal: 8,
+    breakdownSection: {
+        marginTop: theme.spacing[3],
     },
-    breakdownItem: {
+    breakdownHairline: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: theme.colors.border.medium,
+        marginBottom: theme.spacing[3],
+    },
+    breakdownEyebrow: {
+        fontSize: theme.typography.fontSize.xs,
+        letterSpacing: 1.4,
+        textTransform: 'uppercase',
+        color: theme.colors.text.muted,
+        marginBottom: theme.spacing[2],
+    },
+    breakdownList: {
+        gap: theme.spacing[1.5],
+    },
+    networkRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: theme.spacing[2],
+        borderRadius: theme.borderRadius.lg,
+        backgroundColor: theme.colors.surface.secondary,
+    },
+    networkRowDimmed: {
+        opacity: 0.45,
+    },
+    networkAccentBar: {
+        width: 3,
+        alignSelf: 'stretch',
+        borderRadius: 2,
+        marginRight: theme.spacing[3],
+    },
+    networkIconChip: {
+        width: 28,
+        height: 28,
+        borderRadius: theme.borderRadius.md,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: theme.spacing[3],
+    },
+    networkTextBlock: {
         flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
     },
-    breakdownIcon: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: 8,
+    networkName: {
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: theme.typography.fontWeight.semibold,
+        color: theme.colors.text.primary,
     },
-    breakdownText: {
-        justifyContent: 'center',
+    networkSubtitle: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.muted,
     },
-    breakdownLabel: {
-        fontSize: 11,
-        color: 'rgba(255,255,255,0.6)',
-        marginBottom: 1,
+    networkValueBlock: {
+        alignItems: 'flex-end',
+        marginLeft: theme.spacing[2],
     },
-    breakdownValue: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#fff',
+    networkValueFiat: {
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: theme.typography.fontWeight.semibold,
+        color: theme.colors.text.primary,
     },
-    breakdownUnit: {
-        fontSize: 10,
-        fontWeight: '400',
-        color: 'rgba(255,255,255,0.5)',
+    networkValueSats: {
+        fontFamily: theme.typography.fontFamily.mono,
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.muted,
     },
-    breakdownDivider: {
-        width: 1,
-        backgroundColor: 'rgba(255,255,255,0.12)',
-        marginHorizontal: 4,
+    footerDivider: {
+        // Hairline separator between the balance block and the footer (action
+        // buttons). Lives inside the card's padding so it stops short of the
+        // card edges, leaving a little breathing room before the borders.
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: theme.colors.border.medium,
+        marginVertical: theme.spacing[3],
+        marginHorizontal: theme.spacing[1],
     },
 });

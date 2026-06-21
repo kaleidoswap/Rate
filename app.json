@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "KaleidoSwap",
-    "slug": "kaleidoswap-wallet",
-    "version": "1.0.0",
+    "slug": "rate",
+    "version": "0.2.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kaleidoswap.wallet",
-      "buildNumber": "6",
+      "buildNumber": "10",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",
         "NSFaceIDUsageDescription": "Use Face ID to unlock your wallet securely.",
@@ -44,6 +44,7 @@
       },
       "permissions": [
         "CAMERA",
+        "RECORD_AUDIO",
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
         "FOREGROUND_SERVICE"
@@ -62,6 +63,14 @@
           "faceIDPermission": "Allow KaleidoSwap to use Face ID for secure wallet access."
         }
       ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.",
+          "locationWhenInUsePermission": "Allow KaleidoSwap to use your location to show Bitcoin-accepting venues near you.",
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
       "expo-secure-store",
       [
         "expo-build-properties",
@@ -75,16 +84,28 @@
           },
           "android": {
             "minSdkVersion": 29,
-            "compileSdkVersion": 34,
+            "compileSdkVersion": 35,
             "targetSdkVersion": 34,
-            "buildToolsVersion": "34.0.0"
+            "buildToolsVersion": "35.0.0"
           }
         }
       ],
       "@qvac/sdk/expo-plugin",
       "expo-background-task",
       "expo-sqlite",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "color": "#2BEE79"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow KaleidoSwap to use the microphone for on-device voice commands to the AI assistant."
+        }
+      ]
     ],
     "extra": {
       "eas": {
@@ -92,8 +113,7 @@
       }
     },
     "updates": {
-      "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/your-project-id-here"
+      "enabled": false
     },
     "runtimeVersion": {
       "policy": "appVersion"

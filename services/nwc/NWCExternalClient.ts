@@ -160,8 +160,34 @@ export class NWCClient {
       : nip44.decrypt(payload, this.convKey);
   }
 
-  async request<T>(method: NwcMethod, params: Record<string, unknown>): Promise<T> {
+  async request<T>(
+    method: NwcMethod,
+    params: Record<string, unknown>,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<T> {
+    const { signal } = options;
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new NwcError('CANCELLED', `NWC request '${method}' was cancelled`);
+    }
+
+    // Yield before the synchronous NIP-44 encryption/signing burst so a queued
+    // navigation or cancellation event can run first.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new NwcError('CANCELLED', `NWC request '${method}' was cancelled`);
+    }
+
     const content = this.encryptContent(JSON.stringify({ method, params }));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new NwcError('CANCELLED', `NWC request '${method}' was cancelled`);
+    }
     const reqEvent = finalizeEvent(
       {
         kind: NWC_KIND_REQUEST,
@@ -179,12 +205,27 @@ export class NWCClient {
 
     return new Promise<T>((resolve, reject) => {
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        sub.close();
+        signal?.removeEventListener('abort', onAbort);
+      };
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(
+          signal?.reason instanceof Error
+            ? signal.reason
+            : new NwcError('CANCELLED', `NWC request '${method}' was cancelled`),
+        );
+      };
       const sub = this.pool.subscribeMany(this.relays, filter, {
         onevent: (event: Event) => {
           if (settled) return;
           settled = true;
-          clearTimeout(timer);
-          sub.close();
+          cleanup();
           try {
             const decrypted = this.decryptContent(event.content);
             const response = JSON.parse(decrypted) as {
@@ -201,10 +242,11 @@ export class NWCClient {
           }
         },
       });
-      const timer = setTimeout(() => {
+      signal?.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        sub.close();
+        cleanup();
         reject(new NwcError('OTHER', `NWC request '${method}' timed out`));
       }, this.timeoutMs);
 
@@ -216,24 +258,30 @@ export class NWCClient {
     });
   }
 
-  getInfo(): Promise<NwcGetInfoResult> {
-    return this.request<NwcGetInfoResult>('get_info', {});
+  getInfo(signal?: AbortSignal): Promise<NwcGetInfoResult> {
+    return this.request<NwcGetInfoResult>('get_info', {}, { signal });
   }
 
-  getBalance(): Promise<NwcGetBalanceResult> {
-    return this.request<NwcGetBalanceResult>('get_balance', {});
+  getBalance(signal?: AbortSignal): Promise<NwcGetBalanceResult> {
+    return this.request<NwcGetBalanceResult>('get_balance', {}, { signal });
   }
 
-  makeInvoice(params: { amount: number; description?: string; expiry?: number }): Promise<NwcInvoice> {
-    return this.request<NwcInvoice>('make_invoice', { ...params });
+  makeInvoice(
+    params: { amount: number; description?: string; expiry?: number },
+    signal?: AbortSignal,
+  ): Promise<NwcInvoice> {
+    return this.request<NwcInvoice>('make_invoice', { ...params }, { signal });
   }
 
   payInvoice(params: { invoice: string; amount?: number }): Promise<NwcPayInvoiceResult> {
     return this.request<NwcPayInvoiceResult>('pay_invoice', { ...params });
   }
 
-  lookupInvoice(params: { payment_hash?: string; invoice?: string }): Promise<NwcInvoice> {
-    return this.request<NwcInvoice>('lookup_invoice', { ...params });
+  lookupInvoice(
+    params: { payment_hash?: string; invoice?: string },
+    signal?: AbortSignal,
+  ): Promise<NwcInvoice> {
+    return this.request<NwcInvoice>('lookup_invoice', { ...params }, { signal });
   }
 
   async listTransactions(params: Record<string, unknown> = {}): Promise<NwcInvoice[]> {
@@ -252,15 +300,15 @@ export class NWCClient {
   rlnListAssets(params: Record<string, unknown> = {}): Promise<unknown> {
     return this.request<unknown>('rln_list_assets', params);
   }
-  rlnAssetBalance(params: { asset_id: string }): Promise<unknown> {
-    return this.request<unknown>('rln_asset_balance', params);
+  rlnAssetBalance(params: { asset_id: string }, signal?: AbortSignal): Promise<unknown> {
+    return this.request<unknown>('rln_asset_balance', params, { signal });
   }
-  rlnRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
-    return this.request<unknown>('rln_rgb_invoice', params);
+  rlnRgbInvoice(params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    return this.request<unknown>('rln_rgb_invoice', params, { signal });
   }
   /** Lightning invoice; pass asset_id + asset_amount for an RGB-over-LN invoice. */
-  rlnLnInvoice(params: Record<string, unknown>): Promise<unknown> {
-    return this.request<unknown>('rln_ln_invoice', params);
+  rlnLnInvoice(params: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+    return this.request<unknown>('rln_ln_invoice', params, { signal });
   }
   rlnDecodeRgbInvoice(params: { invoice: string }): Promise<unknown> {
     return this.request<unknown>('rln_decode_rgb_invoice', params);
@@ -268,11 +316,11 @@ export class NWCClient {
   rlnSendAsset(params: Record<string, unknown>): Promise<unknown> {
     return this.request<unknown>('rln_send_asset', params);
   }
-  rlnListChannels(): Promise<unknown> {
-    return this.request<unknown>('rln_list_channels', {});
+  rlnListChannels(signal?: AbortSignal): Promise<unknown> {
+    return this.request<unknown>('rln_list_channels', {}, { signal });
   }
-  rlnGetAddress(): Promise<unknown> {
-    return this.request<unknown>('rln_get_address', {});
+  rlnGetAddress(signal?: AbortSignal): Promise<unknown> {
+    return this.request<unknown>('rln_get_address', {}, { signal });
   }
 
   close(): void {

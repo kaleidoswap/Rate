@@ -1,5 +1,23 @@
 // theme/index.ts
-import { colors as k } from '@kaleidorg/kaleido-ui/tokens'
+//
+// Single source of truth: leaf values are sourced from the shared `kaleido-ui`
+// design tokens wherever a canonical token exists, so this app stays visually
+// in sync with the web (rate-extension) and any other KaleidoSwap surface.
+// `k` is the flat web-facing palette (brand/intent colors, text/border ladders);
+// `kdDark` is the runtime dark palette (`makeTheme`) whose surface/text/border
+// values are the RN-shaped twins the web mirrors. Only genuinely app-specific
+// values (shade ramps, per-protocol/per-network leg colors) remain as literals
+// below — those are flagged as candidates to promote into kaleido-ui.
+import { colors as k, makeTheme } from '@kaleidorg/kaleido-ui/tokens'
+
+// Equivalent/tabular balances render in Geist Mono — the same monospaced face
+// the web/extension references via `--font-mono`. Shipped by kaleido-ui and
+// loaded in App.tsx via useFonts(kaleidoFonts); the global Satoshi text patch
+// leaves non-Satoshi families (this one) untouched.
+const MONO_FONT = 'GeistMono'
+
+/** Resolved dark palette from the shared design system (brand default). */
+const kdDark = makeTheme('dark')
 
 // Define types for nested color objects
 type ColorGradient = [string, string];
@@ -59,6 +77,55 @@ interface Colors {
     medium: string;
     dark: string;
     focus: string;
+  };
+  // App-specific brand accents (not part of the kaleido-ui token set). Used for
+  // per-protocol tinting of badges, balance breakdowns and action tiles. Prefer
+  // the `protocolColor()` / `protocolTint()` helpers over reading these directly.
+  protocol: {
+    rgb: string;
+    spark: string;
+    arkade: string;
+  };
+  brand: {
+    violet: string;
+  };
+  // Per-network "leg" colors used to colour-code Send/Receive destinations and
+  // the multi-network QR breakdown. Broader than `protocol` — note `rgb` here is
+  // the pink RGB-asset leg (USD aggregator), NOT the green RGB-Lightning accent
+  // in `protocol.rgb`. `bitcoin` is an alias for `onchain`.
+  networks: {
+    onchain: string;
+    bitcoin: string;
+    lightning: string;
+    spark: string;
+    arkade: string;
+    liquid: string;
+    rgb: string;
+    unified: string;
+  };
+  // Per-network chip background + readable text, sourced from kaleido-ui so
+  // Send/Receive/activity chips stay contrast-safe and match the web exactly.
+  networkChip: {
+    bitcoin: string;
+    rgb: string;
+    arkade: string;
+    spark: string;
+    lightning: string;
+    liquid: string;
+  };
+  networkText: {
+    bitcoin: string;
+    rgb: string;
+    arkade: string;
+    spark: string;
+    lightning: string;
+    liquid: string;
+  };
+  // Transaction-direction colors (shared with web) — used by the activity feed.
+  tx: {
+    sent: string;
+    receive: string;
+    swap: string;
   };
 }
 
@@ -217,8 +284,13 @@ export const lightTheme: ThemeType = {
       700: '#15803D',
       800: '#166534',
       900: '#14532D',
-      950: k.primaryFg,    // #102217
-      gradient: [k.primary, '#1FA855'] as [string, string],
+      950: k.primaryFg,    // #051B10
+      // Flat fill per DESIGN.md: "the brand green is a flat #2BEE79 signal,
+      // never a decorative gradient." Both stops are k.primary so every
+      // primary-green surface (buttons, avatars, bubbles, tiles, send button)
+      // renders solid. The pair shape is retained so the ~7 LinearGradient
+      // consumers keep working; they can later drop the wrapper for a flat View.
+      gradient: [k.primary, k.primary] as [string, string],
     },
 
     // Secondary: Deep Green Surfaces
@@ -266,7 +338,7 @@ export const lightTheme: ThemeType = {
     warning: {
       50: '#FFFBEB',
       100: '#FEF3C7',
-      500: k.warning,      // #F59E0B
+      500: k.warning,      // #FACC15
       600: '#D97706',
       700: '#B45309',
       gradient: [k.warning, '#FBBF24'] as [string, string],
@@ -278,10 +350,10 @@ export const lightTheme: ThemeType = {
       200: '#FECACA',
       300: '#FCA5A5',
       400: '#F87171',
-      500: k.error,        // #F94040
+      500: k.danger,       // #F94040 — canonical danger token (k.error is a deprecated hsl alias)
       600: '#DC2626',
       700: '#B91C1C',
-      gradient: [k.error, '#F87171'] as [string, string],
+      gradient: [k.danger, '#F87171'] as [string, string],
     },
 
     info: {
@@ -345,15 +417,43 @@ export const lightTheme: ThemeType = {
       dark: '#A3B8AC',
       focus: k.primary,      // #2BEE79
     },
+
+    // Per-protocol accents — sourced from the shared kaleido-ui network tokens
+    // so they match the web exactly (single source of truth).
+    protocol: {
+      rgb: k.network.rgb,      // #DD352E
+      spark: k.network.spark,  // #FF6D00
+      arkade: k.network.arkade, // #7C3AED
+    },
+    brand: {
+      violet: kdDark.violet, // #6F32FF — secondary brand accent (Swap action tile)
+    },
+    // Per-network "leg" colors — all sourced from kaleido-ui tokens. `onchain`
+    // is an alias for `bitcoin`; `unified` (all-networks) stays the brand green.
+    networks: {
+      onchain: k.network.bitcoin,
+      bitcoin: k.network.bitcoin,     // #F7931A
+      lightning: k.network.lightning, // #F6C343
+      spark: k.network.spark,         // #FF6D00
+      arkade: k.network.arkade,       // #7C3AED
+      liquid: k.network.liquid,       // #22e1c9
+      rgb: k.network.rgb,             // #DD352E
+      unified: k.primary,             // #2BEE79 — all-networks brand green
+    },
+    networkChip: { ...k.networkChip },
+    networkText: { ...k.networkText },
+    tx: { ...k.tx },
   },
 
   typography: {
     fontFamily: {
-      regular: 'System',
-      medium: 'System',
-      semibold: 'System',
-      bold: 'System',
-      mono: 'System', // Fallback
+      // Satoshi brand typeface, shipped + loaded via kaleido-ui (see App.tsx).
+      // No dedicated 600 face ships, so semibold maps onto the bold cut.
+      regular: 'Satoshi-Regular',
+      medium: 'Satoshi-Medium',
+      semibold: 'Satoshi-Bold',
+      bold: 'Satoshi-Bold',
+      mono: MONO_FONT, // system monospace, matching the extension's mono balances
     },
 
     fontSize: {
@@ -572,7 +672,7 @@ export const lightTheme: ThemeType = {
 
 /**
  * Dark theme — KaleidoSwap's brand-default. Built from the light theme with
- * dark-green surfaces, white-on-dark text and darker shadows/components.
+ * dark-blue (navy) surfaces, white-on-dark text and darker shadows/components.
  */
 export const darkTheme: ThemeType = {
   ...lightTheme,
@@ -589,35 +689,35 @@ export const darkTheme: ThemeType = {
     warning: { ...lightTheme.colors.warning, 50: 'rgba(250, 204, 21, 0.12)', 100: 'rgba(250, 204, 21, 0.18)' },
     error: { ...lightTheme.colors.error, 50: 'rgba(249, 64, 64, 0.12)', 100: 'rgba(249, 64, 64, 0.18)' },
     info: { ...lightTheme.colors.info, 50: 'rgba(66, 144, 255, 0.12)', 100: 'rgba(66, 144, 255, 0.18)' },
-    gray: { ...lightTheme.colors.gray, 50: '#121C16', 100: '#16241B', 200: '#1B2C21', 300: '#243429' },
+    gray: { ...lightTheme.colors.gray, 50: '#0F1C33', 100: '#11203B', 200: '#18294C', 300: '#20335C' },
     background: {
-      primary: '#0D1813',
-      secondary: '#0F1C15',
-      tertiary: '#16241B',
-      modal: '#121C16',
-      backdrop: 'rgba(0, 0, 0, 0.7)',
+      primary: kdDark.background,    // #0A1326
+      secondary: '#0C1730',          // app-local mid-tone (no shared token)
+      tertiary: '#11203B',           // app-local mid-tone (no shared token)
+      modal: kdDark.card,            // #0F1C33
+      backdrop: kdDark.surface.scrim, // rgba(0, 0, 0, 0.70)
     },
     text: {
-      primary: '#FFFFFF',
-      secondary: 'rgba(255, 255, 255, 0.64)',
-      tertiary: 'rgba(255, 255, 255, 0.45)',
-      muted: 'rgba(255, 255, 255, 0.42)',
-      inverse: '#0D1813',
-      inverseSecondary: '#16241B',
-      disabled: 'rgba(255, 255, 255, 0.26)',
+      primary: kdDark.text.primary,     // #FFFFFF
+      secondary: kdDark.text.secondary, // rgba(255,255,255,0.64)
+      tertiary: k.text.muted,           // rgba(255,255,255,0.45)
+      muted: kdDark.text.muted,         // rgba(255,255,255,0.42)
+      inverse: '#0A1326',               // dark text for use on light fills
+      inverseSecondary: '#11203B',
+      disabled: kdDark.text.disabled,   // rgba(255,255,255,0.26)
       link: k.primary,
     },
     surface: {
-      primary: '#121C16',
-      secondary: '#16241B',
-      tertiary: '#1B2C21',
-      elevated: '#17231C',
-      highlight: '#16301F',
+      primary: kdDark.card,          // #0F1C33
+      secondary: '#11203B',          // app-local (no shared token)
+      tertiary: '#18294C',           // app-local (no shared token)
+      elevated: kdDark.cardElevated, // #16273F
+      highlight: '#17315A',          // app-local tinted-green highlight
     },
     border: {
-      light: 'rgba(255, 255, 255, 0.06)',
-      medium: 'rgba(255, 255, 255, 0.10)',
-      dark: 'rgba(255, 255, 255, 0.16)',
+      light: kdDark.border.subtle,   // rgba(255,255,255,0.06)
+      medium: kdDark.border.default, // rgba(255,255,255,0.10)
+      dark: kdDark.border.strong,    // rgba(255,255,255,0.16)
       focus: k.primary,
     },
   },
@@ -634,18 +734,18 @@ export const darkTheme: ThemeType = {
     ...lightTheme.components,
     button: {
       ...lightTheme.components.button,
-      secondary: { ...lightTheme.components.button.secondary, backgroundColor: '#1B2C21', borderColor: 'rgba(255,255,255,0.10)' },
+      secondary: { ...lightTheme.components.button.secondary, backgroundColor: '#18294C', borderColor: 'rgba(255,255,255,0.10)' },
       ghost: { ...lightTheme.components.button.ghost, backgroundColor: 'transparent' },
     },
     card: {
       ...lightTheme.components.card,
-      default: { ...lightTheme.components.card.default, backgroundColor: '#121C16', shadowColor: '#000000', shadowOpacity: 0.3 },
-      elevated: { ...lightTheme.components.card.elevated, backgroundColor: '#17231C', shadowColor: '#000000', shadowOpacity: 0.4 },
+      default: { ...lightTheme.components.card.default, backgroundColor: '#0F1C33', shadowColor: '#000000', shadowOpacity: 0.3 },
+      elevated: { ...lightTheme.components.card.elevated, backgroundColor: '#16273F', shadowColor: '#000000', shadowOpacity: 0.4 },
     },
     input: {
       ...lightTheme.components.input,
-      default: { ...lightTheme.components.input.default, backgroundColor: '#16241B', borderColor: 'rgba(255,255,255,0.10)' },
-      focused: { borderColor: k.primary, backgroundColor: '#121C16' },
+      default: { ...lightTheme.components.input.default, backgroundColor: '#11203B', borderColor: 'rgba(255,255,255,0.10)' },
+      focused: { borderColor: k.primary, backgroundColor: '#0F1C33' },
     },
   },
 };
@@ -663,7 +763,10 @@ export function createNavigationTheme() {
     dark: theme.dark,
     colors: {
       primary: theme.colors.primary[600],
-      background: theme.colors.background.secondary,
+      // Match the extension's page background (kaleido-ui makeTheme('dark').background
+      // = #0A1326). background.secondary (#0C1730) is an app-local mid-tone, not a
+      // shared token, and made the app look bluer/lighter than the extension.
+      background: theme.colors.background.primary,
       card: theme.colors.surface.primary,
       text: theme.colors.text.primary,
       border: theme.colors.border.light,
@@ -673,3 +776,44 @@ export function createNavigationTheme() {
 }
 
 export type Theme = typeof theme;
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+export type ProtocolKey = 'RGB' | 'SPARK' | 'ARKADE';
+
+/** Resolve a protocol's brand accent (case-insensitive). Falls back to gray. */
+export function protocolColor(p?: string | null): string {
+  switch (String(p ?? '').toUpperCase()) {
+    case 'RGB': return theme.colors.protocol.rgb;
+    case 'SPARK': return theme.colors.protocol.spark;
+    case 'ARKADE': return theme.colors.protocol.arkade;
+    default: return theme.colors.gray[400];
+  }
+}
+
+/** A 2-digit hex alpha suffix (00–FF) for an `alpha` in [0,1]. */
+function hexAlpha(alpha: number): string {
+  const a = Math.round(Math.max(0, Math.min(1, alpha)) * 255);
+  return a.toString(16).padStart(2, '0').toUpperCase();
+}
+
+/**
+ * A translucent tint of a protocol's accent — handy for badge/icon backgrounds.
+ * Assumes the protocol colors are 6-digit hex (they are), so the alpha is just
+ * appended. Default ~13% matches the prior inline `+ '20'` usage.
+ */
+export function protocolTint(p?: string | null, alpha = 0.13): string {
+  return protocolColor(p) + hexAlpha(alpha);
+}
+
+/**
+ * Convert a `typography.lineHeight` multiplier (e.g. 1.5) into the absolute
+ * pixel value React Native expects, given a font size. The raw lineHeight
+ * tokens are CSS-style multipliers and are NOT usable directly as RN
+ * `lineHeight` (which is in px) — always go through this helper.
+ */
+export function leading(fontSize: number, multiplier: number = theme.typography.lineHeight.normal): number {
+  return Math.round(fontSize * multiplier);
+}

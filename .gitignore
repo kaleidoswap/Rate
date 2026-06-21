@@ -11,6 +11,7 @@ web-build/
 
 # Native
 .kotlin/
+.android-sdk/
 *.orig.*
 *.jks
 *.p8
@@ -35,3 +36,9 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# Local iOS build artifacts/logs
+build/
+
+# JetBrains IDE
+.idea/

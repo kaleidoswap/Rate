@@ -55,6 +55,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
   const dispatch = useDispatch();
   const { contacts, searchQuery } = useSelector((state: RootState) => state.contacts);
   const nostrState = useSelector((state: RootState) => state.nostr);
+  const unreadByPubkey = useSelector((state: RootState) => state.chat.unreadByPubkey) || {};
   const [showAddForm, setShowAddForm] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [contactSource, setContactSource] = useState<'all' | 'local' | 'nostr'>('all');
@@ -487,6 +488,30 @@ export default function ContactsScreen({ navigation, route }: Props) {
           </View>
         </View>
 
+        {contact.isNostrContact && contact.node_pubkey && (
+          <TouchableOpacity
+            style={styles.iconBtn}
+            onPress={() =>
+              navigation.navigate('Chat', {
+                pubkey: contact.node_pubkey,
+                name: contact.name,
+                npub: contact.npub,
+                avatarUrl: contact.avatar_url,
+              })
+            }
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel={`Message ${contact.name}`}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={17} color={theme.colors.primary[500]} />
+            {(unreadByPubkey[contact.node_pubkey] ?? 0) > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadBadgeText}>
+                  {Math.min(unreadByPubkey[contact.node_pubkey], 99)}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
         {(contact.lightning_address || contact.node_pubkey) && (
           <TouchableOpacity
             style={styles.iconBtn}
@@ -836,10 +861,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: theme.colors.surface.tertiary,
   },
+  unreadBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 16,
+    height: 16,
+    paddingHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: theme.colors.primary[500],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: theme.colors.surface.primary,
+  },
+  unreadBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: theme.colors.text.inverse,
+  },
   modalBackdrop: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    backgroundColor: theme.colors.background.backdrop,
   },
   modalSheetWrap: {
     width: '100%',

@@ -5,15 +5,16 @@
 import React, { useState } from 'react';
 import { View, Image, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { theme } from '../theme';
 import { SparkIcon, ArkadeIcon, RgbIcon } from './ProtocolIcons';
 
 const ICON_CDN_BASE = 'https://raw.githubusercontent.com/kaleidoswap/coinmarketcap-icons-cryptos/refs/heads/main/icons/';
 const DICEBEAR_BASE = 'https://api.dicebear.com/9.x/shapes/svg';
 
 const PROTOCOL_COLORS: Record<string, string> = {
-  RGB: '#2BEE79',
-  SPARK: '#60A5FA',
-  ARKADE: '#A855F7',
+  RGB: theme.colors.networks.unified,
+  SPARK: theme.colors.networks.spark,
+  ARKADE: theme.colors.networks.arkade,
 };
 
 const PROTOCOL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -22,15 +23,22 @@ const PROTOCOL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   ARKADE: 'shield-checkmark',
 };
 
-// Colors for text placeholder backgrounds
+// Colors for text placeholder backgrounds. ETH/USDT/USDC are crypto-brand
+// colors with no token equivalent; the rest map to design tokens.
 const ASSET_COLORS: Record<string, string> = {
-  BTC: '#F7931A',
+  BTC: theme.colors.networks.bitcoin,
   ETH: '#627EEA',
   USDT: '#26A17B',
   USDC: '#2775CA',
-  USDB: '#4290FF',
-  DEFAULT: '#64748B',
+  USDB: theme.colors.accent[500],
+  DEFAULT: theme.colors.gray[500],
 };
+
+/** The brand color an asset's icon uses — so other surfaces (e.g. the asset
+ *  card gradient) can tint to match the icon rather than the protocol. */
+export function assetIconColor(ticker?: string): string {
+  return ASSET_COLORS[(ticker ?? '').toUpperCase().trim()] ?? ASSET_COLORS.DEFAULT;
+}
 
 function getCdnUrl(ticker: string): string {
   const normalized = ticker.toUpperCase().trim();
@@ -40,6 +48,13 @@ function getCdnUrl(ticker: string): string {
 
 function getFallbackUrl(ticker: string): string {
   return `${DICEBEAR_BASE}?seed=${encodeURIComponent(ticker)}&backgroundType=gradientLinear&radius=50`;
+}
+
+/** The actual image URI the icon renders (asset logo → CDN by ticker). Empty
+ *  string when neither resolves. Shared so other surfaces (e.g. the gradient
+ *  average-color sampler) read the exact same image the icon shows. */
+export function resolveAssetIconUri(ticker: string, logoUri?: string): string {
+  return logoUri || getCdnUrl(ticker);
 }
 
 interface AssetIconProps {

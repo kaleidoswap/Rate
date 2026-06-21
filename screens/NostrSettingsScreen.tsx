@@ -43,7 +43,7 @@ export default function NostrSettingsScreen({ navigation }: Props) {
             activeOpacity={0.7}
             onPress={() => navigation.navigate('NWCConnect')}
           >
-            <View style={[styles.rowIcon, { backgroundColor: theme.colors.warning[500] + '1A' }]}>
+            <View style={[styles.rowIcon, { backgroundColor: theme.colors.warning[50] }]}>
               <Ionicons name="flash-outline" size={18} color={theme.colors.warning[500]} />
             </View>
             <View style={styles.rowText}>

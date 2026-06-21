@@ -1,9 +1,78 @@
 // components/chat/FunctionResultCard.tsx
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import InvoiceQRCode from '../InvoiceQRCode';
 import { useAppTheme } from '../../theme/ThemeProvider';
-import type { Theme } from '../../theme';
+import { formatDistance } from '../../services/btcmapService';
+import { leading, type Theme } from '../../theme';
+
+/** Open a merchant in the native maps app — by coordinates if we have them,
+ *  otherwise by a search query on its name/address. */
+/** Cap rows rendered inline in chat; the rest are summarised as "+N more". */
+const MAX_MERCHANT_ROWS = 6;
+
+const openMaps = (merchant: { name?: string; address?: string; lat?: number; lon?: number }) => {
+  let url: string;
+  if (typeof merchant.lat === 'number' && typeof merchant.lon === 'number') {
+    const label = encodeURIComponent(merchant.name || 'Merchant');
+    url =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?ll=${merchant.lat},${merchant.lon}&q=${label}`
+        : `geo:${merchant.lat},${merchant.lon}?q=${merchant.lat},${merchant.lon}(${label})`;
+  } else {
+    const q = encodeURIComponent([merchant.name, merchant.address].filter(Boolean).join(' '));
+    url = `https://www.openstreetmap.org/search?query=${q}`;
+  }
+  Linking.openURL(url).catch(() => {});
+};
+
+/** A single merchant row used by both the list and the detail cards. */
+const MerchantRow: React.FC<{
+  merchant: any;
+  styles: ReturnType<typeof makeStyles>;
+  onOpenLink: (url: string) => void;
+  openMaps: typeof openMaps;
+  expanded?: boolean;
+}> = ({ merchant, styles, onOpenLink, openMaps, expanded }) => (
+  <View style={styles.merchantItem}>
+    <View style={styles.merchantHeader}>
+      <Text style={styles.merchantName} numberOfLines={2}>
+        {merchant.icon ? `${merchant.icon} ` : ''}
+        {merchant.name}
+      </Text>
+      {typeof merchant.distance_m === 'number' && (
+        <Text style={styles.merchantDistance}>{formatDistance(merchant.distance_m)}</Text>
+      )}
+    </View>
+    {!!merchant.address && <Text style={styles.merchantAddress}>{merchant.address}</Text>}
+    {!!merchant.opening_hours && (
+      <Text style={styles.merchantHours}>🕒 {merchant.opening_hours}</Text>
+    )}
+    {(merchant.accepts_lightning || merchant.accepts_bitcoin) && (
+      <Text style={styles.merchantPay}>
+        {merchant.accepts_lightning ? '⚡ Lightning' : ''}
+        {merchant.accepts_lightning && merchant.accepts_bitcoin ? '  ·  ' : ''}
+        {merchant.accepts_bitcoin ? '₿ On-chain' : ''}
+      </Text>
+    )}
+    <View style={styles.merchantActions}>
+      <TouchableOpacity onPress={() => openMaps(merchant)} style={styles.mapsButton}>
+        <Text style={styles.mapsButtonText}>🗺️ Map</Text>
+      </TouchableOpacity>
+      {!!merchant.phone && (
+        <TouchableOpacity onPress={() => Linking.openURL(`tel:${merchant.phone}`)}>
+          <Text style={styles.merchantLink}>📞 {expanded ? merchant.phone : 'Call'}</Text>
+        </TouchableOpacity>
+      )}
+      {!!merchant.website && (
+        <TouchableOpacity onPress={() => onOpenLink(merchant.website)}>
+          <Text style={styles.merchantLink}>🌐 Website</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  </View>
+);
 
 interface FunctionResultCardProps {
   functionCalled: string;
@@ -12,6 +81,8 @@ interface FunctionResultCardProps {
   onCopy: (text: string, label?: string) => void;
   /** Open an external URL. */
   onOpenLink: (url: string) => void;
+  /** Pick a contact from the list_contacts card (e.g. to start a payment). */
+  onSelectContact?: (name: string) => void;
 }
 
 /**
@@ -24,6 +95,7 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
   functionResult,
   onCopy,
   onOpenLink,
+  onSelectContact,
 }) => {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -54,10 +126,12 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
       );
 
     // Invoice generation. Covers the legacy `generate_invoice` shape
-    // ({success, invoice, amount_sats}) and the canonical wallet-contract tools
+    // ({success, invoice, amount_sats}), the layer-routing `create_invoice` tool
+    // the agent normally calls, and the canonical wallet-contract tools
     // (spark_create_invoice / rln_create_ln_invoice / rln_create_rgb_invoice),
     // whose result is the wallet-engine Invoice ({invoice, amount, description}).
     case 'generate_invoice':
+    case 'create_invoice':
     case 'spark_create_invoice':
     case 'rln_create_ln_invoice':
     case 'rln_create_rgb_invoice': {
@@ -79,57 +153,114 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
       );
     }
 
-    case 'find_merchant_locations':
+    case 'list_contacts': {
+      const people: any[] = functionResult.contacts ?? [];
       return (
         <View style={styles.card}>
-          <Text style={styles.title}>🏪 Merchants Found</Text>
-          {functionResult.success ? (
-            <ScrollView style={styles.merchantList} nestedScrollEnabled>
-              {functionResult.merchants.map((merchant: any) => (
-                <View key={merchant.id} style={styles.merchantItem}>
-                  <Text style={styles.merchantName}>{merchant.name}</Text>
-                  <Text style={styles.merchantAddress}>{merchant.address}</Text>
-                  {merchant.phone && (
-                    <TouchableOpacity onPress={() => Linking.openURL(`tel:${merchant.phone}`)}>
-                      <Text style={styles.merchantLink}>📞 {merchant.phone}</Text>
-                    </TouchableOpacity>
+          <Text style={styles.title}>👥 {people.length} Contact{people.length === 1 ? '' : 's'}</Text>
+          {people.length === 0 ? (
+            <Text style={styles.invoiceText}>
+              No contacts yet. Add a Nostr contact or pay a Lightning address directly.
+            </Text>
+          ) : (
+            <>
+              {people.slice(0, MAX_MERCHANT_ROWS).map((c: any, i: number) => (
+                <TouchableOpacity
+                  key={`${c.name ?? 'c'}-${i}`}
+                  style={styles.contactRow}
+                  disabled={!onSelectContact || !c.has_lightning}
+                  onPress={() => onSelectContact?.(String(c.name))}
+                >
+                  <View style={styles.contactAvatar}>
+                    <Text style={styles.contactInitial}>{String(c.name ?? '?').charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.contactName} numberOfLines={1}>{c.name}</Text>
+                    <Text style={styles.contactMeta}>
+                      {c.has_lightning ? '⚡ Lightning' : 'No Lightning address'}
+                      {c.source === 'nostr' ? '  ·  Nostr' : ''}
+                    </Text>
+                  </View>
+                  {onSelectContact && c.has_lightning && (
+                    <Ionicons name="arrow-forward-circle" size={20} color={theme.colors.primary[500]} />
                   )}
-                  {merchant.website && (
-                    <TouchableOpacity onPress={() => onOpenLink(merchant.website)}>
-                      <Text style={styles.merchantLink}>🌐 Website</Text>
-                    </TouchableOpacity>
+                </TouchableOpacity>
+              ))}
+              {people.length > MAX_MERCHANT_ROWS && (
+                <Text style={styles.merchantMore}>+{people.length - MAX_MERCHANT_ROWS} more</Text>
+              )}
+              {onSelectContact && <Text style={styles.attribution}>Tap a contact to send</Text>}
+            </>
+          )}
+        </View>
+      );
+    }
+
+    case 'find_merchant_locations': {
+      const merchants: any[] = functionResult.merchants ?? [];
+      return (
+        <View style={styles.card}>
+          <Text style={styles.title}>
+            🏪 {merchants.length} Bitcoin Merchant{merchants.length === 1 ? '' : 's'} Nearby
+          </Text>
+          {functionResult.success ? (
+            merchants.length === 0 ? (
+              <Text style={styles.invoiceText}>
+                No Bitcoin merchants found in range. Try a wider radius.
+              </Text>
+            ) : (
+              <>
+                {/* A plain View, NOT a nested ScrollView: a ScrollView inside the
+                    chat bubble's Pressable steals the touch from the row's
+                    Map/Call/Website buttons, so they stop responding. The outer
+                    chat list already scrolls; we just cap how many rows we show. */}
+                <View style={styles.merchantList}>
+                  {merchants.slice(0, MAX_MERCHANT_ROWS).map((merchant: any, index: number) => (
+                    <MerchantRow
+                      // OSM ids are only unique WITHIN an element type, so a node and
+                      // a way can share the same numeric id (BTC Map's `nwr` query
+                      // returns all three). Fold in the list index so the React key is
+                      // always unique — otherwise duplicate ids collide and React
+                      // omits/duplicates rows ("two children with the same key").
+                      key={`${merchant.id ?? 'm'}-${index}`}
+                      merchant={merchant}
+                      styles={styles}
+                      onOpenLink={onOpenLink}
+                      openMaps={openMaps}
+                    />
+                  ))}
+                  {merchants.length > MAX_MERCHANT_ROWS && (
+                    <Text style={styles.merchantMore}>
+                      +{merchants.length - MAX_MERCHANT_ROWS} more nearby
+                    </Text>
                   )}
                 </View>
-              ))}
-            </ScrollView>
+                <Text style={styles.attribution}>
+                  {functionResult.source === 'offline'
+                    ? '⚠︎ Offline list — couldn’t reach BTC Map or your location'
+                    : `via BTC Map${functionResult.precise_location ? ' · near your location' : ' · default area'}`}
+                </Text>
+              </>
+            )
           ) : (
             <Text style={styles.errorText}>❌ {functionResult.error}</Text>
           )}
         </View>
       );
+    }
 
     case 'get_merchant_info':
       return (
         <View style={styles.card}>
           <Text style={styles.title}>📍 Merchant Info</Text>
           {functionResult.success ? (
-            <View style={styles.merchantItem}>
-              <Text style={styles.merchantName}>{functionResult.merchant.name}</Text>
-              <Text style={styles.merchantAddress}>{functionResult.merchant.address}</Text>
-              {functionResult.merchant.opening_hours && (
-                <Text style={styles.merchantHours}>🕒 {functionResult.merchant.opening_hours}</Text>
-              )}
-              {functionResult.merchant.phone && (
-                <TouchableOpacity onPress={() => Linking.openURL(`tel:${functionResult.merchant.phone}`)}>
-                  <Text style={styles.merchantLink}>📞 {functionResult.merchant.phone}</Text>
-                </TouchableOpacity>
-              )}
-              {functionResult.merchant.website && (
-                <TouchableOpacity onPress={() => onOpenLink(functionResult.merchant.website)}>
-                  <Text style={styles.merchantLink}>🌐 Website</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+            <MerchantRow
+              merchant={functionResult.merchant}
+              styles={styles}
+              onOpenLink={onOpenLink}
+              openMaps={openMaps}
+              expanded
+            />
           ) : (
             <Text style={styles.errorText}>❌ {functionResult.error}</Text>
           )}
@@ -226,7 +357,7 @@ const makeStyles = (theme: Theme) =>
     },
     title: {
       fontSize: theme.typography.fontSize.sm,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
       marginBottom: theme.spacing[2],
       letterSpacing: 0.5,
@@ -234,17 +365,17 @@ const makeStyles = (theme: Theme) =>
     successText: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.success[500] ?? theme.colors.success[600],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
       marginBottom: theme.spacing[1],
     },
     errorText: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.error[400] ?? theme.colors.error[500],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
     invoiceText: {
       fontSize: theme.typography.fontSize.sm,
-      lineHeight: 20,
+      lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
       color: theme.colors.text.secondary,
       marginBottom: theme.spacing[2],
     },
@@ -259,9 +390,32 @@ const makeStyles = (theme: Theme) =>
     copyText: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
-    merchantList: { maxHeight: 180 },
+    merchantList: {},
+    merchantMore: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+      textAlign: 'center',
+      paddingVertical: theme.spacing[1],
+    },
+    contactRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[2.5] ?? 10,
+      paddingVertical: theme.spacing[2],
+    },
+    contactAvatar: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: `${theme.colors.primary[500]}22`,
+    },
+    contactInitial: { color: theme.colors.primary[500], fontWeight: '700', fontSize: theme.typography.fontSize.base },
+    contactName: { color: theme.colors.text.primary, fontWeight: '600', fontSize: theme.typography.fontSize.sm },
+    contactMeta: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.xs, marginTop: 1 },
     merchantItem: {
       padding: theme.spacing[2],
       backgroundColor: theme.colors.surface.primary,
@@ -270,35 +424,77 @@ const makeStyles = (theme: Theme) =>
       borderWidth: 1,
       borderColor: theme.colors.border.light,
     },
+    merchantHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: theme.spacing[2],
+    },
     merchantName: {
+      flex: 1,
       fontSize: theme.typography.fontSize.sm,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
       color: theme.colors.text.primary,
       marginBottom: theme.spacing[1],
-      lineHeight: 20,
+      lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
+    },
+    merchantDistance: {
+      fontSize: theme.typography.fontSize.xs,
+      fontWeight: theme.typography.fontWeight.bold,
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
+    },
+    merchantPay: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.success[500] ?? theme.colors.success[600],
+      fontWeight: theme.typography.fontWeight.medium,
+      marginBottom: theme.spacing[1],
+    },
+    merchantActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: theme.spacing[3],
+      marginTop: theme.spacing[1],
+    },
+    mapsButton: {
+      paddingVertical: theme.spacing[1],
+      paddingHorizontal: theme.spacing[2],
+      backgroundColor: theme.colors.primary[100] ?? theme.colors.surface.secondary,
+      borderRadius: theme.borderRadius.sm,
+    },
+    mapsButtonText: {
+      fontSize: theme.typography.fontSize.xs,
+      fontWeight: theme.typography.fontWeight.semibold,
+      color: theme.colors.primary[400] ?? theme.colors.primary[500],
+    },
+    attribution: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.tertiary,
+      marginTop: theme.spacing[1],
+      fontStyle: 'italic',
     },
     merchantAddress: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.text.secondary,
       marginBottom: theme.spacing[1],
-      lineHeight: 16,
+      lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.snug),
     },
     merchantLink: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
       marginBottom: theme.spacing[1],
-      fontWeight: '500',
-      lineHeight: 16,
+      fontWeight: theme.typography.fontWeight.medium,
+      lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.snug),
     },
     merchantHours: {
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.success[500] ?? theme.colors.success[600],
       marginBottom: theme.spacing[1],
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
     balanceAmount: {
       fontSize: theme.typography.fontSize.xl,
-      fontWeight: '700',
+      fontWeight: theme.typography.fontWeight.bold,
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
     },
     balanceSub: {
@@ -316,7 +512,7 @@ const makeStyles = (theme: Theme) =>
     },
     assetTicker: {
       fontSize: theme.typography.fontSize.sm,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
       color: theme.colors.text.primary,
     },
     assetBalance: {
@@ -326,7 +522,7 @@ const makeStyles = (theme: Theme) =>
     addressText: {
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.primary,
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
       marginBottom: theme.spacing[1],
     },
     txRow: {
@@ -339,12 +535,12 @@ const makeStyles = (theme: Theme) =>
     txDirection: {
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.secondary,
-      fontWeight: '500',
+      fontWeight: theme.typography.fontWeight.medium,
     },
     txAmount: {
       fontSize: theme.typography.fontSize.sm,
       color: theme.colors.text.primary,
-      fontWeight: '600',
+      fontWeight: theme.typography.fontWeight.semibold,
     },
   });
 

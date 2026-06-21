@@ -35,6 +35,8 @@ import {
 } from '../store/slices/swapSlice';
 import { protocolManager } from '../services/protocols';
 import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
+import { syncAssets } from '../store/slices/assetsSlice';
+import { getAssetDisplayBalance } from '../utils/assetAmount';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
@@ -42,6 +44,7 @@ import {
   normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
+import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import { theme } from '../theme';
 import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
@@ -97,6 +100,52 @@ export default function SwapScreen({ navigation }: Props) {
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
+  // Set once a swap settles so the confirm modal shows a success screen instead
+  // of silently closing (the Flashnet path had no confirmation at all).
+  const [swapSuccess, setSwapSuccess] = useState<
+    { fromAmount: number; fromTicker: string; toAmount: number; toTicker: string; txid?: string } | null
+  >(null);
+
+  // After any swap, refresh balances everywhere: the global asset list (so a
+  // freshly bought Spark token like USDB appears in Assets/Dashboard), the local
+  // picker list, and the pair list. Spark inbound token transfers can settle a
+  // few seconds AFTER executeSwap returns, so force a wallet sync + re-poll a
+  // couple of times rather than reading a single (possibly pre-settlement) value.
+  const refreshAfterSwap = () => {
+    const walletId = walletState?.activeWallet?.id;
+    const sync = () => {
+      if (walletId) dispatch(syncAssets(walletId) as any);
+      loadAvailableAssets();
+    };
+    const sparkAdapter: any = protocolManager.getAdapterIfAvailable('SPARK');
+    Promise.resolve(sparkAdapter?.refreshBalances?.()).catch(() => {}).finally(sync);
+    setTimeout(sync, 4000);
+    setTimeout(sync, 12000);
+    loadTradingPairs();
+  };
+
+  // Build a history entry from a settled quote so swaps (both venues) show up in
+  // the History screen with real amounts.
+  const recordSwapHistory = (
+    q: SwapQuote,
+    status: SwapExecution['status'],
+    txid?: string,
+    swapString?: string,
+  ) => {
+    dispatch(addToHistory({
+      rfq_id: q.rfq_id,
+      swap_string: swapString || '',
+      status,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      txid,
+      from_asset: q.from_asset,
+      to_asset: q.to_asset,
+      from_amount: q.from_amount,
+      to_amount: q.to_amount,
+      venue: q.venue,
+    }));
+  };
 
   // Load trading pairs and assets on mount
   useEffect(() => {
@@ -180,9 +229,32 @@ export default function SwapScreen({ navigation }: Props) {
       // Load Flashnet pools (via Spark → Flashnet)
       try {
         if (flashnetClientManager.isInitialized()) {
-          const pools = await flashnetClientManager.getClient().listPools({ sort: 'TVL_DESC' });
+          const client = flashnetClientManager.getClient();
+          const pools = await client.listPools({ sort: 'TVL_DESC' });
           const poolArray = Array.isArray(pools) ? pools : (pools as any)?.pools || [];
-          flashnetPairs = buildFlashnetPairs(poolArray);
+          // listPools returns asset addresses as HEX pubkeys, but USDB (and the
+          // wallet inventory) are keyed by the bech32m btkn1… identifier. Encode
+          // each side so the pair builder can recognise USDB and match holdings.
+          const enriched = poolArray.map((p: any) => {
+            const encode = (addr?: string) => {
+              if (!addr || addr === BTC_ASSET_PUBKEY) return undefined;
+              try { return client.encodeTokenAddress(addr); } catch { return undefined; }
+            };
+            return {
+              ...p,
+              assetABech32Address: p.assetABech32Address || encode(p.assetAAddress),
+              assetBBech32Address: p.assetBBech32Address || encode(p.assetBAddress),
+            };
+          });
+          // Feed held Spark assets so pool addresses resolve to real
+          // ticker/name/precision (the SDK pool payload carries none).
+          const sparkInventory = (rgbAssets || []).map((a: any) => ({
+            asset_id: a.asset_id,
+            ticker: a.ticker,
+            name: a.name,
+            precision: a.precision,
+          }));
+          flashnetPairs = buildFlashnetPairs(enriched, sparkInventory);
           console.log(`[SwapScreen] Loaded ${flashnetPairs.length} Flashnet pairs`);
         }
       } catch (err) {
@@ -197,27 +269,43 @@ export default function SwapScreen({ navigation }: Props) {
     }
   };
 
-  const loadAvailableAssets = async () => {
+  const loadAvailableAssets = () => {
     try {
-      const assets: Asset[] = [
-        {
-          asset_id: 'BTC',
-          ticker: 'BTC',
-          name: 'Bitcoin',
-          // Balance is in the active BTC unit (sats by default) so the MAX
-          // button and the amount field agree with how the input is parsed.
-          balance: satsToBtcDisplay(walletState?.btcBalance?.vanilla?.spendable || 0),
-          precision: bitcoinUnit === 'sats' ? 0 : 8,
-        },
-        ...rgbAssets.map((asset: any) => ({
+      // Keyed by ticker so held-asset balances win over pair-derived placeholders.
+      const byTicker = new Map<string, Asset>();
+      byTicker.set('BTC', {
+        asset_id: 'BTC',
+        ticker: 'BTC',
+        name: 'Bitcoin',
+        // Balance is in the active BTC unit (sats by default) so the MAX
+        // button and the amount field agree with how the input is parsed.
+        balance: satsToBtcDisplay(walletState?.btcBalance?.vanilla?.spendable || 0),
+        precision: bitcoinUnit === 'sats' ? 0 : 8,
+      });
+      for (const asset of rgbAssets as any[]) {
+        byTicker.set(asset.ticker, {
           asset_id: asset.asset_id,
           ticker: asset.ticker,
           name: asset.name,
-          balance: (asset.balance?.spendable || 0) / Math.pow(10, asset.precision || 8),
+          balance: getAssetDisplayBalance(asset.balance, asset.precision || 0),
           precision: asset.precision,
-        }))
-      ];
-      setAvailableAssets(assets);
+        });
+      }
+      // Surface every ticker that appears in a loaded pair (e.g. Flashnet's USDB)
+      // even when the wallet holds none yet — otherwise the destination is
+      // unreachable and the pair looks missing.
+      for (const ticker of allTickers(tradingPairs)) {
+        if (byTicker.has(ticker)) continue;
+        const pairAsset = findPairAsset(tradingPairs, ticker);
+        byTicker.set(ticker, {
+          asset_id: pairAsset ? getAssetId(pairAsset) : ticker,
+          ticker,
+          name: pairAsset?.name || ticker,
+          balance: 0,
+          precision: pairAsset?.precision ?? 8,
+        });
+      }
+      setAvailableAssets(Array.from(byTicker.values()));
     } catch (error) {
       console.error('Failed to load available assets:', error);
     }
@@ -228,6 +316,27 @@ export default function SwapScreen({ navigation }: Props) {
     if (venueFilter === 'all') return true;
     return p.venue === venueFilter;
   });
+
+  // Rebuild the selectable asset list whenever the loaded pairs, held assets, or
+  // BTC unit change — so a freshly loaded Flashnet USDB pair becomes selectable.
+  useEffect(() => {
+    loadAvailableAssets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradingPairs, rgbAssets, walletState?.btcBalance?.vanilla?.spendable, bitcoinUnit]);
+
+  // Once pairs load, make sure the from/to selection actually forms a real pair.
+  // A Spark-only wallet (no RLN) has no BTC/USDT pair, so fall back to the first
+  // available pair (preferring BTC as the source) — i.e. Flashnet BTC/USDB.
+  useEffect(() => {
+    if (!tradingPairs.length) return;
+    if (findPair(filteredPairs, swapState.fromAsset, swapState.toAsset)) return;
+    const preferred = filteredPairs.find(p => p.base.ticker === 'BTC') || filteredPairs[0];
+    if (preferred) {
+      dispatch(setFromAsset(preferred.base.ticker));
+      dispatch(setToAsset(preferred.quote.ticker));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tradingPairs, venueFilter]);
 
   const getQuote = async () => {
     try {
@@ -315,7 +424,7 @@ export default function SwapScreen({ navigation }: Props) {
             dispatch(setError('KaleidoSwap requires an RGB node connection. Please configure in Settings.'));
             return;
           }
-          const rgbAdapter = protocolManager.getAdapter('RGB');
+          // (RGB connectivity already gated above via kaleidoClientManager.isInitialized().)
           const fromAsset = pair.base.ticker === fromTicker ? pair.base : pair.quote;
           const toAsset = pair.base.ticker === toTicker ? pair.base : pair.quote;
           const fromAssetId = getAssetId(fromAsset);
@@ -401,7 +510,7 @@ export default function SwapScreen({ navigation }: Props) {
         const fromPrecision = (pair.base.ticker === quote.from_asset ? pair.base : pair.quote).precision;
         const toPrecision = (pair.base.ticker === quote.to_asset ? pair.base : pair.quote).precision;
         const rawAmount = quote.from_amount_raw ?? (isBtcTicker(quote.from_asset)
-          ? Math.round(quote.from_amount * 1e8)
+          ? btcDisplayToSats(quote.from_amount)
           : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
         const rawToAmount = quote.to_amount_raw ?? Math.round(isBtcTicker(quote.to_asset)
           ? quote.to_amount * 1e8
@@ -419,14 +528,25 @@ export default function SwapScreen({ navigation }: Props) {
         });
 
         setSwapProgress('done');
+        feedback.swap();
         dispatch(updateExecutionStatus({
           rfq_id: quote.rfq_id,
           status: 'completed',
           txid: result?.outboundTransferId || '',
         }));
+        // Flashnet settles instantly (no status polling), so record history here.
+        recordSwapHistory(quote, 'completed', result?.outboundTransferId || '');
         dispatch(setExecuting(false));
-        setShowConfirmModal(false);
-        loadAvailableAssets();
+        // Keep the modal open and show a success screen (Flashnet settles
+        // instantly — no status polling — so this is the only confirmation).
+        setSwapSuccess({
+          fromAmount: quote.from_amount,
+          fromTicker: quote.from_asset,
+          toAmount: quote.to_amount,
+          toTicker: quote.to_asset,
+          txid: result?.outboundTransferId || '',
+        });
+        refreshAfterSwap();
       } else {
         // ── Kaleidoswap execution (3-step: init → taker → execute) ──
         if (!kaleidoClientManager.isInitialized()) {
@@ -558,7 +678,15 @@ export default function SwapScreen({ navigation }: Props) {
             error_message: swapStatus === 'failed' ? 'Swap failed' : undefined,
           }));
 
-          if (swapState.currentExecution) {
+          // Record an enriched history entry (amounts/tickers from the quote).
+          if (swapState.currentQuote) {
+            recordSwapHistory(
+              swapState.currentQuote,
+              swapStatus === 'failed' ? 'failed' : 'completed',
+              swapState.currentExecution?.txid,
+              swapState.currentExecution?.swap_string,
+            );
+          } else if (swapState.currentExecution) {
             dispatch(addToHistory({
               ...swapState.currentExecution,
               status: swapStatus === 'failed' ? 'failed' : 'completed',
@@ -567,9 +695,22 @@ export default function SwapScreen({ navigation }: Props) {
 
           clearInterval(interval);
           setPollingInterval(null);
-          setShowConfirmModal(false);
           dispatch(setExecuting(false));
-          loadAvailableAssets();
+          if (swapStatus === 'failed') {
+            setShowConfirmModal(false);
+          } else {
+            const q = swapState.currentQuote;
+            if (q) {
+              setSwapSuccess({
+                fromAmount: q.from_amount,
+                fromTicker: q.from_asset,
+                toAmount: q.to_amount,
+                toTicker: q.to_asset,
+                txid: swapState.currentExecution?.txid,
+              });
+            }
+          }
+          refreshAfterSwap();
         }
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
@@ -592,28 +733,57 @@ export default function SwapScreen({ navigation }: Props) {
   const rgbConnected = protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false;
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
 
+  // The KaleidoSwap maker URL this wallet trades against, read from its RGB (RLN)
+  // network config — the same value initializeWdkProtocols feeds into the maker
+  // client. Surfacing it on the create screen lets the user see which provider is
+  // serving pairs (and spot a missing/misconfigured maker when a pair like
+  // BTC/USD turns up empty).
+  const makerProviderUrl = React.useMemo<string | null>(() => {
+    const rln: any = walletState?.activeWallet?.networks?.find(
+      (n: any) => n.type === 'rln' && n.enabled,
+    );
+    if (!rln?.config) return null;
+    try {
+      const cfg = typeof rln.config === 'string' ? JSON.parse(rln.config) : rln.config;
+      return cfg?.makerUrl || cfg?.baseUrl || cfg?.url || null;
+    } catch {
+      return null;
+    }
+  }, [walletState?.activeWallet]);
+
+  // If the active venue filter points at a disconnected venue, fall back to All.
+  useEffect(() => {
+    if (venueFilter === 'kaleidoswap' && !rgbConnected) setVenueFilter('all');
+    if (venueFilter === 'flashnet' && !sparkConnected) setVenueFilter('all');
+  }, [venueFilter, rgbConnected, sparkConnected]);
+
   const renderVenueFilter = () => {
-    const venues: Array<{ id: SwapVenueFilter; label: string; available: boolean }> = [
-      { id: 'all', label: 'All', available: true },
-      { id: 'kaleidoswap', label: 'KaleidoSwap', available: rgbConnected },
-      { id: 'flashnet', label: 'Flashnet', available: sparkConnected },
+    // Only surface venues whose protocol is actually connected. KaleidoSwap
+    // needs an RLN/RGB node; Flashnet needs Spark. With a single venue there's
+    // nothing to switch between, so hide the strip entirely.
+    const venues: Array<{ id: SwapVenueFilter; label: string }> = [
+      { id: 'all', label: 'All' },
+      ...(rgbConnected ? [{ id: 'kaleidoswap' as const, label: 'KaleidoSwap' }] : []),
+      ...(sparkConnected ? [{ id: 'flashnet' as const, label: 'Flashnet' }] : []),
     ];
+    if (venues.length <= 2) return null;
 
     return (
-      <View style={{ flexDirection: 'row', marginBottom: 12, borderRadius: 10, backgroundColor: theme.colors.background.secondary, padding: 3 }}>
+      <View style={{ flexDirection: 'row', marginBottom: theme.spacing[3], borderRadius: theme.borderRadius.base, backgroundColor: theme.colors.background.secondary, padding: 3 }}>
         {venues.map(venue => (
           <TouchableOpacity
             key={venue.id}
-            onPress={() => venue.available && setVenueFilter(venue.id)}
+            onPress={() => setVenueFilter(venue.id)}
             style={{
-              flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center',
+              flex: 1, paddingVertical: theme.spacing[2], borderRadius: theme.spacing[2], alignItems: 'center',
               backgroundColor: venueFilter === venue.id ? theme.colors.primary[500] : 'transparent',
-              opacity: venue.available ? 1 : 0.35,
             }}
           >
             <Text style={{
-              fontSize: 13, fontWeight: venueFilter === venue.id ? '600' : '400',
-              color: venueFilter === venue.id ? '#fff' : theme.colors.text.secondary,
+              fontSize: theme.typography.fontSize.sm, fontWeight: venueFilter === venue.id ? '600' : '400',
+              // Selected tab fills with bright brand green; text.inverse (dark navy)
+              // is the readable on-green colour (plain white reads as low-contrast).
+              color: venueFilter === venue.id ? theme.colors.text.inverse : theme.colors.text.secondary,
             }}>
               {venue.label}
             </Text>
@@ -627,6 +797,18 @@ export default function SwapScreen({ navigation }: Props) {
     <View style={styles.swapContainer}>
       {/* Venue filter tabs */}
       {renderVenueFilter()}
+
+      {/* KaleidoSwap maker provider — shows which maker is serving pairs so an
+          empty pair list (e.g. "No trading pair found for BTC/USD") is debuggable. */}
+      {rgbConnected && venueFilter !== 'flashnet' && (
+        <View style={styles.makerInfoRow}>
+          <Ionicons name="server-outline" size={13} color={theme.colors.text.tertiary} />
+          <Text style={styles.makerInfoLabel}>Maker</Text>
+          <Text style={styles.makerInfoUrl} numberOfLines={1}>
+            {makerProviderUrl || 'not configured'}
+          </Text>
+        </View>
+      )}
 
       {/* From Section */}
       <View style={styles.swapInputContainer}>
@@ -653,7 +835,18 @@ export default function SwapScreen({ navigation }: Props) {
         <View style={styles.swapInputRow}>
           <TextInput
             value={swapState.fromAmount}
-            onChangeText={(text) => dispatch(setFromAmount(text))}
+            onChangeText={(text) => {
+              // Limit the quote input to the available balance for the selected
+              // from-asset/network (same idea as the extension's clamp-to-max):
+              // the user can't request a quote for more than they hold.
+              const max = assetByTicker(swapState.fromAsset)?.balance ?? 0;
+              const n = parseFloat(text.replace(/,/g, ''));
+              if (max > 0 && Number.isFinite(n) && n > max) {
+                dispatch(setFromAmount(String(max)));
+              } else {
+                dispatch(setFromAmount(text));
+              }
+            }}
             placeholder="0"
             placeholderTextColor={theme.colors.text.tertiary}
             keyboardType="decimal-pad"
@@ -678,13 +871,16 @@ export default function SwapScreen({ navigation }: Props) {
         </View>
       </View>
 
-      {/* Swap Arrow Overlay */}
-      <View style={styles.swapArrowContainer}>
+      {/* Direction flip — a card-colored circle sitting in the seam between the
+          two cards (mirrors the extension's swap_vert button). */}
+      <View style={styles.swapArrowContainer} pointerEvents="box-none">
         <TouchableOpacity
           style={styles.swapArrowButton}
           onPress={() => dispatch(swapAssets())}
+          activeOpacity={0.8}
+          accessibilityLabel="Flip swap direction"
         >
-          <Ionicons name="arrow-down" size={24} color={theme.colors.primary[500]} />
+          <Ionicons name="swap-vertical" size={22} color={theme.colors.primary[500]} />
         </TouchableOpacity>
       </View>
 
@@ -775,6 +971,16 @@ export default function SwapScreen({ navigation }: Props) {
   const renderAssetPicker = () => {
     if (!showAssetPicker) return null;
 
+    // Restrict choices to what's actually tradable: destinations must pair with
+    // the current source; sources are any ticker present in a loaded pair. Falls
+    // back to the full asset list before pairs have loaded.
+    const tickers = showAssetPicker === 'to'
+      ? tradableTickers(filteredPairs, swapState.fromAsset)
+      : allTickers(filteredPairs);
+    const pickerAssets = tickers.length
+      ? tickers.map(t => assetByTicker(t)).filter((a): a is Asset => !!a)
+      : availableAssets;
+
     return (
       <View style={styles.modalOverlay}>
         <View style={styles.assetPickerModal}>
@@ -788,7 +994,7 @@ export default function SwapScreen({ navigation }: Props) {
           </View>
 
           <ScrollView style={styles.assetPickerList}>
-            {availableAssets.map((asset) => (
+            {pickerAssets.map((asset) => (
               <TouchableOpacity
                 key={asset.asset_id}
                 style={styles.assetPickerItem}
@@ -865,6 +1071,44 @@ export default function SwapScreen({ navigation }: Props) {
   };
 
   const renderConfirmModal = () => {
+    // Success screen — shown for both venues once a swap settles.
+    if (swapSuccess) {
+      return (
+        <View style={styles.modalOverlay}>
+          <View style={styles.confirmModal}>
+            <View style={{ alignItems: 'center', paddingVertical: 8 }}>
+              <View style={[styles.progressDot, styles.progressDotDone, { width: 56, height: 56, borderRadius: 28, marginBottom: 12 }]}>
+                <Ionicons name="checkmark" size={32} color={theme.colors.text.inverse} />
+              </View>
+              <Text style={styles.confirmTitle}>Swap Complete</Text>
+              <Text style={{ color: theme.colors.text.secondary, marginTop: 6, textAlign: 'center' }}>
+                {formatDisplayAmount(swapSuccess.fromAmount, swapSuccess.fromTicker)} {unitLabelFor(swapSuccess.fromTicker)}
+                {'  →  '}
+                {formatDisplayAmount(swapSuccess.toAmount, swapSuccess.toTicker)} {unitLabelFor(swapSuccess.toTicker)}
+              </Text>
+              {!!swapSuccess.txid && (
+                <Text style={{ color: theme.colors.text.tertiary, marginTop: 8, fontSize: 12 }}>
+                  {swapSuccess.txid.substring(0, 18)}…
+                </Text>
+              )}
+            </View>
+            <Button
+              title="Done"
+              variant="primary"
+              fullWidth
+              style={{ marginTop: 16 }}
+              onPress={() => {
+                setSwapSuccess(null);
+                setShowConfirmModal(false);
+                setSwapProgress('idle');
+                dispatch(resetSwap());
+              }}
+            />
+          </View>
+        </View>
+      );
+    }
+
     if (!showConfirmModal || !swapState.currentQuote) return null;
 
     // currentQuote stores tickers (see from_asset: fromTicker in loadQuote).
@@ -1053,7 +1297,9 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing[4],
     backgroundColor: theme.colors.error[50],
     borderWidth: 1,
-    borderColor: theme.colors.error[200],
+    // error[100] is the dark-theme translucent red tint; [200] is a light-theme
+    // value that reads as a bright pink border on the dark canvas.
+    borderColor: theme.colors.error[100],
   },
 
   errorContent: {
@@ -1066,19 +1312,40 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[700],
+    // error[700] is a light-theme dark red; error[500] is the on-dark readable red.
+    color: theme.colors.error[500],
   },
 
   swapContainer: {
     gap: theme.spacing[2],
   },
 
+  makerInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[1.5],
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.background.secondary,
+  },
+  makerInfoLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  makerInfoUrl: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.secondary,
+  },
+
   swapInputContainer: {
     backgroundColor: theme.colors.surface.primary,
     borderRadius: theme.borderRadius['2xl'],
     padding: theme.spacing[4],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
   },
 
   swapInputHeader: {
@@ -1103,7 +1370,8 @@ const styles = StyleSheet.create({
   maxButtonText: {
     fontSize: theme.typography.fontSize.xs,
     fontWeight: '700',
-    color: theme.colors.primary[600],
+    // primary[600] is a light-theme dark green; primary[500] is the on-dark accent.
+    color: theme.colors.primary[500],
     backgroundColor: theme.colors.primary[50],
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 2,
@@ -1173,24 +1441,23 @@ const styles = StyleSheet.create({
     color: theme.colors.text.primary,
   },
 
+  // In-flow, centered in the seam between the two cards (overlapping both via
+  // negative margins) so it always sits at the true divider — no fragile %.
   swapArrowContainer: {
-    position: 'absolute',
-    left: '50%',
-    top: '38%',
-    marginLeft: -20,
+    alignSelf: 'center',
+    marginTop: -18,
+    marginBottom: -18,
     zIndex: 10,
   },
 
   swapArrowButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: theme.colors.background.primary,
-    borderWidth: 4,
-    borderColor: theme.colors.background.secondary,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.surface.elevated,
     alignItems: 'center',
     justifyContent: 'center',
-    ...theme.shadows.sm,
+    ...theme.shadows.md,
   },
 
   quoteInfoContainer: {
@@ -1219,7 +1486,6 @@ const styles = StyleSheet.create({
 
   getQuoteButton: {
     marginTop: theme.spacing[2],
-    height: 56,
   },
 
   // Status Styles
@@ -1269,7 +1535,8 @@ const styles = StyleSheet.create({
 
   statusProgressText: {
     fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[700],
+    // primary[700] is a light-theme dark green; primary[500] reads on dark.
+    color: theme.colors.primary[500],
     fontWeight: '500',
   },
 

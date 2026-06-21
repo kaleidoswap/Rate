@@ -28,12 +28,19 @@ jest.mock('expo-sqlite', () => ({
 jest.mock('expo-local-authentication', () => ({
   hasHardwareAsync: jest.fn(() => Promise.resolve(true)),
   isEnrolledAsync: jest.fn(() => Promise.resolve(true)),
+  getEnrolledLevelAsync: jest.fn(() => Promise.resolve(3)),
   supportedAuthenticationTypesAsync: jest.fn(() => Promise.resolve([1])),
   authenticateAsync: jest.fn(() => Promise.resolve({ success: true })),
   AuthenticationType: {
     FINGERPRINT: 1,
     FACIAL_RECOGNITION: 2,
     IRIS: 3,
+  },
+  SecurityLevel: {
+    NONE: 0,
+    SECRET: 1,
+    BIOMETRIC_WEAK: 2,
+    BIOMETRIC_STRONG: 3,
   },
 }));
 
@@ -162,4 +169,3 @@ global.console = {
   warn: jest.fn(),
   error: jest.fn(),
 };
-

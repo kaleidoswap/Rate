@@ -10,6 +10,8 @@ import { updateNetwork, deleteWallet } from '../store/slices/walletSlice';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig, WalletRecord } from '../services/DatabaseService';
 import { Button, Input, Card } from '../components';
+import { SecurityService } from '../services/SecurityService';
+import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
 
 interface Props {
     navigation: any;
@@ -19,11 +21,43 @@ interface Props {
 export default function WalletSettingsScreen({ navigation, route }: Props) {
     const { walletId } = route.params;
     const dispatch = useDispatch();
-    const { wallets } = useSelector((state: RootState) => state.wallet);
+    const { wallets, isUnlocked } = useSelector((state: RootState) => state.wallet);
     const wallet = wallets.find((w: WalletRecord) => w.id === walletId);
 
     const [rlnRemoteUrl, setRlnRemoteUrl] = useState('');
     const [isEditingRln, setIsEditingRln] = useState(false);
+    const [revealedMnemonic, setRevealedMnemonic] = useState<string | null>(null);
+    const [showRevealModal, setShowRevealModal] = useState(false);
+
+    // Auth-gated recovery-phrase reveal: the wallet must already be unlocked,
+    // then the OS must authenticate the user again before the words leave
+    // SecureStore.
+    const handleViewMnemonic = async () => {
+        if (typeof walletId !== 'number') return;
+        if (!isUnlocked) {
+            Alert.alert('Unlock wallet first', 'Unlock this wallet before recovering the recovery phrase.');
+            return;
+        }
+
+        try {
+            const mnemonic = await SecurityService.getInstance().revealMnemonic(walletId);
+            if (mnemonic === null) return;
+            if (!mnemonic) {
+                Alert.alert('Unavailable', 'No recovery phrase is stored for this wallet on this device.');
+                return;
+            }
+            setRevealedMnemonic(mnemonic);
+            setShowRevealModal(true);
+        } catch (error: any) {
+            Alert.alert('Security required', error?.message || 'Could not authenticate this device.');
+        }
+    };
+
+    const closeRevealModal = () => {
+        setShowRevealModal(false);
+        // Drop the plaintext seed from component state as soon as the sheet closes.
+        setRevealedMnemonic(null);
+    };
 
     useEffect(() => {
         if (wallet) {
@@ -198,13 +232,13 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
                 <Card style={styles.card}>
                     <TouchableOpacity
                         style={styles.menuItem}
-                        onPress={() => Alert.alert('Info', 'View Mnemonic feature coming soon')}
+                        onPress={handleViewMnemonic}
                     >
                         <View style={styles.menuItemLeft}>
                             <View style={[styles.iconContainer, { backgroundColor: theme.colors.secondary[100] }]}>
-                                <Ionicons name="key" size={20} color={theme.colors.secondary[600]} />
+                                <Ionicons name="key" size={20} color={theme.colors.brand.violet} />
                             </View>
-                            <Text style={styles.menuItemText}>View Mnemonic Phrase</Text>
+                            <Text style={styles.menuItemText}>Recover recovery phrase</Text>
                         </View>
                         <Ionicons name="chevron-forward" size={20} color={theme.colors.gray[400]} />
                     </TouchableOpacity>
@@ -228,6 +262,12 @@ export default function WalletSettingsScreen({ navigation, route }: Props) {
 
                 <View style={styles.footerSpacer} />
             </ScrollView>
+
+            <RevealMnemonicModal
+                visible={showRevealModal}
+                mnemonic={revealedMnemonic}
+                onClose={closeRevealModal}
+            />
         </View>
     );
 }
@@ -329,7 +369,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        backgroundColor: theme.colors.gray[50],
+        backgroundColor: theme.colors.surface.secondary,
         padding: theme.spacing[3],
         borderRadius: theme.borderRadius.base,
         borderWidth: 1,
@@ -373,7 +413,7 @@ const styles = StyleSheet.create({
         color: theme.colors.text.primary,
     },
     dangerCard: {
-        borderColor: theme.colors.error[200],
+        borderColor: theme.colors.error[500],
         borderWidth: 1,
         backgroundColor: theme.colors.error[50],
     },
@@ -382,15 +422,15 @@ const styles = StyleSheet.create({
     },
     dangerText: {
         fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.error[700],
+        color: theme.colors.text.secondary,
         lineHeight: 20,
     },
     deleteButton: {
-        backgroundColor: 'white',
-        borderColor: theme.colors.error[300],
+        backgroundColor: theme.colors.surface.primary,
+        borderColor: theme.colors.error[500],
     },
     deleteButtonText: {
-        color: theme.colors.error[600],
+        color: theme.colors.error[500],
     },
     footerSpacer: {
         height: 40,

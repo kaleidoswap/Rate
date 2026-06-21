@@ -41,6 +41,7 @@ interface Props {
           spendable: number;
         };
         isRGB?: boolean;
+        protocol?: 'BTC' | 'RGB' | 'SPARK' | 'ARKADE';
       };
     };
   };
@@ -67,15 +68,30 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const [assetDetails, setAssetDetails] = useState(asset);
   const [refreshing, setRefreshing] = useState(false);
   
-  const rgbAdapter = protocolManager.getAdapter('RGB');
+  // getAdapterIfAvailable (not getAdapter, which throws) + the isConnected() guard
+  // below ensure we never call the RGB/NWC node when it isn't connected.
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
   const isBTC = asset.asset_id === 'BTC';
+  // Honor the protocol classified by the caller (RGB vs Spark token vs Arkade);
+  // only fall back to the old "non-BTC ⇒ RGB" assumption when it wasn't provided,
+  // so a Spark token is not pushed through the RGB send/receive flow.
+  const isRGB = asset.isRGB ?? !isBTC;
+  // Human label for the asset type chip — protocol-aware so a Spark token is not
+  // mislabelled "RGB Asset".
+  const assetTypeLabel = isBTC
+    ? 'Bitcoin'
+    : asset.protocol === 'SPARK'
+      ? 'Spark Token'
+      : asset.protocol === 'ARKADE'
+        ? 'Arkade Asset'
+        : 'RGB Asset';
 
   useEffect(() => {
     loadAssetDetails();
   }, []);
 
   const loadAssetDetails = async () => {
-    if (isBTC || !rgbAdapter) return;
+    if (isBTC || !rgbAdapter?.isConnected()) return;
     
     try {
       setLoading(true);
@@ -96,23 +112,23 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   };
 
   const handleSend = () => {
-    navigation.navigate('Send', { 
+    navigation.navigate('Send', {
       selectedAsset: {
         asset_id: assetDetails.asset_id,
         ticker: assetDetails.ticker,
         name: assetDetails.name,
-        isRGB: !isBTC,
+        isRGB,
       }
     });
   };
 
   const handleReceive = () => {
-    navigation.navigate('Receive', { 
+    navigation.navigate('Receive', {
       selectedAsset: {
         asset_id: assetDetails.asset_id,
         ticker: assetDetails.ticker,
         name: assetDetails.name,
-        isRGB: !isBTC,
+        isRGB,
       }
     });
   };
@@ -121,7 +137,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     if (isBTC) {
       return (
         <View style={styles.iconContainer}>
-          <Ionicons name="logo-bitcoin" size={48} color="#F7931A" />
+          <Ionicons name="logo-bitcoin" size={48} color={theme.colors.networks.bitcoin} />
         </View>
       );
     }
@@ -144,7 +160,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const renderHeader = () => {
     const balance = isBTC
       ? walletState.btcBalance?.vanilla?.spendable || 0
-      : assetDetails.balance?.spendable || 0;
+      : (typeof assetDetails.balance === 'number'
+          ? assetDetails.balance
+          : (assetDetails.balance?.spendable ?? (assetDetails.balance as any)?.available ?? 0));
 
     // Balances arrive in smallest units (sats for BTC, base units for RGB).
     // Divide by 10^precision before display, and render BTC in the user's
@@ -178,7 +196,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
               <Text style={styles.assetName}>{assetDetails.name}</Text>
               <View style={styles.assetTypeContainer}>
                 <Text style={styles.assetType}>
-                  {isBTC ? 'Bitcoin' : 'RGB Asset'}
+                  {assetTypeLabel}
                 </Text>
               </View>
             </View>
@@ -228,11 +246,20 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
       );
     }
 
-    if (assetDetails.balance) {
+    // `balance` may be a number (DB AssetRecord), a partial object (the BTC card
+    // passes only { spendable }), or a full { settled, future, spendable }.
+    // Read every field defensively — a missing one used to crash
+    // (undefined.toLocaleString()) when tapping the BTC / a Spark asset card.
+    if (assetDetails.balance != null) {
+      const bal: any = assetDetails.balance;
+      const isNum = typeof bal === 'number';
+      const settled = isNum ? bal : (bal.settled ?? 0);
+      const future = isNum ? bal : (bal.future ?? 0);
+      const spendable = isNum ? bal : (bal.spendable ?? bal.available ?? 0);
       details.push(
-        { label: 'Settled Balance', value: assetDetails.balance.settled.toLocaleString() },
-        { label: 'Future Balance', value: assetDetails.balance.future.toLocaleString() },
-        { label: 'Spendable Balance', value: assetDetails.balance.spendable.toLocaleString() }
+        { label: 'Settled Balance', value: Number(settled).toLocaleString() },
+        { label: 'Future Balance', value: Number(future).toLocaleString() },
+        { label: 'Spendable Balance', value: Number(spendable).toLocaleString() }
       );
     }
 
@@ -545,7 +572,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: theme.spacing[3],
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.gray[100],
+    borderBottomColor: theme.colors.border.light,
   },
   
   detailLabel: {

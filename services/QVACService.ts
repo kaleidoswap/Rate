@@ -3,6 +3,7 @@ import {
   loadModel,
   completion,
   transcribe,
+  transcribeStream,
   textToSpeech,
   unloadModel,
   cancel,
@@ -11,8 +12,8 @@ import {
   VERBOSITY,
   embed,
   TTS_EN_SUPERTONIC_Q4_0,
-  WHISPER_BASE_Q8_0,
   EMBEDDINGGEMMA_300M_Q4_0,
+  VAD_SILERO_5_1_2,
 } from '@qvac/sdk';
 import { NativeModules, Platform } from 'react-native';
 import { File, Directory, Paths } from 'expo-file-system';
@@ -35,6 +36,13 @@ import {
   type TtsEngine,
 } from './qvacModels';
 import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
+import {
+  createQvacProvider,
+  createQvacVoice,
+  buildDelegateConfig,
+  cleanAssistantVisibleText,
+  sanitizeForSupertonic,
+} from '@kaleidorg/mind/qvac';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 
 // CPU baseline config for the local llamacpp model. Used as the GPU fallback
@@ -42,7 +50,9 @@ import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 const LOCAL_LLM_CONFIG = {
   device: 'cpu',
   gpu_layers: 0,
-  ctx_size: 2048,
+  // 4096 so the agentic prompt (system + tools + skills + a little history) fits
+  // even on the CPU fallback path; 2048 overflowed ("prompt exceeds context").
+  ctx_size: 4096,
   tools: true,
   verbosity: VERBOSITY.ERROR,
 } as const;
@@ -56,6 +66,13 @@ const LOCAL_LLM_CONFIG_GPU = {
   ...LOCAL_LLM_CONFIG,
   device: 'gpu',
   gpu_layers: 99, // offload all layers; llamacpp clamps to the model's count
+  // 4096 is the proven-stable Metal window on-device. Larger values (6144/8192)
+  // let big agentic prompts fit, BUT can hard-abort the Bare worklet when Metal
+  // can't allocate the KV cache — an uncatchable native crash, observed right
+  // after a voice turn starts generating. So we stay at 4096: a fresh request
+  // (e.g. "places to eat in Turin") fits, and the rare long-conversation overflow
+  // is surfaced as a friendly "clear the chat" message instead of crashing. Heavy
+  // prompts that still don't fit should run via Desktop delegation (16k ctx).
   ctx_size: 4096,
 } as const;
 
@@ -114,49 +131,8 @@ function isPhoneRuntime(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
-function sanitizeForSupertonic(text: string): string {
-  const normalized = text
-    .replace(/\b(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{40,}\b/gi, 'Lightning invoice')
-    .replace(/\blnurl[0-9a-z]{40,}\b/gi, 'Lightning payment link')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/[\u0060\u00B4\u02CB\u2032*_~#<>|[\]{}]/g, ' ')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[•·]/g, '. ')
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
-    .replace(/\s+/g, ' ');
-
-  return Array.from(normalized)
-    .filter((ch) => {
-      const code = ch.charCodeAt(0);
-      return (code === 0x09 || code === 0x0A || code === 0x0D || (code >= 0x20 && code <= 0x7E)) &&
-        code !== 0x60;
-    })
-    .join('')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function cleanAssistantVisibleText(text: string): string {
-  let cleaned = text
-    // Qwen-style reasoning sometimes arrives in contentText. Never show/speak it.
-    .replace(/<think\b[\s\S]*?<\/think>/gi, ' ')
-    .replace(/<think\b[\s\S]*$/gi, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // Some small local models emit a tool-call object as plain text. Drop the
-  // leading fragment and keep any natural-language sentence that follows.
-  const toolPrefix = cleaned.match(/^\s*\{?\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*/i);
-  if (toolPrefix) {
-    cleaned = cleaned.slice(toolPrefix[0].length).replace(/^\s*\{?\s*/, '').trim();
-  }
-
-  return cleaned
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+// `sanitizeForSupertonic` + `cleanAssistantVisibleText` now live in
+// @kaleidorg/mind/qvac (imported above) — one implementation, shared with desktop.
 
 const CONFIG_KEY = 'qvac.config.v1';
 
@@ -221,6 +197,16 @@ class QVACService {
 
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
+  // Coalesce cold-start callers (voice overlay pre-warm, auto-listen, and
+  // transcription fallback) onto the same model load. Previously a second
+  // initializeWhisper() call saw `loading` and returned immediately, then its
+  // caller treated the still-loading model as a failure.
+  private whisperLoadPromise: Promise<void> | null = null;
+  // True when the resident Whisper model was loaded with the Silero VAD submodel,
+  // which the hands-free streaming session (emitVadEvents) requires. A plain
+  // one-shot Whisper load has no VAD, so we reload before opening a voice session.
+  private whisperHasVad = false;
+  private vadModelPath: string | null = null;
   private ttsModelId: string | null = null;
   private embedModelId: string | null = null;
   private embedLoadPromise: Promise<string> | null = null;
@@ -246,6 +232,29 @@ class QVACService {
   // App.tsx syncs this from the persisted KaleidoMind mode (settings.aiMode), so the
   // worklet can never start until the user explicitly opts in.
   private enabled = false;
+
+  // All completion + tool-call parsing lives in @kaleidorg/mind-qvac (shared with
+  // desktop). We inject the raw SDK fns + a model-id resolver; this host keeps
+  // model lifecycle (load/unload, GPU/delegate) below. Defaults mirror the prior
+  // inline turn (0.6 temperature, 512-token cap), overridable per turn.
+  private readonly mindProvider = createQvacProvider({
+    completion,
+    cancel,
+    getModelId: () => this.llmModelId,
+    defaultTemperature: 0.6,
+    defaultMaxTokens: 512,
+  });
+
+  // Shared voice orchestration (transcribe + synth, and the VAD session for
+  // hands-free mode). The SDK fns are injected; this host owns model lifecycle
+  // (load/unload below) via the model-id resolvers.
+  private readonly mindVoice = createQvacVoice({
+    transcribe,
+    textToSpeech,
+    transcribeStream,
+    getWhisperModelId: () => this.whisperModelId,
+    getTtsModelId: () => this.ttsModelId,
+  });
 
   private constructor() {}
 
@@ -465,11 +474,27 @@ class QVACService {
     await this.setDelegate({ enabled, providerPublicKey: this.config.providerPublicKey });
   }
 
-  /** Unload + re-initialize the LLM (after a model/delegation change). */
+  /**
+   * Unload + re-initialize the LLM (after a model/delegation change).
+   *
+   * Only HOT-reloads when the LLM was already running. From a cold state we must
+   * NOT boot it here: this is reached at app startup via the aiMode→delegate sync
+   * (App.tsx QVACEnabledSync → setDelegateEnabled → setDelegate), and cold-booting
+   * the worklet + loading the model at launch means a model-load/worklet crash
+   * bricks the entire app in a restart loop. Cold, we just reset status and let
+   * the model load lazily when the user opens the AI screen (AIAssistantScreen's
+   * useQVAC autoInit on focus). Mirrors the "reload only if already active"
+   * guard in setSttModel.
+   */
   private async reloadLLM(): Promise<void> {
+    const wasActive =
+      !!this.llmModelId ||
+      this.state.llmStatus === 'ready' ||
+      this.state.llmStatus === 'loading' ||
+      this.state.llmStatus === 'downloading';
     await this.unloadLLM().catch(() => {});
     this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, error: null });
-    await this.initializeLLM();
+    if (wasActive) await this.initializeLLM();
   }
 
   /** Switch the speech-to-text (Whisper) model and reload it if it was active. */
@@ -611,9 +636,10 @@ class QVACService {
 
   // --- LLM lifecycle ---
 
-  // Whether to try GPU (Metal) offload for local inference before CPU. Cached
-  // per session so we don't repeatedly attempt a Metal context that can't init.
-  private static PREFER_GPU = true;
+  // Whether to try GPU offload for local inference before CPU. Metal on iOS;
+  // not attempted on Android (Vulkan path in llamacpp is not stable on all
+  // devices — CPU inference is reliable and fast enough on arm64).
+  private static PREFER_GPU = Platform.OS === 'ios';
 
   /**
    * Load the local llamacpp model with Metal/GPU offload when possible, falling
@@ -716,10 +742,7 @@ class QVACService {
             modelSrc,
             modelType: 'llamacpp-completion',
             modelConfig: { ...DELEGATE_LLM_CONFIG },
-            delegate: {
-              providerPublicKey: this.config.providerPublicKey,
-              fallbackToLocal: false,
-            },
+            delegate: buildDelegateConfig(this.config.providerPublicKey),
           } as any);
         } else {
           // Local: try Metal/GPU offload first, fall back to CPU.
@@ -759,49 +782,79 @@ class QVACService {
 
   // --- Whisper lifecycle ---
 
-  async initializeWhisper(): Promise<void> {
+  /**
+   * Download the Silero VAD weights over HTTPS (registry:// crashes the iOS
+   * worklet, so we mirror the same local-file approach used for every other
+   * model) and return the on-disk path. The hands-free streaming session needs
+   * this submodel loaded alongside Whisper.
+   */
+  private async ensureVadModel(): Promise<string> {
+    if (this.vadModelPath) return this.vadModelPath;
+    const url = hfUrlFromDescriptor(VAD_SILERO_5_1_2);
+    if (!url) throw new Error('VAD model has no downloadable URL');
+    const name = String((VAD_SILERO_5_1_2 as any).registryPath).split('/').pop() || 'ggml-silero-v5.1.2.bin';
+    const size = Number((VAD_SILERO_5_1_2 as any).expectedSize) || 885098; // exact size of ggml-silero-v5.1.2.bin
+    const path = await this.ensureLocalModel({ url, name, size }, () => {});
+    this.vadModelPath = path;
+    return path;
+  }
+
+  /**
+   * @param withVad load the Silero VAD submodel too (required for the hands-free
+   *   conversation session; the one-shot push-to-talk path doesn't need it).
+   */
+  async initializeWhisper(opts: { withVad?: boolean } = {}): Promise<void> {
+    const withVad = !!opts.withVad;
     // Hard gate: Whisper also runs in the Bare worklet — never start it unless
     // on-device AI is enabled and the runtime can actually run here.
     if (this.workletBlocked()) {
       console.warn('[QVAC] Whisper init skipped — disabled or runtime unavailable');
       return;
     }
-    if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
+
+    // A cold open can trigger pre-warm and auto-listen in the same render. Wait
+    // for the existing load instead of returning while Whisper is still unusable.
+    if (this.whisperLoadPromise) {
+      await this.whisperLoadPromise;
+      // A hands-free caller may need to upgrade a just-finished one-shot model
+      // to include VAD. Re-enter after the shared load has settled.
+      if (withVad && this.whisperStatusReady() && !this.whisperHasVad) {
+        await this.initializeWhisper({ withVad: true });
+      }
       return;
+    }
+
+    // Already loaded with the capabilities this caller needs.
+    if (this.whisperStatusReady() && (!withVad || this.whisperHasVad)) {
+      return;
+    }
+
+    const load = this.loadWhisperModel(withVad);
+    this.whisperLoadPromise = load;
+    try {
+      await load;
+    } finally {
+      if (this.whisperLoadPromise === load) this.whisperLoadPromise = null;
+    }
+  }
+
+  private async loadWhisperModel(withVad: boolean): Promise<void> {
+    // Upgrade a resident one-shot model to a VAD-capable model for hands-free.
+    if (this.whisperModelId) {
+      await this.unloadWhisper().catch(() => {});
     }
 
     try {
       await this.loadConfig();
 
-      // Delegated: transcription runs on the remote provider's Whisper model
-      // (the same desktop provider the LLM delegates to). The phone downloads no
-      // weights — we pass an SDK descriptor + `delegate`, and the bound modelId
-      // then makes every transcribeAudio() call route over P2P. If the provider
-      // is unreachable we fall through to the local download/load path below.
-      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
-      if (delegating) {
-        this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100, error: null });
-        try {
-          this.whisperModelId = await loadModel({
-            modelSrc: WHISPER_BASE_Q8_0,
-            modelType: 'whispercpp-transcription',
-            modelConfig: { language: deviceWhisperLanguage(), strategy: 'greedy', audio_format: 's16le' } as any,
-            delegate: {
-              providerPublicKey: this.config.providerPublicKey,
-              fallbackToLocal: false,
-            },
-          } as any);
-          this.setState({ whisperStatus: 'ready' });
-          console.log('[QVAC] Whisper ready (delegated):', this.whisperModelId);
-          return;
-        } catch (delErr) {
-          console.warn(
-            '[QVAC] Whisper delegation failed; falling back to local model:',
-            delErr instanceof Error ? delErr.message : String(delErr)
-          );
-        }
-      }
-
+      // Transcription ALWAYS runs on-device, even when the LLM is delegated to a
+      // desktop. The @qvac/sdk only registers a `delegatedHandler` for completion
+      // (the LLM) — `transcribe`/`textToSpeech` have none, so a Whisper model
+      // loaded with a `delegate` config becomes a delegated registry entry and
+      // every transcribeAudio() call throws "Model … is a delegated model and
+      // cannot be accessed directly", breaking voice mode the moment a desktop is
+      // paired. Whisper-base is tiny (~40 MB) and runs fine locally on any phone,
+      // so we keep STT on-device and delegate only the heavy LLM.
       this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
 
       // Use the user-selected Whisper variant, but keep the phone voice loop
@@ -824,15 +877,33 @@ class QVACService {
       // of being force-decoded as English → empty. The QVAC whisper handler
       // rejects "auto"/detect_language for these tiny models, so we always pass
       // a concrete code and fall back to 'en' if the chosen one won't load.
+      // For the hands-free conversation session, Whisper must be loaded with the
+      // Silero VAD submodel — otherwise transcribeStream({ emitVadEvents }) throws
+      // "VAD model name is required for Whisper transcription".
+      let vadModelSrc: string | undefined;
+      if (withVad) {
+        try {
+          vadModelSrc = await this.ensureVadModel();
+        } catch (vadErr) {
+          console.warn('[QVAC] VAD model download failed; hands-free unavailable:',
+            vadErr instanceof Error ? vadErr.message : String(vadErr));
+        }
+      }
+
       const primaryLang = stt.lang === 'en' ? 'en' : deviceWhisperLanguage();
       const loadWhisper = (language: string) =>
         loadModel({
           modelSrc: modelPath,
           modelType: 'whispercpp-transcription',
-          modelConfig: { language, strategy: 'greedy', audio_format: 's16le' } as any,
+          modelConfig: {
+            language,
+            strategy: 'greedy',
+            audio_format: 's16le',
+            ...(vadModelSrc ? { vadModelSrc } : {}),
+          } as any,
         });
 
-      console.log('[QVAC] Whisper: loadModel start', stt.id, 'lang=' + primaryLang, modelPath);
+      console.log('[QVAC] Whisper: loadModel start', stt.id, 'lang=' + primaryLang, 'vad=' + !!vadModelSrc, modelPath);
       this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100 });
 
       try {
@@ -844,6 +915,7 @@ class QVACService {
         this.whisperModelId = await loadWhisper('en');
       }
 
+      this.whisperHasVad = !!vadModelSrc;
       this.setState({ whisperStatus: 'ready' });
       console.log('QVAC Whisper ready:', this.whisperModelId);
     } catch (err) {
@@ -946,90 +1018,57 @@ class QVACService {
    * on-device even when inference is delegated).
    */
   async runProviderTurn(
-    input: TurnInput & { onThinking?: (token: string) => void },
+    input: TurnInput & {
+      onThinking?: (token: string) => void;
+      onStats?: (stats: import('@kaleidorg/mind/qvac').QvacTurnStats) => void;
+      temperature?: number;
+      maxTokens?: number;
+    },
   ): Promise<TurnOutput> {
-    if (!this.llmModelId) {
-      throw new Error('LLM model not loaded');
-    }
-
-    const history = input.system
-      ? [{ role: 'system', content: input.system }, ...input.messages]
-      : input.messages;
-
-    const toolDefs = input.tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-    }));
-
-    const run = completion({
-      modelId: this.llmModelId,
-      history,
-      stream: true,
-      // Parse <think> blocks into separate `thinkingDelta` events so the UI can
-      // surface the model's reasoning on demand without it polluting the answer.
-      captureThinking: true,
-      // Cap output so a turn can't ramble to the context limit (slow + battery);
-      // a wallet reply / tool call is short. 512 is generous headroom.
-      max_tokens: 512,
-      tools: toolDefs.length ? (toolDefs as any) : undefined,
-    } as any);
-
-    let streamed = '';
-    for await (const event of run.events) {
-      if (event.type === 'contentDelta') {
-        streamed += event.text;
-        input.onToken?.(event.text);
-      } else if (event.type === 'thinkingDelta') {
-        // The model's chain-of-thought, streamed separately from the visible
-        // answer. Surfaced so the UI can show it on demand (collapsed reveal).
-        input.onThinking?.(event.text);
-      }
-    }
-
-    const final = await run.final;
-    // Strip <think>…</think> reasoning from the user-visible text; keep the raw
-    // frame (with framing) for the engine's history push-back.
-    const rawText = final.contentText || streamed;
-    const text = cleanAssistantVisibleText(rawText);
-
-    return {
-      text,
-      rawContent: final.raw?.fullText ?? rawText,
-      toolCalls: (final.toolCalls || []).map((c: any) => ({
-        id: c.id,
-        name: c.name,
-        arguments: c.arguments ?? {},
-      })),
-      requestId: run.requestId,
-    };
+    // The shared provider runs completion + streams tokens (contentDelta →
+    // onToken, thinkingDelta → onThinking) + parses the final frame. It reads the
+    // model id via the `getModelId` closure above, so this stays a thin binding.
+    return this.mindProvider.runTurn(input);
   }
 
   /** Cancel an in-flight completion by its requestId (for a stop button). */
   async cancelRequest(requestId: string): Promise<void> {
-    try {
-      await cancel({ requestId });
-    } catch (err) {
-      console.warn('QVAC cancel failed:', err);
-    }
+    await this.mindProvider.cancel?.(requestId);
   }
 
   // --- Transcription ---
 
   async transcribeAudio(audioUri: string): Promise<string> {
-    if (this.workletBlocked() || !this.whisperModelId) {
-      throw new Error('Whisper model not loaded');
+    if (this.workletBlocked()) throw new Error('Whisper model not loaded');
+    // The file:// strip + transcribe call live in the shared voice helper (it
+    // also throws if the Whisper model id isn't resolved yet).
+    return this.mindVoice.transcribeAudio(audioUri);
+  }
+
+  /**
+   * Open a hands-free VAD transcription session for continuous voice. The caller
+   * feeds raw PCM via `session.write()` and drives it with `runVoiceAssistant`
+   * (both from @kaleidorg/mind/qvac). Requires the Whisper model loaded and
+   * @qvac/sdk ≥ 0.13.1 (the VAD conversation session). The one-shot
+   * `transcribeAudio` path above still works on 0.12.x.
+   */
+  async openVoiceSession() {
+    if (this.workletBlocked()) throw new Error('on-device AI unavailable on this device');
+    // The streaming session uses VAD, so make sure Whisper was loaded with the
+    // Silero submodel (reloads it if a one-shot load left VAD off).
+    if (this.whisperStatusReady() && this.whisperHasVad) {
+      // already VAD-capable
+    } else {
+      await this.initializeWhisper({ withVad: true });
     }
+    if (!this.whisperHasVad) {
+      throw new Error('Hands-free needs the voice-activity model, which failed to load. Try again or use the tap-to-talk mic.');
+    }
+    return this.mindVoice.openVoiceSession();
+  }
 
-    // The QVAC SDK's native file reader expects a plain filesystem path, not a
-    // `file://` URI — same as the model-loading paths above. Passing the raw
-    // URI causes AUDIO_FILE_NOT_FOUND even though the file exists.
-    const audioPath = audioUri.replace('file://', '');
-
-    return await transcribe({
-      modelId: this.whisperModelId,
-      audioChunk: audioPath,
-    });
+  private whisperStatusReady(): boolean {
+    return this.state.whisperStatus === 'ready' && !!this.whisperModelId;
   }
 
   // --- Text-to-speech (on-device, QVAC SUPERTONIC-2) ---
@@ -1048,12 +1087,15 @@ class QVACService {
     if (this.ttsLoadPromise) return this.ttsLoadPromise;
 
     this.ttsLoadPromise = (async () => {
-      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
-      console.log(`[QVAC] TTS: loading Supertonic GGML model${delegating ? ' (delegated)' : ''}`);
-      // On-device only: free the Whisper weights before loading the neural voice
-      // so the phone never holds both in RAM. When delegating, both models live
-      // on the remote provider, so there's nothing local to unload.
-      if (!delegating && this.whisperModelId) {
+      console.log('[QVAC] TTS: loading Supertonic GGML model');
+      // TTS ALWAYS runs on-device, even when the LLM is delegated. The @qvac/sdk
+      // only forwards completion (the LLM) to a P2P provider — `textToSpeech` has
+      // no delegated handler, so a TTS model loaded with `delegate` throws
+      // "Model … is a delegated model and cannot be accessed directly" on every
+      // synthesize call. The Supertonic model is small, so we keep it local and
+      // delegate only the LLM. Free the Whisper weights first so the phone never
+      // holds both neural voices in RAM at once.
+      if (this.whisperModelId) {
         console.log('[QVAC] TTS: unloading Whisper before neural voice load');
         await this.unloadWhisper().catch(() => {});
       }
@@ -1067,9 +1109,6 @@ class QVACService {
           ttsSpeed: 1.05,
           ttsNumInferenceSteps: 5,
         },
-        ...(delegating
-          ? { delegate: { providerPublicKey: this.config.providerPublicKey, fallbackToLocal: false } }
-          : {}),
       } as any);
       this.ttsModelId = id;
       console.log('[QVAC] TTS ready:', id);
@@ -1091,26 +1130,14 @@ class QVACService {
    */
   async synthesizeSpeech(text: string): Promise<{ pcm: number[]; sampleRate: number } | null> {
     if (this.workletBlocked()) return null;
-    const trimmed = sanitizeForSupertonic(text);
-    if (!trimmed) return null;
-    if (trimmed !== text.trim()) {
-      console.log('[QVAC] TTS: sanitized unsupported characters before synthesis');
-    }
-    if (Array.from(trimmed).some((ch) => ch.charCodeAt(0) === 0x60)) {
-      console.warn('[QVAC] TTS: refusing Supertonic input with U+0060 after sanitize');
-      return null;
-    }
-    console.log('[QVAC] TTS: synth input chars', Array.from(trimmed).map((ch) => ch.charCodeAt(0)).join(','));
-
-    const modelId = await this.ensureTtsLoaded();
-    const result: any = textToSpeech({
-      modelId,
-      text: trimmed,
-      inputType: 'text',
-      stream: false,
-    } as any);
-    const pcm: number[] = await result.buffer;
-    return { pcm, sampleRate: TTS_SAMPLE_RATE };
+    // Early-out before loading the TTS model: the shared helper sanitizes +
+    // refuses unspeakable input internally, but we check here too so we never
+    // spin up the neural voice for empty/redacted text.
+    if (!sanitizeForSupertonic(text)) return null;
+    await this.ensureTtsLoaded();
+    // sanitize + U+0060 refusal + textToSpeech → 16-bit PCM live in the helper
+    // (44.1 kHz SUPERTONIC default).
+    return this.mindVoice.synthesizeSpeech(text);
   }
 
   // --- Embeddings (for on-device RAG) ---
@@ -1181,6 +1208,7 @@ class QVACService {
     if (this.whisperModelId) {
       await unloadModel({ modelId: this.whisperModelId, clearStorage: false });
       this.whisperModelId = null;
+      this.whisperHasVad = false;
       this.setState({ whisperStatus: 'not_downloaded' });
     }
   }

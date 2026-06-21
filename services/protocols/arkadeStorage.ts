@@ -49,11 +49,16 @@ export function buildArkadeStorage(opts: {
     const db = SQLite.openDatabaseSync(dbName)
 
     // The SDK expects db.run(sql, params), db.get(sql, params), db.all(sql, params).
-    // expo-sqlite v16 exposes runAsync/getFirstAsync/getAllAsync.
+    // Arkade's contract watcher and boarding-UTXO pollers can hit this storage
+    // concurrently and outlive foreground UI calls. On Android, expo-sqlite's
+    // async prepared-statement path has produced NativeDatabase.prepareAsync NPEs
+    // in those background polls. Keep the SDK's async-shaped executor, but run
+    // the small repository queries through the sync helpers to avoid that native
+    // async statement lifecycle.
     const dbAdapter = {
-      run: (sql: string, params?: any[]) => db.runAsync(sql, params || []),
-      get: (sql: string, params?: any[]) => db.getFirstAsync(sql, params || []),
-      all: (sql: string, params?: any[]) => db.getAllAsync(sql, params || []),
+      run: async (sql: string, params?: any[]) => db.runSync(sql, params || []),
+      get: async (sql: string, params?: any[]) => db.getFirstSync(sql, params || []),
+      all: async (sql: string, params?: any[]) => db.getAllSync(sql, params || []),
     }
 
     return {

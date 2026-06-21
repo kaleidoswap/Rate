@@ -87,13 +87,15 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.rate.rgbwallet'
+    namespace 'com.kaleidoswap.wallet'
     defaultConfig {
-        applicationId 'com.rate.rgbwallet'
+        applicationId 'com.kaleidoswap.wallet'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        // Overridable from CI via -PVERSION_CODE / -PVERSION_NAME (or the
+        // ORG_GRADLE_PROJECT_* env vars). Defaults keep local builds working.
+        versionCode((findProperty('VERSION_CODE') ?: '1').toString().toInteger())
+        versionName((findProperty('VERSION_NAME') ?: '1.0.0').toString())
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 
@@ -108,15 +110,26 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Production signing — populated only when the CI/release secrets are
+        // present (RELEASE_STORE_FILE etc., injected via ORG_GRADLE_PROJECT_*).
+        // Left empty for local dev so a plain `assembleRelease` still works.
+        release {
+            if (findProperty('RELEASE_STORE_FILE')) {
+                storeFile file(findProperty('RELEASE_STORE_FILE'))
+                storePassword findProperty('RELEASE_STORE_PASSWORD')
+                keyAlias findProperty('RELEASE_KEY_ALIAS')
+                keyPassword findProperty('RELEASE_KEY_PASSWORD')
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Use the real release keystore when CI provides it; otherwise fall
+            // back to the debug keystore so local release builds don't break.
+            signingConfig findProperty('RELEASE_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

@@ -14,10 +14,21 @@ import uiReducer from './slices/uiSlice';
 import contactsReducer from './slices/contactsSlice';
 import swapReducer from './slices/swapSlice';
 import nostrReducer from './slices/nostrSlice';
+import chatReducer from './slices/chatSlice';
 
 // Import middleware
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
 import { setStore } from './storeProvider';
+
+// The swap slice is otherwise ephemeral (current quote/execution reset each
+// session), but swapHistory should survive restarts so the History screen keeps
+// past swaps. Nest-persist just that key.
+const swapPersistConfig = {
+  key: 'swap',
+  storage: AsyncStorage,
+  whitelist: ['swapHistory'],
+};
+const persistedSwapReducer = persistReducer(swapPersistConfig, swapReducer);
 
 // Combine all reducers first to get proper types
 const rootReducer = combineReducers({
@@ -28,8 +39,9 @@ const rootReducer = combineReducers({
   transactions: transactionsReducer,
   ui: uiReducer,
   contacts: contactsReducer,
-  swap: swapReducer,
+  swap: persistedSwapReducer,
   nostr: nostrReducer,
+  chat: chatReducer,
 });
 
 // Get the actual state type from the root reducer
@@ -39,9 +51,9 @@ type RootReducerState = ReturnType<typeof rootReducer>;
 const persistConfig: PersistConfig<RootReducerState> = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['settings', 'ui', 'contacts', 'nostr'], // Added nostr to persist non-sensitive nostr data
+  whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: persist decrypted DM history locally
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 2,
+  version: 3,
   migrate: (state: any) => {
     // v2: replace the legacy default Nostr relay set with the current one.
     // The old defaults included relay.snort.social (frequently offline) and
@@ -56,6 +68,7 @@ const persistConfig: PersistConfig<RootReducerState> = {
       'wss://nostr.wine',
     ];
     const CURRENT_DEFAULT_RELAYS = [
+      'wss://relay.kaleidoswap.com',
       'wss://relay.damus.io',
       'wss://nos.lol',
       'wss://relay.nostr.band',
@@ -73,6 +86,23 @@ const persistConfig: PersistConfig<RootReducerState> = {
       }
     } catch {
       // Non-fatal: fall through with state unchanged.
+    }
+    // v3: backfill chat fields added after the slice first shipped. Old persisted
+    // `chat` state replaces the slice wholesale on rehydrate (autoMergeLevel1 does
+    // not deep-merge), so without this the new objects are undefined and reads
+    // like `unreadByPubkey[...]` crash.
+    try {
+      if (state?.chat) {
+        const c = state.chat;
+        c.conversations = c.conversations || {};
+        c.loadingByPubkey = c.loadingByPubkey || {};
+        c.unreadByPubkey = c.unreadByPubkey || {};
+        c.paidInvoices = c.paidInvoices || {};
+        if (c.activePubkey === undefined) c.activePubkey = null;
+        if (!c.sendScheme) c.sendScheme = 'nip17';
+      }
+    } catch {
+      // Non-fatal.
     }
     return Promise.resolve(state);
   },

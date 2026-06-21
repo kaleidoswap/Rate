@@ -14,3 +14,37 @@ export function formatAssetAmount(baseUnits: number, precision: number): string 
   // Up to `precision` decimals, trimming trailing zeros (and a dangling dot).
   return value.toFixed(precision).replace(/\.?0+$/, '');
 }
+
+export type AssetBalanceLike =
+  | number
+  | {
+      spendable?: number;
+      available?: number;
+      settled?: number;
+      total?: number;
+      future?: number;
+      pending?: number;
+      offchain_outbound?: number;
+      offchain_inbound?: number;
+    }
+  | null
+  | undefined;
+
+export function getAssetBaseUnitBalance(balance: AssetBalanceLike): number {
+  if (typeof balance === 'number') return Number.isFinite(balance) ? balance : 0;
+  if (!balance) return 0;
+
+  const value =
+    balance.spendable ??
+    balance.available ??
+    balance.settled ??
+    balance.total ??
+    balance.future ??
+    0;
+
+  return Number.isFinite(Number(value)) ? Number(value) : 0;
+}
+
+export function getAssetDisplayBalance(balance: AssetBalanceLike, precision: number): number {
+  return getAssetBaseUnitBalance(balance) / Math.pow(10, precision || 0);
+}

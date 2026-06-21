@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { Image, ImageSourcePropType, View } from 'react-native';
+import { theme } from '../theme';
 
 interface NetworkIconProps {
   network: string;
@@ -33,7 +34,7 @@ export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) 
   const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()];
 
   if (!source) {
-    return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: '#64748B' }} />;
+    return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: theme.colors.gray[500] }} />;
   }
 
   return (

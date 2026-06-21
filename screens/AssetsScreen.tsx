@@ -20,7 +20,9 @@ import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
 import { formatAssetAmount } from '../utils/assetAmount';
 import { useAssetIcon } from '../utils';
-import { theme } from '../theme';
+import { AssetIcon as SharedAssetIcon } from '../components/AssetIcon';
+import { getAssetFamily } from '../utils/account-routing';
+import { theme, protocolColor, protocolTint } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
 import { IssueAssetModal } from '../components/IssueAssetModal';
 import { usePolicy } from '../hooks/usePolicy';
@@ -44,24 +46,21 @@ export default function AssetsScreen({ navigation }: Props) {
   const policy = usePolicy();
   const canIssue = policy.showExperimental;
 
-  // Asset Icon Component
-  const AssetIcon = ({ ticker }: { ticker: string }) => {
-    const { iconUrl } = useAssetIcon(ticker);
-    
-    if (iconUrl) {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Image source={{ uri: iconUrl }} style={styles.assetIconImage} />
-        </View>
-      );
-    }
-    
-    return (
-      <View style={styles.assetIconContainer}>
-        <Ionicons name="diamond" size={24} color={theme.colors.primary[500]} />
-      </View>
-    );
-  };
+  // Asset Icon — uses the shared icon (logoUri → CDN → fallback) so Arkade/Spark
+  // token icons (and the asset's own icon metadata) render here too.
+  const AssetIcon = ({
+    ticker,
+    logoUri,
+    protocol,
+  }: {
+    ticker: string;
+    logoUri?: string;
+    protocol?: 'RGB' | 'SPARK' | 'ARKADE';
+  }) => (
+    <View style={styles.assetIconContainer}>
+      <SharedAssetIcon ticker={ticker} logoUri={logoUri} protocol={protocol} size={40} />
+    </View>
+  );
 
   useEffect(() => {
     if (activeWallet) {
@@ -100,7 +99,7 @@ export default function AssetsScreen({ navigation }: Props) {
   const renderHeader = () => (
     <View style={styles.headerContainer}>
       <ScreenHeader
-        title="RGB Assets"
+        title="Assets"
         showBack={true}
         rightAction={
           canIssue ? (
@@ -166,22 +165,33 @@ export default function AssetsScreen({ navigation }: Props) {
     );
   };
 
-  const renderAssetItem = (asset: AssetRecord, index: number) => (
+  const renderAssetItem = (asset: AssetRecord, index: number) => {
+    // The list holds assets from every protocol (RGB, Spark tokens, Arkade), so
+    // classify by id/ticker rather than assuming RGB — this drives the badge and
+    // ensures a Spark token isn't routed through the RGB detail/send flow.
+    const family = getAssetFamily(asset.asset_id, asset.ticker);
+    return (
     <TouchableOpacity
       key={asset.asset_id}
       style={[styles.assetCard, index === 0 && styles.firstAssetCard]}
-      onPress={() => navigation.navigate('AssetDetail', { 
+      onPress={() => navigation.navigate('AssetDetail', {
         asset: {
           ...asset,
-          isRGB: true
+          isRGB: family === 'RGB',
+          protocol: family,
         }
       })}
     >
       <View style={styles.assetCardHeader}>
         <View style={styles.assetCardLeft}>
-          <AssetIcon ticker={asset.ticker} />
+          <AssetIcon ticker={asset.ticker} logoUri={(asset as any).icon} protocol={(asset as any).protocol} />
           <View style={styles.assetInfo}>
-            <Text style={styles.assetTicker}>{asset.ticker}</Text>
+            <View style={styles.assetTickerRow}>
+              <Text style={styles.assetTicker}>{asset.ticker}</Text>
+              <View style={[styles.protocolBadge, { backgroundColor: protocolTint(family) }]}>
+                <Text style={[styles.protocolBadgeText, { color: protocolColor(family) }]}>{family}</Text>
+              </View>
+            </View>
             <Text style={styles.assetName}>{asset.name}</Text>
           </View>
         </View>
@@ -209,7 +219,8 @@ export default function AssetsScreen({ navigation }: Props) {
         </View>
       </View>
     </TouchableOpacity>
-  );
+    );
+  };
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
@@ -261,7 +272,7 @@ export default function AssetsScreen({ navigation }: Props) {
       activeOpacity={0.8}
     >
       <LinearGradient
-        colors={['#4338ca', '#7c3aed'] as [string, string]}
+        colors={[theme.colors.brand.violet, theme.colors.brand.violet] as [string, string]}
         style={styles.floatingButtonGradient}
       >
         <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
@@ -453,11 +464,29 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
+  assetTickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[1],
+  },
+
   assetTicker: {
     fontSize: theme.typography.fontSize.lg,
     fontWeight: '700',
     color: theme.colors.primary[500],
-    marginBottom: theme.spacing[1],
+  },
+
+  protocolBadge: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full,
+  },
+
+  protocolBadgeText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   
   assetName: {

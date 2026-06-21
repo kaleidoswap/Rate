@@ -72,8 +72,11 @@ export const QVAC_MODELS: QVACModel[] = [
   entry(LLAMA_3_2_1B_INST_Q4_0, 'Llama 3.2 1B', 'phone'),
   entry(LLAMA_TOOL_CALLING_1B_INST_Q4_K, 'Llama 1B (tool-calling)', 'phone'),
   entry(QWEN3_1_7B_INST_Q4, 'Qwen3 1.7B', 'phone'),
-  entry(QWEN3_4B_INST_Q4_K_M, 'Qwen3 4B', 'mac'),
-  entry(QWEN3_8B_INST_Q4_K_M, 'Qwen3 8B', 'mac'),
+  // 4B/8B are large but still run on modern high-RAM phones — let users pick them
+  // on-device instead of gating them behind a "Mac / desktop" tier. Only the 20B
+  // (~11 GB) genuinely needs a desktop.
+  entry(QWEN3_4B_INST_Q4_K_M, 'Qwen3 4B', 'pro'),
+  entry(QWEN3_8B_INST_Q4_K_M, 'Qwen3 8B', 'pro'),
   entry(GPT_OSS_20B_INST_Q4_K_M, 'GPT-OSS 20B', 'mac'),
 ];
 

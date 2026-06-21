@@ -19,11 +19,11 @@ import {
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import { Button, ScreenHeader } from '../components';
 import { RootState } from '../store';
 import NostrService from '../services/NostrService';
-import { saveKeysSecurely, setKeys, initializeNostr } from '../store/slices/nostrSlice';
+import { saveKeysSecurely, setKeys, initializeNostr, loadNostrProfile } from '../store/slices/nostrSlice';
 
 interface Props {
     navigation: any;
@@ -58,7 +58,11 @@ export default function NostrSetupScreen({ navigation, route }: Props) {
         await dispatch(saveKeysSecurely({ privateKey: keys.privateKey, nsec: keys.nsec }) as any);
         dispatch(setKeys(keys));
         // Fire-and-forget relay connection; never block onboarding on the network.
-        dispatch(initializeNostr({ privateKey: keys.privateKey, relays } as any) as any);
+        // Once connected, pull the account's profile (kind-0 metadata) so the
+        // display name is available app-wide (e.g. the dashboard greeting).
+        (dispatch(initializeNostr({ privateKey: keys.privateKey, relays } as any) as any) as Promise<unknown>)
+            .then(() => dispatch(loadNostrProfile() as any))
+            .catch(() => {});
     };
 
     const handleDeriveFromSeed = async () => {
@@ -251,7 +255,7 @@ const styles = StyleSheet.create({
         fontSize: theme.typography.fontSize.base,
         color: theme.colors.text.secondary,
         textAlign: 'center',
-        lineHeight: 22,
+        lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.snug),
         paddingHorizontal: theme.spacing[2],
     },
     optionList: {
@@ -308,7 +312,7 @@ const styles = StyleSheet.create({
     optionDesc: {
         fontSize: theme.typography.fontSize.sm,
         color: theme.colors.text.secondary,
-        lineHeight: 18,
+        lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.snug),
     },
     inputLabel: {
         fontSize: theme.typography.fontSize.sm,

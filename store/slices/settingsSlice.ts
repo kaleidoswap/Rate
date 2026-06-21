@@ -1,7 +1,7 @@
 
 
 // store/slices/settingsSlice.ts
-import { createSlice, PayloadAction } from '@reduxjs/toolkit';
+import { createSlice, PayloadAction, createSelector } from '@reduxjs/toolkit';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import type { RootState } from '../index';
 
@@ -11,6 +11,38 @@ import type { RootState } from '../index';
 //   'local'    run the model on this device
 //   'delegate' run it on a paired desktop; the phone relays
 export type AiMode = 'off' | 'local' | 'delegate';
+
+// User-tunable KaleidoMind agent configuration (persisted). Lets the user shape
+// the agent's behaviour, sampling, context window, and knowledge/memory.
+export interface MindConfig {
+  /** Extra instructions appended to the agent's system prompt (its "persona"). */
+  persona: string;
+  /** Sampling temperature 0..1 (lower = more deterministic). */
+  temperature: number;
+  /** Max tokens per reply. */
+  maxTokens: number;
+  /** How many past messages to keep in context. */
+  historyLength: number;
+  /** Ground answers in the on-device knowledge base (RAG). */
+  ragEnabled: boolean;
+  /** Long-term memory: let the agent remember/recall preferences. */
+  memoryEnabled: boolean;
+  /** Skill names the user has turned OFF (bundled skills are on by default). */
+  disabledSkills: string[];
+  /** User-added MCP connectors (name + URL). */
+  mcpServers: { name: string; url: string }[];
+}
+
+export const DEFAULT_MIND_CONFIG: MindConfig = {
+  persona: '',
+  temperature: 0.6,
+  maxTokens: 512,
+  historyLength: 8,
+  ragEnabled: true,
+  memoryEnabled: true,
+  disabledSkills: [],
+  mcpServers: [],
+};
 
 // Primary denomination the balance/amounts are shown in. Cycled by tapping the
 // balance (sats → BTC → fiat → sats). Distinct from `bitcoinUnit`, which only
@@ -47,6 +79,8 @@ interface SettingsState {
   aiMode: AiMode;
   // Whether the user has been through the one-time KaleidoMind onboarding.
   aiOnboarded: boolean;
+  // User-tunable agent configuration (persona, sampling, context, RAG, memory).
+  mindConfig: MindConfig;
 }
 
 const initialState: SettingsState = {
@@ -71,6 +105,7 @@ const initialState: SettingsState = {
   disclosureLevel: 'lite',
   aiMode: 'off',
   aiOnboarded: false,
+  mindConfig: DEFAULT_MIND_CONFIG,
 };
 
 const settingsSlice = createSlice({
@@ -156,6 +191,12 @@ const settingsSlice = createSlice({
     setAiOnboarded: (state, action: PayloadAction<boolean>) => {
       state.aiOnboarded = action.payload;
     },
+    setMindConfig: (state, action: PayloadAction<Partial<MindConfig>>) => {
+      state.mindConfig = { ...DEFAULT_MIND_CONFIG, ...state.mindConfig, ...action.payload };
+    },
+    resetMindConfig: (state) => {
+      state.mindConfig = DEFAULT_MIND_CONFIG;
+    },
     // Convenience on/off toggle that preserves a chosen 'delegate' setup.
     setAiEnabled: (state, action: PayloadAction<boolean>) => {
       if (action.payload) {
@@ -190,6 +231,8 @@ export const {
   setCurrency,
   setNetwork,
   setDisclosureLevel,
+  setMindConfig,
+  resetMindConfig,
   setAiMode,
   setAiOnboarded,
   setAiEnabled,
@@ -221,5 +264,13 @@ export const selectAiEnabled = (state: RootState): boolean =>
 // Whether the user has completed the one-time KaleidoMind onboarding.
 export const selectAiOnboarded = (state: RootState): boolean =>
   state.settings.aiOnboarded ?? false;
+
+// Memoized so the ref is stable across renders (no thrash), while always
+// merging defaults — older persisted state may be missing newer fields
+// (e.g. disabledSkills/mcpServers), which would otherwise crash consumers.
+export const selectMindConfig = createSelector(
+  [(state: RootState) => state.settings.mindConfig],
+  (mc): MindConfig => ({ ...DEFAULT_MIND_CONFIG, ...(mc ?? {}) }),
+);
 
 export default settingsSlice.reducer;

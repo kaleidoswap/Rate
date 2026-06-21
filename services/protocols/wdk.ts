@@ -24,7 +24,8 @@ import {
   kaleidoClientManager,
   flashnetClientManager,
 } from '@kaleidorg/wallet-engine'
-import { NwcRgbAdapter } from '../nwc/NwcRgbAdapter'
+import * as SecureStore from 'expo-secure-store'
+import { NwcRgbAdapter, NWC_CONNECTION_KEY } from '../nwc/NwcRgbAdapter'
 import type {
   ProtocolType,
   SparkAdapterConfig,
@@ -33,6 +34,7 @@ import type {
   ArkadeAdapterConfig,
 } from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
+import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 
 /**
  * Mobile rollout gates.
@@ -126,8 +128,7 @@ export async function initializeWdkProtocols(
           config = {
             protocol: 'SPARK',
             mnemonic,
-            // Default Spark to regtest (test network); changeable per-account.
-            network: parsed.network || 'regtest',
+            network: resolveSparkNetwork(parsed.network),
           } as SparkAdapterConfig
           break
 
@@ -156,13 +157,12 @@ export async function initializeWdkProtocols(
             mnemonic,
             network: arkadeNetwork,
             arkadeConfig: {
+              ...(parsed.arkadeConfig || {}),
               // mutinynet.arkade.sh is the live signet/mutinynet Ark server;
               // signet.arkade.sh is deprecated and silently fails to board/receive
               // (matches rate-extension's ARKADE_SERVER_URLS.signet).
-              arkServerUrl: parsed.arkServerUrl
-                || (arkadeNetwork === 'mainnet' ? 'https://arkade.computer' : 'https://mutinynet.arkade.sh'),
+              arkServerUrl: parsed.arkServerUrl || getDefaultArkadeServerUrl(arkadeNetwork),
               esploraUrl: parsed.esploraUrl,
-              ...(parsed.arkadeConfig || {}),
               ...(arkadeStorage ? { storage: arkadeStorage } : {}),
             },
           } as ArkadeAdapterConfig
@@ -173,6 +173,14 @@ export async function initializeWdkProtocols(
           // NWC mode (default on mobile): the NwcRgbAdapter drives a remote node over
           // relays and reads its connection string from SecureStore — no HTTP nodeUrl.
           if (RGB_VIA_NWC) {
+            // No paired node yet → soft-skip instead of letting connect() throw, so a
+            // fresh wallet doesn't log a scary ERROR for an expected unconfigured state
+            // (mirrors the HTTP "no node URL configured" skip below).
+            const nwcUri = await SecureStore.getItemAsync(NWC_CONNECTION_KEY)
+            if (!nwcUri) {
+              results.set(protocol, { success: false, error: 'skipped: no NWC connection string configured' })
+              continue
+            }
             config = {
               protocol: 'RGB',
               mnemonic,
@@ -232,8 +240,13 @@ export async function initializeWdkProtocols(
           const sparkAdapter = manager.getAdapterIfAvailable('SPARK') as any
           const sparkWallet = sparkAdapter?.getUnderlyingSparkWallet?.()
           if (sparkWallet) {
-            await flashnetClientManager.initialize(sparkWallet, parsed.network || 'MAINNET')
-            console.log('[initializeWdkProtocols] flashnet (Spark DEX) initialized')
+            const sparkNetwork = (config as SparkAdapterConfig).network || 'regtest'
+            if (sparkNetwork === 'mainnet' || sparkNetwork === 'regtest') {
+              await flashnetClientManager.initialize(sparkWallet, sparkNetwork)
+              console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`)
+            } else {
+              console.log(`[initializeWdkProtocols] flashnet disabled on Spark ${sparkNetwork}`)
+            }
           } else {
             console.log('[initializeWdkProtocols] no SparkWallet exposed → flashnet disabled')
           }

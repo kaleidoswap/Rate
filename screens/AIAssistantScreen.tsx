@@ -16,6 +16,8 @@ import {
   Linking,
   Clipboard,
   Keyboard,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,49 +25,25 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, selectAiMode, setAiMode } from '../store/slices/settingsSlice';
+import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
-import { MainHeader } from '../components';
-import { ChatEmptyState, MessageBubble, TypingDots } from '../components/chat';
-import type { ChatMessage } from '../components/chat';
+import { leading } from '../theme';
+import { MainHeader, MindAvatar, MindGlyph, Badge } from '../components';
+import { ChatEmptyState, MessageBubble, TypingDots, buildCopyText } from '../components/chat';
+import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import QVACSettingsSheet from '../components/QVACSettingsSheet';
 import { shareLightningInvoice } from '../components/InvoiceQRCode';
 import ToastService from '../services/ToastService';
-import { AIAssistantFunctions } from '../services/aiAssistantFunctions';
-import { createQVACTools } from '../services/qvacTools';
 import { useQVAC } from '../hooks/useQVAC';
 import { getModelById } from '../services/qvacModels';
 import { PairingService } from '../services/PairingService';
-import {
-  Engine,
-  ToolRegistry,
-  InProcessToolSource,
-  createL402ToolSource,
-  SkillRegistry,
-  skillsFromBundle,
-  RecipeRegistry,
-  runRecipe,
-  paymentsRecipe,
-  FastPath,
-  WALLET_FAST_INTENTS,
-  InMemoryMemoryStore,
-  createMemoryToolSource,
-  type LLMProvider,
-  type InProcessTool,
-  type SkillBundle,
-  type Message as MindMessage,
-} from '@kaleidorg/mind';
-import { protocolManager } from '../services/protocols';
-import { buildWalletToolSource } from '../services/walletTools';
-import { asyncStorageMemoryIO } from '../services/aiMemory';
-import { buildKnowledgeToolSource } from '../services/aiKnowledge';
-// Skills authored as SKILL.md under ./skills, bundled to JSON at build time
-// (`npm run bundle-skills`). Same authoring + loader the desktop uses.
-import skillBundle from '../skills.bundle.json';
+import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
+import { createMindAgent } from '../services/mindAgent';
+import { decodeBolt11 } from '../utils/decodeInvoice';
 import * as Haptics from 'expo-haptics';
 
 interface Props {
@@ -81,6 +59,7 @@ interface PaymentDetails {
   recipientAvatar?: string;
   lightningAddress?: string;
   isNostrContact?: boolean;
+  priceUsd?: number;
 }
 
 interface Contact {
@@ -95,16 +74,15 @@ interface Contact {
   profile?: any;
 }
 
-const SYSTEM_PROMPT = {
-  role: 'system',
-  content:
-    'You are KaleidoSwap, a concise, privacy-first assistant running fully on-device inside a non-custodial Bitcoin, Lightning and RGB wallet. ' +
-    'Use the provided tools to take actions: pay invoices/addresses, generate invoices, check balance, get a receive address, list recent transactions, find Lugano merchants, or pay Nostr contacts. ' +
-    'Never invent balances, addresses or transaction data — always call the relevant tool and report what it returns. All BTC amounts are in satoshis. ' +
-    'Keep replies short and friendly.',
-};
-
 const toast = () => ToastService.getInstance();
+
+/** A `/command` token for a skill, e.g. "Merchant Finder" → "merchant-finder". */
+const skillSlug = (name: string) => name.toLowerCase().trim().replace(/\s+/g, '-');
+/** Keywords prepended to a turn so the funnel routes to the pinned skill. */
+const skillRouteHint = (skill: Skill): string =>
+  (skill.triggers && skill.triggers.length
+    ? skill.triggers.slice(0, 5).join(' ')
+    : skill.name.replace(/-/g, ' '));
 
 export default function AIAssistantScreen({ navigation }: Props) {
   const theme = useAppTheme();
@@ -139,9 +117,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   const scrollViewRef = useRef<ScrollView>(null);
   const voiceInputRef = useRef<VoiceInputRef>(null);
-  // Accumulates the model's reasoning for the in-flight assistant message so the
-  // provider (built once in a useMemo) can stream it into the right bubble.
-  const thinkingRef = useRef<{ id: string; text: string } | null>(null);
   // Most recent successfully generated invoice — lets "share" act on it.
   const lastInvoiceRef = useRef<{ invoice: string; amount: number; description?: string } | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -159,98 +134,27 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // (off by default) — starting it on a native/JS mismatch hard-crashes the app.
   const aiEnabled = useSelector(selectAiEnabled);
   const aiMode = useSelector(selectAiMode);
+  const btcPriceUSD = useSelector((s: any) => s?.wallet?.btcPriceUSD) || 0;
+  const mindConfig = useSelector(selectMindConfig);
   const dispatch = useDispatch();
   const qvac = useQVAC(aiEnabled);
-  const aiFunctions = useMemo(() => new AIAssistantFunctions(), []);
-  const tools = useMemo(() => createQVACTools(aiFunctions), [aiFunctions]);
-
-  // Long-term memory (remember/recall) — kaleido-mind owns the logic; we inject
-  // on-device AsyncStorage persistence. Available to the agent in every turn.
-  const memoryStore = useMemo(() => new InMemoryMemoryStore({ io: asyncStorageMemoryIO() }), []);
-
-  // Shared @kaleido/mind engine: same agentic loop on mobile, desktop and agent.
-  // Provider = QVAC (local or P2P-delegated); tool source = the on-device wallet
-  // tools (handlers run here, so signing never leaves the phone). The QVACService
-  // singleton is stable, and `tools` only changes when aiFunctions does, so the
-  // engine identity is stable across renders.
-  const engine = useMemo(() => {
-    const provider: LLMProvider = {
-      name: 'qvac',
-      runTurn: (input) =>
-        qvac.service.runProviderTurn({
-          ...input,
-          onThinking: (tok) => {
-            const cur = thinkingRef.current;
-            if (!cur) return;
-            cur.text += tok;
-            updateMessage(cur.id, () => ({ thinking: cur.text }));
-          },
-        }),
-      cancel: (id) => qvac.service.cancelRequest(id),
-    };
-    // Wallet tools now come from the canonical @kaleidorg/mind contract, bound
-    // to the WDK adapters (same names/schemas as the desktop MCP). Handlers run
-    // on-device; spend tools stay confirmation-gated.
-    const walletSource = buildWalletToolSource();
-    // Keep the non-wallet (merchant/map) tools from the legacy set.
-    const merchantTools = (tools as unknown as InProcessTool[]).filter(
-      (t) => t.name === 'find_merchant_locations' || t.name === 'get_merchant_info',
-    );
-    const merchantSource = new InProcessToolSource('merchant', merchantTools);
-    // Memory tools (remember/recall) over the persisted store.
-    const memorySource = createMemoryToolSource(memoryStore);
-    // Knowledge (search_knowledge) — on-device RAG over the Bitcoin corpus.
-    const knowledgeSource = buildKnowledgeToolSource(qvac.service);
-
-    // Shared wallet payment path — used by every "agent spends sats" source
-    // (L402, Bitrefill, …). Pays a BOLT11 with the on-device Lightning wallet
-    // (Spark preferred, RLN fallback) so keys never leave the device.
-    const payInvoice = async (invoice: string) => {
-      const spark = protocolManager.getAdapterIfAvailable('SPARK');
-      const rln = protocolManager.getAdapterIfAvailable('RGB');
-      const adapter: any = spark?.isConnected() ? spark : rln?.isConnected() ? rln : null;
-      if (!adapter) throw new Error('No Lightning wallet connected to pay the invoice');
-      const r: any = await adapter.sendPayment({ invoice });
-      return { preimage: r?.preimage ?? r?.paymentPreimage ?? r?.payment_preimage ?? '' };
-    };
-
-    // L402: buy paywalled HTTP resources in sats. The invoice amount is only
-    // known during the 402 challenge, so rather than a broken pre-execution
-    // payment modal we auto-pay small amounts (≤ cap). Larger ones are declined.
-    const l402Source = createL402ToolSource({
-      payInvoice,
-      maxAutoPaySats: 1000,
-      requiresConfirmation: false,
-      log: (m: string) => console.log('[L402]', m),
-    });
-
-    return new Engine({
-      provider,
-      tools: new ToolRegistry([walletSource, merchantSource, memorySource, knowledgeSource, l402Source]),
-      defaultMaxTurns: 5,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tools, qvac.service, memoryStore]);
-
-  // Skills route a query to a focused playbook + a curated tool subset
-  // (progressive disclosure — the small mobile model never sees every tool at
-  // once). No match → the full toolset is used. Authored as SKILL.md under
-  // ./skills and bundled to skills.bundle.json; add a skill by dropping a new
-  // folder there and re-running `npm run bundle-skills`.
-  const skills = useMemo(
-    () => new SkillRegistry(skillsFromBundle(skillBundle as SkillBundle)),
-    [],
+  // Shared KaleidoMind agent — the SAME funnel the voice overlay uses (fast-path
+  // → recipes → skill-scoped agentic loop over wallet/merchant/memory/RAG/skill
+  // tools). User settings are read per turn through the ref, so tweaking them
+  // in the sheet never rebuilds the engine or drops the in-memory RAG index.
+  const mindConfigRef = useRef(mindConfig);
+  mindConfigRef.current = mindConfig;
+  const agent = useMemo(
+    () => createMindAgent(qvac.service, () => mindConfigRef.current),
+    [qvac.service],
   );
 
-  // Recipes = mobile multi-step ("recipes, not planning"). A matched recipe
-  // (e.g. "pay bob 3 EUR") carries the plan; the model only fills slots, the
-  // deterministic chain runs locally, and the spend is confirmation-gated.
-  const recipes = useMemo(() => new RecipeRegistry([paymentsRecipe]), []);
-
-  // Tier-0 fast-path: common reads (balance / address / price) answered with
-  // NO model at all. The wallet ToolRegistry is shared with the recipe tier.
-  const fastPath = useMemo(() => new FastPath(WALLET_FAST_INTENTS), []);
-  const walletRegistry = useMemo(() => new ToolRegistry([buildWalletToolSource()]), []);
+  // Skills the user can pin to a message (like a `/command`). Pinning one routes
+  // the funnel to that skill so the model gets its instructions for the turn.
+  const skills = useMemo<Skill[]>(() => {
+    try { return agent.listSkills(); } catch { return []; }
+  }, [agent]);
+  const [activeSkill, setActiveSkill] = useState<Skill | null>(null);
 
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
@@ -260,6 +164,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // AI settings sheet (model selection + P2P delegation)
   const [showSettings, setShowSettings] = useState(false);
+  // Conversation history panel (desktop-parity: current conversation + new/clear).
+  const [showHistory, setShowHistory] = useState(false);
+  // Latest turn's real inference stats (tok/s + backend) for the header chip.
+  const [lastStats, setLastStats] = useState<ChatMsgStats | null>(null);
 
   // Friendly name of the paired desktop (for the settings chip + header).
   const [providerName, setProviderName] = useState<string | null>(null);
@@ -293,15 +201,34 @@ export default function AIAssistantScreen({ navigation }: Props) {
     navigation.navigate('PairDesktop');
   }, [navigation]);
 
-  // Header subtitle: which model + whether we're delegating to a desktop.
+  // Fully disconnect the paired desktop: clear the engine's delegation config
+  // (key + flag), forget the stored pairing, drop the displayed name, and fall
+  // back to on-device mode. Without clearing providerPublicKey + the pairing,
+  // the desktop would keep showing as "Paired" with no way to remove it.
+  const disconnectDesktop = useCallback(async () => {
+    const key = qvac.config.providerPublicKey;
+    try {
+      await qvac.setDelegate({ enabled: false, providerPublicKey: '' });
+      if (key) await PairingService.forget(key);
+    } catch {
+      /* best-effort — still drop the UI state below */
+    }
+    setProviderName(null);
+    dispatch(setAiMode('local'));
+  }, [qvac, dispatch]);
+
+  // Header subtitle: which model + where it runs + live throughput (tok/s) from
+  // the last turn (real QVAC stats), mirroring the desktop chat header.
   const headerSubtitle = useMemo(() => {
     const delegating = qvac.config.delegateEnabled && !!qvac.config.providerPublicKey;
     const modelLabel = getModelById(qvac.config.modelId)?.label ?? 'On-device AI';
-    if (delegating) {
-      return `${modelLabel} · via ${providerName || 'Desktop'}`;
-    }
-    return `${modelLabel} · on this device`;
-  }, [qvac.config.delegateEnabled, qvac.config.providerPublicKey, qvac.config.modelId, providerName]);
+    const where = delegating ? `via ${providerName || 'Desktop'}` : 'on this device';
+    const tps =
+      lastStats?.tokensPerSecond && lastStats.tokensPerSecond > 0
+        ? ` · ${lastStats.tokensPerSecond.toFixed(0)} tok/s${lastStats.device ? ` (${lastStats.device.toUpperCase()})` : ''}`
+        : '';
+    return `${modelLabel} · ${where}${tps}`;
+  }, [qvac.config.delegateEnabled, qvac.config.providerPublicKey, qvac.config.modelId, providerName, lastStats]);
 
   const nostrState = useSelector((state: RootState) => state.nostr);
 
@@ -348,6 +275,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const updateMessage = useCallback((id: string, patch: (m: ChatMessage) => Partial<ChatMessage>) => {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch(m) } : m)));
   }, []);
+
+  // No auto-greeting message: an empty chat shows the action-rich ChatEmptyState
+  // (suggestions + quick actions) instead of a wall of welcome text.
 
   // ---- Voice handlers ----
   const handleSpeechStart = () => {
@@ -429,10 +359,28 @@ export default function AIAssistantScreen({ navigation }: Props) {
   }, []);
 
   const handleLongPressMessage = useCallback((message: ChatMessage) => {
-    if (!message.text?.trim()) return;
+    const text = buildCopyText(message);
+    if (!text) return;
     Haptics.selectionAsync();
-    Clipboard.setString(message.text);
+    Clipboard.setString(text);
+    toast().success('Message copied');
   }, []);
+
+  // Copy the entire conversation (each turn's reasoning + answer) as plain text.
+  const copyFullChat = useCallback(() => {
+    const transcript = messages
+      .map((m) => {
+        const who = m.isUser ? 'You' : 'KaleidoMind';
+        const body = m.isUser ? (m.text?.trim() ?? '') : buildCopyText(m);
+        return body ? `${who}:\n${body}` : '';
+      })
+      .filter(Boolean)
+      .join('\n\n———\n\n');
+    if (!transcript) return;
+    Clipboard.setString(transcript);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    toast().success('Full chat copied');
+  }, [messages]);
 
   // ---- Contacts ----
   const handleContactSelection = (contact: Contact) => {
@@ -461,40 +409,63 @@ export default function AIAssistantScreen({ navigation }: Props) {
     confirmResolver.current = null;
   };
 
+  // Map a money-moving tool call → the confirmation sheet. Handles the canonical
+  // @kaleidorg/mind contract tools (send_payment, rln_pay_invoice, rln_send_asset,
+  // execute_swap) AND the legacy ones. The amount is read from the call args, and
+  // for a bare invoice we decode it (the amount lives in the invoice, not args).
+  const decAmt = (s: string): number | undefined => {
+    try { return /^ln(bc|tb|bcrt)/i.test(s) ? decodeBolt11(s).amountSats : undefined; } catch { return undefined; }
+  };
   const buildPaymentDetails = (call: { name: string; arguments: any }): PaymentDetails => {
-    const args = call.arguments || {};
-    if (call.name === 'pay_nostr_contact') {
-      return {
-        type: 'nostr_contact',
-        recipient: args.contact_name || args.contact_npub || 'Nostr contact',
-        amount: Number(args.amount_sats) || 0,
-        description: args.description || 'Payment to Nostr contact',
-        recipientName: args.contact_name,
-        isNostrContact: true,
-      };
+    const a = call.arguments || {};
+    switch (call.name) {
+      case 'send_payment': {
+        const to = String(a.to ?? '');
+        const isAddr = to.includes('@');
+        const amount = Number(a.amount_sats) || decAmt(to) || 0;
+        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: to, amount, description: 'Payment', lightningAddress: isAddr ? to : undefined, priceUsd: btcPriceUSD };
+      }
+      case 'rln_pay_invoice': {
+        const inv = String(a.invoice ?? a.to ?? '');
+        let dec: ReturnType<typeof decodeBolt11> | null = null;
+        try { dec = decodeBolt11(inv); } catch { /* ignore */ }
+        return { type: 'lightning_invoice', recipient: inv, amount: dec?.amountSats ?? Number(a.amount_sats) ?? 0, description: dec?.description || 'Invoice payment', priceUsd: btcPriceUSD };
+      }
+      case 'rln_send_asset': {
+        const amt = Number(a.amount) || 0;
+        const asset = String(a.asset ?? '').toUpperCase();
+        return { type: 'lightning_invoice', recipient: String(a.to ?? ''), amount: 0, description: `Send ${amt.toLocaleString()} ${asset}`, recipientName: `${amt.toLocaleString()} ${asset}` };
+      }
+      case 'execute_swap': {
+        const from = String(a.from_asset ?? '').toUpperCase();
+        const to = String(a.to_asset ?? '').toUpperCase();
+        return { type: 'lightning_invoice', recipient: `${from} → ${to}`, amount: 0, description: `Swap ${a.amount ?? ''} ${from} → ${to}` };
+      }
+      case 'pay_nostr_contact':
+        return { type: 'nostr_contact', recipient: a.contact_name || a.contact_npub || 'Nostr contact', amount: Number(a.amount_sats) || 0, description: a.description || 'Payment to Nostr contact', recipientName: a.contact_name, isNostrContact: true };
+      default: {
+        // legacy pay_lightning_invoice / generic
+        const target = String(a.invoice_or_address || a.to || '');
+        const isAddr = target.includes('@');
+        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: target, amount: Number(a.amount_sats) || decAmt(target) || 0, description: a.description || 'Payment', lightningAddress: isAddr ? target : undefined, priceUsd: btcPriceUSD };
+      }
     }
-    const target = String(args.invoice_or_address || '');
-    const isAddress = target.includes('@');
-    return {
-      type: isAddress ? 'lightning_address' : 'lightning_invoice',
-      recipient: target,
-      amount: Number(args.amount_sats) || 0,
-      description: args.description || 'Payment via AI Assistant',
-      lightningAddress: isAddress ? target : undefined,
-    };
   };
 
   // Opens the confirmation modal and returns a promise the agentic loop awaits.
   const requestConfirmation = (call: {
     name: string;
     arguments: Record<string, unknown>;
-  }): Promise<{ approved: boolean; reason?: string }> =>
-    new Promise((resolve) => {
+  }): Promise<{ approved: boolean; reason?: string }> => {
+    const details = buildPaymentDetails(call);
+    console.log(`[AI] 🔐 CONFIRM ${call.name} · ${details.amount.toLocaleString()} sats → ${details.recipient || details.recipientName} (awaiting user before executing)`);
+    return new Promise((resolve) => {
       confirmResolver.current = resolve;
       setPendingToolCall({ name: call.name, arguments: call.arguments });
-      setPendingPayment(buildPaymentDetails(call));
+      setPendingPayment(details);
       setShowPaymentConfirmation(true);
     });
+  };
 
   // Approve only — the payment itself executes inside the engine's agentic loop
   // (via the wallet ToolSource), after which the model summarises the outcome.
@@ -507,13 +478,41 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // ---- Send ----
   const sendMessage = async (text: string) => {
-    const messageText = (text || inputText).trim();
-    if (!messageText) return;
+    const raw = (text || inputText).trim();
+    if (!raw) return;
+
+    // `/skill-name ...` — pin a skill for this message (Claude-style). A leading
+    // slash command matching a skill sets it as the active skill; the rest is the
+    // actual message. `/skill` alone just pins it and waits for the next message.
+    let messageText = raw;
+    let pinned: Skill | null = activeSkill;
+    const slash = raw.match(/^\/(\S+)\s*([\s\S]*)$/);
+    if (slash) {
+      const token = slash[1].toLowerCase();
+      const match = skills.find(
+        (s) => s.name.toLowerCase() === token || skillSlug(s.name) === token,
+      );
+      if (match) {
+        pinned = match;
+        setActiveSkill(match);
+        messageText = slash[2].trim();
+        if (!messageText) {
+          // Just pinned the skill — keep it active and let the user type next.
+          setInputText('');
+          Haptics.selectionAsync();
+          return;
+        }
+      }
+    }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setInputText('');
     setPartialText('');
     setShowActions(false);
+
+    // The funnel routes by keyword/trigger; prepend the pinned skill's triggers so
+    // it wins selection and the model receives that skill's instructions.
+    const agentInput = pinned ? `${skillRouteHint(pinned)} ${messageText}`.trim() : messageText;
 
     addMessage({ id: nextId(), text: messageText, isUser: true, timestamp: new Date() });
 
@@ -554,94 +553,42 @@ export default function AIAssistantScreen({ navigation }: Props) {
     const assistantId = nextId();
     addMessage({ id: assistantId, text: '', isUser: false, timestamp: new Date(), streaming: true });
 
-    // ── Tier-0: deterministic fast-path (no LLM) ──
-    // Common reads (balance / address / price) answered instantly by calling one
-    // tool directly — zero inference. Reserves the model for harder asks.
-    const fast = fastPath.select(messageText);
-    if (fast) {
-      try {
-        const r: any = await walletRegistry.execute(fast.tool, fast.args);
-        let text: string;
-        if (fast.intent.name === 'balance') {
-          const sats = Number(r?.total_sats ?? 0);
-          const n = r?.layers?.length ?? 0;
-          text = `You have ${sats.toLocaleString()} sats${n > 1 ? ` across ${n} layers` : ''}.`;
-        } else if (fast.intent.name === 'address') {
-          text = r?.address ? `Here's your receive address:\n\n\`${r.address}\`` : 'No address available right now.';
-        } else {
-          text = `Bitcoin is $${Number(r?.price_usd ?? 0).toLocaleString()}.`;
-        }
-        updateMessage(assistantId, () => ({ text, streaming: false }));
-      } catch (e) {
-        updateMessage(assistantId, () => ({ text: (e as Error)?.message ?? 'That failed.', streaming: false }));
-      }
-      setIsLoading(false);
-      return;
-    }
-
-    // ── Tier-2: recipe fast-path (mobile multi-step) ──
-    // A known chain like "pay bob 3 EUR": the recipe carries the plan, the model
-    // only fills slots (~1 inference), the deterministic steps run on-device, and
-    // the spend is confirmation-gated. Only fires when a recipient is confidently
-    // extracted; otherwise fall through to the agentic loop below.
-    const recipe = recipes.select(messageText);
-    if (recipe && recipe.extract?.(messageText)?.recipient) {
-      const recipeProvider: LLMProvider = {
-        name: 'qvac',
-        runTurn: (input) => qvac.service.runProviderTurn(input),
-      };
-      const result = await runRecipe(recipe, messageText, {
-        provider: recipeProvider,
-        tools: walletRegistry,
-        onConfirm: requestConfirmation,
-        onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
-      });
-      updateMessage(assistantId, () => ({ text: result.text, streaming: false }));
-      setIsLoading(false);
-      return;
-    }
-
-    // Route this turn's reasoning tokens (from the provider's onThinking) into
-    // this assistant bubble so they can be revealed on tap.
-    thinkingRef.current = { id: assistantId, text: '' };
-
     // Track which agentic turn is currently streaming so we show only the
     // latest turn's text — early reasoning turns are replaced by the final
     // answer once tools have run.
     let streamingTurn = 0;
+    // This turn's reasoning, streamed into the bubble (revealed on tap).
+    let thinkingText = '';
 
     try {
-      // Keep only the most recent turns so the prompt (system + skill + tools +
-      // history) stays within the model's context window. Small on-device /
-      // delegated models overflow quickly; the last few exchanges are enough.
-      const MAX_HISTORY_MESSAGES = 8;
+      // Full prior conversation — the agent trims it to the configured
+      // history length before prompting (small models overflow quickly).
       const history = messages
         .filter((m) => !m.streaming && m.text.trim().length > 0)
-        .slice(-MAX_HISTORY_MESSAGES)
-        .map((m) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text }));
+        .map((m) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text })) as MindMessage[];
 
-      // Enter the most relevant skill: compose its playbook into the system
-      // prompt and expose only its tools (progressive disclosure). No match →
-      // the base prompt + full toolset.
-      const skill = skills.select(messageText);
-      const { system: skillSystem, allowedTools } = skills.compose(
-        String(SYSTEM_PROMPT.content),
-        skill,
-      );
-      // Memory is ambient: keep remember/recall available even when a skill
-      // narrows the toolset, so the assistant can always recall preferences.
-      const scopedTools = allowedTools
-        ? [...new Set([...allowedTools, 'remember', 'recall', 'search_knowledge'])]
-        : allowedTools;
-      const chatMessages = [
-        { role: 'system', content: skillSystem },
-        ...history,
-        { role: 'user', content: messageText },
-      ];
-
-      const res = await engine.runAgentic(chatMessages as MindMessage[], {
-        allowedTools: scopedTools,
+      // One shared funnel (fast-path → recipe → agentic) — see services/mindAgent.
+      const res = await agent.runTurn(agentInput, {
+        history,
         onStart: (requestId) => setActiveRequestId(requestId),
+        onThinking: (tok) => {
+          thinkingText += tok;
+          updateMessage(assistantId, () => ({ thinking: thinkingText }));
+        },
+        // Real per-turn inference numbers (tok/s, tokens, GPU/CPU) — shown under
+        // the reply and as a live chip in the header (desktop parity).
+        onStats: (s) => {
+          const st: ChatMsgStats = {
+            tokensPerSecond: s.tokensPerSecond,
+            totalTokens: s.totalTokens,
+            promptTokens: s.promptTokens,
+            device: s.backendDevice,
+          };
+          updateMessage(assistantId, () => ({ stats: st }));
+          setLastStats(st);
+        },
+        // A recipe step is executing (deterministic tier).
+        onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
         onToken: (token, turn) => {
           updateMessage(assistantId, (m) => {
             if (turn !== streamingTurn) {
@@ -653,11 +600,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
           });
           scrollToBottom(true);
         },
-        onToolCall: (call) => {
-          const def = tools.find((t) => t.name === call.name);
-          // Visible feedback while a tool runs (esp. during the payment gap).
+        // Visible feedback while a tool runs (esp. during the payment gap).
+        onToolCall: (call, info) => {
           updateMessage(assistantId, () => ({
-            text: def?.requiresConfirmation
+            text: info.requiresConfirmation
               ? '⚡ Preparing payment…'
               : `🔧 ${call.name.replace(/_/g, ' ')}…`,
           }));
@@ -667,46 +613,66 @@ export default function AIAssistantScreen({ navigation }: Props) {
         onConfirm: requestConfirmation,
       });
 
-      const lastCall = res.toolCalls[res.toolCalls.length - 1];
+      if (res.tier === 'fast') {
+        // Instant deterministic read — attach the balance card when relevant.
+        const card: ChatMessage['card'] | undefined =
+          res.intent === 'balance'
+            ? { type: 'balance', data: { ...(res.data as any), priceUsd: btcPriceUSD } }
+            : undefined;
+        updateMessage(assistantId, () => ({ text: res.text, card, streaming: false }));
+      } else if (res.tier === 'recipe') {
+        updateMessage(assistantId, () => ({ text: res.text, streaming: false }));
+      } else {
+        const lastCall = res.toolCalls?.[res.toolCalls.length - 1];
 
-      // If an invoice was just generated, remember it (so "share" can act on it)
-      // and offer to share it if the model didn't already mention it. Covers the
-      // legacy generate_invoice and the canonical *_create_invoice wallet tools.
-      let finalText = res.text?.trim() || 'Done.';
-      const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
-      const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;
-      if (invResult?.invoice) {
-        lastInvoiceRef.current = {
-          invoice: invResult.invoice,
-          amount: Number(invResult.amount_sats ?? invResult.amount) || 0,
-          description: invResult.description,
-        };
-        if (!/share/i.test(finalText)) {
-          finalText += '\n\nWant me to share it? Just say “share”.';
+        // If an invoice was just generated, remember it (so "share" can act on
+        // it) and offer to share it if the model didn't already mention it.
+        let finalText =
+          res.text?.trim() ||
+          (lastCall
+            ? 'Done.'
+            : "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.");
+        const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
+        const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;
+        if (invResult?.invoice) {
+          lastInvoiceRef.current = {
+            invoice: invResult.invoice,
+            amount: Number(invResult.amount_sats ?? invResult.amount) || 0,
+            description: invResult.description,
+          };
+          if (!/share/i.test(finalText)) {
+            finalText += '\n\nWant me to share it? Just say “share”.';
+          }
         }
-      }
 
-      updateMessage(assistantId, () => ({
-        text: finalText,
-        streaming: false,
-        functionCalled: lastCall?.name,
-        functionResult: lastCall?.result,
-      }));
+        updateMessage(assistantId, () => ({
+          text: finalText,
+          streaming: false,
+          functionCalled: lastCall?.name,
+          functionResult: lastCall?.result,
+        }));
+      }
 
       // Clear any lingering confirmation UI.
       setPendingPayment(null);
       setPendingToolCall(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      console.error('QVAC chat error:', error);
+      console.error('KaleidoMind chat error:', error);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      // Wallet-tool errors are written for the user ("Your SPARK wallet isn't
+      // connected yet.") — show them; fall back to a generic note otherwise.
+      const raw = error instanceof Error && error.message ? error.message : '';
+      // A prompt-too-long overflow is opaque to users — translate it into an action.
+      const msg = /context window|prompt tokens|exceeds the|context length|too long/i.test(raw)
+        ? 'This conversation got too long for the on-device model. Clear the chat (🗑️ in the header) to start fresh, then try again.'
+        : raw;
       updateMessage(assistantId, () => ({
-        text: "I couldn't process that on-device just now. Please try again. 🔧",
+        text: msg || "I couldn't process that on-device just now. Please try again. 🔧",
         streaming: false,
       }));
     }
 
-    thinkingRef.current = null;
     setActiveRequestId(null);
     setIsLoading(false);
   };
@@ -724,14 +690,20 @@ export default function AIAssistantScreen({ navigation }: Props) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // One-tap "new chat" — clears the conversation and resets per-chat state. No
+  // confirm dialog (the desktop/Claude pattern: starting fresh is cheap & common).
+  const newChat = useCallback(() => {
+    setMessages([]);
+    setLastStats(null);
+    setShowHistory(false);
+    lastInvoiceRef.current = null;
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
   const clearChatHistory = () => {
-    Alert.alert('Clear Chat History', 'Are you sure you want to clear all chat history? This cannot be undone.', [
+    Alert.alert('Clear chat', 'Clear this conversation? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear',
-        style: 'destructive',
-        onPress: () => setMessages([]),
-      },
+      { text: 'Clear', style: 'destructive', onPress: newChat },
     ]);
   };
 
@@ -745,6 +717,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary[600]} />
             <Text style={styles.modelBannerText}>
               KaleidoMind (on-device AI) is off. Enable to download and run it locally.
+              It's experimental — it can make mistakes.
             </Text>
             <TouchableOpacity
               onPress={() => dispatch(setAiMode('local'))}
@@ -842,7 +815,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
     {
       icon: 'people',
       label: 'Contacts',
-      gradient: ['#8B5CF6', '#A855F7'],
+      gradient: [theme.colors.brand.violet, theme.colors.protocol.arkade],
       onPress: () => setShowContactsSelector(true),
     },
     {
@@ -854,31 +827,69 @@ export default function AIAssistantScreen({ navigation }: Props) {
   ];
 
   const renderQuickActions = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.quickActionsContainer}
-      contentContainerStyle={styles.quickActionsContent}
-      keyboardShouldPersistTaps="handled"
-    >
-      {QUICK_ACTIONS.map((a) => (
-        <TouchableOpacity
-          key={a.label}
-          style={styles.quickActionButton}
-          onPress={() => {
-            setShowActions(false);
-            a.onPress();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={a.label}
+    <View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.quickActionsContainer}
+        contentContainerStyle={styles.quickActionsContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {QUICK_ACTIONS.map((a) => (
+          <TouchableOpacity
+            key={a.label}
+            style={styles.quickActionButton}
+            onPress={() => {
+              setShowActions(false);
+              a.onPress();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={a.label}
+          >
+            <LinearGradient colors={a.gradient} style={styles.quickActionGradient}>
+              <Ionicons name={a.icon} size={16} color="white" />
+              <Text style={styles.quickActionText}>{a.label}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* Pin a skill for the next message (like a /command). */}
+      {skills.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.skillRowContainer}
+          contentContainerStyle={styles.quickActionsContent}
+          keyboardShouldPersistTaps="handled"
         >
-          <LinearGradient colors={a.gradient} style={styles.quickActionGradient}>
-            <Ionicons name={a.icon} size={16} color="white" />
-            <Text style={styles.quickActionText}>{a.label}</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
+          <View style={styles.skillRowLabel}>
+            <Ionicons name="sparkles-outline" size={13} color={theme.colors.text.tertiary} />
+            <Text style={styles.skillRowLabelText}>Skills</Text>
+          </View>
+          {skills.map((s) => {
+            const on = activeSkill?.name === s.name;
+            return (
+              <TouchableOpacity
+                key={s.name}
+                style={[styles.skillChip, on && styles.skillChipActive]}
+                onPress={() => {
+                  setActiveSkill(on ? null : s);
+                  setShowActions(false);
+                  Haptics.selectionAsync();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Use skill ${s.name}`}
+              >
+                <Text style={[styles.skillChipText, on && styles.skillChipTextActive]}>
+                  /{skillSlug(s.name)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
+    </View>
   );
 
   const canSend = !!inputText.trim() && !isListening;
@@ -888,13 +899,41 @@ export default function AIAssistantScreen({ navigation }: Props) {
       <MainHeader
         title="KaleidoMind"
         subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
-        icon="sparkles"
+        iconNode={<MindGlyph size={22} color={theme.colors.text.primary} />}
+        titleBadge={<Badge label="Experimental" color={theme.colors.warning[500]} size="sm" />}
         rightAction={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {nostrState.isConnected && (
               <View style={styles.nostrIndicator}>
                 <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />
               </View>
+            )}
+            {aiEnabled && !isEmpty && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={newChat}
+                accessibilityLabel="New chat"
+              >
+                <Ionicons name="create-outline" size={20} color="white" />
+              </TouchableOpacity>
+            )}
+            {aiEnabled && !isEmpty && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={copyFullChat}
+                accessibilityLabel="Copy full chat"
+              >
+                <Ionicons name="copy-outline" size={20} color="white" />
+              </TouchableOpacity>
+            )}
+            {aiEnabled && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={() => setShowHistory(true)}
+                accessibilityLabel="Chat history"
+              >
+                <Ionicons name="time-outline" size={20} color="white" />
+              </TouchableOpacity>
             )}
             <TouchableOpacity
               style={styles.headerBtn}
@@ -903,15 +942,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
             >
               <Ionicons name="settings-outline" size={20} color="white" />
             </TouchableOpacity>
-            {!isEmpty && (
-              <TouchableOpacity
-                style={[styles.headerBtn, styles.headerBtnDanger]}
-                onPress={clearChatHistory}
-                accessibilityLabel="Clear chat history"
-              >
-                <Ionicons name="trash-outline" size={20} color="white" />
-              </TouchableOpacity>
-            )}
           </View>
         }
       />
@@ -958,13 +988,15 @@ export default function AIAssistantScreen({ navigation }: Props) {
                       onCopy={copyToClipboard}
                       onOpenLink={openLink}
                       onLongPress={handleLongPressMessage}
+                      onSelectContact={(name) => {
+                        setInputText(`Send to ${name} `);
+                        Haptics.selectionAsync();
+                      }}
                     />
                   ))}
                   {isLoading && !messages.some((m) => m.streaming) && (
                     <View style={styles.processingRow}>
-                      <LinearGradient colors={theme.colors.primary.gradient!} style={styles.processingAvatar}>
-                        <Ionicons name="sparkles" size={16} color="#fff" />
-                      </LinearGradient>
+                      <MindAvatar size={32} style={styles.processingAvatar} />
                       <View style={styles.processingBubble}>
                         <TypingDots label="Thinking on-device…" />
                       </View>
@@ -976,6 +1008,19 @@ export default function AIAssistantScreen({ navigation }: Props) {
               <View style={styles.inputContainer}>
                 <BlurView intensity={80} tint={theme.dark ? 'dark' : 'light'} style={styles.inputGradient}>
                   {showActions && renderQuickActions()}
+
+                  {/* Pinned-skill chip: this message routes to it; tap ✕ to clear. */}
+                  {activeSkill && (
+                    <View style={styles.activeSkillRow}>
+                      <View style={styles.activeSkillChip}>
+                        <Ionicons name="sparkles" size={12} color={theme.colors.primary[500]} />
+                        <Text style={styles.activeSkillText}>/{skillSlug(activeSkill.name)}</Text>
+                        <TouchableOpacity onPress={() => setActiveSkill(null)} hitSlop={8} accessibilityLabel="Clear skill">
+                          <Ionicons name="close" size={14} color={theme.colors.text.secondary} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
 
                   <View style={styles.inputRow}>
                     {/* Toggle quick actions */}
@@ -1025,23 +1070,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
                       )}
                     </View>
 
-                    {/* Voice input button */}
-                    <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                      <TouchableOpacity
-                        style={[styles.roundButton, (!isVoiceAvailable || !qvac.isReady) && styles.disabledButton]}
-                        onPress={startListening}
-                        disabled={!isVoiceAvailable || isLoading || !qvac.isReady}
-                        accessibilityLabel={isListening ? 'Stop recording' : 'Start voice input'}
-                      >
-                        <LinearGradient
-                          colors={isListening ? theme.colors.error.gradient! : theme.colors.accent.gradient!}
-                          style={styles.buttonGradient}
-                        >
-                          <Ionicons name={isListening ? 'stop' : 'mic'} size={20} color="white" />
-                        </LinearGradient>
-                      </TouchableOpacity>
-                    </Animated.View>
-
+                    {/* One trailing action button (standard chat pattern): STOP
+                        while generating, SEND when there's text, otherwise MIC —
+                        instead of a cluttered blue-mic + red-stop pair. */}
                     {isLoading ? (
                       <TouchableOpacity
                         style={styles.roundButton}
@@ -1052,20 +1083,32 @@ export default function AIAssistantScreen({ navigation }: Props) {
                           <Ionicons name="stop" size={20} color="white" />
                         </LinearGradient>
                       </TouchableOpacity>
-                    ) : (
+                    ) : canSend ? (
                       <TouchableOpacity
-                        style={[styles.roundButton, !canSend && styles.disabledButton]}
+                        style={styles.roundButton}
                         onPress={() => sendMessage(inputText)}
-                        disabled={!canSend}
                         accessibilityLabel="Send message"
                       >
-                        <LinearGradient
-                          colors={canSend ? theme.colors.primary.gradient! : [theme.colors.gray[300], theme.colors.gray[300]]}
-                          style={styles.buttonGradient}
-                        >
-                          <Ionicons name="send" size={20} color={canSend ? 'white' : theme.colors.gray[500]} />
+                        <LinearGradient colors={theme.colors.primary.gradient!} style={styles.buttonGradient}>
+                          <Ionicons name="send" size={20} color="white" />
                         </LinearGradient>
                       </TouchableOpacity>
+                    ) : (
+                      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                        <TouchableOpacity
+                          style={[styles.roundButton, (!isVoiceAvailable || !qvac.isReady) && styles.disabledButton]}
+                          onPress={startListening}
+                          disabled={!isVoiceAvailable || !qvac.isReady}
+                          accessibilityLabel={isListening ? 'Stop recording' : 'Start voice input'}
+                        >
+                          <LinearGradient
+                            colors={isListening ? theme.colors.error.gradient! : theme.colors.accent.gradient!}
+                            style={styles.buttonGradient}
+                          >
+                            <Ionicons name={isListening ? 'stop' : 'mic'} size={20} color="white" />
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </Animated.View>
                     )}
                   </View>
 
@@ -1120,6 +1163,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSelectModel={(id) => qvac.setModel(id)}
             onSetDelegate={(opts) => qvac.setDelegate(opts)}
             onScanQR={openScanner}
+            onDisconnectDesktop={disconnectDesktop}
+            onDesignAgent={() => { setShowSettings(false); navigation.navigate('MindSettings'); }}
             providerName={providerName}
             deviceMemGb={qvac.deviceMemGb}
             recommendedModelId={qvac.recommendedModelId}
@@ -1132,6 +1177,49 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSetSttModel={(id) => qvac.setSttModel(id)}
             onSetTtsEngine={(engine) => qvac.setTtsEngine(engine)}
           />
+
+          {/* Conversation history — current chat (desktop parity) + new/clear. */}
+          <Modal visible={showHistory} transparent animationType="slide" onRequestClose={() => setShowHistory(false)}>
+            <Pressable style={styles.skillsBackdrop} onPress={() => setShowHistory(false)}>
+              <Pressable style={styles.skillsSheet} onPress={() => {}}>
+                <View style={styles.skillsHandle} />
+                <View style={styles.historyHeaderRow}>
+                  <Text style={styles.skillsTitle}>Conversation</Text>
+                  <View style={styles.historyActions}>
+                    <TouchableOpacity style={styles.historyAction} onPress={newChat} accessibilityLabel="New chat">
+                      <Ionicons name="create-outline" size={15} color={theme.colors.primary[500]} />
+                      <Text style={styles.historyActionText}>New</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.historyAction}
+                      onPress={() => { newChat(); }}
+                      accessibilityLabel="Clear conversation"
+                      disabled={isEmpty}
+                    >
+                      <Ionicons name="trash-outline" size={15} color={isEmpty ? theme.colors.text.tertiary : theme.colors.error[500]} />
+                      <Text style={[styles.historyActionText, { color: isEmpty ? theme.colors.text.tertiary : theme.colors.error[500] }]}>Clear</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <Text style={styles.skillsHint}>{messages.length} message{messages.length === 1 ? '' : 's'} in this chat.</Text>
+                {isEmpty ? (
+                  <Text style={styles.skillsHint}>No messages yet — ask KaleidoMind anything.</Text>
+                ) : (
+                  <ScrollView style={styles.historyList} keyboardShouldPersistTaps="handled">
+                    {messages.filter((m) => m.text?.trim()).map((m) => (
+                      <View key={m.id} style={styles.historyItem}>
+                        <Text style={styles.historyWho}>{m.isUser ? 'You' : 'Mind'}</Text>
+                        <Text style={styles.historyPreview} numberOfLines={2}>{m.text.trim()}</Text>
+                        <Text style={styles.historyTime}>
+                          {m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
+              </Pressable>
+            </Pressable>
+          </Modal>
         </LinearGradient>
       </View>
     </View>
@@ -1143,6 +1231,24 @@ const makeStyles = (theme: Theme) =>
     container: { flex: 1, backgroundColor: theme.colors.background.primary },
     chatContainer: { flex: 1 },
     background: { flex: 1 },
+    skillsBackdrop: { flex: 1, backgroundColor: theme.colors.background.backdrop, justifyContent: 'flex-end' },
+    skillsSheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: theme.borderRadius.xl, borderTopRightRadius: theme.borderRadius.xl, padding: theme.spacing[5], paddingBottom: theme.spacing[9] },
+    skillsHandle: { width: 40, height: 4, borderRadius: 2, backgroundColor: theme.colors.border.medium, alignSelf: 'center', marginBottom: theme.spacing[3.5] },
+    skillsTitle: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.bold },
+    skillsHint: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: theme.spacing[1], marginBottom: theme.spacing[3] },
+    skillItem: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingVertical: theme.spacing[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
+    skillItemIcon: { width: 34, height: 34, borderRadius: theme.borderRadius.base, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primary[500] + '1A' },
+    skillItemName: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold, textTransform: 'capitalize' },
+    skillItemDesc: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 2, lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.tight) },
+    historyHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    historyActions: { flexDirection: 'row', gap: theme.spacing[3] },
+    historyAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    historyActionText: { color: theme.colors.primary[500], fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
+    historyList: { maxHeight: 360, marginTop: theme.spacing[2] },
+    historyItem: { paddingVertical: theme.spacing[2.5], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
+    historyWho: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.bold, marginBottom: 2 },
+    historyPreview: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.snug) },
+    historyTime: { color: theme.colors.text.tertiary, fontSize: 11, marginTop: 3 },
     content: { flex: 1 },
     contentInner: { flex: 1 },
     messagesContainer: { flex: 1 },
@@ -1183,6 +1289,33 @@ const makeStyles = (theme: Theme) =>
       gap: theme.spacing[2],
     },
     quickActionText: { fontSize: theme.typography.fontSize.xs, color: 'white', fontWeight: '600', letterSpacing: 0.5 },
+    skillRowContainer: { marginBottom: theme.spacing[3] },
+    skillRowLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: theme.spacing[1], alignSelf: 'center' },
+    skillRowLabelText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontWeight: '600' },
+    skillChip: {
+      paddingVertical: theme.spacing[1.5] ?? 6,
+      paddingHorizontal: theme.spacing[3],
+      borderRadius: theme.borderRadius.full ?? 999,
+      backgroundColor: theme.colors.surface.secondary,
+      borderWidth: 1,
+      borderColor: theme.colors.border.light,
+    },
+    skillChipActive: { backgroundColor: `${theme.colors.primary[500]}22`, borderColor: theme.colors.primary[500] },
+    skillChipText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, fontWeight: '600' },
+    skillChipTextActive: { color: theme.colors.primary[500] },
+    activeSkillRow: { flexDirection: 'row', marginBottom: theme.spacing[2], paddingHorizontal: theme.spacing[1] },
+    activeSkillChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: theme.borderRadius.full ?? 999,
+      backgroundColor: `${theme.colors.primary[500]}1A`,
+      borderWidth: 1,
+      borderColor: `${theme.colors.primary[500]}55`,
+    },
+    activeSkillText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.primary[500], fontWeight: '700' },
 
     // Input
     inputContainer: {

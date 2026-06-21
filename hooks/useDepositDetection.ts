@@ -1,134 +1,257 @@
-// hooks/useDepositDetection.ts
-//
-// Detects an incoming deposit while a receive address / invoice is on screen,
-// mirroring rate-extension's useDepositDetection + useInvoiceStatus:
-//
-//  - Lightning invoices: poll the invoice status (~2s) until it settles.
-//  - Everything else (on-chain BTC, RGB asset, Spark, Arkade): snapshot a
-//    baseline balance when the address appears, then poll (~4s) and fire when
-//    the balance rises above the baseline.
-//
-// All adapter calls are best-effort and wrapped in try/catch — if an adapter
-// lacks a method (or errors transiently) we simply skip that tick rather than
-// crash the receive screen.
+// Monitor only the receive methods actually encoded in the visible QR.
+// Polling is deliberately single-flight: the next cycle is scheduled only after
+// every adapter call in the current cycle has completed.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { protocolManager } from '../services/protocols';
+import {
+  callAbortableAdapterMethod,
+  receiveMethodsSignature,
+  runReceiveOperation,
+  type ReceiveMethod,
+  type ReceiveProtocol,
+} from '../utils/receive-session';
 
-type ProtocolName = 'RGB' | 'SPARK' | 'ARKADE';
+export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'liquid';
+export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
+
+export interface DepositDetectionEvent {
+  layer: DepositLayer;
+  status: DepositDetectionStatus;
+  protocol?: ReceiveProtocol;
+  message?: string;
+  rawStatus?: string;
+}
 
 interface UseDepositDetectionArgs {
   enabled: boolean;
-  networkType: string; // 'lightning' | 'onchain' | 'spark' | 'arkade' | 'unified'
-  assetId?: string; // RGB asset id, or 'BTC'/undefined for bitcoin
-  invoice?: string; // bolt11 invoice when networkType === 'lightning'
-  onDetected: () => void;
+  methods: ReceiveMethod[];
+  onDetected: (event?: DepositDetectionEvent) => void;
+  onStatus?: (event: DepositDetectionEvent) => void;
 }
 
-const BALANCE_POLL_MS = 4000;
-const INVOICE_POLL_MS = 2000;
+const POLL_MS = 8_000;
+const INITIAL_DELAY_MS = 4_000;
+const POLL_TIMEOUT_MS = 6_000;
 
-function pickAdapter(preferred: ProtocolName) {
-  return (
-    protocolManager.getAdapterIfAvailable(preferred) ||
-    protocolManager.getAdapterIfAvailable('RGB') ||
-    protocolManager.getAdapterIfAvailable('SPARK') ||
-    protocolManager.getAdapterIfAvailable('ARKADE')
-  );
+function getConnectedAdapter(protocol: ReceiveProtocol): any | null {
+  const adapter: any = protocolManager.getAdapterIfAvailable(protocol);
+  return adapter?.isConnected?.() === true ? adapter : null;
 }
 
-// Returns a single comparable number for the relevant balance, or null when it
-// can't be read this tick (adapter missing / transient error).
-async function readBalanceMetric(networkType: string, assetId?: string): Promise<number | null> {
-  const isBtc = !assetId || assetId === 'BTC';
-  const preferred: ProtocolName =
-    networkType === 'spark' ? 'SPARK' : networkType === 'arkade' ? 'ARKADE' : 'RGB';
-  const adapter: any = pickAdapter(preferred);
+async function readMethodBalance(
+  method: ReceiveMethod,
+  parentSignal?: AbortSignal,
+): Promise<number | null> {
+  const adapter = getConnectedAdapter(method.protocol);
   if (!adapter) return null;
+
   try {
-    if (isBtc) {
-      const bal = await adapter.getBtcBalance?.();
-      if (!bal) return null;
-      return Number(bal.total ?? (bal.confirmed ?? 0) + (bal.unconfirmed ?? 0));
+    if (!method.assetId || method.assetId === 'BTC' || method.assetId === 'USD' || method.assetId === 'RGB_NEW') {
+      const balance = await runReceiveOperation<any>(
+        `${method.protocol} receive balance`,
+        (signal) => callAbortableAdapterMethod(adapter, 'getBtcBalance', [], signal),
+        POLL_TIMEOUT_MS,
+        parentSignal,
+      );
+      if (!balance) return null;
+      return Number(balance.total ?? (balance.confirmed ?? 0) + (balance.unconfirmed ?? 0));
     }
-    const ab = await adapter.getAssetBalance?.(assetId);
-    if (!ab) return null;
-    return Number(ab.total ?? ab.future ?? ab.settled ?? ab.spendable ?? 0);
+
+    const balance = await runReceiveOperation<any>(
+      `${method.protocol} ${method.assetId} receive balance`,
+      (signal) => callAbortableAdapterMethod(
+        adapter,
+        'getAssetBalance',
+        [method.assetId],
+        signal,
+      ),
+      POLL_TIMEOUT_MS,
+      parentSignal,
+    );
+    if (!balance) return null;
+    return Number(balance.total ?? balance.future ?? balance.settled ?? balance.spendable ?? 0);
   } catch {
     return null;
   }
 }
 
-async function isInvoiceSettled(invoice: string): Promise<boolean> {
-  const adapter: any =
-    protocolManager.getAdapterIfAvailable('RGB') || protocolManager.getAdapterIfAvailable('SPARK');
-  if (!adapter?.getInvoiceStatus) return false;
+function normalizeDepositStatus(raw: unknown): DepositDetectionStatus | null {
+  const state = String(raw ?? '').trim().toLowerCase();
+  if (!state) return null;
+  if (['settled', 'paid', 'succeeded', 'success', 'complete', 'completed', 'confirmed', 'claimed'].includes(state)) {
+    return 'confirmed';
+  }
+  if (['pending', 'processing', 'created', 'open', 'unpaid', 'unconfirmed', 'awaiting', 'inflight'].includes(state)) {
+    return 'pending';
+  }
+  if (['expired', 'timeout', 'timed_out'].includes(state)) return 'expired';
+  if (['failed', 'error', 'cancelled', 'canceled', 'rejected'].includes(state)) return 'failed';
+  if (state.includes('unconfirm') || state.includes('not_confirm')) return 'pending';
+  if (state.includes('confirm') || state.includes('settle') || state.includes('paid')) return 'confirmed';
+  if (state.includes('pending') || state.includes('await') || state.includes('process') || state.includes('open')) return 'pending';
+  if (state.includes('expir')) return 'expired';
+  if (state.includes('fail') || state.includes('cancel') || state.includes('reject')) return 'failed';
+  return null;
+}
+
+async function readInvoiceStatus(
+  method: ReceiveMethod,
+  parentSignal?: AbortSignal,
+): Promise<DepositDetectionEvent | null> {
+  const adapter = getConnectedAdapter(method.protocol);
+  if (!adapter?.getInvoiceStatus) return null;
+
   try {
-    const res = await adapter.getInvoiceStatus({ invoice });
-    const state = String(res?.state ?? res?.status ?? '').toLowerCase();
-    return ['settled', 'paid', 'succeeded', 'complete', 'completed'].includes(state);
+    const result = await runReceiveOperation<any>(
+      `${method.protocol} invoice status`,
+      (signal) => callAbortableAdapterMethod(
+        adapter,
+        'getInvoiceStatus',
+        [{ invoice: method.value }],
+        signal,
+      ),
+      POLL_TIMEOUT_MS,
+      parentSignal,
+    );
+    const rawStatus = result?.state ?? result?.status;
+    const status = normalizeDepositStatus(rawStatus);
+    return status
+      ? {
+          layer: method.layer,
+          status,
+          protocol: method.protocol,
+          rawStatus: String(rawStatus ?? ''),
+        }
+      : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
 export function useDepositDetection({
   enabled,
-  networkType,
-  assetId,
-  invoice,
+  methods,
   onDetected,
+  onStatus,
 }: UseDepositDetectionArgs): void {
-  const baselineRef = useRef<number | null>(null);
+  const signature = receiveMethodsSignature(methods);
+  const monitoredMethods = useMemo(
+    () => methods.filter((method) => method.monitor === 'balance' || method.monitor === 'invoice'),
+    [signature],
+  );
+  const baselinesRef = useRef<Map<string, number>>(new Map());
   const firedRef = useRef(false);
+  const statusKeyRef = useRef<string | null>(null);
+  const onDetectedRef = useRef(onDetected);
+  const onStatusRef = useRef(onStatus);
+  onDetectedRef.current = onDetected;
+  onStatusRef.current = onStatus;
 
   useEffect(() => {
-    if (!enabled) {
-      baselineRef.current = null;
+    if (!enabled || monitoredMethods.length === 0) {
+      baselinesRef.current = new Map();
       firedRef.current = false;
+      statusKeyRef.current = null;
       return;
     }
 
     let cancelled = false;
+    const operationController = new AbortController();
+    let nextTickTimer: ReturnType<typeof setTimeout> | null = null;
     firedRef.current = false;
-    baselineRef.current = null;
+    baselinesRef.current = new Map();
+    statusKeyRef.current = null;
 
-    const isLn = networkType === 'lightning' && !!invoice;
+    const emitStatus = (event: DepositDetectionEvent) => {
+      if (cancelled || firedRef.current) return;
+      const key = `${event.layer}:${event.status}:${event.protocol ?? ''}:${event.rawStatus ?? ''}`;
+      if (statusKeyRef.current === key) return;
+      statusKeyRef.current = key;
+      onStatusRef.current?.(event);
+    };
 
-    // Capture the pre-deposit balance so we only react to a genuine increase.
-    if (!isLn) {
-      void readBalanceMetric(networkType, assetId).then((v) => {
-        if (!cancelled) baselineRef.current = v;
-      });
-    }
+    const fire = (event: DepositDetectionEvent) => {
+      if (cancelled || firedRef.current) return;
+      firedRef.current = true;
+      onDetectedRef.current(event);
+    };
+
+    const captureBaselines = async () => {
+      for (const method of monitoredMethods) {
+        if (cancelled) return;
+        if (method.monitor !== 'balance') continue;
+        const balance = await readMethodBalance(method, operationController.signal);
+        if (cancelled) return;
+        if (balance != null) baselinesRef.current.set(method.key, balance);
+      }
+    };
 
     const tick = async () => {
-      if (cancelled || firedRef.current) return;
+      for (const method of monitoredMethods) {
+        if (cancelled || firedRef.current) return;
 
-      if (isLn) {
-        if (await isInvoiceSettled(invoice as string)) {
-          firedRef.current = true;
-          if (!cancelled) onDetected();
+        if (method.monitor === 'invoice') {
+          const event = await readInvoiceStatus(method, operationController.signal);
+          if (!event) continue;
+          if (event.status === 'confirmed' || event.status === 'claimed') {
+            fire(event);
+            return;
+          }
+          emitStatus(event);
+          continue;
         }
-        return;
-      }
 
-      const current = await readBalanceMetric(networkType, assetId);
-      if (current == null) return;
-      if (baselineRef.current == null) {
-        baselineRef.current = current;
-        return;
-      }
-      if (current > baselineRef.current) {
-        firedRef.current = true;
-        if (!cancelled) onDetected();
+        const balance = await readMethodBalance(method, operationController.signal);
+        if (cancelled || firedRef.current || balance == null) continue;
+        const baseline = baselinesRef.current.get(method.key);
+        if (baseline == null) {
+          baselinesRef.current.set(method.key, balance);
+        } else if (balance > baseline) {
+          fire({
+            layer: method.layer,
+            status: 'confirmed',
+            protocol: method.protocol,
+          });
+          return;
+        }
       }
     };
 
-    const id = setInterval(tick, isLn ? INVOICE_POLL_MS : BALANCE_POLL_MS);
+    const checkInvoicesOnce = async () => {
+      for (const method of monitoredMethods) {
+        if (cancelled || firedRef.current || method.monitor !== 'invoice') continue;
+        const event = await readInvoiceStatus(method, operationController.signal);
+        if (!event) continue;
+        if (event.status === 'confirmed' || event.status === 'claimed') {
+          fire(event);
+          return;
+        }
+        emitStatus(event);
+      }
+    };
+
+    const scheduleTick = () => {
+      nextTickTimer = setTimeout(() => {
+        if (cancelled || firedRef.current) return;
+        void tick().finally(() => {
+          if (!cancelled && !firedRef.current) scheduleTick();
+        });
+      }, POLL_MS);
+    };
+
+    const startTimer = setTimeout(() => {
+      if (cancelled) return;
+      void captureBaselines().then(checkInvoicesOnce).finally(() => {
+        if (!cancelled && !firedRef.current) scheduleTick();
+      });
+    }, INITIAL_DELAY_MS);
+
     return () => {
       cancelled = true;
-      clearInterval(id);
+      operationController.abort(new Error('Deposit monitoring stopped'));
+      clearTimeout(startTimer);
+      if (nextTickTimer) clearTimeout(nextTickTimer);
     };
-  }, [enabled, networkType, assetId, invoice, onDetected]);
+  }, [enabled, signature]);
 }

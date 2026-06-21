@@ -1,27 +1,25 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { LinearGradient } from 'expo-linear-gradient';
+import { theme, protocolColor } from '../theme';
 import { Card } from './Card';
-import { AssetIcon } from './AssetIcon';
-import { formatAssetAmount } from '../utils/assetAmount';
+import { AssetIcon, assetIconColor, resolveAssetIconUri } from './AssetIcon';
+import { useAverageIconColor } from '../utils/iconAverageColor';
+import { Badge } from './Badge';
+import { SectionHeader } from './SectionHeader';
+import { AmountText } from './AmountText';
+import { formatAssetAmount, getAssetBaseUnitBalance, type AssetBalanceLike } from '../utils/assetAmount';
 
 interface NiaAsset {
     asset_id: string;
     ticker: string;
     name: string;
     precision: number;
-    balance: {
-        spendable: number;
-    };
+    balance: AssetBalanceLike;
     protocol?: 'RGB' | 'SPARK' | 'ARKADE';
+    icon?: string;
 }
-
-const PROTOCOL_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
-    RGB: { bg: '#2BEE7920', text: '#2BEE79' },
-    SPARK: { bg: '#60A5FA20', text: '#60A5FA' },
-    ARKADE: { bg: '#A855F720', text: '#A855F7' },
-};
 
 interface AssetListProps {
     assets: NiaAsset[];
@@ -32,6 +30,56 @@ interface AssetListProps {
 
 // AssetIcon imported from ./AssetIcon
 
+/**
+ * Single asset card. Its own component so it can derive the gradient accent
+ * from the *average color of the asset's icon* (sampled dynamically), falling
+ * back to the per-ticker brand color until/unless that resolves.
+ */
+const AssetRow: React.FC<{ asset: NiaAsset; onPress: () => void }> = ({ asset, onPress }) => {
+    const iconUri = resolveAssetIconUri(asset.ticker, asset.icon);
+    const accent = useAverageIconColor(iconUri, assetIconColor(asset.ticker));
+    return (
+        <TouchableOpacity style={styles.assetCardWrapper} onPress={onPress}>
+            <LinearGradient
+                // Clean, restrained accent: the dark card holds most of the row,
+                // with just a faint tint toward the trailing edge so the asset's
+                // colour reads without the loud, over-bright gradient bar.
+                colors={[
+                    theme.colors.surface.primary,
+                    theme.colors.surface.primary,
+                    `${accent}12`,
+                    `${accent}24`,
+                ]}
+                locations={[0, 0.55, 0.85, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0.5 }}
+                style={styles.assetVerticalCard}
+            >
+                <View style={styles.assetVerticalContent}>
+                    <View style={styles.assetVerticalLeft}>
+                        <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={36} />
+                        <View style={styles.assetVerticalInfo}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] }}>
+                                <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
+                                {asset.protocol && (
+                                    <Badge label={asset.protocol} color={protocolColor(asset.protocol)} />
+                                )}
+                            </View>
+                            <Text style={styles.assetVerticalName}>{asset.name}</Text>
+                        </View>
+                    </View>
+                    <View style={styles.assetVerticalRight}>
+                        <AmountText style={styles.assetVerticalBalance}>
+                            {formatAssetAmount(getAssetBaseUnitBalance(asset.balance), asset.precision)}
+                        </AmountText>
+                        <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
+                    </View>
+                </View>
+            </LinearGradient>
+        </TouchableOpacity>
+    );
+};
+
 export const AssetList: React.FC<AssetListProps> = ({
     assets,
     onViewAll,
@@ -40,12 +88,7 @@ export const AssetList: React.FC<AssetListProps> = ({
 }) => {
     return (
         <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Assets</Text>
-                <TouchableOpacity onPress={onViewAll}>
-                    <Text style={styles.sectionAction}>View All</Text>
-                </TouchableOpacity>
-            </View>
+            <SectionHeader title="Assets" eyebrow actionLabel="View All" onAction={onViewAll} />
 
             {assets.length === 0 ? (
                 <Card style={styles.emptyCard}>
@@ -60,44 +103,10 @@ export const AssetList: React.FC<AssetListProps> = ({
                     </View>
                 </Card>
             ) : (
+                <View style={styles.assetsListWrapper}>
                 <View style={styles.assetsVerticalContainer}>
                     {assets.slice(0, 3).map((asset) => (
-                        <TouchableOpacity
-                            key={asset.asset_id}
-                            style={styles.assetVerticalCard}
-                            onPress={() => onAssetPress(asset)}
-                        >
-                            <View style={styles.assetVerticalContent}>
-                                <View style={styles.assetVerticalLeft}>
-                                    <AssetIcon ticker={asset.ticker} protocol={asset.protocol} size={36} />
-                                    <View style={styles.assetVerticalInfo}>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                            <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
-                                            {asset.protocol && (
-                                                <View style={{
-                                                    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4,
-                                                    backgroundColor: PROTOCOL_BADGE_COLORS[asset.protocol]?.bg || '#ffffff10',
-                                                }}>
-                                                    <Text style={{
-                                                        fontSize: 9, fontWeight: '700', letterSpacing: 0.3,
-                                                        color: PROTOCOL_BADGE_COLORS[asset.protocol]?.text || '#999',
-                                                    }}>
-                                                        {asset.protocol}
-                                                    </Text>
-                                                </View>
-                                            )}
-                                        </View>
-                                        <Text style={styles.assetVerticalName}>{asset.name}</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.assetVerticalRight}>
-                                    <Text style={styles.assetVerticalBalance}>
-                                        {formatAssetAmount(asset.balance.spendable, asset.precision)}
-                                    </Text>
-                                    <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
-                                </View>
-                            </View>
-                        </TouchableOpacity>
+                      <AssetRow key={asset.asset_id} asset={asset} onPress={() => onAssetPress(asset)} />
                     ))}
                     {assets.length > 3 && (
                         <TouchableOpacity
@@ -109,6 +118,21 @@ export const AssetList: React.FC<AssetListProps> = ({
                         </TouchableOpacity>
                     )}
                 </View>
+                {assets.length > 2 && (
+                    <View pointerEvents="none" style={styles.fadeOverlay}>
+                        <LinearGradient
+                            colors={[
+                                `${theme.colors.background.primary}00`,
+                                theme.colors.background.primary,
+                            ]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 0, y: 1 }}
+                            pointerEvents="none"
+                            style={styles.fadeGradient}
+                        />
+                    </View>
+                )}
+                </View>
             )}
         </View>
     );
@@ -118,22 +142,6 @@ const styles = StyleSheet.create({
     section: {
         marginTop: theme.spacing[6],
         paddingHorizontal: theme.spacing[4],
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: theme.spacing[3],
-    },
-    sectionTitle: {
-        fontSize: theme.typography.fontSize.lg,
-        fontWeight: '700',
-        color: theme.colors.text.primary,
-    },
-    sectionAction: {
-        fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.primary[600],
-        fontWeight: '600',
     },
     emptyCard: {
         padding: theme.spacing[6],
@@ -170,15 +178,32 @@ const styles = StyleSheet.create({
     emptyButton: {
         minWidth: 120,
     },
+    assetsListWrapper: {
+        position: 'relative',
+    },
     assetsVerticalContainer: {
         gap: theme.spacing[3],
     },
-    assetVerticalCard: {
-        backgroundColor: theme.colors.surface.primary,
+    fadeOverlay: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: 130,
+    },
+    fadeGradient: {
+        flex: 1,
+    },
+    assetCardWrapper: {
+        // Clip the gradient to the rounded card shape. A hairline border gives the
+        // card clean, modern definition against the dark background.
         borderRadius: theme.borderRadius.xl,
-        padding: theme.spacing[3],
-        borderWidth: 1,
+        overflow: 'hidden',
+        borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border.light,
+    },
+    assetVerticalCard: {
+        padding: theme.spacing[3],
     },
     assetVerticalContent: {
         flexDirection: 'row',
@@ -188,6 +213,9 @@ const styles = StyleSheet.create({
     assetVerticalLeft: {
         flexDirection: 'row',
         alignItems: 'center',
+        gap: theme.spacing[3],
+        flex: 1,
+        minWidth: 0,
     },
     assetIconContainer: {
         width: 40,

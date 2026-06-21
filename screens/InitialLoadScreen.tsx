@@ -34,11 +34,17 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
         // Set active wallet in Redux
         dispatch(setActiveWallet(activeWallet));
 
-        // Initialize protocol services for all enabled networks
+        // Initialize protocol services — timeout after 8s so a slow/unreachable
+        // node never blocks the load screen on Android or low-connectivity devices.
         try {
-          await initializeProtocolServices();
+          await Promise.race([
+            initializeProtocolServices(),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error('protocol init timeout')), 8000)
+            ),
+          ]);
         } catch (e) {
-          console.error('Failed to initialize protocol services:', e);
+          console.warn('Protocol init skipped:', e instanceof Error ? e.message : String(e));
         }
 
         dispatch(setInitialized(true));

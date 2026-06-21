@@ -1,21 +1,21 @@
 // screens/AddWalletScreen.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, Alert, Switch, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
-import { useDispatch } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { createNewWallet } from '../store/slices/walletSlice';
+import { useAppDispatch } from '../store/hooks';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Input } from '../components';
-import { protocolManager } from '../services/protocols';
+import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
 
 interface Props {
     navigation: any;
 }
 
 export default function AddWalletScreen({ navigation }: Props) {
-    const dispatch = useDispatch();
+    const dispatch = useAppDispatch();
     const [name, setName] = useState('');
     const [mnemonic, setMnemonic] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
@@ -63,13 +63,13 @@ export default function AddWalletScreen({ navigation }: Props) {
             const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [];
 
             if (networks.spark) {
-                selectedNetworks.push({ type: 'spark', enabled: true, config: '{}' });
+                selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
             }
             if (networks.liquid) {
-                selectedNetworks.push({ type: 'liquid', enabled: true, config: '{}' });
+                selectedNetworks.push({ type: 'liquid', enabled: true, config: buildDefaultNetworkConfig('liquid') });
             }
             if (networks.arkade) {
-                selectedNetworks.push({ type: 'arkade', enabled: true, config: '{}' });
+                selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
             }
             if (networks.rln) {
                 selectedNetworks.push({
@@ -79,7 +79,6 @@ export default function AddWalletScreen({ navigation }: Props) {
                 });
             }
 
-            // @ts-ignore
             await dispatch(createNewWallet({
                 name,
                 mnemonic,
@@ -247,7 +246,7 @@ const styles = StyleSheet.create({
         width: 40,
         height: 40,
         borderRadius: theme.borderRadius.base,
-        backgroundColor: theme.colors.gray[100],
+        backgroundColor: theme.colors.surface.secondary,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -284,7 +283,7 @@ const styles = StyleSheet.create({
         marginBottom: theme.spacing[2],
     },
     mnemonicContainer: {
-        backgroundColor: theme.colors.gray[50],
+        backgroundColor: theme.colors.surface.secondary,
         padding: theme.spacing[3],
         borderRadius: theme.borderRadius.base,
         marginBottom: theme.spacing[3],

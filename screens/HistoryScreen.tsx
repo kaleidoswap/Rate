@@ -13,7 +13,7 @@ import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { RootState } from '../store';
-import { MainHeader } from '../components';
+import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
 import { theme } from '../theme';
 import {
@@ -25,6 +25,7 @@ import {
     type AssetMeta,
 } from '../services/ActivityService';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 
 type FilterTab = 'all' | 'receive' | 'send' | 'swap';
 
@@ -35,15 +36,16 @@ const FILTERS: { key: FilterTab; label: string }[] = [
     { key: 'swap', label: 'Swaps' },
 ];
 
-// Per-type visual identity: icon + accent colour.
+// Per-type visual identity: icon + accent colour. Direction colours come from
+// the shared `tx` tokens (sent/receive/swap) so the activity feed matches web.
 function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
     switch (type) {
         case 'receive':
-            return { icon: 'arrow-down', color: theme.colors.success[500] };
+            return { icon: 'arrow-down', color: theme.colors.tx.receive };
         case 'send':
-            return { icon: 'arrow-up', color: theme.colors.error[500] };
+            return { icon: 'arrow-up', color: theme.colors.tx.sent };
         case 'swap':
-            return { icon: 'swap-horizontal', color: '#A78BFA' };
+            return { icon: 'swap-horizontal', color: theme.colors.tx.swap };
         case 'issuance':
             return { icon: 'add-circle-outline', color: theme.colors.accent[500] };
         case 'channel_open':
@@ -64,6 +66,28 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
     'Arkade': 'Arkade',
     'Swap': 'Swap',
 };
+
+// Map an activity layer to a per-network chip colour pair (background + text)
+// sourced from the shared kaleido-ui tokens, so the chips stay contrast-safe
+// and match the web. Layers without a network token fall back to the neutral
+// surface chip.
+function layerChipColors(layer: ActivityLayer): { bg: string; text: string } {
+    switch (layer) {
+        case 'L1':
+            return { bg: theme.colors.networkChip.bitcoin, text: theme.colors.networkText.bitcoin };
+        case 'RGB-L1':
+        case 'RGB-LN':
+            return { bg: theme.colors.networkChip.rgb, text: theme.colors.networkText.rgb };
+        case 'LN':
+            return { bg: theme.colors.networkChip.lightning, text: theme.colors.networkText.lightning };
+        case 'Spark':
+            return { bg: theme.colors.networkChip.spark, text: theme.colors.networkText.spark };
+        case 'Arkade':
+            return { bg: theme.colors.networkChip.arkade, text: theme.colors.networkText.arkade };
+        default:
+            return { bg: theme.colors.surface.tertiary, text: theme.colors.text.secondary };
+    }
+}
 
 function typeLabel(item: ActivityItem): string {
     switch (item.type) {
@@ -109,6 +133,7 @@ export default function HistoryScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [softError, setSoftError] = useState<string | null>(null);
     const [filter, setFilter] = useState<FilterTab>('all');
+    const [selectedItem, setSelectedItem] = useState<ActivityItem | null>(null);
 
     const fetchActivity = useCallback(async () => {
         const assets: AssetMeta[] = (rgbAssets || []).map((a: any) => ({
@@ -122,6 +147,11 @@ export default function HistoryScreen() {
             status: s.status,
             created_at: s.created_at,
             txid: s.txid,
+            from_asset: s.from_asset,
+            to_asset: s.to_asset,
+            from_amount: s.from_amount,
+            to_amount: s.to_amount,
+            venue: s.venue,
         }));
         try {
             const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps });
@@ -169,9 +199,10 @@ export default function HistoryScreen() {
     const renderItem = ({ item }: { item: ActivityItem }) => {
         const v = typeVisual(item.type);
         const st = statusVisual[item.status];
+        const chip = layerChipColors(item.layer);
         const hasAmount = item.amount !== '';
         return (
-            <TouchableOpacity activeOpacity={0.7} style={styles.row}>
+            <TouchableOpacity activeOpacity={0.7} style={styles.row} onPress={() => setSelectedItem(item)}>
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={20} color={v.color} />
                 </View>
@@ -183,7 +214,7 @@ export default function HistoryScreen() {
                             <Text
                                 style={[
                                     styles.rowAmount,
-                                    { color: item.type === 'receive' || item.type === 'issuance' ? theme.colors.success[500] : theme.colors.text.primary },
+                                    { color: item.type === 'receive' || item.type === 'issuance' ? theme.colors.tx.receive : theme.colors.text.primary },
                                 ]}
                                 numberOfLines={1}
                             >
@@ -193,8 +224,8 @@ export default function HistoryScreen() {
                     </View>
                     <View style={styles.rowBottomLine}>
                         <View style={styles.metaRow}>
-                            <View style={styles.layerChip}>
-                                <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
+                            <View style={[styles.layerChip, { backgroundColor: chip.bg }]}>
+                                <Text style={[styles.layerChipText, { color: chip.text }]}>{LAYER_LABEL[item.layer]}</Text>
                             </View>
                             {item.timestamp != null && (
                                 <Text style={styles.timeText}>
@@ -218,21 +249,13 @@ export default function HistoryScreen() {
             <MainHeader title="Activity" onBack={() => navigation.goBack()} />
 
             {/* Filter tabs */}
-            <View style={styles.filterBar}>
-                {FILTERS.map((f) => {
-                    const active = filter === f.key;
-                    return (
-                        <TouchableOpacity
-                            key={f.key}
-                            style={[styles.filterTab, active && styles.filterTabActive]}
-                            onPress={() => setFilter(f.key)}
-                            activeOpacity={0.8}
-                        >
-                            <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>{f.label}</Text>
-                        </TouchableOpacity>
-                    );
-                })}
-            </View>
+            <SegmentedTabs
+                options={FILTERS}
+                value={filter}
+                onChange={(key) => setFilter(key)}
+                scrollable={false}
+                style={styles.filterBar}
+            />
 
             {softError && (
                 <View style={styles.errorBanner}>
@@ -268,6 +291,8 @@ export default function HistoryScreen() {
                     }
                 />
             )}
+
+            <ActivityDetailSheet item={selectedItem} onClose={() => setSelectedItem(null)} />
         </View>
     );
 }
@@ -278,31 +303,9 @@ const styles = StyleSheet.create({
         backgroundColor: theme.colors.background.secondary,
     },
     filterBar: {
-        flexDirection: 'row',
-        gap: theme.spacing[2],
         paddingHorizontal: theme.spacing[4],
         paddingTop: theme.spacing[3],
         paddingBottom: theme.spacing[2],
-    },
-    filterTab: {
-        paddingHorizontal: theme.spacing[4],
-        paddingVertical: theme.spacing[2],
-        borderRadius: theme.borderRadius.full,
-        backgroundColor: theme.colors.surface.primary,
-        borderWidth: 1,
-        borderColor: theme.colors.border.light,
-    },
-    filterTabActive: {
-        backgroundColor: theme.colors.primary[500],
-        borderColor: theme.colors.primary[500],
-    },
-    filterTabText: {
-        fontSize: theme.typography.fontSize.sm,
-        fontWeight: '600',
-        color: theme.colors.text.secondary,
-    },
-    filterTabTextActive: {
-        color: theme.colors.text.inverse,
     },
     errorBanner: {
         flexDirection: 'row',
@@ -365,7 +368,7 @@ const styles = StyleSheet.create({
     },
     rowBody: {
         flex: 1,
-        gap: 4,
+        gap: theme.spacing[1],
     },
     rowTopLine: {
         flexDirection: 'row',

@@ -193,6 +193,7 @@ const initialState: NostrState = {
   contactsLastUpdated: null,
   
   relays: [
+    'wss://relay.kaleidoswap.com',
     'wss://relay.damus.io',
     'wss://nos.lol',
     'wss://relay.nostr.band',

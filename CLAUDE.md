@@ -58,7 +58,7 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 - `NostrService.ts` / `NWCService.ts` – Nostr protocol + NIP-47 Wallet Connect
 - `SecurityService.ts` – biometric auth, SecureStore encryption
 - `QVACService.ts` – on-device AI model lifecycle (LLM + Whisper via @qvac/sdk)
-- `qvacTools.ts` – QVAC tool definitions mapping to AIAssistantFunctions
+- `mindAgent.ts` – the ONE KaleidoMind agent runner (fast-path → recipe → agentic funnel) shared by chat and voice; `walletTools.ts` / `merchantTools.ts` / `aiMemory.ts` / `aiKnowledge.ts` are its tool-source bindings
 
 ### Protocol Layer (shared library)
 
@@ -76,7 +76,16 @@ Utility files:
 
 ### Theming
 
-`theme/index.ts` exports design tokens (colors, typography, spacing). Use `ThemeProvider.tsx` context via the `useTheme()` hook — do not hardcode colors or spacing.
+`theme/index.ts` exports design tokens (colors, typography, spacing) — do not hardcode colors or spacing. Most screens `import { theme }` (the static **dark** theme; dark is the brand default). A context path also exists (`useAppTheme()` from `theme/ThemeProvider.tsx`) but is not yet used app-wide.
+
+**Dark-only for now.** Because screens import the static dark `theme`, a Light/System toggle has no visible effect, so the Settings theme picker is intentionally omitted. `lightTheme` and the `useAppTheme()` path are kept for a future migration — to make light mode real, screens must consume `useAppTheme()` instead of the static import.
+
+Token helpers in `theme/index.ts`:
+- `protocolColor(p)` / `protocolTint(p, alpha)` — per-protocol accents (`theme.colors.protocol`). Never re-hardcode protocol hexes.
+- `theme.colors.networks` — per-network "leg" colors for Send/Receive destination coding (shared so the two screens can't drift). `theme.colors.brand.violet` is the secondary brand accent.
+- `leading(fontSize, multiplier)` — convert a `typography.lineHeight` multiplier to the absolute px RN needs (the raw `lineHeight` tokens are CSS-style multipliers and are NOT usable directly).
+
+Shared UI primitives live in `components/` and are exported from `components/index.ts`: `Button`, `Card`, `Input`, `Badge`, `SegmentedTabs`, `CopyButton`, `SectionHeader`, `Divider`, `Callout`, `AmountText` (tabular-nums for balances/amounts), `EmptyState`. Prefer these over hand-rolling pills/tabs/dividers/copy affordances.
 
 ### Key Patterns
 
@@ -85,7 +94,7 @@ Utility files:
 - Multi-protocol wallet via `protocolManager` (Spark, Arkade, RGB); screens use `protocolManager.getAdapter('PROTOCOL')` with legacy `RGBApiService` fallback
 - RGB Lightning node accessed via kaleido-sdk through the shared `@kaleidorg/wallet-engine` library
 - Swaps support two venues: KaleidoSwap (maker-based atomic swaps) and Flashnet (Spark AMM pools)
-- AI assistant uses QVAC SDK for on-device LLM (QWEN3 600M) and Whisper transcription — see `services/QVACService.ts`, `services/qvacTools.ts`, and `services/aiAssistantFunctions.ts`
+- AI assistant uses QVAC SDK for on-device LLM (QWEN3 600M) and Whisper transcription, driven through the shared `@kaleidorg/mind` engine — see `services/mindAgent.ts` (single runner for chat + voice), `services/QVACService.ts` (model lifecycle), and `services/walletTools.ts` (wallet tool contract binding, unit-tested in `walletTools.test.ts`)
 - Voice input uses `components/VoiceInput.tsx` (QVAC Whisper) instead of WebView-based speech recognition
 - QVAC models require physical devices (no emulator support); first launch downloads models (~400MB LLM + ~40MB Whisper)
 - Sensitive keys use `expo-secure-store`; environment variables via `react-native-dotenv` from `.env`

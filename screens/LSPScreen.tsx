@@ -55,7 +55,7 @@ export default function LSPScreen({ navigation }: Props) {
   });
 
   const settings = useSelector((state: RootState) => state.settings);
-  const rgbAdapter = protocolManager.getAdapter('RGB');
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
   // Channel management is an Advanced-only surface; guard the screen itself so it
   // can't leak into Lite mode even if reached via deep link or stale navigation.
   const policy = usePolicy();
@@ -68,6 +68,11 @@ export default function LSPScreen({ navigation }: Props) {
     try {
       setIsLoading(true);
       setError(null);
+      // Never hit the RGB/NWC node when it isn't connected.
+      if (!rgbAdapter?.isConnected()) {
+        setError('RGB node not connected. Please connect it in Settings.');
+        return;
+      }
       const info = await rgbAdapter.executeProtocolOperation!('getLspInfo', {});
       setLspInfo(info);
       setConnectionUrl(info.lsp_connection_url);
@@ -82,6 +87,7 @@ export default function LSPScreen({ navigation }: Props) {
 
   const checkConnection = async (url: string) => {
     try {
+      if (!rgbAdapter?.isConnected()) return;
       const pubkey = url.split('@')[0];
       const peers = await rgbAdapter.executeProtocolOperation!('listPeers', {});
       setIsConnected(peers.some((peer: any) => peer.pubkey === pubkey));
@@ -93,6 +99,10 @@ export default function LSPScreen({ navigation }: Props) {
   const handleConnect = async () => {
     try {
       setIsLoading(true);
+      if (!rgbAdapter?.isConnected()) {
+        Alert.alert('Error', 'RGB node not connected. Please connect it in Settings.');
+        return;
+      }
       await rgbAdapter.executeProtocolOperation!('connectPeer', { peerAddr: connectionUrl });
       setIsConnected(true);
       Alert.alert('Success', 'Connected to LSP successfully');
@@ -107,6 +117,10 @@ export default function LSPScreen({ navigation }: Props) {
   const handleCreateOrder = async () => {
     try {
       setIsLoading(true);
+      if (!rgbAdapter?.isConnected()) {
+        Alert.alert('Error', 'RGB node not connected. Please connect it in Settings.');
+        return;
+      }
       const nodeInfo = await rgbAdapter.getNodeInfo();
       const addressResult = await rgbAdapter.getReceiveAddress();
 
@@ -177,7 +191,7 @@ export default function LSPScreen({ navigation }: Props) {
           value={connectionUrl}
           onChangeText={setConnectionUrl}
           placeholder="Enter LSP connection URL"
-          placeholderTextColor={theme.colors.gray[400]}
+          placeholderTextColor={theme.colors.text.muted}
         />
         <Button
           title={isConnected ? "Continue" : "Connect to LSP"}
@@ -200,7 +214,7 @@ export default function LSPScreen({ navigation }: Props) {
           onChangeText={(value) => setFormData({ ...formData, capacitySat: value })}
           placeholder="Channel Capacity (sats)"
           keyboardType="numeric"
-          placeholderTextColor={theme.colors.gray[400]}
+          placeholderTextColor={theme.colors.text.muted}
         />
         <TextInput
           style={styles.input}
@@ -208,7 +222,7 @@ export default function LSPScreen({ navigation }: Props) {
           onChangeText={(value) => setFormData({ ...formData, clientBalanceSat: value })}
           placeholder="Local Balance (sats)"
           keyboardType="numeric"
-          placeholderTextColor={theme.colors.gray[400]}
+          placeholderTextColor={theme.colors.text.muted}
         />
         <Button
           title="Create Order"

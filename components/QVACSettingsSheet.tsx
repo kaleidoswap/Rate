@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { theme, leading } from '../theme';
 import type { QVACModel, SttModel, TtsOption, TtsEngine } from '../services/qvacModels';
 import type { QVACConfig, ModelStatus } from '../services/QVACService';
 import type { AiMode } from '../store/slices/settingsSlice';
@@ -29,6 +29,8 @@ interface Props {
   onSetDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => void;
   /** Open the QR scanner to pair with a desktop provider. */
   onScanQR: () => void;
+  /** Forget the paired desktop: clears engine delegation + stored pairing. */
+  onDisconnectDesktop?: () => void;
   /** Friendly name of the currently-paired desktop, if any. */
   providerName?: string | null;
   /** Total device RAM in GB (shown next to the model list). */
@@ -51,6 +53,8 @@ interface Props {
   onSetSttModel: (id: string) => void;
   /** Switch the text-to-speech engine. */
   onSetTtsEngine: (engine: TtsEngine) => void;
+  /** Open the "Design your agent" screen (personality, connectors, context). */
+  onDesignAgent?: () => void;
 }
 
 /** Extract a 64–66 char hex provider key from pasted text (QR payload or raw). */
@@ -75,6 +79,7 @@ export default function QVACSettingsSheet({
   onSelectModel,
   onSetDelegate,
   onScanQR,
+  onDisconnectDesktop,
   providerName,
   deviceMemGb,
   recommendedModelId,
@@ -86,10 +91,22 @@ export default function QVACSettingsSheet({
   ttsOptions,
   onSetSttModel,
   onSetTtsEngine,
+  onDesignAgent,
 }: Props) {
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const hasProvider = !!config.providerPublicKey;
   const isDownloaded = (id: string) => downloadedModelIds.includes(id);
+
+  const confirmDisconnect = () => {
+    Alert.alert(
+      'Disconnect desktop?',
+      `Forget “${providerName || 'this desktop'}” and stop delegating to it? KaleidoMind will switch back to running on this device. You can pair again anytime.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: () => onDisconnectDesktop?.() },
+      ]
+    );
+  };
 
   const confirmDelete = (id: string, label: string) => {
     Alert.alert(
@@ -124,7 +141,7 @@ export default function QVACSettingsSheet({
 
         {busy && (
           <View style={styles.busyBar}>
-            <ActivityIndicator size="small" color={theme.colors.primary[600]} />
+            <ActivityIndicator size="small" color={theme.colors.primary[500]} />
             <Text style={styles.busyText}>
               {llmStatus === 'downloading' ? `Downloading model… ${combinedProgress}%` : 'Loading model…'}
             </Text>
@@ -162,6 +179,17 @@ export default function QVACSettingsSheet({
             })}
           </View>
 
+          {onDesignAgent && aiMode !== 'off' && (
+            <TouchableOpacity style={styles.designRow} onPress={onDesignAgent} activeOpacity={0.85}>
+              <Ionicons name="construct-outline" size={18} color={theme.colors.primary[500]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.designLabel}>Design your agent</Text>
+                <Text style={styles.designHint}>Personality, connectors, context & memory</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
+            </TouchableOpacity>
+          )}
+
           {aiMode === 'off' && (
             <Text style={styles.disabledNote}>
               KaleidoMind is off. Pick “On this device” or “Desktop” to use it.
@@ -170,7 +198,7 @@ export default function QVACSettingsSheet({
           {aiMode === 'delegate' && (
             <Text style={styles.disabledNote}>
               {hasProvider
-                ? `Delegating to ${providerName || 'your desktop'}. Switch to “Off” to disconnect.`
+                ? `Delegating to ${providerName || 'your desktop'}. Use “Disconnect this desktop” below to unpair.`
                 : 'No desktop connected yet — scan the pairing QR, or switch to “Off”.'}
             </Text>
           )}
@@ -224,7 +252,7 @@ export default function QVACSettingsSheet({
                     </TouchableOpacity>
                   )}
                   {selected ? (
-                    <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[600]} />
+                    <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[500]} />
                   ) : (
                     <Ionicons name="ellipse-outline" size={22} color={theme.colors.border.medium} />
                   )}
@@ -271,7 +299,7 @@ export default function QVACSettingsSheet({
                     </TouchableOpacity>
                   )}
                   {selected ? (
-                    <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[600]} />
+                    <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[500]} />
                   ) : (
                     <Ionicons name="ellipse-outline" size={22} color={theme.colors.border.medium} />
                   )}
@@ -294,7 +322,7 @@ export default function QVACSettingsSheet({
                   <Text style={styles.modelMeta}>{t.hint}</Text>
                 </View>
                 {selected ? (
-                  <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[600]} />
+                  <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[500]} />
                 ) : (
                   <Ionicons name="ellipse-outline" size={22} color={theme.colors.border.medium} />
                 )}
@@ -328,9 +356,16 @@ export default function QVACSettingsSheet({
               </View>
 
               <TouchableOpacity style={styles.scanButtonGhost} onPress={onScanQR}>
-                <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[600]} />
+                <Ionicons name="qr-code-outline" size={18} color={theme.colors.primary[500]} />
                 <Text style={styles.scanGhostText}>Scan a different desktop</Text>
               </TouchableOpacity>
+
+              {onDisconnectDesktop && (
+                <TouchableOpacity style={styles.disconnectButton} onPress={confirmDisconnect}>
+                  <Ionicons name="unlink-outline" size={18} color={theme.colors.error[500]} />
+                  <Text style={styles.disconnectText}>Disconnect this desktop</Text>
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <TouchableOpacity style={styles.scanButtonPrimary} onPress={onScanQR}>
@@ -407,7 +442,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border.light,
   },
-  title: { fontSize: theme.typography.fontSize.xl, fontWeight: '700', color: theme.colors.text.primary },
+  title: { fontSize: theme.typography.fontSize.xl, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.primary },
   busyBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -416,7 +451,7 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[2],
     backgroundColor: theme.colors.primary[50],
   },
-  busyText: { color: theme.colors.primary[700], fontSize: theme.typography.fontSize.sm, fontWeight: '600' },
+  busyText: { color: theme.colors.primary[500], fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }, // [500] not [700]: dark theme only overrides intent ramps at 50/100
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10] },
   modeGroup: {
     flexDirection: 'row',
@@ -435,12 +470,15 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.secondary,
   },
   modeBtnActive: { borderColor: theme.colors.primary[500], backgroundColor: theme.colors.primary[500] },
-  modeBtnLabel: { fontSize: theme.typography.fontSize.xs, fontWeight: '600', color: theme.colors.text.secondary, textAlign: 'center' },
+  modeBtnLabel: { fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.secondary, textAlign: 'center' },
   modeBtnLabelActive: { color: theme.colors.text.inverse },
   disabledNote: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontStyle: 'italic', marginTop: theme.spacing[1], marginBottom: theme.spacing[4] },
-  sectionTitle: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
-  subSectionTitle: { fontSize: theme.typography.fontSize.sm, fontWeight: '700', color: theme.colors.text.secondary, marginBottom: theme.spacing[2], textTransform: 'uppercase', letterSpacing: 0.5 },
-  sectionHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginBottom: theme.spacing[3], lineHeight: 18 },
+  designRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], backgroundColor: theme.colors.surface.primary, borderRadius: theme.borderRadius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, padding: theme.spacing[3.5], marginTop: theme.spacing[3], marginBottom: theme.spacing[4] },
+  designLabel: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.primary },
+  designHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
+  sectionTitle: { fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
+  subSectionTitle: { fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.secondary, marginBottom: theme.spacing[2], textTransform: 'uppercase', letterSpacing: 0.5 },
+  sectionHint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginBottom: theme.spacing[3], lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.normal) },
   modelRight: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
   trashBtn: { padding: theme.spacing[1] },
   modelRow: {
@@ -458,15 +496,15 @@ const styles = StyleSheet.create({
   modelRowDisabled: { opacity: 0.45 },
   modelInfo: { flex: 1, paddingRight: theme.spacing[2] },
   modelLabelRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], flexWrap: 'wrap' },
-  modelLabel: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
+  modelLabel: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.primary },
   modelMeta: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
   recPill: {
     backgroundColor: theme.colors.primary[500],
-    borderRadius: 999,
+    borderRadius: theme.borderRadius.full,
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 1,
   },
-  recPillText: { color: theme.colors.text.inverse, fontSize: 10, fontWeight: '700' },
+  recPillText: { color: theme.colors.text.inverse, fontSize: 10, fontWeight: theme.typography.fontWeight.bold },
 
   // Provider chip
   providerChip: {
@@ -483,15 +521,15 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5 },
   dotOn: { backgroundColor: theme.colors.success[500] },
   dotOff: { backgroundColor: theme.colors.border.medium },
-  providerName: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
+  providerName: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.primary },
   providerKey: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2, fontFamily: 'Courier' },
   activePill: {
     backgroundColor: theme.colors.success[500],
-    borderRadius: 999,
+    borderRadius: theme.borderRadius.full,
     paddingHorizontal: theme.spacing[2],
     paddingVertical: 2,
   },
-  activePillText: { color: theme.colors.text.inverse, fontSize: 11, fontWeight: '700' },
+  activePillText: { color: theme.colors.text.inverse, fontSize: 11, fontWeight: theme.typography.fontWeight.bold },
 
   toggleRow: {
     flexDirection: 'row',
@@ -499,7 +537,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: theme.spacing[2],
   },
-  toggleLabel: { fontSize: theme.typography.fontSize.base, color: theme.colors.text.primary, fontWeight: '500' },
+  toggleLabel: { fontSize: theme.typography.fontSize.base, color: theme.colors.text.primary, fontWeight: theme.typography.fontWeight.medium },
 
   // Scan buttons
   scanButtonPrimary: {
@@ -507,12 +545,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: theme.spacing[2],
-    backgroundColor: theme.colors.primary[600],
+    backgroundColor: theme.colors.primary[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
     borderRadius: theme.borderRadius.md,
     paddingVertical: theme.spacing[3],
     marginTop: theme.spacing[1],
   },
-  scanPrimaryText: { color: theme.colors.text.inverse, fontWeight: '700', fontSize: theme.typography.fontSize.base },
+  scanPrimaryText: { color: theme.colors.text.inverse, fontWeight: theme.typography.fontWeight.bold, fontSize: theme.typography.fontSize.base },
   scanButtonGhost: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -524,7 +562,19 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[3],
     marginTop: theme.spacing[1],
   },
-  scanGhostText: { color: theme.colors.primary[600], fontWeight: '600', fontSize: theme.typography.fontSize.sm },
+  scanGhostText: { color: theme.colors.primary[500], fontWeight: theme.typography.fontWeight.semibold, fontSize: theme.typography.fontSize.sm }, // [500] not [600] for dark-bg visibility
+  disconnectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1,
+    borderColor: theme.colors.error[500],
+    paddingVertical: theme.spacing[3],
+    marginTop: theme.spacing[2],
+  },
+  disconnectText: { color: theme.colors.error[500], fontWeight: theme.typography.fontWeight.semibold, fontSize: theme.typography.fontSize.sm },
 
   // Paste-pubkey
   pasteToggle: {
@@ -534,7 +584,7 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing[3],
     paddingVertical: theme.spacing[1],
   },
-  pasteToggleText: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, fontWeight: '600' },
+  pasteToggleText: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
   pasteInput: {
     borderWidth: 1,
     borderColor: theme.colors.border.medium,
@@ -554,13 +604,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: theme.spacing[2],
-    backgroundColor: theme.colors.primary[600],
+    backgroundColor: theme.colors.primary[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
     borderRadius: theme.borderRadius.md,
     paddingVertical: theme.spacing[3],
     marginTop: theme.spacing[2],
   },
   useKeyButtonDisabled: { opacity: 0.4 },
-  useKeyText: { color: theme.colors.text.inverse, fontWeight: '700', fontSize: theme.typography.fontSize.base },
+  useKeyText: { color: theme.colors.text.inverse, fontWeight: theme.typography.fontWeight.bold, fontSize: theme.typography.fontSize.base },
 
-  note: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: theme.spacing[3], lineHeight: 18 },
+  note: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: theme.spacing[3], lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.normal) },
 });

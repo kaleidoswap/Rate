@@ -24,10 +24,12 @@ interface NewAssetSheetProps {
   onChooseExisting: () => void;
 }
 
+// Per-network leg colours sourced from the shared theme tokens so the sheet's
+// accents match the rest of the app (and the web) instead of drifting hexes.
 const NETWORK_COLORS = {
-  spark: '#60A5FA',
-  arkade: '#A855F7',
-  rgb: '#2BEE79',
+  spark: theme.colors.networks.spark,
+  arkade: theme.colors.networks.arkade,
+  rgb: theme.colors.networks.rgb,
 } as const;
 
 export const NewAssetSheet: React.FC<NewAssetSheetProps> = ({
@@ -123,14 +125,14 @@ export const NewAssetSheet: React.FC<NewAssetSheetProps> = ({
 };
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: theme.colors.background.backdrop },
   sheet: {
     backgroundColor: theme.colors.surface.primary,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 32,
+    borderTopLeftRadius: theme.borderRadius.xl,
+    borderTopRightRadius: theme.borderRadius.xl,
+    paddingHorizontal: theme.spacing[5],
+    paddingTop: theme.spacing[2.5],
+    paddingBottom: theme.spacing[8],
   },
   handle: {
     alignSelf: 'center',
@@ -138,30 +140,30 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
     backgroundColor: theme.colors.border.medium,
-    marginBottom: 14,
+    marginBottom: theme.spacing[3.5],
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: theme.spacing[4],
   },
-  title: { fontSize: 18, fontWeight: '700', color: theme.colors.text.primary },
+  title: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
   empty: {
-    fontSize: 13,
+    fontSize: theme.typography.fontSize.sm,
     lineHeight: 19,
     color: theme.colors.text.tertiary,
-    marginBottom: 8,
+    marginBottom: theme.spacing[2],
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    padding: 12,
-    borderRadius: 14,
+    gap: theme.spacing[3],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
     borderLeftWidth: 3,
     backgroundColor: theme.colors.background.secondary,
-    marginBottom: 10,
+    marginBottom: theme.spacing[2.5],
   },
   optionIcon: {
     width: 40,
@@ -170,21 +172,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  optionTitle: { fontSize: 15, fontWeight: '600', color: theme.colors.text.primary },
-  optionSub: { fontSize: 12, color: theme.colors.text.tertiary, marginTop: 2 },
+  optionTitle: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
+  optionSub: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
   existingBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    marginTop: 4,
+    gap: theme.spacing[2],
+    marginTop: theme.spacing[1],
     paddingVertical: 13,
-    borderRadius: 14,
+    borderRadius: theme.borderRadius.md,
     borderWidth: 1,
     borderColor: theme.colors.border.medium,
     borderStyle: 'dashed',
   },
-  existingText: { fontSize: 14, fontWeight: '600', color: theme.colors.text.secondary },
+  existingText: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.secondary },
 });
 
 export default NewAssetSheet;

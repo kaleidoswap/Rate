@@ -28,6 +28,8 @@ interface PaymentDetails {
   recipientAvatar?: string;
   lightningAddress?: string;
   isNostrContact?: boolean;
+  /** BTC/USD price used for the fiat estimate (0/undefined → hide the USD line). */
+  priceUsd?: number;
 }
 
 interface Props {
@@ -183,18 +185,20 @@ export default function PaymentConfirmationModal({
             {/* Payment Details */}
             <View style={styles.paymentCard}>
               <LinearGradient
-                colors={['#667eea', '#764ba2']}
+                colors={[theme.colors.brand.violet, theme.colors.brand.violet]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.amountGradient}
               >
                 <Text style={styles.amountLabel}>Payment Amount</Text>
                 <Text style={styles.amount}>
-                  {formatAmount(paymentDetails.amount)} sats
+                  {paymentDetails.amount > 0 ? `${formatAmount(paymentDetails.amount)} sats` : (paymentDetails.recipientName || paymentDetails.description || '')}
                 </Text>
-                <Text style={styles.amountUsd}>
-                  ≈ ${((paymentDetails.amount / 100000000) * 45000).toFixed(2)} USD
-                </Text>
+                {paymentDetails.amount > 0 && (paymentDetails.priceUsd ?? 0) > 0 && (
+                  <Text style={styles.amountUsd}>
+                    ≈ ${((paymentDetails.amount / 100000000) * (paymentDetails.priceUsd as number)).toFixed(2)} USD · BTC ${Number(paymentDetails.priceUsd).toLocaleString()}
+                  </Text>
+                )}
               </LinearGradient>
 
               {/* Recipient Info */}
@@ -275,7 +279,7 @@ export default function PaymentConfirmationModal({
                 disabled={loading}
               >
                 <LinearGradient
-                  colors={loading ? ['#9CA3AF', '#9CA3AF'] : ['#667eea', '#764ba2']}
+                  colors={loading ? [theme.colors.gray[400], theme.colors.gray[400]] : theme.colors.primary.gradient!}
                   style={styles.confirmGradient}
                 >
                   {loading ? (
@@ -307,7 +311,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    backgroundColor: theme.colors.background.backdrop,
   },
   modalContainer: {
     justifyContent: 'flex-end',

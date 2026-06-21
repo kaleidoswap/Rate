@@ -14,15 +14,20 @@ import {
 } from 'react-native';
 import { AmountInput as WdkAmountInput, AssetSelector as WdkAssetSelector } from '@kaleidorg/kaleido-ui/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSelector } from 'react-redux';
+import { KeyboardAvoidingView, Platform } from 'react-native';
+import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
+import { loadBtcBalance } from '../store/slices/walletSlice';
 // RGBApiService removed — all operations via protocolManager
 import { NetworkIcon } from '../components/NetworkIcon';
 import { PressableScale } from '../components/PressableScale';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import { feedback } from '../utils/feedback';
+import { resolveLightningAddressToInvoice } from '../utils/lnurl';
+import { decodeBolt11 } from '../utils/decodeInvoice';
+import type { PaymentType } from './PaymentSuccessScreen';
 import { protocolManager } from '../services/protocols';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
@@ -31,9 +36,9 @@ import {
 } from '../utils/account-routing';
 import { theme } from '../theme';
 import { Card, Button, Input, ScreenHeader } from '../components';
+import { AssetIcon as TokenAssetIcon } from '../components/AssetIcon';
 import { useAssetIcon } from '../utils';
 import { formatBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
-import { usePolicy } from '../hooks/usePolicy';
 
 interface Props {
   navigation: any;
@@ -105,15 +110,22 @@ interface DecodedRGBInvoice extends BaseRGBInvoiceResponse {
 }
 
 function SendScreen({ navigation, route }: Props) {
+  const dispatch = useDispatch<any>();
   const walletState = useSelector((state: RootState) => state.wallet);
   const assetsState = useSelector((state: RootState) => state.assets);
   const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
+  const isBalanceLoading = useSelector((state: RootState) => state.wallet.isBalanceLoading);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD, bitcoinPrice } = useBitcoinConversion();
-  // In Lite mode the auto-router picks the best route; only Advanced lets the
-  // user override it, so the manual route selector is gated.
-  const policy = usePolicy();
+
+  // Refresh BTC balances when the screen opens — balances aren't persisted, so
+  // arriving here cold (e.g. straight from the QR scanner) would otherwise show
+  // a stale "0" until the next dashboard refresh.
+  useEffect(() => {
+    dispatch(loadBtcBalance());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [selectedAsset, setSelectedAsset] = useState<Asset>({
     asset_id: 'BTC',
@@ -172,6 +184,36 @@ function SendScreen({ navigation, route }: Props) {
       precision: asset.precision,
     })) : [])
   ];
+
+  // Spendable BTC for the currently chosen route. When a route is selected
+  // (e.g. "Pays from Spark") show that account's balance specifically; before a
+  // route is resolved fall back to the cross-protocol total. This is what makes
+  // the amount screen show a real balance instead of "0".
+  const btcSpendableSats = useCallback((): number => {
+    const acct = activeRoute?.account as 'RGB' | 'SPARK' | 'ARKADE' | undefined;
+    const perAccount = acct ? btcBalance?.byProtocol?.[acct]?.total : undefined;
+    if (typeof perAccount === 'number') return perAccount;
+    return btcBalance?.vanilla?.spendable || 0;
+  }, [activeRoute?.account, btcBalance]);
+
+  // Keep the selected asset's balance/precision in sync with live wallet data.
+  // `selectedAsset` is seeded once from state at mount, so without this its
+  // balance stays frozen at the mount-time value (showing "0" when balances
+  // haven't loaded yet) even after the wallet/asset balances arrive.
+  useEffect(() => {
+    setSelectedAsset((prev) => {
+      if (prev.asset_id === 'BTC') {
+        const live = btcSpendableSats();
+        if (live === prev.balance) return prev;
+        return { ...prev, balance: live };
+      }
+      const live = allAssets.find((a) => a.asset_id === prev.asset_id);
+      if (!live) return prev;
+      if (live.balance === prev.balance && live.precision === prev.precision) return prev;
+      return { ...prev, balance: live.balance, precision: live.precision };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [btcBalance, rgbAssets, activeRoute?.account]);
 
   useEffect(() => {
     // Handle route parameters from QR scanner or other navigation
@@ -261,20 +303,39 @@ function SendScreen({ navigation, route }: Props) {
 
       if (destKind === 'lightning') {
         try {
-          const rgbAdapter = protocolManager.getAdapter('RGB');
-          const decodedResult = await rgbAdapter.decodeInvoice(input);
-          const decoded = {
-            payment_hash: decodedResult.paymentHash || decodedResult.payment_hash || '',
-            amt_msat: decodedResult.amountMsat || decodedResult.amount_msat || (decodedResult.amount ? decodedResult.amount * 1000 : 0),
-            asset_id: decodedResult.asset_id,
-            asset_amount: decodedResult.asset_amount,
-            description: decodedResult.description || '',
-            expiry_sec: 0,
-            payee_pubkey: decodedResult.destination || decodedResult.payee_pubkey || '',
+          const trimmed = input.trim();
+          // Decode the BOLT11 locally first — this is node-independent, so a
+          // Lightning invoice is recognized on any wallet (e.g. Spark-only),
+          // not just when the RGB node is connected.
+          const local = decodeBolt11(trimmed);
+          const decoded: any = {
+            payment_hash: '',
+            amt_msat: local.amountSats ? local.amountSats * 1000 : 0,
+            asset_id: undefined,
+            asset_amount: undefined,
+            description: local.description || '',
+            expiry_sec: local.expirySec || 0,
+            payee_pubkey: '',
           };
+
+          // Enrich with RGB-over-LN details (asset_id / asset_amount) only when
+          // the RGB node is available — best-effort, never blocks detection.
+          const rgbAdapter = protocolManager.getAdapterIfAvailable?.('RGB');
+          if (rgbAdapter?.decodeInvoice) {
+            try {
+              const r: any = await rgbAdapter.decodeInvoice(trimmed);
+              decoded.payment_hash = r.paymentHash || r.payment_hash || decoded.payment_hash;
+              decoded.amt_msat = r.amountMsat || r.amount_msat || (r.amount ? r.amount * 1000 : decoded.amt_msat);
+              decoded.asset_id = r.asset_id ?? decoded.asset_id;
+              decoded.asset_amount = r.asset_amount ?? decoded.asset_amount;
+              decoded.description = r.description || decoded.description;
+              decoded.payee_pubkey = r.destination || r.payee_pubkey || decoded.payee_pubkey;
+            } catch { /* keep the local decode */ }
+          }
+
           setDecodedInvoice(decoded);
           setAddressType('lightning');
-          
+
           // Auto-set asset and amount if specified in invoice
           if (decoded.asset_id) {
             const asset = allAssets.find(a => a.asset_id === decoded.asset_id);
@@ -285,9 +346,10 @@ function SendScreen({ navigation, route }: Props) {
               }
             }
           } else if (decoded.amt_msat > 0) {
-            // BTC Lightning invoice with amount
-            const amountBTC = decoded.amt_msat / 100000000000; // Convert msat to BTC
-            setAmount(amountBTC.toFixed(8));
+            // BTC Lightning invoice with amount — set it in the active entry
+            // unit so it displays correctly (sats vs BTC).
+            const sats = Math.round(decoded.amt_msat / 1000);
+            setAmount(bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8));
             // Ensure BTC is selected for BTC invoices
             const btcAsset = allAssets.find(a => a.asset_id === 'BTC');
             if (btcAsset) {
@@ -301,7 +363,13 @@ function SendScreen({ navigation, route }: Props) {
       } else if (input.startsWith('rgb')) {
         // RGB invoice
         try {
-          const rgbAdapterRgb = protocolManager.getAdapter('RGB');
+          const rgbAdapterRgb = protocolManager.getAdapterIfAvailable('RGB');
+          // Decoding requires the RGB/NWC node — don't call it offline.
+          if (!rgbAdapterRgb?.isConnected()) {
+            setAddressType('invalid');
+            setValidationError('RGB node not connected. Please connect it in Settings.');
+            return;
+          }
           const decoded = await rgbAdapterRgb.decodeRgbInvoice?.({ invoice: input }) as any;
           
           // Extract amount from assignment if it's a fungible assignment
@@ -349,7 +417,7 @@ function SendScreen({ navigation, route }: Props) {
     } finally {
       setIsDecodingInvoice(false);
     }
-  }, [allAssets]);
+  }, [allAssets, bitcoinUnit]);
 
   const handlePasteFromClipboard = async () => {
     try {
@@ -428,7 +496,11 @@ function SendScreen({ navigation, route }: Props) {
     // already raw (sats for BTC, base units for RGB) and `amount` is entered in
     // the active bitcoinUnit — comparing a sats input against a whole-BTC balance
     // (the old bug) produced false "Insufficient Balance" errors in sats mode.
-    if (selectedAsset) {
+    // Only enforce the client-side balance check when we actually know a
+    // positive balance. If it's still 0 (balances load asynchronously and
+    // aren't persisted), skip it and let the protocol report a real shortfall —
+    // otherwise a slow balance load blocks an otherwise-valid payment.
+    if (selectedAsset && (selectedAsset.balance || 0) > 0) {
       const isBtc = selectedAsset.asset_id === 'BTC';
       const precision = selectedAsset.precision || 8;
       const availableRaw = selectedAsset.balance || 0;
@@ -470,14 +542,19 @@ function SendScreen({ navigation, route }: Props) {
       const protocol = route?.protocol || 'RGB';
       const method = route?.method || 'lightning';
 
+      // Captured per branch so we navigate to a single, consistent success
+      // screen instead of a bare Alert.
+      let successType: PaymentType = 'lightning';
+      let result: any = null;
+
       if (method === 'spark') {
         // Spark transfer
         const sparkAdapter = protocolManager.getAdapter('SPARK');
         const amountSats = bitcoinUnit === 'BTC'
           ? Math.round(parseFloat(amount) * 1e8)
           : Math.round(parseFloat(amount));
-        await sparkAdapter.sendPayment({ invoice: address, amount: amountSats });
-        Alert.alert('Payment Sent!', 'Spark payment sent successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        result = await sparkAdapter.sendPayment({ invoice: address, amount: amountSats });
+        successType = 'spark';
 
       } else if (method === 'arkade' || method === 'boarding') {
         // Arkade transfer or offboard
@@ -485,18 +562,47 @@ function SendScreen({ navigation, route }: Props) {
         const amountSats = bitcoinUnit === 'BTC'
           ? Math.round(parseFloat(amount) * 1e8)
           : Math.round(parseFloat(amount));
-        if (method === 'boarding') {
-          await arkadeAdapter.sendBtcOnchain?.({ address, amount: amountSats });
-        } else {
-          await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
+
+        const feeSats = await assertArkadeFeeCovered(arkadeAdapter, address, amountSats);
+        result = method === 'boarding' && typeof arkadeAdapter.sendBtcOnchain === 'function'
+          ? await arkadeAdapter.sendBtcOnchain({ address, amount: amountSats })
+          : await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
+        ensureSuccessfulArkadeResult(result);
+        if (result.fee == null || Number(result.fee) === 0) {
+          result = { ...result, fee: feeSats };
         }
-        Alert.alert('Payment Sent!', 'Arkade payment sent successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        successType = method === 'boarding' ? 'boarding' : 'arkade';
 
       } else if (addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay') {
         // Lightning payment — route to the correct protocol
         const lnAdapter = protocolManager.getAdapter(protocol);
-        await lnAdapter.sendPayment({ invoice: address });
-        Alert.alert('Payment Sent!', 'Lightning payment sent successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        const enteredSats = amountSatsFromBtcUnits(amount);
+
+        // A Lightning address / LNURL is not payable directly — resolve it to a
+        // concrete BOLT11 invoice for the entered amount first (protocols like
+        // Spark can only pay an invoice, not a user@domain string).
+        let invoiceToPay = address;
+        if (addressType === 'lightning-address' || addressType === 'lnurl-pay') {
+          if (enteredSats <= 0) throw new Error('Enter an amount to pay this Lightning address.');
+          invoiceToPay = await resolveLightningAddressToInvoice(address, enteredSats);
+        }
+
+        // Amountless (0-amount) BOLT11: the invoice carries no amount, so pass
+        // the entered amount explicitly — required by Spark, honored by RGB.
+        const isAmountlessInvoice =
+          addressType === 'lightning' &&
+          (!decodedInvoice || !decodedInvoice.amt_msat || decodedInvoice.amt_msat === 0) &&
+          !decodedInvoice?.asset_id;
+        if (isAmountlessInvoice && enteredSats <= 0) {
+          throw new Error('Enter an amount to pay this Lightning invoice.');
+        }
+
+        result = await lnAdapter.sendPayment(
+          isAmountlessInvoice
+            ? { invoice: invoiceToPay, amount: enteredSats }
+            : { invoice: invoiceToPay },
+        );
+        successType = 'lightning';
 
       } else if (addressType === 'bitcoin') {
         // On-chain BTC — route to correct protocol
@@ -507,23 +613,33 @@ function SendScreen({ navigation, route }: Props) {
         const onchainSats = bitcoinUnit === 'BTC'
           ? Math.round(parseFloat(amount) * 1e8)
           : Math.round(parseFloat(amount));
-        await btcAdapter.sendBtcOnchain?.({ address, amount: onchainSats, feeRate: feeRateNum });
-        Alert.alert('Payment Sent!', 'Bitcoin transaction broadcasted successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        if (typeof btcAdapter.sendBtcOnchain !== 'function') {
+          throw new Error(`${protocol} does not support Bitcoin on-chain withdrawals from this wallet version.`);
+        }
+        result = await btcAdapter.sendBtcOnchain({ address, amount: onchainSats, feeRate: feeRateNum });
+        ensureSuccessfulProtocolResult(result, `${protocol} on-chain withdrawal`);
+        successType = 'bitcoin';
 
       } else if (addressType === 'rgb') {
-        const rgbSendAdapter = protocolManager.getAdapter('RGB');
+        const rgbSendAdapter = protocolManager.getAdapterIfAvailable('RGB');
+        // Don't attempt an RGB send over a node that isn't connected.
+        if (!rgbSendAdapter?.isConnected()) {
+          throw new Error('RGB node not connected. Please connect it in Settings.');
+        }
         // RGB amounts are base units (input is whole tokens) — scale by precision,
         // otherwise "10" would send 10 base units (0.00001 of a precision-6 asset).
         const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, selectedAsset.precision || 8));
-        await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: rgbBaseUnits });
-        Alert.alert('Asset Sent!', 'RGB asset transfer completed successfully!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+        result = await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: rgbBaseUnits });
+        successType = 'rgb';
       }
-      feedback.send();
+
+      goToPaymentSuccess(successType, result);
     } catch (error) {
       console.error('Send error:', error);
       feedback.error();
+      setPaymentStep('review');
       Alert.alert(
-        'Error',
+        'Payment Failed',
         error instanceof Error ? error.message : 'Failed to send payment'
       );
     } finally {
@@ -531,20 +647,113 @@ function SendScreen({ navigation, route }: Props) {
     }
   };
 
-  const AssetIcon = ({ asset }: { asset: Asset }) => {
-    if (!asset) return null;
-    
-    if (asset.ticker === 'BTC') {
-      return (
-        <View style={styles.assetIconContainer}>
-          <Ionicons name="logo-bitcoin" size={20} color="#F7931A" />
-        </View>
+  const assertArkadeFeeCovered = async (
+    arkadeAdapter: any,
+    destination: string,
+    amountSats: number,
+  ): Promise<number> => {
+    const quote = await arkadeAdapter.executeProtocolOperation?.('quoteSendTransaction', {
+      to: destination,
+      value: amountSats,
+    });
+    const feeSats = Number(quote?.fee);
+    if (!Number.isFinite(feeSats)) {
+      throw new Error('Could not estimate the Arkade network fee. Please try again.');
+    }
+
+    const balance = await arkadeAdapter.getBtcBalance?.();
+    const availableSats = Number(balance?.total ?? balance?.confirmed ?? 0);
+    if (!Number.isFinite(availableSats)) {
+      throw new Error('Could not read your Arkade balance. Please try again.');
+    }
+    if (amountSats + feeSats > availableSats) {
+      throw new Error(
+        `Insufficient Arkade balance. This payment needs ${amountSats.toLocaleString()} sats plus a ${feeSats.toLocaleString()} sats network fee.`
       );
     }
-    
+
+    return feeSats;
+  };
+
+  const ensureSuccessfulArkadeResult = (result: any) => {
+    if (!result) {
+      throw new Error('Arkade did not return a payment result.');
+    }
+    if (result.status === 'failed' || result.error) {
+      throw new Error(result.error || 'Arkade payment failed.');
+    }
+    const reference = result.txid || result.txId || result.paymentHash || result.payment_hash || result.hash;
+    if (!reference || (typeof reference === 'string' && reference.trim() === '')) {
+      throw new Error('Arkade did not return a transaction ID. The payment was not confirmed.');
+    }
+  };
+
+  const ensureSuccessfulProtocolResult = (result: any, label: string) => {
+    if (!result) {
+      throw new Error(`${label} did not return a payment result.`);
+    }
+    if (result.status === 'failed' || result.error) {
+      throw new Error(result.error || `${label} failed.`);
+    }
+    const reference = result.txid || result.txId || result.paymentHash || result.payment_hash || result.hash;
+    if (!reference || (typeof reference === 'string' && reference.trim() === '')) {
+      throw new Error(`${label} did not return a transaction ID.`);
+    }
+  };
+
+  // Builds the display payload from current state and routes to the clean
+  // success screen (which owns the success haptic + chime). `result` is the
+  // adapter return value, mined for a txid / payment hash / preimage reference.
+  const goToPaymentSuccess = (paymentType: PaymentType, result: any) => {
+    const isBtc = selectedAsset.asset_id === 'BTC';
+    const unit = isBtc ? bitcoinUnit : selectedAsset.ticker;
+    const fiat = isBtc && bitcoinPrice > 0 && amount
+      ? `≈ $${parseFloat(formatSatoshisToUSD(amountSatsFromBtcUnits(amount))).toLocaleString()}`
+      : undefined;
+
+    const reference =
+      result?.txid || result?.txId || result?.payment_hash ||
+      result?.paymentHash || result?.hash || result?.preimage || undefined;
+    const referenceLabel =
+      paymentType === 'lightning' ? 'Payment hash'
+      : paymentType === 'rgb' ? 'Transaction'
+      : 'Transaction ID';
+
+    // Surface the on-chain fee rate on the receipt for on-chain sends only
+    // (same rule as the fee selector).
+    const fee = result?.fee != null && Number.isFinite(Number(result.fee))
+      ? `${Number(result.fee).toLocaleString()} sats`
+      : (addressType === 'bitcoin' || addressType === 'rgb')
+      ? `${feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB`
+      : undefined;
+
+    navigation.navigate('PaymentSuccess', {
+      amount: amount || '0',
+      unit,
+      fiat,
+      recipient: address,
+      paymentType,
+      status: result?.status === 'pending' ? 'pending' : 'confirmed',
+      fee,
+      reference: typeof reference === 'string' ? reference : undefined,
+      referenceLabel,
+    });
+  };
+
+  // Real asset iconography (CDN logos, e.g. the orange ₿ for BTC) with an RGB
+  // protocol badge — matching the WDK asset-selector rows shown in the modal,
+  // instead of generic Ionicons glyphs.
+  const AssetIcon = ({ asset }: { asset: Asset }) => {
+    if (!asset) return null;
     return (
       <View style={styles.assetIconContainer}>
-        <Ionicons name="diamond" size={20} color={theme.colors.primary[500]} />
+        <TokenAssetIcon
+          ticker={asset.ticker}
+          name={asset.name}
+          protocol={asset.isRGB ? 'RGB' : undefined}
+          showBadge={!!asset.isRGB}
+          size={36}
+        />
       </View>
     );
   };
@@ -564,31 +773,74 @@ function SendScreen({ navigation, route }: Props) {
     />
   );
 
+  // Once a recipient is decoded we collapse the raw input into a compact
+  // summary — there's no value in showing a 400-char Lightning invoice in full.
+  const isLnDest = addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay';
+  const recipientLocked = !!address && addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice;
+  const recipientColor = isLnDest ? theme.colors.networks.lightning
+    : addressType === 'spark' ? theme.colors.networks.spark
+    : addressType === 'arkade' ? theme.colors.networks.arkade
+    : addressType === 'bitcoin' ? theme.colors.networks.onchain
+    : theme.colors.primary[500];
+  const recipientNetwork = isLnDest ? 'lightning'
+    : addressType === 'spark' ? 'spark'
+    : addressType === 'arkade' ? 'arkade'
+    : addressType === 'bitcoin' ? 'bitcoin'
+    : 'rgb';
+  const recipientLabel = addressType === 'lightning' ? 'Lightning Invoice'
+    : addressType === 'lightning-address' ? 'Lightning Address'
+    : addressType === 'lnurl-pay' ? 'LNURL Pay'
+    : addressType === 'spark' ? 'Spark Address'
+    : addressType === 'arkade' ? 'Arkade Address'
+    : addressType === 'bitcoin' ? 'Bitcoin Address'
+    : 'RGB Invoice';
+
   const renderAddressInput = () => (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Who are you paying?</Text>
-      <Text style={styles.sectionDescription}>
-        Paste or scan an address/invoice, or pick a contact. We'll work out the rest.
-      </Text>
+      {!recipientLocked && (
+        <Text style={styles.sectionDescription}>
+          Paste or scan an address/invoice, or pick a contact. We'll work out the rest.
+        </Text>
+      )}
 
-      <Input
-        placeholder="Address, invoice, or Lightning address…"
-        value={address}
-        onChangeText={(text) => {
-          setAddress(text);
-          detectAddressType(text);
-        }}
-        multiline={addressType === 'lightning' && address.length > 50}
-        variant="outlined"
-        rightIcon={address ? (
+      {recipientLocked ? (
+        <View style={styles.recipientCard}>
+          <View style={[styles.recipientIcon, { backgroundColor: recipientColor }]}>
+            <NetworkIcon network={recipientNetwork} size={16} color="white" />
+          </View>
+          <View style={styles.recipientBody}>
+            <Text style={styles.recipientType}>{recipientLabel}</Text>
+            <Text style={styles.recipientAddress} numberOfLines={1} ellipsizeMode="middle">
+              {address}
+            </Text>
+          </View>
           <TouchableOpacity
-            onPress={() => { setAddress(''); detectAddressType(''); }}
+            onPress={() => { feedback.select(); setAddress(''); detectAddressType(''); }}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            <Ionicons name="close-circle" size={20} color={theme.colors.text.muted} />
+            <Ionicons name="close-circle" size={24} color={theme.colors.text.muted} />
           </TouchableOpacity>
-        ) : undefined}
-      />
+        </View>
+      ) : (
+        <Input
+          placeholder="Address, invoice, or Lightning address…"
+          value={address}
+          onChangeText={(text) => {
+            setAddress(text);
+            detectAddressType(text);
+          }}
+          variant="outlined"
+          rightIcon={address ? (
+            <TouchableOpacity
+              onPress={() => { setAddress(''); detectAddressType(''); }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close-circle" size={20} color={theme.colors.text.muted} />
+            </TouchableOpacity>
+          ) : undefined}
+        />
+      )}
 
       {/* Empty-state entry methods — the primary way to start a payment.
           Shown only before a recipient is entered; once `address` is set the
@@ -615,47 +867,10 @@ function SendScreen({ navigation, route }: Props) {
         </View>
       )}
 
-      {/* Address Type Indicator */}
-      {addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice && (
-        <View style={styles.addressTypeIndicator}>
-          <View style={[
-            styles.addressTypeIcon,
-            { backgroundColor:
-              addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay' ? '#FACC15'
-              : addressType === 'spark' ? '#60A5FA'
-              : addressType === 'arkade' ? '#A855F7'
-              : addressType === 'bitcoin' ? '#F7931A'
-              : '#2BEE79'
-            }
-          ]}>
-            <NetworkIcon
-              network={
-                addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay' ? 'lightning'
-                : addressType === 'spark' ? 'spark'
-                : addressType === 'arkade' ? 'arkade'
-                : addressType === 'bitcoin' ? 'bitcoin'
-                : 'rgb'
-              }
-              size={14}
-              color="white"
-            />
-          </View>
-          <Text style={styles.addressTypeText}>
-            {addressType === 'lightning' ? 'Lightning Invoice'
-              : addressType === 'lightning-address' ? 'Lightning Address'
-              : addressType === 'lnurl-pay' ? 'LNURL Pay'
-              : addressType === 'spark' ? 'Spark Address'
-              : addressType === 'arkade' ? 'Arkade Address'
-              : addressType === 'bitcoin' ? 'Bitcoin Address'
-              : 'RGB Invoice'
-            }
-          </Text>
-        </View>
-      )}
-
-      {/* Route selector — shows available send routes when multiple exist.
-          Hidden in Lite mode: the auto-router sends via the best route. */}
-      {policy.showRouteSelector && sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
+      {/* Route selector — whenever more than one account can pay the
+          destination, always let the user choose which to spend from. The
+          auto-router still pre-selects the best route as the default. */}
+      {sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
         <View style={{ marginTop: 14, gap: 8 }}>
           <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.4 }}>
             Send via
@@ -876,7 +1091,15 @@ function SendScreen({ navigation, route }: Props) {
   // AmountInput drives this via token or (BTC-only) fiat entry.
   const setAmountClamped = (next: string) => {
     const maxNum = parseFloat(getMaxAmount());
-    setAmount(parseFloat(next || '0') > maxNum ? getMaxAmount() : next);
+    // Only clamp once we actually know a positive spendable balance. While
+    // balances are still loading (max is 0/unknown) clamping would silently
+    // force the entry back to 0 — that's what previously sent a 0-amount
+    // Lightning payment to Spark. validateInputs() still catches real overspends.
+    if (maxNum > 0 && parseFloat(next || '0') > maxNum) {
+      setAmount(getMaxAmount());
+      return;
+    }
+    setAmount(next);
   };
 
   const amountSatsFromBtcUnits = (v: string): number =>
@@ -916,7 +1139,6 @@ function SendScreen({ navigation, route }: Props) {
     const isBtc = selectedAsset.asset_id === 'BTC';
     const canEnterFiat = isBtc && bitcoinPrice > 0;
     const maxAmount = getMaxAmount();
-    const maxAmountNum = parseFloat(maxAmount);
 
     const tokenSymbol = isBtc ? bitcoinUnit : selectedAsset.ticker;
     const tokenBalance = isBtc
@@ -948,12 +1170,7 @@ function SendScreen({ navigation, route }: Props) {
       });
     };
 
-    const quickPercents = isBtc && maxAmountNum
-      ? [0.25, 0.5, 0.75].map((p) => ({
-          label: `${p * 100}%`,
-          value: bitcoinUnit === 'BTC' ? (maxAmountNum * p).toFixed(8) : String(Math.floor(maxAmountNum * p)),
-        }))
-      : [];
+    const balanceLoading = isBtc && isBalanceLoading && (selectedAsset.balance || 0) === 0;
 
     return (
       <View style={styles.section}>
@@ -962,8 +1179,8 @@ function SendScreen({ navigation, route }: Props) {
           value={amountMode === 'fiat' ? fiatInput : amount}
           onChangeText={handleAmountChange}
           tokenSymbol={tokenSymbol}
-          tokenBalance={tokenBalance}
-          tokenBalanceUSD={tokenBalanceUSD}
+          tokenBalance={balanceLoading ? 'Loading…' : tokenBalance}
+          tokenBalanceUSD={balanceLoading ? '' : tokenBalanceUSD}
           inputMode={amountMode}
           onToggleInputMode={onToggleMode}
           onUseMax={() => { feedback.select(); setAmountMode('token'); setAmount(maxAmount); }}
@@ -972,27 +1189,15 @@ function SendScreen({ navigation, route }: Props) {
         />
 
         {secondary ? <Text style={styles.amountSecondary}>{secondary}</Text> : null}
-
-        {quickPercents.length > 0 && (
-          <View style={styles.quickAmounts}>
-            {quickPercents.map((q) => (
-              <TouchableOpacity
-                key={`quick-${q.label}`}
-                style={styles.quickAmountButton}
-                onPress={() => { feedback.select(); setAmountMode('token'); setAmount(q.value); }}
-              >
-                <Text style={styles.quickAmountText}>{q.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
       </View>
     );
   };
 
   const renderFeeSelector = () => {
-    // Only show fee selector for on-chain transactions
-    if (addressType === 'lightning' || addressType === 'lightning-address') {
+    // Match rate-extension: the sat/vB fee rate applies to on-chain operations
+    // only — a plain Bitcoin send and an RGB transfer (which anchors a UTXO on
+    // L1). Lightning, Spark and Arkade transfers carry no on-chain fee rate.
+    if (addressType !== 'bitcoin' && addressType !== 'rgb') {
       return null;
     }
 
@@ -1080,9 +1285,18 @@ function SendScreen({ navigation, route }: Props) {
   const renderPaymentReview = () => {
     if (paymentStep !== 'review') return null;
 
-    const effectiveAmount = amount || 
+    const effectiveAmount = amount ||
       (decodedInvoice?.amt_msat ? (decodedInvoice.amt_msat / 100000000000).toFixed(8) : '0') ||
       (decodedRGBInvoice?.amount ? (decodedRGBInvoice.amount / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8) : '0');
+
+    // USD conversion needs SATS, not the display string. `amount` is in the
+    // active unit (BTC or sats) so route it through amountSatsFromBtcUnits;
+    // an amountless typed send falls back to the invoice's msat value.
+    const effectiveAmountSats = amount
+      ? amountSatsFromBtcUnits(amount)
+      : decodedInvoice?.amt_msat
+        ? Math.round(decodedInvoice.amt_msat / 1000)
+        : 0;
 
     return (
       <View style={styles.section}>
@@ -1123,11 +1337,11 @@ function SendScreen({ navigation, route }: Props) {
               </View>
             )}
 
-            {selectedAsset.ticker === 'BTC' && effectiveAmount && (
+            {selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
               <View style={styles.reviewRow}>
                 <Text style={styles.reviewLabel}>USD Value</Text>
                 <Text style={styles.reviewValue}>
-                  ≈ ${parseFloat(formatSatoshisToUSD(effectiveAmount)).toLocaleString()}
+                  ≈ ${parseFloat(formatSatoshisToUSD(effectiveAmountSats)).toLocaleString()}
                 </Text>
               </View>
             )}
@@ -1160,31 +1374,40 @@ function SendScreen({ navigation, route }: Props) {
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
       {renderHeader()}
-      
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {paymentStep === 'input' && (
-          <>
-            {renderAddressInput()}
-            {/* Destination-first: only reveal the payment details once we've
-                decoded a valid recipient, so the screen starts focused on
-                paste / scan / pick-a-contact. */}
-            {address && addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice && (
-              <>
-                {renderAssetSelector()}
-                {renderAmountInput()}
-                {renderFeeSelector()}
-              </>
-            )}
-          </>
-        )}
-        {renderPaymentReview()}
-      </ScrollView>
 
-      {renderSendButton()}
+      {/* Keep the focused amount field above the keyboard. */}
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+        >
+          {paymentStep === 'input' && (
+            <>
+              {renderAddressInput()}
+              {/* Destination-first: only reveal the payment details once we've
+                  decoded a valid recipient, so the screen starts focused on
+                  paste / scan / pick-a-contact. */}
+              {address && addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice && (
+                <>
+                  {renderAssetSelector()}
+                  {renderAmountInput()}
+                  {renderFeeSelector()}
+                </>
+              )}
+            </>
+          )}
+          {renderPaymentReview()}
+        </ScrollView>
+
+        {renderSendButton()}
+      </KeyboardAvoidingView>
 
       <NostrContactsSelector
         visible={showContactPicker}
@@ -1255,8 +1478,46 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   
+  flex: {
+    flex: 1,
+  },
+
   scrollView: {
     flex: 1,
+  },
+
+  recipientCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    padding: theme.spacing[3] + 2,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+  },
+  recipientIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recipientBody: {
+    flex: 1,
+  },
+  recipientType: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 2,
+  },
+  recipientAddress: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: 'monospace',
+    color: theme.colors.text.primary,
   },
   
   scrollContent: {
@@ -1346,15 +1607,15 @@ const styles = StyleSheet.create({
   },
   
   lightningIcon: {
-    backgroundColor: '#f59e0b',
+    backgroundColor: theme.colors.networks.lightning,
   },
-  
+
   bitcoinIcon: {
-    backgroundColor: '#F7931A',
+    backgroundColor: theme.colors.networks.bitcoin,
   },
-  
+
   rgbIcon: {
-    backgroundColor: '#10b981',
+    backgroundColor: theme.colors.primary[500],
   },
   
   addressTypeText: {
@@ -1488,12 +1749,6 @@ const styles = StyleSheet.create({
   },
 
   assetIconContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
     marginRight: theme.spacing[3],
   },
   
@@ -1826,7 +2081,6 @@ const styles = StyleSheet.create({
   },
 
   reviewHeaderText: {
-    marginLeft: theme.spacing[3],
     flex: 1,
   },
 

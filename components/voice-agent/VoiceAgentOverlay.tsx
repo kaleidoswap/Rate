@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Clipboard,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -9,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { speak as qvacSpeak, stopSpeak } from '../../services/qvacTts';
 import Animated, {
   Easing,
@@ -19,10 +22,20 @@ import Animated, {
   interpolate,
   cancelAnimation,
 } from 'react-native-reanimated';
+import { useSelector } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
+import Markdown from 'react-native-markdown-display';
+import { MindAvatar } from '../MindMark';
+import { PayableCard } from '../chat/PayableCard';
+import FunctionResultCard from '../chat/FunctionResultCard';
+import { findPayable, stripPayable } from '../../utils/decodeInvoice';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
+import { getModelById } from '../../services/qvacModels';
+import { startHandsFreeVoice, type HandsFreeController } from '../../services/handsFreeVoice';
+import { selectMindConfig } from '../../store/slices/settingsSlice';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 interface Bubble {
@@ -31,6 +44,31 @@ interface Bubble {
   text: string;
   /** The model's chain-of-thought for this turn (shown on demand). */
   thinking?: string;
+  /** A structured tool result (e.g. merchants) rendered as a rich card instead
+   *  of having the model read the raw data aloud. */
+  functionCalled?: string;
+  functionResult?: any;
+}
+
+/** Tool results that get a structured card (and a short spoken summary) in voice. */
+const MERCHANT_TOOLS = ['find_merchant_locations', 'get_merchant_info'];
+
+/**
+ * If a turn called a merchant tool, return its structured result plus a SHORT
+ * line to speak/show — so the model doesn't read the whole list aloud; the card
+ * carries the detail instead.
+ */
+function merchantCardFrom(res: any): { name: string; result: any; spoken: string } | null {
+  const calls = res?.toolCalls;
+  if (!Array.isArray(calls)) return null;
+  const call = [...calls].reverse().find((c: any) => MERCHANT_TOOLS.includes(c?.name));
+  if (!call) return null;
+  const n = call.result?.merchants?.length ?? 0;
+  const spoken =
+    n > 0
+      ? `Found ${n} Bitcoin-accepting merchant${n === 1 ? '' : 's'} nearby — they're on the card below.`
+      : "I couldn't find any Bitcoin-accepting merchants nearby right now.";
+  return { name: call.name, result: call.result, spoken };
 }
 interface ConfirmState {
   call: { name: string; arguments: Record<string, unknown> };
@@ -39,6 +77,53 @@ interface ConfirmState {
 
 let _id = 0;
 const nextId = () => `${Date.now()}-${_id++}`;
+
+// Markdown styling for assistant replies, so **bold**, lists and `code` render
+// cleanly instead of showing raw markup. Tuned to the assistant bubble.
+const mdStyles = {
+  body: { color: theme.colors.text.primary, fontSize: 15, lineHeight: 21 },
+  paragraph: { marginTop: 0, marginBottom: 6 },
+  strong: { fontWeight: '700' as const, color: theme.colors.text.primary },
+  em: { fontStyle: 'italic' as const },
+  bullet_list: { marginTop: 2, marginBottom: 6 },
+  ordered_list: { marginTop: 2, marginBottom: 6 },
+  // Each row lays its marker beside the content so wrapped lines stay aligned.
+  list_item: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, marginVertical: 2 },
+  bullet_list_icon: { color: theme.colors.primary[500], marginRight: 8, marginLeft: 2, lineHeight: 21, fontSize: 15 },
+  bullet_list_content: { flex: 1 },
+  ordered_list_icon: { color: theme.colors.primary[500], marginRight: 8, marginLeft: 2, lineHeight: 21, fontSize: 15, fontWeight: '700' as const },
+  ordered_list_content: { flex: 1 },
+  link: { color: theme.colors.text.link, textDecorationLine: 'underline' as const },
+  code_inline: {
+    backgroundColor: theme.colors.surface.tertiary,
+    color: theme.colors.text.primary,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    fontSize: 13,
+  },
+  fence: {
+    backgroundColor: theme.colors.surface.tertiary,
+    color: theme.colors.text.primary,
+    borderWidth: 0,
+    borderRadius: 8,
+    padding: 8,
+  },
+  heading1: { fontSize: 17, fontWeight: '700' as const, color: theme.colors.text.primary, marginVertical: 4 },
+  heading2: { fontSize: 16, fontWeight: '700' as const, color: theme.colors.text.primary, marginVertical: 4 },
+};
+
+/** Shown when the model returns nothing — far friendlier than a blunt "Done." */
+const NO_ANSWER_FALLBACK = "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.";
+
+/** Turn a raw model/runtime error into something a person can act on. */
+function friendlyError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  if (/context window|prompt tokens|exceeds the|context length|too long/i.test(msg)) {
+    return 'That conversation got too long for the on-device model. Tap ✕ to start a fresh one, then try again.';
+  }
+  if (/cancel/i.test(msg)) return 'Stopped.';
+  return msg || 'Something went wrong. Please try again.';
+}
 
 interface VoiceAgentOverlayProps {
   visible: boolean;
@@ -56,9 +141,17 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
 
 const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
   const qvac = useQVAC();
-  // Same KaleidoMind funnel as the chat screen — fast-path, recipes, contract
-  // wallet tools, memory + on-device RAG, confirm gate.
-  const agent = useMemo(() => createMindAgent(qvac.service), [qvac.service]);
+  const insets = useSafeAreaInsets();
+  // Same KaleidoMind funnel AND settings as the chat screen — fast-path,
+  // recipes, contract wallet tools, memory + on-device RAG, confirm gate,
+  // persona/sampling/toggles. Settings are read per turn through the ref.
+  const mindConfig = useSelector(selectMindConfig);
+  const mindConfigRef = useRef(mindConfig);
+  mindConfigRef.current = mindConfig;
+  const agent = useMemo(
+    () => createMindAgent(qvac.service, () => mindConfigRef.current),
+    [qvac.service],
+  );
   const voiceRef = useRef<VoiceInputRef>(null);
   const scrollRef = useRef<ScrollView>(null);
 
@@ -66,12 +159,37 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Which assistant bubbles have their reasoning expanded (tap to reveal).
+  // Which assistant bubbles have their reasoning expanded (tap to reveal). A
+  // value of `undefined` means "auto" — expanded live while reasoning, then
+  // collapsed once the answer arrives (the Claude-style behaviour).
   const [openThinking, setOpenThinking] = useState<Record<string, boolean>>({});
+  // The assistant bubble currently being generated (drives the live auto-expand).
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  // Long-press / tap-to-copy for any bubble's text.
+  const copyText = useCallback((text: string) => {
+    const t = text?.trim();
+    if (!t) return;
+    Clipboard.setString(t);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }, []);
+
+  // Continuous hands-free mode (Whisper VAD streaming) — distinct from the
+  // push-to-talk orb, which keeps working when this is off.
+  const [handsFree, setHandsFree] = useState(false);
+  const handsFreeRef = useRef<HandsFreeController | null>(null);
+  // Latest bubbles, read inside the hands-free respond closure (created once
+  // when the loop starts) to build turn history without a stale snapshot.
+  const bubblesRef = useRef(bubbles);
+  bubblesRef.current = bubbles;
 
   // True while the session is mounted — guards the speak→listen loop so a late
   // TTS callback can't start the recorder after the overlay has closed.
   const aliveRef = useRef(true);
+  // The in-flight inference request id (from onStart) so we can abort it when the
+  // overlay closes — otherwise the model keeps "thinking" in the background and
+  // speaks its answer minutes later, anywhere in the app.
+  const requestIdRef = useRef<string | null>(null);
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -80,19 +198,15 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   }, []);
 
   const pulse = useSharedValue(0);
-  const spin = useSharedValue(0);
-
   // Drive the orb animation from the current phase.
   useEffect(() => {
     cancelAnimation(pulse);
-    cancelAnimation(spin);
     if (phase === 'listening') {
       pulse.value = withRepeat(withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) }), -1, true);
     } else if (phase === 'speaking') {
       pulse.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
-    } else if (phase === 'thinking') {
-      spin.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.linear }), -1, false);
     } else {
+      // idle / thinking: settle the orb; "thinking" shows a spinner inside it.
       pulse.value = withTiming(0, { duration: 200 });
     }
   }, [phase]);
@@ -101,22 +215,40 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   useEffect(
     () => () => {
       void stopSpeak();
-      voiceRef.current?.stopListening?.();
+      voiceRef.current?.cancelListening?.();
+      handsFreeRef.current?.stop();
+      // Abort any in-flight inference so it can't finish + speak after close.
+      if (requestIdRef.current) {
+        void qvac.service?.cancelRequest?.(requestIdRef.current).catch(() => {});
+        requestIdRef.current = null;
+      }
     },
     []
   );
 
-  // Press-and-hold entry: begin listening the moment the model is ready, so the
-  // hold gesture flows straight into a spoken request without a second tap.
+  // On open, pre-warm BOTH the STT model and the mic/audio session, so the first
+  // utterance transcribes immediately and the first recording starts hot. Without
+  // the audio warm-up the first clip captured silence ("can't fetch my voice the
+  // first time") because the recording session was cold (and the mic-permission
+  // prompt raced with auto-listen).
+  useEffect(() => {
+    void qvac.service?.initializeWhisper?.().catch(() => {});
+    void voiceRef.current?.warmup?.();
+  }, []);
+
+  // Press-and-hold entry: begin listening only once BOTH the chat model and
+  // Whisper are ready. Starting the native recorder while Whisper was still
+  // cold made the UI say "Listening" even though the first utterance could not
+  // be consumed reliably.
   const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (autoListen && qvac.isReady && phase === 'idle' && !autoStartedRef.current) {
+    if (autoListen && qvac.isReady && qvac.isWhisperReady && phase === 'idle' && !autoStartedRef.current) {
       autoStartedRef.current = true;
       void stopSpeak();
       setError(null);
       voiceRef.current?.startListening();
     }
-  }, [autoListen, qvac.isReady, phase]);
+  }, [autoListen, qvac.isReady, qvac.isWhisperReady, phase]);
 
   const appendBubble = (role: Bubble['role'], text: string) => {
     const id = nextId();
@@ -147,11 +279,13 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       const priorHistory = bubbles.map((b) => ({ role: b.role, content: b.text }));
       setPhase('thinking');
       const assistantId = appendBubble('assistant', '');
+      setActiveId(assistantId);
       let streamed = '';
       let reasoning = '';
       try {
         const res = await agent.runTurn(userText, {
           history: priorHistory,
+          onStart: (id) => { requestIdRef.current = id; },
           onToken: (tok) => {
             // Stream the answer into the bubble live + keep it scrolled into view.
             streamed += tok;
@@ -161,12 +295,25 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           onThinking: (tok) => {
             reasoning += tok;
             patchBubble(assistantId, { thinking: reasoning });
+            scrollToEnd();
           },
           onConfirm: (call) =>
             new Promise((resolve) => setConfirm({ call, resolve })),
         });
-        const finalText = (res.text || streamed || 'Done.').trim();
-        patchBubble(assistantId, { text: finalText });
+        requestIdRef.current = null;
+        // If the overlay closed mid-turn, don't patch/speak a stale answer.
+        if (!aliveRef.current) return;
+        // Merchant results → structured card + short spoken summary (no reading
+        // the raw list aloud); everything else speaks the model's reply.
+        const merchant = merchantCardFrom(res);
+        const finalText = merchant
+          ? merchant.spoken
+          : (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
+        patchBubble(assistantId, {
+          text: finalText,
+          ...(merchant ? { functionCalled: merchant.name, functionResult: merchant.result } : {}),
+        });
+        setActiveId(null);
         scrollToEnd();
         // Speak the reply with on-device QVAC TTS (falls back to the system
         // voice automatically if QVAC TTS isn't available). When it finishes,
@@ -178,8 +325,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           onError: () => setPhase('idle'),
         });
       } catch (e) {
+        requestIdRef.current = null;
+        if (!aliveRef.current) return;
         patchBubble(assistantId, { text: '' });
-        setError(e instanceof Error ? e.message : 'Something went wrong.');
+        setActiveId(null);
+        setError(friendlyError(e));
         setPhase('idle');
       }
     },
@@ -203,7 +353,12 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       qvac.initialize();
       return;
     }
-    if (!qvac.isReady) return;
+    if (qvac.whisperStatus === 'error') {
+      setError(null);
+      void qvac.service.initializeWhisper();
+      return;
+    }
+    if (!qvac.isReady || !qvac.isWhisperReady) return;
     if (phase === 'listening') {
       voiceRef.current?.stopListening();
     } else if (phase === 'idle') {
@@ -217,26 +372,165 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     }
   };
 
+  // ── Hands-free (continuous VAD) ─────────────────────────────────────────────
+  // Resolve when the spoken reply finishes playing (onDone), so the loop's mic
+  // re-gate + cooldown timing stays correct.
+  const speakHandsFree = (text: string): Promise<void> =>
+    new Promise((resolve) => {
+      void stopSpeak();
+      void qvacSpeak(text, { onDone: () => resolve(), onError: () => resolve() });
+    });
+
+  // Run one turn for a transcribed utterance and return the reply text — same
+  // agent/settings/confirm-gate as chat + push-to-talk, streamed into a bubble.
+  const respondHandsFree = async (transcript: string): Promise<string> => {
+    appendBubble('user', transcript);
+    const priorHistory = bubblesRef.current.map((b) => ({ role: b.role, content: b.text }));
+    const assistantId = appendBubble('assistant', '');
+    setActiveId(assistantId);
+    let streamed = '';
+    let reasoning = '';
+    try {
+      const res = await agent.runTurn(transcript, {
+        history: priorHistory,
+        onStart: (id) => { requestIdRef.current = id; },
+        onToken: (tok) => {
+          streamed += tok;
+          patchBubble(assistantId, { text: streamed });
+          scrollToEnd();
+        },
+        onThinking: (tok) => {
+          reasoning += tok;
+          patchBubble(assistantId, { thinking: reasoning });
+          scrollToEnd();
+        },
+        onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
+      });
+      requestIdRef.current = null;
+      if (!aliveRef.current) return '';
+      const merchant = merchantCardFrom(res);
+      const finalText = merchant
+        ? merchant.spoken
+        : (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
+      patchBubble(assistantId, {
+        text: finalText,
+        ...(merchant ? { functionCalled: merchant.name, functionResult: merchant.result } : {}),
+      });
+      scrollToEnd();
+      return finalText;
+    } finally {
+      setActiveId(null);
+    }
+  };
+
+  const stopHandsFree = () => {
+    handsFreeRef.current?.stop();
+    handsFreeRef.current = null;
+    setHandsFree(false);
+    setPhase('idle');
+  };
+
+  const startHandsFree = async () => {
+    if (handsFreeRef.current || !qvac.isReady) return;
+    setError(null);
+    setHandsFree(true);
+    void stopSpeak();
+    voiceRef.current?.stopListening?.(); // never run both mic paths at once
+    try {
+      handsFreeRef.current = await startHandsFreeVoice({
+        respond: respondHandsFree,
+        speak: speakHandsFree,
+        onState: (s) => setPhase(s),
+        onError: (e) => {
+          setError(e instanceof Error ? e.message : 'Voice loop stopped.');
+          stopHandsFree();
+        },
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not start hands-free voice.');
+      setHandsFree(false);
+      setPhase('idle');
+    }
+  };
+
+  const toggleHandsFree = () => {
+    if (handsFree) stopHandsFree();
+    else void startHandsFree();
+  };
+
+  // Pause everything: stop the spoken reply, the mic capture, and the hands-free
+  // loop, settling the orb to idle without closing the overlay. Tap the orb to
+  // resume talking.
+  const pauseVoice = () => {
+    Haptics.selectionAsync().catch(() => {});
+    void stopSpeak();
+    // Cancel (discard) the mic clip rather than stop — a paused utterance must
+    // NOT be transcribed and sent as a turn.
+    voiceRef.current?.cancelListening?.();
+    if (handsFree) stopHandsFree();
+    setPhase('idle');
+  };
+
+  // Copy the whole voice conversation (each turn's reasoning + answer) for debug.
+  const copyFullChat = () => {
+    const transcript = bubbles
+      .map((b) => {
+        const who = b.role === 'user' ? 'You' : 'KaleidoMind';
+        const body = b.role === 'user'
+          ? b.text.trim()
+          : [b.thinking?.trim() ? `Thinking:\n${b.thinking.trim()}` : '', b.text.trim()].filter(Boolean).join('\n\n');
+        return body ? `${who}:\n${body}` : '';
+      })
+      .filter(Boolean)
+      .join('\n\n———\n\n');
+    if (!transcript) return;
+    Clipboard.setString(transcript);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
+  // Show the pause control whenever the assistant is actively doing something.
+  const canPause = handsFree || phase === 'listening' || phase === 'speaking' || phase === 'thinking';
+
   const orbStyle = useAnimatedStyle(() => ({
+    // Pulse only — NO rotation. The orb hosts the upright mic/speaker icon; the
+    // "thinking" spin lives in the ActivityIndicator inside it. Rotating the orb
+    // froze the icon at a mid-spin angle (cancelAnimation doesn't reset the
+    // value), which is why the mic/speaker glyphs looked bent.
     transform: [
       { scale: interpolate(pulse.value, [0, 1], [1, phase === 'listening' ? 1.18 : 1.08]) },
-      { rotate: `${interpolate(spin.value, [0, 1], [0, 360])}deg` },
-    ],
+    ] as const,
   }));
   const ringStyle = useAnimatedStyle(() => ({
     opacity: interpolate(pulse.value, [0, 1], [0.4, 0]),
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.8]) }],
   }));
 
+  // Which LLM is answering + where it runs, shown under the header title.
+  const modelSubtitle = (() => {
+    const delegating = qvac.config?.delegateEnabled && !!qvac.config?.providerPublicKey;
+    const label = getModelById(qvac.config?.modelId)?.label ?? 'On-device AI';
+    return `${label} · ${delegating ? 'via Desktop' : 'on this device'}`;
+  })();
+
   const aiFailed = qvac.llmStatus === 'error';
-  // The on-device model is still downloading/loading (not an error, not ready).
-  const modelLoading = !aiFailed && !qvac.isReady;
+  const speechFailed = qvac.whisperStatus === 'error';
+  // The mic is genuinely ready only when both reasoning and speech recognition
+  // are available. QVACService now coalesces concurrent Whisper initialization,
+  // so this cannot get stranded behind a load that another caller started.
+  const voiceReady = qvac.isReady && qvac.isWhisperReady;
+  const modelLoading = !aiFailed && !speechFailed && !voiceReady;
   const statusText = aiFailed
     ? `On-device AI unavailable — ${qvac.error || 'the model could not be loaded'}`
     : !qvac.isReady
     ? qvac.isDownloading
       ? `Preparing the on-device AI… ${qvac.combinedProgress}%`
       : 'Starting the on-device AI…'
+    : !qvac.isWhisperReady
+      ? qvac.whisperStatus === 'error'
+        ? `Speech recognition unavailable — ${qvac.error || 'the voice model could not be loaded'}`
+        : qvac.whisperStatus === 'downloading'
+          ? `Preparing speech recognition… ${qvac.whisperDownloadProgress}%`
+          : 'Starting speech recognition…'
     : error
       ? error
       : phase === 'listening'
@@ -257,12 +551,22 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
-              <Ionicons name="sparkles" size={18} color={theme.colors.primary[500]} />
-              <Text style={styles.headerTitle}>KaleidoMind</Text>
+              <MindAvatar size={28} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.headerTitle}>KaleidoMind</Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>{modelSubtitle}</Text>
+              </View>
             </View>
-            <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
-              <Ionicons name="close" size={20} color={theme.colors.text.secondary} />
-            </Pressable>
+            <View style={styles.headerActions}>
+              {bubbles.length > 0 && (
+                <Pressable onPress={copyFullChat} hitSlop={10} style={styles.closeBtn} accessibilityLabel="Copy full chat">
+                  <Ionicons name="copy-outline" size={18} color={theme.colors.text.secondary} />
+                </Pressable>
+              )}
+              <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
+                <Ionicons name="close" size={20} color={theme.colors.text.secondary} />
+              </Pressable>
+            </View>
           </View>
 
           {/* Conversation */}
@@ -279,37 +583,102 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             )}
             {bubbles.map((b) => {
               const hasThinking = b.role === 'assistant' && !!b.thinking?.trim();
-              if (!b.text && !hasThinking) return null;
-              const open = !!openThinking[b.id];
+              const hasText = !!b.text?.trim();
+              if (!hasText && !hasThinking) return null;
+              const isActive = b.id === activeId;
+              // Live reasoning, no answer yet → show it expanded (Claude-style);
+              // once the answer streams in, auto-collapse. A manual tap overrides.
+              const thinkingLive = isActive && hasThinking && !hasText;
+              const open = openThinking[b.id] ?? thinkingLive;
               return (
-                <View
+                <Pressable
                   key={b.id}
+                  // Long-press copies the whole bubble — reasoning AND answer when
+                  // both are present, so the thinking is copyable in voice mode too.
+                  onLongPress={() =>
+                    copyText(
+                      [hasThinking ? `Thinking:\n${b.thinking!.trim()}` : '', hasText ? b.text : '']
+                        .filter(Boolean)
+                        .join('\n\n'),
+                    )
+                  }
+                  delayLongPress={300}
                   style={[styles.bubble, b.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}
                 >
                   {hasThinking && (
-                    <>
+                    <View style={styles.thinkWrap}>
                       <Pressable
-                        onPress={() => setOpenThinking((p) => ({ ...p, [b.id]: !p[b.id] }))}
+                        onPress={() => setOpenThinking((p) => ({ ...p, [b.id]: !open }))}
                         style={styles.thinkToggle}
                         hitSlop={6}
                       >
-                        <Ionicons name="sparkles-outline" size={12} color={theme.colors.text.muted} />
-                        <Text style={styles.thinkToggleText}>{open ? 'Hide thinking' : 'Show thinking'}</Text>
+                        <Ionicons name="sparkles-outline" size={12} color={thinkingLive ? theme.colors.primary[500] : theme.colors.text.muted} />
+                        <Text
+                          style={[styles.thinkToggleText, thinkingLive && { color: theme.colors.primary[500] }]}
+                        >
+                          {thinkingLive ? 'Thinking…' : open ? 'Hide thinking' : 'Show thinking'}
+                        </Text>
                         <Ionicons
                           name={open ? 'chevron-up' : 'chevron-down'}
                           size={12}
-                          color={theme.colors.text.muted}
+                          color={thinkingLive ? theme.colors.primary[500] : theme.colors.text.muted}
                         />
                       </Pressable>
-                      {open && <Text style={styles.thinkText}>{b.thinking!.trim()}</Text>}
-                    </>
+                      {open && (
+                        <View style={styles.thinkBlock}>
+                          <Text style={styles.thinkText} selectable>
+                            {b.thinking!.trim()}
+                          </Text>
+                          {/* Copy just the reasoning (only once it's settled). */}
+                          {!thinkingLive && (
+                            <Pressable onPress={() => copyText(b.thinking!.trim())} style={styles.copyBtn} hitSlop={8}>
+                              <Ionicons name="copy-outline" size={12} color={theme.colors.text.muted} />
+                              <Text style={styles.copyBtnText}>Copy thinking</Text>
+                            </Pressable>
+                          )}
+                        </View>
+                      )}
+                    </View>
                   )}
-                  {!!b.text && (
-                    <Text style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}>
-                      {b.text}
-                    </Text>
+                  {hasText && (() => {
+                    // Surface a Lightning invoice / address / RGB invoice in the
+                    // reply as a rich card (copy + share, lightning: link on share)
+                    // instead of an unreadable, untappable raw string.
+                    const payable = b.role === 'assistant' ? findPayable(b.text) : null;
+                    const shown = payable ? stripPayable(b.text, payable).trim() : b.text;
+                    return (
+                      <>
+                        {!!shown && (
+                          b.role === 'user' ? (
+                            <Text selectable style={styles.bubbleUserText}>{shown}</Text>
+                          ) : (
+                            // Render markdown so the model's **bold**, lists and
+                            // `code` format properly instead of showing raw markup.
+                            <Markdown style={mdStyles as any}>{shown}</Markdown>
+                          )
+                        )}
+                        {payable && <PayableCard payable={payable} onCopy={copyText} />}
+                      </>
+                    );
+                  })()}
+                  {/* Structured tool result (e.g. merchants) as a rich card, so the
+                      model never has to read the raw data aloud. */}
+                  {b.functionResult && (
+                    <FunctionResultCard
+                      functionCalled={b.functionCalled ?? ''}
+                      functionResult={b.functionResult}
+                      onCopy={copyText}
+                      onOpenLink={(url) => Linking.openURL(url).catch(() => {})}
+                    />
                   )}
-                </View>
+                  {/* Discoverable copy affordance on finished assistant replies. */}
+                  {b.role === 'assistant' && hasText && !isActive && (
+                    <Pressable onPress={() => copyText(b.text)} style={styles.copyBtn} hitSlop={8}>
+                      <Ionicons name="copy-outline" size={13} color={theme.colors.text.muted} />
+                      <Text style={styles.copyBtnText}>Copy</Text>
+                    </Pressable>
+                  )}
+                </Pressable>
               );
             })}
           </ScrollView>
@@ -318,7 +687,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           <Pressable
             onPress={toggleListening}
             style={styles.orbArea}
-            disabled={!qvac.isReady && qvac.llmStatus !== 'error'}
+            disabled={!voiceReady && !aiFailed && !speechFailed}
           >
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
             <Animated.View style={[styles.orb, { backgroundColor: orbColor }, orbStyle]}>
@@ -339,12 +708,55 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               <View
                 style={[
                   styles.loadFill,
-                  { width: `${qvac.isDownloading ? qvac.combinedProgress : 100}%` },
+                  {
+                    width: `${
+                      !qvac.isReady
+                        ? qvac.isDownloading ? qvac.combinedProgress : 100
+                        : qvac.whisperStatus === 'downloading' ? qvac.whisperDownloadProgress : 100
+                    }%`,
+                  },
                 ]}
               />
             </View>
           )}
           <Text style={styles.status}>{statusText}</Text>
+
+          {/* Pause — stop listening/speaking/hands-free without leaving voice. */}
+          {canPause && (
+            <Pressable onPress={pauseVoice} style={styles.pauseBtn} hitSlop={8} accessibilityLabel="Pause voice">
+              <Ionicons name="pause" size={16} color={theme.colors.text.primary} />
+              <Text style={styles.pauseBtnText}>Pause</Text>
+            </Pressable>
+          )}
+
+          {/* Hands-free (continuous VAD) toggle. Needs @qvac/sdk ≥ 0.13.1 + the
+              react-native-live-audio-stream native module (see services/micStream.ts);
+              the orb above is the one-shot push-to-talk path and works without them. */}
+          <Pressable
+            onPress={toggleHandsFree}
+            disabled={!voiceReady && !aiFailed && !speechFailed}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              marginTop: 10,
+              opacity: voiceReady ? 1 : 0.4,
+            }}
+          >
+            <Ionicons
+              name={handsFree ? 'infinite' : 'infinite-outline'}
+              size={16}
+              color={handsFree ? theme.colors.brand.violet : theme.colors.text.secondary}
+            />
+            <Text
+              style={{
+                fontSize: 13,
+                color: handsFree ? theme.colors.brand.violet : theme.colors.text.secondary,
+              }}
+            >
+              {handsFree ? 'Hands-free on' : 'Hands-free'}
+            </Text>
+          </Pressable>
 
           {/* Hidden recorder */}
           <View style={{ height: 0, overflow: 'hidden' }}>
@@ -361,46 +773,109 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             />
           </View>
 
-          {/* Money-action confirm card */}
-          {confirm && (
-            <View style={styles.confirmCard}>
-              <Text style={styles.confirmTitle}>Confirm action</Text>
-              <Text style={styles.confirmBody}>
-                {humanizeCall(confirm.call)}
-              </Text>
-              <View style={styles.confirmActions}>
-                <Pressable
-                  style={[styles.confirmBtn, styles.confirmDecline]}
-                  onPress={() => {
-                    confirm.resolve({ approved: false, reason: 'declined' });
-                    setConfirm(null);
-                  }}
-                >
-                  <Text style={styles.confirmDeclineText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.confirmBtn, styles.confirmApprove]}
-                  onPress={() => {
-                    confirm.resolve({ approved: true });
-                    setConfirm(null);
-                  }}
-                >
-                  <Text style={styles.confirmApproveText}>Approve</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
         </View>
+
+        {/* Money-action confirm — a bottom-anchored overlay above the sheet so
+            it's always fully on-screen and tappable (an in-flow card overflowed
+            the max-height sheet and got clipped off the bottom edge). */}
+        {confirm && (
+          <View style={styles.confirmOverlay}>
+            {/* Tap outside the card to dismiss (treated as a decline). */}
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => {
+                confirm.resolve({ approved: false, reason: 'declined' });
+                setConfirm(null);
+              }}
+            />
+            {(() => {
+              const info = describeCall(confirm.call);
+              return (
+                <View style={[styles.confirmCard, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+                  <View style={styles.confirmHandle} />
+                  <View style={styles.confirmIconCircle}>
+                    <Ionicons name={info.icon} size={22} color={theme.colors.primary[500]} />
+                  </View>
+                  <Text style={styles.confirmTitle}>{info.title}</Text>
+                  {!!info.primary && <Text style={styles.confirmAmount}>{info.primary}</Text>}
+                  {info.rows.length > 0 && (
+                    <View style={styles.confirmRows}>
+                      {info.rows.map((r) => (
+                        <View key={r.label} style={styles.confirmRow}>
+                          <Text style={styles.confirmRowLabel}>{r.label}</Text>
+                          <Text style={styles.confirmRowValue} numberOfLines={1}>{r.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  <Text style={styles.confirmNote}>Review the details — this can't be undone.</Text>
+                  <View style={styles.confirmActions}>
+                    <Pressable
+                      style={[styles.confirmBtn, styles.confirmDecline]}
+                      onPress={() => {
+                        confirm.resolve({ approved: false, reason: 'declined' });
+                        setConfirm(null);
+                      }}
+                    >
+                      <Text style={styles.confirmDeclineText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.confirmBtn, styles.confirmApprove]}
+                      onPress={() => {
+                        confirm.resolve({ approved: true });
+                        setConfirm(null);
+                      }}
+                    >
+                      <Text style={styles.confirmApproveText}>{info.cta}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })()}
+          </View>
+        )}
       </View>
     </Modal>
   );
 };
 
-function humanizeCall(call: { name: string; arguments: Record<string, unknown> }): string {
+interface CallInfo {
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  cta: string;
+  primary?: string;
+  rows: { label: string; value: string }[];
+}
+
+/** Turn a confirmation-gated tool call into a readable payment card. */
+function describeCall(call: { name: string; arguments: Record<string, unknown> }): CallInfo {
   const a = call.arguments || {};
-  if (call.name === 'pay_lightning_invoice') return `Pay a Lightning invoice${a.amount ? ` (${a.amount} sats)` : ''}?`;
-  if (call.name === 'pay_nostr_contact') return `Send ${a.amount ?? ''} sats to ${a.contact ?? 'a contact'}?`;
-  return `Run "${call.name}" with ${JSON.stringify(a)}?`;
+  const shorten = (s?: unknown) => {
+    const v = String(s ?? '').trim();
+    return v.length > 30 ? `${v.slice(0, 14)}…${v.slice(-10)}` : v;
+  };
+  const sats = (n?: unknown) =>
+    n != null && Number.isFinite(Number(n)) ? `${Number(n).toLocaleString()} sats` : undefined;
+
+  switch (call.name) {
+    case 'send_payment':
+      return { title: 'Confirm payment', icon: 'flash', cta: 'Confirm & send', primary: sats(a.amount_sats), rows: [{ label: 'To', value: shorten(a.to) }] };
+    case 'rln_pay_invoice':
+    case 'pay_lightning_invoice':
+      return { title: 'Pay Lightning invoice', icon: 'flash', cta: 'Pay', primary: sats(a.amount ?? a.amount_sats), rows: [{ label: 'Invoice', value: shorten(a.invoice) }] };
+    case 'pay_nostr_contact':
+      return { title: 'Confirm payment', icon: 'flash', cta: 'Confirm & send', primary: sats(a.amount), rows: [{ label: 'To', value: String(a.contact ?? 'a contact') }] };
+    case 'rln_send_asset':
+      return {
+        title: 'Send asset',
+        icon: 'diamond',
+        cta: 'Confirm & send',
+        primary: a.amount != null ? `${a.amount} ${String(a.asset ?? '').toUpperCase()}` : undefined,
+        rows: [{ label: 'To', value: shorten(a.to) }],
+      };
+    default:
+      return { title: 'Confirm action', icon: 'shield-checkmark', cta: 'Approve', rows: [{ label: call.name, value: shorten(JSON.stringify(a)) }] };
+  }
 }
 
 const styles = StyleSheet.create({
@@ -422,8 +897,10 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border.light,
   },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 },
   headerTitle: { fontSize: 18, fontWeight: '700', color: theme.colors.text.primary },
+  headerSubtitle: { fontSize: 12, color: theme.colors.text.tertiary, marginTop: 1 },
   closeBtn: {
     width: 34,
     height: 34,
@@ -439,18 +916,23 @@ const styles = StyleSheet.create({
   bubbleAssistant: { alignSelf: 'flex-start', backgroundColor: theme.colors.surface.secondary, borderBottomLeftRadius: 5 },
   bubbleUserText: { color: theme.colors.text.inverse, fontSize: 15, fontWeight: '500' },
   bubbleAssistantText: { color: theme.colors.text.primary, fontSize: 15 },
-  thinkToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  thinkWrap: { marginBottom: 8 },
+  thinkToggle: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   thinkToggleText: { color: theme.colors.text.muted, fontSize: 12, fontWeight: '600' },
+  thinkBlock: {
+    marginTop: 6,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.colors.primary[500],
+  },
   thinkText: {
     color: theme.colors.text.secondary,
     fontSize: 13,
     fontStyle: 'italic',
-    lineHeight: 18,
-    marginBottom: 8,
-    paddingLeft: 8,
-    borderLeftWidth: 2,
-    borderLeftColor: theme.colors.border.medium,
+    lineHeight: 19,
   },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-start' },
+  copyBtnText: { color: theme.colors.text.muted, fontSize: 12, fontWeight: '600' },
   loadTrack: {
     height: 4,
     borderRadius: 2,
@@ -470,18 +952,74 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   status: { textAlign: 'center', color: theme.colors.text.secondary, fontSize: 14, marginTop: 6, fontWeight: '500' },
+  pauseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+  },
+  pauseBtnText: { color: theme.colors.text.primary, fontSize: 13, fontWeight: '600' },
+  confirmOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
   confirmCard: {
-    marginTop: 14,
-    padding: 16,
-    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     backgroundColor: theme.colors.surface.elevated,
-    borderWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border.medium,
   },
-  confirmTitle: { color: theme.colors.text.primary, fontWeight: '700', fontSize: 15, marginBottom: 4 },
-  confirmBody: { color: theme.colors.text.secondary, fontSize: 14, marginBottom: 14 },
+  confirmHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    backgroundColor: theme.colors.border.medium,
+    marginBottom: 14,
+  },
+  confirmTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  confirmIconCircle: {
+    alignSelf: 'center',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: `${theme.colors.primary[500]}1A`,
+    marginBottom: 10,
+  },
+  confirmTitle: { color: theme.colors.text.primary, fontWeight: '700', fontSize: 16, textAlign: 'center' },
+  confirmAmount: { color: theme.colors.text.primary, fontWeight: '800', fontSize: 28, textAlign: 'center', marginTop: 6 },
+  confirmRows: {
+    marginTop: 14,
+    backgroundColor: theme.colors.surface.secondary,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  confirmRowLabel: { color: theme.colors.text.secondary, fontSize: 13 },
+  confirmRowValue: { color: theme.colors.text.primary, fontSize: 14, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
+  confirmNote: { color: theme.colors.text.tertiary, fontSize: 12, textAlign: 'center', marginTop: 12, marginBottom: 16 },
+  confirmBody: { color: theme.colors.text.secondary, fontSize: 14, lineHeight: 20, marginBottom: 16 },
   confirmActions: { flexDirection: 'row', gap: 10 },
-  confirmBtn: { flex: 1, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  confirmBtn: { flex: 1, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   confirmDecline: { backgroundColor: theme.colors.surface.secondary },
   confirmDeclineText: { color: theme.colors.text.primary, fontWeight: '600' },
   confirmApprove: { backgroundColor: theme.colors.primary[500] },

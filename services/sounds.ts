@@ -3,17 +3,26 @@
 // Lightweight UI sound-effects engine. Instead of shipping binary audio assets,
 // we SYNTHESISE a small palette of short, pleasant chimes on-device the first
 // time each one is needed: render 16-bit PCM → wrap in a WAV container (same
-// trick as services/qvacTts.ts) → cache the file → preload an expo-av Sound and
+// trick as services/qvacTts.ts) → cache the file → preload an expo-audio player and
 // replay it on demand. Synthesised tones keep the bundle tiny and let the sounds
 // stay perfectly on-brand (bright, musical, never harsh).
 //
 // These are deliberately quiet, sub-400ms blips meant to ACCOMPANY haptics — see
 // utils/feedback.ts, which fires both together so the wallet is legible through
-// sound and touch, not sight alone. UI sounds respect the hardware mute switch
-// (playsInSilentModeIOS is left at its default of false) so they never surprise
-// anyone in a meeting.
+// sound and touch, not sight alone.
+//
+// AUDIO SESSION: we explicitly configure the iOS/Android audio mode before the
+// first sound (see ensureAudioMode). Two reasons this matters:
+//   1. Without it, an uninitialised session + the iOS mute switch silently drops
+//      every UI sound — the "sounds don't always play" bug. We set
+//      playsInSilentModeIOS:true so the user's "Sound effects" toggle is the
+//      single source of truth (these are intentional, opt-in feedback chimes).
+//   2. The voice/TTS code (services/qvacTts.ts, components/VoiceInput.tsx)
+//      reconfigures the GLOBAL session (DoNotMix / recording). We use
+//      MixWithOthers so we never kill the user's music, and re-assert our mode if
+//      it was clobbered, so UI sounds keep working after using the assistant.
 
-import { Audio } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { File, Directory, Paths } from 'expo-file-system';
 import { Buffer } from 'buffer';
 
@@ -177,12 +186,42 @@ function floatToWav(samples: number[]): Uint8Array {
 
 class SoundEngine {
   private enabled = true;
-  private sounds = new Map<SoundKey, Audio.Sound>();
-  private loading = new Map<SoundKey, Promise<Audio.Sound | null>>();
+  private sounds = new Map<SoundKey, AudioPlayer>();
+  private loading = new Map<SoundKey, Promise<AudioPlayer | null>>();
+  private audioModePromise: Promise<void> | null = null;
 
   /** Mirror the user's "Sound effects" setting. */
   setEnabled(on: boolean): void {
     this.enabled = on;
+  }
+
+  /**
+   * Configure a baseline audio session for short UI feedback sounds, so they
+   * play reliably (including over the iOS mute switch) and never interrupt the
+   * user's other audio. Cached after the first success; safe to call before
+   * every play (re-asserts the mode if the TTS/voice code changed the global
+   * session in the meantime). Best-effort — never throws into the UI.
+   */
+  private ensureAudioMode(): Promise<void> {
+    // Coalesce concurrent callers onto one in-flight setAudioModeAsync, then
+    // clear it so the NEXT play() re-asserts the mode — this is what recovers UI
+    // sound after recording/TTS changed the global session. setAudioModeAsync is
+    // idempotent and cheap, and UI sounds are infrequent, so per-play is fine.
+    if (this.audioModePromise) return this.audioModePromise;
+    this.audioModePromise = setAudioModeAsync({
+      playsInSilentMode: true,
+      shouldPlayInBackground: false,
+      // MixWithOthers (both platforms now) so UI blips never kill the user's music.
+      interruptionMode: 'mixWithOthers',
+      shouldRouteThroughEarpiece: false,
+    })
+      .catch(() => {
+        /* best-effort — sound is non-critical */
+      })
+      .finally(() => {
+        this.audioModePromise = null;
+      });
+    return this.audioModePromise;
   }
 
   isEnabled(): boolean {
@@ -199,10 +238,10 @@ class SoundEngine {
     return dir;
   }
 
-  // Load an expo-av Sound for a key. Prefers a bundled CUSTOM_SOUNDS asset
+  // Load an expo-audio player for a key. Prefers a bundled CUSTOM_SOUNDS asset
   // (e.g. an AI-generated .mp3); otherwise synthesises the built-in chime once
   // and caches the WAV. Both paths are cached in `this.sounds` after first load.
-  private async load(key: SoundKey): Promise<Audio.Sound | null> {
+  private async load(key: SoundKey): Promise<AudioPlayer | null> {
     const existing = this.sounds.get(key);
     if (existing) return existing;
     const inflight = this.loading.get(key);
@@ -214,7 +253,7 @@ class SoundEngine {
         let source: any;
         let volume = 1.0;
         if (custom != null) {
-          // A require()'d audio asset (number/module ref) — expo-av loads it directly.
+          // A require()'d audio asset (number/module ref) — expo-audio loads it directly.
           source = custom;
           volume = CUSTOM_SOUND_VOLUME;
         } else {
@@ -226,10 +265,10 @@ class SoundEngine {
           }
           source = { uri: file.uri };
         }
-        const { sound } = await Audio.Sound.createAsync(source, {
-          shouldPlay: false,
-          volume,
-        });
+        // createAudioPlayer starts loading immediately and does not auto-play
+        // (no shouldPlay flag); by the time play() runs the clip is warm.
+        const sound = createAudioPlayer(source);
+        sound.volume = volume;
         this.sounds.set(key, sound);
         return sound;
       } catch {
@@ -246,9 +285,15 @@ class SoundEngine {
   async play(key: SoundKey): Promise<void> {
     if (!this.enabled) return;
     try {
+      // Make sure our playback session is active before we play — the global
+      // audio mode may have been changed by recording/TTS since the last sound.
+      await this.ensureAudioMode();
       const sound = await this.load(key);
       if (!sound) return;
-      await sound.replayAsync();
+      // expo-audio has no replayAsync: rewind to the start, then play. This
+      // restarts the chime on rapid taps and after it has finished once.
+      await sound.seekTo(0);
+      sound.play();
     } catch {
       /* ignore — sound is non-critical */
     }
@@ -256,7 +301,7 @@ class SoundEngine {
 
   /** Warm the cache so the first interaction isn't delayed by synthesis. */
   async preload(keys: SoundKey[] = ['tap', 'success', 'error']): Promise<void> {
-    await Promise.all(keys.map((k) => this.load(k)));
+    await Promise.all([this.ensureAudioMode(), ...keys.map((k) => this.load(k))]);
   }
 }
 
