@@ -37,7 +37,10 @@ const DOTS = [0, 1, 2];
 export const BrandLoading: React.FC<BrandLoadingProps> = ({
   markSize = 132,
   message,
-  showWordmark = true,
+  // Mark-only by default: there's no proper "KaleidoSwap" wordmark logo to set
+  // under the mark, and the hand-typed name rendered incompletely — so skip the
+  // letters and show just the (correct) kaleidoscope-K mark.
+  showWordmark = false,
 }) => {
   const glow = useSharedValue(0);
   const t = useSharedValue(0);

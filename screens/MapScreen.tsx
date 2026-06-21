@@ -182,7 +182,10 @@ export default function MapScreen({ navigation }: Props) {
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={onLocatePress}
-          style={[styles.fab, { bottom: insets.bottom + theme.spacing[4] }]}
+          // Up near the top, just under the BTC Map search bar (rather than the
+          // bottom, where it collided with the merchant panel) so it stays
+          // visible when the search/results panel slides up from below.
+          style={[styles.fab, { top: insets.top + theme.spacing[16] }]}
           accessibilityLabel="Center map on my location"
         >
           <LinearGradient

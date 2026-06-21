@@ -292,7 +292,9 @@ const islandStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.10)',
   },
   centerGap: {
-    width: 84,
+    // Snug to the FAB (68px) so the two tabs on each side sit close to it,
+    // symmetrically — no extra gap pushing the right pair away.
+    width: 68,
   },
   label: {
     fontSize: 10,
