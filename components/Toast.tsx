@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import ToastService, { Toast as ToastType, ToastPosition } from '../services/ToastService';
@@ -19,6 +19,7 @@ interface ToastProps {
 }
 
 const ToastItem: React.FC<ToastProps> = ({ toast, onDismiss }) => {
+  const insets = useSafeAreaInsets();
   const translateY = new Animated.Value(toast.position === 'top' ? -100 : 100);
   const opacity = new Animated.Value(0);
 
@@ -75,67 +76,53 @@ const ToastItem: React.FC<ToastProps> = ({ toast, onDismiss }) => {
     }
   };
 
+  // A solid, elevated (dark) surface for every type so light text stays legible —
+  // the old per-type `[50]` tints were near-white and washed out light text on
+  // the dark UI, making the toast effectively invisible. The type colour now lives
+  // only in the icon + left accent bar.
   const getColors = () => {
-    switch (toast.type) {
-      case 'success':
-        return {
-          background: theme.colors.success[50],
-          border: theme.colors.success[500],
-          icon: theme.colors.success[500],
-          text: theme.colors.text.primary,
-        };
-      case 'error':
-        return {
-          background: theme.colors.error[50],
-          border: theme.colors.error[500],
-          icon: theme.colors.error[500],
-          text: theme.colors.text.primary,
-        };
-      case 'warning':
-        return {
-          background: theme.colors.warning[50],
-          border: theme.colors.warning[500],
-          icon: theme.colors.warning[500],
-          text: theme.colors.text.primary,
-        };
-      case 'info':
-        return {
-          background: theme.colors.info[50],
-          border: theme.colors.info[500],
-          icon: theme.colors.info[500],
-          text: theme.colors.text.primary,
-        };
-      default:
-        return {
-          background: theme.colors.surface.elevated,
-          border: theme.colors.border.medium,
-          icon: theme.colors.text.secondary,
-          text: theme.colors.text.primary,
-        };
-    }
+    const accent =
+      toast.type === 'success' ? theme.colors.success[500]
+      : toast.type === 'error' ? theme.colors.error[500]
+      : toast.type === 'warning' ? theme.colors.warning[500]
+      : toast.type === 'info' ? theme.colors.info[500]
+      : theme.colors.text.secondary;
+    return {
+      background: theme.colors.surface.elevated ?? theme.colors.surface.primary,
+      border: accent,
+      icon: accent,
+      text: theme.colors.text.primary,
+    };
   };
 
   const colors = getColors();
-  const containerStyle = toast.position === 'top' ? styles.containerTop : styles.containerBottom;
+  const isTop = toast.position === 'top';
+  const containerStyle = isTop ? styles.containerTop : styles.containerBottom;
 
   return (
     <Animated.View
       testID="toast-container"
+      pointerEvents="box-none"
       style={[
         containerStyle,
+        // Keep the toast clear of the status bar / home indicator. Using the raw
+        // inset is more reliable than a nested SafeAreaView, which returned 0 here
+        // and let the toast ride up over the clock/Wi-Fi.
+        isTop ? { paddingTop: insets.top + 8 } : { paddingBottom: insets.bottom + 8 },
         {
           opacity,
           transform: [{ translateY }],
         },
       ]}
     >
-      <SafeAreaView edges={toast.position === 'top' ? ['top'] : ['bottom']}>
+      <View>
         <View
           style={[
             styles.toast,
             {
               backgroundColor: colors.background,
               borderLeftColor: colors.border,
+              borderColor: theme.colors.border.medium,
             },
           ]}
         >
@@ -164,7 +151,7 @@ const ToastItem: React.FC<ToastProps> = ({ toast, onDismiss }) => {
             <Ionicons name="close" size={20} color={colors.text} />
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     </Animated.View>
   );
 };
@@ -219,12 +206,13 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[4],
     paddingHorizontal: theme.spacing[4],
     borderRadius: theme.borderRadius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
     borderLeftWidth: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 10,
   },
   icon: {
     marginRight: theme.spacing[3],
