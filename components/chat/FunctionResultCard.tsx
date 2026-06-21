@@ -1,6 +1,6 @@
 // components/chat/FunctionResultCard.tsx
 import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Linking, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform } from 'react-native';
 import InvoiceQRCode from '../InvoiceQRCode';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { formatDistance } from '../../services/btcmapService';
@@ -8,6 +8,9 @@ import { leading, type Theme } from '../../theme';
 
 /** Open a merchant in the native maps app — by coordinates if we have them,
  *  otherwise by a search query on its name/address. */
+/** Cap rows rendered inline in chat; the rest are summarised as "+N more". */
+const MAX_MERCHANT_ROWS = 6;
+
 const openMaps = (merchant: { name?: string; address?: string; lat?: number; lon?: number }) => {
   let url: string;
   if (typeof merchant.lat === 'number' && typeof merchant.lon === 'number') {
@@ -160,8 +163,12 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
               </Text>
             ) : (
               <>
-                <ScrollView style={styles.merchantList} nestedScrollEnabled>
-                  {merchants.map((merchant: any, index: number) => (
+                {/* A plain View, NOT a nested ScrollView: a ScrollView inside the
+                    chat bubble's Pressable steals the touch from the row's
+                    Map/Call/Website buttons, so they stop responding. The outer
+                    chat list already scrolls; we just cap how many rows we show. */}
+                <View style={styles.merchantList}>
+                  {merchants.slice(0, MAX_MERCHANT_ROWS).map((merchant: any, index: number) => (
                     <MerchantRow
                       // OSM ids are only unique WITHIN an element type, so a node and
                       // a way can share the same numeric id (BTC Map's `nwr` query
@@ -175,7 +182,12 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
                       openMaps={openMaps}
                     />
                   ))}
-                </ScrollView>
+                  {merchants.length > MAX_MERCHANT_ROWS && (
+                    <Text style={styles.merchantMore}>
+                      +{merchants.length - MAX_MERCHANT_ROWS} more nearby
+                    </Text>
+                  )}
+                </View>
                 <Text style={styles.attribution}>
                   {functionResult.source === 'offline'
                     ? '⚠︎ Offline list — couldn’t reach BTC Map or your location'
@@ -333,7 +345,13 @@ const makeStyles = (theme: Theme) =>
       color: theme.colors.primary[400] ?? theme.colors.primary[500],
       fontWeight: theme.typography.fontWeight.medium,
     },
-    merchantList: { maxHeight: 280 },
+    merchantList: {},
+    merchantMore: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+      textAlign: 'center',
+      paddingVertical: theme.spacing[1],
+    },
     merchantItem: {
       padding: theme.spacing[2],
       backgroundColor: theme.colors.surface.primary,
