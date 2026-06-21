@@ -25,6 +25,7 @@ import Animated, {
 import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
+import Markdown from 'react-native-markdown-display';
 import { MindAvatar } from '../MindMark';
 import { PayableCard } from '../chat/PayableCard';
 import FunctionResultCard from '../chat/FunctionResultCard';
@@ -75,6 +76,34 @@ interface ConfirmState {
 
 let _id = 0;
 const nextId = () => `${Date.now()}-${_id++}`;
+
+// Markdown styling for assistant replies, so **bold**, lists and `code` render
+// cleanly instead of showing raw markup. Tuned to the assistant bubble.
+const mdStyles = {
+  body: { color: theme.colors.text.primary, fontSize: 15, lineHeight: 21 },
+  paragraph: { marginTop: 0, marginBottom: 6 },
+  strong: { fontWeight: '700' as const, color: theme.colors.text.primary },
+  bullet_list: { marginVertical: 2 },
+  ordered_list: { marginVertical: 2 },
+  list_item: { marginVertical: 1 },
+  link: { color: theme.colors.text.link, textDecorationLine: 'underline' as const },
+  code_inline: {
+    backgroundColor: theme.colors.surface.tertiary,
+    color: theme.colors.text.primary,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    fontSize: 13,
+  },
+  fence: {
+    backgroundColor: theme.colors.surface.tertiary,
+    color: theme.colors.text.primary,
+    borderWidth: 0,
+    borderRadius: 8,
+    padding: 8,
+  },
+  heading1: { fontSize: 17, fontWeight: '700' as const, color: theme.colors.text.primary, marginVertical: 4 },
+  heading2: { fontSize: 16, fontWeight: '700' as const, color: theme.colors.text.primary, marginVertical: 4 },
+};
 
 /** Shown when the model returns nothing — far friendlier than a blunt "Done." */
 const NO_ANSWER_FALLBACK = "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.";
@@ -558,12 +587,13 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                     return (
                       <>
                         {!!shown && (
-                          <Text
-                            selectable
-                            style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}
-                          >
-                            {shown}
-                          </Text>
+                          b.role === 'user' ? (
+                            <Text selectable style={styles.bubbleUserText}>{shown}</Text>
+                          ) : (
+                            // Render markdown so the model's **bold**, lists and
+                            // `code` format properly instead of showing raw markup.
+                            <Markdown style={mdStyles as any}>{shown}</Markdown>
+                          )
                         )}
                         {payable && <PayableCard payable={payable} onCopy={copyText} />}
                       </>
