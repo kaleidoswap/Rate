@@ -23,7 +23,7 @@ import { theme, leading } from '../theme';
 import { Button, ScreenHeader } from '../components';
 import { RootState } from '../store';
 import NostrService from '../services/NostrService';
-import { saveKeysSecurely, setKeys, initializeNostr } from '../store/slices/nostrSlice';
+import { saveKeysSecurely, setKeys, initializeNostr, loadNostrProfile } from '../store/slices/nostrSlice';
 
 interface Props {
     navigation: any;
@@ -58,7 +58,11 @@ export default function NostrSetupScreen({ navigation, route }: Props) {
         await dispatch(saveKeysSecurely({ privateKey: keys.privateKey, nsec: keys.nsec }) as any);
         dispatch(setKeys(keys));
         // Fire-and-forget relay connection; never block onboarding on the network.
-        dispatch(initializeNostr({ privateKey: keys.privateKey, relays } as any) as any);
+        // Once connected, pull the account's profile (kind-0 metadata) so the
+        // display name is available app-wide (e.g. the dashboard greeting).
+        (dispatch(initializeNostr({ privateKey: keys.privateKey, relays } as any) as any) as Promise<unknown>)
+            .then(() => dispatch(loadNostrProfile() as any))
+            .catch(() => {});
     };
 
     const handleDeriveFromSeed = async () => {
