@@ -1,67 +1,100 @@
-# KaleidoSwap Wallet — Smart RGB Lightning Wallet
+# KaleidoSwap Wallet
 
-A next-generation non-custodial mobile wallet that integrates RGB assets, Lightning Network, AI assistance, and social features into a unified Bitcoin experience.
+**A non-custodial, multi-protocol Bitcoin wallet with an on-device AI assistant.**
 
-## Overview
+KaleidoSwap is a React Native (Expo) mobile wallet that brings Bitcoin, the Lightning
+Network, RGB assets, Liquid, and Bitcoin L2s (Spark, Arkade) together under one
+self-custodial roof — driven by a private, **on-device** AI assistant and Nostr social
+payments. Your keys, your assets, and your AI all stay on your phone.
 
-KaleidoSwap is a React Native mobile application that provides a complete self-custodial wallet solution for Bitcoin and RGB assets. The wallet features an embedded RGB Lightning Node, AI-powered natural language interface, Nostr social integration, and local business discovery through BTC Map integration.
+---
 
-## Key Features
+## Highlights
 
-### 💰 **Wallet Core**
-- **Non-custodial**: Users control their private keys
-- **Multi-asset support**: Bitcoin and RGB assets (stablecoins, tokens, NFTs)
-- **Lightning Network**: Fast, low-cost payments
-- **On-chain transactions**: Full Bitcoin blockchain support
-- **HD wallet**: BIP39 mnemonic seed phrase backup
+- 🔑 **Non-custodial & multi-protocol** — one HD wallet (BIP39) across Bitcoin on-chain,
+  Lightning, RGB assets, Liquid, Spark, and Arkade.
+- 🤖 **On-device AI** — a private assistant (KaleidoMind) that runs the LLM and speech
+  models locally; nothing is sent to a cloud LLM by default.
+- 🔁 **Atomic swaps** — trustless asset swaps via the KaleidoSwap maker network, plus
+  Flashnet AMM pools on Spark.
+- 🌐 **Nostr-native** — contacts, Lightning Zaps, Lightning Address, and NWC
+  (Nostr Wallet Connect) to pair external apps.
+- 🗺️ **Real-world spending** — discover Bitcoin-accepting merchants via BTC Map.
+- 🔒 **Hardened by default** — biometric unlock, encrypted SQLite (SQLCipher), and
+  keys held in the device secure store.
 
-### 🤖 **AI Assistant**
-- **Natural language interface**: Control wallet with voice or text
-- **Smart commands**: "Send 100,000 sats to Alice" or "Create invoice for $50"
-- **MCP server integration**: Direct AI-to-wallet communication
-- **Location services**: Find Bitcoin-accepting businesses with AI
+---
 
-### 🌐 **Social Features (Nostr)**
-- **Contact management**: Sync contacts via Nostr protocol
-- **Lightning Zaps**: Social micropayments
-- **Lightning Address**: Send to username@domain.com
-- **Wallet Connect**: Connect to external applications
-- **Social payments**: Pay friends directly from contact list
+## Supported protocols
 
-### 🗺️ **Local Discovery**
-- **BTC Map integration**: Find nearby Bitcoin merchants
-- **Real-world utility**: Bridge digital assets to physical commerce
-- **Merchant payments**: Direct payments to discovered businesses
-- **Stablecoin support**: Spend RGB stablecoins locally
+KaleidoSwap is built on a shared multi-protocol engine (`@kaleidorg/wallet-engine`)
+that routes operations to the active protocol adapter:
 
-### ⚡ **Advanced Features**
-- **Atomic swaps**: Exchange assets via Kaleidoswap integration
-- **LSP integration**: Automated Lightning liquidity management
-- **QR code support**: Scan Bitcoin addresses, Lightning invoices, RGB invoices
-- **Biometric security**: Face ID, Touch ID, Fingerprint authentication
+| Protocol | What it covers | Backed by |
+|---|---|---|
+| **Bitcoin / Lightning + RGB** | On-chain BTC, Lightning payments, and RGB asset transfers via an RGB Lightning Node | `kaleido-sdk` (RLN) |
+| **Liquid** | Liquid Network assets (L-BTC, issued assets) | `lwk-rn` (native module) |
+| **Spark** | Spark L2 Bitcoin + tokens | `@buildonspark/spark-sdk` |
+| **Arkade** | Ark VTXOs | `@arkade-os/sdk` |
+| **Flashnet** | Spark AMM DEX pools | `@flashnet/sdk` |
 
-## Technology Stack
+Swaps are **KaleidoSwap-first**: the wallet quotes and executes trustless atomic swaps
+against the KaleidoSwap maker API, with additional venues for breadth:
 
-- **Frontend**: React Native with Expo
-- **State Management**: Redux Toolkit
-- **Database**: SQLite with SQLCipher encryption
-- **Security**: Expo SecureStore, biometric authentication
-- **AI**: OpenAI GPT integration with custom MCP server
-- **Bitcoin/RGB**: Embedded RGB Lightning Node binary
-- **Nostr**: NDK (Nostr Development Kit)
-- **Maps**: BTC Map API integration
+- **KaleidoSwap** — maker-based atomic swaps (primary).
+- **Flashnet** — Spark AMM DEX pools.
+- **Boltz** — submarine swaps between Lightning and on-chain BTC / Liquid.
+
+---
+
+## The AI assistant (KaleidoMind)
+
+The assistant is a natural-language interface to the wallet — ask it to check balances,
+create invoices, send payments, swap assets, or find merchants, in chat or by voice.
+
+- **Private by default.** The LLM (QWEN3 ~600M) and Whisper speech-to-text run **on
+  device** through the [QVAC SDK](https://www.npmjs.com/package/@qvac/sdk). Conversations
+  and transcription don't leave your phone.
+- **One agent for chat and voice.** A single runner (`services/mindAgent.ts`) powers both
+  text chat and hands-free voice, built on the shared `@kaleidorg/mind` engine.
+- **Physical device required.** On-device inference is **not available on a simulator /
+  emulator** (the rest of the wallet works fine on one). First launch downloads the
+  models (~400 MB LLM + ~40 MB Whisper).
+- **Delegate to desktop.** To use the assistant on a simulator — or to offload inference
+  — pair the app to a desktop **KaleidoMind provider** over P2P (see
+  [AI assistant & voice](#ai-assistant--voice-on-device-vs-delegated)).
+
+---
 
 ## Architecture
 
-### Node Options
-- **Local Mode**: RGB Lightning Node runs as embedded binary in the app
-- **Cloud Mode**: Connect to remote Thunderstack nodes for demo/production
+`index.ts` (polyfills) → `App.tsx` (Redux + PersistGate + Theme + ErrorBoundary) →
+`navigation/` (pre-auth setup flow ↔ main tabs + modals).
 
-### Security
-- Hardware security module integration
-- Multi-layer encryption (SQLCipher + AES)
-- Secure key derivation and storage
-- Background app protection
+- **State** — Redux Toolkit + Redux Persist (`store/`).
+- **Service layer** (`services/`) keeps screens free of direct SDK calls. At its center is
+  **ProtocolManager** (`services/protocols/`), which routes every operation to the active
+  protocol adapter (Spark, Arkade, RGB/RLN, Liquid, Flashnet). Alongside it: the
+  KaleidoMind agent (`mindAgent.ts` + `*Tools.ts`), on-device AI lifecycle
+  (`QVACService.ts`), Nostr + NWC, and biometric auth + encrypted SQLite.
+- **Theming** — design tokens in `theme/`, shared UI primitives in `components/`.
+
+> A legacy single-node path (`RGBApiService.ts`, `WalletManager.ts`) is **deprecated**,
+> superseded by ProtocolManager.
+
+---
+
+## Tech stack
+
+- **App** — React Native 0.81 + Expo SDK 54 (New Architecture), TypeScript
+- **State** — Redux Toolkit, Redux Persist
+- **Storage** — `expo-sqlite` with SQLCipher; `expo-secure-store` for keys
+- **AI / voice** — `@qvac/sdk` (on-device LLM + Whisper), `@kaleidorg/mind`
+- **Wallet engine** — `@kaleidorg/wallet-engine` + protocol SDKs (Spark, Arkade, RGB, Liquid, Flashnet)
+- **Nostr** — `@nostr-dev-kit/ndk`, `nostr-tools`
+- **Maps** — `react-native-maps` + BTC Map API
+
+---
 
 ## Quick Start
 
@@ -82,7 +115,9 @@ cd Rate
 pnpm install        # also runs setup:native → fetches the lwk-rn native artifacts
 ```
 
-`pnpm install` resolves the WDK protocol stack (Spark, RLN/RGB, Liquid, Arkade) — several of these are local `file:` siblings (`../wallet-engine`, `../wdk-wallet-*`, `../arkade-wdk`), so keep those checked out next to this repo.
+`pnpm install` resolves the multi-protocol stack (Spark, RLN/RGB, Liquid, Arkade). Several
+are local `file:` siblings (`../wallet-engine`, `../wdk-wallet-*`, `../arkade-wdk`), so keep
+those checked out next to this repo.
 
 > ⚠️ **Do not symlink `node_modules`** (e.g. `ln -s` into another checkout). A self-referencing link causes `ELOOP: too many symbolic links`. If you hit it: `rm node_modules && pnpm install`.
 
@@ -162,109 +197,80 @@ Chat, transcription, and speech synthesis are then served over P2P by the deskto
 so they work even on a simulator. Toggle delegation off to fall back to on-device
 inference (physical device only).
 
-### Demo Mode
+### Managing the QVAC install (dev)
 
-The app comes pre-configured to work with Thunderstack demo nodes - no additional setup required for testing.
+The on-device AI ships as a `bare` worker bundle plus natively-linked addons. The JS
+worker bundle and the native addons must stay **in lockstep** — a stale bundle can request
+an addon version that isn't in the native app and crash with `ADDON_NOT_FOUND`.
+`pnpm install` keeps them aligned via `postinstall`, but when you change QVAC-related deps
+or hit addon errors, re-sync manually:
+
+```bash
+pnpm run sync-qvac-bundle   # regenerate the QVAC worker bundle + relink native addons
+```
+
+Notes:
+- `qvac.config.json` lists the enabled QVAC plugins (LLM completion, Whisper
+  transcription, TTS) — edit it to add/remove on-device capabilities, then re-run
+  `sync-qvac-bundle`.
+- After changing native addons you must **rebuild** the app (`npx expo run:ios/android`);
+  a Metro reload alone won't pick them up.
+- Models are **not** bundled — they download on first launch on a physical device
+  (~400 MB LLM + ~40 MB Whisper). Delegate to a desktop provider to skip the download.
+- Agent skills are bundled separately: `pnpm run bundle-skills` regenerates
+  `skills.bundle.json` from `skills/`.
+
+---
 
 ## Usage
 
-### First Time Setup
+### First-time setup
 
-1. **Create Wallet**: Generate new wallet or restore from backup
-2. **Secure Wallet**: Set password and enable biometric authentication
-3. **Backup Phrase**: Securely store your 12-word recovery phrase
-4. **Configure Node**: Choose local or cloud node connection
+1. **Create or restore** a wallet (12-word BIP39 recovery phrase).
+2. **Secure it** — set a password and enable biometric unlock.
+3. **Back up** your recovery phrase offline.
+4. **Connect** — the app configures the protocol adapters for your selected network.
 
-### Basic Operations
+### Everyday operations
 
-#### Send Bitcoin/RGB Assets
-```
-1. Tap "Send" on dashboard
-2. Select asset type (Bitcoin/RGB)
-3. Enter amount and recipient
-4. Confirm transaction
-```
+- **Send / Receive** — across Bitcoin, Lightning, RGB, Liquid, Spark, and Arkade; scan
+  Bitcoin addresses, Lightning invoices, RGB invoices, and LNURL via the QR scanner.
+- **Swap** — quote and execute atomic swaps via the KaleidoSwap maker network (and
+  Flashnet AMM where available).
+- **Ask the assistant** — "send 50,000 sats to John", "create an invoice for $25", "swap
+  10 USDT to BTC", or "find coffee shops that accept Bitcoin" — by text or voice.
+- **Social** — Zap Nostr contacts, pay a Lightning Address, or connect an external app
+  with NWC.
 
-#### AI Commands
-```
-Voice: "Send 50,000 sats to John"
-Text: "Create an invoice for $25"
-Location: "Find coffee shops that accept Bitcoin"
-```
+---
 
-#### Social Payments
-```
-1. Go to Contacts (Nostr)
-2. Select friend
-3. Tap "Zap" for Lightning payment
-4. Enter amount and send
-```
+## Testing
 
-### Asset Management
-
-- **View Balances**: Dashboard shows all Bitcoin and RGB assets
-- **Transaction History**: Complete history with transaction details
-- **Asset Details**: Detailed information for each RGB asset
-- **Atomic Swaps**: Exchange assets through integrated DEX
-
-## API Integration
-
-### AI Service
-The wallet integrates with OpenAI GPT through a custom MCP (Model Context Protocol) server that provides secure access to wallet functions.
-
-### Nostr Integration
-Uses NDK for Nostr protocol integration, enabling social features and wallet connect functionality.
-
-### BTC Map API
-Integrates with BTC Map to discover local Bitcoin-accepting merchants and enable location-based payments.
-
-## Security Considerations
-
-### Key Management
-- Private keys never leave the device
-- Hardware security module integration
-- Secure enclave storage on supported devices
-
-### Data Protection
-- SQLCipher database encryption
-- AES encryption for sensitive data
-- TLS/SSL for network communications
-
-### Authentication
-- Biometric authentication (Face ID, Touch ID, Fingerprint)
-- PIN protection with attempt limiting
-- Session management with automatic locks
-
-## Development
-
-### Project Structure
-```
-rate/
-├── screens/          # React Native screens
-├── services/         # Business logic and API integrations
-├── store/           # Redux state management
-├── components/      # Reusable UI components
-├── navigation/      # Navigation configuration
-├── utils/          # Helper functions
-├── types/          # TypeScript definitions
-└── assets/         # Static assets and RGB node binary
-```
-
-### Building
-
-This is a **prebuilt** Expo project (it has `ios/` and `android/` directories), so use `expo run:*`, not `expo start --ios/--android`.
-
-#### Development
 ```bash
-# First build (compiles native code) — see "Run on iOS" / "Run on Android" above:
-npx expo run:ios          # iOS simulator/device
-npx expo run:android      # Android emulator/device
-
-# Subsequent JS-only changes just need Metro:
-npx expo start --dev-client
+npm test                # run all tests
+npm run test:watch      # watch mode
+npm run test:coverage   # coverage report
+npx jest path/to/file.test.ts   # single file
 ```
 
-#### Production (EAS)
+Coverage thresholds (enforced by `jest.config.js`): 70% statements/lines/functions, 60% branches.
+
+---
+
+## Building
+
+This is a **prebuilt** Expo project (it has `ios/` and `android/` directories), so use
+`expo run:*`, not `expo start --ios/--android`.
+
+### Development
+
+```bash
+npx expo run:ios          # iOS simulator/device (first build compiles native code)
+npx expo run:android      # Android emulator/device
+npx expo start --dev-client   # JS-only changes after a native build is installed
+```
+
+### Production (EAS)
 
 Build profiles live in `eas.json` (`development`, `preview`, `production`):
 
@@ -274,7 +280,28 @@ eas build --profile preview     --platform android  # internal test build
 eas build --profile production   --platform ios      # store build (auto-increments version)
 ```
 
-### Troubleshooting
+---
+
+## Project structure
+
+```
+rate/
+├── screens/        # React Native screens
+├── services/       # Business logic, protocol adapters, AI agent, integrations
+├── store/          # Redux slices, hooks, selectors
+├── components/     # Reusable UI primitives
+├── navigation/     # Navigation configuration
+├── theme/          # Design tokens (dark)
+├── hooks/          # React hooks (e.g. useProtocol)
+├── utils/          # Helpers (account routing, swap model, …)
+├── skills/         # KaleidoMind agent skills
+├── types/          # TypeScript definitions
+└── assets/         # Static assets
+```
+
+---
+
+## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -283,35 +310,54 @@ eas build --profile production   --platform ios      # store build (auto-increme
 | iOS build: missing `LwkRnFramework.xcframework` | `pnpm run setup:native` (re-fetches lwk-rn artifacts). |
 | `pod install`: `uniffi-bindgen-react-native` version conflict | Keep it pinned to `0.28.3-3` (lwk-rn's podspec requires that exact version). |
 | `npx expo` prompts to install a different Expo version | `node_modules` is broken — reinstall so the local `expo` is used. |
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Documentation**: See the [Quick Start](#quick-start) above for setup and troubleshooting
-- **Issues**: Report bugs via GitHub Issues
-
-## Roadmap
-
-- [x] Core wallet functionality
-- [x] AI assistant integration
-- [x] Nostr social features
-- [x] BTC Map integration
-- [ ] Enhanced AI capabilities
-- [ ] Plugin architecture
-- [ ] Multi-language support
-- [ ] Hardware wallet integration
+| AI assistant unavailable | On-device inference needs a **physical device**, or pair a desktop KaleidoMind provider. |
 
 ---
 
-*KaleidoSwap Wallet: Making Bitcoin and RGB assets accessible through conversational AI and social integration.*
+## Roadmap
+
+The next chapters of KaleidoSwap, grouped by horizon. Items move up as they land.
+
+### Now — in progress
+
+- **Agentic-first wallet** — promote the KaleidoMind agent from a tab to the *primary*
+  interface: agent-driven send / receive / swap, multi-step task execution, proactive
+  suggestions, and persistent on-device memory.
+- **White Noise chats by default** — adopt [White Noise](https://github.com/parres-hq/whitenoise)
+  (MLS-over-Nostr) as the default end-to-end-encrypted messaging layer for 1:1 and group
+  chat, with payments embedded directly in conversation.
+- **Lite vs Advanced modes** — a real mode switch: **Lite** hides protocol plumbing (one
+  balance; send / receive / swap / chat), **Advanced** exposes per-protocol accounts,
+  channels / LSP, RGB internals, and node settings.
+
+### Next
+
+- **Nostr profile onboarding & key management** — first-run Nostr identity setup (profile,
+  relays, NIP-05), clean separation of the wallet seed from the Nostr identity key,
+  import / export of the Nostr key, and per-app NWC key scoping.
+- **Light mode** — finish the theming migration (move screens from the static dark `theme`
+  onto `useAppTheme()` so the Light / System toggle becomes real).
+- **Background payments & notifications** — reliable incoming-payment and swap-status push
+  via `expo-background-task` + `expo-notifications`.
+
+### Later
+
+- **Encrypted cloud backup & recovery** — beyond the 12 words: encrypted backup of
+  contacts, Nostr identity, and app settings.
+- **Hardware-signer / external-key support** — sign with an external key device.
+- **Multi-language (i18n)** — localization for a broader audience.
+- **Per-protocol UX maturity** — Liquid asset issuance, Spark token discovery, and Arkade
+  onboarding surfaced consistently across the wallet.
+
+---
+
+## Contributing
+
+1. Fork the repository and create a feature branch.
+2. Make your changes and add tests where applicable.
+3. Ensure `npm test` passes.
+4. Submit a pull request.
+
+## License
+
+MIT License — see [LICENSE](LICENSE).
