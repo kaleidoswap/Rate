@@ -17,29 +17,33 @@ import { feedback } from '../utils/feedback';
 /** A single selectable action on the orbit. */
 export interface OrbitAction {
   key: string;
-  /** Short name shown in the hover tooltip while dragging. */
+  /** Short name shown in the hover tooltip while sliding. */
   label: string;
-  /** Accent color — used for the petal fill (when selected), border and glow. */
+  /** Accent color — used for the petal fill, border and glow. */
   color: string;
-  /** Icon node, rendered white on the petal. */
+  /** Icon node, rendered on the petal. */
   renderIcon: () => React.ReactNode;
-  /** Fired when the finger is released over this petal. */
+  /** Fired when this petal is chosen. */
   onSelect: () => void;
 }
 
 interface OrbitFABProps {
-  /** Icon for the resting center button (e.g. a "+"). */
+  /** Icon for the resting center button (e.g. the brand mark). */
   renderCenterIcon: () => React.ReactNode;
   /** Petals, laid out across the fan in array order. Keep to ~2–5. */
   actions: OrbitAction[];
   /**
    * Arc the petals fan across, in degrees (up = 90, right = 0, left = 180).
    * Defaults to a symmetric 150°→30°. Pass a right-leaning range to cluster the
-   * petals under the right thumb — e.g. arcStart={70} arcEnd={20}. Action[0]
+   * petals under the right thumb — e.g. arcStart={82} arcEnd={14}. actions[0]
    * sits at `arcStart`, the last action at `arcEnd`.
    */
   arcStart?: number;
   arcEnd?: number;
+  /** Action key fired on a DOUBLE-TAP of the center button (shortcut). */
+  doubleTapKey?: string;
+  /** Action key fired on a PRESS-AND-HOLD of the center button (shortcut). */
+  holdKey?: string;
 }
 
 const FAB = 60;
@@ -49,24 +53,42 @@ const DEAD_ZONE = 36;         // finger this close to center → no selection (c
 const SELECT_SLOP = 46;       // max angular distance (deg) from a petal to capture it
 const SPRING = { damping: 14, stiffness: 180, mass: 0.6 } as const;
 
+// Gesture disambiguation thresholds. The key invariant the design calls for:
+// a press held STILL fires the hold action (mic), but a press that SLIDES must
+// open the menu and select — never the hold action. We get that for free from
+// the gesture engine: LongPress fails the moment the finger travels more than
+// HOLD_MAX_MOVE, and Pan only begins once it travels SLIDE_MIN — so any real
+// slide cancels the hold before it can fire.
+const TAP_MAX_MS = 260;       // a press longer than this is no longer a tap…
+const HOLD_MS = 380;          // …and a still press this long → the hold action
+const HOLD_MAX_MOVE = 14;     // moving more than this aborts the hold (→ slide)
+const SLIDE_MIN = 18;         // finger must travel this far to start a slide-select
+
 /**
- * Expandable radial "orbit" FAB.
+ * Expandable radial "orbit" FAB with a four-way gesture vocabulary:
  *
- * - Tap the "+" → the action petals fan out and STAY pinned open.
- * - From there, flick toward a petal and release to fire it, or tap the "+"
- *   again to dismiss. Press + drag + release in one motion also works.
+ *   • double-tap         → the `doubleTapKey` action (e.g. Scan)
+ *   • press & hold still  → the `holdKey` action (e.g. Voice/mic)
+ *   • single tap          → fan the menu out and PIN it open (tap again to close)
+ *   • press & slide       → fan out and select by sliding toward a petal, release
+ *                           to fire — all in one motion, no lift required
  *
- * The whole interaction lives inside one Pan gesture, so once the touch begins,
- * gesture-handler tracks the finger across the entire screen even though the
- * petals render outside the tab-bar bounds (no per-petal hit-boxes needed —
- * which is what keeps selection reliable on Android).
+ * Selection rides a single Pan whose touch is tracked screen-wide, so the petals
+ * need no per-petal hit-boxes (which keeps them reliable on Android even though
+ * they render outside the tab-bar bounds).
  */
-export const OrbitFAB: React.FC<OrbitFABProps> = ({ renderCenterIcon, actions, arcStart = 150, arcEnd = 30 }) => {
+export const OrbitFAB: React.FC<OrbitFABProps> = ({
+  renderCenterIcon,
+  actions,
+  arcStart = 150,
+  arcEnd = 30,
+  doubleTapKey,
+  holdKey,
+}) => {
   const progress = useSharedValue(0); // 0 = closed, 1 = fully fanned out
   const sel = useSharedValue(-1);     // currently highlighted petal index
-  const latched = useSharedValue(0);     // 1 = pinned open after a tap
-  const wasLatched = useSharedValue(0);  // latch state captured at gesture start
   const [mounted, setMounted] = useState(false); // overlay mounted only while active
+  const [pinned, setPinned] = useState(false);    // menu held open after a tap
   const [hovered, setHovered] = useState(-1);     // mirror of sel for the tooltip
 
   // Fan from arcStart → arcEnd; a single action sits at the arc midpoint.
@@ -101,40 +123,86 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({ renderCenterIcon, actions, a
     return bestDiff <= SELECT_SLOP ? best : -1;
   };
 
+  // --- JS-thread helpers (called from runOnJS or from runOnJS(true) gestures) ---
   const onHover = (idx: number) => {
     setHovered(idx);
     if (idx >= 0) feedback.select();
   };
 
-  const fire = (idx: number) => {
+  const fireIndex = (idx: number) => {
     if (idx >= 0 && idx < actions.length) {
       feedback.success();
       actions[idx].onSelect();
     }
   };
 
-  const close = () => {
-    'worklet';
-    cancelAnimation(progress);
-    progress.value = withTiming(0, { duration: 160, easing: Easing.in(Easing.quad) }, () => {
-      runOnJS(setMounted)(false);
-    });
-    sel.value = -1;
-    runOnJS(setHovered)(-1);
+  const fireKey = (key?: string) => {
+    const a = key ? actions.find((x) => x.key === key) : undefined;
+    if (a) {
+      feedback.success();
+      a.onSelect();
+    }
   };
 
+  const closeMenu = () => {
+    progress.value = withTiming(0, { duration: 160, easing: Easing.in(Easing.quad) }, (finished) => {
+      'worklet';
+      if (finished) runOnJS(setMounted)(false);
+    });
+    sel.value = -1;
+    setHovered(-1);
+    setPinned(false);
+  };
+
+  const pinOpen = () => {
+    feedback.tap();
+    setMounted(true);
+    setPinned(true);
+    cancelAnimation(progress);
+    progress.value = withSpring(1, SPRING);
+  };
+
+  // --- Gestures ---------------------------------------------------------------
+  // Shortcut: double-tap → doubleTapKey action.
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .maxDuration(TAP_MAX_MS)
+    .runOnJS(true)
+    .onStart(() => {
+      closeMenu();
+      fireKey(doubleTapKey);
+    });
+
+  // Single tap → toggle the pinned menu.
+  const singleTap = Gesture.Tap()
+    .numberOfTaps(1)
+    .maxDuration(TAP_MAX_MS)
+    .runOnJS(true)
+    .onStart(() => {
+      if (pinned) closeMenu();
+      else pinOpen();
+    });
+
+  // Press & hold STILL → holdKey action. maxDistance aborts the hold the instant
+  // the finger slides, so a hold-into-slide never fires this.
+  const longPress = Gesture.LongPress()
+    .minDuration(HOLD_MS)
+    .maxDistance(HOLD_MAX_MOVE)
+    .runOnJS(true)
+    .onStart(() => {
+      closeMenu();
+      fireKey(holdKey);
+    });
+
+  // Press & slide → fan out and select by direction; release fires the petal.
   const pan = Gesture.Pan()
-    .minDistance(0)
+    .minDistance(SLIDE_MIN)
     .maxPointers(1)
     .shouldCancelWhenOutside(false)
-    .onBegin(() => {
-      wasLatched.value = latched.value; // was the menu already pinned open?
-      sel.value = -1;
-      runOnJS(setMounted)(true);
-      runOnJS(feedback.tap)();
-      // Any press opens the orbit immediately (no QR-on-tap shortcut anymore).
+    .onStart(() => {
       cancelAnimation(progress);
       progress.value = withSpring(1, SPRING);
+      runOnJS(setMounted)(true);
     })
     .onUpdate((e) => {
       if (progress.value > 0.15) {
@@ -147,22 +215,16 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({ renderCenterIcon, actions, a
     })
     .onEnd(() => {
       const chosen = sel.value;
-      if (chosen >= 0) {
-        // Flicked toward a petal → fire it and close.
-        runOnJS(fire)(chosen);
-        latched.value = 0;
-      } else if (wasLatched.value) {
-        // Tapped the "+" again while pinned open → dismiss.
-        latched.value = 0;
-      } else {
-        // Tap from closed → pin the menu open so the user can choose.
-        latched.value = 1;
-      }
+      if (chosen >= 0) runOnJS(fireIndex)(chosen);
     })
     .onFinalize(() => {
-      // Keep the petals on screen while pinned open; otherwise collapse.
-      if (latched.value === 0) close();
+      // A slide always resolves the menu (fired above, or dismissed here).
+      runOnJS(closeMenu)();
     });
+
+  // double-tap wins over single-tap; hold and slide race the taps on their own
+  // activation conditions (time held still vs. distance travelled).
+  const gesture = Gesture.Race(Gesture.Exclusive(doubleTap, singleTap), longPress, pan);
 
   const fabStyle = useAnimatedStyle(() => ({
     transform: [{ scale: 1 - 0.06 * progress.value }],
@@ -182,14 +244,7 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({ renderCenterIcon, actions, a
         <>
           <Animated.View style={[styles.scrim, scrimStyle]} pointerEvents="none" />
           {actions.map((a, i) => (
-            <Petal
-              key={a.key}
-              index={i}
-              pos={positions[i]}
-              color={a.color}
-              progress={progress}
-              sel={sel}
-            >
+            <Petal key={a.key} index={i} pos={positions[i]} color={a.color} progress={progress} sel={sel}>
               {a.renderIcon()}
             </Petal>
           ))}
@@ -203,7 +258,7 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({ renderCenterIcon, actions, a
         </>
       )}
 
-      <GestureDetector gesture={pan}>
+      <GestureDetector gesture={gesture}>
         <Animated.View style={[styles.fab, fabStyle]} accessibilityRole="button" accessibilityLabel="Quick actions">
           {renderCenterIcon()}
         </Animated.View>
@@ -228,8 +283,6 @@ const Petal: React.FC<PetalProps> = ({ index, pos, color, progress, sel, childre
     const scale = (0.5 + 0.5 * p) * (isSel ? 1.2 : 1);
     return {
       opacity: Math.min(1, p * 1.5),
-      // Highlighted petal gets a bright white ring + extra lift; the accent fill
-      // and colored glow carry each petal's identity.
       borderColor: isSel ? '#FFFFFF' : 'rgba(255,255,255,0.16)',
       borderWidth: isSel ? 2.5 : 1.5,
       shadowOpacity: isSel ? 0.85 : 0.5,
@@ -257,7 +310,7 @@ const styles = StyleSheet.create({
     overflow: 'visible',
   },
   // Big, centered dim layer that fades in behind the petals. pointerEvents none —
-  // the active Pan gesture owns the touch stream, so the scrim never intercepts.
+  // the active gesture owns the touch stream, so the scrim never intercepts.
   scrim: {
     position: 'absolute',
     width: 1600,

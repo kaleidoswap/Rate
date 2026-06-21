@@ -115,10 +115,18 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // Split the tabs so a gap opens in the middle for the floating mic button.
   const mid = Math.ceil(routes.length / 2);
 
-  // The "+" fans out two quick actions, clustered toward the right thumb
-  // (see arcStart/arcEnd on OrbitFAB below). Order = arcStart → arcEnd, so
-  // Voice sits lowest/right (easiest reach), Scan above it.
+  // Quick actions on the center FAB, clustered toward the right thumb (see the
+  // arc on OrbitFAB below). Order = arcStart → arcEnd, so Voice sits lowest/right
+  // (easiest reach). Scan also has a double-tap shortcut and Voice a hold
+  // shortcut (doubleTapKey / holdKey below).
   const orbitActions: OrbitAction[] = [
+    {
+      key: 'swap',
+      label: 'Swap',
+      color: theme.colors.brand.violet,
+      renderIcon: () => <Ionicons name="swap-horizontal" size={24} color="#FFFFFF" />,
+      onSelect: () => navigation.navigate('Swap'),
+    },
     {
       key: 'scan',
       label: 'Scan',
@@ -191,9 +199,12 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         <OrbitFAB
           renderCenterIcon={() => <BrandMark size={34} />}
           actions={orbitActions}
-          // Right-leaning arc so both petals sit under the right thumb.
-          arcStart={70}
-          arcEnd={20}
+          // Right-leaning arc so all three petals sit under the right thumb.
+          arcStart={82}
+          arcEnd={14}
+          // Shortcuts: double-tap → Scan, press-and-hold → Voice/mic.
+          doubleTapKey="scan"
+          holdKey="voice"
         />
       </View>
     </View>
