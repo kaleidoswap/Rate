@@ -112,8 +112,12 @@ const Tab = createBottomTabNavigator();
 function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
   const routes = state.routes;
-  // Split the tabs so a gap opens in the middle for the floating mic button.
+  // Split the tabs so a gap opens in the middle for the center FAB.
   const mid = Math.ceil(routes.length / 2);
+  // The floating "island" (scroll-under, rounded pill) is reserved for the
+  // wallet. Every other tab uses a fixed, in-flow bar that reserves layout
+  // space so the scene's interactive content sits above it.
+  const isWallet = routes[state.index]?.name === 'DashboardTab';
 
   // Quick actions on the center FAB, clustered toward the right thumb (see the
   // arc on OrbitFAB below). Order = arcStart → arcEnd, so Voice sits lowest/right
@@ -174,6 +178,38 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     );
   };
 
+  const centerFab = (
+    <OrbitFAB
+      renderCenterIcon={() => <BrandMark size={40} />}
+      actions={orbitActions}
+      // Even fan across the top now that there are three actions.
+      arcStart={150}
+      arcEnd={30}
+      // Shortcuts: double-tap → Scan, press-and-hold → Voice/mic.
+      doubleTapKey="scan"
+      holdKey="voice"
+    />
+  );
+
+  // Non-wallet tabs (Contacts / Map / Mind): a fixed, in-flow bar. Because the
+  // root is NOT absolute, the navigator reserves its height and pushes scene
+  // content above it (no overlap). The FAB stays centered within the bar bounds
+  // so it remains tappable on Android.
+  if (!isWallet) {
+    return (
+      <View style={[fixedStyles.outer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <View style={fixedStyles.row}>
+          {routes.slice(0, mid).map((r, i) => renderItem(r, i))}
+          <View style={islandStyles.centerGap} />
+          {routes.slice(mid).map((r, i) => renderItem(r, i + mid))}
+        </View>
+        <View pointerEvents="box-none" style={fixedStyles.micWrap}>
+          {centerFab}
+        </View>
+      </View>
+    );
+  }
+
   return (
     // box-none: the bar floats over the scene (absolute), so let touches pass
     // through everywhere except the actual island/mic/tabs below.
@@ -193,20 +229,9 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         <View style={islandStyles.centerGap} />
         {routes.slice(mid).map((r, i) => renderItem(r, i + mid))}
       </View>
-      {/* Center FAB — QR by default; press & hold to fan out the orbit of quick
-          actions. Centered over the gap, overflowing the island top. */}
+      {/* Center FAB — overflows the island top. Press for the quick-actions orbit. */}
       <View pointerEvents="box-none" style={islandStyles.micWrap}>
-        <OrbitFAB
-          renderCenterIcon={() => <BrandMark size={40} />}
-          actions={orbitActions}
-          // Even fan across the top now that there are three actions
-          // (upper-left → up → upper-right).
-          arcStart={150}
-          arcEnd={30}
-          // Shortcuts: double-tap → Scan, press-and-hold → Voice/mic.
-          doubleTapKey="scan"
-          holdKey="voice"
-        />
+        {centerFab}
       </View>
     </View>
   );
@@ -277,12 +302,43 @@ const islandStyles = StyleSheet.create({
   micWrap: {
     position: 'absolute',
     // FAB top sits at the outer's top edge, giving ~22px of overflow above the
-    // island (the rest of the 60px FAB overlaps/sits within it).
-    top: 27,
+    // island (the rest of the FAB overlaps/sits within it).
+    top: 22,
     left: 0,
     right: 0,
     alignItems: 'center',
     // Let the orbit petals + scrim render beyond the bar's bounds.
+    overflow: 'visible',
+  },
+});
+
+// Fixed (non-island) bar used on every tab except the wallet. In-flow (not
+// absolute) so React Navigation reserves its height and the scene's content
+// sits above it instead of scrolling underneath.
+const fixedStyles = StyleSheet.create({
+  outer: {
+    backgroundColor: theme.colors.surface.primary,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: theme.colors.border.light,
+    paddingTop: 8,
+    paddingHorizontal: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    minHeight: 60,
+  },
+  micWrap: {
+    position: 'absolute',
+    // Center the FAB within the tab row (top 8 = paddingTop, height = row), so it
+    // stays inside the bar's bounds and remains tappable on Android.
+    top: 8,
+    height: 60,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
     overflow: 'visible',
   },
 });
