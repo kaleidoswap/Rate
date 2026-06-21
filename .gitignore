@@ -39,3 +39,6 @@ yarn-error.*
 
 # Local iOS build artifacts/logs
 build/
+
+# JetBrains IDE
+.idea/
