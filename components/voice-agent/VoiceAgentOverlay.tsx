@@ -233,18 +233,18 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     void qvac.service?.initializeWhisper?.().catch(() => {});
   }, []);
 
-  // Press-and-hold entry: begin listening once the model is ready, so the hold
-  // gesture flows straight into a spoken request. Wait for the STT model too —
-  // starting the mic before Whisper is ready captured a silent first clip.
+  // Press-and-hold entry: begin listening once the chat model is ready, so the
+  // hold gesture flows straight into a spoken request. Whisper is pre-warmed
+  // above and loads on-demand at transcription time if it isn't ready yet.
   const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (autoListen && qvac.isReady && qvac.isWhisperReady && phase === 'idle' && !autoStartedRef.current) {
+    if (autoListen && qvac.isReady && phase === 'idle' && !autoStartedRef.current) {
       autoStartedRef.current = true;
       void stopSpeak();
       setError(null);
       voiceRef.current?.startListening();
     }
-  }, [autoListen, qvac.isReady, qvac.isWhisperReady, phase]);
+  }, [autoListen, qvac.isReady, phase]);
 
   const appendBubble = (role: Bubble['role'], text: string) => {
     const id = nextId();
@@ -349,8 +349,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       qvac.initialize();
       return;
     }
-    // Need both the chat model and speech-to-text before we can capture a turn.
-    if (!qvac.isReady || !qvac.isWhisperReady) return;
+    if (!qvac.isReady) return;
     if (phase === 'listening') {
       voiceRef.current?.stopListening();
     } else if (phase === 'idle') {
@@ -498,19 +497,18 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   }));
 
   const aiFailed = qvac.llmStatus === 'error';
-  // Voice needs BOTH the chat model AND the speech-to-text model. Treat either
-  // still loading as "not ready" so the orb shows a spinner (not a tappable mic
-  // that would capture a silent clip) until speech recognition is actually up.
-  const voiceReady = qvac.isReady && qvac.isWhisperReady;
-  const modelLoading = !aiFailed && !voiceReady;
+  // Ready once the chat model is up. Whisper (STT) is pre-warmed in the
+  // background and also loads on-demand at transcription time, so we DON'T hard-
+  // block the mic on it — doing so left the UI stuck on "preparing speech
+  // recognition" whenever Whisper wasn't instantly ready.
+  const voiceReady = qvac.isReady;
+  const modelLoading = !aiFailed && !qvac.isReady;
   const statusText = aiFailed
     ? `On-device AI unavailable — ${qvac.error || 'the model could not be loaded'}`
     : !qvac.isReady
     ? qvac.isDownloading
       ? `Preparing the on-device AI… ${qvac.combinedProgress}%`
       : 'Starting the on-device AI…'
-    : !qvac.isWhisperReady
-    ? 'Preparing speech recognition…'
     : error
       ? error
       : phase === 'listening'
@@ -759,34 +757,50 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                 setConfirm(null);
               }}
             />
-            <View style={[styles.confirmCard, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
-              <View style={styles.confirmHandle} />
-              <View style={styles.confirmTitleRow}>
-                <Ionicons name="shield-checkmark" size={18} color={theme.colors.primary[500]} />
-                <Text style={styles.confirmTitle}>Confirm action</Text>
-              </View>
-              <Text style={styles.confirmBody}>{humanizeCall(confirm.call)}</Text>
-              <View style={styles.confirmActions}>
-                <Pressable
-                  style={[styles.confirmBtn, styles.confirmDecline]}
-                  onPress={() => {
-                    confirm.resolve({ approved: false, reason: 'declined' });
-                    setConfirm(null);
-                  }}
-                >
-                  <Text style={styles.confirmDeclineText}>Cancel</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.confirmBtn, styles.confirmApprove]}
-                  onPress={() => {
-                    confirm.resolve({ approved: true });
-                    setConfirm(null);
-                  }}
-                >
-                  <Text style={styles.confirmApproveText}>Approve</Text>
-                </Pressable>
-              </View>
-            </View>
+            {(() => {
+              const info = describeCall(confirm.call);
+              return (
+                <View style={[styles.confirmCard, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+                  <View style={styles.confirmHandle} />
+                  <View style={styles.confirmIconCircle}>
+                    <Ionicons name={info.icon} size={22} color={theme.colors.primary[500]} />
+                  </View>
+                  <Text style={styles.confirmTitle}>{info.title}</Text>
+                  {!!info.primary && <Text style={styles.confirmAmount}>{info.primary}</Text>}
+                  {info.rows.length > 0 && (
+                    <View style={styles.confirmRows}>
+                      {info.rows.map((r) => (
+                        <View key={r.label} style={styles.confirmRow}>
+                          <Text style={styles.confirmRowLabel}>{r.label}</Text>
+                          <Text style={styles.confirmRowValue} numberOfLines={1}>{r.value}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                  <Text style={styles.confirmNote}>Review the details — this can't be undone.</Text>
+                  <View style={styles.confirmActions}>
+                    <Pressable
+                      style={[styles.confirmBtn, styles.confirmDecline]}
+                      onPress={() => {
+                        confirm.resolve({ approved: false, reason: 'declined' });
+                        setConfirm(null);
+                      }}
+                    >
+                      <Text style={styles.confirmDeclineText}>Cancel</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.confirmBtn, styles.confirmApprove]}
+                      onPress={() => {
+                        confirm.resolve({ approved: true });
+                        setConfirm(null);
+                      }}
+                    >
+                      <Text style={styles.confirmApproveText}>{info.cta}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })()}
           </View>
         )}
       </View>
@@ -794,11 +808,43 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   );
 };
 
-function humanizeCall(call: { name: string; arguments: Record<string, unknown> }): string {
+interface CallInfo {
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  cta: string;
+  primary?: string;
+  rows: { label: string; value: string }[];
+}
+
+/** Turn a confirmation-gated tool call into a readable payment card. */
+function describeCall(call: { name: string; arguments: Record<string, unknown> }): CallInfo {
   const a = call.arguments || {};
-  if (call.name === 'pay_lightning_invoice') return `Pay a Lightning invoice${a.amount ? ` (${a.amount} sats)` : ''}?`;
-  if (call.name === 'pay_nostr_contact') return `Send ${a.amount ?? ''} sats to ${a.contact ?? 'a contact'}?`;
-  return `Run "${call.name}" with ${JSON.stringify(a)}?`;
+  const shorten = (s?: unknown) => {
+    const v = String(s ?? '').trim();
+    return v.length > 30 ? `${v.slice(0, 14)}…${v.slice(-10)}` : v;
+  };
+  const sats = (n?: unknown) =>
+    n != null && Number.isFinite(Number(n)) ? `${Number(n).toLocaleString()} sats` : undefined;
+
+  switch (call.name) {
+    case 'send_payment':
+      return { title: 'Confirm payment', icon: 'flash', cta: 'Confirm & send', primary: sats(a.amount_sats), rows: [{ label: 'To', value: shorten(a.to) }] };
+    case 'rln_pay_invoice':
+    case 'pay_lightning_invoice':
+      return { title: 'Pay Lightning invoice', icon: 'flash', cta: 'Pay', primary: sats(a.amount ?? a.amount_sats), rows: [{ label: 'Invoice', value: shorten(a.invoice) }] };
+    case 'pay_nostr_contact':
+      return { title: 'Confirm payment', icon: 'flash', cta: 'Confirm & send', primary: sats(a.amount), rows: [{ label: 'To', value: String(a.contact ?? 'a contact') }] };
+    case 'rln_send_asset':
+      return {
+        title: 'Send asset',
+        icon: 'diamond',
+        cta: 'Confirm & send',
+        primary: a.amount != null ? `${a.amount} ${String(a.asset ?? '').toUpperCase()}` : undefined,
+        rows: [{ label: 'To', value: shorten(a.to) }],
+      };
+    default:
+      return { title: 'Confirm action', icon: 'shield-checkmark', cta: 'Approve', rows: [{ label: call.name, value: shorten(JSON.stringify(a)) }] };
+  }
 }
 
 const styles = StyleSheet.create({
@@ -910,7 +956,35 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   confirmTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  confirmTitle: { color: theme.colors.text.primary, fontWeight: '700', fontSize: 16 },
+  confirmIconCircle: {
+    alignSelf: 'center',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: `${theme.colors.primary[500]}1A`,
+    marginBottom: 10,
+  },
+  confirmTitle: { color: theme.colors.text.primary, fontWeight: '700', fontSize: 16, textAlign: 'center' },
+  confirmAmount: { color: theme.colors.text.primary, fontWeight: '800', fontSize: 28, textAlign: 'center', marginTop: 6 },
+  confirmRows: {
+    marginTop: 14,
+    backgroundColor: theme.colors.surface.secondary,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+  },
+  confirmRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 10,
+  },
+  confirmRowLabel: { color: theme.colors.text.secondary, fontSize: 13 },
+  confirmRowValue: { color: theme.colors.text.primary, fontSize: 14, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
+  confirmNote: { color: theme.colors.text.tertiary, fontSize: 12, textAlign: 'center', marginTop: 12, marginBottom: 16 },
   confirmBody: { color: theme.colors.text.secondary, fontSize: 14, lineHeight: 20, marginBottom: 16 },
   confirmActions: { flexDirection: 'row', gap: 10 },
   confirmBtn: { flex: 1, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
