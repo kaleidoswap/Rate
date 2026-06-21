@@ -46,7 +46,7 @@ interface OrbitFABProps {
   holdKey?: string;
 }
 
-const FAB = 60;
+const FAB = 68;
 const PETAL = 52;
 const RADIUS = 96;            // center-to-petal distance
 const DEAD_ZONE = 36;         // finger this close to center → no selection (cancel region)
@@ -323,16 +323,16 @@ const styles = StyleSheet.create({
     width: FAB,
     height: FAB,
     borderRadius: FAB / 2,
-    // White fill so the multi-color K mark reads (the green FAB would swallow
-    // the mark's green facets); the green glow below keeps it on-brand.
+    // White fill so the multi-color K mark reads (a green fill would swallow
+    // the mark's green facets). Neutral drop shadow — no green glow.
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: theme.colors.primary[500],
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 10,
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
   },
   petal: {
     position: 'absolute',

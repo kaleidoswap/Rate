@@ -197,11 +197,12 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           actions. Centered over the gap, overflowing the island top. */}
       <View pointerEvents="box-none" style={islandStyles.micWrap}>
         <OrbitFAB
-          renderCenterIcon={() => <BrandMark size={34} />}
+          renderCenterIcon={() => <BrandMark size={40} />}
           actions={orbitActions}
-          // Right-leaning arc so all three petals sit under the right thumb.
-          arcStart={82}
-          arcEnd={14}
+          // Even fan across the top now that there are three actions
+          // (upper-left → up → upper-right).
+          arcStart={150}
+          arcEnd={30}
           // Shortcuts: double-tap → Scan, press-and-hold → Voice/mic.
           doubleTapKey="scan"
           holdKey="voice"
@@ -266,7 +267,7 @@ const islandStyles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.10)',
   },
   centerGap: {
-    width: 64,
+    width: 84,
   },
   label: {
     fontSize: 10,
