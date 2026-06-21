@@ -509,6 +509,18 @@ export default function DashboardScreen({ navigation }: Props) {
     };
   }, [protocolsReady, isScreenFocused, isNodeUnlocked, isConnecting]);
 
+  // A spend elsewhere (KaleidoMind voice/chat payment tools) emits this so the
+  // balance reflects it right away — plus a short follow-up once it settles —
+  // instead of waiting for the 30s poll. loadDashboardData self-guards on
+  // protocolsReady/isUpdating, so a stray emit is a no-op.
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('rate.refreshBalance', () => {
+      void loadDashboardData(false);
+      setTimeout(() => void loadDashboardData(false), 2500);
+    });
+    return () => sub.remove();
+  }, [protocolsReady]);
+
   // Update the useFocusEffect to handle screen focus
   useFocusEffect(
     useCallback(() => {

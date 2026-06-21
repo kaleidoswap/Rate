@@ -8,6 +8,7 @@
 // Spend tools stay confirmation-gated by the contract (requiresConfirmation),
 // so the Engine pauses for the UI confirm sheet before any send.
 
+import { DeviceEventEmitter } from 'react-native';
 import {
   InProcessToolSource,
   type InProcessTool,
@@ -236,14 +237,15 @@ const HANDLERS: Record<string, WalletHandler> = {
   },
 
   // ── Spend (confirmation-gated by the contract) ──
-  rln_pay_invoice: async ({ invoice }) => lightningAdapter().sendPayment({ invoice: String(invoice) }),
+  rln_pay_invoice: async ({ invoice }) =>
+    afterSpend(await lightningAdapter().sendPayment({ invoice: String(invoice) })),
   // RGB asset send. RGB transfers go to an RGB/Lightning invoice (which carries
   // the asset); a contact's plain Lightning address can't receive an asset, so
   // we guide the user to get their RGB invoice rather than silently mis-send.
   rln_send_asset: async ({ asset, amount, to }) => {
     const target = String(to ?? '').trim();
     if (/^(rgb:|ln(bc|tb|bcrt))/i.test(target)) {
-      return requireLayer('rln').sendPayment({ invoice: target });
+      return afterSpend(await requireLayer('rln').sendPayment({ invoice: target }));
     }
     throw new Error(`To send ${amount ?? ''} ${String(asset).toUpperCase()} to "${to}", ask them for an RGB invoice and paste it here.`);
   },
@@ -268,9 +270,16 @@ const HANDLERS: Record<string, WalletHandler> = {
       throw new Error("On-chain sends from the assistant aren't supported yet — use the Send screen.");
     }
     // Pay the BOLT11 invoice on the Lightning rail (Spark preferred, RLN fallback).
-    return lightningAdapter().sendPayment({ invoice: target, ...(sats ? { amountSats: sats } : {}) });
+    return afterSpend(await lightningAdapter().sendPayment({ invoice: target, ...(sats ? { amountSats: sats } : {}) }));
   },
 };
+
+/** After value leaves the wallet, nudge the dashboard to reload balances. */
+function afterSpend<T>(result: T): T {
+  // Optional-chained so it's a harmless no-op under the jest RN mock.
+  DeviceEventEmitter?.emit?.('rate.refreshBalance');
+  return result;
+}
 
 /**
  * Pay a BOLT11 invoice on the Lightning rail and return its preimage. Used by
