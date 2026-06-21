@@ -33,6 +33,7 @@ import { findPayable, stripPayable } from '../../utils/decodeInvoice';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
+import { getModelById } from '../../services/qvacModels';
 import { startHandsFreeVoice, type HandsFreeController } from '../../services/handsFreeVoice';
 import { selectMindConfig } from '../../store/slices/settingsSlice';
 
@@ -496,6 +497,13 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.8]) }],
   }));
 
+  // Which LLM is answering + where it runs, shown under the header title.
+  const modelSubtitle = (() => {
+    const delegating = qvac.config?.delegateEnabled && !!qvac.config?.providerPublicKey;
+    const label = getModelById(qvac.config?.modelId)?.label ?? 'On-device AI';
+    return `${label} · ${delegating ? 'via Desktop' : 'on this device'}`;
+  })();
+
   const aiFailed = qvac.llmStatus === 'error';
   // Ready once the chat model is up. Whisper (STT) is pre-warmed in the
   // background and also loads on-demand at transcription time, so we DON'T hard-
@@ -530,7 +538,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
               <MindAvatar size={28} />
-              <Text style={styles.headerTitle}>KaleidoMind</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.headerTitle}>KaleidoMind</Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>{modelSubtitle}</Text>
+              </View>
             </View>
             <View style={styles.headerActions}>
               {bubbles.length > 0 && (
@@ -867,8 +878,9 @@ const styles = StyleSheet.create({
   },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, marginRight: 8 },
   headerTitle: { fontSize: 18, fontWeight: '700', color: theme.colors.text.primary },
+  headerSubtitle: { fontSize: 12, color: theme.colors.text.tertiary, marginTop: 1 },
   closeBtn: {
     width: 34,
     height: 34,
