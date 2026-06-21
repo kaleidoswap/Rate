@@ -247,8 +247,8 @@ const islandStyles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     paddingHorizontal: 16,
-    // Just enough room above the island for the top third of the mic to overflow.
-    paddingTop: 22,
+    // Extra room above the island so the FAB can sit a touch higher and overflow.
+    paddingTop: 32,
   },
   // Fades from transparent (top) to the page background (bottom), beginning the
   // fade ABOVE the island so content reads as scrolling out behind the nav.
@@ -303,9 +303,9 @@ const islandStyles = StyleSheet.create({
   },
   micWrap: {
     position: 'absolute',
-    // FAB top sits at the outer's top edge, giving ~22px of overflow above the
-    // island (the rest of the FAB overlaps/sits within it).
-    top: 22,
+    // Raised: FAB top sits near the outer's top edge, giving more overflow above
+    // the island so the center button reads as lifted and clearly centered.
+    top: 12,
     left: 0,
     right: 0,
     alignItems: 'center',

@@ -361,16 +361,19 @@ const styles = StyleSheet.create({
     width: FAB,
     height: FAB,
     borderRadius: FAB / 2,
-    // White fill so the multi-color K mark reads (a green fill would swallow
-    // the mark's green facets). Neutral drop shadow — no green glow.
-    backgroundColor: '#FFFFFF',
+    // Dark-glass disc so the button reads as part of the dark UI (not a white
+    // chip). A violet rim + green glow nod to the brand without swallowing the
+    // multi-color K mark, whose bright violet/mint facets read on dark.
+    backgroundColor: 'rgba(18, 20, 30, 0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(111, 50, 255, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowColor: theme.colors.primary[500],
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.7,
+    shadowRadius: 16,
+    elevation: 12,
   },
   petal: {
     position: 'absolute',
