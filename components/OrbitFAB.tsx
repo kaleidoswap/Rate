@@ -307,11 +307,14 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
             ) : (
               shortcutHints.length > 0 && (
                 <View style={styles.legend}>
-                  {shortcutHints.map((h) => (
-                    <Text key={h.gesture} style={styles.legendText}>
-                      <Text style={styles.legendGesture}>{h.gesture}</Text>
-                      {`  ${h.label}`}
-                    </Text>
+                  {shortcutHints.map((h, i) => (
+                    <React.Fragment key={h.gesture}>
+                      {i > 0 && <Text style={styles.legendDivider}>·</Text>}
+                      <Text style={styles.legendText}>
+                        <Text style={styles.legendGesture}>{h.gesture}</Text>
+                        {` ${h.label}`}
+                      </Text>
+                    </React.Fragment>
                   ))}
                 </View>
               )
@@ -409,9 +412,9 @@ const styles = StyleSheet.create({
   },
   tooltipWrap: {
     position: 'absolute',
-    top: -(RADIUS + 58),
-    left: -120,
-    right: -120,
+    top: -(RADIUS + 42),
+    left: -140,
+    right: -140,
     alignItems: 'center',
   },
   tooltip: {
@@ -428,12 +431,13 @@ const styles = StyleSheet.create({
     fontWeight: theme.typography.fontWeight.semibold,
   },
   legend: {
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 14,
-    gap: 3,
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(18,20,30,0.88)',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(18,20,30,0.9)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
@@ -444,6 +448,10 @@ const styles = StyleSheet.create({
   legendGesture: {
     color: theme.colors.text.primary,
     fontWeight: theme.typography.fontWeight.semibold,
+  },
+  legendDivider: {
+    color: theme.colors.text.tertiary,
+    fontSize: 11,
   },
 });
 

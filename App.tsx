@@ -135,7 +135,7 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
       key: 'scan',
       label: 'Scan',
       color: theme.colors.info[500],
-      renderIcon: () => <Ionicons name="qr-code" size={24} color="#FFFFFF" />,
+      renderIcon: () => <Ionicons name="scan" size={24} color="#FFFFFF" />,
       onSelect: () => navigation.navigate('QRScanner'),
     },
     {
@@ -196,8 +196,10 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // content above it (no overlap). The FAB stays centered within the bar bounds
   // so it remains tappable on Android.
   if (!isWallet) {
+    // Trim the safe-area gap: the icons otherwise leave a tall block of solid
+    // bar below them. Keep just enough clearance above the home indicator.
     return (
-      <View style={[fixedStyles.outer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+      <View style={[fixedStyles.outer, { paddingBottom: Math.max(insets.bottom - 12, 8) }]}>
         <View style={fixedStyles.row}>
           {routes.slice(0, mid).map((r, i) => renderItem(r, i))}
           <View style={islandStyles.centerGap} />
