@@ -180,7 +180,7 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
   const centerFab = (
     <OrbitFAB
-      renderCenterIcon={() => <BrandMark size={40} />}
+      renderCenterIcon={() => <BrandMark size={44} />}
       actions={orbitActions}
       // Even fan across the top now that there are three actions.
       arcStart={150}

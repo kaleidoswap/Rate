@@ -361,19 +361,11 @@ const styles = StyleSheet.create({
     width: FAB,
     height: FAB,
     borderRadius: FAB / 2,
-    // Dark-glass disc so the button reads as part of the dark UI (not a white
-    // chip). A violet rim + green glow nod to the brand without swallowing the
-    // multi-color K mark, whose bright violet/mint facets read on dark.
-    backgroundColor: 'rgba(18, 20, 30, 0.82)',
-    borderWidth: 1,
-    borderColor: 'rgba(111, 50, 255, 0.45)',
+    // No disc/circle behind the mark — the multi-color K stands on its own for a
+    // cleaner read against the dark UI. Transparent fill, no border, no glow.
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: theme.colors.primary[500],
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.7,
-    shadowRadius: 16,
-    elevation: 12,
   },
   petal: {
     position: 'absolute',
