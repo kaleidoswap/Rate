@@ -110,7 +110,7 @@ export async function geocodeAddress(address: string): Promise<Coords | null> {
 }
 
 // Haversine distance in metres.
-function distanceMeters(a: Coords, b: Coords): number {
+export function distanceMeters(a: Coords, b: Coords): number {
   const R = 6371000;
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat);
