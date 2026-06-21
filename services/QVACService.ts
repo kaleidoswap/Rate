@@ -197,6 +197,11 @@ class QVACService {
 
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
+  // Coalesce cold-start callers (voice overlay pre-warm, auto-listen, and
+  // transcription fallback) onto the same model load. Previously a second
+  // initializeWhisper() call saw `loading` and returned immediately, then its
+  // caller treated the still-loading model as a failure.
+  private whisperLoadPromise: Promise<void> | null = null;
   // True when the resident Whisper model was loaded with the Silero VAD submodel,
   // which the hands-free streaming session (emitVadEvents) requires. A plain
   // one-shot Whisper load has no VAD, so we reload before opening a voice session.
@@ -806,10 +811,36 @@ class QVACService {
       console.warn('[QVAC] Whisper init skipped — disabled or runtime unavailable');
       return;
     }
-    if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
-      // Already (being) loaded. If the caller needs VAD but the resident model
-      // has none, reload it with the VAD submodel; otherwise nothing to do.
-      if (!(withVad && this.state.whisperStatus === 'ready' && !this.whisperHasVad)) return;
+
+    // A cold open can trigger pre-warm and auto-listen in the same render. Wait
+    // for the existing load instead of returning while Whisper is still unusable.
+    if (this.whisperLoadPromise) {
+      await this.whisperLoadPromise;
+      // A hands-free caller may need to upgrade a just-finished one-shot model
+      // to include VAD. Re-enter after the shared load has settled.
+      if (withVad && this.whisperStatusReady() && !this.whisperHasVad) {
+        await this.initializeWhisper({ withVad: true });
+      }
+      return;
+    }
+
+    // Already loaded with the capabilities this caller needs.
+    if (this.whisperStatusReady() && (!withVad || this.whisperHasVad)) {
+      return;
+    }
+
+    const load = this.loadWhisperModel(withVad);
+    this.whisperLoadPromise = load;
+    try {
+      await load;
+    } finally {
+      if (this.whisperLoadPromise === load) this.whisperLoadPromise = null;
+    }
+  }
+
+  private async loadWhisperModel(withVad: boolean): Promise<void> {
+    // Upgrade a resident one-shot model to a VAD-capable model for hands-free.
+    if (this.whisperModelId) {
       await this.unloadWhisper().catch(() => {});
     }
 

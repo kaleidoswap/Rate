@@ -131,6 +131,20 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
           return;
         }
 
+        // Never advertise "Listening" until the recognizer can actually consume
+        // the clip. On a cold first open the model may still be downloading or
+        // loading; initializeWhisper() now joins any in-flight load instead of
+        // racing it.
+        const qvac = QVACService.getInstance();
+        if (qvac.getState().whisperStatus !== 'ready') {
+          await qvac.initializeWhisper();
+          const voiceState = qvac.getState();
+          if (voiceState.whisperStatus !== 'ready') {
+            onError(voiceState.error || 'Speech recognition is not ready');
+            return;
+          }
+        }
+
         await setAudioModeAsync({
           allowsRecording: true,
           playsInSilentMode: true,
