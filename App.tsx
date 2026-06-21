@@ -322,21 +322,22 @@ const fixedStyles = StyleSheet.create({
     backgroundColor: theme.colors.surface.primary,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: theme.colors.border.light,
-    paddingTop: 8,
+    paddingTop: 4,
     paddingHorizontal: 8,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    minHeight: 60,
+    minHeight: 58,
   },
   micWrap: {
     position: 'absolute',
-    // Center the FAB within the tab row (top 8 = paddingTop, height = row), so it
-    // stays inside the bar's bounds and remains tappable on Android.
-    top: 8,
-    height: 60,
+    // Sit the FAB level with the tab icons rather than floating above them: a
+    // larger top offset drops its centre into the row so it no longer reads as
+    // riding too high above the (solid) non-dashboard bar.
+    top: 14,
+    height: 58,
     left: 0,
     right: 0,
     alignItems: 'center',
