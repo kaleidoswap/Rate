@@ -21,7 +21,7 @@ import { ToastContainer } from './components/Toast';
 import ChatNotifications from './components/ChatNotifications';
 import { OrbitFAB, type OrbitAction } from './components/OrbitFAB';
 import NetworkService from './services/NetworkService';
-import { feedback, preloadFeedback } from './utils/feedback';
+import { preloadFeedback } from './utils/feedback';
 
 import { store, persistor } from './store';
 import { selectAiMode } from './store/slices/settingsSlice';
@@ -114,35 +114,16 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // Split the tabs so a gap opens in the middle for the floating mic button.
   const mid = Math.ceil(routes.length / 2);
 
-  // Quick tap on the center FAB → QR scanner (the default, most-used action).
-  const onScanPress = () => {
-    feedback.select();
-    navigation.navigate('QRScanner');
-  };
-
-  // Petals that fan out of the center FAB on press-and-hold + drag. Ordered
-  // left→right across the upward arc.
+  // The "+" fans out two quick actions, clustered toward the right thumb
+  // (see arcStart/arcEnd on OrbitFAB below). Order = arcStart → arcEnd, so
+  // Voice sits lowest/right (easiest reach), Scan above it.
   const orbitActions: OrbitAction[] = [
     {
-      key: 'send',
-      label: 'Send',
-      color: theme.colors.networks.lightning,
-      renderIcon: () => <Ionicons name="arrow-up" size={24} color={theme.colors.primary[950]} />,
-      onSelect: () => navigation.navigate('Send'),
-    },
-    {
-      key: 'receive',
-      label: 'Receive',
-      color: theme.colors.networks.bitcoin,
-      renderIcon: () => <Ionicons name="arrow-down" size={24} color={theme.colors.primary[950]} />,
-      onSelect: () => navigation.navigate('Receive'),
-    },
-    {
-      key: 'swap',
-      label: 'Swap',
-      color: theme.colors.brand.violet,
-      renderIcon: () => <Ionicons name="swap-horizontal" size={24} color="#FFFFFF" />,
-      onSelect: () => navigation.navigate('Swap'),
+      key: 'scan',
+      label: 'Scan',
+      color: theme.colors.info[500],
+      renderIcon: () => <Ionicons name="qr-code" size={24} color="#FFFFFF" />,
+      onSelect: () => navigation.navigate('QRScanner'),
     },
     {
       key: 'voice',
@@ -207,9 +188,11 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           actions. Centered over the gap, overflowing the island top. */}
       <View pointerEvents="box-none" style={islandStyles.micWrap}>
         <OrbitFAB
-          onDefaultPress={onScanPress}
-          renderCenterIcon={() => <Ionicons name="qr-code" size={26} color={theme.colors.primary[950]} />}
+          renderCenterIcon={() => <Ionicons name="add" size={30} color={theme.colors.primary[950]} />}
           actions={orbitActions}
+          // Right-leaning arc so both petals sit under the right thumb.
+          arcStart={70}
+          arcEnd={20}
         />
       </View>
     </View>

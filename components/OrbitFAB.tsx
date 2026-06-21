@@ -7,7 +7,6 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
   withSpring,
   withTiming,
   type SharedValue,
@@ -29,19 +28,23 @@ export interface OrbitAction {
 }
 
 interface OrbitFABProps {
-  /** Quick tap (no hold/drag) — the FAB's default action. */
-  onDefaultPress: () => void;
-  /** Icon for the resting center button. */
+  /** Icon for the resting center button (e.g. a "+"). */
   renderCenterIcon: () => React.ReactNode;
-  /** Petals, laid out left→right across an upward fan. Keep to ~3–5. */
+  /** Petals, laid out across the fan in array order. Keep to ~2–5. */
   actions: OrbitAction[];
+  /**
+   * Arc the petals fan across, in degrees (up = 90, right = 0, left = 180).
+   * Defaults to a symmetric 150°→30°. Pass a right-leaning range to cluster the
+   * petals under the right thumb — e.g. arcStart={70} arcEnd={20}. Action[0]
+   * sits at `arcStart`, the last action at `arcEnd`.
+   */
+  arcStart?: number;
+  arcEnd?: number;
 }
 
 const FAB = 60;
 const PETAL = 52;
 const RADIUS = 96;            // center-to-petal distance
-const OPEN_DELAY = 160;       // hold this long → orbit opens (shorter = a tap → default)
-const OPEN_MOVE = 8;          // …or move this far first → open immediately
 const DEAD_ZONE = 36;         // finger this close to center → no selection (cancel region)
 const SELECT_SLOP = 46;       // max angular distance (deg) from a petal to capture it
 const SPRING = { damping: 14, stiffness: 180, mass: 0.6 } as const;
@@ -49,30 +52,33 @@ const SPRING = { damping: 14, stiffness: 180, mass: 0.6 } as const;
 /**
  * Expandable radial "orbit" FAB.
  *
- * - Quick tap → `onDefaultPress` (the QR scanner).
- * - Press & hold (or press + drag) → an arc of action petals fans out above the
- *   button with a spring. Slide the finger toward a petal to highlight it and
- *   release to fire it — all in one continuous gesture, no lift required.
+ * - Tap the "+" → the action petals fan out and STAY pinned open.
+ * - From there, flick toward a petal and release to fire it, or tap the "+"
+ *   again to dismiss. Press + drag + release in one motion also works.
  *
  * The whole interaction lives inside one Pan gesture, so once the touch begins,
  * gesture-handler tracks the finger across the entire screen even though the
- * petals render outside the tab-bar bounds.
+ * petals render outside the tab-bar bounds (no per-petal hit-boxes needed —
+ * which is what keeps selection reliable on Android).
  */
-export const OrbitFAB: React.FC<OrbitFABProps> = ({ onDefaultPress, renderCenterIcon, actions }) => {
+export const OrbitFAB: React.FC<OrbitFABProps> = ({ renderCenterIcon, actions, arcStart = 150, arcEnd = 30 }) => {
   const progress = useSharedValue(0); // 0 = closed, 1 = fully fanned out
   const sel = useSharedValue(-1);     // currently highlighted petal index
+  const latched = useSharedValue(0);     // 1 = pinned open after a tap
+  const wasLatched = useSharedValue(0);  // latch state captured at gesture start
   const [mounted, setMounted] = useState(false); // overlay mounted only while active
   const [hovered, setHovered] = useState(-1);     // mirror of sel for the tooltip
 
-  // Even fan from 150° (left) to 30° (right); single action sits straight up.
+  // Fan from arcStart → arcEnd; a single action sits at the arc midpoint.
   const positions = useMemo(() => {
     const n = actions.length;
+    const span = arcStart - arcEnd;
     return actions.map((_, i) => {
-      const angle = n <= 1 ? 90 : 150 - i * (120 / (n - 1));
+      const angle = n <= 1 ? arcStart - span / 2 : arcStart - i * (span / (n - 1));
       const rad = (angle * Math.PI) / 180;
       return { angle, x: RADIUS * Math.cos(rad), y: -RADIUS * Math.sin(rad) };
     });
-  }, [actions.length]);
+  }, [actions.length, arcStart, arcEnd]);
   const angles = useMemo(() => positions.map((p) => p.angle), [positions]);
 
   // Which petal does the finger point at? Direction-based (distance along the ray
@@ -122,19 +128,15 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({ onDefaultPress, renderCenter
     .maxPointers(1)
     .shouldCancelWhenOutside(false)
     .onBegin(() => {
+      wasLatched.value = latched.value; // was the menu already pinned open?
       sel.value = -1;
       runOnJS(setMounted)(true);
       runOnJS(feedback.tap)();
-      // Delay the open so a quick tap stays a tap; a sustained press fans out.
-      progress.value = withDelay(OPEN_DELAY, withSpring(1, SPRING));
+      // Any press opens the orbit immediately (no QR-on-tap shortcut anymore).
+      cancelAnimation(progress);
+      progress.value = withSpring(1, SPRING);
     })
     .onUpdate((e) => {
-      const dist = Math.sqrt(e.translationX * e.translationX + e.translationY * e.translationY);
-      // Moving before the delay elapses opens the orbit right away.
-      if (progress.value === 0 && dist > OPEN_MOVE) {
-        cancelAnimation(progress);
-        progress.value = withSpring(1, SPRING);
-      }
       if (progress.value > 0.15) {
         const idx = pickIndex(e.translationX, e.translationY);
         if (idx !== sel.value) {
@@ -143,24 +145,28 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({ onDefaultPress, renderCenter
         }
       }
     })
-    .onEnd((e) => {
-      const dist = Math.sqrt(e.translationX * e.translationX + e.translationY * e.translationY);
-      const opened = progress.value > 0;
+    .onEnd(() => {
       const chosen = sel.value;
-      // Tap (released during the open delay) or a barely-there press with nothing
-      // highlighted → run the default action.
-      if (!opened || (progress.value < 0.25 && dist <= OPEN_MOVE && chosen < 0)) {
-        runOnJS(onDefaultPress)();
-      } else if (chosen >= 0) {
+      if (chosen >= 0) {
+        // Flicked toward a petal → fire it and close.
         runOnJS(fire)(chosen);
+        latched.value = 0;
+      } else if (wasLatched.value) {
+        // Tapped the "+" again while pinned open → dismiss.
+        latched.value = 0;
+      } else {
+        // Tap from closed → pin the menu open so the user can choose.
+        latched.value = 1;
       }
     })
     .onFinalize(() => {
-      close();
+      // Keep the petals on screen while pinned open; otherwise collapse.
+      if (latched.value === 0) close();
     });
 
   const fabStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - 0.06 * progress.value }],
+    // Spin the "+" into an "×" as the menu opens.
+    transform: [{ scale: 1 - 0.06 * progress.value }, { rotate: `${progress.value * 45}deg` }],
   }));
 
   const scrimStyle = useAnimatedStyle(() => ({
