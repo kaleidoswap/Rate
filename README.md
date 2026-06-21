@@ -7,6 +7,11 @@ Network, RGB assets, Liquid, and Bitcoin L2s (Spark, Arkade) together under one
 self-custodial roof — driven by a private, **on-device** AI assistant and Nostr social
 payments. Your keys, your assets, and your AI all stay on your phone.
 
+> ⚠️ **Alpha software.** KaleidoSwap is under active development and **not production-ready**.
+> Expect bugs, breaking changes, and incomplete features. The KaleidoMind AI assistant is
+> **experimental** and can make mistakes — always review actions before confirming. Use
+> test networks and small amounts only; **do not store funds you can't afford to lose.**
+
 ---
 
 ## Highlights
