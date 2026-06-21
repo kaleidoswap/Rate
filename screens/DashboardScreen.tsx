@@ -158,6 +158,12 @@ export default function DashboardScreen({ navigation }: Props) {
   const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [protocolsReady, setProtocolsReady] = useState(false);
+  // Startup initializes protocols and then fetches balances in the same async
+  // focus callback. React state does not update synchronously, so reading
+  // `protocolsReady` from that callback used to see the initial false value and
+  // skip the first balance load. These refs are the immediate lifecycle gates;
+  // state remains the source of truth for rendering.
+  const protocolsReadyRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
   const { formatSatoshisToUSD } = useBitcoinConversion();
   // Denomination-aware formatter for the headline balance (tap to cycle sats/BTC/fiat).
@@ -173,6 +179,7 @@ export default function DashboardScreen({ navigation }: Props) {
   });
   const [rgbAssets, setRgbAssetsState] = useState<NiaAsset[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
+  const isUpdatingRef = useRef(false);
 
   // Modal state for channel details
   const [channelModalVisible, setChannelModalVisible] = useState(false);
@@ -249,7 +256,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
   // Initialize protocol services (only once)
   const initializeApi = useCallback(async () => {
-    if (protocolsReady) return true; // Already initialized
+    if (protocolsReadyRef.current) return true; // Already initialized
 
     try {
       console.log('Initializing protocol services...');
@@ -275,6 +282,7 @@ export default function DashboardScreen({ navigation }: Props) {
       }
 
       if (anyConnected) {
+        protocolsReadyRef.current = true;
         setProtocolsReady(true);
         // Show warning toast if some protocols failed but at least one connected
         if (failed.length > 0) {
@@ -290,6 +298,7 @@ export default function DashboardScreen({ navigation }: Props) {
       for (const proto of protocols) {
         const adapter = protocolManager.getAdapterIfAvailable(proto);
         if (adapter?.isConnected()) {
+          protocolsReadyRef.current = true;
           setProtocolsReady(true);
           return true;
         }
@@ -311,12 +320,12 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   }, []);
 
-  const checkNodeStatus = async () => {
+  const checkNodeStatus = async (skipInitialization = false) => {
     try {
       setIsConnecting(true);
       setConnectionError(null);
 
-      if (!protocolsReady) {
+      if (!skipInitialization && !protocolsReadyRef.current) {
         await initializeApi();
       }
 
@@ -348,12 +357,13 @@ export default function DashboardScreen({ navigation }: Props) {
   };
 
   const loadDashboardData = async (showLoadingIndicator = true) => {
-    if (!protocolsReady || isUpdating) {
+    if (!protocolsReadyRef.current || isUpdatingRef.current) {
       console.log('Skipping update: Protocols not ready or update in progress');
       return;
     }
 
     try {
+      isUpdatingRef.current = true;
       setIsUpdating(true);
       if (showLoadingIndicator) {
         setLoading(true);
@@ -477,6 +487,7 @@ export default function DashboardScreen({ navigation }: Props) {
         );
       }
     } finally {
+      isUpdatingRef.current = false;
       setIsUpdating(false);
       if (showLoadingIndicator) {
         setLoading(false);
@@ -525,13 +536,21 @@ export default function DashboardScreen({ navigation }: Props) {
   useFocusEffect(
     useCallback(() => {
       const initializeAndLoad = async () => {
-        const isUnlocked = await checkNodeStatus();
-        if (isUnlocked) {
-          await loadDashboardData(true); // Show loading indicator for manual refresh
+        const ready = await initializeApi();
+        if (!ready) {
+          await checkNodeStatus(true);
+          return;
         }
+
+        // Node metadata and balances are independent reads. Fetch them together
+        // so a slow getNodeInfo() call cannot hold the headline balance hostage.
+        await Promise.all([
+          checkNodeStatus(true),
+          loadDashboardData(true),
+        ]);
       };
 
-      initializeAndLoad();
+      void initializeAndLoad();
     }, [])
   );
 
