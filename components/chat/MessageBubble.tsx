@@ -8,10 +8,19 @@ import { ChatBubble } from '@kaleidorg/kaleido-ui/native';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { leading, type Theme } from '../../theme';
 import TypingDots from './TypingDots';
+import { MindAvatar } from '../MindMark';
 import FunctionResultCard from './FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
 import { PayableCard } from './PayableCard';
 import { BalanceCard } from './BalanceCard';
+
+/** Real per-turn inference numbers (from QVAC), shown under an answer. */
+export interface ChatMsgStats {
+  tokensPerSecond?: number;
+  totalTokens?: number;
+  promptTokens?: number;
+  device?: 'cpu' | 'gpu';
+}
 
 export interface ChatMessage {
   id: string;
@@ -23,9 +32,40 @@ export interface ChatMessage {
   streaming?: boolean;
   /** The model's chain-of-thought for this reply (revealed on tap). */
   thinking?: string;
+  /** Real inference stats for this answer (tok/s, tokens, backend) — see StatsFooter. */
+  stats?: ChatMsgStats;
   /** Structured card to render in place of (or alongside) the text. */
   card?: { type: 'balance' | 'contact' | 'merchant'; data: any };
 }
+
+/** Compact, desktop-parity stats line: tok/s · tokens · GPU/CPU. */
+const StatsFooter: React.FC<{ stats: ChatMsgStats; styles: ReturnType<typeof makeStyles>; theme: Theme }> = ({ stats, styles, theme }) => {
+  const { tokensPerSecond, totalTokens, device } = stats;
+  const hasAny = (typeof tokensPerSecond === 'number' && tokensPerSecond > 0) || typeof totalTokens === 'number' || !!device;
+  if (!hasAny) return null;
+  return (
+    <View style={styles.statsRow}>
+      {typeof tokensPerSecond === 'number' && tokensPerSecond > 0 && (
+        <View style={styles.statChip}>
+          <Ionicons name="speedometer-outline" size={11} color={theme.colors.text.tertiary} />
+          <Text style={styles.statText}>{tokensPerSecond.toFixed(1)} tok/s</Text>
+        </View>
+      )}
+      {typeof totalTokens === 'number' && (
+        <View style={styles.statChip}>
+          <Ionicons name="layers-outline" size={11} color={theme.colors.text.tertiary} />
+          <Text style={styles.statText}>{totalTokens.toLocaleString('en-US')} tokens</Text>
+        </View>
+      )}
+      {device && (
+        <View style={styles.statChip}>
+          <Ionicons name={device === 'gpu' ? 'flash-outline' : 'hardware-chip-outline'} size={11} color={theme.colors.text.tertiary} />
+          <Text style={styles.statText}>{device === 'gpu' ? 'GPU' : 'CPU'}</Text>
+        </View>
+      )}
+    </View>
+  );
+};
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -58,9 +98,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
       <Ionicons name="person" size={16} color="#fff" />
     </LinearGradient>
   ) : (
-    <LinearGradient colors={theme.colors.primary.gradient!} style={styles.avatar}>
-      <Ionicons name="sparkles" size={16} color="#fff" />
-    </LinearGradient>
+    <MindAvatar size={32} style={styles.avatar} />
   );
 
   return (
@@ -118,6 +156,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
               onOpenLink={onOpenLink}
             />
           ) : null}
+          {!message.streaming && message.stats && (
+            <StatsFooter stats={message.stats} styles={styles} theme={theme} />
+          )}
         </View>
       )}
     </ChatBubble>
@@ -187,6 +228,18 @@ const makeStyles = (theme: Theme) =>
       borderLeftWidth: 2,
       borderLeftColor: theme.colors.border.medium,
     },
+    statsRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'center',
+      gap: theme.spacing[2.5] ?? 10,
+      marginTop: theme.spacing[2],
+      paddingTop: theme.spacing[1.5] ?? 6,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: theme.colors.border.light,
+    },
+    statChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+    statText: { fontSize: 11, color: theme.colors.text.tertiary, fontWeight: theme.typography.fontWeight.medium },
   });
 
 export default React.memo(MessageBubble);

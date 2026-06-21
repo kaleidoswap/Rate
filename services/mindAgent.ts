@@ -28,6 +28,7 @@ import {
   type SkillBundle,
   type ToolSource,
 } from '@kaleidorg/mind';
+import type { QvacTurnStats } from '@kaleidorg/mind/qvac';
 import skillBundle from '../skills.bundle.json';
 import { buildWalletToolSource } from './walletTools';
 import { buildMerchantToolSource } from './merchantTools';
@@ -87,6 +88,8 @@ export interface RunTurnCallbacks {
   onStep?: (name: string) => void;
   /** The model's chain-of-thought, streamed as it reasons (shown on demand). */
   onThinking?: (token: string) => void;
+  /** Real per-turn inference stats (tok/s, tokens, backend device) for the UI. */
+  onStats?: (stats: QvacTurnStats) => void;
 }
 
 export type MindTurnResult = FunnelResult;
@@ -156,8 +159,9 @@ export function createMindAgent(
   getSettings: () => MindAgentSettings = () => ({}),
 ): MindAgent {
   // The Funnel builds each TurnInput internally, so we inject the per-turn
-  // thinking sink + sampling settings here via closures read at call time.
+  // thinking + stats sinks + sampling settings here via closures read at call time.
   let thinkingSink: ((token: string) => void) | undefined;
+  let statsSink: ((stats: QvacTurnStats) => void) | undefined;
   const provider: LLMProvider = {
     name: 'qvac',
     runTurn: (i) => {
@@ -167,6 +171,7 @@ export function createMindAgent(
         ...(s.temperature != null ? { temperature: s.temperature } : {}),
         ...(s.maxTokens != null ? { maxTokens: s.maxTokens } : {}),
         onThinking: (t) => thinkingSink?.(t),
+        onStats: (st) => statsSink?.(st),
       });
     },
     cancel: (id) => qvac.cancelRequest(id),
@@ -196,8 +201,9 @@ export function createMindAgent(
 
   return {
     async runTurn(text, cbs: RunTurnCallbacks = {}) {
-      // Make this turn's reasoning available to the provider closure.
+      // Make this turn's reasoning + stats available to the provider closure.
       thinkingSink = cbs.onThinking;
+      statsSink = cbs.onStats;
       try {
         return await funnel.runTurn(text, {
           history: cbs.history,
@@ -209,6 +215,7 @@ export function createMindAgent(
         });
       } finally {
         thinkingSink = undefined;
+        statsSink = undefined;
       }
     },
     listSkills: () => funnel.listSkills(),

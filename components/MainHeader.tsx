@@ -20,6 +20,8 @@ interface MainHeaderProps {
   showSettings?: boolean;
   rightAction?: React.ReactNode;
   icon?: keyof typeof Ionicons.glyphMap;
+  /** Render a custom icon node before the title instead of an Ionicons `icon`. */
+  iconNode?: React.ReactNode;
   onBack?: () => void;
   children?: React.ReactNode;
   /**
@@ -40,6 +42,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   showSettings,
   rightAction,
   icon,
+  iconNode,
   onBack,
   children,
   elevated,
@@ -72,8 +75,12 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
                   {greeting && <Text style={styles.greeting}>{greeting}</Text>}
                   <View style={styles.titleRow}>
                     {withLogo && <BrandMark size={24} />}
-                    {icon && !withLogo && (
-                      <Ionicons name={icon} size={20} color={theme.colors.text.primary} style={{ marginRight: 8, opacity: 0.9 }} />
+                    {iconNode && !withLogo ? (
+                      <View style={{ marginRight: 8 }}>{iconNode}</View>
+                    ) : (
+                      icon && !withLogo && (
+                        <Ionicons name={icon} size={20} color={theme.colors.text.primary} style={{ marginRight: 8, opacity: 0.9 }} />
+                      )
                     )}
                     {title && (
                       <Text style={styles.title} numberOfLines={1}>

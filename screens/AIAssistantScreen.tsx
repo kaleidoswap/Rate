@@ -29,9 +29,9 @@ import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig } from '../s
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
-import { MainHeader } from '../components';
+import { MainHeader, MindAvatar, MindGlyph } from '../components';
 import { ChatEmptyState, MessageBubble, TypingDots } from '../components/chat';
-import type { ChatMessage } from '../components/chat';
+import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
@@ -73,16 +73,6 @@ interface Contact {
   isNostrContact?: boolean;
   profile?: any;
 }
-
-const WELCOME_TEXT =
-  "👋 Hi, I'm **KaleidoMind** — your private, on-device wallet assistant. Everything runs on your phone; nothing leaves the device.\n\n" +
-  'I can help you:\n' +
-  '• Check your **balance** and the BTC **price**\n' +
-  '• Create an **invoice** to get paid\n' +
-  '• **Send** a payment — you always confirm before anything moves\n' +
-  '• **Swap** between BTC and assets\n' +
-  '• Answer **Bitcoin / Lightning / RGB** questions, and remember your preferences\n\n' +
-  'Try: _"what\'s my balance"_, _"create an invoice for 5000 sats"_, or _"pay alice 3 eur"_.';
 
 const toast = () => ToastService.getInstance();
 
@@ -159,7 +149,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // AI settings sheet (model selection + P2P delegation)
   const [showSettings, setShowSettings] = useState(false);
-  const [showSkills, setShowSkills] = useState(false);
+  // Conversation history panel (desktop-parity: current conversation + new/clear).
+  const [showHistory, setShowHistory] = useState(false);
+  // Latest turn's real inference stats (tok/s + backend) for the header chip.
+  const [lastStats, setLastStats] = useState<ChatMsgStats | null>(null);
 
   // Friendly name of the paired desktop (for the settings chip + header).
   const [providerName, setProviderName] = useState<string | null>(null);
@@ -209,15 +202,18 @@ export default function AIAssistantScreen({ navigation }: Props) {
     dispatch(setAiMode('local'));
   }, [qvac, dispatch]);
 
-  // Header subtitle: which model + whether we're delegating to a desktop.
+  // Header subtitle: which model + where it runs + live throughput (tok/s) from
+  // the last turn (real QVAC stats), mirroring the desktop chat header.
   const headerSubtitle = useMemo(() => {
     const delegating = qvac.config.delegateEnabled && !!qvac.config.providerPublicKey;
     const modelLabel = getModelById(qvac.config.modelId)?.label ?? 'On-device AI';
-    if (delegating) {
-      return `${modelLabel} · via ${providerName || 'Desktop'}`;
-    }
-    return `${modelLabel} · on this device`;
-  }, [qvac.config.delegateEnabled, qvac.config.providerPublicKey, qvac.config.modelId, providerName]);
+    const where = delegating ? `via ${providerName || 'Desktop'}` : 'on this device';
+    const tps =
+      lastStats?.tokensPerSecond && lastStats.tokensPerSecond > 0
+        ? ` · ${lastStats.tokensPerSecond.toFixed(0)} tok/s${lastStats.device ? ` (${lastStats.device.toUpperCase()})` : ''}`
+        : '';
+    return `${modelLabel} · ${where}${tps}`;
+  }, [qvac.config.delegateEnabled, qvac.config.providerPublicKey, qvac.config.modelId, providerName, lastStats]);
 
   const nostrState = useSelector((state: RootState) => state.nostr);
 
@@ -265,13 +261,8 @@ export default function AIAssistantScreen({ navigation }: Props) {
     setMessages((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch(m) } : m)));
   }, []);
 
-  // Greet the user with a contextual welcome the first time the chat is ready.
-  const welcomed = useRef(false);
-  useEffect(() => {
-    if (welcomed.current || !qvac.isReady || messages.length > 0) return;
-    welcomed.current = true;
-    addMessage({ id: nextId(), text: WELCOME_TEXT, isUser: false, timestamp: new Date() });
-  }, [qvac.isReady, messages.length, addMessage]);
+  // No auto-greeting message: an empty chat shows the action-rich ChatEmptyState
+  // (suggestions + quick actions) instead of a wall of welcome text.
 
   // ---- Voice handlers ----
   const handleSpeechStart = () => {
@@ -523,6 +514,18 @@ export default function AIAssistantScreen({ navigation }: Props) {
           thinkingText += tok;
           updateMessage(assistantId, () => ({ thinking: thinkingText }));
         },
+        // Real per-turn inference numbers (tok/s, tokens, GPU/CPU) — shown under
+        // the reply and as a live chip in the header (desktop parity).
+        onStats: (s) => {
+          const st: ChatMsgStats = {
+            tokensPerSecond: s.tokensPerSecond,
+            totalTokens: s.totalTokens,
+            promptTokens: s.promptTokens,
+            device: s.backendDevice,
+          };
+          updateMessage(assistantId, () => ({ stats: st }));
+          setLastStats(st);
+        },
         // A recipe step is executing (deterministic tier).
         onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
         onToken: (token, turn) => {
@@ -563,7 +566,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
         // If an invoice was just generated, remember it (so "share" can act on
         // it) and offer to share it if the model didn't already mention it.
-        let finalText = res.text?.trim() || 'Done.';
+        let finalText =
+          res.text?.trim() ||
+          (lastCall
+            ? 'Done.'
+            : "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.");
         const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
         const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;
         if (invResult?.invoice) {
@@ -594,7 +601,11 @@ export default function AIAssistantScreen({ navigation }: Props) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       // Wallet-tool errors are written for the user ("Your SPARK wallet isn't
       // connected yet.") — show them; fall back to a generic note otherwise.
-      const msg = error instanceof Error && error.message ? error.message : '';
+      const raw = error instanceof Error && error.message ? error.message : '';
+      // A prompt-too-long overflow is opaque to users — translate it into an action.
+      const msg = /context window|prompt tokens|exceeds the|context length|too long/i.test(raw)
+        ? 'This conversation got too long for the on-device model. Clear the chat (🗑️ in the header) to start fresh, then try again.'
+        : raw;
       updateMessage(assistantId, () => ({
         text: msg || "I couldn't process that on-device just now. Please try again. 🔧",
         streaming: false,
@@ -618,14 +629,20 @@ export default function AIAssistantScreen({ navigation }: Props) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // One-tap "new chat" — clears the conversation and resets per-chat state. No
+  // confirm dialog (the desktop/Claude pattern: starting fresh is cheap & common).
+  const newChat = useCallback(() => {
+    setMessages([]);
+    setLastStats(null);
+    setShowHistory(false);
+    lastInvoiceRef.current = null;
+    Haptics.selectionAsync().catch(() => {});
+  }, []);
+
   const clearChatHistory = () => {
-    Alert.alert('Clear Chat History', 'Are you sure you want to clear all chat history? This cannot be undone.', [
+    Alert.alert('Clear chat', 'Clear this conversation? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Clear',
-        style: 'destructive',
-        onPress: () => setMessages([]),
-      },
+      { text: 'Clear', style: 'destructive', onPress: newChat },
     ]);
   };
 
@@ -782,7 +799,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
       <MainHeader
         title="KaleidoMind"
         subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
-        icon="sparkles"
+        iconNode={<MindGlyph size={22} color={theme.colors.text.primary} />}
         rightAction={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {nostrState.isConnected && (
@@ -790,13 +807,22 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />
               </View>
             )}
+            {aiEnabled && !isEmpty && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={newChat}
+                accessibilityLabel="New chat"
+              >
+                <Ionicons name="create-outline" size={20} color="white" />
+              </TouchableOpacity>
+            )}
             {aiEnabled && (
               <TouchableOpacity
                 style={styles.headerBtn}
-                onPress={() => setShowSkills(true)}
-                accessibilityLabel="Skills"
+                onPress={() => setShowHistory(true)}
+                accessibilityLabel="Chat history"
               >
-                <Ionicons name="extension-puzzle-outline" size={20} color="white" />
+                <Ionicons name="time-outline" size={20} color="white" />
               </TouchableOpacity>
             )}
             <TouchableOpacity
@@ -806,15 +832,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
             >
               <Ionicons name="settings-outline" size={20} color="white" />
             </TouchableOpacity>
-            {!isEmpty && (
-              <TouchableOpacity
-                style={[styles.headerBtn, styles.headerBtnDanger]}
-                onPress={clearChatHistory}
-                accessibilityLabel="Clear chat history"
-              >
-                <Ionicons name="trash-outline" size={20} color="white" />
-              </TouchableOpacity>
-            )}
           </View>
         }
       />
@@ -865,9 +882,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
                   ))}
                   {isLoading && !messages.some((m) => m.streaming) && (
                     <View style={styles.processingRow}>
-                      <LinearGradient colors={theme.colors.primary.gradient!} style={styles.processingAvatar}>
-                        <Ionicons name="sparkles" size={16} color="#fff" />
-                      </LinearGradient>
+                      <MindAvatar size={32} style={styles.processingAvatar} />
                       <View style={styles.processingBubble}>
                         <TypingDots label="Thinking on-device…" />
                       </View>
@@ -1038,33 +1053,44 @@ export default function AIAssistantScreen({ navigation }: Props) {
             onSetTtsEngine={(engine) => qvac.setTtsEngine(engine)}
           />
 
-          {/* Skills launcher — tap a skill to start a task with it. */}
-          <Modal visible={showSkills} transparent animationType="slide" onRequestClose={() => setShowSkills(false)}>
-            <Pressable style={styles.skillsBackdrop} onPress={() => setShowSkills(false)}>
+          {/* Conversation history — current chat (desktop parity) + new/clear. */}
+          <Modal visible={showHistory} transparent animationType="slide" onRequestClose={() => setShowHistory(false)}>
+            <Pressable style={styles.skillsBackdrop} onPress={() => setShowHistory(false)}>
               <Pressable style={styles.skillsSheet} onPress={() => {}}>
                 <View style={styles.skillsHandle} />
-                <Text style={styles.skillsTitle}>Skills</Text>
-                <Text style={styles.skillsHint}>Tap one to start. Turn skills on/off in Settings → Design your agent → Connectors.</Text>
-                {agent.listSkills().length === 0 ? (
-                  <Text style={styles.skillsHint}>No skills enabled.</Text>
-                ) : (
-                  agent.listSkills().map((s) => (
-                    <TouchableOpacity
-                      key={s.name}
-                      style={styles.skillItem}
-                      onPress={() => { setShowSkills(false); sendMessage(skillStarter(s.name)); }}
-                      activeOpacity={0.85}
-                    >
-                      <View style={styles.skillItemIcon}>
-                        <Ionicons name="extension-puzzle" size={16} color={theme.colors.primary[500]} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.skillItemName}>{s.name}</Text>
-                        {!!s.description && <Text style={styles.skillItemDesc} numberOfLines={2}>{s.description}</Text>}
-                      </View>
-                      <Ionicons name="arrow-forward" size={16} color={theme.colors.text.tertiary} />
+                <View style={styles.historyHeaderRow}>
+                  <Text style={styles.skillsTitle}>Conversation</Text>
+                  <View style={styles.historyActions}>
+                    <TouchableOpacity style={styles.historyAction} onPress={newChat} accessibilityLabel="New chat">
+                      <Ionicons name="create-outline" size={15} color={theme.colors.primary[500]} />
+                      <Text style={styles.historyActionText}>New</Text>
                     </TouchableOpacity>
-                  ))
+                    <TouchableOpacity
+                      style={styles.historyAction}
+                      onPress={() => { newChat(); }}
+                      accessibilityLabel="Clear conversation"
+                      disabled={isEmpty}
+                    >
+                      <Ionicons name="trash-outline" size={15} color={isEmpty ? theme.colors.text.tertiary : theme.colors.error[500]} />
+                      <Text style={[styles.historyActionText, { color: isEmpty ? theme.colors.text.tertiary : theme.colors.error[500] }]}>Clear</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+                <Text style={styles.skillsHint}>{messages.length} message{messages.length === 1 ? '' : 's'} in this chat.</Text>
+                {isEmpty ? (
+                  <Text style={styles.skillsHint}>No messages yet — ask KaleidoMind anything.</Text>
+                ) : (
+                  <ScrollView style={styles.historyList} keyboardShouldPersistTaps="handled">
+                    {messages.filter((m) => m.text?.trim()).map((m) => (
+                      <View key={m.id} style={styles.historyItem}>
+                        <Text style={styles.historyWho}>{m.isUser ? 'You' : 'Mind'}</Text>
+                        <Text style={styles.historyPreview} numberOfLines={2}>{m.text.trim()}</Text>
+                        <Text style={styles.historyTime}>
+                          {m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
                 )}
               </Pressable>
             </Pressable>
@@ -1074,11 +1100,6 @@ export default function AIAssistantScreen({ navigation }: Props) {
     </View>
   );
 }
-
-const SKILL_STARTERS: Record<string, string> = {
-  bitrefill: 'Buy a $25 gift card with Bitrefill',
-};
-const skillStarter = (name: string) => SKILL_STARTERS[name] ?? `Help me use the ${name} skill`;
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
@@ -1094,6 +1115,15 @@ const makeStyles = (theme: Theme) =>
     skillItemIcon: { width: 34, height: 34, borderRadius: theme.borderRadius.base, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primary[500] + '1A' },
     skillItemName: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold, textTransform: 'capitalize' },
     skillItemDesc: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 2, lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.tight) },
+    historyHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+    historyActions: { flexDirection: 'row', gap: theme.spacing[3] },
+    historyAction: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    historyActionText: { color: theme.colors.primary[500], fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
+    historyList: { maxHeight: 360, marginTop: theme.spacing[2] },
+    historyItem: { paddingVertical: theme.spacing[2.5], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
+    historyWho: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.bold, marginBottom: 2 },
+    historyPreview: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.snug) },
+    historyTime: { color: theme.colors.text.tertiary, fontSize: 11, marginTop: 3 },
     content: { flex: 1 },
     contentInner: { flex: 1 },
     messagesContainer: { flex: 1 },

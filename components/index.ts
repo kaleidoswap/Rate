@@ -31,6 +31,7 @@ export * from './ProtocolIcons';
 export * from './NetworkIcon';
 export * from './ChannelList';
 export * from './MainHeader';
+export * from './MindMark';
 export * from './ErrorBoundary';
 export * from './Toast';
 export * from './LoadingSkeleton';

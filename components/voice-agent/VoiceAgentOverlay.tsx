@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Clipboard,
   Modal,
   Pressable,
   ScrollView,
@@ -9,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { speak as qvacSpeak, stopSpeak } from '../../services/qvacTts';
 import Animated, {
   Easing,
@@ -20,7 +22,9 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import { useSelector } from 'react-redux';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
+import { MindAvatar } from '../MindMark';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
@@ -43,6 +47,19 @@ interface ConfirmState {
 let _id = 0;
 const nextId = () => `${Date.now()}-${_id++}`;
 
+/** Shown when the model returns nothing — far friendlier than a blunt "Done." */
+const NO_ANSWER_FALLBACK = "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.";
+
+/** Turn a raw model/runtime error into something a person can act on. */
+function friendlyError(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  if (/context window|prompt tokens|exceeds the|context length|too long/i.test(msg)) {
+    return 'That conversation got too long for the on-device model. Tap ✕ to start a fresh one, then try again.';
+  }
+  if (/cancel/i.test(msg)) return 'Stopped.';
+  return msg || 'Something went wrong. Please try again.';
+}
+
 interface VoiceAgentOverlayProps {
   visible: boolean;
   onClose: () => void;
@@ -59,6 +76,7 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
 
 const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
   const qvac = useQVAC();
+  const insets = useSafeAreaInsets();
   // Same KaleidoMind funnel AND settings as the chat screen — fast-path,
   // recipes, contract wallet tools, memory + on-device RAG, confirm gate,
   // persona/sampling/toggles. Settings are read per turn through the ref.
@@ -76,8 +94,20 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Which assistant bubbles have their reasoning expanded (tap to reveal).
+  // Which assistant bubbles have their reasoning expanded (tap to reveal). A
+  // value of `undefined` means "auto" — expanded live while reasoning, then
+  // collapsed once the answer arrives (the Claude-style behaviour).
   const [openThinking, setOpenThinking] = useState<Record<string, boolean>>({});
+  // The assistant bubble currently being generated (drives the live auto-expand).
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  // Long-press / tap-to-copy for any bubble's text.
+  const copyText = useCallback((text: string) => {
+    const t = text?.trim();
+    if (!t) return;
+    Clipboard.setString(t);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  }, []);
 
   // Continuous hands-free mode (Whisper VAD streaming) — distinct from the
   // push-to-talk orb, which keeps working when this is off.
@@ -167,6 +197,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       const priorHistory = bubbles.map((b) => ({ role: b.role, content: b.text }));
       setPhase('thinking');
       const assistantId = appendBubble('assistant', '');
+      setActiveId(assistantId);
       let streamed = '';
       let reasoning = '';
       try {
@@ -181,12 +212,14 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           onThinking: (tok) => {
             reasoning += tok;
             patchBubble(assistantId, { thinking: reasoning });
+            scrollToEnd();
           },
           onConfirm: (call) =>
             new Promise((resolve) => setConfirm({ call, resolve })),
         });
-        const finalText = (res.text || streamed || 'Done.').trim();
+        const finalText = (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
         patchBubble(assistantId, { text: finalText });
+        setActiveId(null);
         scrollToEnd();
         // Speak the reply with on-device QVAC TTS (falls back to the system
         // voice automatically if QVAC TTS isn't available). When it finishes,
@@ -199,7 +232,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         });
       } catch (e) {
         patchBubble(assistantId, { text: '' });
-        setError(e instanceof Error ? e.message : 'Something went wrong.');
+        setActiveId(null);
+        setError(friendlyError(e));
         setPhase('idle');
       }
     },
@@ -252,25 +286,31 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     appendBubble('user', transcript);
     const priorHistory = bubblesRef.current.map((b) => ({ role: b.role, content: b.text }));
     const assistantId = appendBubble('assistant', '');
+    setActiveId(assistantId);
     let streamed = '';
     let reasoning = '';
-    const res = await agent.runTurn(transcript, {
-      history: priorHistory,
-      onToken: (tok) => {
-        streamed += tok;
-        patchBubble(assistantId, { text: streamed });
-        scrollToEnd();
-      },
-      onThinking: (tok) => {
-        reasoning += tok;
-        patchBubble(assistantId, { thinking: reasoning });
-      },
-      onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
-    });
-    const finalText = (res.text || streamed || 'Done.').trim();
-    patchBubble(assistantId, { text: finalText });
-    scrollToEnd();
-    return finalText;
+    try {
+      const res = await agent.runTurn(transcript, {
+        history: priorHistory,
+        onToken: (tok) => {
+          streamed += tok;
+          patchBubble(assistantId, { text: streamed });
+          scrollToEnd();
+        },
+        onThinking: (tok) => {
+          reasoning += tok;
+          patchBubble(assistantId, { thinking: reasoning });
+          scrollToEnd();
+        },
+        onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
+      });
+      const finalText = (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
+      patchBubble(assistantId, { text: finalText });
+      scrollToEnd();
+      return finalText;
+    } finally {
+      setActiveId(null);
+    }
   };
 
   const stopHandsFree = () => {
@@ -348,7 +388,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
-              <Ionicons name="sparkles" size={18} color={theme.colors.primary[500]} />
+              <MindAvatar size={28} />
               <Text style={styles.headerTitle}>KaleidoMind</Text>
             </View>
             <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
@@ -370,37 +410,64 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             )}
             {bubbles.map((b) => {
               const hasThinking = b.role === 'assistant' && !!b.thinking?.trim();
-              if (!b.text && !hasThinking) return null;
-              const open = !!openThinking[b.id];
+              const hasText = !!b.text?.trim();
+              if (!hasText && !hasThinking) return null;
+              const isActive = b.id === activeId;
+              // Live reasoning, no answer yet → show it expanded (Claude-style);
+              // once the answer streams in, auto-collapse. A manual tap overrides.
+              const thinkingLive = isActive && hasThinking && !hasText;
+              const open = openThinking[b.id] ?? thinkingLive;
               return (
-                <View
+                <Pressable
                   key={b.id}
+                  onLongPress={() => copyText(hasText ? b.text : b.thinking || '')}
+                  delayLongPress={300}
                   style={[styles.bubble, b.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}
                 >
                   {hasThinking && (
-                    <>
+                    <View style={styles.thinkWrap}>
                       <Pressable
-                        onPress={() => setOpenThinking((p) => ({ ...p, [b.id]: !p[b.id] }))}
+                        onPress={() => setOpenThinking((p) => ({ ...p, [b.id]: !open }))}
                         style={styles.thinkToggle}
                         hitSlop={6}
                       >
-                        <Ionicons name="sparkles-outline" size={12} color={theme.colors.text.muted} />
-                        <Text style={styles.thinkToggleText}>{open ? 'Hide thinking' : 'Show thinking'}</Text>
+                        <Ionicons name="sparkles-outline" size={12} color={thinkingLive ? theme.colors.primary[500] : theme.colors.text.muted} />
+                        <Text
+                          style={[styles.thinkToggleText, thinkingLive && { color: theme.colors.primary[500] }]}
+                        >
+                          {thinkingLive ? 'Thinking…' : open ? 'Hide thinking' : 'Show thinking'}
+                        </Text>
                         <Ionicons
                           name={open ? 'chevron-up' : 'chevron-down'}
                           size={12}
-                          color={theme.colors.text.muted}
+                          color={thinkingLive ? theme.colors.primary[500] : theme.colors.text.muted}
                         />
                       </Pressable>
-                      {open && <Text style={styles.thinkText}>{b.thinking!.trim()}</Text>}
-                    </>
+                      {open && (
+                        <View style={styles.thinkBlock}>
+                          <Text style={styles.thinkText} selectable>
+                            {b.thinking!.trim()}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
                   )}
-                  {!!b.text && (
-                    <Text style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}>
+                  {hasText && (
+                    <Text
+                      selectable
+                      style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}
+                    >
                       {b.text}
                     </Text>
                   )}
-                </View>
+                  {/* Discoverable copy affordance on finished assistant replies. */}
+                  {b.role === 'assistant' && hasText && !isActive && (
+                    <Pressable onPress={() => copyText(b.text)} style={styles.copyBtn} hitSlop={8}>
+                      <Ionicons name="copy-outline" size={13} color={theme.colors.text.muted} />
+                      <Text style={styles.copyBtnText}>Copy</Text>
+                    </Pressable>
+                  )}
+                </Pressable>
               );
             })}
           </ScrollView>
@@ -481,13 +548,28 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             />
           </View>
 
-          {/* Money-action confirm card */}
-          {confirm && (
-            <View style={styles.confirmCard}>
-              <Text style={styles.confirmTitle}>Confirm action</Text>
-              <Text style={styles.confirmBody}>
-                {humanizeCall(confirm.call)}
-              </Text>
+        </View>
+
+        {/* Money-action confirm — a bottom-anchored overlay above the sheet so
+            it's always fully on-screen and tappable (an in-flow card overflowed
+            the max-height sheet and got clipped off the bottom edge). */}
+        {confirm && (
+          <View style={styles.confirmOverlay}>
+            {/* Tap outside the card to dismiss (treated as a decline). */}
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={() => {
+                confirm.resolve({ approved: false, reason: 'declined' });
+                setConfirm(null);
+              }}
+            />
+            <View style={[styles.confirmCard, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
+              <View style={styles.confirmHandle} />
+              <View style={styles.confirmTitleRow}>
+                <Ionicons name="shield-checkmark" size={18} color={theme.colors.primary[500]} />
+                <Text style={styles.confirmTitle}>Confirm action</Text>
+              </View>
+              <Text style={styles.confirmBody}>{humanizeCall(confirm.call)}</Text>
               <View style={styles.confirmActions}>
                 <Pressable
                   style={[styles.confirmBtn, styles.confirmDecline]}
@@ -509,8 +591,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                 </Pressable>
               </View>
             </View>
-          )}
-        </View>
+          </View>
+        )}
       </View>
     </Modal>
   );
@@ -559,18 +641,23 @@ const styles = StyleSheet.create({
   bubbleAssistant: { alignSelf: 'flex-start', backgroundColor: theme.colors.surface.secondary, borderBottomLeftRadius: 5 },
   bubbleUserText: { color: theme.colors.text.inverse, fontSize: 15, fontWeight: '500' },
   bubbleAssistantText: { color: theme.colors.text.primary, fontSize: 15 },
-  thinkToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
+  thinkWrap: { marginBottom: 8 },
+  thinkToggle: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   thinkToggleText: { color: theme.colors.text.muted, fontSize: 12, fontWeight: '600' },
+  thinkBlock: {
+    marginTop: 6,
+    paddingLeft: 10,
+    borderLeftWidth: 2,
+    borderLeftColor: theme.colors.primary[500],
+  },
   thinkText: {
     color: theme.colors.text.secondary,
     fontSize: 13,
     fontStyle: 'italic',
-    lineHeight: 18,
-    marginBottom: 8,
-    paddingLeft: 8,
-    borderLeftWidth: 2,
-    borderLeftColor: theme.colors.border.medium,
+    lineHeight: 19,
   },
+  copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-start' },
+  copyBtnText: { color: theme.colors.text.muted, fontSize: 12, fontWeight: '600' },
   loadTrack: {
     height: 4,
     borderRadius: 2,
@@ -590,18 +677,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   status: { textAlign: 'center', color: theme.colors.text.secondary, fontSize: 14, marginTop: 6, fontWeight: '500' },
+  confirmOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
   confirmCard: {
-    marginTop: 14,
-    padding: 16,
-    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     backgroundColor: theme.colors.surface.elevated,
-    borderWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border.medium,
   },
-  confirmTitle: { color: theme.colors.text.primary, fontWeight: '700', fontSize: 15, marginBottom: 4 },
-  confirmBody: { color: theme.colors.text.secondary, fontSize: 14, marginBottom: 14 },
+  confirmHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    backgroundColor: theme.colors.border.medium,
+    marginBottom: 14,
+  },
+  confirmTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  confirmTitle: { color: theme.colors.text.primary, fontWeight: '700', fontSize: 16 },
+  confirmBody: { color: theme.colors.text.secondary, fontSize: 14, lineHeight: 20, marginBottom: 16 },
   confirmActions: { flexDirection: 'row', gap: 10 },
-  confirmBtn: { flex: 1, height: 46, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  confirmBtn: { flex: 1, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   confirmDecline: { backgroundColor: theme.colors.surface.secondary },
   confirmDeclineText: { color: theme.colors.text.primary, fontWeight: '600' },
   confirmApprove: { backgroundColor: theme.colors.primary[500] },
