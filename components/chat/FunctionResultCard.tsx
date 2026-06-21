@@ -1,6 +1,7 @@
 // components/chat/FunctionResultCard.tsx
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import InvoiceQRCode from '../InvoiceQRCode';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { formatDistance } from '../../services/btcmapService';
@@ -80,6 +81,8 @@ interface FunctionResultCardProps {
   onCopy: (text: string, label?: string) => void;
   /** Open an external URL. */
   onOpenLink: (url: string) => void;
+  /** Pick a contact from the list_contacts card (e.g. to start a payment). */
+  onSelectContact?: (name: string) => void;
 }
 
 /**
@@ -92,6 +95,7 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
   functionResult,
   onCopy,
   onOpenLink,
+  onSelectContact,
 }) => {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
@@ -145,6 +149,49 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
         <View style={styles.card}>
           <Text style={styles.title}>🧾 Invoice Generation Failed</Text>
           <Text style={styles.errorText}>❌ {functionResult.error || 'Could not generate an invoice.'}</Text>
+        </View>
+      );
+    }
+
+    case 'list_contacts': {
+      const people: any[] = functionResult.contacts ?? [];
+      return (
+        <View style={styles.card}>
+          <Text style={styles.title}>👥 {people.length} Contact{people.length === 1 ? '' : 's'}</Text>
+          {people.length === 0 ? (
+            <Text style={styles.invoiceText}>
+              No contacts yet. Add a Nostr contact or pay a Lightning address directly.
+            </Text>
+          ) : (
+            <>
+              {people.slice(0, MAX_MERCHANT_ROWS).map((c: any, i: number) => (
+                <TouchableOpacity
+                  key={`${c.name ?? 'c'}-${i}`}
+                  style={styles.contactRow}
+                  disabled={!onSelectContact || !c.has_lightning}
+                  onPress={() => onSelectContact?.(String(c.name))}
+                >
+                  <View style={styles.contactAvatar}>
+                    <Text style={styles.contactInitial}>{String(c.name ?? '?').charAt(0).toUpperCase()}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.contactName} numberOfLines={1}>{c.name}</Text>
+                    <Text style={styles.contactMeta}>
+                      {c.has_lightning ? '⚡ Lightning' : 'No Lightning address'}
+                      {c.source === 'nostr' ? '  ·  Nostr' : ''}
+                    </Text>
+                  </View>
+                  {onSelectContact && c.has_lightning && (
+                    <Ionicons name="arrow-forward-circle" size={20} color={theme.colors.primary[500]} />
+                  )}
+                </TouchableOpacity>
+              ))}
+              {people.length > MAX_MERCHANT_ROWS && (
+                <Text style={styles.merchantMore}>+{people.length - MAX_MERCHANT_ROWS} more</Text>
+              )}
+              {onSelectContact && <Text style={styles.attribution}>Tap a contact to send</Text>}
+            </>
+          )}
         </View>
       );
     }
@@ -352,6 +399,23 @@ const makeStyles = (theme: Theme) =>
       textAlign: 'center',
       paddingVertical: theme.spacing[1],
     },
+    contactRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[2.5] ?? 10,
+      paddingVertical: theme.spacing[2],
+    },
+    contactAvatar: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: `${theme.colors.primary[500]}22`,
+    },
+    contactInitial: { color: theme.colors.primary[500], fontWeight: '700', fontSize: theme.typography.fontSize.base },
+    contactName: { color: theme.colors.text.primary, fontWeight: '600', fontSize: theme.typography.fontSize.sm },
+    contactMeta: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.xs, marginTop: 1 },
     merchantItem: {
       padding: theme.spacing[2],
       backgroundColor: theme.colors.surface.primary,

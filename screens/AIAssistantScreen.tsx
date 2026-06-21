@@ -988,6 +988,10 @@ export default function AIAssistantScreen({ navigation }: Props) {
                       onCopy={copyToClipboard}
                       onOpenLink={openLink}
                       onLongPress={handleLongPressMessage}
+                      onSelectContact={(name) => {
+                        setInputText(`Send to ${name} `);
+                        Haptics.selectionAsync();
+                      }}
                     />
                   ))}
                   {isLoading && !messages.some((m) => m.streaming) && (

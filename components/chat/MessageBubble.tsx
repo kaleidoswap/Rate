@@ -71,6 +71,8 @@ interface MessageBubbleProps {
   message: ChatMessage;
   onCopy: (text: string, label?: string) => void;
   onOpenLink: (url: string) => void;
+  /** Tap a contact in a list_contacts card (e.g. to start a payment). */
+  onSelectContact?: (name: string) => void;
   /** Long-press a bubble to copy its text. */
   onLongPress: (message: ChatMessage) => void;
 }
@@ -81,7 +83,7 @@ interface MessageBubbleProps {
  * web + mobile share one bubble; the app-specific content (gradient avatar,
  * markdown, thinking toggle, structured cards) is composed in here.
  */
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLink, onLongPress }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLink, onLongPress, onSelectContact }) => {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const mdStyles = useMemo(() => makeMarkdownStyles(theme), [theme]);
@@ -154,6 +156,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
               functionResult={message.functionResult}
               onCopy={onCopy}
               onOpenLink={onOpenLink}
+              onSelectContact={onSelectContact}
             />
           ) : null}
           {!message.streaming && message.stats && (
