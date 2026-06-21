@@ -372,15 +372,25 @@ export default function DashboardScreen({ navigation }: Props) {
       const adapterProtoMap: Array<[any, string]> = [
         [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
       ];
-      for (const [adapter, proto] of adapterProtoMap) {
-        if (adapter?.isConnected()) {
+      // Fetch every adapter's BTC balance IN PARALLEL — previously serial, so the
+      // headline balance waited on the sum of all adapter latencies. Now it waits
+      // on the slowest single one.
+      const balanceResults = await Promise.all(
+        adapterProtoMap.map(async ([adapter, proto]) => {
+          if (!adapter?.isConnected()) return null;
           try {
-            const btc = await adapter.getBtcBalance();
-            totalConfirmed += btc.confirmed;
-            totalUnconfirmed += btc.unconfirmed;
-            byProtocol[proto] = btc;
-          } catch (e) { console.warn('Balance fetch error:', e); }
-        }
+            return { proto, btc: await adapter.getBtcBalance() };
+          } catch (e) {
+            console.warn('Balance fetch error:', e);
+            return null;
+          }
+        })
+      );
+      for (const r of balanceResults) {
+        if (!r) continue;
+        totalConfirmed += r.btc.confirmed;
+        totalUnconfirmed += r.btc.unconfirmed;
+        byProtocol[r.proto] = r.btc;
       }
       const balance = {
         vanilla: { settled: totalConfirmed, future: totalConfirmed + totalUnconfirmed, spendable: totalConfirmed },
@@ -396,11 +406,13 @@ export default function DashboardScreen({ navigation }: Props) {
       const adapterMap: Array<[any, 'RGB' | 'SPARK' | 'ARKADE']> = [
         [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
       ];
-      for (const [adapter, proto] of adapterMap) {
-        if (adapter?.isConnected()) {
+      // Same treatment for assets — fetch each adapter's list concurrently.
+      const assetResults = await Promise.all(
+        adapterMap.map(async ([adapter, proto]) => {
+          if (!adapter?.isConnected()) return [] as any[];
           try {
             const unifiedAssets = await adapter.listAssets();
-            const mapped = unifiedAssets
+            return unifiedAssets
               .filter((a: any) => a.id !== 'BTC')
               .map((a: any) => {
                 const isUsdb = isUsdbTokenAddress(a.id);
@@ -424,10 +436,13 @@ export default function DashboardScreen({ navigation }: Props) {
                   },
                 };
               });
-            assets.push(...mapped);
-          } catch (e) { console.warn('Asset fetch error:', e); }
-        }
-      }
+          } catch (e) {
+            console.warn('Asset fetch error:', e);
+            return [] as any[];
+          }
+        })
+      );
+      assets = assetResults.flat();
       setRgbAssetsState(assets);
 
       const assetRecords = assets.map((asset: any) => ({
