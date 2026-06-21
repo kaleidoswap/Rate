@@ -106,6 +106,17 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
   }, [actions.length, arcStart, arcEnd]);
   const angles = useMemo(() => positions.map((p) => p.angle), [positions]);
 
+  // Small shortcut legend shown above the open menu (when no petal is hovered),
+  // so the gesture vocabulary is discoverable without cluttering the resting bar.
+  const shortcutHints = useMemo(() => {
+    const labelFor = (k?: string) => actions.find((a) => a.key === k)?.label;
+    return [
+      { gesture: 'Double-tap', label: labelFor(doubleTapKey) },
+      { gesture: 'Hold', label: labelFor(holdKey) },
+      { gesture: 'Slide', label: 'pick' },
+    ].filter((h) => !!h.label) as { gesture: string; label: string }[];
+  }, [actions, doubleTapKey, holdKey]);
+
   // Which petal does the finger point at? Direction-based (distance along the ray
   // doesn't matter), with a dead zone near the center that selects nothing.
   const pickIndex = (dx: number, dy: number) => {
@@ -287,10 +298,21 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
             </Petal>
           ))}
           <Animated.View style={[styles.tooltipWrap, tooltipStyle]} pointerEvents="none">
-            {hovered >= 0 && (
+            {hovered >= 0 ? (
               <View style={styles.tooltip}>
                 <Text style={styles.tooltipText}>{actions[hovered].label}</Text>
               </View>
+            ) : (
+              shortcutHints.length > 0 && (
+                <View style={styles.legend}>
+                  {shortcutHints.map((h) => (
+                    <Text key={h.gesture} style={styles.legendText}>
+                      <Text style={styles.legendGesture}>{h.gesture}</Text>
+                      {`  ${h.label}`}
+                    </Text>
+                  ))}
+                </View>
+              )
             )}
           </Animated.View>
         </>
@@ -401,6 +423,24 @@ const styles = StyleSheet.create({
   tooltipText: {
     color: theme.colors.text.primary,
     fontSize: 13,
+    fontWeight: theme.typography.fontWeight.semibold,
+  },
+  legend: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+    gap: 3,
+    alignItems: 'center',
+    backgroundColor: 'rgba(18,20,30,0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  legendText: {
+    color: theme.colors.text.secondary,
+    fontSize: 11,
+  },
+  legendGesture: {
+    color: theme.colors.text.primary,
     fontWeight: theme.typography.fontWeight.semibold,
   },
 });

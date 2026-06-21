@@ -180,7 +180,7 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
 
   const centerFab = (
     <OrbitFAB
-      renderCenterIcon={() => <BrandMark size={44} />}
+      renderCenterIcon={() => <BrandMark size={48} />}
       actions={orbitActions}
       // Even fan across the top now that there are three actions.
       arcStart={150}
@@ -247,8 +247,8 @@ const islandStyles = StyleSheet.create({
     bottom: 0,
     alignItems: 'center',
     paddingHorizontal: 16,
-    // Extra room above the island so the FAB can sit a touch higher and overflow.
-    paddingTop: 32,
+    // Headroom for the orbit petals (which also render beyond via overflow).
+    paddingTop: 16,
   },
   // Fades from transparent (top) to the page background (bottom), beginning the
   // fade ABOVE the island so content reads as scrolling out behind the nav.
@@ -303,12 +303,15 @@ const islandStyles = StyleSheet.create({
   },
   micWrap: {
     position: 'absolute',
-    // Raised: FAB top sits near the outer's top edge, giving more overflow above
-    // the island so the center button reads as lifted and clearly centered.
-    top: 12,
+    // Span the island pill (top = outer paddingTop, height = pill height: items
+    // 58 + paddingVertical 6·2) and center within it, so the K mark sits level
+    // with the tab icons instead of floating above them.
+    top: 16,
+    height: 70,
     left: 0,
     right: 0,
     alignItems: 'center',
+    justifyContent: 'center',
     // Let the orbit petals + scrim render beyond the bar's bounds.
     overflow: 'visible',
   },
@@ -333,10 +336,9 @@ const fixedStyles = StyleSheet.create({
   },
   micWrap: {
     position: 'absolute',
-    // Sit the FAB level with the tab icons rather than floating above them: a
-    // larger top offset drops its centre into the row so it no longer reads as
-    // riding too high above the (solid) non-dashboard bar.
-    top: 14,
+    // Span the tab row (top = paddingTop, height = row) and center within it, so
+    // the K mark sits level with the other tab icons.
+    top: 4,
     height: 58,
     left: 0,
     right: 0,
