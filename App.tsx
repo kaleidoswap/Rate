@@ -10,7 +10,7 @@ import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { View, Text, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView, DeviceEventEmitter } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { ThemeProvider } from '@react-navigation/native';
@@ -584,26 +584,27 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <Provider store={store}>
-          <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
-            <QVACEnabledSync />
-            <ChatNotifications />
-            <AppThemeProvider>
-              <KaleidoThemeProvider>
-                <ThemeProvider value={navigationTheme}>
-                  <StatusBar style="light" backgroundColor="transparent" translucent={true} />
-                  <AppNavigator />
-                  <ToastContainer />
-                </ThemeProvider>
-              </KaleidoThemeProvider>
-            </AppThemeProvider>
-          </PersistGate>
-        </Provider>
-        {!introDone && <BrandIntro onFinish={() => setIntroDone(true)} />}
-      </ErrorBoundary>
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <Provider store={store}>
+            <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
+              <QVACEnabledSync />
+              <ChatNotifications />
+              <AppThemeProvider>
+                <KaleidoThemeProvider>
+                  <ThemeProvider value={navigationTheme}>
+                    <StatusBar style="light" backgroundColor="transparent" translucent={true} />
+                    <AppNavigator />
+                    <ToastContainer />
+                  </ThemeProvider>
+                </KaleidoThemeProvider>
+              </AppThemeProvider>
+            </PersistGate>
+          </Provider>
+          {!introDone && <BrandIntro onFinish={() => setIntroDone(true)} />}
+        </ErrorBoundary>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
-
 
