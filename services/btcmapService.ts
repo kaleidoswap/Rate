@@ -15,14 +15,17 @@
 // supports `around:`. Same dataset BTC Map shows, just filtered by distance.
 
 import * as Location from 'expo-location';
+import { Directory, File, Paths } from 'expo-file-system';
 
 /** KaleidoSwap home base (Lugano) — only used when we can't get a real fix. */
 export const FALLBACK_COORDS: Coords = { lat: 46.00607, lng: 8.95201 };
 
-const OVERPASS_ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-];
+// BTC Map's own element dump. A single reliable GET (CDN-backed), filtered
+// client-side by distance — the same approach kaleido-mind's host adapter uses.
+// We previously POST'd live Overpass queries, which are rate-limited and flaky
+// from a device, so they frequently threw and dropped us to the offline list.
+const BTCMAP_ELEMENTS_URL = 'https://api.btcmap.org/v2/elements';
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // BTC Map data changes slowly — cache a day.
 
 const DEFAULT_RADIUS_M = 5000; // 5 km — a sensible "near me" walking/transit radius
 const MAX_RADIUS_M = 50000;
@@ -198,41 +201,103 @@ function buildAddress(tags: Record<string, string>): string | undefined {
   return addr.length > 0 ? addr : undefined;
 }
 
-interface OverpassElement {
-  type: 'node' | 'way' | 'relation';
-  id: number;
-  lat?: number;
-  lon?: number;
-  center?: { lat: number; lon: number };
-  tags?: Record<string, string>;
+/** Subset of the BTC Map v2 element schema we consume. */
+interface BtcMapElement {
+  id: string;
+  osm_json?: {
+    type?: 'node' | 'way' | 'relation';
+    id?: number;
+    lat?: number;
+    lon?: number;
+    bounds?: { minlat: number; minlon: number; maxlat: number; maxlon: number };
+    tags?: Record<string, string>;
+  };
+  deleted_at?: string;
 }
 
-async function runOverpass(query: string): Promise<OverpassElement[]> {
-  let lastErr: unknown;
-  for (const endpoint of OVERPASS_ENDPOINTS) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-      if (!res.ok) {
-        lastErr = new Error(`Overpass ${endpoint} → HTTP ${res.status}`);
-        continue;
+interface ElementsCache {
+  fetchedAt: number;
+  elements: BtcMapElement[];
+}
+
+// In-memory cache for the session; the disk cache survives restarts (24h TTL).
+let memElements: BtcMapElement[] | null = null;
+let memElementsAt = 0;
+
+function cacheFile(): File {
+  const dir = new Directory(Paths.cache, 'kaleido');
+  if (!dir.exists) dir.create({ intermediates: true });
+  return new File(dir, 'btcmap-elements.json');
+}
+
+/**
+ * Load the BTC Map element dump — from memory, then disk (if < 24h old), then a
+ * live fetch. Throws only when there is no usable cache AND the network fetch
+ * fails, so callers can fall back gracefully.
+ */
+async function loadElements(): Promise<BtcMapElement[]> {
+  if (memElements && Date.now() - memElementsAt < CACHE_TTL_MS) return memElements;
+
+  const file = cacheFile();
+  try {
+    if (file.exists) {
+      const cached = JSON.parse(file.textSync()) as ElementsCache;
+      if (cached && Array.isArray(cached.elements) && Date.now() - cached.fetchedAt < CACHE_TTL_MS) {
+        memElements = cached.elements;
+        memElementsAt = cached.fetchedAt;
+        return cached.elements;
       }
-      const json = await res.json();
-      return (json.elements ?? []) as OverpassElement[];
-    } catch (err) {
-      clearTimeout(timer);
-      lastErr = err;
-      // try the next mirror
     }
+  } catch {
+    // corrupt cache — ignore and refetch
   }
-  throw lastErr ?? new Error('All Overpass endpoints failed');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS * 2);
+  let live: BtcMapElement[];
+  try {
+    const res = await fetch(BTCMAP_ELEMENTS_URL, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`BTC Map → HTTP ${res.status}`);
+    const data = (await res.json()) as BtcMapElement[];
+    live = data.filter((e) => !e.deleted_at);
+  } catch (err) {
+    clearTimeout(timer);
+    // Stale-but-present cache beats a hard failure — serve it if we have one.
+    if (memElements) return memElements;
+    try {
+      if (file.exists) {
+        const stale = JSON.parse(file.textSync()) as ElementsCache;
+        if (stale && Array.isArray(stale.elements)) return stale.elements;
+      }
+    } catch {
+      /* no usable fallback */
+    }
+    throw err;
+  }
+
+  memElements = live;
+  memElementsAt = Date.now();
+  try {
+    file.write(JSON.stringify({ fetchedAt: memElementsAt, elements: live }));
+  } catch {
+    // disk cache is best-effort
+  }
+  return live;
+}
+
+/** A point for an element — its own lat/lon, or the centre of its bbox. */
+function elementCenter(el: BtcMapElement): Coords | null {
+  const j = el.osm_json;
+  if (!j) return null;
+  if (j.lat != null && j.lon != null) return { lat: j.lat, lng: j.lon };
+  if (j.bounds) {
+    return {
+      lat: (j.bounds.minlat + j.bounds.maxlat) / 2,
+      lng: (j.bounds.minlon + j.bounds.maxlon) / 2,
+    };
+  }
+  return null;
 }
 
 export interface FindNearbyParams {
@@ -246,9 +311,9 @@ export interface FindNearbyParams {
 }
 
 /**
- * Find Bitcoin-accepting merchants near `center` from the BTC Map (OSM) dataset,
- * sorted nearest-first. Throws if every Overpass mirror is unreachable — callers
- * should catch and fall back (e.g. to an offline list) for graceful degradation.
+ * Find Bitcoin-accepting merchants near `center` from the BTC Map dataset,
+ * sorted nearest-first. Throws if the element dump can't be loaded (no cache +
+ * network failure) — callers should catch and fall back for graceful degradation.
  */
 export async function findNearbyMerchants({
   center,
@@ -258,44 +323,36 @@ export async function findNearbyMerchants({
   limit = 10,
 }: FindNearbyParams): Promise<BtcMapMerchant[]> {
   const radius = Math.max(250, Math.min(MAX_RADIUS_M, Math.round(radiusMeters)));
-  const lat = center.lat;
-  const lon = center.lng;
 
-  // Union of the BTC Map payment tags, named elements only, with way/relation
-  // centroids so non-point venues still get coordinates.
-  const overpassQuery = `[out:json][timeout:25];
-(
-  nwr["currency:XBT"="yes"]["name"](around:${radius},${lat},${lon});
-  nwr["payment:lightning"="yes"]["name"](around:${radius},${lat},${lon});
-  nwr["payment:onchain"="yes"]["name"](around:${radius},${lat},${lon});
-);
-out center tags 200;`;
-
-  const elements = await runOverpass(overpassQuery);
+  const elements = await loadElements();
 
   const merchants: BtcMapMerchant[] = elements
     .map((el) => {
-      const elat = el.lat ?? el.center?.lat;
-      const elon = el.lon ?? el.center?.lon;
-      const tags = el.tags ?? {};
-      if (elat == null || elon == null || !tags.name) return null;
+      const point = elementCenter(el);
+      const tags = el.osm_json?.tags ?? {};
+      if (!point || !tags.name) return null;
+
+      const distance = distanceMeters(center, point);
+      if (distance > radius) return null;
 
       const { category: cat, icon } = classify(tags);
       const acceptsLn =
         tags['payment:lightning'] === 'yes' || tags['payment:lightning_contactless'] === 'yes';
       const acceptsOnchain =
-        tags['payment:onchain'] === 'yes' || tags['currency:XBT'] === 'yes';
+        tags['payment:onchain'] === 'yes' ||
+        tags['payment:bitcoin'] === 'yes' ||
+        tags['currency:XBT'] === 'yes';
 
       return {
-        id: el.id,
-        osm_type: el.type,
+        id: el.osm_json?.id ?? 0,
+        osm_type: el.osm_json?.type ?? 'node',
         name: tags.name,
         address: buildAddress(tags),
         category: cat,
         icon,
-        lat: elat,
-        lon: elon,
-        distance_m: distanceMeters(center, { lat: elat, lng: elon }),
+        lat: point.lat,
+        lon: point.lng,
+        distance_m: distance,
         phone: tags.phone ?? tags['contact:phone'],
         website: tags.website ?? tags['contact:website'],
         opening_hours: tags.opening_hours,
