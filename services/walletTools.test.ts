@@ -231,6 +231,19 @@ describe('resolve_contact', () => {
     );
   });
 
+  it('matches a contact despite trailing punctuation ("Walter?")', async () => {
+    setStore({ contacts: [{ name: 'Walter', lightning_address: 'walter@ln.tips' }] });
+    const r: any = await source().execute('resolve_contact', { name: 'Walter?' });
+    expect(r.ln_address).toBe('walter@ln.tips');
+  });
+
+  it('lists the real contacts when the named one is missing (so the agent can recover)', async () => {
+    setStore({ contacts: [{ name: 'Walter' }, { name: 'Vincenzo' }] });
+    await expect(source().execute('send_payment', { to: 'send', amount_sats: 1 })).rejects.toThrow(
+      'Your contacts are: Walter, Vincenzo.',
+    );
+  });
+
   it('list_contacts returns names + Lightning availability so the agent can ask', async () => {
     setStore({ contacts: [{ name: 'Alice', lightning_address: 'alice@ln.tips' }, { name: 'Bob' }] });
     const r: any = await source().execute('list_contacts', {});

@@ -80,10 +80,25 @@ function contacts(): any[] {
   log('contacts', { local: local.length, nostr: nostr.length });
   return [...local, ...nostr];
 }
+/** Lowercase + strip punctuation so "Walter?" / "walter." match "Walter". */
+const normName = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim();
 function findContact(name: string): any | undefined {
-  const q = name.trim().toLowerCase();
+  const q = normName(name);
+  if (!q) return undefined;
   const list = contacts();
-  return list.find((c) => c?.name?.toLowerCase() === q) ?? list.find((c) => c?.name?.toLowerCase().includes(q));
+  return (
+    list.find((c) => normName(c?.name) === q) ??
+    list.find((c) => {
+      const n = normName(c?.name);
+      return !!n && (n.includes(q) || q.includes(n));
+    })
+  );
+}
+/** "Not found" error that lists the real contacts so the agent can self-correct. */
+function noContactError(name: string): Error {
+  const names = contacts().map((c) => c?.name).filter(Boolean);
+  const hint = names.length ? ` Your contacts are: ${names.join(', ')}.` : ' You have no saved contacts.';
+  return new Error(`No contact named "${name}".${hint}`);
 }
 /**
  * A contact's Lightning address — the cached `lud16`, or one fetched live from
@@ -220,12 +235,12 @@ const HANDLERS: Record<string, WalletHandler> = {
     };
   },
   resolve_contact: async ({ name }) => {
-    const q = String(name).trim().toLowerCase();
+    const q = normName(name);
     const list = contacts();
     log('resolve_contact', { name, total: list.length });
-    const exact = list.filter((c) => c?.name?.toLowerCase() === q);
-    const matches = exact.length ? exact : list.filter((c) => c?.name?.toLowerCase().includes(q));
-    if (matches.length === 0) throw new Error(`No contact named "${name}".`);
+    const exact = list.filter((c) => normName(c?.name) === q);
+    const matches = exact.length ? exact : list.filter((c) => q && normName(c?.name).includes(q));
+    if (matches.length === 0) throw noContactError(String(name));
     // Disambiguate duplicates — never guess who to pay.
     if (matches.length > 1) {
       throw new Error(`There are ${matches.length} contacts matching "${name}" (${matches.map((c) => c.name).join(', ')}) — which one?`);
@@ -256,7 +271,7 @@ const HANDLERS: Record<string, WalletHandler> = {
     // Lightning address live when it wasn't pre-cached (the voice path).
     if (target && !looksLikeDestination(target)) {
       const c = findContact(target);
-      if (!c) throw new Error(`No contact named "${to}".`);
+      if (!c) throw noContactError(String(to));
       const ln = await contactLnAddress(c);
       if (!ln) throw new Error(`"${c.name ?? to}" doesn't have a Lightning address set.`);
       target = ln;
