@@ -71,6 +71,8 @@ interface VoiceInputProps {
 export interface VoiceInputRef {
   startListening: () => void;
   stopListening: () => void;
+  /** Stop the mic and discard the clip — does NOT transcribe or fire onResult. */
+  cancelListening: () => void;
 }
 
 const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
@@ -83,6 +85,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
     useImperativeHandle(ref, () => ({
       startListening: () => startRecording(),
       stopListening: () => stopRecording(),
+      cancelListening: () => cancelRecording(),
     }));
 
     // Release the app-wide native recorder if this instance still owns it when it
@@ -157,6 +160,22 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         startingRef.current = false;
         recorderStarting = false;
       }
+    };
+
+    // Stop the mic and DISCARD the clip — no transcription, no onResult. Used by
+    // the voice overlay's Pause so a captured utterance is dropped, not sent.
+    const cancelRecording = async () => {
+      if (!isRecordingRef.current || !recorderRef.current) return;
+      const recording = recorderRef.current;
+      try {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        recorderRef.current = null;
+        await recording.stop();
+        if (activeRecording === recording) activeRecording = null;
+        try { recording.release(); } catch { /* already freed */ }
+        await setAudioModeAsync({ allowsRecording: false });
+      } catch { /* best-effort teardown */ }
     };
 
     const stopRecording = async () => {

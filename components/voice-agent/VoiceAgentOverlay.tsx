@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Clipboard,
+  Linking,
   Modal,
   Pressable,
   ScrollView,
@@ -26,6 +27,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 import { MindAvatar } from '../MindMark';
 import { PayableCard } from '../chat/PayableCard';
+import FunctionResultCard from '../chat/FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
@@ -40,6 +42,31 @@ interface Bubble {
   text: string;
   /** The model's chain-of-thought for this turn (shown on demand). */
   thinking?: string;
+  /** A structured tool result (e.g. merchants) rendered as a rich card instead
+   *  of having the model read the raw data aloud. */
+  functionCalled?: string;
+  functionResult?: any;
+}
+
+/** Tool results that get a structured card (and a short spoken summary) in voice. */
+const MERCHANT_TOOLS = ['find_merchant_locations', 'get_merchant_info'];
+
+/**
+ * If a turn called a merchant tool, return its structured result plus a SHORT
+ * line to speak/show — so the model doesn't read the whole list aloud; the card
+ * carries the detail instead.
+ */
+function merchantCardFrom(res: any): { name: string; result: any; spoken: string } | null {
+  const calls = res?.toolCalls;
+  if (!Array.isArray(calls)) return null;
+  const call = [...calls].reverse().find((c: any) => MERCHANT_TOOLS.includes(c?.name));
+  if (!call) return null;
+  const n = call.result?.merchants?.length ?? 0;
+  const spoken =
+    n > 0
+      ? `Found ${n} Bitcoin-accepting merchant${n === 1 ? '' : 's'} nearby — they're on the card below.`
+      : "I couldn't find any Bitcoin-accepting merchants nearby right now.";
+  return { name: call.name, result: call.result, spoken };
 }
 interface ConfirmState {
   call: { name: string; arguments: Record<string, unknown> };
@@ -215,8 +242,16 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           onConfirm: (call) =>
             new Promise((resolve) => setConfirm({ call, resolve })),
         });
-        const finalText = (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
-        patchBubble(assistantId, { text: finalText });
+        // Merchant results → structured card + short spoken summary (no reading
+        // the raw list aloud); everything else speaks the model's reply.
+        const merchant = merchantCardFrom(res);
+        const finalText = merchant
+          ? merchant.spoken
+          : (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
+        patchBubble(assistantId, {
+          text: finalText,
+          ...(merchant ? { functionCalled: merchant.name, functionResult: merchant.result } : {}),
+        });
         setActiveId(null);
         scrollToEnd();
         // Speak the reply with on-device QVAC TTS (falls back to the system
@@ -302,8 +337,14 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         },
         onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
       });
-      const finalText = (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
-      patchBubble(assistantId, { text: finalText });
+      const merchant = merchantCardFrom(res);
+      const finalText = merchant
+        ? merchant.spoken
+        : (res.text?.trim() || streamed.trim() || NO_ANSWER_FALLBACK);
+      patchBubble(assistantId, {
+        text: finalText,
+        ...(merchant ? { functionCalled: merchant.name, functionResult: merchant.result } : {}),
+      });
       scrollToEnd();
       return finalText;
     } finally {
@@ -352,9 +393,28 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   const pauseVoice = () => {
     Haptics.selectionAsync().catch(() => {});
     void stopSpeak();
-    voiceRef.current?.stopListening?.();
+    // Cancel (discard) the mic clip rather than stop — a paused utterance must
+    // NOT be transcribed and sent as a turn.
+    voiceRef.current?.cancelListening?.();
     if (handsFree) stopHandsFree();
     setPhase('idle');
+  };
+
+  // Copy the whole voice conversation (each turn's reasoning + answer) for debug.
+  const copyFullChat = () => {
+    const transcript = bubbles
+      .map((b) => {
+        const who = b.role === 'user' ? 'You' : 'KaleidoMind';
+        const body = b.role === 'user'
+          ? b.text.trim()
+          : [b.thinking?.trim() ? `Thinking:\n${b.thinking.trim()}` : '', b.text.trim()].filter(Boolean).join('\n\n');
+        return body ? `${who}:\n${body}` : '';
+      })
+      .filter(Boolean)
+      .join('\n\n———\n\n');
+    if (!transcript) return;
+    Clipboard.setString(transcript);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
   };
 
   // Show the pause control whenever the assistant is actively doing something.
@@ -406,9 +466,16 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               <MindAvatar size={28} />
               <Text style={styles.headerTitle}>KaleidoMind</Text>
             </View>
-            <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
-              <Ionicons name="close" size={20} color={theme.colors.text.secondary} />
-            </Pressable>
+            <View style={styles.headerActions}>
+              {bubbles.length > 0 && (
+                <Pressable onPress={copyFullChat} hitSlop={10} style={styles.closeBtn} accessibilityLabel="Copy full chat">
+                  <Ionicons name="copy-outline" size={18} color={theme.colors.text.secondary} />
+                </Pressable>
+              )}
+              <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
+                <Ionicons name="close" size={20} color={theme.colors.text.secondary} />
+              </Pressable>
+            </View>
           </View>
 
           {/* Conversation */}
@@ -502,6 +569,16 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                       </>
                     );
                   })()}
+                  {/* Structured tool result (e.g. merchants) as a rich card, so the
+                      model never has to read the raw data aloud. */}
+                  {b.functionResult && (
+                    <FunctionResultCard
+                      functionCalled={b.functionCalled ?? ''}
+                      functionResult={b.functionResult}
+                      onCopy={copyText}
+                      onOpenLink={(url) => Linking.openURL(url).catch(() => {})}
+                    />
+                  )}
                   {/* Discoverable copy affordance on finished assistant replies. */}
                   {b.role === 'assistant' && hasText && !isActive && (
                     <Pressable onPress={() => copyText(b.text)} style={styles.copyBtn} hitSlop={8}>
@@ -674,6 +751,7 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border.light,
   },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   headerTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   headerTitle: { fontSize: 18, fontWeight: '700', color: theme.colors.text.primary },
   closeBtn: {
