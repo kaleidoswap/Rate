@@ -99,8 +99,9 @@ interface Channel {
 
 /**
  * A time-of-day greeting with a little variety so it changes between opens.
- * `name` (the user's Nostr name, when connected) is appended when present;
- * otherwise the bare phrase is used so the wallet works without Nostr.
+ * `name` (the user's Nostr name, when connected) is used when present; when no
+ * Nostr profile name is set we fall back to "anon" so the greeting still reads
+ * personally (the wallet stays usable without Nostr).
  */
 function buildGreeting(name?: string): string {
   const hour = new Date().getHours();
@@ -111,7 +112,7 @@ function buildGreeting(name?: string): string {
     : hour < 21 ? ['Good evening', 'Evening', 'Welcome back']
     : ['Good night', 'Winding down', 'Hi'];
   const phrase = pool[Math.floor(Math.random() * pool.length)];
-  return name ? `${phrase}, ${name}` : phrase;
+  return `${phrase}, ${name || 'anon'}`;
 }
 
 export default function DashboardScreen({ navigation }: Props) {
