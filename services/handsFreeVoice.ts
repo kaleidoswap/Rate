@@ -44,12 +44,12 @@ export interface HandsFreeController {
 export async function startHandsFreeVoice(handlers: HandsFreeHandlers): Promise<HandsFreeController> {
   const qvac = QVACService.getInstance();
 
-  // The session needs the Whisper model resident.
+  // The session needs the Whisper model resident WITH the Silero VAD submodel
+  // (emitVadEvents requires it). initializeWhisper reloads if a prior one-shot
+  // load left VAD off; openVoiceSession below also re-checks defensively.
+  await qvac.initializeWhisper({ withVad: true });
   if (qvac.getState().whisperStatus !== 'ready') {
-    await qvac.initializeWhisper();
-    if (qvac.getState().whisperStatus !== 'ready') {
-      throw new Error(qvac.getState().error || 'voice model failed to load');
-    }
+    throw new Error(qvac.getState().error || 'voice model failed to load');
   }
 
   const session = await qvac.openVoiceSession();

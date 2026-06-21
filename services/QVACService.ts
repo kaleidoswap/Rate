@@ -13,6 +13,7 @@ import {
   embed,
   TTS_EN_SUPERTONIC_Q4_0,
   EMBEDDINGGEMMA_300M_Q4_0,
+  VAD_SILERO_5_1_2,
 } from '@qvac/sdk';
 import { NativeModules, Platform } from 'react-native';
 import { File, Directory, Paths } from 'expo-file-system';
@@ -49,7 +50,9 @@ import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 const LOCAL_LLM_CONFIG = {
   device: 'cpu',
   gpu_layers: 0,
-  ctx_size: 2048,
+  // 4096 so the agentic prompt (system + tools + skills + a little history) fits
+  // even on the CPU fallback path; 2048 overflowed ("prompt exceeds context").
+  ctx_size: 4096,
   tools: true,
   verbosity: VERBOSITY.ERROR,
 } as const;
@@ -63,6 +66,13 @@ const LOCAL_LLM_CONFIG_GPU = {
   ...LOCAL_LLM_CONFIG,
   device: 'gpu',
   gpu_layers: 99, // offload all layers; llamacpp clamps to the model's count
+  // 4096 is the proven-stable Metal window on-device. Larger values (6144/8192)
+  // let big agentic prompts fit, BUT can hard-abort the Bare worklet when Metal
+  // can't allocate the KV cache — an uncatchable native crash, observed right
+  // after a voice turn starts generating. So we stay at 4096: a fresh request
+  // (e.g. "places to eat in Turin") fits, and the rare long-conversation overflow
+  // is surfaced as a friendly "clear the chat" message instead of crashing. Heavy
+  // prompts that still don't fit should run via Desktop delegation (16k ctx).
   ctx_size: 4096,
 } as const;
 
@@ -187,6 +197,11 @@ class QVACService {
 
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
+  // True when the resident Whisper model was loaded with the Silero VAD submodel,
+  // which the hands-free streaming session (emitVadEvents) requires. A plain
+  // one-shot Whisper load has no VAD, so we reload before opening a voice session.
+  private whisperHasVad = false;
+  private vadModelPath: string | null = null;
   private ttsModelId: string | null = null;
   private embedModelId: string | null = null;
   private embedLoadPromise: Promise<string> | null = null;
@@ -762,7 +777,29 @@ class QVACService {
 
   // --- Whisper lifecycle ---
 
-  async initializeWhisper(): Promise<void> {
+  /**
+   * Download the Silero VAD weights over HTTPS (registry:// crashes the iOS
+   * worklet, so we mirror the same local-file approach used for every other
+   * model) and return the on-disk path. The hands-free streaming session needs
+   * this submodel loaded alongside Whisper.
+   */
+  private async ensureVadModel(): Promise<string> {
+    if (this.vadModelPath) return this.vadModelPath;
+    const url = hfUrlFromDescriptor(VAD_SILERO_5_1_2);
+    if (!url) throw new Error('VAD model has no downloadable URL');
+    const name = String((VAD_SILERO_5_1_2 as any).registryPath).split('/').pop() || 'ggml-silero-v5.1.2.bin';
+    const size = Number((VAD_SILERO_5_1_2 as any).expectedSize) || 885098; // exact size of ggml-silero-v5.1.2.bin
+    const path = await this.ensureLocalModel({ url, name, size }, () => {});
+    this.vadModelPath = path;
+    return path;
+  }
+
+  /**
+   * @param withVad load the Silero VAD submodel too (required for the hands-free
+   *   conversation session; the one-shot push-to-talk path doesn't need it).
+   */
+  async initializeWhisper(opts: { withVad?: boolean } = {}): Promise<void> {
+    const withVad = !!opts.withVad;
     // Hard gate: Whisper also runs in the Bare worklet — never start it unless
     // on-device AI is enabled and the runtime can actually run here.
     if (this.workletBlocked()) {
@@ -770,7 +807,10 @@ class QVACService {
       return;
     }
     if (this.state.whisperStatus === 'ready' || this.state.whisperStatus === 'downloading' || this.state.whisperStatus === 'loading') {
-      return;
+      // Already (being) loaded. If the caller needs VAD but the resident model
+      // has none, reload it with the VAD submodel; otherwise nothing to do.
+      if (!(withVad && this.state.whisperStatus === 'ready' && !this.whisperHasVad)) return;
+      await this.unloadWhisper().catch(() => {});
     }
 
     try {
@@ -806,15 +846,33 @@ class QVACService {
       // of being force-decoded as English → empty. The QVAC whisper handler
       // rejects "auto"/detect_language for these tiny models, so we always pass
       // a concrete code and fall back to 'en' if the chosen one won't load.
+      // For the hands-free conversation session, Whisper must be loaded with the
+      // Silero VAD submodel — otherwise transcribeStream({ emitVadEvents }) throws
+      // "VAD model name is required for Whisper transcription".
+      let vadModelSrc: string | undefined;
+      if (withVad) {
+        try {
+          vadModelSrc = await this.ensureVadModel();
+        } catch (vadErr) {
+          console.warn('[QVAC] VAD model download failed; hands-free unavailable:',
+            vadErr instanceof Error ? vadErr.message : String(vadErr));
+        }
+      }
+
       const primaryLang = stt.lang === 'en' ? 'en' : deviceWhisperLanguage();
       const loadWhisper = (language: string) =>
         loadModel({
           modelSrc: modelPath,
           modelType: 'whispercpp-transcription',
-          modelConfig: { language, strategy: 'greedy', audio_format: 's16le' } as any,
+          modelConfig: {
+            language,
+            strategy: 'greedy',
+            audio_format: 's16le',
+            ...(vadModelSrc ? { vadModelSrc } : {}),
+          } as any,
         });
 
-      console.log('[QVAC] Whisper: loadModel start', stt.id, 'lang=' + primaryLang, modelPath);
+      console.log('[QVAC] Whisper: loadModel start', stt.id, 'lang=' + primaryLang, 'vad=' + !!vadModelSrc, modelPath);
       this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100 });
 
       try {
@@ -826,6 +884,7 @@ class QVACService {
         this.whisperModelId = await loadWhisper('en');
       }
 
+      this.whisperHasVad = !!vadModelSrc;
       this.setState({ whisperStatus: 'ready' });
       console.log('QVAC Whisper ready:', this.whisperModelId);
     } catch (err) {
@@ -928,7 +987,12 @@ class QVACService {
    * on-device even when inference is delegated).
    */
   async runProviderTurn(
-    input: TurnInput & { onThinking?: (token: string) => void; temperature?: number; maxTokens?: number },
+    input: TurnInput & {
+      onThinking?: (token: string) => void;
+      onStats?: (stats: import('@kaleidorg/mind/qvac').QvacTurnStats) => void;
+      temperature?: number;
+      maxTokens?: number;
+    },
   ): Promise<TurnOutput> {
     // The shared provider runs completion + streams tokens (contentDelta →
     // onToken, thinkingDelta → onThinking) + parses the final frame. It reads the
@@ -959,7 +1023,21 @@ class QVACService {
    */
   async openVoiceSession() {
     if (this.workletBlocked()) throw new Error('on-device AI unavailable on this device');
+    // The streaming session uses VAD, so make sure Whisper was loaded with the
+    // Silero submodel (reloads it if a one-shot load left VAD off).
+    if (this.whisperStatusReady() && this.whisperHasVad) {
+      // already VAD-capable
+    } else {
+      await this.initializeWhisper({ withVad: true });
+    }
+    if (!this.whisperHasVad) {
+      throw new Error('Hands-free needs the voice-activity model, which failed to load. Try again or use the tap-to-talk mic.');
+    }
     return this.mindVoice.openVoiceSession();
+  }
+
+  private whisperStatusReady(): boolean {
+    return this.state.whisperStatus === 'ready' && !!this.whisperModelId;
   }
 
   // --- Text-to-speech (on-device, QVAC SUPERTONIC-2) ---
@@ -1099,6 +1177,7 @@ class QVACService {
     if (this.whisperModelId) {
       await unloadModel({ modelId: this.whisperModelId, clearStorage: false });
       this.whisperModelId = null;
+      this.whisperHasVad = false;
       this.setState({ whisperStatus: 'not_downloaded' });
     }
   }
