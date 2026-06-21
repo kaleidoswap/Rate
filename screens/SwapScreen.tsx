@@ -835,7 +835,18 @@ export default function SwapScreen({ navigation }: Props) {
         <View style={styles.swapInputRow}>
           <TextInput
             value={swapState.fromAmount}
-            onChangeText={(text) => dispatch(setFromAmount(text))}
+            onChangeText={(text) => {
+              // Limit the quote input to the available balance for the selected
+              // from-asset/network (same idea as the extension's clamp-to-max):
+              // the user can't request a quote for more than they hold.
+              const max = assetByTicker(swapState.fromAsset)?.balance ?? 0;
+              const n = parseFloat(text.replace(/,/g, ''));
+              if (max > 0 && Number.isFinite(n) && n > max) {
+                dispatch(setFromAmount(String(max)));
+              } else {
+                dispatch(setFromAmount(text));
+              }
+            }}
             placeholder="0"
             placeholderTextColor={theme.colors.text.tertiary}
             keyboardType="decimal-pad"
@@ -860,13 +871,16 @@ export default function SwapScreen({ navigation }: Props) {
         </View>
       </View>
 
-      {/* Swap Arrow Overlay */}
-      <View style={styles.swapArrowContainer}>
+      {/* Direction flip — a card-colored circle sitting in the seam between the
+          two cards (mirrors the extension's swap_vert button). */}
+      <View style={styles.swapArrowContainer} pointerEvents="box-none">
         <TouchableOpacity
           style={styles.swapArrowButton}
           onPress={() => dispatch(swapAssets())}
+          activeOpacity={0.8}
+          accessibilityLabel="Flip swap direction"
         >
-          <Ionicons name="arrow-down" size={24} color={theme.colors.primary[500]} />
+          <Ionicons name="swap-vertical" size={22} color={theme.colors.primary[500]} />
         </TouchableOpacity>
       </View>
 
@@ -1332,8 +1346,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface.primary,
     borderRadius: theme.borderRadius['2xl'],
     padding: theme.spacing[4],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
   },
 
   swapInputHeader: {
@@ -1429,24 +1441,23 @@ const styles = StyleSheet.create({
     color: theme.colors.text.primary,
   },
 
+  // In-flow, centered in the seam between the two cards (overlapping both via
+  // negative margins) so it always sits at the true divider — no fragile %.
   swapArrowContainer: {
-    position: 'absolute',
-    left: '50%',
-    top: '38%',
-    marginLeft: -20,
+    alignSelf: 'center',
+    marginTop: -18,
+    marginBottom: -18,
     zIndex: 10,
   },
 
   swapArrowButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: theme.colors.background.primary,
-    borderWidth: 4,
-    borderColor: theme.colors.background.secondary,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: theme.colors.surface.elevated,
     alignItems: 'center',
     justifyContent: 'center',
-    ...theme.shadows.sm,
+    ...theme.shadows.md,
   },
 
   quoteInfoContainer: {
@@ -1475,7 +1486,6 @@ const styles = StyleSheet.create({
 
   getQuoteButton: {
     marginTop: theme.spacing[2],
-    height: 56,
   },
 
   // Status Styles
