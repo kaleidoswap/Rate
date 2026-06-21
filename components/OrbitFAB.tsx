@@ -166,7 +166,9 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
 
   const fireIndex = (idx: number) => {
     if (idx >= 0 && idx < actions.length) {
-      feedback.success();
+      // Same light press noise as the Receive/Swap/Send tiles — no celebratory
+      // "bell" chime just for opening a quick action.
+      feedback.tap();
       actions[idx].onSelect();
     }
   };
@@ -174,7 +176,7 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
   const fireKey = (key?: string) => {
     const a = key ? actions.find((x) => x.key === key) : undefined;
     if (a) {
-      feedback.success();
+      feedback.tap();
       a.onSelect();
     }
   };
