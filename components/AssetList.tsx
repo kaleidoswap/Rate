@@ -41,16 +41,18 @@ const AssetRow: React.FC<{ asset: NiaAsset; onPress: () => void }> = ({ asset, o
     return (
         <TouchableOpacity style={styles.assetCardWrapper} onPress={onPress}>
             <LinearGradient
-                // 135deg: navy card 30% → accent@55 75% → accent@b3 100%.
+                // Clean, restrained accent: the dark card holds most of the row,
+                // with just a faint tint toward the trailing edge so the asset's
+                // colour reads without the loud, over-bright gradient bar.
                 colors={[
                     theme.colors.surface.primary,
                     theme.colors.surface.primary,
-                    `${accent}55`,
-                    `${accent}B3`,
+                    `${accent}12`,
+                    `${accent}24`,
                 ]}
-                locations={[0, 0.3, 0.75, 1]}
+                locations={[0, 0.55, 0.85, 1]}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                end={{ x: 1, y: 0.5 }}
                 style={styles.assetVerticalCard}
             >
                 <View style={styles.assetVerticalContent}>
@@ -193,9 +195,12 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     assetCardWrapper: {
-        // Clip the gradient to the rounded card shape. No border (extension parity).
+        // Clip the gradient to the rounded card shape. A hairline border gives the
+        // card clean, modern definition against the dark background.
         borderRadius: theme.borderRadius.xl,
         overflow: 'hidden',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border.light,
     },
     assetVerticalCard: {
         padding: theme.spacing[3],
