@@ -73,6 +73,9 @@ export interface VoiceInputRef {
   stopListening: () => void;
   /** Stop the mic and discard the clip — does NOT transcribe or fire onResult. */
   cancelListening: () => void;
+  /** Pre-grant mic permission + activate the recording session so the FIRST
+   *  recording isn't cold (the first clip otherwise captured silence). */
+  warmup: () => Promise<void>;
 }
 
 const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
@@ -86,7 +89,21 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
       startListening: () => startRecording(),
       stopListening: () => stopRecording(),
       cancelListening: () => cancelRecording(),
+      warmup: () => warmupAudio(),
     }));
+
+    // Pre-grant the mic permission and activate the recording audio session, so
+    // the first real recording starts hot. Without this the cold session (just
+    // after the LLM/TTS configured playback) captured silence for the whole first
+    // clip, and the permission prompt raced with auto-listen.
+    const warmupAudio = async () => {
+      try {
+        await requestRecordingPermissionsAsync();
+        await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      } catch {
+        /* best-effort warm-up */
+      }
+    };
 
     // Release the app-wide native recorder if this instance still owns it when it
     // unmounts (e.g. the voice-agent overlay closes mid-recording). Otherwise the

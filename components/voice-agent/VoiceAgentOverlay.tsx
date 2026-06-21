@@ -226,12 +226,14 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     []
   );
 
-  // Pre-warm the on-device STT model as soon as the overlay opens, so the first
-  // utterance transcribes immediately. Otherwise Whisper only loaded lazily when
-  // the user STOPPED talking — and the first cold recording came back empty
-  // ("detects zero speech even while listening").
+  // On open, pre-warm BOTH the STT model and the mic/audio session, so the first
+  // utterance transcribes immediately and the first recording starts hot. Without
+  // the audio warm-up the first clip captured silence ("can't fetch my voice the
+  // first time") because the recording session was cold (and the mic-permission
+  // prompt raced with auto-listen).
   useEffect(() => {
     void qvac.service?.initializeWhisper?.().catch(() => {});
+    void voiceRef.current?.warmup?.();
   }, []);
 
   // Press-and-hold entry: begin listening only once BOTH the chat model and
