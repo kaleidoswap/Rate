@@ -420,7 +420,15 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               return (
                 <Pressable
                   key={b.id}
-                  onLongPress={() => copyText(hasText ? b.text : b.thinking || '')}
+                  // Long-press copies the whole bubble — reasoning AND answer when
+                  // both are present, so the thinking is copyable in voice mode too.
+                  onLongPress={() =>
+                    copyText(
+                      [hasThinking ? `Thinking:\n${b.thinking!.trim()}` : '', hasText ? b.text : '']
+                        .filter(Boolean)
+                        .join('\n\n'),
+                    )
+                  }
                   delayLongPress={300}
                   style={[styles.bubble, b.role === 'user' ? styles.bubbleUser : styles.bubbleAssistant]}
                 >
@@ -448,6 +456,13 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                           <Text style={styles.thinkText} selectable>
                             {b.thinking!.trim()}
                           </Text>
+                          {/* Copy just the reasoning (only once it's settled). */}
+                          {!thinkingLive && (
+                            <Pressable onPress={() => copyText(b.thinking!.trim())} style={styles.copyBtn} hitSlop={8}>
+                              <Ionicons name="copy-outline" size={12} color={theme.colors.text.muted} />
+                              <Text style={styles.copyBtnText}>Copy thinking</Text>
+                            </Pressable>
+                          )}
                         </View>
                       )}
                     </View>
