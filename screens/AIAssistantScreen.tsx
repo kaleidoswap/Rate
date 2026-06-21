@@ -970,23 +970,9 @@ export default function AIAssistantScreen({ navigation }: Props) {
                       )}
                     </View>
 
-                    {/* Voice input button */}
-                    <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
-                      <TouchableOpacity
-                        style={[styles.roundButton, (!isVoiceAvailable || !qvac.isReady) && styles.disabledButton]}
-                        onPress={startListening}
-                        disabled={!isVoiceAvailable || isLoading || !qvac.isReady}
-                        accessibilityLabel={isListening ? 'Stop recording' : 'Start voice input'}
-                      >
-                        <LinearGradient
-                          colors={isListening ? theme.colors.error.gradient! : theme.colors.accent.gradient!}
-                          style={styles.buttonGradient}
-                        >
-                          <Ionicons name={isListening ? 'stop' : 'mic'} size={20} color="white" />
-                        </LinearGradient>
-                      </TouchableOpacity>
-                    </Animated.View>
-
+                    {/* One trailing action button (standard chat pattern): STOP
+                        while generating, SEND when there's text, otherwise MIC —
+                        instead of a cluttered blue-mic + red-stop pair. */}
                     {isLoading ? (
                       <TouchableOpacity
                         style={styles.roundButton}
@@ -997,20 +983,32 @@ export default function AIAssistantScreen({ navigation }: Props) {
                           <Ionicons name="stop" size={20} color="white" />
                         </LinearGradient>
                       </TouchableOpacity>
-                    ) : (
+                    ) : canSend ? (
                       <TouchableOpacity
-                        style={[styles.roundButton, !canSend && styles.disabledButton]}
+                        style={styles.roundButton}
                         onPress={() => sendMessage(inputText)}
-                        disabled={!canSend}
                         accessibilityLabel="Send message"
                       >
-                        <LinearGradient
-                          colors={canSend ? theme.colors.primary.gradient! : [theme.colors.gray[300], theme.colors.gray[300]]}
-                          style={styles.buttonGradient}
-                        >
-                          <Ionicons name="send" size={20} color={canSend ? 'white' : theme.colors.gray[500]} />
+                        <LinearGradient colors={theme.colors.primary.gradient!} style={styles.buttonGradient}>
+                          <Ionicons name="send" size={20} color="white" />
                         </LinearGradient>
                       </TouchableOpacity>
+                    ) : (
+                      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                        <TouchableOpacity
+                          style={[styles.roundButton, (!isVoiceAvailable || !qvac.isReady) && styles.disabledButton]}
+                          onPress={startListening}
+                          disabled={!isVoiceAvailable || !qvac.isReady}
+                          accessibilityLabel={isListening ? 'Stop recording' : 'Start voice input'}
+                        >
+                          <LinearGradient
+                            colors={isListening ? theme.colors.error.gradient! : theme.colors.accent.gradient!}
+                            style={styles.buttonGradient}
+                          >
+                            <Ionicons name={isListening ? 'stop' : 'mic'} size={20} color="white" />
+                          </LinearGradient>
+                        </TouchableOpacity>
+                      </Animated.View>
                     )}
                   </View>
 
