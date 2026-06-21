@@ -12,7 +12,6 @@ import {
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { theme, leading } from '../theme';
 import { MainHeader } from '../components';
@@ -79,7 +78,6 @@ const INJECTED_BRANDING = `
 `;
 
 export default function MapScreen({ navigation }: Props) {
-  const insets = useSafeAreaInsets();
   const webRef = useRef<WebView>(null);
 
   const [coords, setCoords] = useState<Coords>(FALLBACK_COORDS);
@@ -116,13 +114,6 @@ export default function MapScreen({ navigation }: Props) {
 
   const mapUrl = useMemo(() => buildMapUrl(coords), [coords]);
 
-  const onLocatePress = useCallback(() => {
-    if (permission === 'denied') {
-      Linking.openSettings();
-      return;
-    }
-    fetchLocation(true);
-  }, [permission, fetchLocation]);
 
   const busy = locating || webLoading;
 
@@ -178,33 +169,6 @@ export default function MapScreen({ navigation }: Props) {
           </View>
         )}
 
-        {/* Locate-me FAB */}
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={onLocatePress}
-          // Up near the top, just under the BTC Map search bar (rather than the
-          // bottom, where it collided with the merchant panel) so it stays
-          // visible when the search/results panel slides up from below.
-          style={[styles.fab, { top: insets.top + theme.spacing[16] }]}
-          accessibilityLabel="Center map on my location"
-        >
-          <LinearGradient
-            colors={['#3BFF8C', '#15E99A']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.fabInner}
-          >
-            {locating ? (
-              <ActivityIndicator size="small" color={theme.colors.primary[950]} />
-            ) : (
-              <Ionicons
-                name={permission === 'denied' ? 'location-outline' : 'locate'}
-                size={22}
-                color={theme.colors.primary[950]}
-              />
-            )}
-          </LinearGradient>
-        </TouchableOpacity>
 
         {/* Branded loading veil while we locate the user / boot the map. */}
         {busy && (
@@ -295,22 +259,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
-  fab: {
-    position: 'absolute',
-    right: theme.spacing[4],
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    ...theme.shadows.lg,
-    shadowColor: theme.colors.primary[500],
-    shadowOpacity: 0.45,
-  },
-  fabInner: {
-    flex: 1,
-    borderRadius: 27,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
 
   loadingVeil: {
     ...StyleSheet.absoluteFillObject,

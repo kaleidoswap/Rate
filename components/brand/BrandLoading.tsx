@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
@@ -83,6 +84,14 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
       <View style={styles.center}>
         <View style={styles.markWrap}>
           <Animated.View style={[styles.glow, glowStyle]} />
+          {/* Soften the glow into a diffuse halo rather than a hard green disc. */}
+          <BlurView
+            intensity={48}
+            tint="dark"
+            experimentalBlurMethod="dimezisBlurView"
+            style={styles.glowBlur}
+            pointerEvents="none"
+          />
           <BrandMark size={markSize} />
         </View>
 
@@ -117,6 +126,14 @@ const styles = StyleSheet.create({
     height: 240,
     borderRadius: 120,
     backgroundColor: '#15E99A',
+  },
+  // Circular blur over the glow so it reads as a soft halo, not a hard disc.
+  glowBlur: {
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    overflow: 'hidden',
   },
   words: { marginTop: 36, alignItems: 'center' },
   wordmark: { fontSize: 30, fontWeight: '800', letterSpacing: 0.3, color: '#F4FFF9' },

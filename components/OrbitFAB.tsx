@@ -1,8 +1,9 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Easing,
+  cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -18,9 +19,13 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 /** A single selectable action on the orbit. */
 export interface OrbitAction {
   key: string;
+  /** Short name shown in the hover tooltip while sliding. */
   label: string;
+  /** Accent color — used for the petal fill, border and glow. */
   color: string;
+  /** Icon node, rendered on the petal. */
   renderIcon: () => React.ReactNode;
+  /** Fired when this petal is chosen. */
   onSelect: () => void;
 }
 
@@ -31,7 +36,9 @@ interface OrbitFABProps {
   actions: OrbitAction[];
   /**
    * Arc the petals fan across, in degrees (up = 90, right = 0, left = 180).
-   * actions[0] sits at `arcStart`, the last action at `arcEnd`.
+   * Defaults to a symmetric 150°→30°. Pass a right-leaning range to cluster the
+   * petals under the right thumb — e.g. arcStart={82} arcEnd={14}. actions[0]
+   * sits at `arcStart`, the last action at `arcEnd`.
    */
   arcStart?: number;
   arcEnd?: number;
@@ -42,26 +49,35 @@ interface OrbitFABProps {
 }
 
 const FAB = 68;
-const PETAL = 56;
-const RADIUS = 108;       // center-to-petal distance
-const WRAP_W = 92;        // petal+label hit target width
-const SPRING = { damping: 14, stiffness: 170, mass: 0.6 } as const;
-const TAP_MAX_MS = 260;   // a press longer than this isn't a tap…
-const HOLD_MS = 360;      // …and a still press this long → the hold action
-const HOLD_MAX_MOVE = 14; // moving more than this aborts the hold
+const PETAL = 52;
+const RADIUS = 96;            // center-to-petal distance
+const DEAD_ZONE = 36;         // finger this close to center → no selection (cancel region)
+const SELECT_SLOP = 46;       // max angular distance (deg) from a petal to capture it
+const SPRING = { damping: 14, stiffness: 180, mass: 0.6 } as const;
+
+// Gesture disambiguation thresholds. The key invariant the design calls for:
+// a press held STILL fires the hold action (mic), but a press that SLIDES must
+// open the menu and select — never the hold action. We get that for free from
+// the gesture engine: LongPress fails the moment the finger travels more than
+// HOLD_MAX_MOVE, and Pan only begins once it travels SLIDE_MIN — so any real
+// slide cancels the hold before it can fire.
+const TAP_MAX_MS = 260;       // a press longer than this is no longer a tap…
+const HOLD_MS = 380;          // …and a still press this long → the hold action
+const HOLD_MAX_MOVE = 14;     // moving more than this aborts the hold (→ slide)
+const SLIDE_MIN = 18;         // finger must travel this far to start a slide-select
 
 /**
- * Expandable radial "orbit" FAB.
+ * Expandable radial "orbit" FAB with a four-way gesture vocabulary:
  *
- *   • single tap          → fan the menu open
- *   • tap a petal          → run that action and close
- *   • tap the button again OR anywhere outside → close
- *   • double-tap           → the `doubleTapKey` shortcut (e.g. Scan)
- *   • press & hold still    → the `holdKey` shortcut (e.g. Voice/mic)
+ *   • double-tap         → the `doubleTapKey` action (e.g. Scan)
+ *   • press & hold still  → the `holdKey` action (e.g. Voice/mic)
+ *   • single tap          → fan the menu out and PIN it open (tap again to close)
+ *   • press & slide       → fan out and select by sliding toward a petal, release
+ *                           to fire — all in one motion, no lift required
  *
- * The open menu lives in a full-screen Modal so the scrim reliably catches
- * outside taps and the petals are directly tappable on every platform. The
- * petals are positioned from the button's measured on-screen center.
+ * Selection rides a single Pan whose touch is tracked screen-wide, so the petals
+ * need no per-petal hit-boxes (which keeps them reliable on Android even though
+ * they render outside the tab-bar bounds).
  */
 export const OrbitFAB: React.FC<OrbitFABProps> = ({
   renderCenterIcon,
@@ -71,160 +87,224 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
   doubleTapKey,
   holdKey,
 }) => {
-  const rootRef = useRef<View>(null);
-  const [open, setOpen] = useState(false);
-  const [center, setCenter] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const progress = useSharedValue(0);
+  const progress = useSharedValue(0); // 0 = closed, 1 = fully fanned out
+  const sel = useSharedValue(-1);     // currently highlighted petal index
+  const [mounted, setMounted] = useState(false); // overlay mounted only while active
+  const [pinned, setPinned] = useState(false);    // menu held open after a tap
+  const [hovered, setHovered] = useState(-1);     // mirror of sel for the tooltip
 
-  // Mirror `open` into a ref so gesture closures read the live value.
-  const openRef = useRef(open);
-  openRef.current = open;
-
+  // Fan from arcStart → arcEnd; a single action sits at the arc midpoint.
   const positions = useMemo(() => {
     const n = actions.length;
     const span = arcStart - arcEnd;
     return actions.map((_, i) => {
       const angle = n <= 1 ? arcStart - span / 2 : arcStart - i * (span / (n - 1));
       const rad = (angle * Math.PI) / 180;
-      return { x: RADIUS * Math.cos(rad), y: -RADIUS * Math.sin(rad) };
+      return { angle, x: RADIUS * Math.cos(rad), y: -RADIUS * Math.sin(rad) };
     });
   }, [actions.length, arcStart, arcEnd]);
+  const angles = useMemo(() => positions.map((p) => p.angle), [positions]);
 
-  const close = useCallback(() => {
-    progress.value = withTiming(0, { duration: 150, easing: Easing.in(Easing.quad) }, (finished) => {
-      'worklet';
-      if (finished) runOnJS(setOpen)(false);
-    });
-  }, [progress]);
-
-  const openMenu = useCallback(() => {
-    const node = rootRef.current;
-    if (!node) return;
-    node.measureInWindow((x, y, w, h) => {
-      setCenter({ x: x + w / 2, y: y + h / 2 });
-      setOpen(true);
-      progress.value = withSpring(1, SPRING);
-      feedback.tap();
-    });
-  }, [progress]);
-
-  const fireKey = useCallback(
-    (key?: string) => {
-      const a = key ? actions.find((x) => x.key === key) : undefined;
-      if (a) {
-        feedback.success();
-        a.onSelect();
+  // Which petal does the finger point at? Direction-based (distance along the ray
+  // doesn't matter), with a dead zone near the center that selects nothing.
+  const pickIndex = (dx: number, dy: number) => {
+    'worklet';
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < DEAD_ZONE) return -1;
+    const ang = (Math.atan2(-dy, dx) * 180) / Math.PI; // up = +90
+    let best = -1;
+    let bestDiff = 999;
+    for (let i = 0; i < angles.length; i += 1) {
+      let d = Math.abs(ang - angles[i]);
+      if (d > 180) d = 360 - d;
+      if (d < bestDiff) {
+        bestDiff = d;
+        best = i;
       }
-    },
-    [actions],
-  );
+    }
+    return bestDiff <= SELECT_SLOP ? best : -1;
+  };
 
-  // single tap → toggle; double-tap / long-press → shortcuts. double-tap wins
-  // over single (Exclusive); a still hold beats a quick tap (Race).
+  // --- JS-thread helpers (called from runOnJS or from runOnJS(true) gestures) ---
+  const onHover = (idx: number) => {
+    setHovered(idx);
+    if (idx >= 0) feedback.select();
+  };
+
+  const fireIndex = (idx: number) => {
+    if (idx >= 0 && idx < actions.length) {
+      feedback.success();
+      actions[idx].onSelect();
+    }
+  };
+
+  const fireKey = (key?: string) => {
+    const a = key ? actions.find((x) => x.key === key) : undefined;
+    if (a) {
+      feedback.success();
+      a.onSelect();
+    }
+  };
+
+  const closeMenu = () => {
+    progress.value = withTiming(0, { duration: 160, easing: Easing.in(Easing.quad) }, (finished) => {
+      'worklet';
+      if (finished) runOnJS(setMounted)(false);
+    });
+    sel.value = -1;
+    setHovered(-1);
+    setPinned(false);
+  };
+
+  const pinOpen = () => {
+    feedback.tap();
+    setMounted(true);
+    setPinned(true);
+    cancelAnimation(progress);
+    progress.value = withSpring(1, SPRING);
+  };
+
+  // --- Gestures ---------------------------------------------------------------
+  // Shortcut: double-tap → doubleTapKey action.
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
     .maxDuration(TAP_MAX_MS)
     .runOnJS(true)
     .onStart(() => {
-      if (openRef.current) close();
+      closeMenu();
       fireKey(doubleTapKey);
     });
+
+  // Single tap → toggle the pinned menu.
   const singleTap = Gesture.Tap()
     .numberOfTaps(1)
     .maxDuration(TAP_MAX_MS)
     .runOnJS(true)
     .onStart(() => {
-      if (openRef.current) close();
-      else openMenu();
+      if (pinned) closeMenu();
+      else pinOpen();
     });
+
+  // Press & hold STILL → holdKey action. maxDistance aborts the hold the instant
+  // the finger slides, so a hold-into-slide never fires this.
   const longPress = Gesture.LongPress()
     .minDuration(HOLD_MS)
     .maxDistance(HOLD_MAX_MOVE)
     .runOnJS(true)
     .onStart(() => {
-      if (openRef.current) close();
+      closeMenu();
       fireKey(holdKey);
     });
-  const gesture = Gesture.Exclusive(doubleTap, Gesture.Race(longPress, singleTap));
 
-  const fabAnim = useAnimatedStyle(() => ({ transform: [{ scale: 1 - 0.04 * progress.value }] }));
-  const scrimAnim = useAnimatedStyle(() => ({ opacity: progress.value * 0.5 }));
-  const replicaAnim = useAnimatedStyle(() => ({
+  // Press & slide → fan out and select by direction; release fires the petal.
+  const pan = Gesture.Pan()
+    .minDistance(SLIDE_MIN)
+    .maxPointers(1)
+    .shouldCancelWhenOutside(false)
+    .onStart(() => {
+      cancelAnimation(progress);
+      progress.value = withSpring(1, SPRING);
+      runOnJS(setMounted)(true);
+    })
+    .onUpdate((e) => {
+      if (progress.value > 0.15) {
+        const idx = pickIndex(e.translationX, e.translationY);
+        if (idx !== sel.value) {
+          sel.value = idx;
+          runOnJS(onHover)(idx);
+        }
+      }
+    })
+    .onEnd(() => {
+      const chosen = sel.value;
+      if (chosen >= 0) runOnJS(fireIndex)(chosen);
+    })
+    .onFinalize(() => {
+      // A slide always resolves the menu (fired above, or dismissed here).
+      runOnJS(closeMenu)();
+    });
+
+  // double-tap wins over single-tap; hold and slide race the taps on their own
+  // activation conditions (time held still vs. distance travelled).
+  const gesture = Gesture.Race(Gesture.Exclusive(doubleTap, singleTap), longPress, pan);
+
+  const fabStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 - 0.06 * progress.value }],
+  }));
+
+  const scrimStyle = useAnimatedStyle(() => ({
+    opacity: progress.value * 0.45,
+  }));
+
+  const tooltipStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
-    transform: [{ translateX: center.x - FAB / 2 }, { translateY: center.y - FAB / 2 }],
   }));
 
   return (
-    <View ref={rootRef} collapsable={false} style={styles.root}>
-      <GestureDetector gesture={gesture}>
-        <Animated.View style={[styles.fab, fabAnim]} accessibilityRole="button" accessibilityLabel="Quick actions">
-          {renderCenterIcon()}
-        </Animated.View>
-      </GestureDetector>
-
-      <Modal visible={open} transparent statusBarTranslucent animationType="none" onRequestClose={close}>
-        {/* Dim layer (visual only) under the tap-catching scrim. */}
-        <Animated.View style={[styles.scrim, scrimAnim]} pointerEvents="none" />
-        {/* Tap anywhere outside a petal → close. */}
-        <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Close quick actions">
+    <View style={styles.root} pointerEvents="box-none">
+      {mounted && (
+        <>
+          {/* Tap the dim scrim (anywhere outside the button) to close. */}
+          <AnimatedPressable
+            style={[styles.scrim, scrimStyle]}
+            onPress={closeMenu}
+            accessibilityLabel="Close quick actions"
+          />
           {actions.map((a, i) => (
-            <Petal
-              key={a.key}
-              center={center}
-              pos={positions[i]}
-              color={a.color}
-              label={a.label}
-              progress={progress}
-              onPress={() => {
-                feedback.success();
-                a.onSelect();
-                close();
-              }}
-            >
+            <Petal key={a.key} index={i} pos={positions[i]} color={a.color} progress={progress} sel={sel}>
               {a.renderIcon()}
             </Petal>
           ))}
-          {/* Center mark replica so petals fan from the visible button; tapping
-              it falls through to the scrim → close ("tap it again to close"). */}
-          <Animated.View style={[styles.replica, replicaAnim]} pointerEvents="none">
-            {renderCenterIcon()}
+          <Animated.View style={[styles.tooltipWrap, tooltipStyle]} pointerEvents="none">
+            {hovered >= 0 && (
+              <View style={styles.tooltip}>
+                <Text style={styles.tooltipText}>{actions[hovered].label}</Text>
+              </View>
+            )}
           </Animated.View>
-        </Pressable>
-      </Modal>
+        </>
+      )}
+
+      <GestureDetector gesture={gesture}>
+        <Animated.View style={[styles.fab, fabStyle]} accessibilityRole="button" accessibilityLabel="Quick actions">
+          {renderCenterIcon()}
+        </Animated.View>
+      </GestureDetector>
     </View>
   );
 };
 
 interface PetalProps {
-  center: { x: number; y: number };
+  index: number;
   pos: { x: number; y: number };
   color: string;
-  label: string;
   progress: SharedValue<number>;
-  onPress: () => void;
+  sel: SharedValue<number>;
   children: React.ReactNode;
 }
 
-const Petal: React.FC<PetalProps> = ({ center, pos, color, label, progress, onPress, children }) => {
+const Petal: React.FC<PetalProps> = ({ index, pos, color, progress, sel, children }) => {
   const style = useAnimatedStyle(() => {
     const p = progress.value;
+    const isSel = sel.value === index;
+    const scale = (0.5 + 0.5 * p) * (isSel ? 1.2 : 1);
     return {
-      opacity: Math.min(1, p * 1.6),
-      transform: [
-        { translateX: center.x - WRAP_W / 2 + pos.x * p },
-        { translateY: center.y - PETAL / 2 + pos.y * p },
-        { scale: 0.5 + 0.5 * p },
-      ],
+      opacity: Math.min(1, p * 1.5),
+      borderColor: isSel ? '#FFFFFF' : 'rgba(255,255,255,0.16)',
+      borderWidth: isSel ? 2.5 : 1.5,
+      shadowOpacity: isSel ? 0.85 : 0.5,
+      shadowRadius: isSel ? 14 : 10,
+      transform: [{ translateX: pos.x * p }, { translateY: pos.y * p }, { scale }],
     };
   });
 
   return (
-    <AnimatedPressable style={[styles.petalWrap, style]} onPress={onPress} accessibilityLabel={label}>
-      <View style={[styles.petal, { backgroundColor: color }]}>{children}</View>
-      <Text style={styles.petalLabel} numberOfLines={1}>
-        {label}
-      </Text>
-    </AnimatedPressable>
+    <Animated.View
+      style={[styles.petal, { backgroundColor: color, shadowColor: color }, style]}
+      pointerEvents="none"
+    >
+      {children}
+    </Animated.View>
   );
 };
 
@@ -234,12 +314,24 @@ const styles = StyleSheet.create({
     height: FAB,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'visible',
+  },
+  // Big, centered dim layer that fades in behind the petals. pointerEvents none —
+  // the active gesture owns the touch stream, so the scrim never intercepts.
+  scrim: {
+    position: 'absolute',
+    width: 1600,
+    height: 1600,
+    left: FAB / 2 - 800,
+    top: FAB / 2 - 800,
+    backgroundColor: '#000',
   },
   fab: {
     width: FAB,
     height: FAB,
     borderRadius: FAB / 2,
-    // White fill so the multi-color K mark reads; neutral drop shadow (no glow).
+    // White fill so the multi-color K mark reads (a green fill would swallow
+    // the mark's green facets). Neutral drop shadow — no green glow.
     backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
@@ -249,51 +341,40 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000',
-  },
-  replica: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: FAB,
-    height: FAB,
-    borderRadius: FAB / 2,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  petalWrap: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: WRAP_W,
-    alignItems: 'center',
-  },
   petal: {
+    position: 'absolute',
     width: PETAL,
     height: PETAL,
     borderRadius: PETAL / 2,
+    // Centered on the FAB; transforms fly it out to its orbit slot.
+    left: (FAB - PETAL) / 2,
+    top: (FAB - PETAL) / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.18)',
-    shadowColor: '#000',
+    borderWidth: 1.5,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
+    shadowOpacity: 0.55,
+    shadowRadius: 10,
+    elevation: 8,
   },
-  petalLabel: {
-    marginTop: 6,
+  tooltipWrap: {
+    position: 'absolute',
+    top: -(RADIUS + 58),
+    left: -120,
+    right: -120,
+    alignItems: 'center',
+  },
+  tooltip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  tooltipText: {
     color: theme.colors.text.primary,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: theme.typography.fontWeight.semibold,
   },
 });
