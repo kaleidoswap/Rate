@@ -119,10 +119,12 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
       );
 
     // Invoice generation. Covers the legacy `generate_invoice` shape
-    // ({success, invoice, amount_sats}) and the canonical wallet-contract tools
+    // ({success, invoice, amount_sats}), the layer-routing `create_invoice` tool
+    // the agent normally calls, and the canonical wallet-contract tools
     // (spark_create_invoice / rln_create_ln_invoice / rln_create_rgb_invoice),
     // whose result is the wallet-engine Invoice ({invoice, amount, description}).
     case 'generate_invoice':
+    case 'create_invoice':
     case 'spark_create_invoice':
     case 'rln_create_ln_invoice':
     case 'rln_create_rgb_invoice': {

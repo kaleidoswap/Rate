@@ -121,7 +121,7 @@ const HANDLERS: Record<string, WalletHandler> = {
   arkade_get_address: async () => ({ address: (await requireLayer('arkade').getReceiveAddress()).address }),
 
   // ── Receive (invoices with amount) ──
-  spark_create_invoice: async ({ amount_sats }) => normInvoice(await requireLayer('spark').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined })),
+  spark_create_invoice: async ({ amount_sats }) => normInvoice(await requireLayer('spark').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined, layer: 'BTC_LN' })),
   rln_create_ln_invoice: async ({ amount_sats }) => normInvoice(await requireLayer('rln').createInvoice({ amount: amount_sats ? Number(amount_sats) : undefined })),
   rln_create_rgb_invoice: async ({ asset, amount }) => normInvoice(await requireLayer('rln').createInvoice({ asset: String(asset), assetAmount: Number(amount) })),
 
@@ -144,7 +144,11 @@ const HANDLERS: Record<string, WalletHandler> = {
           : adapter(LAYER_PROTO.rln) ? 'rln' : 'spark';
       const ad = adapter(LAYER_PROTO[lk]) || lightningAdapter();
       log('create_invoice via', lk);
-      r = await ad.createInvoice({ amount: amt });
+      // Always ask for a Lightning (BOLT11) receive. Spark otherwise defaults to
+      // a native Spark sats invoice (a spark1… address), which is NOT a standard
+      // Lightning invoice and can't be paid/copied as one. RLN/Arkade ignore the
+      // hint and return their bolt11 regardless.
+      r = await ad.createInvoice({ amount: amt, layer: 'BTC_LN' });
     }
     log('create_invoice result', r);
     return normInvoice(r);

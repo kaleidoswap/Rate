@@ -334,7 +334,7 @@ describe('create_invoice', () => {
     setAdapters({ SPARK: spark, RGB: rln });
 
     await source().execute('create_invoice', { asset: 'BTC', amount: 5000 });
-    expect(rln.createInvoice).toHaveBeenCalledWith({ amount: 5000 });
+    expect(rln.createInvoice).toHaveBeenCalledWith({ amount: 5000, layer: 'BTC_LN' });
     expect(spark.createInvoice).not.toHaveBeenCalled();
   });
 
@@ -344,7 +344,7 @@ describe('create_invoice', () => {
     setAdapters({ SPARK: spark, RGB: rln });
 
     await source().execute('create_invoice', { asset: 'BTC', amount: 5000, layer: 'spark' });
-    expect(spark.createInvoice).toHaveBeenCalledWith({ amount: 5000 });
+    expect(spark.createInvoice).toHaveBeenCalledWith({ amount: 5000, layer: 'BTC_LN' });
     expect(rln.createInvoice).not.toHaveBeenCalled();
   });
 
