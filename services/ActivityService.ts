@@ -302,22 +302,27 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
   // 4. Swaps (KaleidoSwap atomic + Flashnet AMM) from Redux history
   for (const swap of swaps) {
     const trimNum = (n: number) => parseFloat(n.toFixed(8)).toString();
+    // BTC swap legs are stored in satoshis — label them "sats", not "BTC", so a
+    // 801-sat leg reads "801 sats" instead of the misleading "801 BTC".
+    const legTicker = (asset?: string | null) => (asset === 'BTC' ? 'sats' : asset || '');
+    const fmtLeg = (amt: number, asset?: string | null) => `${trimNum(amt)} ${legTicker(asset)}`.trim();
     const hasLegs =
       swap.from_asset != null && swap.to_asset != null &&
       swap.from_amount != null && swap.to_amount != null;
-    const amount = hasLegs
-      ? `${trimNum(swap.from_amount as number)} ${swap.from_asset} → ${trimNum(swap.to_amount as number)} ${swap.to_asset}`
-      : '';
     const venueName = swap.venue === 'flashnet' ? 'Flashnet Swap' : 'Atomic Swap';
     items.push({
       id: `swap-${swap.rfq_id}`,
       type: 'swap',
       source: 'swap',
       asset: swap.to_asset || 'BTC',
-      assetName: hasLegs ? `${swap.from_asset} → ${swap.to_asset}` : venueName,
-      assetTicker: swap.to_asset || '',
+      // Full route lives in the subtitle (assetName); the right-hand column shows
+      // only the *received* leg, so the ticker is no longer duplicated.
+      assetName: hasLegs
+        ? `${fmtLeg(swap.from_amount as number, swap.from_asset)} → ${fmtLeg(swap.to_amount as number, swap.to_asset)}`
+        : venueName,
+      assetTicker: hasLegs ? legTicker(swap.to_asset) : '',
       assetPrecision: 0,
-      amount,
+      amount: hasLegs ? trimNum(swap.to_amount as number) : '',
       status: normalizeSwapStatus(swap.status),
       timestamp: swap.created_at,
       txid: swap.txid || swap.rfq_id,

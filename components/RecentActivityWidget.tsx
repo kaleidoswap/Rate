@@ -56,7 +56,7 @@ function typeLabel(type: ActivityItemType): string {
 }
 
 function amountPrefix(type: ActivityItemType): string {
-    if (type === 'receive' || type === 'issuance') return '+';
+    if (type === 'receive' || type === 'issuance' || type === 'swap') return '+';
     if (type === 'send') return '−';
     return '';
 }
@@ -129,7 +129,11 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
         const v = typeVisual(item.type);
         const st = ACTIVITY_STATUS_VISUAL[item.status];
         const hasAmount = item.amount !== '';
-        const isIncoming = item.type === 'receive' || item.type === 'issuance';
+        // Swaps net into the received asset, so colour them like an inflow.
+        const isIncoming = item.type === 'receive' || item.type === 'issuance' || item.type === 'swap';
+        // Swaps carry the full "X sats → Y USDB" route in assetName; show it as a
+        // subtitle so the route is visible without crowding the amount column.
+        const subtitle = item.type === 'swap' ? item.assetName : undefined;
 
         return (
             <TouchableOpacity
@@ -144,6 +148,9 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
 
                 <View style={styles.rowBody}>
                     <Text style={styles.rowTitle} numberOfLines={1}>{typeLabel(item.type)}</Text>
+                    {subtitle ? (
+                        <Text style={styles.rowSubtitle} numberOfLines={1}>{subtitle}</Text>
+                    ) : null}
                     <View style={styles.rowMeta}>
                         <View style={styles.layerChip}>
                             <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
@@ -253,6 +260,10 @@ const styles = StyleSheet.create({
         fontSize: theme.typography.fontSize.sm,
         fontWeight: '600',
         color: theme.colors.text.primary,
+    },
+    rowSubtitle: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.secondary,
     },
     rowMeta: {
         flexDirection: 'row',
