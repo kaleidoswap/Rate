@@ -41,7 +41,7 @@ import ToastService from '../services/ToastService';
 import { useQVAC } from '../hooks/useQVAC';
 import { getModelById } from '../services/qvacModels';
 import { PairingService } from '../services/PairingService';
-import type { Message as MindMessage } from '@kaleidorg/mind';
+import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import * as Haptics from 'expo-haptics';
@@ -75,6 +75,14 @@ interface Contact {
 }
 
 const toast = () => ToastService.getInstance();
+
+/** A `/command` token for a skill, e.g. "Merchant Finder" → "merchant-finder". */
+const skillSlug = (name: string) => name.toLowerCase().trim().replace(/\s+/g, '-');
+/** Keywords prepended to a turn so the funnel routes to the pinned skill. */
+const skillRouteHint = (skill: Skill): string =>
+  (skill.triggers && skill.triggers.length
+    ? skill.triggers.slice(0, 5).join(' ')
+    : skill.name.replace(/-/g, ' '));
 
 export default function AIAssistantScreen({ navigation }: Props) {
   const theme = useAppTheme();
@@ -140,6 +148,13 @@ export default function AIAssistantScreen({ navigation }: Props) {
     () => createMindAgent(qvac.service, () => mindConfigRef.current),
     [qvac.service],
   );
+
+  // Skills the user can pin to a message (like a `/command`). Pinning one routes
+  // the funnel to that skill so the model gets its instructions for the turn.
+  const skills = useMemo<Skill[]>(() => {
+    try { return agent.listSkills(); } catch { return []; }
+  }, [agent]);
+  const [activeSkill, setActiveSkill] = useState<Skill | null>(null);
 
   // Raw tool call awaiting user confirmation (e.g. a payment)
   const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
@@ -463,13 +478,41 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   // ---- Send ----
   const sendMessage = async (text: string) => {
-    const messageText = (text || inputText).trim();
-    if (!messageText) return;
+    const raw = (text || inputText).trim();
+    if (!raw) return;
+
+    // `/skill-name ...` — pin a skill for this message (Claude-style). A leading
+    // slash command matching a skill sets it as the active skill; the rest is the
+    // actual message. `/skill` alone just pins it and waits for the next message.
+    let messageText = raw;
+    let pinned: Skill | null = activeSkill;
+    const slash = raw.match(/^\/(\S+)\s*([\s\S]*)$/);
+    if (slash) {
+      const token = slash[1].toLowerCase();
+      const match = skills.find(
+        (s) => s.name.toLowerCase() === token || skillSlug(s.name) === token,
+      );
+      if (match) {
+        pinned = match;
+        setActiveSkill(match);
+        messageText = slash[2].trim();
+        if (!messageText) {
+          // Just pinned the skill — keep it active and let the user type next.
+          setInputText('');
+          Haptics.selectionAsync();
+          return;
+        }
+      }
+    }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setInputText('');
     setPartialText('');
     setShowActions(false);
+
+    // The funnel routes by keyword/trigger; prepend the pinned skill's triggers so
+    // it wins selection and the model receives that skill's instructions.
+    const agentInput = pinned ? `${skillRouteHint(pinned)} ${messageText}`.trim() : messageText;
 
     addMessage({ id: nextId(), text: messageText, isUser: true, timestamp: new Date() });
 
@@ -525,7 +568,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         .map((m) => ({ role: m.isUser ? 'user' : 'assistant', content: m.text })) as MindMessage[];
 
       // One shared funnel (fast-path → recipe → agentic) — see services/mindAgent.
-      const res = await agent.runTurn(messageText, {
+      const res = await agent.runTurn(agentInput, {
         history,
         onStart: (requestId) => setActiveRequestId(requestId),
         onThinking: (tok) => {
@@ -784,31 +827,69 @@ export default function AIAssistantScreen({ navigation }: Props) {
   ];
 
   const renderQuickActions = () => (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      style={styles.quickActionsContainer}
-      contentContainerStyle={styles.quickActionsContent}
-      keyboardShouldPersistTaps="handled"
-    >
-      {QUICK_ACTIONS.map((a) => (
-        <TouchableOpacity
-          key={a.label}
-          style={styles.quickActionButton}
-          onPress={() => {
-            setShowActions(false);
-            a.onPress();
-          }}
-          accessibilityRole="button"
-          accessibilityLabel={a.label}
+    <View>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.quickActionsContainer}
+        contentContainerStyle={styles.quickActionsContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        {QUICK_ACTIONS.map((a) => (
+          <TouchableOpacity
+            key={a.label}
+            style={styles.quickActionButton}
+            onPress={() => {
+              setShowActions(false);
+              a.onPress();
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={a.label}
+          >
+            <LinearGradient colors={a.gradient} style={styles.quickActionGradient}>
+              <Ionicons name={a.icon} size={16} color="white" />
+              <Text style={styles.quickActionText}>{a.label}</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+
+      {/* Pin a skill for the next message (like a /command). */}
+      {skills.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.skillRowContainer}
+          contentContainerStyle={styles.quickActionsContent}
+          keyboardShouldPersistTaps="handled"
         >
-          <LinearGradient colors={a.gradient} style={styles.quickActionGradient}>
-            <Ionicons name={a.icon} size={16} color="white" />
-            <Text style={styles.quickActionText}>{a.label}</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      ))}
-    </ScrollView>
+          <View style={styles.skillRowLabel}>
+            <Ionicons name="sparkles-outline" size={13} color={theme.colors.text.tertiary} />
+            <Text style={styles.skillRowLabelText}>Skills</Text>
+          </View>
+          {skills.map((s) => {
+            const on = activeSkill?.name === s.name;
+            return (
+              <TouchableOpacity
+                key={s.name}
+                style={[styles.skillChip, on && styles.skillChipActive]}
+                onPress={() => {
+                  setActiveSkill(on ? null : s);
+                  setShowActions(false);
+                  Haptics.selectionAsync();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Use skill ${s.name}`}
+              >
+                <Text style={[styles.skillChipText, on && styles.skillChipTextActive]}>
+                  /{skillSlug(s.name)}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
+    </View>
   );
 
   const canSend = !!inputText.trim() && !isListening;
@@ -923,6 +1004,19 @@ export default function AIAssistantScreen({ navigation }: Props) {
               <View style={styles.inputContainer}>
                 <BlurView intensity={80} tint={theme.dark ? 'dark' : 'light'} style={styles.inputGradient}>
                   {showActions && renderQuickActions()}
+
+                  {/* Pinned-skill chip: this message routes to it; tap ✕ to clear. */}
+                  {activeSkill && (
+                    <View style={styles.activeSkillRow}>
+                      <View style={styles.activeSkillChip}>
+                        <Ionicons name="sparkles" size={12} color={theme.colors.primary[500]} />
+                        <Text style={styles.activeSkillText}>/{skillSlug(activeSkill.name)}</Text>
+                        <TouchableOpacity onPress={() => setActiveSkill(null)} hitSlop={8} accessibilityLabel="Clear skill">
+                          <Ionicons name="close" size={14} color={theme.colors.text.secondary} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
 
                   <View style={styles.inputRow}>
                     {/* Toggle quick actions */}
@@ -1191,6 +1285,33 @@ const makeStyles = (theme: Theme) =>
       gap: theme.spacing[2],
     },
     quickActionText: { fontSize: theme.typography.fontSize.xs, color: 'white', fontWeight: '600', letterSpacing: 0.5 },
+    skillRowContainer: { marginBottom: theme.spacing[3] },
+    skillRowLabel: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: theme.spacing[1], alignSelf: 'center' },
+    skillRowLabelText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, fontWeight: '600' },
+    skillChip: {
+      paddingVertical: theme.spacing[1.5] ?? 6,
+      paddingHorizontal: theme.spacing[3],
+      borderRadius: theme.borderRadius.full ?? 999,
+      backgroundColor: theme.colors.surface.secondary,
+      borderWidth: 1,
+      borderColor: theme.colors.border.light,
+    },
+    skillChipActive: { backgroundColor: `${theme.colors.primary[500]}22`, borderColor: theme.colors.primary[500] },
+    skillChipText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, fontWeight: '600' },
+    skillChipTextActive: { color: theme.colors.primary[500] },
+    activeSkillRow: { flexDirection: 'row', marginBottom: theme.spacing[2], paddingHorizontal: theme.spacing[1] },
+    activeSkillChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: theme.borderRadius.full ?? 999,
+      backgroundColor: `${theme.colors.primary[500]}1A`,
+      borderWidth: 1,
+      borderColor: `${theme.colors.primary[500]}55`,
+    },
+    activeSkillText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.primary[500], fontWeight: '700' },
 
     // Input
     inputContainer: {
