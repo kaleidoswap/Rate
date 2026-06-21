@@ -29,10 +29,12 @@ export async function shareLightningInvoice(params: {
   description?: string;
 }): Promise<boolean> {
   const { invoice, amount, description } = params;
+  // Share a tappable `lightning:` URI so the recipient's wallet opens directly.
+  const link = invoice.toLowerCase().startsWith('lightning:') ? invoice : `lightning:${invoice}`;
   const message = `⚡️ Lightning Invoice\n\n💰 Amount: ${amount.toLocaleString()} sats\n${
     description ? `📝 Description: ${description}\n` : ''
-  }\n🧾 Invoice:\n${invoice}`;
-  return sharePayable(invoice, 'Lightning Invoice', message);
+  }\n${link}`;
+  return sharePayable(link, 'Lightning Invoice', message);
 }
 
 /**

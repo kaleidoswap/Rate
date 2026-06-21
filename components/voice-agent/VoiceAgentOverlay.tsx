@@ -25,6 +25,8 @@ import { useSelector } from 'react-redux';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 import { MindAvatar } from '../MindMark';
+import { PayableCard } from '../chat/PayableCard';
+import { findPayable, stripPayable } from '../../utils/decodeInvoice';
 import VoiceInput, { VoiceInputRef } from '../VoiceInput';
 import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
@@ -129,19 +131,15 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   }, []);
 
   const pulse = useSharedValue(0);
-  const spin = useSharedValue(0);
-
   // Drive the orb animation from the current phase.
   useEffect(() => {
     cancelAnimation(pulse);
-    cancelAnimation(spin);
     if (phase === 'listening') {
       pulse.value = withRepeat(withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) }), -1, true);
     } else if (phase === 'speaking') {
       pulse.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
-    } else if (phase === 'thinking') {
-      spin.value = withRepeat(withTiming(1, { duration: 1000, easing: Easing.linear }), -1, false);
     } else {
+      // idle / thinking: settle the orb; "thinking" shows a spinner inside it.
       pulse.value = withTiming(0, { duration: 200 });
     }
   }, [phase]);
@@ -348,10 +346,27 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     else void startHandsFree();
   };
 
+  // Pause everything: stop the spoken reply, the mic capture, and the hands-free
+  // loop, settling the orb to idle without closing the overlay. Tap the orb to
+  // resume talking.
+  const pauseVoice = () => {
+    Haptics.selectionAsync().catch(() => {});
+    void stopSpeak();
+    voiceRef.current?.stopListening?.();
+    if (handsFree) stopHandsFree();
+    setPhase('idle');
+  };
+
+  // Show the pause control whenever the assistant is actively doing something.
+  const canPause = handsFree || phase === 'listening' || phase === 'speaking' || phase === 'thinking';
+
   const orbStyle = useAnimatedStyle(() => ({
+    // Pulse only — NO rotation. The orb hosts the upright mic/speaker icon; the
+    // "thinking" spin lives in the ActivityIndicator inside it. Rotating the orb
+    // froze the icon at a mid-spin angle (cancelAnimation doesn't reset the
+    // value), which is why the mic/speaker glyphs looked bent.
     transform: [
       { scale: interpolate(pulse.value, [0, 1], [1, phase === 'listening' ? 1.18 : 1.08]) },
-      { rotate: `${interpolate(spin.value, [0, 1], [0, 360])}deg` },
     ] as const,
   }));
   const ringStyle = useAnimatedStyle(() => ({
@@ -467,14 +482,26 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                       )}
                     </View>
                   )}
-                  {hasText && (
-                    <Text
-                      selectable
-                      style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}
-                    >
-                      {b.text}
-                    </Text>
-                  )}
+                  {hasText && (() => {
+                    // Surface a Lightning invoice / address / RGB invoice in the
+                    // reply as a rich card (copy + share, lightning: link on share)
+                    // instead of an unreadable, untappable raw string.
+                    const payable = b.role === 'assistant' ? findPayable(b.text) : null;
+                    const shown = payable ? stripPayable(b.text, payable).trim() : b.text;
+                    return (
+                      <>
+                        {!!shown && (
+                          <Text
+                            selectable
+                            style={b.role === 'user' ? styles.bubbleUserText : styles.bubbleAssistantText}
+                          >
+                            {shown}
+                          </Text>
+                        )}
+                        {payable && <PayableCard payable={payable} onCopy={copyText} />}
+                      </>
+                    );
+                  })()}
                   {/* Discoverable copy affordance on finished assistant replies. */}
                   {b.role === 'assistant' && hasText && !isActive && (
                     <Pressable onPress={() => copyText(b.text)} style={styles.copyBtn} hitSlop={8}>
@@ -518,6 +545,14 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             </View>
           )}
           <Text style={styles.status}>{statusText}</Text>
+
+          {/* Pause — stop listening/speaking/hands-free without leaving voice. */}
+          {canPause && (
+            <Pressable onPress={pauseVoice} style={styles.pauseBtn} hitSlop={8} accessibilityLabel="Pause voice">
+              <Ionicons name="pause" size={16} color={theme.colors.text.primary} />
+              <Text style={styles.pauseBtnText}>Pause</Text>
+            </Pressable>
+          )}
 
           {/* Hands-free (continuous VAD) toggle. Needs @qvac/sdk ≥ 0.13.1 + the
               react-native-live-audio-stream native module (see services/micStream.ts);
@@ -692,6 +727,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   status: { textAlign: 'center', color: theme.colors.text.secondary, fontSize: 14, marginTop: 6, fontWeight: '500' },
+  pauseBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 10,
+    paddingVertical: 7,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+  },
+  pauseBtnText: { color: theme.colors.text.primary, fontSize: 13, fontWeight: '600' },
   confirmOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.55)',
