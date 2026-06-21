@@ -98,13 +98,60 @@ export async function getUserLocation(): Promise<UserLocation> {
 }
 
 /** Geocode a free-text address (for the `near_address` path). */
+/**
+ * Geocode a free-text place ("Turin", "Torino, Italy") to coordinates.
+ *
+ * Primary path is a network geocoder (Nominatim/OSM) — the same dataset the
+ * merchants come from, and it works regardless of device location permission or
+ * platform geocoder availability. The OS geocoder (`Location.geocodeAsync`) is
+ * only a secondary fallback: it is flaky for remote cities (often empty on
+ * Android) and unavailable in the hands-free worker path, which is why a spoken
+ * "merchants in Turin" used to fail. Net: city lookups no longer need the
+ * device's position at all.
+ */
 export async function geocodeAddress(address: string): Promise<Coords | null> {
+  const q = address.trim();
+  if (!q) return null;
+
+  const fromNominatim = await geocodeViaNominatim(q);
+  if (fromNominatim) return fromNominatim;
+
   try {
-    const [hit] = await Location.geocodeAsync(address);
-    if (!hit) return null;
-    return { lat: hit.latitude, lng: hit.longitude };
+    const [hit] = await Location.geocodeAsync(q);
+    if (hit) return { lat: hit.latitude, lng: hit.longitude };
   } catch (err) {
-    console.warn('📍 geocodeAddress failed:', err);
+    console.warn('📍 OS geocoder failed:', err);
+  }
+  return null;
+}
+
+async function geocodeViaNominatim(query: string): Promise<Coords | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const url =
+      'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' +
+      encodeURIComponent(query);
+    const res = await fetch(url, {
+      headers: {
+        // Nominatim's usage policy requires an identifying User-Agent.
+        'User-Agent': 'KaleidoSwap-Wallet/1.0 (merchant-search)',
+        Accept: 'application/json',
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const arr = (await res.json()) as Array<{ lat?: string; lon?: string }>;
+    const hit = arr?.[0];
+    if (!hit?.lat || !hit?.lon) return null;
+    const lat = Number(hit.lat);
+    const lng = Number(hit.lon);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+    return null;
+  } catch (err) {
+    clearTimeout(timer);
+    console.warn('📍 Nominatim geocode failed:', err);
     return null;
   }
 }
