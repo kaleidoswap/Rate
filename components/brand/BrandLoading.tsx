@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
   Easing,
   interpolate,
@@ -14,7 +15,9 @@ import { BrandMark } from './BrandMark';
 // Shared with BrandIntro so the intro's final frame and this steady-state
 // loader are visually identical — the intro overlay fades out onto this with
 // no jarring white flash.
-export const BRAND_BG = ['#0B2416', '#08200F', '#05160D'] as [string, string, string];
+// Navy (matches the app's dark background family #0A1326) rather than the old
+// dark-forest green, so the loader reads as the same surface as the wallet.
+export const BRAND_BG = ['#13213B', '#0A1326', '#06101F'] as [string, string, string];
 
 interface BrandLoadingProps {
   /** Size of the kaleidoscope mark (px). */
@@ -26,6 +29,7 @@ interface BrandLoadingProps {
 }
 
 const DOTS = [0, 1, 2];
+const GLOW = 320; // diameter of the soft radial halo behind the mark
 
 /**
  * Steady-state branded loading screen: dark kaleidoscope background, the mark
@@ -35,7 +39,10 @@ const DOTS = [0, 1, 2];
 export const BrandLoading: React.FC<BrandLoadingProps> = ({
   markSize = 132,
   message,
-  showWordmark = true,
+  // Mark-only by default: there's no proper "KaleidoSwap" wordmark logo to set
+  // under the mark, and the hand-typed name rendered incompletely — so skip the
+  // letters and show just the (correct) kaleidoscope-K mark.
+  showWordmark = false,
 }) => {
   const glow = useSharedValue(0);
   const t = useSharedValue(0);
@@ -77,7 +84,21 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
       <LinearGradient colors={BRAND_BG} start={{ x: 0.2, y: 0 }} end={{ x: 0.85, y: 1 }} style={StyleSheet.absoluteFill} />
       <View style={styles.center}>
         <View style={styles.markWrap}>
-          <Animated.View style={[styles.glow, glowStyle]} />
+          {/* Soft radial halo: bright-green center fading to fully transparent at
+              the edge, so it reads as a diffuse glow that melts into the page
+              rather than a hard disc with a visible background box. */}
+          <Animated.View style={[styles.glowWrap, glowStyle]} pointerEvents="none">
+            <Svg width={GLOW} height={GLOW}>
+              <Defs>
+                <RadialGradient id="brandGlow" cx="50%" cy="50%" r="50%">
+                  <Stop offset="0%" stopColor="#15E99A" stopOpacity={0.55} />
+                  <Stop offset="55%" stopColor="#15E99A" stopOpacity={0.16} />
+                  <Stop offset="100%" stopColor="#15E99A" stopOpacity={0} />
+                </RadialGradient>
+              </Defs>
+              <Circle cx={GLOW / 2} cy={GLOW / 2} r={GLOW / 2} fill="url(#brandGlow)" />
+            </Svg>
+          </Animated.View>
           <BrandMark size={markSize} />
         </View>
 
@@ -103,15 +124,15 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#05160D' },
+  root: { flex: 1, backgroundColor: '#06101F' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   markWrap: { alignItems: 'center', justifyContent: 'center' },
-  glow: {
+  glowWrap: {
     position: 'absolute',
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: '#15E99A',
+    width: GLOW,
+    height: GLOW,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   words: { marginTop: 36, alignItems: 'center' },
   wordmark: { fontSize: 30, fontWeight: '800', letterSpacing: 0.3, color: '#F4FFF9' },

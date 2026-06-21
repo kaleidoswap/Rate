@@ -1,5 +1,5 @@
 // screens/DashboardScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,7 @@ import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
+import { loadNostrProfile } from '../store/slices/nostrSlice';
 import {
   selectDisclosureLevel,
   selectAiEnabled,
@@ -96,11 +97,50 @@ interface Channel {
   asset_remote_amount: number;
 }
 
+/**
+ * A time-of-day greeting with a little variety so it changes between opens.
+ * `name` (the user's Nostr name, when connected) is appended when present;
+ * otherwise the bare phrase is used so the wallet works without Nostr.
+ */
+function buildGreeting(name?: string): string {
+  const hour = new Date().getHours();
+  const pool =
+    hour < 5 ? ['Still up', 'Good night', 'Hi']
+    : hour < 12 ? ['Good morning', 'Morning', 'Rise and shine']
+    : hour < 17 ? ['Good afternoon', 'Hey there', 'Hi']
+    : hour < 21 ? ['Good evening', 'Evening', 'Welcome back']
+    : ['Good night', 'Winding down', 'Hi'];
+  const phrase = pool[Math.floor(Math.random() * pool.length)];
+  return name ? `${phrase}, ${name}` : phrase;
+}
+
 export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  // Header greeting uses the Nostr display name when connected; falls back to a
+  // name-less greeting otherwise (Nostr stays optional — see header below).
+  const nostrName = useSelector((state: RootState) => {
+    const p = state.nostr?.profile;
+    return (p?.display_name || p?.name || '').trim();
+  });
+  const greeting = useMemo(() => buildGreeting(nostrName || undefined), [nostrName]);
+
+  // If Nostr is connected but we never pulled the profile (the wallet-side
+  // connect path doesn't fetch it, and a restored connection doesn't either),
+  // fetch it once so the greeting can show the account's name.
+  const nostrConnected = useSelector(
+    (state: RootState) => !!(state.nostr?.isConnected || state.nostr?.hasStoredKeys),
+  );
+  const nostrProfileLoaded = useSelector((state: RootState) => !!state.nostr?.profile);
+  const triedNostrProfile = useRef(false);
+  useEffect(() => {
+    if (nostrConnected && !nostrProfileLoaded && !triedNostrProfile.current) {
+      triedNostrProfile.current = true;
+      dispatch(loadNostrProfile() as any);
+    }
+  }, [nostrConnected, nostrProfileLoaded, dispatch]);
   const disclosureLevel = useSelector(selectDisclosureLevel);
   // On-device AI is opt-in; only surface the voice agent FAB once it's enabled
   // so the QVAC Bare worklet can't be started (and crash) before a native rebuild.
@@ -727,7 +767,8 @@ export default function DashboardScreen({ navigation }: Props) {
       {/* Sticky header: lives outside the ScrollView so it stays fixed while
           content scrolls beneath it. `elevated` gives it a downward shadow. */}
       <MainHeader
-        brandLogo
+        title={greeting}
+        showLogo={false}
         showSettings
         elevated
       />
