@@ -51,6 +51,7 @@ interface OrbitFABProps {
 const FAB = 68;
 const PETAL = 52;
 const RADIUS = 96;            // center-to-petal distance
+const SCRIM = 1600;           // full-screen tap/dim layer, centered on the FAB
 const DEAD_ZONE = 36;         // finger this close to center → no selection (cancel region)
 const SELECT_SLOP = 46;       // max angular distance (deg) from a petal to capture it
 const SPRING = { damping: 14, stiffness: 180, mass: 0.6 } as const;
@@ -112,6 +113,27 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
     const dist = Math.sqrt(dx * dx + dy * dy);
     if (dist < DEAD_ZONE) return -1;
     const ang = (Math.atan2(-dy, dx) * 180) / Math.PI; // up = +90
+    let best = -1;
+    let bestDiff = 999;
+    for (let i = 0; i < angles.length; i += 1) {
+      let d = Math.abs(ang - angles[i]);
+      if (d > 180) d = 360 - d;
+      if (d < bestDiff) {
+        bestDiff = d;
+        best = i;
+      }
+    }
+    return bestDiff <= SELECT_SLOP ? best : -1;
+  };
+
+  // JS-thread twin of pickIndex for a discrete tap on the scrim. Lets a tap
+  // TOWARD a petal select it (the petals themselves can't be hit-tested where
+  // they render outside the bar on Android), so the pinned menu is tappable and
+  // not just slide-driven. A tap in the dead zone / away from any petal closes.
+  const directionToIndex = (dx: number, dy: number): number => {
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < DEAD_ZONE) return -1;
+    const ang = (Math.atan2(-dy, dx) * 180) / Math.PI;
     let best = -1;
     let bestDiff = 999;
     for (let i = 0; i < angles.length; i += 1) {
@@ -244,11 +266,20 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
     <View style={styles.root} pointerEvents="box-none">
       {mounted && (
         <>
-          {/* Tap the dim scrim (anywhere outside the button) to close. */}
+          {/* Tap toward a petal to select it; tap the center/away to close.
+              (The scrim is centered on the FAB, so locationX/Y − SCRIM/2 is the
+              offset from the button center.) */}
           <AnimatedPressable
             style={[styles.scrim, scrimStyle]}
-            onPress={closeMenu}
-            accessibilityLabel="Close quick actions"
+            onPress={(e) => {
+              const idx = directionToIndex(
+                e.nativeEvent.locationX - SCRIM / 2,
+                e.nativeEvent.locationY - SCRIM / 2,
+              );
+              if (idx >= 0) fireIndex(idx);
+              closeMenu();
+            }}
+            accessibilityLabel="Quick actions — tap an action or tap away to close"
           />
           {actions.map((a, i) => (
             <Petal key={a.key} index={i} pos={positions[i]} color={a.color} progress={progress} sel={sel}>
@@ -320,10 +351,10 @@ const styles = StyleSheet.create({
   // the active gesture owns the touch stream, so the scrim never intercepts.
   scrim: {
     position: 'absolute',
-    width: 1600,
-    height: 1600,
-    left: FAB / 2 - 800,
-    top: FAB / 2 - 800,
+    width: SCRIM,
+    height: SCRIM,
+    left: FAB / 2 - SCRIM / 2,
+    top: FAB / 2 - SCRIM / 2,
     backgroundColor: '#000',
   },
   fab: {
