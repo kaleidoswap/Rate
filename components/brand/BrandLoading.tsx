@@ -14,7 +14,9 @@ import { BrandMark } from './BrandMark';
 // Shared with BrandIntro so the intro's final frame and this steady-state
 // loader are visually identical — the intro overlay fades out onto this with
 // no jarring white flash.
-export const BRAND_BG = ['#0B2416', '#08200F', '#05160D'] as [string, string, string];
+// Navy (matches the app's dark background family #0A1326) rather than the old
+// dark-forest green, so the loader reads as the same surface as the wallet.
+export const BRAND_BG = ['#13213B', '#0A1326', '#06101F'] as [string, string, string];
 
 interface BrandLoadingProps {
   /** Size of the kaleidoscope mark (px). */
@@ -103,7 +105,7 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
 };
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#05160D' },
+  root: { flex: 1, backgroundColor: '#06101F' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   markWrap: { alignItems: 'center', justifyContent: 'center' },
   glow: {

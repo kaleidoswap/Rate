@@ -206,7 +206,7 @@ export default function MapScreen({ navigation }: Props) {
         {/* Branded loading veil while we locate the user / boot the map. */}
         {busy && (
           <LinearGradient
-            colors={['#0B2416', '#08200F', '#05160D']}
+            colors={['#13213B', '#0A1326', '#06101F']}
             style={styles.loadingVeil}
             pointerEvents="none"
           >
