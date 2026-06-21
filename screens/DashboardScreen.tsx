@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { RootState } from '../store';
 import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
@@ -97,6 +97,7 @@ interface Channel {
 }
 
 export default function DashboardScreen({ navigation }: Props) {
+  const isScreenFocused = useIsFocused();
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
@@ -427,11 +428,13 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   };
 
-  // Auto-refresh wallet data (only when protocols are ready)
+  // Auto-refresh only while Dashboard is actually visible. A parent-stack modal
+  // such as Receive keeps this component mounted; polling behind it can otherwise
+  // collide with receive-address generation and monopolize the same adapters.
   useEffect(() => {
     let intervalId: NodeJS.Timeout;
 
-    if (!protocolsReady) return;
+    if (!protocolsReady || !isScreenFocused) return;
 
     const refreshData = async () => {
       if (!isUpdating) {
@@ -439,10 +442,8 @@ export default function DashboardScreen({ navigation }: Props) {
       }
     };
 
-    // Initial load
-    refreshData();
-
-    // Poll every 30 seconds
+    // The focus effect below owns the immediate refresh. This interval handles
+    // only subsequent refreshes, avoiding two adapter bursts on focus.
     intervalId = setInterval(refreshData, 30000);
 
     return () => {
@@ -450,7 +451,7 @@ export default function DashboardScreen({ navigation }: Props) {
         clearInterval(intervalId);
       }
     };
-  }, [isNodeUnlocked, isConnecting]);
+  }, [protocolsReady, isScreenFocused, isNodeUnlocked, isConnecting]);
 
   // Update the useFocusEffect to handle screen focus
   useFocusEffect(

@@ -258,12 +258,29 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     return this.mapAssetBalance(raw, 0);
   }
 
+  async getAssetBalanceWithSignal(
+    assetId: string,
+    signal: AbortSignal,
+  ): Promise<UnifiedAsset['balance']> {
+    this.requireRln();
+    const raw = anyRec(await this.c().rlnAssetBalance({ asset_id: assetId }, signal));
+    return this.mapAssetBalance(raw, 0);
+  }
+
   async refreshBalances(): Promise<void> {
     // Balances are fetched live; nothing to refresh.
   }
 
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
     const { balance } = await this.c().getBalance(); // millisats
+    const sats = Math.floor(balance / 1000);
+    return { confirmed: sats, unconfirmed: 0, total: sats };
+  }
+
+  async getBtcBalanceWithSignal(
+    signal: AbortSignal,
+  ): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
+    const { balance } = await this.c().getBalance(signal);
     const sats = Math.floor(balance / 1000);
     return { confirmed: sats, unconfirmed: 0, total: sats };
   }
@@ -308,6 +325,12 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     return Array.isArray(res.channels) ? res.channels : [];
   }
 
+  async listChannelsWithSignal(signal: AbortSignal): Promise<any[]> {
+    if (!this.isRln) return [];
+    const res = anyRec(await this.c().rlnListChannels(signal));
+    return Array.isArray(res.channels) ? res.channels : [];
+  }
+
   async listPayments(): Promise<any> {
     if (!this.isRln) return { payments: [] };
     return this.c().request('rln_list_payments', {});
@@ -321,6 +344,13 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   // ── invoices / payments ───────────────────────────────────────────────────
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
+    return this.createInvoiceWithSignal(request);
+  }
+
+  async createInvoiceWithSignal(
+    request: InvoiceRequest,
+    signal?: AbortSignal,
+  ): Promise<Invoice> {
     if (request.asset) {
       // RGB-over-Lightning invoice (a BOLT11 carrying an RGB asset). This rides
       // /lninvoice with asset_id + asset_amount — NOT /rgbinvoice (that's the
@@ -337,7 +367,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
             : {}),
           amt_msat: Math.max(requestedMsat, RGB_HTLC_MIN_MSAT),
           expiry_sec: request.expirySeconds ?? 3600,
-        })
+        }, signal)
       );
       return {
         invoice: raw.invoice ?? '',
@@ -351,7 +381,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
       amount: (request.amount ?? 0) * 1000, // sats → msat
       description: request.description,
       expiry: request.expirySeconds,
-    });
+    }, signal);
     return {
       invoice: inv.invoice ?? '',
       paymentHash: inv.payment_hash ?? '',
@@ -362,8 +392,12 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async createRgbInvoice(params: any): Promise<any> {
+    return this.createRgbInvoiceWithSignal(params);
+  }
+
+  async createRgbInvoiceWithSignal(params: any, signal?: AbortSignal): Promise<any> {
     this.requireRln();
-    return this.c().rlnRgbInvoice(params);
+    return this.c().rlnRgbInvoice(params, signal);
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
@@ -406,7 +440,14 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async getInvoiceStatus(params: { invoice: string }): Promise<any> {
-    return this.c().lookupInvoice({ invoice: params.invoice });
+    return this.getInvoiceStatusWithSignal(params);
+  }
+
+  async getInvoiceStatusWithSignal(
+    params: { invoice: string },
+    signal?: AbortSignal,
+  ): Promise<any> {
+    return this.c().lookupInvoice({ invoice: params.invoice }, signal);
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
@@ -450,9 +491,16 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
+    return this.getReceiveAddressWithSignal(assetId);
+  }
+
+  async getReceiveAddressWithSignal(
+    assetId?: string,
+    signal?: AbortSignal,
+  ): Promise<Address> {
     if (assetId) {
       this.requireRln();
-      const raw = anyRec(await this.c().rlnRgbInvoice({ asset_id: assetId }));
+      const raw = anyRec(await this.c().rlnRgbInvoice({ asset_id: assetId }, signal));
       return {
         address: raw.invoice ?? raw.recipient_id ?? '',
         format: 'RGB_INVOICE',
@@ -461,7 +509,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     }
     // On-chain BTC address is only available from an RLN node over NWC.
     this.requireRln();
-    const raw = anyRec(await this.c().rlnGetAddress());
+    const raw = anyRec(await this.c().rlnGetAddress(signal));
     return { address: raw.address ?? '', format: 'BTC_ADDRESS' };
   }
 
