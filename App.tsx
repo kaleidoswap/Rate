@@ -20,6 +20,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import ChatNotifications from './components/ChatNotifications';
 import { OrbitFAB, type OrbitAction } from './components/OrbitFAB';
+import { BrandMark } from './components/BrandMark';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
 
@@ -188,7 +189,7 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
           actions. Centered over the gap, overflowing the island top. */}
       <View pointerEvents="box-none" style={islandStyles.micWrap}>
         <OrbitFAB
-          renderCenterIcon={() => <Ionicons name="add" size={30} color={theme.colors.primary[950]} />}
+          renderCenterIcon={() => <BrandMark size={34} />}
           actions={orbitActions}
           // Right-leaning arc so both petals sit under the right thumb.
           arcStart={70}

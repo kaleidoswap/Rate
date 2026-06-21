@@ -165,8 +165,7 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({ renderCenterIcon, actions, a
     });
 
   const fabStyle = useAnimatedStyle(() => ({
-    // Spin the "+" into an "×" as the menu opens.
-    transform: [{ scale: 1 - 0.06 * progress.value }, { rotate: `${progress.value * 45}deg` }],
+    transform: [{ scale: 1 - 0.06 * progress.value }],
   }));
 
   const scrimStyle = useAnimatedStyle(() => ({
@@ -271,7 +270,9 @@ const styles = StyleSheet.create({
     width: FAB,
     height: FAB,
     borderRadius: FAB / 2,
-    backgroundColor: theme.colors.primary[500],
+    // White fill so the multi-color K mark reads (the green FAB would swallow
+    // the mark's green facets); the green glow below keeps it on-brand.
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: theme.colors.primary[500],
