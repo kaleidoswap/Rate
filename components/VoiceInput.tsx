@@ -138,6 +138,11 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
 
         recording = new AudioModule.AudioRecorder(RECORDING_OPTIONS);
         await recording.prepareToRecordAsync();
+        // Let iOS actually engage the mic input route before capturing. On a cold
+        // first start (just after switching the audio category, or right after the
+        // mic-permission grant) `record()` can otherwise capture pure silence for
+        // the whole clip — the "first recording returns no speech" bug.
+        await new Promise((resolve) => setTimeout(resolve, 250));
         recording.record();
 
         recorderRef.current = recording;

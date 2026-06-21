@@ -210,17 +210,26 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     []
   );
 
-  // Press-and-hold entry: begin listening the moment the model is ready, so the
-  // hold gesture flows straight into a spoken request without a second tap.
+  // Pre-warm the on-device STT model as soon as the overlay opens, so the first
+  // utterance transcribes immediately. Otherwise Whisper only loaded lazily when
+  // the user STOPPED talking — and the first cold recording came back empty
+  // ("detects zero speech even while listening").
+  useEffect(() => {
+    void qvac.service?.initializeWhisper?.().catch(() => {});
+  }, []);
+
+  // Press-and-hold entry: begin listening once the model is ready, so the hold
+  // gesture flows straight into a spoken request. Wait for the STT model too —
+  // starting the mic before Whisper is ready captured a silent first clip.
   const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (autoListen && qvac.isReady && phase === 'idle' && !autoStartedRef.current) {
+    if (autoListen && qvac.isReady && qvac.isWhisperReady && phase === 'idle' && !autoStartedRef.current) {
       autoStartedRef.current = true;
       void stopSpeak();
       setError(null);
       voiceRef.current?.startListening();
     }
-  }, [autoListen, qvac.isReady, phase]);
+  }, [autoListen, qvac.isReady, qvac.isWhisperReady, phase]);
 
   const appendBubble = (role: Bubble['role'], text: string) => {
     const id = nextId();
@@ -319,7 +328,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       qvac.initialize();
       return;
     }
-    if (!qvac.isReady) return;
+    // Need both the chat model and speech-to-text before we can capture a turn.
+    if (!qvac.isReady || !qvac.isWhisperReady) return;
     if (phase === 'listening') {
       voiceRef.current?.stopListening();
     } else if (phase === 'idle') {
@@ -464,14 +474,19 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   }));
 
   const aiFailed = qvac.llmStatus === 'error';
-  // The on-device model is still downloading/loading (not an error, not ready).
-  const modelLoading = !aiFailed && !qvac.isReady;
+  // Voice needs BOTH the chat model AND the speech-to-text model. Treat either
+  // still loading as "not ready" so the orb shows a spinner (not a tappable mic
+  // that would capture a silent clip) until speech recognition is actually up.
+  const voiceReady = qvac.isReady && qvac.isWhisperReady;
+  const modelLoading = !aiFailed && !voiceReady;
   const statusText = aiFailed
     ? `On-device AI unavailable — ${qvac.error || 'the model could not be loaded'}`
     : !qvac.isReady
     ? qvac.isDownloading
       ? `Preparing the on-device AI… ${qvac.combinedProgress}%`
       : 'Starting the on-device AI…'
+    : !qvac.isWhisperReady
+    ? 'Preparing speech recognition…'
     : error
       ? error
       : phase === 'listening'
@@ -625,7 +640,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           <Pressable
             onPress={toggleListening}
             style={styles.orbArea}
-            disabled={!qvac.isReady && qvac.llmStatus !== 'error'}
+            disabled={!voiceReady && qvac.llmStatus !== 'error'}
           >
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
             <Animated.View style={[styles.orb, { backgroundColor: orbColor }, orbStyle]}>
@@ -666,7 +681,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               the orb above is the one-shot push-to-talk path and works without them. */}
           <Pressable
             onPress={toggleHandsFree}
-            disabled={!qvac.isReady && qvac.llmStatus !== 'error'}
+            disabled={!voiceReady && qvac.llmStatus !== 'error'}
             style={{
               flexDirection: 'row',
               alignItems: 'center',
