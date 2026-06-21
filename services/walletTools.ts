@@ -84,6 +84,23 @@ function findContact(name: string): any | undefined {
   const list = contacts();
   return list.find((c) => c?.name?.toLowerCase() === q) ?? list.find((c) => c?.name?.toLowerCase().includes(q));
 }
+/**
+ * A contact's Lightning address — the cached `lud16`, or one fetched live from
+ * the Nostr profile when the contact came from Nostr and wasn't pre-resolved
+ * (the voice/agent path never opens the contacts picker that would cache it).
+ */
+async function contactLnAddress(c: any): Promise<string | undefined> {
+  if (c?.lightning_address) return String(c.lightning_address);
+  if (c?.pubkey) {
+    try {
+      const info = await NostrService.getInstance().getUserInfo(String(c.pubkey));
+      return info?.profile?.lud16;
+    } catch {
+      /* offline / no relay — fall through */
+    }
+  }
+  return undefined;
+}
 const looksLikeDestination = (s: string) => /^(ln(bc|tb|bcrt)|bc1|tb1|[a-z0-9._-]+@)/i.test(s.trim());
 const isLightningAddress = (s: string) => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.trim());
 const isOnchainAddress = (s: string) => /^(bc1|tb1|bcrt1)/i.test(s.trim());
@@ -179,6 +196,28 @@ const HANDLERS: Record<string, WalletHandler> = {
     const cur = String(currency ?? 'USD').toUpperCase();
     return { sats, ...(cur !== 'USD' ? { note: `approximate — treated ${cur} as USD` } : {}) };
   },
+  // List the user's contacts (local + Nostr) so the agent can ask "which friend?"
+  // — names plus whether each can receive over Lightning. No payable details are
+  // resolved here; that happens per-contact at send time.
+  list_contacts: async () => {
+    const list = contacts();
+    log('list_contacts', { total: list.length });
+    const people = list
+      .filter((c) => c?.name)
+      .map((c) => ({
+        name: c.name,
+        has_lightning: !!(c.lightning_address || c.pubkey),
+        source: c.pubkey ? 'nostr' : 'local',
+      }));
+    return {
+      count: people.length,
+      contacts: people,
+      message:
+        people.length === 0
+          ? 'No contacts yet. Add a Nostr contact or pay a Lightning address directly.'
+          : `You have ${people.length} contact${people.length === 1 ? '' : 's'}.`,
+    };
+  },
   resolve_contact: async ({ name }) => {
     const q = String(name).trim().toLowerCase();
     const list = contacts();
@@ -191,18 +230,7 @@ const HANDLERS: Record<string, WalletHandler> = {
       throw new Error(`There are ${matches.length} contacts matching "${name}" (${matches.map((c) => c.name).join(', ')}) — which one?`);
     }
     const c = matches[0];
-    let ln = c.lightning_address as string | undefined;
-    // Nostr contact whose lud16 wasn't cached (no contacts-picker pre-resolve, as
-    // in voice) → fetch the profile's Lightning address on demand.
-    if (!ln && c.pubkey) {
-      try {
-        const info = await NostrService.getInstance().getUserInfo(String(c.pubkey));
-        ln = info?.profile?.lud16;
-        log('resolve_contact nostr lud16', { found: !!ln });
-      } catch (e) {
-        log('resolve_contact nostr fetch failed', e);
-      }
-    }
+    const ln = await contactLnAddress(c);
     if (!ln) throw new Error(`"${c.name}" doesn't have a Lightning address set.`);
     return { name: c.name, ln_address: ln, npub: c.npub };
   },
@@ -222,11 +250,14 @@ const HANDLERS: Record<string, WalletHandler> = {
   send_payment: async ({ to, amount_sats }) => {
     let target = String(to ?? '').trim();
     const sats = amount_sats != null ? Number(amount_sats) : undefined;
-    // Contact name → its payable destination.
+    // Contact name → its payable destination. Resolves a Nostr contact's
+    // Lightning address live when it wasn't pre-cached (the voice path).
     if (target && !looksLikeDestination(target)) {
       const c = findContact(target);
-      if (c?.lightning_address) target = c.lightning_address;
-      else throw new Error(`I don't have a payable address for "${to}".`);
+      if (!c) throw new Error(`No contact named "${to}".`);
+      const ln = await contactLnAddress(c);
+      if (!ln) throw new Error(`"${c.name ?? to}" doesn't have a Lightning address set.`);
+      target = ln;
     }
     if (!target) throw new Error('A destination (invoice, address, or contact) is required.');
     // Lightning address (user@domain) → resolve to a BOLT11 invoice via LNURL-pay.
@@ -301,6 +332,7 @@ function describeWalletTool(name: string): string {
     get_swap_quote: 'Describe where a swap quote can be obtained.',
     get_price: 'Get the cached or freshly fetched BTC price.',
     fiat_to_sats: 'Convert a fiat amount to satoshis using the BTC price.',
+    list_contacts: "List the user's saved contacts (local + Nostr) so you can ask which one to pay. Use this when the user wants to send to a friend/contact but hasn't named who, or to confirm available recipients.",
     resolve_contact: 'Resolve a local or Nostr contact to a Lightning address.',
     rln_pay_invoice: 'Pay a Lightning invoice from the connected wallet.',
     rln_send_asset: 'Send an RGB asset to a provided RGB invoice.',
@@ -348,6 +380,8 @@ function paramsForWalletTool(name: string): Record<string, unknown> {
         amount: numberProp('Fiat amount.'),
         currency: stringProp('Fiat currency, defaults to USD.'),
       }, ['amount']);
+    case 'list_contacts':
+      return object({});
     case 'resolve_contact':
       return object({ name: stringProp('Contact name to resolve.') }, ['name']);
     case 'rln_pay_invoice':

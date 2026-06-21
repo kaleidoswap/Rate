@@ -230,6 +230,16 @@ describe('resolve_contact', () => {
       `"Dave" doesn't have a Lightning address set.`,
     );
   });
+
+  it('list_contacts returns names + Lightning availability so the agent can ask', async () => {
+    setStore({ contacts: [{ name: 'Alice', lightning_address: 'alice@ln.tips' }, { name: 'Bob' }] });
+    const r: any = await source().execute('list_contacts', {});
+    expect(r.count).toBe(2);
+    expect(r.contacts).toEqual([
+      { name: 'Alice', has_lightning: true, source: 'local' },
+      { name: 'Bob', has_lightning: false, source: 'local' },
+    ]);
+  });
 });
 
 // ── Spend routing ─────────────────────────────────────────────────────
@@ -281,7 +291,7 @@ describe('send_payment', () => {
     setAdapters({ SPARK: makeAdapter() });
     setStore({ contacts: [{ name: 'Dave' }] });
     await expect(source().execute('send_payment', { to: 'Dave', amount_sats: 100 })).rejects.toThrow(
-      `I don't have a payable address for "Dave".`,
+      `"Dave" doesn't have a Lightning address set.`,
     );
   });
 
