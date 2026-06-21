@@ -53,6 +53,7 @@ const PETAL = 52;
 const RADIUS = 96;            // center-to-petal distance
 const SCRIM = 1600;           // full-screen tap/dim layer, centered on the FAB
 const DEAD_ZONE = 36;         // finger this close to center → no selection (cancel region)
+const MAX_TAP_REACH = RADIUS + PETAL; // taps beyond the petal ring = dismiss, not select
 const SELECT_SLOP = 46;       // max angular distance (deg) from a petal to capture it
 const SPRING = { damping: 14, stiffness: 180, mass: 0.6 } as const;
 
@@ -143,7 +144,11 @@ export const OrbitFAB: React.FC<OrbitFABProps> = ({
   // not just slide-driven. A tap in the dead zone / away from any petal closes.
   const directionToIndex = (dx: number, dy: number): number => {
     const dist = Math.sqrt(dx * dx + dy * dy);
-    if (dist < DEAD_ZONE) return -1;
+    // A tap must land in the petal RING to count as a selection. Too close
+    // (dead zone) or well beyond the petals → it's a tap-away, so close without
+    // firing anything. Previously ANY tap in a petal's direction fired it, even
+    // far across the screen, so dismissing the menu triggered an action.
+    if (dist < DEAD_ZONE || dist > MAX_TAP_REACH) return -1;
     const ang = (Math.atan2(-dy, dx) * 180) / Math.PI;
     let best = -1;
     let bestDiff = 999;
