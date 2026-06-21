@@ -1,5 +1,6 @@
 // App.tsx
 import 'react-native-gesture-handler';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
@@ -18,8 +19,9 @@ import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import ChatNotifications from './components/ChatNotifications';
+import { OrbitFAB, type OrbitAction } from './components/OrbitFAB';
 import NetworkService from './services/NetworkService';
-import { preloadFeedback } from './utils/feedback';
+import { feedback, preloadFeedback } from './utils/feedback';
 
 import { store, persistor } from './store';
 import { selectAiMode } from './store/slices/settingsSlice';
@@ -112,11 +114,48 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   // Split the tabs so a gap opens in the middle for the floating mic button.
   const mid = Math.ceil(routes.length / 2);
 
-  const onMicPress = () => {
-    // The voice overlay lives on the Wallet/dashboard screen — focus it, then open.
-    navigation.navigate(routes[0].name);
-    DeviceEventEmitter.emit('rate.openVoice');
+  // Quick tap on the center FAB → QR scanner (the default, most-used action).
+  const onScanPress = () => {
+    feedback.select();
+    navigation.navigate('QRScanner');
   };
+
+  // Petals that fan out of the center FAB on press-and-hold + drag. Ordered
+  // left→right across the upward arc.
+  const orbitActions: OrbitAction[] = [
+    {
+      key: 'send',
+      label: 'Send',
+      color: theme.colors.networks.lightning,
+      renderIcon: () => <Ionicons name="arrow-up" size={24} color={theme.colors.primary[950]} />,
+      onSelect: () => navigation.navigate('Send'),
+    },
+    {
+      key: 'receive',
+      label: 'Receive',
+      color: theme.colors.networks.bitcoin,
+      renderIcon: () => <Ionicons name="arrow-down" size={24} color={theme.colors.primary[950]} />,
+      onSelect: () => navigation.navigate('Receive'),
+    },
+    {
+      key: 'swap',
+      label: 'Swap',
+      color: theme.colors.brand.violet,
+      renderIcon: () => <Ionicons name="swap-horizontal" size={24} color="#FFFFFF" />,
+      onSelect: () => navigation.navigate('Swap'),
+    },
+    {
+      key: 'voice',
+      label: 'Voice',
+      color: theme.colors.primary[500],
+      renderIcon: () => <Ionicons name="mic" size={24} color={theme.colors.primary[950]} />,
+      onSelect: () => {
+        // The voice overlay lives on the Wallet/dashboard screen — focus it, then open.
+        navigation.navigate(routes[0].name);
+        DeviceEventEmitter.emit('rate.openVoice');
+      },
+    },
+  ];
 
   const renderItem = (route: typeof routes[number], index: number) => {
     const { options } = descriptors[route.key];
@@ -164,17 +203,14 @@ function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
         <View style={islandStyles.centerGap} />
         {routes.slice(mid).map((r, i) => renderItem(r, i + mid))}
       </View>
-      {/* Green mic button — centered over the gap, overflowing the island top. */}
+      {/* Center FAB — QR by default; press & hold to fan out the orbit of quick
+          actions. Centered over the gap, overflowing the island top. */}
       <View pointerEvents="box-none" style={islandStyles.micWrap}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel="Voice assistant"
-          activeOpacity={0.85}
-          onPress={onMicPress}
-          style={islandStyles.mic}
-        >
-          <Ionicons name="mic" size={26} color={theme.colors.primary[950]} />
-        </TouchableOpacity>
+        <OrbitFAB
+          onDefaultPress={onScanPress}
+          renderCenterIcon={() => <Ionicons name="qr-code" size={26} color={theme.colors.primary[950]} />}
+          actions={orbitActions}
+        />
       </View>
     </View>
   );
@@ -244,25 +280,14 @@ const islandStyles = StyleSheet.create({
   },
   micWrap: {
     position: 'absolute',
-    // Mic top sits at the outer's top edge, giving ~22px of overflow above the
-    // island (the rest of the 60px mic overlaps/sits within it).
+    // FAB top sits at the outer's top edge, giving ~22px of overflow above the
+    // island (the rest of the 60px FAB overlaps/sits within it).
     top: 27,
     left: 0,
     right: 0,
     alignItems: 'center',
-  },
-  mic: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: theme.colors.primary[500],
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: theme.colors.primary[500],
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
-    elevation: 10,
+    // Let the orbit petals + scrim render beyond the bar's bounds.
+    overflow: 'visible',
   },
 });
 
@@ -499,24 +524,26 @@ export default function App() {
   }
 
   return (
-    <ErrorBoundary>
-      <Provider store={store}>
-        <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
-          <QVACEnabledSync />
-          <ChatNotifications />
-          <AppThemeProvider>
-            <KaleidoThemeProvider>
-              <ThemeProvider value={navigationTheme}>
-                <StatusBar style="light" backgroundColor="transparent" translucent={true} />
-                <AppNavigator />
-                <ToastContainer />
-              </ThemeProvider>
-            </KaleidoThemeProvider>
-          </AppThemeProvider>
-        </PersistGate>
-      </Provider>
-      {!introDone && <BrandIntro onFinish={() => setIntroDone(true)} />}
-    </ErrorBoundary>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ErrorBoundary>
+        <Provider store={store}>
+          <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
+            <QVACEnabledSync />
+            <ChatNotifications />
+            <AppThemeProvider>
+              <KaleidoThemeProvider>
+                <ThemeProvider value={navigationTheme}>
+                  <StatusBar style="light" backgroundColor="transparent" translucent={true} />
+                  <AppNavigator />
+                  <ToastContainer />
+                </ThemeProvider>
+              </KaleidoThemeProvider>
+            </AppThemeProvider>
+          </PersistGate>
+        </Provider>
+        {!introDone && <BrandIntro onFinish={() => setIntroDone(true)} />}
+      </ErrorBoundary>
+    </GestureHandlerRootView>
   );
 }
 
