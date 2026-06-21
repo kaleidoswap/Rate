@@ -29,7 +29,7 @@ import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig } from '../s
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
-import { MainHeader, MindAvatar, MindGlyph } from '../components';
+import { MainHeader, MindAvatar, MindGlyph, Badge } from '../components';
 import { ChatEmptyState, MessageBubble, TypingDots, buildCopyText } from '../components/chat';
 import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
@@ -674,6 +674,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
             <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary[600]} />
             <Text style={styles.modelBannerText}>
               KaleidoMind (on-device AI) is off. Enable to download and run it locally.
+              It's experimental — it can make mistakes.
             </Text>
             <TouchableOpacity
               onPress={() => dispatch(setAiMode('local'))}
@@ -818,6 +819,7 @@ export default function AIAssistantScreen({ navigation }: Props) {
         title="KaleidoMind"
         subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
         iconNode={<MindGlyph size={22} color={theme.colors.text.primary} />}
+        titleBadge={<Badge label="Experimental" color={theme.colors.warning[500]} size="sm" />}
         rightAction={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {nostrState.isConnected && (

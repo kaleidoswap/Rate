@@ -88,10 +88,16 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
             <View style={styles.heroIcon}>
               <Ionicons name="sparkles" size={30} color={theme.colors.primary[500]} />
             </View>
-            <Text style={styles.title}>Meet KaleidoMind</Text>
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>Meet KaleidoMind</Text>
+              <View style={styles.experimentalBadge}>
+                <Text style={styles.experimentalText}>Experimental</Text>
+              </View>
+            </View>
             <Text style={styles.subtitle}>
               A private AI assistant that can check balances, create invoices and send payments by
-              voice or chat — all without your keys leaving the wallet. Choose how it runs.
+              voice or chat — all without your keys leaving the wallet. It's experimental — it can
+              make mistakes, so review actions before confirming. Choose how it runs.
             </Text>
           </View>
 
@@ -158,11 +164,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: theme.spacing[4],
   },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[2],
+  },
   title: {
     fontSize: theme.typography.fontSize['2xl'],
     fontWeight: theme.typography.fontWeight.extrabold,
     color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
+  },
+  experimentalBadge: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.full ?? 999,
+    backgroundColor: `${theme.colors.warning[500]}22`,
+    borderWidth: 1,
+    borderColor: `${theme.colors.warning[500]}55`,
+  },
+  experimentalText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.warning[500],
   },
   subtitle: {
     fontSize: theme.typography.fontSize.sm,

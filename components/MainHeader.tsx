@@ -22,6 +22,8 @@ interface MainHeaderProps {
   icon?: keyof typeof Ionicons.glyphMap;
   /** Render a custom icon node before the title instead of an Ionicons `icon`. */
   iconNode?: React.ReactNode;
+  /** A small node rendered right after the title (e.g. an "Experimental" badge). */
+  titleBadge?: React.ReactNode;
   onBack?: () => void;
   children?: React.ReactNode;
   /**
@@ -43,6 +45,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   rightAction,
   icon,
   iconNode,
+  titleBadge,
   onBack,
   children,
   elevated,
@@ -87,6 +90,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
                         {title}
                       </Text>
                     )}
+                    {titleBadge && <View style={{ marginLeft: 8 }}>{titleBadge}</View>}
                   </View>
                   {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
                 </>
