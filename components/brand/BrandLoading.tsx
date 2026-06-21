@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import Animated, {
   Easing,
   interpolate,
@@ -29,6 +29,7 @@ interface BrandLoadingProps {
 }
 
 const DOTS = [0, 1, 2];
+const GLOW = 320; // diameter of the soft radial halo behind the mark
 
 /**
  * Steady-state branded loading screen: dark kaleidoscope background, the mark
@@ -83,15 +84,21 @@ export const BrandLoading: React.FC<BrandLoadingProps> = ({
       <LinearGradient colors={BRAND_BG} start={{ x: 0.2, y: 0 }} end={{ x: 0.85, y: 1 }} style={StyleSheet.absoluteFill} />
       <View style={styles.center}>
         <View style={styles.markWrap}>
-          <Animated.View style={[styles.glow, glowStyle]} />
-          {/* Soften the glow into a diffuse halo rather than a hard green disc. */}
-          <BlurView
-            intensity={48}
-            tint="dark"
-            experimentalBlurMethod="dimezisBlurView"
-            style={styles.glowBlur}
-            pointerEvents="none"
-          />
+          {/* Soft radial halo: bright-green center fading to fully transparent at
+              the edge, so it reads as a diffuse glow that melts into the page
+              rather than a hard disc with a visible background box. */}
+          <Animated.View style={[styles.glowWrap, glowStyle]} pointerEvents="none">
+            <Svg width={GLOW} height={GLOW}>
+              <Defs>
+                <RadialGradient id="brandGlow" cx="50%" cy="50%" r="50%">
+                  <Stop offset="0%" stopColor="#15E99A" stopOpacity={0.55} />
+                  <Stop offset="55%" stopColor="#15E99A" stopOpacity={0.16} />
+                  <Stop offset="100%" stopColor="#15E99A" stopOpacity={0} />
+                </RadialGradient>
+              </Defs>
+              <Circle cx={GLOW / 2} cy={GLOW / 2} r={GLOW / 2} fill="url(#brandGlow)" />
+            </Svg>
+          </Animated.View>
           <BrandMark size={markSize} />
         </View>
 
@@ -120,20 +127,12 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#06101F' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   markWrap: { alignItems: 'center', justifyContent: 'center' },
-  glow: {
+  glowWrap: {
     position: 'absolute',
-    width: 240,
-    height: 240,
-    borderRadius: 120,
-    backgroundColor: '#15E99A',
-  },
-  // Circular blur over the glow so it reads as a soft halo, not a hard disc.
-  glowBlur: {
-    position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    overflow: 'hidden',
+    width: GLOW,
+    height: GLOW,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   words: { marginTop: 36, alignItems: 'center' },
   wordmark: { fontSize: 30, fontWeight: '800', letterSpacing: 0.3, color: '#F4FFF9' },
