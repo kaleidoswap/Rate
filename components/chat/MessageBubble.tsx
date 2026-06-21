@@ -1,6 +1,6 @@
 // components/chat/MessageBubble.tsx
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Markdown from 'react-native-markdown-display';
@@ -159,6 +159,21 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
           {!message.streaming && message.stats && (
             <StatsFooter stats={message.stats} styles={styles} theme={theme} />
           )}
+          {/* Discoverable copy on a settled assistant reply — copies the answer
+              plus its reasoning when present (long-press the bubble also works). */}
+          {!message.streaming && !!message.text?.trim() && (
+            <View style={styles.copyRow}>
+              <TouchableOpacity
+                onPress={() => onCopy(buildCopyText(message), 'Message')}
+                style={styles.copyBtn}
+                hitSlop={8}
+                accessibilityLabel="Copy message"
+              >
+                <Ionicons name="copy-outline" size={13} color={theme.colors.text.tertiary} />
+                <Text style={styles.copyBtnText}>Copy</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       )}
     </ChatBubble>
@@ -166,6 +181,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
 };
 
 const formatTime = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/** Plain-text copy of a message — its reasoning AND answer when both exist. */
+export const buildCopyText = (message: ChatMessage): string =>
+  [message.thinking?.trim() ? `Thinking:\n${message.thinking.trim()}` : '', message.text?.trim() ?? '']
+    .filter(Boolean)
+    .join('\n\n');
 
 const makeMarkdownStyles = (theme: Theme) => ({
   body: {
@@ -240,6 +261,17 @@ const makeStyles = (theme: Theme) =>
     },
     statChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     statText: { fontSize: 11, color: theme.colors.text.tertiary, fontWeight: theme.typography.fontWeight.medium },
+    copyRow: { flexDirection: 'row', marginTop: theme.spacing[1.5] ?? 6 },
+    copyBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 3,
+      paddingHorizontal: 8,
+      borderRadius: theme.borderRadius.full ?? 999,
+      backgroundColor: theme.colors.surface.secondary,
+    },
+    copyBtnText: { fontSize: 11, color: theme.colors.text.tertiary, fontWeight: theme.typography.fontWeight.medium },
   });
 
 export default React.memo(MessageBubble);

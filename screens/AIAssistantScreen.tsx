@@ -30,7 +30,7 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
 import { MainHeader, MindAvatar, MindGlyph } from '../components';
-import { ChatEmptyState, MessageBubble, TypingDots } from '../components/chat';
+import { ChatEmptyState, MessageBubble, TypingDots, buildCopyText } from '../components/chat';
 import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
@@ -344,10 +344,28 @@ export default function AIAssistantScreen({ navigation }: Props) {
   }, []);
 
   const handleLongPressMessage = useCallback((message: ChatMessage) => {
-    if (!message.text?.trim()) return;
+    const text = buildCopyText(message);
+    if (!text) return;
     Haptics.selectionAsync();
-    Clipboard.setString(message.text);
+    Clipboard.setString(text);
+    toast().success('Message copied');
   }, []);
+
+  // Copy the entire conversation (each turn's reasoning + answer) as plain text.
+  const copyFullChat = useCallback(() => {
+    const transcript = messages
+      .map((m) => {
+        const who = m.isUser ? 'You' : 'KaleidoMind';
+        const body = m.isUser ? (m.text?.trim() ?? '') : buildCopyText(m);
+        return body ? `${who}:\n${body}` : '';
+      })
+      .filter(Boolean)
+      .join('\n\n———\n\n');
+    if (!transcript) return;
+    Clipboard.setString(transcript);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    toast().success('Full chat copied');
+  }, [messages]);
 
   // ---- Contacts ----
   const handleContactSelection = (contact: Contact) => {
@@ -814,6 +832,15 @@ export default function AIAssistantScreen({ navigation }: Props) {
                 accessibilityLabel="New chat"
               >
                 <Ionicons name="create-outline" size={20} color="white" />
+              </TouchableOpacity>
+            )}
+            {aiEnabled && !isEmpty && (
+              <TouchableOpacity
+                style={styles.headerBtn}
+                onPress={copyFullChat}
+                accessibilityLabel="Copy full chat"
+              >
+                <Ionicons name="copy-outline" size={20} color="white" />
               </TouchableOpacity>
             )}
             {aiEnabled && (
