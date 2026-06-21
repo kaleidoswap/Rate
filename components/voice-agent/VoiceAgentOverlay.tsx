@@ -83,9 +83,15 @@ const mdStyles = {
   body: { color: theme.colors.text.primary, fontSize: 15, lineHeight: 21 },
   paragraph: { marginTop: 0, marginBottom: 6 },
   strong: { fontWeight: '700' as const, color: theme.colors.text.primary },
-  bullet_list: { marginVertical: 2 },
-  ordered_list: { marginVertical: 2 },
-  list_item: { marginVertical: 1 },
+  em: { fontStyle: 'italic' as const },
+  bullet_list: { marginTop: 2, marginBottom: 6 },
+  ordered_list: { marginTop: 2, marginBottom: 6 },
+  // Each row lays its marker beside the content so wrapped lines stay aligned.
+  list_item: { flexDirection: 'row' as const, alignItems: 'flex-start' as const, marginVertical: 2 },
+  bullet_list_icon: { color: theme.colors.primary[500], marginRight: 8, marginLeft: 2, lineHeight: 21, fontSize: 15 },
+  bullet_list_content: { flex: 1 },
+  ordered_list_icon: { color: theme.colors.primary[500], marginRight: 8, marginLeft: 2, lineHeight: 21, fontSize: 15, fontWeight: '700' as const },
+  ordered_list_content: { flex: 1 },
   link: { color: theme.colors.text.link, textDecorationLine: 'underline' as const },
   code_inline: {
     backgroundColor: theme.colors.surface.tertiary,
@@ -179,6 +185,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // True while the session is mounted — guards the speak→listen loop so a late
   // TTS callback can't start the recorder after the overlay has closed.
   const aliveRef = useRef(true);
+  // The in-flight inference request id (from onStart) so we can abort it when the
+  // overlay closes — otherwise the model keeps "thinking" in the background and
+  // speaks its answer minutes later, anywhere in the app.
+  const requestIdRef = useRef<string | null>(null);
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -204,8 +214,13 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   useEffect(
     () => () => {
       void stopSpeak();
-      voiceRef.current?.stopListening?.();
+      voiceRef.current?.cancelListening?.();
       handsFreeRef.current?.stop();
+      // Abort any in-flight inference so it can't finish + speak after close.
+      if (requestIdRef.current) {
+        void qvac.service?.cancelRequest?.(requestIdRef.current).catch(() => {});
+        requestIdRef.current = null;
+      }
     },
     []
   );
@@ -266,6 +281,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       try {
         const res = await agent.runTurn(userText, {
           history: priorHistory,
+          onStart: (id) => { requestIdRef.current = id; },
           onToken: (tok) => {
             // Stream the answer into the bubble live + keep it scrolled into view.
             streamed += tok;
@@ -280,6 +296,9 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           onConfirm: (call) =>
             new Promise((resolve) => setConfirm({ call, resolve })),
         });
+        requestIdRef.current = null;
+        // If the overlay closed mid-turn, don't patch/speak a stale answer.
+        if (!aliveRef.current) return;
         // Merchant results → structured card + short spoken summary (no reading
         // the raw list aloud); everything else speaks the model's reply.
         const merchant = merchantCardFrom(res);
@@ -302,6 +321,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           onError: () => setPhase('idle'),
         });
       } catch (e) {
+        requestIdRef.current = null;
+        if (!aliveRef.current) return;
         patchBubble(assistantId, { text: '' });
         setActiveId(null);
         setError(friendlyError(e));
@@ -364,6 +385,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     try {
       const res = await agent.runTurn(transcript, {
         history: priorHistory,
+        onStart: (id) => { requestIdRef.current = id; },
         onToken: (tok) => {
           streamed += tok;
           patchBubble(assistantId, { text: streamed });
@@ -376,6 +398,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         },
         onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
       });
+      requestIdRef.current = null;
+      if (!aliveRef.current) return '';
       const merchant = merchantCardFrom(res);
       const finalText = merchant
         ? merchant.spoken
