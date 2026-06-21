@@ -32,6 +32,7 @@ import type { QvacTurnStats } from '@kaleidorg/mind/qvac';
 import skillBundle from '../skills.bundle.json';
 import { buildWalletToolSource } from './walletTools';
 import { buildMerchantToolSource } from './merchantTools';
+import { numberWordsToDigits } from '../utils/numberWords';
 import { buildSwapToolSource } from './swapTools';
 import { buildPaidDataToolSource } from './aiPaidData';
 import { buildKnowledgeToolSource } from './aiKnowledge';
@@ -204,8 +205,11 @@ export function createMindAgent(
       // Make this turn's reasoning + stats available to the provider closure.
       thinkingSink = cbs.onThinking;
       statsSink = cbs.onStats;
+      // Spoken/typed number words → digits so the deterministic payment recipe
+      // can extract amounts ("send Walter one satoshi" → "... 1 satoshi").
+      const normalized = numberWordsToDigits(text);
       try {
-        return await funnel.runTurn(text, {
+        return await funnel.runTurn(normalized, {
           history: cbs.history,
           onStart: cbs.onStart,
           onToken: cbs.onToken,
