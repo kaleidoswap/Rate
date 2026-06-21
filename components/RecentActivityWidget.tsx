@@ -71,7 +71,7 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
     'Swap': 'Swap',
 };
 
-const MAX_ITEMS = 3;
+const MAX_ITEMS = 2;
 
 export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
     const swapHistory = useSelector((state: RootState) => state.swap.swapHistory);
@@ -125,6 +125,49 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
     // Don't render the section if there's nothing to show after loading.
     if (!loading && items.length === 0) return null;
 
+    const renderRow = (item: ActivityItem) => {
+        const v = typeVisual(item.type);
+        const st = ACTIVITY_STATUS_VISUAL[item.status];
+        const hasAmount = item.amount !== '';
+        const isIncoming = item.type === 'receive' || item.type === 'issuance';
+
+        return (
+            <TouchableOpacity
+                key={item.id}
+                activeOpacity={0.7}
+                style={styles.row}
+                onPress={() => setSelected(item)}
+            >
+                <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
+                    <Ionicons name={v.icon} size={18} color={v.color} />
+                </View>
+
+                <View style={styles.rowBody}>
+                    <Text style={styles.rowTitle} numberOfLines={1}>{typeLabel(item.type)}</Text>
+                    <View style={styles.rowMeta}>
+                        <View style={styles.layerChip}>
+                            <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
+                        </View>
+                        <View style={[styles.statusDot, { backgroundColor: st.color }]} />
+                        <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
+                    </View>
+                </View>
+
+                {hasAmount && (
+                    <Text
+                        style={[
+                            styles.rowAmount,
+                            { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary },
+                        ]}
+                        numberOfLines={1}
+                    >
+                        {amountPrefix(item.type)}{item.amount} {item.assetTicker}
+                    </Text>
+                )}
+            </TouchableOpacity>
+        );
+    };
+
     return (
         <View style={styles.container}>
             <SectionHeader
@@ -140,60 +183,24 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                     <ActivityIndicator size="small" color={theme.colors.primary[500]} />
                 </View>
             ) : (
-                <View style={styles.listWrap}>
-                <View style={styles.list}>
-                {items.map((item) => {
-                    const v = typeVisual(item.type);
-                    const st = ACTIVITY_STATUS_VISUAL[item.status];
-                    const hasAmount = item.amount !== '';
-                    const isIncoming = item.type === 'receive' || item.type === 'issuance';
-
-                    return (
-                        <TouchableOpacity
-                            key={item.id}
-                            activeOpacity={0.7}
-                            style={styles.row}
-                            onPress={() => setSelected(item)}
-                        >
-                            <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
-                                <Ionicons name={v.icon} size={18} color={v.color} />
+                <View>
+                    {/* First item shows in full; everything from the second down
+                        fades into the page background as a "there's more" teaser. */}
+                    {renderRow(items[0])}
+                    {items.length > 1 && (
+                        <View style={styles.restWrap}>
+                            <View style={styles.list}>
+                                {items.slice(1).map(renderRow)}
                             </View>
-
-                            <View style={styles.rowBody}>
-                                <Text style={styles.rowTitle} numberOfLines={1}>{typeLabel(item.type)}</Text>
-                                <View style={styles.rowMeta}>
-                                    <View style={styles.layerChip}>
-                                        <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
-                                    </View>
-                                    <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                                    <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
-                                </View>
-                            </View>
-
-                            {hasAmount && (
-                                <Text
-                                    style={[
-                                        styles.rowAmount,
-                                        { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary },
-                                    ]}
-                                    numberOfLines={1}
-                                >
-                                    {amountPrefix(item.type)}{item.amount} {item.assetTicker}
-                                </Text>
-                            )}
-                        </TouchableOpacity>
-                    );
-                })}
-                </View>
-                {items.length > 2 && (
-                    <LinearGradient
-                        colors={[`${theme.colors.background.primary}00`, theme.colors.background.primary]}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 0, y: 1 }}
-                        pointerEvents="none"
-                        style={styles.fade}
-                    />
-                )}
+                            <LinearGradient
+                                colors={[`${theme.colors.background.primary}00`, theme.colors.background.primary]}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 0, y: 1 }}
+                                pointerEvents="none"
+                                style={StyleSheet.absoluteFill}
+                            />
+                        </View>
+                    )}
                 </View>
             )}
 
@@ -214,18 +221,13 @@ const styles = StyleSheet.create({
         paddingVertical: theme.spacing[6],
         alignItems: 'center',
     },
-    listWrap: {
-        position: 'relative',
-    },
     list: {
         gap: theme.spacing[3],
     },
-    fade: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        height: 130,
+    // Holds every item past the first; the gradient overlay fades them out.
+    restWrap: {
+        position: 'relative',
+        marginTop: theme.spacing[3],
     },
     row: {
         flexDirection: 'row',
