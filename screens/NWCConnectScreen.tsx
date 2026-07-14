@@ -85,8 +85,8 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         // 2) Enroll the network so it reconnects on launch.
         await enrollNetwork(network);
         // 3) Activate the adapter now.
-        await protocolManager.connect('RGB', { protocol: 'RGB', network } as any);
-        await protocolManager.setActiveProtocol('RGB');
+        await protocolManager.connect('RGB_LN', { protocol: 'RGB_LN', network } as any);
+        await protocolManager.setActiveProtocol('RGB_LN');
         // 4) Reflect in Redux + pull fresh balances/assets through the new wallet.
         dispatch(setConnectedWallet(walletPubkey));
         dispatch(setNWCConnectionString(uri));
@@ -184,7 +184,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleDisconnect = async () => {
     try {
-      await protocolManager.disconnect('RGB');
+      await protocolManager.disconnect('RGB_LN');
     } catch {
       /* ignore */
     }

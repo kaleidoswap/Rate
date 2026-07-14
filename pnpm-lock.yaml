@@ -39,8 +39,8 @@ importers:
         specifier: ^0.6.1
         version: 0.6.1(@qvac/sdk@0.13.3(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.35))(expo-device@8.0.10(expo@54.0.35))(expo-file-system@19.0.23(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.4(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(sodium-javascript@0.8.0))
       '@kaleidorg/wallet-engine':
-        specifier: npm:@kaleidorg/wallet-protocols@1.0.0-beta.8
-        version: '@kaleidorg/wallet-protocols@1.0.0-beta.8(3763d8736b82a27bdf993654aa232178)'
+        specifier: ^1.0.0-beta.55
+        version: 1.0.0-beta.55(041ffdd41cc9e0a5ab391e7e4e7fa396)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))
@@ -1590,8 +1590,46 @@ packages:
       '@qvac/sdk':
         optional: true
 
-  '@kaleidorg/wallet-protocols@1.0.0-beta.8':
-    resolution: {integrity: sha512-nfHRICay4HqXhwPGGPt7WgRw7tcqPLtzUl07UophwjVOQpZYlrY+Q3jDFXJ/Mx6z0d/AskyNPKSsLzKwsxSfTA==}
+  '@kaleidorg/wallet-engine@1.0.0-beta.55':
+    resolution: {integrity: sha512-QZay1fd9Te0rxJv728OAbcIsdvWAlm/0jXML9LMtBCBzyxluiAuVIvTPp3f65rGt/NPD1HXV9f/o0wZwmNbGjA==}
+    peerDependencies:
+      '@arkade-os/boltz-swap': ^0.3.22
+      '@arkade-os/sdk': ^0.4.19
+      '@arkade-os/wdk': ^0.1.4
+      '@buildonspark/spark-sdk': ^0.7.10
+      '@flashnet/sdk': ^0.5.7
+      '@kaleidorg/wdk-protocol-swap-kaleidoswap': ^1.0.0-beta.2
+      '@kaleidorg/wdk-wallet-liquid': ^1.0.0-beta.4
+      '@kaleidorg/wdk-wallet-rln': ^1.0.0-beta.2
+      '@tetherto/wdk-wallet-spark': ^1.0.0-beta.17
+      '@utexo/rgb-lib-wasm': ^1.0.0-beta.3
+      '@utexo/wdk-wallet-rgb': ^2.0.3
+      kaleido-sdk: 0.1.11
+    peerDependenciesMeta:
+      '@arkade-os/boltz-swap':
+        optional: true
+      '@arkade-os/sdk':
+        optional: true
+      '@arkade-os/wdk':
+        optional: true
+      '@buildonspark/spark-sdk':
+        optional: true
+      '@flashnet/sdk':
+        optional: true
+      '@kaleidorg/wdk-protocol-swap-kaleidoswap':
+        optional: true
+      '@kaleidorg/wdk-wallet-liquid':
+        optional: true
+      '@kaleidorg/wdk-wallet-rln':
+        optional: true
+      '@tetherto/wdk-wallet-spark':
+        optional: true
+      '@utexo/rgb-lib-wasm':
+        optional: true
+      '@utexo/wdk-wallet-rgb':
+        optional: true
+      kaleido-sdk:
+        optional: true
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.2':
     resolution: {integrity: sha512-rRU5OcBRp6jeY0kGffqT2jezFFVuAPX519Qc99jcHEo+qLJuNqM8sSHMfO5x8bx4zrF0AXhN3CEpsSHPHDHUaA==}
@@ -2084,6 +2122,9 @@ packages:
 
   '@scure/btc-signer@2.0.1':
     resolution: {integrity: sha512-vk5a/16BbSFZkhh1JIJ0+4H9nceZVo5WzKvJGGWiPp3sQOExeW+L53z3dI6u0adTPoE8ZbL+XEb6hEGzVZSvvQ==}
+
+  '@scure/btc-signer@2.2.0':
+    resolution: {integrity: sha512-ZXZ08sZqSZKEcOuEQnxTF66ouHtl6+UA6U/QfQM06K9WiOlEkXF4LviZCaSgkdiFh9cyMt9+xdup7JtEv3p0fw==}
 
   '@shikijs/core@3.23.0':
     resolution: {integrity: sha512-NSWQz0riNb67xthdm5br6lAkvpDJRTgB36fxlo37ZzM2yq0PQFFzbd8psqC2XMPgCzo1fW6cVi18+ArJ44wqgA==}
@@ -5023,6 +5064,10 @@ packages:
 
   micro-packed@0.8.0:
     resolution: {integrity: sha512-AKb8znIvg9sooythbXzyFeChEY0SkW0C6iXECpy/ls0e5BtwXO45J9wD9SLzBztnS4XmF/5kwZknsq+jyynd/A==}
+    engines: {node: '>= 20.19.0'}
+
+  micro-packed@0.9.0:
+    resolution: {integrity: sha512-gFdaWTxEXOwtSOcpxulO4AuXVtp3HWIRmB8eq8+3m1Zku0ubgva0UGpi03YhcvsTJasHngG9gTIUK5kHNKdesg==}
     engines: {node: '>= 20.19.0'}
 
   micromark-util-character@2.1.1:
@@ -8618,49 +8663,25 @@ snapshots:
     optionalDependencies:
       '@qvac/sdk': 0.13.3(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.35))(expo-device@8.0.10(expo@54.0.35))(expo-file-system@19.0.23(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.4(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(sodium-javascript@0.8.0)
 
-  '@kaleidorg/wallet-protocols@1.0.0-beta.8(3763d8736b82a27bdf993654aa232178)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.55(041ffdd41cc9e0a5ab391e7e4e7fa396)':
     dependencies:
+      '@noble/curves': 2.2.0
+      '@noble/hashes': 2.2.0
+      '@scure/base': 2.2.0
       '@scure/bip32': 1.7.0
       '@scure/bip39': 1.6.0
-      kaleido-sdk: 0.1.8
+      '@scure/btc-signer': 2.2.0
     optionalDependencies:
+      '@arkade-os/boltz-swap': 0.3.40(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-background-task@1.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.35)
       '@arkade-os/sdk': 0.4.36(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-background-task@1.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.35)
+      '@arkade-os/wdk': https://codeload.github.com/arkade-os/arkade-wdk/tar.gz/102967daf634759f1602f06dd27f3b21a0a88d9a(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))(bare-url@2.4.5)(expo-background-task@1.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.35)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.35)(sodium-javascript@0.8.0)
       '@buildonspark/spark-sdk': 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
       '@flashnet/sdk': 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))
       '@kaleidorg/wdk-wallet-liquid': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))
       '@kaleidorg/wdk-wallet-rln': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))
       '@tetherto/wdk-wallet-spark': 1.0.0-beta.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))(bare-url@2.4.5)(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(sodium-javascript@0.8.0)(ws@8.21.0)
-    transitivePeerDependencies:
-      - '@buildonspark/issuer-sdk'
-      - '@ledgerhq/ledger-bitcoin'
-      - '@react-native-async-storage/async-storage'
-      - '@tetherto/wdk-wallet'
-      - bare-abort-controller
-      - bare-buffer
-      - bare-events
-      - bare-pipe
-      - bare-tcp
-      - bare-url
-      - bip32
-      - bitcoinjs-lib
-      - bufferutil
-      - ecpair
-      - expo
-      - expo-background-task
-      - expo-sqlite
-      - expo-task-manager
-      - lwk-rn
-      - lwk_wasm
-      - react
-      - react-native
-      - react-native-b4a
-      - react-native-get-random-values
-      - sodium-javascript
-      - supports-color
-      - typescript
-      - utf-8-validate
-      - ws
+      kaleido-sdk: 0.1.8
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))':
     dependencies:
@@ -9470,6 +9491,13 @@ snapshots:
       '@noble/hashes': 2.0.1
       '@scure/base': 2.0.0
       micro-packed: 0.8.0
+
+  '@scure/btc-signer@2.2.0':
+    dependencies:
+      '@noble/curves': 2.2.0
+      '@noble/hashes': 2.2.0
+      '@scure/base': 2.2.0
+      micro-packed: 0.9.0
 
   '@shikijs/core@3.23.0':
     dependencies:
@@ -13579,6 +13607,10 @@ snapshots:
   micro-packed@0.8.0:
     dependencies:
       '@scure/base': 2.0.0
+
+  micro-packed@0.9.0:
+    dependencies:
+      '@scure/base': 2.2.0
 
   micromark-util-character@2.1.1:
     dependencies:

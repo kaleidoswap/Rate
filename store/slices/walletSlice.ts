@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../../utils/protocol-bridge'
 // store/slices/walletSlice.ts
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { WalletRecord, NetworkConfig, NetworkType } from '../../services/DatabaseService';
@@ -224,7 +225,7 @@ export const updateNetwork = createAsyncThunk(
 
             if (apiUrl) {
               try {
-                await protocolManager.connect('RGB', {
+                await protocolManager.connect('RGB_LN', {
                   protocol: 'RGB',
                   nodeUrl: apiUrl,
                 } as any);
@@ -257,7 +258,7 @@ export const unlockWallet = createAsyncThunk(
       const dbService = DatabaseService.getInstance();
 
       // Unlock RGB node via protocolManager
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       if (rgbAdapter?.isConnected() && rgbAdapter.executeProtocolOperation) {
         await rgbAdapter.executeProtocolOperation('unlockNode', {
           password: params.password,
@@ -286,7 +287,7 @@ export const loadBtcBalance = createAsyncThunk(
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
       const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
       for (const proto of protocols) {
-        const adapter = protocolManager.getAdapterIfAvailable(proto);
+        const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
           try {
             const btc = await adapter.getBtcBalance();
@@ -326,7 +327,7 @@ export const syncWallet = createAsyncThunk(
   'wallet/sync',
   async (_, { rejectWithValue }) => {
     try {
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       if (rgbAdapter?.isConnected() && rgbAdapter.executeProtocolOperation) {
         await rgbAdapter.executeProtocolOperation('sync', {});
       }

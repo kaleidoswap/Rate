@@ -51,7 +51,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   const successAnim = useRef<LottieView>(null);
   const errorAnim = useRef<LottieView>(null);
 
-  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
 
   useEffect(() => {
     if (!permission) {
@@ -306,8 +306,11 @@ export default function QRScannerScreen({ navigation, route }: Props) {
     if (!rgbAdapter?.isConnected()) {
       throw new Error('RGB node not connected. Please connect it in Settings to scan RGB invoices.');
     }
-    // Decode RGB invoice
-    const decodedInvoice = await rgbAdapter.decodeRgbInvoice!({ invoice });
+    // Decode RGB invoice (decodeRgbInvoice returns `unknown` in beta.55; narrow to what we read).
+    const decodedInvoice = (await rgbAdapter.decodeRgbInvoice!({ invoice })) as {
+      assignment?: { type?: string; value?: number | string };
+      asset_id?: string;
+    };
 
     // Extract amount from assignment if it's a fungible assignment
     let invoiceAmount: string | undefined = undefined;

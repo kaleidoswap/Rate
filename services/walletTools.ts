@@ -33,7 +33,7 @@ function normInvoice(r: any): Record<string, unknown> {
 
 const LAYER_PROTO: Record<'spark' | 'rln' | 'arkade', ProtocolType> = {
   spark: 'SPARK',
-  rln: 'RGB',
+  rln: 'RGB_LN',
   arkade: 'ARKADE',
 };
 
@@ -47,7 +47,7 @@ function requireLayer(layer: keyof typeof LAYER_PROTO): any {
   return a;
 }
 function lightningAdapter(): any {
-  const a = adapter('SPARK') ?? adapter('RGB');
+  const a = adapter('SPARK') ?? adapter('RGB_LN');
   if (!a) throw new Error('No Lightning wallet is connected.');
   return a;
 }
@@ -191,7 +191,7 @@ const HANDLERS: Record<string, WalletHandler> = {
   // the live quote + atomic execution happen on the tested Swap screen, so the
   // agent quotes + hands off rather than moving funds blind.
   get_swap_quote: async ({ from_asset, to_asset, amount }) => {
-    const venue = adapter('RGB') ? 'KaleidoSwap (RLN)' : adapter('SPARK') ? 'Flashnet (Spark)' : null;
+    const venue = adapter('RGB_LN') ? 'KaleidoSwap (RLN)' : adapter('SPARK') ? 'Flashnet (Spark)' : null;
     if (!venue) throw new Error('Connect a Spark or RLN wallet to swap.');
     const f = String(from_asset ?? '').toUpperCase();
     const t = String(to_asset ?? '').toUpperCase();

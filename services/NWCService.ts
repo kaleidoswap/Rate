@@ -125,7 +125,7 @@ export class NWCService {
   public async initialize(relays?: string[]): Promise<boolean> {
     try {
       // Get RGB adapter from ProtocolManager
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       if (!rgbAdapter?.isConnected()) {
         console.warn('NWCService: RGB adapter not connected');
         return false;

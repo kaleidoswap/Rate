@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -320,7 +321,7 @@ function SendScreen({ navigation, route }: Props) {
 
           // Enrich with RGB-over-LN details (asset_id / asset_amount) only when
           // the RGB node is available — best-effort, never blocks detection.
-          const rgbAdapter = protocolManager.getAdapterIfAvailable?.('RGB');
+          const rgbAdapter = protocolManager.getAdapterIfAvailable?.('RGB_LN');
           if (rgbAdapter?.decodeInvoice) {
             try {
               const r: any = await rgbAdapter.decodeInvoice(trimmed);
@@ -363,7 +364,7 @@ function SendScreen({ navigation, route }: Props) {
       } else if (input.startsWith('rgb')) {
         // RGB invoice
         try {
-          const rgbAdapterRgb = protocolManager.getAdapterIfAvailable('RGB');
+          const rgbAdapterRgb = protocolManager.getAdapterIfAvailable('RGB_LN');
           // Decoding requires the RGB/NWC node — don't call it offline.
           if (!rgbAdapterRgb?.isConnected()) {
             setAddressType('invalid');
@@ -575,7 +576,7 @@ function SendScreen({ navigation, route }: Props) {
 
       } else if (addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay') {
         // Lightning payment — route to the correct protocol
-        const lnAdapter = protocolManager.getAdapter(protocol);
+        const lnAdapter = protocolManager.getAdapter(toEngineProtocol(protocol));
         const enteredSats = amountSatsFromBtcUnits(amount);
 
         // A Lightning address / LNURL is not payable directly — resolve it to a
@@ -607,7 +608,7 @@ function SendScreen({ navigation, route }: Props) {
       } else if (addressType === 'bitcoin') {
         // On-chain BTC — route to correct protocol
         const feeRateNum = feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate || 2;
-        const btcAdapter = protocolManager.getAdapter(protocol);
+        const btcAdapter = protocolManager.getAdapter(toEngineProtocol(protocol));
         // sendBtcOnchain expects sats; convert from the active unit (BTC mode
         // previously sent e.g. 0.001 instead of 100000 sats).
         const onchainSats = bitcoinUnit === 'BTC'
@@ -621,7 +622,7 @@ function SendScreen({ navigation, route }: Props) {
         successType = 'bitcoin';
 
       } else if (addressType === 'rgb') {
-        const rgbSendAdapter = protocolManager.getAdapterIfAvailable('RGB');
+        const rgbSendAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
         // Don't attempt an RGB send over a node that isn't connected.
         if (!rgbSendAdapter?.isConnected()) {
           throw new Error('RGB node not connected. Please connect it in Settings.');
