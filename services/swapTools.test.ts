@@ -70,7 +70,7 @@ describe('swap tools — KaleidoSwap maker venue', () => {
     };
     rln = { whitelistSwap: jest.fn(async () => undefined), getTakerPubkey: jest.fn(async () => '02taker') };
     mManager.getAdapterIfAvailable.mockImplementation((p: any) =>
-      p === 'RGB' ? ({ isConnected: () => true, getSwapStatus: jest.fn(async () => ({ status: 'completed' })) } as any) : null);
+      p === 'RGB_LN' ? ({ isConnected: () => true, getSwapStatus: jest.fn(async () => ({ status: 'completed' })) } as any) : null);
     mKaleido.isInitialized.mockReturnValue(true);
     mKaleido.getClient.mockReturnValue({ maker, rln } as any);
     mFlash.isInitialized.mockReturnValue(false);

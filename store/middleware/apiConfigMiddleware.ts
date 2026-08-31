@@ -12,7 +12,7 @@ export const apiConfigMiddleware: Middleware = store => next => action => {
     console.log('API config update needed, reconnecting RGB protocol...');
     const settings = state.settings;
     if (settings?.remoteNodeUrl) {
-      protocolManager.connect('RGB', {
+      protocolManager.connect('RGB_LN', {
         protocol: 'RGB',
         nodeUrl: settings.remoteNodeUrl.trim(),
       } as any).catch(err => {

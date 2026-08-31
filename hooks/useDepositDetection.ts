@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../utils/protocol-bridge'
 // Monitor only the receive methods actually encoded in the visible QR.
 // Polling is deliberately single-flight: the next cycle is scheduled only after
 // every adapter call in the current cycle has completed.
@@ -35,7 +36,7 @@ const INITIAL_DELAY_MS = 4_000;
 const POLL_TIMEOUT_MS = 6_000;
 
 function getConnectedAdapter(protocol: ReceiveProtocol): any | null {
-  const adapter: any = protocolManager.getAdapterIfAvailable(protocol);
+  const adapter: any = protocolManager.getAdapterIfAvailable(toEngineProtocol(protocol));
   return adapter?.isConnected?.() === true ? adapter : null;
 }
 

@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
@@ -296,7 +297,7 @@ export default function DashboardScreen({ navigation }: Props) {
       // Check if any adapter is already connected from a previous init
       const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
       for (const proto of protocols) {
-        const adapter = protocolManager.getAdapterIfAvailable(proto);
+        const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
           protocolsReadyRef.current = true;
           setProtocolsReady(true);
@@ -334,7 +335,7 @@ export default function DashboardScreen({ navigation }: Props) {
       const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
       for (const proto of protocols) {
         try {
-          const adapter = protocolManager.getAdapterIfAvailable(proto);
+          const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
           if (adapter?.isConnected()) {
             info = await adapter.getNodeInfo();
             break;
@@ -371,7 +372,7 @@ export default function DashboardScreen({ navigation }: Props) {
       console.log('Loading dashboard data...');
 
       // Load via protocolManager (multi-protocol)
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
       const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
 

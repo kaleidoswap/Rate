@@ -39,7 +39,7 @@ export function useProtocolStatus(): RouteResolverAccounts {
   // This is computed live from the protocol manager
   // In a future version, this could be Redux-driven for reactivity
   return useMemo(() => {
-    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB')
+    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN')
     const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK')
     const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE')
 
@@ -57,7 +57,7 @@ export function useProtocolStatus(): RouteResolverAccounts {
  */
 export function useRefreshableProtocolStatus() {
   const getStatus = useCallback((): RouteResolverAccounts => {
-    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB')
+    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN')
     const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK')
     const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE')
 

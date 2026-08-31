@@ -173,7 +173,7 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
   const assetMap: Record<string, AssetMeta> = {};
   for (const a of assets) assetMap[a.asset_id] = a;
 
-  const rgb = protocolManager.getAdapterIfAvailable('RGB');
+  const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
   const rgbConnected = !!rgb?.isConnected();
 
   // 1. Lightning payments (BTC LN + RGB LN)

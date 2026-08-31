@@ -215,7 +215,7 @@ export default function SwapScreen({ navigation }: Props) {
 
       // Load Kaleidoswap pairs (via RGB adapter / kaleido-sdk maker)
       try {
-        const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+        const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
         if (rgbAdapter?.isConnected()) {
           const client = kaleidoClientManager.getClient();
           const rawPairs = await client.maker.listPairs();
@@ -377,12 +377,15 @@ export default function SwapScreen({ navigation }: Props) {
           let rate = 0;
           try {
             const sim: any = await client.simulateSwap({
-              poolId,
+              poolId: poolId || '',
               assetInAddress: fromAssetId,
               assetOutAddress: toAssetId,
               amountIn: String(rawAmount),
+              // maxSlippageBps: @flashnet/sdk dropped this from SimulateSwapRequest in a
+              // recent minor (surfaced by the dependency refresh, unrelated to the
+              // wallet-engine bump). Kept at runtime via the cast; verify on device.
               maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
-            });
+            } as any);
             const rawOut = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
             toAmountRaw = rawOut;
             toAmount = isBtcTicker(toTicker) ? satsToBtcDisplay(rawOut) : rawOut / Math.pow(10, toPrecision);
@@ -517,7 +520,7 @@ export default function SwapScreen({ navigation }: Props) {
           : quote.to_amount * Math.pow(10, toPrecision));
 
         const result = await client.executeSwap({
-          poolId,
+          poolId: poolId || '',
           assetInAddress: fromAssetId,
           assetOutAddress: toAssetId,
           amountIn: String(rawAmount),
@@ -645,7 +648,7 @@ export default function SwapScreen({ navigation }: Props) {
         pollCount++;
 
         // Poll via kaleido-sdk maker API
-        const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+        const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
         if (!rgbAdapter?.isConnected()) {
           console.warn('[SwapScreen] RGB adapter not connected, stopping poll');
           clearInterval(interval);
@@ -730,7 +733,7 @@ export default function SwapScreen({ navigation }: Props) {
 
 
 
-  const rgbConnected = protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false;
+  const rgbConnected = protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false;
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
 
   // The KaleidoSwap maker URL this wallet trades against, read from its RGB (RLN)

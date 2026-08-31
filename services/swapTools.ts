@@ -52,7 +52,7 @@ interface CachedQuote {
 const quoteCache = new Map<string, CachedQuote>();
 
 function rgbAvailable(): boolean {
-  const a = protocolManager.getAdapterIfAvailable('RGB');
+  const a = protocolManager.getAdapterIfAvailable('RGB_LN');
   return !!a?.isConnected() && kaleidoClientManager.isInitialized();
 }
 function flashnetAvailable(): boolean {
@@ -261,7 +261,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     const id = String(order_id);
     // Flashnet settles instantly (no status endpoint).
     if (id.startsWith('flashnet-')) return { order_id: id, status: 'completed' };
-    const a = protocolManager.getAdapterIfAvailable('RGB');
+    const a = protocolManager.getAdapterIfAvailable('RGB_LN');
     const s: any = await a?.getSwapStatus?.(id);
     return { order_id: id, status: s?.status ?? 'pending' };
   },

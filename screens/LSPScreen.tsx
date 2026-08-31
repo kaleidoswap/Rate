@@ -55,7 +55,7 @@ export default function LSPScreen({ navigation }: Props) {
   });
 
   const settings = useSelector((state: RootState) => state.settings);
-  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
   // Channel management is an Advanced-only surface; guard the screen itself so it
   // can't leak into Lite mode even if reached via deep link or stale navigation.
   const policy = usePolicy();
@@ -73,7 +73,7 @@ export default function LSPScreen({ navigation }: Props) {
         setError('RGB node not connected. Please connect it in Settings.');
         return;
       }
-      const info = await rgbAdapter.executeProtocolOperation!('getLspInfo', {});
+      const info: any = await rgbAdapter.executeProtocolOperation!('getLspInfo', {});
       setLspInfo(info);
       setConnectionUrl(info.lsp_connection_url);
       await checkConnection(info.lsp_connection_url);
@@ -89,7 +89,7 @@ export default function LSPScreen({ navigation }: Props) {
     try {
       if (!rgbAdapter?.isConnected()) return;
       const pubkey = url.split('@')[0];
-      const peers = await rgbAdapter.executeProtocolOperation!('listPeers', {});
+      const peers: any[] = (await rgbAdapter.executeProtocolOperation!('listPeers', {})) as any[];
       setIsConnected(peers.some((peer: any) => peer.pubkey === pubkey));
     } catch (err) {
       console.error('Failed to check peer connection:', err);
@@ -140,7 +140,7 @@ export default function LSPScreen({ navigation }: Props) {
         announce_channel: true,
         channel_expiry_blocks: parseInt(formData.channelExpireBlocks),
         client_balance_sat: parseInt(formData.clientBalanceSat),
-        client_pubkey: nodeInfo.pubkey,
+        client_pubkey: nodeInfo.pubkey ?? '',
         funding_confirms_within_blocks: lspInfo?.options.min_funding_confirms_within_blocks || 1,
         lsp_balance_sat: parseInt(formData.capacitySat) - parseInt(formData.clientBalanceSat),
         refund_onchain_address: typeof addressResult === 'string' ? addressResult : addressResult.address,

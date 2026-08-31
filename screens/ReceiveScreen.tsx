@@ -581,7 +581,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     
     try {
       setChannelsLoading(true);
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       const channelsResponse = rgbAdapter?.isConnected()
         ? await runReceiveOperation<any>('Load RGB Lightning channels', (signal) =>
             callAbortableAdapterMethod<any>(rgbAdapter, 'listChannels', [], signal))
@@ -823,7 +823,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       else if (selectedAsset.asset_id === 'BTC') {
         if (networkType === 'onchain') {
           // Use whichever adapter is connected for on-chain address
-          const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
           if (rgbAdapter?.isConnected()) {
             const addr = await runReceiveOperation(
@@ -876,7 +876,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           // Try RGB first (Lightning), then Spark (also supports Lightning).
           // `layer: 'BTC_LN'` is REQUIRED for Spark — without it the Spark adapter
           // mints a native Spark sats invoice (a `spark…` string), not a BOLT11.
-          const rgbLn = protocolManager.getAdapterIfAvailable('RGB');
+          const rgbLn = protocolManager.getAdapterIfAvailable('RGB_LN');
           const sparkLn = protocolManager.getAdapterIfAvailable('SPARK');
           if (rgbLn?.isConnected()) {
             const invoice = await runReceiveOperation('Create RGB Lightning invoice', (signal) =>
@@ -926,7 +926,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       } else {
         // RGB assets (require RGB adapter)
         if (networkType === 'onchain') {
-          const rgbAssetAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          const rgbAssetAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           if (!rgbAssetAdapter?.isConnected() || !rgbAssetAdapter.createRgbInvoice) {
             throw new Error('RGB node required for on-chain RGB asset deposits. Please configure in Settings.');
           }
@@ -965,7 +965,7 @@ export default function ReceiveScreen({ navigation }: Props) {
               ? Math.round(parsed * Math.pow(10, precision))
               : undefined;
 
-          const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB');
+          const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           if (!rgbAssetLnAdapter?.isConnected()) {
             throw new Error('RGB node required for RGB Lightning deposits. Please configure in Settings.');
           }
@@ -1046,7 +1046,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     const isCurrentGeneration = () => unifiedGenerationRef.current === generationId;
     const startedAt = nowMs();
     receiveLog('unified.usd.start', { generationId });
-    const rgb = protocolManager.getAdapterIfAvailable('RGB');
+    const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
     const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
     receiveLog('unified.usd.adapters', {
@@ -1248,7 +1248,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       return;
     }
 
-    const rgb = protocolManager.getAdapterIfAvailable('RGB');
+    const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
     const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
     const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
