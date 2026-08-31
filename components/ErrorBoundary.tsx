@@ -81,7 +81,7 @@ export class ErrorBoundary extends Component<Props, State> {
             <View style={styles.iconContainer}>
               <Ionicons name="alert-circle" size={64} color="white" />
             </View>
-            <Text style={styles.title}>Something Went Wrong</Text>
+            <Text style={styles.title} accessibilityRole="alert">Something Went Wrong</Text>
             <Text style={styles.subtitle}>
               The app encountered an unexpected error
             </Text>
