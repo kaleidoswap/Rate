@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../utils/protocol-bridge'
 // services/chatPayments.ts
 //
 // Thin wrappers over protocolManager for creating and paying invoices from the
@@ -10,7 +11,7 @@ type ProtocolName = 'SPARK' | 'RGB' | 'ARKADE';
 
 function firstConnected(order: ProtocolName[]): any | null {
   for (const proto of order) {
-    const adapter = protocolManager.getAdapterIfAvailable(proto);
+    const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
     if (adapter?.isConnected?.()) return adapter;
   }
   return null;

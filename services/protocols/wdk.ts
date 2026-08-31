@@ -13,26 +13,24 @@
  * This is the sole wallet engine on mobile (native adapters removed from ./index.ts).
  */
 
+import { ProtocolManager, networkTypeToProtocol } from '@kaleidorg/wallet-engine'
+// beta.55: adapters + WDK helpers moved behind the /adapters/wdk subpath, and the
+// legacy client managers behind /adapters/native (protocol SDKs are now optional peers).
 import {
-  ProtocolManager,
   registerWdkModule,
   SparkWdkAdapter,
   LiquidWdkAdapter,
   RlnWdkAdapter,
   ArkadeWdkAdapter,
-  networkTypeToProtocol,
-  kaleidoClientManager,
-  flashnetClientManager,
-} from '@kaleidorg/wallet-engine'
+  type SparkAdapterConfig,
+  type LiquidAdapterConfig,
+  type RlnAdapterConfig,
+  type ArkadeAdapterConfig,
+} from '@kaleidorg/wallet-engine/adapters/wdk'
+import { kaleidoClientManager, flashnetClientManager } from '@kaleidorg/wallet-engine/adapters/native'
 import * as SecureStore from 'expo-secure-store'
 import { NwcRgbAdapter, NWC_CONNECTION_KEY } from '../nwc/NwcRgbAdapter'
-import type {
-  ProtocolType,
-  SparkAdapterConfig,
-  LiquidAdapterConfig,
-  RlnAdapterConfig,
-  ArkadeAdapterConfig,
-} from '@kaleidorg/wallet-engine'
+import type { ProtocolType } from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
 import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 
@@ -169,7 +167,7 @@ export async function initializeWdkProtocols(
           break
         }
 
-        case 'RGB': {
+        case 'RGB_LN': {
           // NWC mode (default on mobile): the NwcRgbAdapter drives a remote node over
           // relays and reads its connection string from SecureStore — no HTTP nodeUrl.
           if (RGB_VIA_NWC) {
@@ -182,7 +180,7 @@ export async function initializeWdkProtocols(
               continue
             }
             config = {
-              protocol: 'RGB',
+              protocol: 'RGB_LN',
               mnemonic,
               network: parsed.network || 'regtest',
             } as RlnAdapterConfig
@@ -195,7 +193,7 @@ export async function initializeWdkProtocols(
             continue
           }
           config = {
-            protocol: 'RGB',
+            protocol: 'RGB_LN',
             mnemonic,
             nodeUrl,
             network: parsed.network || 'regtest',
@@ -215,7 +213,7 @@ export async function initializeWdkProtocols(
       // kaleidoClientManager.getClient().maker/.rln directly). Pure HTTP — no SparkWallet.
       // NOTE: flashnet (Spark DEX) still needs the SparkWallet exposed from the WDK Spark
       // adapter — tracked gap; AMM swaps stay disabled until then.
-      if (protocol === 'RGB') {
+      if (protocol === 'RGB_LN') {
         const makerBaseUrl = parsed.makerUrl || parsed.baseUrl
         if (makerBaseUrl) {
           try {

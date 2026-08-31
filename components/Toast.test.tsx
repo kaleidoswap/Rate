@@ -1,6 +1,6 @@
 // components/Toast.test.tsx
 import React from 'react';
-import { render, fireEvent, waitFor } from '@testing-library/react-native';
+import { render, fireEvent } from '@testing-library/react-native';
 import Toast from './Toast';
 import ToastService from '../services/ToastService';
 
@@ -12,13 +12,16 @@ describe('Toast', () => {
 
   beforeEach(() => {
     mockToastService = {
-      addListener: jest.fn(),
+      // Real ToastService.subscribe() always returns an unsubscribe function;
+      // Toast.tsx calls it unconditionally on cleanup, so the mock needs the
+      // same default rather than undefined.
+      subscribe: jest.fn(() => jest.fn()),
       getInstance: jest.fn(),
-      showSuccess: jest.fn(),
-      showError: jest.fn(),
-      showInfo: jest.fn(),
-      showWarning: jest.fn(),
-      hideToast: jest.fn(),
+      success: jest.fn(),
+      error: jest.fn(),
+      info: jest.fn(),
+      warning: jest.fn(),
+      dismiss: jest.fn(),
     } as any;
 
     (ToastService.getInstance as jest.Mock).mockReturnValue(mockToastService);
@@ -27,7 +30,7 @@ describe('Toast', () => {
 
   describe('Rendering', () => {
     it('should not render when no toast is visible', () => {
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         // Don't trigger any toast
         return jest.fn();
       });
@@ -38,7 +41,7 @@ describe('Toast', () => {
     });
 
     it('should render success toast', () => {
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         callback({
           type: 'success',
           message: 'Success message',
@@ -54,7 +57,7 @@ describe('Toast', () => {
     });
 
     it('should render error toast', () => {
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         callback({
           type: 'error',
           message: 'Error message',
@@ -70,7 +73,7 @@ describe('Toast', () => {
     });
 
     it('should render info toast', () => {
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         callback({
           type: 'info',
           message: 'Info message',
@@ -86,7 +89,7 @@ describe('Toast', () => {
     });
 
     it('should render warning toast', () => {
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         callback({
           type: 'warning',
           message: 'Warning message',
@@ -107,7 +110,7 @@ describe('Toast', () => {
         onPress: jest.fn(),
       };
 
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         callback({
           type: 'error',
           message: 'Error with action',
@@ -131,7 +134,7 @@ describe('Toast', () => {
         onPress: jest.fn(),
       };
 
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         callback({
           type: 'error',
           message: 'Error',
@@ -150,11 +153,11 @@ describe('Toast', () => {
     });
 
     it('should dismiss toast when close button is pressed', () => {
-      mockToastService.addListener.mockImplementation((callback) => {
+      mockToastService.subscribe.mockImplementation((callback) => {
         callback({
+          id: 'toast-1',
           type: 'success',
           message: 'Success',
-          visible: true,
           duration: 3000,
         });
         return jest.fn();
@@ -164,57 +167,11 @@ describe('Toast', () => {
 
       fireEvent.press(getByTestId('toast-close-button'));
 
-      expect(mockToastService.hideToast).toHaveBeenCalled();
-    });
-  });
-
-  describe('Auto-dismiss', () => {
-    it('should auto-dismiss after duration', async () => {
-      jest.useFakeTimers();
-
-      mockToastService.addListener.mockImplementation((callback) => {
-        callback({
-          type: 'success',
-          message: 'Auto-dismiss',
-          visible: true,
-          duration: 2000,
-        });
-        return jest.fn();
-      });
-
-      render(<Toast />);
-
-      jest.advanceTimersByTime(2000);
-
-      await waitFor(() => {
-        expect(mockToastService.hideToast).toHaveBeenCalled();
-      });
-
-      jest.useRealTimers();
-    });
-
-    it('should not auto-dismiss if duration is 0', async () => {
-      jest.useFakeTimers();
-
-      mockToastService.addListener.mockImplementation((callback) => {
-        callback({
-          type: 'success',
-          message: 'No auto-dismiss',
-          visible: true,
-          duration: 0,
-        });
-        return jest.fn();
-      });
-
-      render(<Toast />);
-
-      jest.advanceTimersByTime(5000);
-
-      await waitFor(() => {
-        expect(mockToastService.hideToast).not.toHaveBeenCalled();
-      });
-
-      jest.useRealTimers();
+      // Dismissal is service-owned: the component just forwards the id to
+      // ToastService.dismiss() — auto-dismiss timing lives inside the real
+      // ToastService's processQueue() (a setTimeout), not in this component,
+      // so it isn't observable through a mocked service and isn't tested here.
+      expect(mockToastService.dismiss).toHaveBeenCalledWith('toast-1');
     });
   });
 
@@ -222,12 +179,12 @@ describe('Toast', () => {
     it('should subscribe to ToastService on mount', () => {
       render(<Toast />);
 
-      expect(mockToastService.addListener).toHaveBeenCalled();
+      expect(mockToastService.subscribe).toHaveBeenCalled();
     });
 
     it('should unsubscribe from ToastService on unmount', () => {
       const unsubscribe = jest.fn();
-      mockToastService.addListener.mockReturnValue(unsubscribe);
+      mockToastService.subscribe.mockReturnValue(unsubscribe);
 
       const { unmount } = render(<Toast />);
 
@@ -241,7 +198,7 @@ describe('Toast', () => {
     it('should update when new toast is shown', () => {
       let callback: any;
 
-      mockToastService.addListener.mockImplementation((cb) => {
+      mockToastService.subscribe.mockImplementation((cb) => {
         callback = cb;
         return jest.fn();
       });

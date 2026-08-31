@@ -55,7 +55,11 @@ function makeAdapter(overrides: Partial<Record<keyof MockAdapter, unknown>> = {}
 /** Wire which adapters are "connected" for this test. */
 function setAdapters(adapters: { SPARK?: MockAdapter | null; RGB?: MockAdapter | null; ARKADE?: MockAdapter | null }) {
   (mockedManager.getAdapterIfAvailable as jest.Mock).mockImplementation(
-    (proto: string) => (adapters as Record<string, MockAdapter | null | undefined>)[proto] ?? null,
+    // Production queries the engine's 'RGB_LN'; the fixture keys it as 'RGB'.
+    (proto: string) => {
+      const key = proto === 'RGB_LN' ? 'RGB' : proto;
+      return (adapters as Record<string, MockAdapter | null | undefined>)[key] ?? null;
+    },
   );
 }
 

@@ -66,6 +66,45 @@ jest.mock('react-native/Libraries/EventEmitter/NativeEventEmitter', () => {
   };
 }, { virtual: true });
 
+// Mock react-native-reanimated. Its own shipped mock.js still pulls in the
+// real react-native-worklets (a JSI-backed native module with no jest mock
+// of its own) in v4, so we hand-roll the subset this codebase actually uses:
+// shared values behave synchronously (no reactivity, no animation), which is
+// enough since these tests only assert on rendering/interaction, not motion.
+jest.mock('react-native-reanimated', () => {
+  const identity = (t) => t;
+  const withHelper = (toValue) => toValue;
+  return {
+    __esModule: true,
+    default: {
+      createAnimatedComponent: (Component) => Component,
+      View: 'Animated.View',
+      Text: 'Animated.Text',
+      Image: 'Animated.Image',
+    },
+    useSharedValue: (initial) => ({ value: initial }),
+    useAnimatedStyle: (styleFactory) => styleFactory(),
+    withSpring: withHelper,
+    withTiming: withHelper,
+    withDelay: (_delay, animation) => animation,
+    withSequence: (...animations) => animations[animations.length - 1],
+    withRepeat: (animation) => animation,
+    interpolate: (_value, _input, output) => output[0],
+    cancelAnimation: () => {},
+    runOnJS: (fn) => fn,
+    Easing: {
+      linear: identity,
+      ease: identity,
+      quad: identity,
+      cubic: identity,
+      bezier: () => identity,
+      in: identity,
+      out: identity,
+      inOut: identity,
+    },
+  };
+});
+
 // Mock LinearGradient
 jest.mock('expo-linear-gradient', () => ({
   LinearGradient: 'LinearGradient',
@@ -76,6 +115,60 @@ jest.mock('lottie-react-native', () => 'LottieView');
 
 // Mock QRCode
 jest.mock('react-native-qrcode-svg', () => 'QRCode');
+
+// Mock @expo/vector-icons — the real package pulls in expo-font ->
+// expo-modules-core, which needs the native `globalThis.expo` binding that
+// only exists on-device (or under jest-expo's preset, which this project
+// doesn't use).
+jest.mock('@expo/vector-icons', () => ({
+  Ionicons: 'Ionicons',
+  MaterialCommunityIcons: 'MaterialCommunityIcons',
+}));
+
+// Mock react-native-safe-area-context — the real package requires native
+// react-native internals (TurboModuleRegistry) not present under this
+// project's lightweight react-native mock.
+jest.mock('react-native-safe-area-context', () => ({
+  SafeAreaProvider: ({ children }) => children,
+  SafeAreaView: 'SafeAreaView',
+  useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
+}));
+
+// Mock expo-audio — same expo-modules-core native-binding issue as
+// @expo/vector-icons above.
+jest.mock('expo-audio', () => ({
+  createAudioPlayer: jest.fn(() => ({
+    play: jest.fn(),
+    pause: jest.fn(),
+    remove: jest.fn(),
+    seekTo: jest.fn(),
+  })),
+  setAudioModeAsync: jest.fn(() => Promise.resolve()),
+}));
+
+// Mock expo-file-system — same expo-modules-core native-binding issue as
+// @expo/vector-icons above. services/sounds.ts wraps all File/Directory use
+// in try/catch (audio is a nice-to-have), so a minimal non-throwing shape
+// is enough.
+jest.mock('expo-file-system', () => ({
+  File: class {
+    exists = true;
+    uri = '';
+    write() {}
+  },
+  Directory: class {},
+  Paths: { cache: {} },
+}));
+
+// Mock expo-haptics — same expo-modules-core native-binding issue as
+// @expo/vector-icons above.
+jest.mock('expo-haptics', () => ({
+  impactAsync: jest.fn(() => Promise.resolve()),
+  notificationAsync: jest.fn(() => Promise.resolve()),
+  selectionAsync: jest.fn(() => Promise.resolve()),
+  ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
+  NotificationFeedbackType: { Success: 'success', Warning: 'warning', Error: 'error' },
+}));
 
 // Mock Clipboard
 jest.mock('@react-native-clipboard/clipboard', () => ({
@@ -91,12 +184,29 @@ jest.mock('react-native', () => ({
   },
   StyleSheet: {
     create: jest.fn((styles) => styles),
+    flatten: jest.fn((style) => {
+      const flat = Array.isArray(style) ? style.flat(Infinity) : [style];
+      return Object.assign({}, ...flat.filter(Boolean));
+    }),
   },
   View: 'View',
   Text: 'Text',
   TextInput: 'TextInput',
-  TouchableOpacity: 'TouchableOpacity',
+  // A real component, not a bare string: fireEvent.press() doesn't check
+  // `disabled` itself, and walks up to any ancestor's onPress if this node's
+  // is missing — so onPress must stay a function that checks disabled at
+  // call time (mirroring how the real TouchableOpacity/Pressability works),
+  // rather than being conditionally omitted.
+  TouchableOpacity: ({ onPress, disabled, children, ...props }) =>
+    require('react').createElement(
+      'TouchableOpacity',
+      { ...props, disabled, onPress: (...args) => { if (!disabled) onPress?.(...args); } },
+      children
+    ),
   ScrollView: 'ScrollView',
+  Switch: 'Switch',
+  Modal: 'Modal',
+  Pressable: 'Pressable',
   FlatList: 'FlatList',
   Image: 'Image',
   ActivityIndicator: 'ActivityIndicator',

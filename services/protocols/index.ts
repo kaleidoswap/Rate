@@ -36,11 +36,12 @@ export async function initializeProtocols(
 
 // Re-export everything consumers need from the shared lib.
 export type { ProtocolType, IProtocolAdapter, SparkConfig, ArkadeConfig, RgbConfig } from '@kaleidorg/wallet-engine'
+export { ProtocolManager } from '@kaleidorg/wallet-engine'
+// beta.55: the legacy client managers moved behind the /adapters/native subpath
+// (protocol SDKs are now optional peers; the root barrel is SDK-free).
 export {
-  ProtocolManager,
-  // Swap-path client managers (see note above — not initialized by the WDK engine).
   kaleidoClientManager,
   flashnetClientManager,
   sparkClientManager,
   arkadeClientManager,
-} from '@kaleidorg/wallet-engine'
+} from '@kaleidorg/wallet-engine/adapters/native'

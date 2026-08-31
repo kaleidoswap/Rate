@@ -70,7 +70,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   
   // getAdapterIfAvailable (not getAdapter, which throws) + the isConnected() guard
   // below ensure we never call the RGB/NWC node when it isn't connected.
-  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
   const isBTC = asset.asset_id === 'BTC';
   // Honor the protocol classified by the caller (RGB vs Spark token vs Arkade);
   // only fall back to the old "non-BTC ⇒ RGB" assumption when it wasn't provided,

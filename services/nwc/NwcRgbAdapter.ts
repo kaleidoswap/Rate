@@ -33,6 +33,8 @@ import type {
   ConnectionInfo,
   TransactionFilter,
 } from '@kaleidorg/wallet-engine';
+// beta.55: IProtocolAdapter now requires a `capabilities` manifest.
+import { PROTOCOL_OPERATIONS } from '@kaleidorg/wallet-engine';
 
 import { NWCClient, parseNwcUri } from './NWCExternalClient';
 
@@ -54,7 +56,7 @@ const BTC_ASSET: UnifiedAsset = {
   name: 'Bitcoin',
   ticker: 'BTC',
   precision: 8,
-  protocol: 'RGB',
+  protocol: 'RGB_LN',
   layer: 'BTC_LN',
   balance: {
     total: 0,
@@ -73,8 +75,10 @@ const BTC_ASSET: UnifiedAsset = {
 };
 
 export class NwcRgbAdapter implements IProtocolAdapter {
-  readonly protocolName: ProtocolType = 'RGB';
+  readonly protocolName: ProtocolType = 'RGB_LN';
   readonly supportedLayers: Layer[] = ['BTC_LN', 'RGB_LN', 'BTC_L1', 'RGB_L1'];
+  // NWC drives a remote RGB-LN node; it shares the RGB_LN operation manifest.
+  readonly capabilities = PROTOCOL_OPERATIONS.RGB_LN;
   readonly version = '0.1.0-nwc';
 
   private client?: NWCClient;
@@ -152,7 +156,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
     return {
-      protocol: 'RGB',
+      protocol: 'RGB_LN',
       connected: this.connected,
       nodeId: this.nodePubkey,
       network: this.network,
@@ -203,7 +207,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
       name: raw.name ?? raw.ticker ?? raw.asset_id,
       ticker: raw.ticker ?? raw.name ?? '',
       precision,
-      protocol: 'RGB',
+      protocol: 'RGB_LN',
       layer: 'RGB_LN',
       balance: this.mapAssetBalance(anyRec(raw.balance), precision),
       capabilities: {
