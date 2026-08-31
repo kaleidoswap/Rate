@@ -46,7 +46,23 @@ const blockedLinkedModules = singleCopyNativeModules.map(
       `${escapePath(kaleidoUiRoot)}\\/node_modules\\/(?:\\.pnpm\\/[^/]+\\/node_modules\\/)?${name}\\/.*`
     )
 );
-config.resolver.blockList = exclusionList(blockedLinkedModules);
+// @kaleidorg/wallet-engine's adapters/wdk barrel re-exports RgbLibWdkAdapter /
+// RgbLibWasmAdapter alongside the adapters this app actually registers
+// (Spark/Liquid/Rln/Arkade — RGB goes over NWC to a remote node instead, see
+// services/nwc/NwcRgbAdapter.ts), so Metro still needs to resolve their
+// dynamic import()s even though this app never instantiates those two
+// adapters. pnpm's hoisted node-linker installs their optional peers
+// (@utexo/wdk-wallet-rgb, @utexo/rgb-lib-wasm) since they're resolvable —
+// but the real @utexo/wdk-wallet-rgb pulls in @utexo/rgb-sdk -> @utexo/rgb-lib,
+// which imports Node's fs/path and isn't Metro-bundleable. Block them so
+// resolution falls through to the empty stub in extraNodeModules below.
+const blockedUtexoRgbModules = ['@utexo/wdk-wallet-rgb', '@utexo/rgb-lib-wasm'].map(
+  (name) =>
+    new RegExp(
+      `node_modules\\/(?:\\.pnpm\\/[^/]+\\/node_modules\\/)?${escapePath(name)}\\/.*`
+    )
+);
+config.resolver.blockList = exclusionList([...blockedLinkedModules, ...blockedUtexoRgbModules]);
 
 // Force all shared deps to resolve from rate's node_modules (single copy, correct platform entries)
 config.resolver.extraNodeModules = {
@@ -69,6 +85,16 @@ config.resolver.extraNodeModules = {
   '@arkade-os/sdk': path.resolve(__dirname, 'node_modules/@arkade-os/sdk'),
   '@scure/bip39': path.resolve(__dirname, 'node_modules/@scure/bip39'),
   '@scure/bip32': path.resolve(__dirname, 'node_modules/@scure/bip32'),
+  // Unused optional peers of @kaleidorg/wallet-engine's adapters/wdk barrel —
+  // this app only registers Spark/Liquid/Rln/Arkade (RGB goes over NWC to a
+  // remote node instead — see services/nwc/NwcRgbAdapter.ts), but Metro
+  // still needs to resolve every export the barrel re-exports, including
+  // RgbLibWdkAdapter/RgbLibWasmAdapter's dynamic import()s. The real
+  // @utexo/wdk-wallet-rgb pulls in @utexo/rgb-sdk -> @utexo/rgb-lib, which
+  // imports Node's fs/path — not Metro-bundleable, and never actually
+  // invoked at runtime since this app never instantiates those adapters.
+  '@utexo/wdk-wallet-rgb': path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js'),
+  '@utexo/rgb-lib-wasm': path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js'),
 };
 
 // Add polyfill resolver
