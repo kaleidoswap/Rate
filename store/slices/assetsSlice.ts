@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../../utils/protocol-bridge'
 // store/slices/assetsSlice.ts
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { AssetRecord } from '../../services/DatabaseService';
@@ -73,7 +74,7 @@ export const syncAssets = createAsyncThunk<
     let niaAssets: any[] = [];
     const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
     for (const proto of protocols) {
-      const adapter = protocolManager.getAdapterIfAvailable(proto);
+      const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
       if (adapter?.isConnected()) {
         try {
           // Reconcile with the network first so pending/unclaimed transfers
@@ -138,17 +139,18 @@ export const issueNiaAsset = createAsyncThunk<
     const dbService = DatabaseService.getInstance();
 
     // Issue asset via protocolManager
-    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
     if (!rgbAdapter?.isConnected() || !rgbAdapter.executeProtocolOperation) {
       throw new Error('RGB protocol not connected');
     }
-    const result = await rgbAdapter.executeProtocolOperation('issueAssetNIA', {
+    // executeProtocolOperation returns `unknown` (beta.55); narrow to the shape we use.
+    const result = (await rgbAdapter.executeProtocolOperation('issueAssetNIA', {
       amounts: params.amounts,
       ticker: params.ticker,
       name: params.name,
       precision: params.precision,
-    });
-    
+    })) as { asset: any };
+
     // Add to database
     await dbService.upsertAsset({
       wallet_id: params.walletId,

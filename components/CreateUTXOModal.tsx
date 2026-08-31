@@ -89,7 +89,7 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
     setIsLoading(true);
 
     try {
-      const rgbAdapter = protocolManager.getAdapter('RGB');
+      const rgbAdapter = protocolManager.getAdapter('RGB_LN');
       if (!rgbAdapter) {
         throw new Error('RGB adapter not available');
       }

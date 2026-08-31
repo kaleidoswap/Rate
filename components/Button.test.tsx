@@ -177,9 +177,9 @@ describe('Button', () => {
       );
 
       const text = getByText('Custom Text');
-      expect(text.props.style).toEqual(
-        expect.arrayContaining([expect.objectContaining(customTextStyle)])
-      );
+      // Button merges text styles via object spread ({ ...getTextStyle(), ...textStyle }),
+      // unlike the container `style` prop above, which stays an array.
+      expect(text.props.style).toEqual(expect.objectContaining(customTextStyle));
     });
   });
 

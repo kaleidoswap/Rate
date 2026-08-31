@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SettingsScreen.tsx
 import React, { useCallback, useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Switch, Alert, Text, TouchableOpacity } from 'react-native';
@@ -160,7 +161,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [protocolErrors, setProtocolErrors] = useState<Partial<Record<WalletProtocol, string>>>({});
   const refreshProtocolStatus = useCallback(() => {
     setProtocolStatus({
-      RGB: protocolManager.getAdapterIfAvailable('RGB')?.isConnected() ?? false,
+      RGB: protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false,
       SPARK: protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false,
       ARKADE: protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected() ?? false,
     });
@@ -212,7 +213,7 @@ export default function SettingsScreen({ navigation }: Props) {
           await db.addNetworkToWallet(id, { type, enabled: true, config: nextConfig });
         }
 
-        await protocolManager.disconnect(proto);
+        await protocolManager.disconnect(toEngineProtocol(proto));
         const refreshedWallet = await db.getActiveWallet();
         const updatedNetwork = refreshedWallet?.networks?.find((n) => n.type === type);
         const mnemonic = refreshedWallet?.encrypted_mnemonic;
@@ -221,7 +222,7 @@ export default function SettingsScreen({ navigation }: Props) {
         }
 
         const results = await initializeProtocols(mnemonic, [updatedNetwork]);
-        const result = results.get(proto);
+        const result = results.get(toEngineProtocol(proto));
         if (!result?.success) {
           throw new Error(result?.error || `${proto} did not connect.`);
         }

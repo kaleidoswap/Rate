@@ -1,3 +1,4 @@
+import { toEngineProtocol } from '../../utils/protocol-bridge'
 // store/slices/nodeSlice.ts
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { protocolManager } from '../../services/protocols';
@@ -42,7 +43,7 @@ export const startNode = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       // Check if any protocol is connected
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB');
+      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       if (rgbAdapter?.isConnected()) {
         return { isRunning: true, port: 3008, lightningPort: 9738 };
       }
@@ -50,7 +51,7 @@ export const startNode = createAsyncThunk(
       // Try to get connection info from any adapter
       const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
       for (const proto of protocols) {
-        const adapter = protocolManager.getAdapterIfAvailable(proto);
+        const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
           return { isRunning: true, port: 0, lightningPort: 0 };
         }

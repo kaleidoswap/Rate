@@ -1,0 +1,13 @@
+# The QVAC / bare-kit native toolchain (bare-pack, bare-link, the bare-kit
+# ios/android link.mjs) assumes a flat node_modules: it resolves the project
+# root as <pkg>/../../.. and resolves sibling addon packages by walking up
+# node_modules. pnpm's default symlinked .pnpm layout breaks all of this —
+# the project root resolves inside .pnpm and the native addons (llamacpp,
+# whispercpp, …) never get linked into the app, crashing loadModel at runtime.
+#
+# Hoisted layout makes react-native-bare-kit and every @qvac/* addon real,
+# top-level directories so the linker finds them. Keep this for QVAC to work.
+#
+# pnpm >=10 no longer reads node-linker from .npmrc — it must be declared
+# here in pnpm-workspace.yaml.
+nodeLinker: hoisted

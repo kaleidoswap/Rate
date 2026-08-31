@@ -104,16 +104,22 @@ describe('ErrorBoundary', () => {
       // Error UI should be displayed
       expect(getByText(/Something went wrong/i)).toBeTruthy();
 
-      // Press reset button
-      const resetButton = getByText(/Try Again/i);
-      fireEvent.press(resetButton);
-
-      // Re-render with no error
+      // Swap in a non-throwing child BEFORE pressing reset. The boundary
+      // still shows the error UI here (render() only reads `hasError`,
+      // it never re-evaluates children while an error is active) — but
+      // if we pressed reset first instead, componentDidCatch would just
+      // catch the still-throwing child again immediately, undoing the
+      // reset within the same commit.
       rerender(
         <ErrorBoundary>
           <ThrowError shouldThrow={false} />
         </ErrorBoundary>
       );
+      expect(getByText(/Something went wrong/i)).toBeTruthy();
+
+      // Now reset: hasError clears, and props.children is already safe to render.
+      const resetButton = getByText(/Try Again/i);
+      fireEvent.press(resetButton);
 
       // Children should be displayed again
       expect(queryByText('No error')).toBeTruthy();
@@ -136,8 +142,12 @@ describe('ErrorBoundary', () => {
   });
 
   describe('Custom Fallback', () => {
+    // ErrorBoundary's `fallback` prop is a plain callback called positionally
+    // as fallback(error, errorInfo, reset) — its return value is used directly
+    // as the render output, it is NOT rendered as a React component via
+    // createElement. So the callback receives three arguments, not one props object.
     it('should use custom fallback component', () => {
-      const CustomFallback = ({ error, resetError }: any) => (
+      const CustomFallback = (error: Error) => (
         <Text>Custom error: {error.message}</Text>
       );
 
@@ -151,9 +161,7 @@ describe('ErrorBoundary', () => {
     });
 
     it('should pass error and resetError to custom fallback', () => {
-      const CustomFallback = jest.fn(({ error, resetError }) => (
-        <Text>Custom Fallback</Text>
-      ));
+      const CustomFallback = jest.fn(() => <Text>Custom Fallback</Text>);
 
       render(
         <ErrorBoundary fallback={CustomFallback}>
@@ -162,11 +170,9 @@ describe('ErrorBoundary', () => {
       );
 
       expect(CustomFallback).toHaveBeenCalledWith(
-        expect.objectContaining({
-          error: expect.any(Error),
-          resetError: expect.any(Function),
-        }),
-        {}
+        expect.any(Error),
+        expect.anything(),
+        expect.any(Function)
       );
     });
   });
@@ -210,16 +216,21 @@ describe('ErrorBoundary', () => {
 
       expect(getByText(/First error/i)).toBeTruthy();
 
-      // Reset
-      const resetButton = getByText(/Try Again/i);
-      fireEvent.press(resetButton);
-
-      // Throw another error
+      // Swap in the next (also-throwing) child BEFORE resetting — same
+      // reasoning as the reset test above: render() won't look at the new
+      // child until hasError clears, so pressing reset first would just
+      // re-catch "First error" again instead of ever seeing "Second error".
       rerender(
         <ErrorBoundary>
           <ThrowError shouldThrow={true} message="Second error" />
         </ErrorBoundary>
       );
+      expect(getByText(/First error/i)).toBeTruthy();
+
+      // Reset: hasError clears, props.children (the "Second error" thrower)
+      // renders, throws, and gets caught fresh.
+      const resetButton = getByText(/Try Again/i);
+      fireEvent.press(resetButton);
 
       expect(getByText(/Second error/i)).toBeTruthy();
     });
