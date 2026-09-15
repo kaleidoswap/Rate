@@ -18,7 +18,7 @@
     "postinstall": "bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js && node scripts/patch-bare-kit-linker.js && npm run sync-mind"
   },
   "dependencies": {
-    "@arkade-os/sdk": "^0.4.66",
+    "@arkade-os/sdk": "^0.4.72",
     "@arkade-os/wdk": "github:arkade-os/arkade-wdk",
     "@buildonspark/spark-sdk": "^0.7.17",
     "@expo/metro-runtime": "~6.1.2",
