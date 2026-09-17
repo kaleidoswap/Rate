@@ -40,13 +40,13 @@ importers:
         version: 0.6.4(@qvac/sdk@0.13.5(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.37))(expo-device@8.0.10(expo@54.0.37))(expo-file-system@19.0.24(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.5(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(sodium-javascript@0.8.0))
       '@kaleidorg/wallet-engine':
         specifier: 1.0.0-beta.70
-        version: 1.0.0-beta.70(9bafefc95bba2b607647c3a705c22cf4)
+        version: 1.0.0-beta.70(4bbee9ba35d745df04c65d62d4a1242f)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
       '@kaleidorg/wdk-wallet-liquid':
-        specifier: 1.0.0-beta.2
-        version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))
+        specifier: 1.0.0-beta.9
+        version: 1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))
       '@kaleidorg/wdk-wallet-rln':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
@@ -1664,12 +1664,12 @@ packages:
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
 
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.2':
-    resolution: {integrity: sha512-UIMNUe8kE7DRxH83NEtjzjDfmqxbiJ2x04mb3xgs3vdwSe4YnNVEHqjhwTssIjefswg9qhac1QWFeRWGa0m6tA==}
+  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.9':
+    resolution: {integrity: sha512-9MZI9+wgay1Yer4jCnNzkuMu9x1OHDDSUGFrH0ypxLM8oIdV39P50ukx6yYUxpELcw6C8GfS937iLrmjdyF+Fg==}
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
       lwk-rn: ^0.9.0-2.0.3
-      lwk_wasm: ^0.17.2
+      lwk_wasm: ^0.19.0
     peerDependenciesMeta:
       lwk-rn:
         optional: true
@@ -5138,8 +5138,8 @@ packages:
       react: '*'
       react-native: '*'
 
-  lwk_node@0.17.2:
-    resolution: {integrity: sha512-EwVgMmN2SP/8+ji2HfjvKuDp3t/bEPjaVhTaEDlr97BwpA/6HaZ/I+7VpFQVA1u+T/1J8q483cZh078JmCIKRQ==}
+  lwk_node@0.19.0:
+    resolution: {integrity: sha512-OQAFt1GUPHeucoQOL7glhqInCVPJrTwq07oc4zMWkEXVtdnE6xW6rIcit3TwBR0p3h+iSK7g8eCinUayINWMVA==}
 
   make-dir@2.1.0:
     resolution: {integrity: sha512-LS9X+dc8KLxXCb8dni79fLIIUA5VyZoyjSMCwTluaXA0o27cCK0bhXkpgw+sTXVpPy/lSO57ilRixqk0vDmtRA==}
@@ -9200,7 +9200,7 @@ snapshots:
     optionalDependencies:
       '@qvac/sdk': 0.13.5(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-url@2.4.5)(expo-build-properties@1.0.10(expo@54.0.37))(expo-device@8.0.10(expo@54.0.37))(expo-file-system@19.0.24(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)))(pear-pipe@1.0.6(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-bare-kit@0.14.5(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(sodium-javascript@0.8.0)
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.70(9bafefc95bba2b607647c3a705c22cf4)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.70(4bbee9ba35d745df04c65d62d4a1242f)':
     dependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
@@ -9214,7 +9214,7 @@ snapshots:
       '@buildonspark/spark-sdk': 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(ws@8.21.0)
       '@flashnet/sdk': 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)))(typescript@5.9.3)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
-      '@kaleidorg/wdk-wallet-liquid': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))
+      '@kaleidorg/wdk-wallet-liquid': 1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))
       '@kaleidorg/wdk-wallet-rln': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
       '@tetherto/wdk-wallet-spark': 1.0.0-beta.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))(bare-url@2.4.5)(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)(sodium-javascript@0.8.0)(ws@8.21.0)
       '@utexo/rgb-lib-wasm': 1.0.0-beta.3
@@ -9228,10 +9228,10 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))':
+  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))
-      lwk_node: 0.17.2
+      lwk_node: 0.19.0
     optionalDependencies:
       lwk-rn: 0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
 
@@ -14100,7 +14100,7 @@ snapshots:
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.0)
       uniffi-bindgen-react-native: 0.28.3-3
 
-  lwk_node@0.17.2: {}
+  lwk_node@0.19.0: {}
 
   make-dir@2.1.0:
     dependencies:
