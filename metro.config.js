@@ -97,6 +97,25 @@ config.resolver.extraNodeModules = {
   '@utexo/rgb-lib-wasm': path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js'),
 };
 
+// @kaleidorg/wallet-engine's Arkade adapter (beta.70+) lazily loads the Arkade
+// Intents venue from the '@kaleidorg/swap-sdk/arkade' subpath. This app has no
+// swap-sdk dependency and never touches that venue — swap-sdk is a Rust->wasm
+// package, and wasm is exactly what the mobile build avoids. Metro still has to
+// resolve the subpath because it bundles a single file and doesn't tree-shake the
+// adapter barrel, so send it to the same empty stub as the unused @utexo adapters.
+// A subpath can't go through extraNodeModules (that maps a package root and then
+// appends the remainder), hence resolveRequest.
+const swapSdkStub = path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js');
+const previousResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === '@kaleidorg/swap-sdk' || moduleName.startsWith('@kaleidorg/swap-sdk/')) {
+    return { type: 'sourceFile', filePath: swapSdkStub };
+  }
+  return previousResolveRequest
+    ? previousResolveRequest(context, moduleName, platform)
+    : context.resolveRequest(context, moduleName, platform);
+};
+
 // Add polyfill resolver
 config.resolver.alias = {
   crypto: 'react-native-get-random-values',
