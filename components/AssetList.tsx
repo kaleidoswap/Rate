@@ -41,16 +41,18 @@ const AssetRow: React.FC<{ asset: NiaAsset; onPress: () => void }> = ({ asset, o
     return (
         <TouchableOpacity style={styles.assetCardWrapper} onPress={onPress}>
             <LinearGradient
-                // Clean, restrained accent: the dark card holds most of the row,
-                // with just a faint tint toward the trailing edge so the asset's
-                // colour reads without the loud, over-bright gradient bar.
+                // A tint on the trailing edge only, so the asset's colour reads as an
+                // accent rather than a stain. The previous ramp started at 55% and
+                // peaked at 14% alpha, which over the navy card turned a warm icon
+                // (BTC orange) into a muddy band across half the row that looked
+                // like a rendering fault. Start late, stay faint.
                 colors={[
                     theme.colors.surface.primary,
                     theme.colors.surface.primary,
-                    `${accent}12`,
-                    `${accent}24`,
+                    `${accent}0D`,
+                    `${accent}1A`,
                 ]}
-                locations={[0, 0.55, 0.85, 1]}
+                locations={[0, 0.74, 0.93, 1]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0.5 }}
                 style={styles.assetVerticalCard}

@@ -7,6 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../theme';
 import { BrandMark } from './BrandMark';
 import { BrandLogo } from './brand/BrandLogo';
+import { useIsModalPresentation } from './ModalPresentation';
 
 interface MainHeaderProps {
   title?: string;
@@ -54,10 +55,16 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   const insets = useSafeAreaInsets();
   const withLogo = showLogo ?? !!greeting;
 
+  // A sheet already starts below the status bar, so padding by the window's top
+  // inset stacked a second status bar's worth of dead space above the title on
+  // every modal route. See ModalPresentation for why this is declared, not detected.
+  const isModal = useIsModalPresentation();
+  const topInset = isModal ? 0 : insets.top;
+
   return (
     <View style={[styles.container, elevated && styles.containerElevated]}>
       <StatusBar barStyle="light-content" />
-      <View style={[styles.bar, elevated && styles.barElevated, { paddingTop: insets.top + 4 }]}>
+      <View style={[styles.bar, elevated && styles.barElevated, { paddingTop: topInset + 4 }]}>
         <View style={styles.content}>
           <View style={styles.row}>
             {onBack && (
