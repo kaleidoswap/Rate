@@ -2297,7 +2297,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           <Text style={styles.amountRowLabel}>
             {summary ? 'Requested amount' : required ? 'Amount required' : 'Add amount'}
           </Text>
-          <Text style={styles.amountRowValue} numberOfLines={1}>
+          <Text style={styles.amountRowValue} numberOfLines={2}>
             {summary || 'Optional — tap to set in BTC, USD or fiat'}
           </Text>
         </View>
@@ -2624,7 +2624,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           activeOpacity={0.7}
         >
-          <Ionicons name="arrow-back" size={26} color={theme.colors.text.primary} />
+          <Ionicons name="arrow-back" size={20} color={theme.colors.text.primary} />
         </TouchableOpacity>
         <Text style={styles.receiveHeaderTitle}>Receive</Text>
       </View>
@@ -2738,9 +2738,10 @@ const styles = StyleSheet.create({
   },
 
   receiveBackButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    // Matches MainHeader's `iconBtn`; this screen predates the shared header.
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: theme.colors.surface.secondary,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border.light,
@@ -2749,9 +2750,11 @@ const styles = StyleSheet.create({
   },
 
   receiveHeaderTitle: {
+    // Matches MainHeader's `title`.
     flex: 1,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 21,
+    fontWeight: theme.typography.fontWeight.bold,
+    letterSpacing: -0.3,
     color: theme.colors.text.primary,
   },
   
