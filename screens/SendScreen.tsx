@@ -766,9 +766,9 @@ function SendScreen({ navigation, route }: Props) {
       rightAction={
         <TouchableOpacity
           onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
-          style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.15)' }}
+          style={styles.helpButton}
         >
-          <Ionicons name="help-circle-outline" size={22} color={theme.colors.text.inverse} />
+          <Ionicons name="help-circle-outline" size={20} color={theme.colors.text.primary} />
         </TouchableOpacity>
       }
     />
@@ -1471,10 +1471,13 @@ const styles = StyleSheet.create({
   },
   
   helpButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    // Mirrors MainHeader's `iconBtn` so the two header controls are one shape.
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
     alignItems: 'center',
     justifyContent: 'center',
   },

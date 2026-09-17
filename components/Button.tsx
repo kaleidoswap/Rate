@@ -95,7 +95,7 @@ export const Button: React.FC<ButtonProps> = ({
   };
 
   const buttonStyle = getButtonStyle();
-  const finalTextStyle = { ...getTextStyle(), ...textStyle };
+  const finalTextStyle = { ...getTextStyle(), ...(disabled ? styles.disabledText : null), ...textStyle };
 
   const buttonContent = (
     <>
@@ -201,7 +201,16 @@ const styles = StyleSheet.create({
   },
   
   disabled: {
-    opacity: 0.5,
+    // A disabled CTA used to be the primary green at 50% opacity, which on a dark
+    // background still reads as a solid, tappable brand button — the Swap screen's
+    // "Enter Amount" looked identical in weight to Send's live "Scan QR code".
+    // Drop the brand colour entirely instead: a muted surface says "not yet".
+    backgroundColor: theme.colors.surface.secondary,
+    borderColor: theme.colors.border.light,
+    opacity: 1,
+  },
+  disabledText: {
+    color: theme.colors.text.tertiary,
   },
   
   text: {

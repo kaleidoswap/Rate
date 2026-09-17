@@ -41,6 +41,7 @@ import WalletListScreen from './screens/WalletListScreen';
 import AddWalletScreen from './screens/AddWalletScreen';
 import WalletSettingsScreen from './screens/WalletSettingsScreen';
 import DashboardScreen from './screens/DashboardScreen';
+import { asModalScreen } from './components/ModalPresentation';
 import SendScreen from './screens/SendScreen';
 import ReceiveScreen from './screens/ReceiveScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
@@ -463,33 +464,33 @@ function AppNavigator() {
         <Stack.Screen name="Dashboard" component={DashboardTabs} />
         <Stack.Screen
           name="Settings"
-          component={SettingsScreen}
+          component={asModalScreen(SettingsScreen)}
           options={{
             presentation: 'modal',
             headerShown: false,
           }}
         />
-        <Stack.Screen name="Send" component={SendScreen} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="Receive" component={ReceiveScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="NostrSettings" component={asModalScreen(NostrSettingsScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
           name="QRScanner"
-          component={QRScannerScreen}
+          component={asModalScreen(QRScannerScreen)}
           options={{ presentation: 'modal' }}
         />
         <Stack.Screen
           name="PairDesktop"
-          component={PairDesktopScreen}
+          component={asModalScreen(PairDesktopScreen)}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen
           name="MindSettings"
-          component={MindSettingsScreen}
+          component={asModalScreen(MindSettingsScreen)}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen
           name="NWCConnect"
-          component={NWCConnectScreen}
+          component={asModalScreen(NWCConnectScreen)}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
@@ -500,10 +501,10 @@ function AppNavigator() {
           options={{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false }}
         />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
-        <Stack.Screen name="Assets" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
           name="Swap"
-          component={SwapScreen}
+          component={asModalScreen(SwapScreen)}
           options={{
             presentation: 'modal',
             headerShown: false,
@@ -511,7 +512,7 @@ function AppNavigator() {
         />
         <Stack.Screen
           name="AssetDetail"
-          component={AssetDetailScreen}
+          component={asModalScreen(AssetDetailScreen)}
           options={{
             presentation: 'modal',
             headerShown: false,
@@ -525,10 +526,10 @@ function AppNavigator() {
             headerShown: false,
           }}
         />
-        <Stack.Screen name="LSP" component={LSPScreen} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="OpenChannel" component={LSPScreen} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="Channels" component={LSPScreen} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="IssueAsset" component={AssetsScreen} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="LSP" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="OpenChannel" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="Channels" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="IssueAsset" component={asModalScreen(AssetsScreen)} options={{ presentation: 'modal', headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
