@@ -1,6 +1,6 @@
 // store/index.ts
 import { configureStore } from '@reduxjs/toolkit';
-import { persistStore, persistReducer, PersistConfig, PURGE } from 'redux-persist';
+import { persistStore, persistReducer, PersistConfig, PURGE, createTransform } from 'redux-persist';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { combineReducers } from '@reduxjs/toolkit';
 
@@ -19,6 +19,7 @@ import chatReducer from './slices/chatSlice';
 // Import middleware
 import { apiConfigMiddleware } from './middleware/apiConfigMiddleware';
 import { setStore } from './storeProvider';
+import { sanitizeNostrPersistedState } from './nostrPersistence';
 
 // The swap slice is otherwise ephemeral (current quote/execution reset each
 // session), but swapHistory should survive restarts so the History screen keeps
@@ -47,13 +48,26 @@ const rootReducer = combineReducers({
 // Get the actual state type from the root reducer
 type RootReducerState = ReturnType<typeof rootReducer>;
 
+// Secrets may be useful in live Redux state for copy/share UI, but must never
+// cross into AsyncStorage. SecureStore is the sole persistence layer for Nostr
+// private keys and NWC credentials.
+export const nostrSecretTransform = createTransform(
+  (inboundState: any, key) => {
+    if (key !== 'nostr' || !inboundState) return inboundState;
+    return sanitizeNostrPersistedState(inboundState);
+  },
+  (outboundState) => outboundState,
+  { whitelist: ['nostr'] },
+);
+
 // Redux persist configuration
 const persistConfig: PersistConfig<RootReducerState> = {
   key: 'root',
   storage: AsyncStorage,
   whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: persist decrypted DM history locally
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 3,
+  version: 5,
+  transforms: [nostrSecretTransform],
   migrate: (state: any) => {
     // v2: replace the legacy default Nostr relay set with the current one.
     // The old defaults included relay.snort.social (frequently offline) and
@@ -100,6 +114,51 @@ const persistConfig: PersistConfig<RootReducerState> = {
         c.paidInvoices = c.paidInvoices || {};
         if (c.activePubkey === undefined) c.activePubkey = null;
         if (!c.sendScheme) c.sendScheme = 'nip17';
+      }
+    } catch {
+      // Non-fatal.
+    }
+    // v4: early external-NWC builds accidentally reused the wallet-service
+    // `nwcConnectionString` field and therefore copied the client credential
+    // out of SecureStore into persisted Redux. External connections are fully
+    // represented by connectedWallet/nwcWalletType; remove only the collided
+    // value when this app is not itself serving an NWC connection.
+    try {
+      if (
+        state?.nostr?.connectedWallet
+        && !state.nostr.walletConnectEnabled
+        && state.nostr.nwcConnectionString
+      ) {
+        state.nostr.nwcConnectionString = null;
+      }
+    } catch {
+      // Non-fatal.
+    }
+    // v5: capability-aware, multi-connection NWC metadata. Credentials remain
+    // in SecureStore; this list contains display-safe information only.
+    try {
+      if (state?.nostr) {
+        const n = state.nostr;
+        n.nwcConnections = Array.isArray(n.nwcConnections) ? n.nwcConnections : [];
+        n.nwcCapabilities = Array.isArray(n.nwcCapabilities) ? n.nwcCapabilities : [];
+        if (n.selectedNwcConnectionId === undefined) n.selectedNwcConnectionId = null;
+        if (n.connectedWallet && n.nwcConnections.length === 0) {
+          const type = n.nwcWalletType === 'rln' ? 'rln' : 'ln';
+          const capabilities = type === 'rln'
+            ? ['payInvoice', 'createInvoice', 'readBalance', 'readHistory', 'manageChannels', 'rgbAssets', 'onchain']
+            : ['payInvoice', 'createInvoice', 'readBalance'];
+          n.nwcConnections.push({
+            id: n.connectedWallet,
+            walletPubkey: n.connectedWallet,
+            network: 'unknown',
+            type,
+            capabilities,
+            relays: [],
+            lastConnectedAt: Date.now(),
+          });
+          n.selectedNwcConnectionId = n.connectedWallet;
+          n.nwcCapabilities = capabilities;
+        }
       }
     } catch {
       // Non-fatal.
@@ -175,4 +234,3 @@ export type AppDispatch = typeof store.dispatch;
 import { useDispatch, useSelector, TypedUseSelectorHook } from 'react-redux';
 export const useAppDispatch = () => useDispatch<AppDispatch>();
 export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
-

@@ -20,7 +20,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as SecureStore from 'expo-secure-store';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
 import { setDisclosureLevel } from '../store/slices/settingsSlice';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
@@ -31,9 +30,15 @@ import { Button, Card, Input, ScreenHeader } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { NWCClient, parseNwcUri } from '../services/nwc/NWCExternalClient';
-
-/** SecureStore key shared with NwcRgbAdapter + NWCConnectScreen. */
-const NWC_CONNECTION_KEY = 'nwc_connection_string';
+import {
+  connectionIdForUri,
+  deriveNwcCapabilities,
+  friendlyNwcError,
+  loadActiveNwcCredential,
+  removeNwcCredential,
+  saveAndSelectNwcCredential,
+} from '../services/nwc/connectionStore';
+import { upsertNwcConnection } from '../store/slices/nostrSlice';
 
 interface Props {
   navigation: any;
@@ -169,12 +174,34 @@ export default function WalletSetupScreen({ navigation }: Props) {
     let client: NWCClient | null = null;
     try {
       client = new NWCClient(uri, { timeoutMs: 20_000 });
-      await client.getInfo(); // live connection test
-      await SecureStore.setItemAsync(NWC_CONNECTION_KEY, uri);
+      const info = await client.getInfo(); // live connection test
+      let isRln = (info.methods ?? []).some((method) => method.startsWith('rln_'));
+      if (!isRln) {
+        try {
+          isRln = !!(await client.rlnNodeInfo());
+        } catch {
+          // A normal NIP-47 Lightning wallet is valid too.
+        }
+      }
+      const parsed = parseNwcUri(uri);
+      const id = connectionIdForUri(uri);
+      const type = isRln ? 'rln' : 'ln';
+      const capabilities = deriveNwcCapabilities(info.methods ?? [], isRln);
+      await saveAndSelectNwcCredential(id, uri);
+      dispatch(upsertNwcConnection({
+        id,
+        walletPubkey: parsed.walletPubkey,
+        alias: info.alias,
+        network: info.network || 'unknown',
+        type,
+        capabilities,
+        relays: parsed.relays,
+        lastConnectedAt: Date.now(),
+      }));
       setRlnConnected(true);
       proceedAfterRln();
     } catch (e) {
-      setRlnError(e instanceof Error ? e.message : 'Could not reach the node');
+      setRlnError(friendlyNwcError(e));
     } finally {
       client?.close();
       setRlnConnecting(false);
@@ -184,8 +211,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const handleSkipRln = async () => {
     Keyboard.dismiss();
     setRlnConnected(false);
-    // Drop any previously stored string so a skipped setup doesn't reuse a stale node.
-    await SecureStore.deleteItemAsync(NWC_CONNECTION_KEY).catch(() => {});
+    // Drop a setup-time active credential so skipping cannot reuse a stale node.
+    const active = await loadActiveNwcCredential();
+    if (active.id) await removeNwcCredential(active.id).catch(() => undefined);
     proceedAfterRln();
   };
 
@@ -564,15 +592,15 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <Text style={styles.stepTitle}>RGB Lightning Node</Text>
+      <Text style={styles.stepTitle}>Lightning wallet</Text>
       <Text style={styles.stepDescription}>
-        Hold RGB assets and open Lightning channels via your own RLN node. Connect it over
-        Nostr Wallet Connect — or skip and add it later in Settings.
+        Connect any Lightning wallet over Nostr Wallet Connect. Compatible RGB Lightning
+        nodes also unlock RGB assets and channel management.
       </Text>
 
       <View style={styles.experimentalBadge}>
-        <Ionicons name="flask-outline" size={14} color={theme.colors.warning[600]} />
-        <Text style={styles.experimentalText}>Experimental · Test network only</Text>
+        <Ionicons name="shield-checkmark-outline" size={14} color={theme.colors.warning[600]} />
+        <Text style={styles.experimentalText}>Permissions are detected automatically</Text>
       </View>
 
       <View style={styles.inputWrapper}>
@@ -606,7 +634,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           <Ionicons name="bulb-outline" size={18} color={theme.colors.info[500]} />
         </View>
         <Text style={styles.tipText}>
-          Get a connection string from the KaleidoSwap desktop app (or your self-hosted node).
+          Get a connection string from your Lightning wallet, KaleidoSwap desktop app, or self-hosted node.
         </Text>
       </View>
     </ScrollView>

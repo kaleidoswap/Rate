@@ -57,7 +57,9 @@ const AssetRow: React.FC<{ asset: NiaAsset; onPress: () => void }> = ({ asset, o
             >
                 <View style={styles.assetVerticalContent}>
                     <View style={styles.assetVerticalLeft}>
-                        <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={36} />
+                        <View style={[styles.assetIconHalo, { backgroundColor: `${accent}18` }]}>
+                            <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={40} />
+                        </View>
                         <View style={styles.assetVerticalInfo}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] }}>
                                 <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
@@ -69,11 +71,12 @@ const AssetRow: React.FC<{ asset: NiaAsset; onPress: () => void }> = ({ asset, o
                         </View>
                     </View>
                     <View style={styles.assetVerticalRight}>
+                        <Text style={styles.assetBalanceLabel}>Balance</Text>
                         <AmountText style={styles.assetVerticalBalance}>
                             {formatAssetAmount(getAssetBaseUnitBalance(asset.balance), asset.precision)}
                         </AmountText>
-                        <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
                     </View>
+                    <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
                 </View>
             </LinearGradient>
         </TouchableOpacity>
@@ -105,33 +108,19 @@ export const AssetList: React.FC<AssetListProps> = ({
             ) : (
                 <View style={styles.assetsListWrapper}>
                 <View style={styles.assetsVerticalContainer}>
-                    {assets.slice(0, 3).map((asset) => (
+                    {assets.slice(0, 4).map((asset) => (
                       <AssetRow key={asset.asset_id} asset={asset} onPress={() => onAssetPress(asset)} />
                     ))}
-                    {assets.length > 3 && (
+                    {assets.length > 4 && (
                         <TouchableOpacity
                             style={styles.viewMoreButton}
                             onPress={onViewAll}
                         >
-                            <Text style={styles.viewMoreText}>View {assets.length - 3} more assets</Text>
+                            <Text style={styles.viewMoreText}>View {assets.length - 4} more assets</Text>
                             <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
                         </TouchableOpacity>
                     )}
                 </View>
-                {assets.length > 2 && (
-                    <View pointerEvents="none" style={styles.fadeOverlay}>
-                        <LinearGradient
-                            colors={[
-                                `${theme.colors.background.primary}00`,
-                                theme.colors.background.primary,
-                            ]}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 0, y: 1 }}
-                            pointerEvents="none"
-                            style={styles.fadeGradient}
-                        />
-                    </View>
-                )}
                 </View>
             )}
         </View>
@@ -217,6 +206,13 @@ const styles = StyleSheet.create({
         flex: 1,
         minWidth: 0,
     },
+    assetIconHalo: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     assetIconContainer: {
         width: 40,
         height: 40,
@@ -243,14 +239,21 @@ const styles = StyleSheet.create({
         color: theme.colors.text.secondary,
     },
     assetVerticalRight: {
-        flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-end',
+        marginHorizontal: theme.spacing[2],
+    },
+    assetBalanceLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        color: theme.colors.text.tertiary,
+        textTransform: 'uppercase',
+        letterSpacing: 0.45,
+        marginBottom: 2,
     },
     assetVerticalBalance: {
         fontSize: theme.typography.fontSize.base,
         fontWeight: '600',
         color: theme.colors.text.primary,
-        marginRight: theme.spacing[2],
     },
     viewMoreButton: {
         flexDirection: 'row',

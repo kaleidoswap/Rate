@@ -136,6 +136,8 @@ export default function DashboardScreen({ navigation }: Props) {
     (state: RootState) => !!(state.nostr?.isConnected || state.nostr?.hasStoredKeys),
   );
   const nostrProfileLoaded = useSelector((state: RootState) => !!state.nostr?.profile);
+  const nwcWalletType = useSelector((state: RootState) => state.nostr?.nwcWalletType);
+  const nwcCapabilities = useSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
   const triedNostrProfile = useRef(false);
   useEffect(() => {
     if (nostrConnected && !nostrProfileLoaded && !triedNostrProfile.current) {
@@ -474,7 +476,11 @@ export default function DashboardScreen({ navigation }: Props) {
       // Load Lightning channels (RGB only)
       console.log('Fetching Lightning channels...');
       let channelsList: any[] = [];
-      if (rgbAdapter?.isConnected()) {
+      // Plain NIP-47 wallets can create/pay invoices but do not expose RLN
+      // channel management. Only query channels from an actual RLN/direct node.
+      const connectedWalletType = (rgbAdapter as any)?.walletType?.() ?? nwcWalletType;
+      const canManageChannels = connectedWalletType == null || nwcCapabilities.includes('manageChannels');
+      if (rgbAdapter?.isConnected() && connectedWalletType !== 'ln' && canManageChannels) {
         try { channelsList = await rgbAdapter.listChannels(); } catch { /* no channels */ }
       }
       setChannels(channelsList);
@@ -578,6 +584,10 @@ export default function DashboardScreen({ navigation }: Props) {
     (sum, channel) => sum + channel.local_balance_sat,
     0
   );
+  const hasChannelCapableNode =
+    (protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false)
+    && ((protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType?.() ?? nwcWalletType) !== 'ln'
+    && (nwcWalletType == null || nwcCapabilities.includes('manageChannels'));
 
   // Aggregate priced tokens into a sats-equivalent and fold them into the total,
   // matching the extension (totalBTC = btc across protocols + tokenValueSats).
@@ -912,7 +922,7 @@ export default function DashboardScreen({ navigation }: Props) {
           onViewAll={() => navigation.getParent()?.navigate('History')}
         />
 
-        {policy.showChannelManagement && (
+        {policy.showChannelManagement && hasChannelCapableNode && (
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}

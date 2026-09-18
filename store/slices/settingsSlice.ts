@@ -50,6 +50,12 @@ export const DEFAULT_MIND_CONFIG: MindConfig = {
 export type DisplayDenomination = 'sats' | 'BTC' | 'fiat';
 const DENOMINATION_CYCLE: DisplayDenomination[] = ['sats', 'BTC', 'fiat'];
 
+export interface LastBtcReceiveRoute {
+  axis: 'method' | 'account';
+  network: 'unified' | 'onchain' | 'lightning' | 'spark' | 'arkade';
+  account: 'RGB' | 'SPARK' | 'ARKADE' | null;
+}
+
 interface SettingsState {
   nodeType: 'remote' | 'local';
   remoteNodeUrl: string;
@@ -74,6 +80,9 @@ interface SettingsState {
   // 'lite' shows BTC/USD/assets only; 'advanced' reveals networks/routes/channels.
   // Chosen at wallet creation, reversible in settings.
   disclosureLevel: DisclosureLevel;
+  // The last explicit advanced receive destination, so repeated deposits do
+  // not require navigating the routing matrix from scratch.
+  lastBtcReceiveRoute: LastBtcReceiveRoute | null;
   // KaleidoMind mode — defaults 'off' so the QVAC Bare worklet never starts
   // unprompted (which can crash on a native/JS mismatch or the iOS Simulator).
   aiMode: AiMode;
@@ -103,6 +112,7 @@ const initialState: SettingsState = {
   network: 'regtest',
   needsApiConfigUpdate: false,
   disclosureLevel: 'lite',
+  lastBtcReceiveRoute: null,
   aiMode: 'off',
   aiOnboarded: false,
   mindConfig: DEFAULT_MIND_CONFIG,
@@ -185,6 +195,9 @@ const settingsSlice = createSlice({
     setDisclosureLevel: (state, action: PayloadAction<DisclosureLevel>) => {
       state.disclosureLevel = action.payload;
     },
+    setLastBtcReceiveRoute: (state, action: PayloadAction<LastBtcReceiveRoute>) => {
+      state.lastBtcReceiveRoute = action.payload;
+    },
     setAiMode: (state, action: PayloadAction<AiMode>) => {
       state.aiMode = action.payload;
     },
@@ -231,6 +244,7 @@ export const {
   setCurrency,
   setNetwork,
   setDisclosureLevel,
+  setLastBtcReceiveRoute,
   setMindConfig,
   resetMindConfig,
   setAiMode,

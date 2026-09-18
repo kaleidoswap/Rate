@@ -55,7 +55,13 @@ export default function LSPScreen({ navigation }: Props) {
   });
 
   const settings = useSelector((state: RootState) => state.settings);
+  const nwcWalletType = useSelector((state: RootState) => state.nostr?.nwcWalletType);
+  const nwcCapabilities = useSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
   const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
+  const isChannelCapableNode =
+    !!rgbAdapter?.isConnected()
+    && ((rgbAdapter as any)?.walletType?.() ?? nwcWalletType) !== 'ln'
+    && (nwcWalletType == null || nwcCapabilities.includes('manageChannels'));
   // Channel management is an Advanced-only surface; guard the screen itself so it
   // can't leak into Lite mode even if reached via deep link or stale navigation.
   const policy = usePolicy();
@@ -69,8 +75,8 @@ export default function LSPScreen({ navigation }: Props) {
       setIsLoading(true);
       setError(null);
       // Never hit the RGB/NWC node when it isn't connected.
-      if (!rgbAdapter?.isConnected()) {
-        setError('RGB node not connected. Please connect it in Settings.');
+      if (!isChannelCapableNode || !rgbAdapter) {
+        setError('Connect an RGB Lightning node in Settings to manage channels.');
         return;
       }
       const info: any = await rgbAdapter.executeProtocolOperation!('getLspInfo', {});
@@ -87,7 +93,7 @@ export default function LSPScreen({ navigation }: Props) {
 
   const checkConnection = async (url: string) => {
     try {
-      if (!rgbAdapter?.isConnected()) return;
+      if (!isChannelCapableNode || !rgbAdapter) return;
       const pubkey = url.split('@')[0];
       const peers: any[] = (await rgbAdapter.executeProtocolOperation!('listPeers', {})) as any[];
       setIsConnected(peers.some((peer: any) => peer.pubkey === pubkey));
@@ -99,8 +105,8 @@ export default function LSPScreen({ navigation }: Props) {
   const handleConnect = async () => {
     try {
       setIsLoading(true);
-      if (!rgbAdapter?.isConnected()) {
-        Alert.alert('Error', 'RGB node not connected. Please connect it in Settings.');
+      if (!isChannelCapableNode || !rgbAdapter) {
+        Alert.alert('Node required', 'Connect an RGB Lightning node in Settings to manage channels.');
         return;
       }
       await rgbAdapter.executeProtocolOperation!('connectPeer', { peerAddr: connectionUrl });
@@ -117,8 +123,8 @@ export default function LSPScreen({ navigation }: Props) {
   const handleCreateOrder = async () => {
     try {
       setIsLoading(true);
-      if (!rgbAdapter?.isConnected()) {
-        Alert.alert('Error', 'RGB node not connected. Please connect it in Settings.');
+      if (!isChannelCapableNode || !rgbAdapter) {
+        Alert.alert('Node required', 'Connect an RGB Lightning node in Settings to manage channels.');
         return;
       }
       const nodeInfo = await rgbAdapter.getNodeInfo();
@@ -265,6 +271,27 @@ export default function LSPScreen({ navigation }: Props) {
     );
   }
 
+  if (!isChannelCapableNode) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
+          </TouchableOpacity>
+          <Text style={styles.title}>Lightning Channels</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
+          <Ionicons name="flash-outline" size={40} color={theme.colors.text.tertiary} />
+          <Text style={[styles.loadingText, { textAlign: 'center' }]}>
+            Connect an RGB Lightning node via NWC in Settings to view or open channels.
+          </Text>
+          <Button title="Open Settings" onPress={() => navigation.navigate('Settings')} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -375,4 +402,4 @@ const styles = StyleSheet.create({
     color: theme.colors.text.primary,
     fontSize: theme.typography.fontSize.base,
   },
-}); 
+});

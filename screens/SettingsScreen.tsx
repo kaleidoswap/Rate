@@ -2,6 +2,7 @@ import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SettingsScreen.tsx
 import React, { useCallback, useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Switch, Alert, Text, TouchableOpacity } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { NetworkIcon } from '../components/NetworkIcon';
@@ -13,9 +14,9 @@ import {
   setRemoteNodeUrl,
   setUnitPreference,
   selectDisplayDenomination,
+  selectDisclosureLevel,
   setDisclosureLevel,
   setSoundEnabled,
-  selectDisclosureLevel,
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
@@ -29,6 +30,8 @@ import DatabaseService, { type NetworkType } from '../services/DatabaseService';
 import SecurityService from '../services/SecurityService';
 import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
 import { initializeProtocols, protocolManager } from '../services/protocols';
+import { removeNwcCredential, WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
+import { clearNwcConnections } from '../store/slices/nostrSlice';
 import {
   NETWORK_LABEL,
   PROTOCOL_DEFAULT_NETWORK,
@@ -46,6 +49,7 @@ interface Props {
 
 type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
 const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
+const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0';
 
 // ---------------------------------------------------------------------------
 // Reusable building blocks — consistent, fully-themed rows so nothing renders
@@ -103,7 +107,28 @@ export default function SettingsScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const settings = useSelector((state: RootState) => state.settings);
   const nostrState = useSelector((state: RootState) => state.nostr);
+  const selectedNwcConnection = (nostrState.nwcConnections ?? []).find(
+    (connection) => connection.id === nostrState.selectedNwcConnectionId,
+  );
   const disclosureLevel = useSelector(selectDisclosureLevel);
+  const [settingsQuery, setSettingsQuery] = useState('');
+  const settingsSearchIndex = [
+    'nostr profile relays keys identity',
+    'direct node connectivity url',
+    'kaleidomind ai desktop model agent',
+    'wallet connection lightning nwc rgb node',
+    'security backup recovery phrase passkey',
+    'preferences display mode bitcoin unit sound currency',
+    'wallet protocols network spark arkade rgb',
+    'danger remove delete wallet',
+  ];
+  const showSection = (...terms: string[]) => {
+    const query = settingsQuery.trim().toLowerCase();
+    return !query || terms.some((term) => term.toLowerCase().includes(query));
+  };
+  const normalizedSettingsQuery = settingsQuery.trim().toLowerCase();
+  const hasSettingsSearchResults = !normalizedSettingsQuery
+    || settingsSearchIndex.some((entry) => entry.includes(normalizedSettingsQuery));
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [tempNodeUrl, setTempNodeUrl] = useState(settings.remoteNodeUrl);
 
@@ -375,6 +400,11 @@ export default function SettingsScreen({ navigation }: Props) {
               const db = DBService.getInstance();
               const aw = await db.getActiveWallet();
               if (aw?.id) await db.deleteWallet(aw.id);
+              await Promise.all([
+                ...(nostrState.nwcConnections ?? []).map((connection) => removeNwcCredential(connection.id)),
+                SecureStore.deleteItemAsync(WALLET_SERVICE_NWC_URI_KEY),
+              ]);
+              dispatch(clearNwcConnections());
               dispatch(setActiveWallet(null as any));
               Alert.alert('Wallet Removed', 'You can now create or import a new wallet.');
               navigation.reset({ index: 0, routes: [{ name: 'InitialLoad' as any }] });
@@ -392,7 +422,26 @@ export default function SettingsScreen({ navigation }: Props) {
       <MainHeader title="Settings" onBack={() => navigation.goBack()} />
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
+        <Input
+          value={settingsQuery}
+          onChangeText={setSettingsQuery}
+          placeholder="Search settings"
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={styles.searchInput}
+          accessibilityLabel="Search settings"
+        />
+
+        {!hasSettingsSearchResults && (
+          <View style={styles.searchEmpty} accessibilityRole="text">
+            <Ionicons name="search-outline" size={24} color={theme.colors.text.tertiary} />
+            <Text style={styles.searchEmptyTitle}>No settings found</Text>
+            <Text style={styles.searchEmptyText}>Try “wallet”, “security”, “network”, or “display”.</Text>
+          </View>
+        )}
+
         {/* Nostr */}
+        {showSection('nostr profile relays keys identity') && <>
         <SectionLabel>Nostr</SectionLabel>
         <Group>
           <Row
@@ -415,10 +464,15 @@ export default function SettingsScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('NostrSettings')}
           />
         </Group>
+        </>}
 
-        {/* Connectivity */}
-        <SectionLabel>Connectivity</SectionLabel>
-        <Group>
+        {/* The HTTP node controls are a legacy/developer transport. Mobile uses
+            NWC by default, where showing this switch was misleading because it
+            had no effect on the active adapter. */}
+        {!RGB_VIA_NWC && disclosureLevel === 'advanced' && showSection('direct node connectivity url') && (
+          <>
+          <SectionLabel>Direct node</SectionLabel>
+          <Group>
           <Row
             first
             icon="server-outline"
@@ -458,9 +512,12 @@ export default function SettingsScreen({ navigation }: Props) {
               )}
             </View>
           )}
-        </Group>
+          </Group>
+          </>
+        )}
 
         {/* KaleidoMind */}
+        {showSection('kaleidomind ai desktop model agent') && <>
         <SectionLabel>KaleidoMind</SectionLabel>
         <Group>
           <Row
@@ -483,15 +540,21 @@ export default function SettingsScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('MindSettings')}
           />
         </Group>
+        </>}
 
-        <SectionLabel>Connections</SectionLabel>
+        {showSection('wallet connection lightning nwc rgb node') && <>
+        <SectionLabel>Wallet connection</SectionLabel>
         <Group>
           <Row
             first
             icon="flash-outline"
             iconColor={theme.colors.warning[500]}
-            label="Connect a Lightning wallet"
-            description="Pay & check balances via NWC (Lightning or RGB node)"
+            label="Lightning node"
+            description={nostrState.connectedWallet
+              ? nostrState.nwcWalletType === 'rln'
+                ? `${selectedNwcConnection?.alias || 'RGB node'} · RGB, Lightning and channels`
+                : `${selectedNwcConnection?.alias || 'NWC wallet'} · ${nostrState.nwcCapabilities?.includes('createInvoice') ? 'send and receive' : 'limited permissions'}`
+              : 'Connect any NWC wallet or RGB Lightning node'}
             value={
               nostrState.connectedWallet
                 ? nostrState.nwcWalletType === 'rln'
@@ -501,9 +564,21 @@ export default function SettingsScreen({ navigation }: Props) {
             }
             onPress={() => navigation.navigate('NWCConnect')}
           />
+          {nostrState.connectedWallet && (
+            <Row
+              icon="pulse-outline"
+              iconColor={theme.colors.success[500]}
+              label="Connection capabilities"
+              description={`${nostrState.nwcCapabilities?.length ?? 0} permissions detected · ${(nostrState.nwcConnections ?? []).length} saved wallet${(nostrState.nwcConnections ?? []).length === 1 ? '' : 's'}`}
+              value="Manage"
+              onPress={() => navigation.navigate('NWCConnect')}
+            />
+          )}
         </Group>
+        </>}
 
         {/* Security */}
+        {showSection('security backup recovery phrase passkey') && <>
         <SectionLabel>Security</SectionLabel>
         <Group>
           <Row
@@ -524,8 +599,10 @@ export default function SettingsScreen({ navigation }: Props) {
             onPress={handlePasskeySuggestion}
           />
         </Group>
+        </>}
 
         {/* Preferences */}
+        {showSection('preferences display mode bitcoin unit sound currency') && <>
         <SectionLabel>Preferences</SectionLabel>
         <Group>
           <Row first icon="options-outline" label="Display Mode" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
@@ -548,10 +625,14 @@ export default function SettingsScreen({ navigation }: Props) {
           />
           <Row icon="cash-outline" iconColor={theme.colors.success[500]} label="Currency" description="Fiat used for value display" value={settings.currency} onPress={() => setActiveSheet('currency')} />
         </Group>
+        </>}
 
-        {/* Wallet Protocols */}
-        <SectionLabel>Wallet Protocols</SectionLabel>
-        <Group>
+        {/* Network internals belong to Advanced mode. Lite mode keeps Settings
+            focused on user choices and the single Lightning connection. */}
+        {disclosureLevel === 'advanced' && showSection('wallet protocols network spark arkade rgb') && (
+          <>
+          <SectionLabel>Wallet Protocols</SectionLabel>
+          <Group>
           {WALLET_PROTOCOLS.map((proto, idx) => {
             const connected = protocolStatus[proto];
             const connecting = protocolConnecting[proto] ?? false;
@@ -598,9 +679,12 @@ export default function SettingsScreen({ navigation }: Props) {
               </View>
             );
           })}
-        </Group>
+          </Group>
+          </>
+        )}
 
         {/* Danger Zone */}
+        {showSection('danger remove delete wallet') && <>
         <SectionLabel tone="danger">Danger Zone</SectionLabel>
         <Group>
           <TouchableOpacity activeOpacity={0.7} onPress={handleRemoveWallet}>
@@ -616,6 +700,7 @@ export default function SettingsScreen({ navigation }: Props) {
             </View>
           </TouchableOpacity>
         </Group>
+        </>}
 
         <View style={{ height: theme.spacing[10] }} />
       </ScrollView>
@@ -665,6 +750,27 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: theme.spacing[4],
     paddingTop: theme.spacing[2],
+  },
+  searchInput: {
+    marginTop: theme.spacing[2],
+    marginBottom: theme.spacing[1],
+  },
+  searchEmpty: {
+    alignItems: 'center',
+    paddingVertical: theme.spacing[8],
+    paddingHorizontal: theme.spacing[4],
+  },
+  searchEmptyTitle: {
+    marginTop: theme.spacing[2],
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  searchEmptyText: {
+    marginTop: theme.spacing[1],
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.tertiary,
+    textAlign: 'center',
   },
   sectionLabel: {
     fontSize: theme.typography.fontSize.xs,

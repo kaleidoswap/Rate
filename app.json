@@ -2,7 +2,7 @@
   "expo": {
     "name": "KaleidoSwap",
     "slug": "rate",
-    "version": "0.2.0",
+    "version": "0.2.4",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -17,7 +17,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.kaleidoswap.wallet",
-      "buildNumber": "10",
+      "buildNumber": "11",
       "infoPlist": {
         "NSCameraUsageDescription": "This app uses the camera to scan QR codes for Bitcoin addresses and Lightning invoices.",
         "NSFaceIDUsageDescription": "Use Face ID to unlock your wallet securely.",
@@ -37,7 +37,8 @@
     },
     "android": {
       "package": "com.kaleidoswap.wallet",
-      "versionCode": 1,
+      "versionCode": 2,
+      "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#102217"

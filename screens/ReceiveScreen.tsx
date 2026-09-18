@@ -1,5 +1,5 @@
 // screens/ReceiveScreen.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -17,17 +17,18 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSelector } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
 import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-engine';
-import { selectDisclosureLevel } from '../store/slices/settingsSlice';
+import { selectDisclosureLevel, setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
   getAssetFamily, resolveReceiveAccounts, getNetworkTypesForAccount,
+  type AccountId,
   type NetworkType as ProtocolNetworkType,
 } from '../utils/account-routing';
 import { theme } from '../theme';
@@ -48,6 +49,7 @@ import { AmountEditorModal } from '../components/AmountEditorModal';
 import { NewAssetSheet, type NewAssetKind } from '../components/NewAssetSheet';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { PressableScale } from '../components/PressableScale';
+import { ReceiveRouteSelector } from '../components/receive/ReceiveRouteSelector';
 import { feedback } from '../utils/feedback';
 import { useBitcoinConversion } from '../utils/bitcoinUnits';
 import {
@@ -316,6 +318,7 @@ function DepositMonitorCard({
 }
 
 export default function ReceiveScreen({ navigation }: Props) {
+  const dispatch = useDispatch();
   // Narrow selectors: subscribe to ONLY the two fields this screen reads. The
   // previous coarse `state.wallet` / `state.assets` selectors re-rendered this
   // ~3k-line component on any unrelated change (price ticks, tx history, etc.).
@@ -402,8 +405,16 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Lite mode: a single private BIP321 QR (BTC/$ toggle) with the advanced
   // network picker hidden behind "Show all networks".
   const disclosureLevel = useSelector(selectDisclosureLevel);
+  const nwcWalletType = useSelector((state: RootState) => state.nostr?.nwcWalletType);
+  const nwcCapabilities = useSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
+  const lastBtcReceiveRoute = useSelector((state: RootState) => state.settings.lastBtcReceiveRoute);
   const isLite = disclosureLevel === 'lite';
   const [showAllNetworks, setShowAllNetworks] = useState(false);
+  // Advanced receive mirrors the extension's two ways into the same route
+  // matrix: choose how the sender will pay, or choose which account to top up.
+  const [routeAxis, setRouteAxis] = useState<'method' | 'account'>('method');
+  const [selectedAccount, setSelectedAccount] = useState<AccountId | null>(null);
+  const restoredBtcRoute = useRef(false);
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
@@ -560,16 +571,50 @@ export default function ReceiveScreen({ navigation }: Props) {
     } else {
       const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
       for (const account of accounts) {
-        for (const net of getNetworkTypesForAccount(account, family)) networks.add(net);
+        for (const net of getNetworkTypesForAccount(account, family)) {
+          // A plain NIP-47 wallet is Lightning-only. It shares the RGB_LN
+          // adapter slot but cannot derive an on-chain/RGB address.
+          if (account === 'RGB' && nwcWalletType === 'ln' && net === 'onchain') continue;
+          if (
+            account === 'RGB'
+            && nwcWalletType === 'ln'
+            && net === 'lightning'
+            && !nwcCapabilities.includes('createInvoice')
+          ) continue;
+          networks.add(net);
+        }
       }
-      // BTC Lightning needs a usable channel (Spark brings its own LN liquidity).
-      if (networks.has('lightning') && !hasAnyUsableChannel() && !status.SPARK) {
+      // An external plain NWC Lightning wallet creates invoices without exposing
+      // channel inventory. RLN needs usable inbound liquidity; Spark brings its
+      // own Lightning bridge.
+      if (
+        networks.has('lightning')
+        && !hasAnyUsableChannel()
+        && !status.SPARK
+        && !(nwcWalletType === 'ln' && nwcCapabilities.includes('createInvoice'))
+      ) {
         networks.delete('lightning');
       }
     }
 
     return Array.from(networks);
-  }, [selectedAsset, getProtocolStatus, channels]);
+  }, [selectedAsset, getProtocolStatus, channels, nwcWalletType, nwcCapabilities]);
+
+  useEffect(() => {
+    if (
+      restoredBtcRoute.current
+      || isLite
+      || selectedAsset.ticker !== 'BTC'
+      || !lastBtcReceiveRoute
+    ) return;
+    const routeAvailable = lastBtcReceiveRoute.network === 'unified'
+      || availableNetworkTypes.includes(lastBtcReceiveRoute.network);
+    if (!routeAvailable) return;
+    restoredBtcRoute.current = true;
+    setRouteAxis(lastBtcReceiveRoute.axis);
+    setSelectedAccount(lastBtcReceiveRoute.account);
+    setNetworkType(lastBtcReceiveRoute.network);
+  }, [availableNetworkTypes, isLite, lastBtcReceiveRoute, selectedAsset.ticker]);
   
   // Constants for HTLC calculations (from desktop app)
   const MSATS_PER_SAT = 1000;
@@ -763,7 +808,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           } else {
             const addr = await runReceiveOperation<any>(
               'Create Spark address',
-              () => sparkAdapter.getReceiveAddress(),
+              () => sparkAdapter.getReceiveAddress('SPARK'),
             );
             result = addr.address;
             methodMeta = {
@@ -822,10 +867,15 @@ export default function ReceiveScreen({ navigation }: Props) {
       // ── RGB / Legacy: on-chain + lightning ──
       else if (selectedAsset.asset_id === 'BTC') {
         if (networkType === 'onchain') {
-          // Use whichever adapter is connected for on-chain address
+          // Honour the account picked in "By account" mode. In method mode the
+          // existing RGB → Spark priority remains the default.
           const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
-          if (rgbAdapter?.isConnected()) {
+          const preferSpark = selectedAccount === 'SPARK';
+          const rgbCanReceiveOnchain = rgbAdapter?.isConnected()
+            && nwcWalletType !== 'ln'
+            && (nwcWalletType == null || nwcCapabilities.includes('onchain'));
+          if (!preferSpark && rgbCanReceiveOnchain) {
             const addr = await runReceiveOperation(
               'Create RGB Bitcoin address',
               (signal) => callAbortableAdapterMethod<any>(
@@ -873,12 +923,16 @@ export default function ReceiveScreen({ navigation }: Props) {
           const amountSats =
             !isNaN(numericAmount) && numericAmount > 0 ? Math.round(numericAmount) : undefined;
 
-          // Try RGB first (Lightning), then Spark (also supports Lightning).
+          // Honour an explicit account choice; otherwise prefer the connected
+          // NWC/RGB Lightning wallet and fall back to Spark.
           // `layer: 'BTC_LN'` is REQUIRED for Spark — without it the Spark adapter
           // mints a native Spark sats invoice (a `spark…` string), not a BOLT11.
           const rgbLn = protocolManager.getAdapterIfAvailable('RGB_LN');
           const sparkLn = protocolManager.getAdapterIfAvailable('SPARK');
-          if (rgbLn?.isConnected()) {
+          const preferSpark = selectedAccount === 'SPARK';
+          const rgbCanCreateInvoice = rgbLn?.isConnected()
+            && (nwcWalletType == null || nwcCapabilities.includes('createInvoice'));
+          if (!preferSpark && rgbCanCreateInvoice) {
             const invoice = await runReceiveOperation('Create RGB Lightning invoice', (signal) =>
               callAbortableAdapterMethod<any>(
                 rgbLn,
@@ -1114,7 +1168,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           try {
             const addr = await runReceiveOperation(
               'Create Spark USD address',
-              () => spark.getReceiveAddress(),
+              () => spark.getReceiveAddress('SPARK'),
             );
             if (addr?.address) sparkAddress = addr.address;
             receiveLog('unified.usd.spark.done', {
@@ -1317,7 +1371,10 @@ export default function ReceiveScreen({ navigation }: Props) {
           // Automatic unified generation must stay on local/lightweight adapters.
           // RGB/NWC on-chain generation remains available through manual refresh
           // and the explicit On-chain network.
-          if (reason === 'manual' && rgb?.isConnected()) {
+          const rgbCanCreateOnchainAddress = rgb?.isConnected()
+            && nwcWalletType !== 'ln'
+            && (nwcWalletType == null || nwcCapabilities.includes('onchain'));
+          if (reason === 'manual' && rgbCanCreateOnchainAddress) {
             const addr = await runReceiveOperation<any>(
               'Create unified RGB Bitcoin address',
               (signal) => callAbortableAdapterMethod<any>(
@@ -1396,7 +1453,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         try {
           const addr = await runReceiveOperation(
             'Create unified Spark address',
-            () => spark.getReceiveAddress(),
+            () => spark.getReceiveAddress('SPARK'),
           );
           if (addr?.address) collected.sparkAddress = addr.address;
           if (addr?.address) {
@@ -1489,8 +1546,10 @@ export default function ReceiveScreen({ navigation }: Props) {
             const taskStartedAt = nowMs();
             // Automatic enrichment uses Spark only. An explicit user action may
             // add RGB Lightning; that request is abortable through the NWC client.
+            const rgbCanCreateInvoice = rgb?.isConnected()
+              && (nwcWalletType == null || nwcCapabilities.includes('createInvoice'));
             const lnAdapter = reason === 'manual'
-              ? rgb?.isConnected() ? rgb : spark?.isConnected() ? spark : undefined
+              ? rgbCanCreateInvoice ? rgb : spark?.isConnected() ? spark : undefined
               : spark?.isConnected() ? spark : undefined;
             if (!lnAdapter) return;
             try {
@@ -2108,6 +2167,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
         balance: btcBalance?.vanilla?.spendable || 0,
       });
+      setRouteAxis('method');
+      setSelectedAccount(null);
       setNetworkType('unified');
     };
     const selectUsd = () => {
@@ -2121,6 +2182,8 @@ export default function ReceiveScreen({ navigation }: Props) {
       // unified view so the aggregator actually runs.
       setUnifiedAsset('USD');
       setSelectedAsset({ asset_id: 'USD', ticker: 'USD', name: 'US Dollar', isRGB: false });
+      setRouteAxis('method');
+      setSelectedAccount(null);
       setNetworkType('unified');
     };
 
@@ -2171,12 +2234,87 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
+  const renderRouteAxisSelector = () => {
+    if (isLite) return null;
+
+    const status = getProtocolStatus();
+    const family = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
+    const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
+    const effectiveAccount =
+      (selectedAccount && accounts.includes(selectedAccount) ? selectedAccount : null)
+      ?? accounts[0]
+      ?? null;
+    const chooseAccount = (account: AccountId) => {
+      feedback.select();
+      resetReceiveSurface();
+      setSelectedAccount(account);
+      let nextNetwork: ReceiveMode;
+      if (account === 'SPARK') {
+        nextNetwork = 'spark';
+      } else if (account === 'ARKADE') {
+        nextNetwork = 'arkade';
+      } else {
+        nextNetwork = nwcWalletType === 'ln' && family === 'BTC' ? 'lightning' : 'onchain';
+      }
+      setNetworkType(nextNetwork);
+      if (selectedAsset.ticker === 'BTC') {
+        dispatch(setLastBtcReceiveRoute({ axis: 'account', network: nextNetwork, account }));
+      }
+    };
+
+    return (
+      <ReceiveRouteSelector
+        axis={routeAxis}
+        accounts={accounts}
+        selectedAccount={effectiveAccount}
+        nwcWalletType={nwcWalletType}
+        onAccountChange={chooseAccount}
+        onAxisChange={(axis) => {
+          if (routeAxis === axis) return;
+          feedback.select();
+          resetReceiveSurface();
+          setRouteAxis(axis);
+          if (axis === 'method') {
+            setSelectedAccount(null);
+            setNetworkType('unified');
+            if (selectedAsset.ticker === 'BTC') {
+              dispatch(setLastBtcReceiveRoute({ axis: 'method', network: 'unified', account: null }));
+            }
+          } else if (effectiveAccount) {
+            chooseAccount(effectiveAccount);
+          }
+        }}
+      />
+    );
+  };
+
   // ── Network selector: "All" by default, specific networks behind a dropdown ─
   const renderNetworkDropdown = () => {
     const canUseAll = selectedAsset.ticker === 'BTC' || /usd/i.test(selectedAsset.ticker);
     const isRgbAsset = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker) === 'RGB';
+    const status = getProtocolStatus();
+    const family = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
+    const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
+    const effectiveAccount =
+      (selectedAccount && accounts.includes(selectedAccount) ? selectedAccount : null)
+      ?? accounts[0]
+      ?? null;
+    const accountNetworks = effectiveAccount
+      ? getNetworkTypesForAccount(effectiveAccount, family).filter(
+          (network) => {
+            if (effectiveAccount === 'RGB' && nwcWalletType === 'ln' && network === 'onchain') return false;
+            if (effectiveAccount === 'RGB' && nwcWalletType === 'ln' && network === 'lightning') {
+              return nwcCapabilities.includes('createInvoice');
+            }
+            return true;
+          },
+        )
+      : [];
+    const selectableNetworks = routeAxis === 'account'
+      ? availableNetworkTypes.filter((network) => accountNetworks.includes(network))
+      : availableNetworkTypes;
     const options: Array<{ id: ReceiveMode; label: string; sub: string }> = [
-      ...(canUseAll
+      ...(canUseAll && routeAxis === 'method'
         ? [{
             id: 'unified' as ReceiveMode,
             label: 'All networks',
@@ -2186,14 +2324,14 @@ export default function ReceiveScreen({ navigation }: Props) {
               : 'On-chain · Spark · Arkade · optional Lightning',
           }]
         : []),
-      ...(availableNetworkTypes.includes('onchain')
-        ? [{ id: 'onchain' as ReceiveMode, label: isRgbAsset ? 'RGB on-chain' : 'On-chain', sub: isRgbAsset ? 'RGB Layer 1 (L1)' : 'Bitcoin Layer 1' }] : []),
-      ...(availableNetworkTypes.includes('lightning')
+      ...(selectableNetworks.includes('onchain')
+        ? [{ id: 'onchain' as ReceiveMode, label: isRgbAsset ? 'RGB on-chain' : 'On-chain', sub: isRgbAsset ? 'RGB account · network fee · slower' : 'Bitcoin wallet · network fee · slower' }] : []),
+      ...(selectableNetworks.includes('lightning')
         ? [{ id: 'lightning' as ReceiveMode, label: isRgbAsset ? 'RGB Lightning' : 'Lightning', sub: isRgbAsset ? 'Instant · in-channel (RGB-LN)' : 'Instant · low fee' }] : []),
-      ...(availableNetworkTypes.includes('spark')
-        ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Instant' }] : []),
-      ...(availableNetworkTypes.includes('arkade')
-        ? [{ id: 'arkade' as ReceiveMode, label: 'Arkade', sub: 'Off-chain' }] : []),
+      ...(selectableNetworks.includes('spark')
+        ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Spark balance · instant · low fee' }] : []),
+      ...(selectableNetworks.includes('arkade')
+        ? [{ id: 'arkade' as ReceiveMode, label: 'Arkade', sub: 'Arkade balance · off-chain' }] : []),
     ];
     const current = options.find((o) => o.id === networkType) || options[0];
     if (!current) return null;
@@ -2235,6 +2373,17 @@ export default function ReceiveScreen({ navigation }: Props) {
           />
         </TouchableOpacity>
 
+        <View style={styles.routeSummary}>
+          <Ionicons name="information-circle-outline" size={15} color={color} />
+          <Text style={styles.routeSummaryText}>
+            {current.id === 'unified'
+              ? 'The QR lets the sender choose; funds land in the matching account.'
+              : current.id === 'lightning'
+                ? `Funds land in ${effectiveAccount === 'SPARK' ? 'Spark' : 'your connected Lightning wallet'}; instant with a routing fee.`
+                : current.sub}
+          </Text>
+        </View>
+
         {showNetworkDropdown && (
           <View style={styles.netDropdown}>
             {options.map((o) => {
@@ -2253,6 +2402,13 @@ export default function ReceiveScreen({ navigation }: Props) {
                     }
                     resetReceiveSurface();
                     setNetworkType(o.id);
+                    if (selectedAsset.ticker === 'BTC') {
+                      dispatch(setLastBtcReceiveRoute({
+                        axis: routeAxis,
+                        network: o.id,
+                        account: routeAxis === 'account' ? effectiveAccount : null,
+                      }));
+                    }
                     setShowNetworkDropdown(false);
                   }}
                   activeOpacity={0.7}
@@ -2637,6 +2793,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         keyboardDismissMode="on-drag"
       >
         {renderAssetTabs()}
+        {renderRouteAxisSelector()}
         {renderNetworkDropdown()}
         {renderAmountRow()}
         {renderContent()}
@@ -3613,6 +3770,68 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
+  routeAxisCard: {
+    marginBottom: theme.spacing[3],
+    padding: 4,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    backgroundColor: theme.colors.surface.primary,
+  },
+  routeAxisTabs: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  routeAxisTab: {
+    flex: 1,
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: theme.borderRadius.base,
+  },
+  routeAxisTabActive: {
+    backgroundColor: theme.colors.primary[50],
+  },
+  routeAxisTabText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '600',
+    color: theme.colors.text.tertiary,
+  },
+  routeAxisTabTextActive: {
+    color: theme.colors.primary[500],
+  },
+  accountChoices: {
+    gap: 4,
+    paddingTop: 4,
+  },
+  accountChoice: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: theme.spacing[2],
+    borderRadius: theme.borderRadius.base,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  accountChoiceText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  accountChoiceLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  accountChoiceSub: {
+    marginTop: 1,
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+  },
+
   // Network selector + dropdown
   netSelectorWrap: {
     marginBottom: theme.spacing[4],
@@ -3645,6 +3864,19 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.tertiary,
     marginTop: 1,
+  },
+  routeSummary: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing[2],
+    marginTop: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2],
+  },
+  routeSummaryText: {
+    flex: 1,
+    fontSize: theme.typography.fontSize.xs,
+    lineHeight: 17,
+    color: theme.colors.text.secondary,
   },
   netDropdown: {
     marginTop: theme.spacing[2],
