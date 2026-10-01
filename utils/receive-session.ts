@@ -68,7 +68,7 @@ export async function runReceiveOperation<T>(
     if (timeoutId) clearTimeout(timeoutId);
     parentSignal?.removeEventListener('abort', abortFromParent);
     const durationMs = (globalThis.performance?.now?.() ?? Date.now()) - startedAt;
-    if (__DEV__ && durationMs >= 500) {
+    if (__DEV__ && process.env.EXPO_PUBLIC_RECEIVE_DEBUG === '1' && durationMs >= 500) {
       console.warn(`[ReceivePerformance] ${operation} took ${Math.round(durationMs)}ms`);
     }
   }

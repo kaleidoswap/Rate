@@ -11,8 +11,6 @@ import {
   Share,
   Clipboard,
   ActivityIndicator,
-  Animated,
-  Easing,
   InteractionManager,
   Platform,
   AppState,
@@ -46,7 +44,7 @@ import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector } from '../components/AssetSelector';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { UsdCoinIcon } from '../components/ProtocolIcons';
-import { QrCode } from '@kaleidorg/kaleido-ui/native';
+import QRCode from 'react-native-qrcode-svg';
 import { AmountEditorModal } from '../components/AmountEditorModal';
 import { NewAssetSheet, type NewAssetKind } from '../components/NewAssetSheet';
 import { useFiatRates } from '../hooks/useFiatRates';
@@ -191,7 +189,9 @@ const DeferredQrCode = React.memo(function DeferredQrCode({ value, size }: { val
     );
   }
 
-  return <QrCode value={renderValue} size={size} />;
+  // Dense universal requests need square modules and an unobstructed center.
+  // The white wrapper provides the quiet zone around the code.
+  return <QRCode value={renderValue} size={size} color="#000000" backgroundColor="#FFFFFF" ecl="M" />;
 });
 
 function DepositMonitorCard({
@@ -209,37 +209,6 @@ function DepositMonitorCard({
   accent: string;
   methodCount?: number;
 }) {
-  const pulse = React.useRef(new Animated.Value(0)).current;
-  const rotate = React.useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!visible) return;
-    pulse.setValue(0);
-    rotate.setValue(0);
-    const pulseLoop = Animated.loop(
-      Animated.timing(pulse, {
-        toValue: 1,
-        duration: 1400,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      })
-    );
-    const rotateLoop = Animated.loop(
-      Animated.timing(rotate, {
-        toValue: 1,
-        duration: 1600,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    );
-    pulseLoop.start();
-    rotateLoop.start();
-    return () => {
-      pulseLoop.stop();
-      rotateLoop.stop();
-    };
-  }, [visible, pulse, rotate]);
-
   if (!visible) return null;
 
   const layerLabel = formatDepositLayer(layer);
@@ -266,13 +235,10 @@ function DepositMonitorCard({
           : status === 'failed' || status === 'expired'
             ? 'Generate a fresh code when you are ready'
             : 'Checking connected layers for incoming deposits');
-  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.45] });
-  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
-  const spin = rotate.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
   const isProblem = status === 'failed' || status === 'expired';
   const iconName: keyof typeof Ionicons.glyphMap = isProblem ? 'alert-circle' : status === 'claimed' ? 'checkmark-circle' : 'sync';
   const iconColor = isProblem ? theme.colors.warning[500] : status === 'claimed' ? theme.colors.success[500] : accent;
-  const isQuietReadyState = status === 'watching' && !message;
+  const isQuietReadyState = status === 'watching';
 
   if (isQuietReadyState) {
     const methodsLabel = methodCount
@@ -290,27 +256,7 @@ function DepositMonitorCard({
 
   return (
     <View style={[styles.depositMonitorCard, { borderColor: iconColor + '30' }]}>
-      <View style={styles.depositMonitorIconWrap}>
-        <Animated.View
-          style={[
-            styles.depositMonitorPulse,
-            {
-              borderColor: iconColor,
-              opacity: pulseOpacity,
-              transform: [{ scale: pulseScale }],
-            },
-          ]}
-        />
-        <Animated.View
-          style={[
-            styles.depositMonitorIcon,
-            { backgroundColor: iconColor + '18' },
-            iconName === 'sync' && { transform: [{ rotate: spin }] },
-          ]}
-        >
-          <Ionicons name={iconName} size={18} color={iconColor} />
-        </Animated.View>
-      </View>
+      <Ionicons name={iconName} size={22} color={iconColor} />
       <View style={styles.depositMonitorText}>
         <Text style={styles.depositMonitorTitle} numberOfLines={1}>{title}</Text>
         <Text style={styles.depositMonitorSubtitle} numberOfLines={2}>{subtitle}</Text>
@@ -341,7 +287,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // heights. The previous 248px maximum pushed the actions below the fold even
   // though a ~220px high-contrast QR remains comfortably scannable.
   const { width: screenWidth } = useWindowDimensions();
-  const qrSize = Math.max(172, Math.min(220, Math.round(screenWidth - 144)));
+  const qrSize = Math.max(172, Math.min(248, Math.round(screenWidth - 104)));
   
   // Safe destructuring with fallbacks
   const rgbAssets = (rgbAssetsRaw || []) as RGBAsset[];
@@ -395,14 +341,12 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [receiveMethods, setReceiveMethods] = useState<ReceiveMethod[]>([]);
   const unifiedMethods = receiveMethods.map((method) => method.label);
   const unifiedAddresses = receiveMethods.map(({ key, label, value }) => ({ key, label, value }));
-  const [showAddressInfo, setShowAddressInfo] = useState(false);
   // The raw address breakdown is hidden behind a collapsed section by default —
   // the QR (and its single "Copy" affordance) is the primary way to receive, so
   // the list of individual addresses only appears when the user expands it.
   const [showPaymentOptions, setShowPaymentOptions] = useState(false);
   const [fallbackAddress, setFallbackAddress] = useState<{ label: string; value: string } | null>(null);
   // Per-address "show full" toggles in the unified address list (keyed by row).
-  const [expandedAddrs, setExpandedAddrs] = useState<Record<string, boolean>>({});
   // Collapse/expand the full address inside the single-network receive card.
   const [showFullAddr, setShowFullAddr] = useState(false);
   // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
@@ -839,9 +783,9 @@ export default function ReceiveScreen({ navigation }: Props) {
         try {
           const arkadeAdapter = protocolManager.getAdapter('ARKADE');
           if (arkadeSubMode === 'boarding') {
-            const addr = await runReceiveOperation(
+            const addr = await runReceiveOperation<any>(
               'Create Arkade boarding address',
-              () => arkadeAdapter.getReceiveAddress('boarding'),
+              () => (arkadeAdapter as any).getBoardingAddress(),
             );
             result = addr.address;
             methodMeta = {
@@ -909,7 +853,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             // deposit must be claimed in — track it for useSparkAutoClaim.
             const addr = await runReceiveOperation<any>(
               'Create Spark Bitcoin deposit address',
-              () => sparkAdapter.getReceiveAddress('onchain'),
+              () => sparkAdapter.getReceiveAddress('BTC'),
             );
             result = addr.address;
             methodMeta = {
@@ -1410,8 +1354,11 @@ export default function ReceiveScreen({ navigation }: Props) {
           if (!collected.btcAddress && spark?.isConnected()) {
             const addr = await runReceiveOperation(
               'Create unified Spark Bitcoin address',
-              () => spark.getReceiveAddress('onchain'),
-            );
+              () => spark.getReceiveAddress('BTC'),
+            ).catch((error) => {
+              console.warn('Spark deposit address unavailable; trying Arkade:', error);
+              return null;
+            });
             if (addr?.address) {
               collected.btcAddress = addr.address;
               // Spark on-chain deposit → needs claim/sweep (useSparkAutoClaim).
@@ -1429,9 +1376,9 @@ export default function ReceiveScreen({ navigation }: Props) {
             }
           }
           if (!collected.btcAddress && arkade?.isConnected()) {
-            const addr = await runReceiveOperation(
+            const addr = await runReceiveOperation<any>(
               'Create unified Arkade boarding address',
-              () => arkade.getReceiveAddress('boarding'),
+              () => (arkade as any).getBoardingAddress(),
             );
             if (addr?.address) collected.btcAddress = addr.address;
             if (addr?.address) {
@@ -1826,7 +1773,6 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [copied, setCopied] = useState(false);
   // Which address-list row was just copied (inline checkmark, auto-resets) —
   // avoids a disruptive modal Alert on every copy.
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyToClipboard = async () => {
     if (!address) return;
     receiveLog('tap.copyAddress', { length: address.length, networkType });
@@ -2019,122 +1965,24 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   // Unified single-QR receive view (wraps the body with a BTC/USD asset selector).
-  // Pro/extension-style list of every address embedded in the unified QR. Each
-  // row copies its address; a collapsible panel explains them; "Add RGB address"
-  // jumps to the advanced asset picker.
-  const renderUnifiedAddressList = () => {
-    if (!unifiedAddresses.length) return null;
-    const colorFor = (key: string): string =>
-      (NETWORK_COLORS as Record<string, string>)[key] ?? theme.colors.primary[500];
-    const trunc = (v: string) => (v.length > 30 ? `${v.slice(0, 16)}…${v.slice(-10)}` : v);
-    const rgbConnected = !!getProtocolStatus().RGB;
-    return (
-      <View style={styles.addrListSection}>
-        <Text style={styles.universalRequestSubtitle}>{unifiedMethods.join(' · ')}</Text>
-        <Text style={styles.addrValue}>Sender can’t scan the request? Share a single payment method below.</Text>
-        {unifiedAddresses.map((a, idx) => {
-          const isOpen = !!expandedAddrs[a.key];
-          const isCopied = copiedKey === a.key;
-          const isLast = idx === unifiedAddresses.length - 1;
-          const copyAddr = async () => {
-            receiveLog('tap.copyUnifiedMethod', { key: a.key, length: a.value.length });
-            await Clipboard.setString(a.value);
-            feedback.select();
-            setCopiedKey(a.key);
-            setTimeout(() => setCopiedKey((k) => (k === a.key ? null : k)), 1600);
-          };
-          const dotColor = colorFor(a.key);
-          return (
-            <View key={a.key} style={[styles.addrRow, isLast && styles.addrRowLast]}>
-              {/* Tap anywhere on the label/value to copy (large target); the
-                  chevron expands the full value, the icon mirrors the copy. */}
-              <TouchableOpacity style={styles.addrRowMain} onPress={copyAddr} activeOpacity={0.6}>
-                <View style={[styles.addrDot, { backgroundColor: dotColor }]} />
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.addrLabel}>{a.label}</Text>
-                  {isOpen ? (
-                    <Text style={styles.uriFull} selectable>{a.value}</Text>
-                  ) : (
-                    <Text style={styles.addrValue} numberOfLines={1}>{trunc(a.value)}</Text>
-                  )}
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.addrIconBtn} accessibilityRole="button"
-                accessibilityLabel={`Show ${a.label} QR code`} onPress={() => setFallbackAddress(a)}>
-                <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.primary} />
-              </TouchableOpacity>
-              {/* Per-address "show full" — the full value lives here, not on the URI. */}
-              <TouchableOpacity
-                onPress={() => setExpandedAddrs((p) => ({ ...p, [a.key]: !p[a.key] }))}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={styles.addrIconBtn}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={isOpen ? 'chevron-up' : 'chevron-down'}
-                  size={16}
-                  color={theme.colors.text.tertiary}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={copyAddr}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={styles.addrIconBtn}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={isCopied ? 'checkmark' : 'copy-outline'}
-                  size={18}
-                  color={isCopied ? theme.colors.success[500] : dotColor}
-                />
-              </TouchableOpacity>
-            </View>
-          );
-        })}
-
-        {(
-          <>
-            <TouchableOpacity
-              style={styles.addrInfoToggle}
-              onPress={() => setShowAddressInfo((v) => !v)}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="information-circle-outline" size={16} color={theme.colors.text.tertiary} />
-              <Text style={styles.addrInfoToggleText}>What are these addresses?</Text>
-              <Ionicons
-                name={showAddressInfo ? 'chevron-up' : 'chevron-down'}
-                size={16}
-                color={theme.colors.text.tertiary}
-              />
-            </TouchableOpacity>
-            {showAddressInfo && (
-              <Text style={styles.addrInfoBody}>
-                The single QR above carries several ways to be paid — a sender's wallet automatically picks
-                whichever it supports: Bitcoin on-chain, Lightning (instant, low fee), Spark, Arkade or
-                Liquid. You can also copy any individual address above.
-              </Text>
-            )}
-          </>
-        )}
-
-        {/* Only offer an RGB receive when an RGB node is actually connected —
-            otherwise there is no RGB address to add. */}
-        {rgbConnected && (
-          <TouchableOpacity
-            style={styles.addRgbBtn}
-            activeOpacity={0.7}
-            onPress={() => {
-              setShowAllNetworks(true);
-              setShowAssetSelector(true);
-            }}
-          >
-            <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
-            <Text style={styles.addRgbText}>Add RGB address</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    );
-  };
+  // Individual payment codes are secondary actions in the payment-method sheet.
+  const renderUnifiedAddressList = () => (
+    <View style={styles.addrListSection}>
+      <Text style={styles.universalRequestSubtitle}>
+        The main QR includes these methods. Choose one if the sender needs a separate code.
+      </Text>
+      {unifiedAddresses.map((a, index) => (
+        <TouchableOpacity key={a.key}
+          accessibilityRole="button" accessibilityLabel={`Show ${a.label} payment code`}
+          style={[styles.addrRow, index === unifiedAddresses.length - 1 && styles.addrRowLast]}
+          onPress={() => setFallbackAddress(a)}>
+          <View style={[styles.addrDot, { backgroundColor: (NETWORK_COLORS as Record<string, string>)[a.key] ?? theme.colors.primary[500] }]} />
+          <Text style={[styles.addrLabel, { flex: 1 }]}>{a.label}</Text>
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
 
   // Handle a pick from the "+" new-asset sheet: switch to a fresh receive on the
   // chosen protocol (Spark / Arkade address, or a blind RGB invoice).
@@ -2447,22 +2295,19 @@ export default function ReceiveScreen({ navigation }: Props) {
     return (
       <TouchableOpacity
         accessibilityRole="button" accessibilityLabel={summary ? `Edit requested amount, ${summary}` : 'Add requested amount'}
-        style={[styles.amountRow, { paddingVertical: theme.spacing[5] }]}
+        style={[styles.amountRow, { paddingVertical: theme.spacing[2], borderWidth: 0, backgroundColor: 'transparent' }]}
         onPress={() => {
           receiveLog('tap.amountRow', { amount, networkType, asset: selectedAsset.ticker });
           setShowAmountEditor(true);
         }}
         activeOpacity={0.7}
       >
-        <View style={styles.amountRowIcon}>
-          <Ionicons name="cash-outline" size={18} color={theme.colors.primary[500]} />
-        </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.amountRowLabel}>
             {summary ? 'Requested amount' : required ? 'Amount required' : 'Add amount'}
           </Text>
           <Text style={[styles.amountRowValue, summary ? { fontSize: theme.typography.fontSize['2xl'], fontWeight: '600' } : {}]} numberOfLines={2}>
-            {summary || 'Optional — tap to set in BTC, USD or fiat'}
+            {summary || 'Optional'}
           </Text>
         </View>
         <View style={styles.amountEditBtn}>
@@ -2498,7 +2343,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     onCopy: () => void;
     onShare: () => void;
   }) => (
-    <View style={[styles.uriCard, { borderColor: accent + '40' }]}>
+    <View style={[styles.uriCard, { borderColor: accent + '40' }, label === 'Payment request' && { borderWidth: 0, padding: 0, backgroundColor: 'transparent' }]}>
       {/* Header: method icon + label + the (truncated) value. Tapping copies. */}
       {label !== 'Payment request' && <TouchableOpacity style={styles.uriCardRow} onPress={onCopy} activeOpacity={0.6}>
         <View style={[styles.uriIconWrap, { backgroundColor: accent + '1A' }]}>{icon}</View>
@@ -2531,8 +2376,8 @@ export default function ReceiveScreen({ navigation }: Props) {
           onPress={onCopy}
           activeOpacity={0.85}
         >
-          <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color="#FFFFFF" />
-          <Text style={styles.uriPrimaryBtnText}>{copied ? 'Copied' : label === 'Payment request' ? 'Copy request' : 'Copy'}</Text>
+          <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color={copied || label === 'Payment request' ? theme.colors.background.primary : '#FFFFFF'} />
+          <Text style={[styles.uriPrimaryBtnText, { color: copied || label === 'Payment request' ? theme.colors.background.primary : '#FFFFFF' }]}>{copied ? 'Copied' : label === 'Payment request' ? 'Copy request' : 'Copy'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.uriSecondaryBtn, { borderColor: accent + '40' }]}
@@ -2609,6 +2454,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           <TouchableOpacity
             onPress={() => generateUnifiedUri()}
             style={styles.qrRefreshBtn}
+            accessibilityRole="button" accessibilityLabel="Refresh payment request"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
           >
@@ -2625,25 +2471,6 @@ export default function ReceiveScreen({ navigation }: Props) {
                 : 'Creating the first payment method…'}
             </Text>
           </View>
-        )}
-
-        {showPaymentOptions && !unifiedLoading
-          && getProtocolStatus().RGB
-          && !receiveMethods.some((method) => method.protocol === 'RGB') && (
-          <TouchableOpacity
-            style={styles.addRgbBtn}
-            onPress={() => generateUnifiedUri({
-              includeLightning: true,
-              preserveExisting: true,
-              reason: 'manual',
-            })}
-            activeOpacity={0.7}
-          >
-            <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
-            <Text style={styles.addRgbText}>
-              {unifiedAsset === 'USD' ? 'Add RGB USDT method' : 'Add RGB / Lightning method'}
-            </Text>
-          </TouchableOpacity>
         )}
 
         <View style={styles.qrContainer}>
@@ -2750,6 +2577,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           <TouchableOpacity
             onPress={generateAddress}
             style={styles.qrRefreshBtn}
+            accessibilityRole="button" accessibilityLabel="Refresh payment request"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             activeOpacity={0.7}
           >
@@ -2817,26 +2645,54 @@ export default function ReceiveScreen({ navigation }: Props) {
           methodCount={networkType === 'unified' ? unifiedMethods.length : 1}
         />
         <TouchableOpacity style={styles.addrListHeader} accessibilityRole="button"
-          accessibilityState={{ expanded: showPaymentOptions }}
-          onPress={() => setShowPaymentOptions(value => !value)}>
-          <Text style={styles.addrListTitle}>Payment options</Text>
-          <Ionicons name={showPaymentOptions ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
+          accessibilityLabel="Payment methods" onPress={() => setShowPaymentOptions(true)}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.addrLabel, { marginBottom: 4 }]}>Payment methods</Text>
+            <Text style={styles.universalRequestSubtitle}>{networkType === 'unified' ? unifiedMethods.join(' · ') : 'Choose how to receive'}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={theme.colors.text.secondary} />
         </TouchableOpacity>
-        {showPaymentOptions && <>{networkType === 'unified' && renderUnifiedAddressList()}{renderNetworkDropdown()}</>}
       </ScrollView>
 
-      <Modal visible={fallbackAddress !== null} animationType="slide" presentationStyle="pageSheet"
-        onRequestClose={() => setFallbackAddress(null)}>
+      <Modal visible={showPaymentOptions || fallbackAddress !== null} animationType="slide" presentationStyle="pageSheet"
+        onRequestClose={() => { setFallbackAddress(null); setShowPaymentOptions(false); }}>
         <SafeAreaView style={styles.container}>
           <View style={styles.receiveHeader}>
-            <Text style={styles.receiveHeaderTitle}>{fallbackAddress?.label}</Text>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close payment method"
+            {fallbackAddress && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back to payment methods"
               style={styles.receiveBackButton} onPress={() => setFallbackAddress(null)}>
+              <Ionicons name="arrow-back" size={22} color={theme.colors.text.primary} />
+            </TouchableOpacity>}
+            <Text style={[styles.receiveHeaderTitle, { flex: 1 }]}>{fallbackAddress?.label ?? 'Payment methods'}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close payment method"
+              style={styles.receiveBackButton} onPress={() => { setFallbackAddress(null); setShowPaymentOptions(false); }}>
               <Ionicons name="close" size={26} color={theme.colors.text.primary} />
             </TouchableOpacity>
           </View>
           <ScrollView contentContainerStyle={styles.scrollContent}>
-            <Text style={styles.universalRequestSubtitle}>Ask the sender to use this payment method.</Text>
+            {!fallbackAddress && <>
+              {networkType === 'unified' && renderUnifiedAddressList()}
+        {!unifiedLoading
+          && getProtocolStatus().RGB
+          && !receiveMethods.some((method) => method.protocol === 'RGB') && (
+          <TouchableOpacity
+            style={styles.addRgbBtn}
+            onPress={() => generateUnifiedUri({
+              includeLightning: true,
+              preserveExisting: true,
+              reason: 'manual',
+            })}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
+            <Text style={styles.addRgbText}>
+              {unifiedAsset === 'USD' ? 'Add RGB USDT method' : 'Add RGB / Lightning method'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+              {renderNetworkDropdown()}
+            </>}
+            {fallbackAddress && <Text style={styles.universalRequestSubtitle}>Ask the sender to use this payment method.</Text>}
             {fallbackAddress && <>
               <View style={styles.qrContainer}><View style={styles.qrCodeWrapper}>
                 <DeferredQrCode value={fallbackAddress.value} size={qrSize} />
