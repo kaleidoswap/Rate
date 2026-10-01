@@ -1,7 +1,8 @@
 # KaleidoPay: Rate integration
 
-Entry points: Send → Open KaleidoPay; a BOLT12 offer or bitcoin URI containing
-`lno` pasted into Send; QR scanner; KaleidoPay's own scan/paste controls.
+Entry points: a BOLT12 offer or bitcoin URI containing `lno` scanned or pasted
+into Send. Routing is automatic based on the request; there is no separate
+KaleidoPay entry in Send. Scanning another request re-evaluates its type.
 Legacy BOLT11 scans remain in the existing Send flow.
 
 The screen previews requests, compares live quotes, and executes the explicitly

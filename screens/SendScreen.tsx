@@ -843,9 +843,6 @@ function SendScreen({ navigation, route }: Props) {
   const renderAddressInput = () => (
     <View style={styles.section}>
       <Text style={styles.sectionTitle}>Who are you paying?</Text>
-      <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('KaleidoPay')}>
-        <Text style={styles.sectionDescription}>Open KaleidoPay →</Text>
-      </TouchableOpacity>
       {!recipientLocked && (
         <Text style={styles.sectionDescription}>
           Paste or scan an address/invoice, or pick a contact. We'll work out the rest.
