@@ -40,3 +40,45 @@ test('cancels late clipboard navigation after leaving the screen and ignores dou
   expect(Clipboard.getString).toHaveBeenCalledTimes(1); screen.unmount();
   await act(async () => { resolve('contact'); }); expect(navigation.navigate).not.toHaveBeenCalled();
 });
+
+test.each(['lno1testoffer', 'LIGHTNING:lno1testoffer', 'bitcoin:?lno=lno1testoffer'])('automatically routes %s to KaleidoPay', async code => {
+  (Clipboard.getString as jest.Mock).mockResolvedValue(code);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).toHaveBeenCalledWith('KaleidoPay', { code });
+});
+test('a Lightning invoice scanned from KaleidoPay still goes to the regular Send flow', async () => {
+  (require('../utils/decodeInvoice').decodeBolt11 as jest.Mock).mockReturnValue({ amountSats: 1000, description: 'Coffee' });
+  (Clipboard.getString as jest.Mock).mockResolvedValue('lnbc1000testinvoice');
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { returnScreen: 'KaleidoPay' } }} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).toHaveBeenCalledWith('Send', expect.objectContaining({ isLightning: true, prefilledAddress: 'lnbc1000testinvoice' }));
+});
+
+
+test('a universal request with a Lightning invoice opens the ordinary payment review', async () => {
+  (require('../utils/decodeInvoice').decodeBolt11 as jest.Mock).mockReturnValue({ amountSats: 1000, description: 'Coffee' });
+  (Clipboard.getString as jest.Mock).mockResolvedValue('bitcoin:?lightning=lnbc1000testinvoice');
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).toHaveBeenCalledWith('Send', expect.objectContaining({ isLightning: true, prefilledAddress: 'lnbc1000testinvoice' }));
+});
+test('a Spark-only universal request preserves its native address and amount', async () => {
+  const address = `spark1${'q'.repeat(32)}`;
+  (Clipboard.getString as jest.Mock).mockResolvedValue(`bitcoin:?spark=${address}&amount=0.00001`);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).toHaveBeenCalledWith('Send', expect.objectContaining({ prefilledAddress: address, prefilledAmount: '1000', paymentType: 'spark' }));
+});
+test('a token request is never silently treated as a BTC native request', async () => {
+  (Clipboard.getString as jest.Mock).mockResolvedValue(`bitcoin:?spark=spark1${'q'.repeat(32)}&assetid=USD&assetamount=10`);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).not.toHaveBeenCalled();
+  expect(screen.getByText(/not a recognized/)).toBeTruthy();
+});

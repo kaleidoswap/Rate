@@ -30,3 +30,9 @@ test('network isolation, quote totals and unregister', async () => {
     await expect(quotePayment(preview)).rejects.toThrow('disconnected');
   } finally { disconnect(); }
 });
+
+test('normalizes a Lightning URI wrapper for both routing and preview', () => {
+  expect(isKaleidoPayCode(`LIGHTNING:${offer}`)).toBe(true);
+  expect(isKaleidoPayCode('lightning:lnbc1000')).toBe(false);
+  expect(previewPayment(`lightning://${offer}`, 'signet', '1000', 'wrapped').request.amountSat).toBe(1000);
+});

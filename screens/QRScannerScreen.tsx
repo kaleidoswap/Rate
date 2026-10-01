@@ -284,6 +284,20 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       };
     }
 
+    // A universal BTC request may contain only a native rail, with no Bitcoin
+    // path or Lightning invoice. Do not reinterpret token requests as BTC.
+    if (!params.has('assetid')) {
+      for (const [key, kind] of [['spark', 'spark'], ['ark', 'arkade']] as const) {
+        const nativeAddress = params.get(key);
+        if (nativeAddress && classifyWithdrawDestination(nativeAddress) === kind) {
+          const amountBtc = Number(params.get('amount'));
+          return {
+            ...handlePassthroughAddress(nativeAddress, kind),
+            amount: Number.isFinite(amountBtc) && amountBtc > 0 ? btcToEntryUnit(amountBtc) : undefined,
+          };
+        }
+      }
+    }
     throw new Error(UNRECOGNIZED_ERROR);
   };
 

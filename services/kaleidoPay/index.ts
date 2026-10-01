@@ -41,11 +41,15 @@ export function registerKaleidoPayAccount(account: PayAccount): () => void {
   accounts.set(account.source.id, account);
   return () => { if (accounts.get(account.source.id) === account) accounts.delete(account.source.id); };
 }
+function normalizePaymentCode(text: string): string {
+  return text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
+}
 export function isKaleidoPayCode(text: string): boolean {
-  return /^lno1/i.test(text.trim()) || /^bitcoin:/i.test(text.trim()) && /[?&]lno=/i.test(text);
+  const code = normalizePaymentCode(text);
+  return /^lno1/i.test(code) || /^bitcoin:/i.test(code) && /[?&]lno=/i.test(code);
 }
 export function previewPayment(text: string, network: Network, amount: string, requestId: string): Preview {
-  const code = decodePaymentCode(text.trim(), network);
+  const code = decodePaymentCode(normalizePaymentCode(text), network);
   if (code.amountSat === undefined && !/^[1-9]\d*$/.test(amount)) throw new Error('Enter a whole number of sats.');
   const amountSat = code.amountSat ?? Number(amount);
   const rails = [...(code.address ? [`btc:${network}`] : []), ...(code.offer ? acceptedRails(code.offer) : [])];
