@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleId": "c7abd49c50386788619e0b7f200d23b7fd6e0296125fc943b302308537d7de76",
+  "bundleId": "ea82f35b906d552ce58a008302bd4e13090ef0f98db0ca38b707ef2ede439a3a",
   "addons": [
     "@qvac/llm-llamacpp",
     "@qvac/transcription-whispercpp",
@@ -14,10 +14,7 @@
     "bare-hrtime",
     "bare-inspect",
     "bare-os",
-    "bare-path",
-    "bare-performance",
     "bare-pipe",
-    "bare-posix",
     "bare-signals",
     "bare-stdio",
     "bare-tcp",

@@ -1,3 +1,4 @@
+import { normalizeDepositStatus } from '../utils/deposit-status';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // Monitor only the receive methods actually encoded in the visible QR.
 // Polling is deliberately single-flight: the next cycle is scheduled only after
@@ -75,25 +76,6 @@ async function readMethodBalance(
   } catch {
     return null;
   }
-}
-
-function normalizeDepositStatus(raw: unknown): DepositDetectionStatus | null {
-  const state = String(raw ?? '').trim().toLowerCase();
-  if (!state) return null;
-  if (['settled', 'paid', 'succeeded', 'success', 'complete', 'completed', 'confirmed', 'claimed'].includes(state)) {
-    return 'confirmed';
-  }
-  if (['pending', 'processing', 'created', 'open', 'unpaid', 'unconfirmed', 'awaiting', 'inflight'].includes(state)) {
-    return 'pending';
-  }
-  if (['expired', 'timeout', 'timed_out'].includes(state)) return 'expired';
-  if (['failed', 'error', 'cancelled', 'canceled', 'rejected'].includes(state)) return 'failed';
-  if (state.includes('unconfirm') || state.includes('not_confirm')) return 'pending';
-  if (state.includes('confirm') || state.includes('settle') || state.includes('paid')) return 'confirmed';
-  if (state.includes('pending') || state.includes('await') || state.includes('process') || state.includes('open')) return 'pending';
-  if (state.includes('expir')) return 'expired';
-  if (state.includes('fail') || state.includes('cancel') || state.includes('reject')) return 'failed';
-  return null;
 }
 
 async function readInvoiceStatus(
