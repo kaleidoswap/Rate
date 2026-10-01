@@ -187,50 +187,39 @@ export class DatabaseService {
   async createWallet(wallet: Omit<WalletRecord, 'id' | 'networks'>, initialNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[]): Promise<number> {
     if (!this.db) throw new Error('Database not initialized');
 
-    // Deactivate other wallets if this one is active (remembering which one was
-    // active, so a failed seed write below can be rolled back).
-    let previouslyActiveId: number | null = null;
-    if (wallet.is_active) {
-      const prev = await this.db.getFirstAsync<{ id: number }>(
-        'SELECT id FROM wallets WHERE is_active = TRUE LIMIT 1'
-      );
-      previouslyActiveId = prev?.id ?? null;
-      await this.db.runAsync('UPDATE wallets SET is_active = FALSE');
-    }
-
-    const result = await this.db.runAsync(
-      `INSERT INTO wallets (name, derivation_path, created_at, is_active, encrypted_mnemonic)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        wallet.name,
-        wallet.derivation_path || null,
-        wallet.created_at,
-        wallet.is_active ? 1 : 0,
-        // The seed is NEVER written to the SQLite file — it goes to the OS
-        // secure enclave below (keyed by the new wallet id).
-        null,
-      ]
-    );
-
-    const walletId = result.lastInsertRowId;
-
-    if (wallet.encrypted_mnemonic) {
-      const stored = await SecurityService.getInstance().storeMnemonic(walletId, wallet.encrypted_mnemonic);
-      if (!stored) {
-        // Without the seed in secure storage the wallet can't be reopened, so
-        // don't leave a half-created row behind or report success.
-        await this.db.runAsync('DELETE FROM wallets WHERE id = ?', [walletId]);
-        if (previouslyActiveId !== null) {
-          await this.db.runAsync('UPDATE wallets SET is_active = TRUE WHERE id = ?', [previouslyActiveId]);
-        }
-        throw new Error('Could not save the recovery phrase to secure storage. The wallet was not created.');
+    let walletId = 0;
+    await this.db.withTransactionAsync(async () => {
+      // Deactivate other wallets if this one is active
+      if (wallet.is_active) {
+        await this.db!.runAsync('UPDATE wallets SET is_active = FALSE');
       }
-    }
 
-    // Add initial networks
-    for (const network of initialNetworks) {
-      await this.addNetworkToWallet(walletId, network);
-    }
+      const result = await this.db!.runAsync(
+        `INSERT INTO wallets (name, derivation_path, created_at, is_active, encrypted_mnemonic)
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          wallet.name,
+          wallet.derivation_path || null,
+          wallet.created_at,
+          wallet.is_active ? 1 : 0,
+          // The seed is NEVER written to the SQLite file — it goes to the OS
+          // secure enclave below (keyed by the new wallet id).
+          null,
+        ]
+      );
+
+      walletId = result.lastInsertRowId;
+
+      if (wallet.encrypted_mnemonic) {
+        const stored = await SecurityService.getInstance().storeMnemonic(walletId, wallet.encrypted_mnemonic);
+        if (!stored) throw new Error('Could not securely save your wallet. Please try again.');
+      }
+
+      // Add initial networks
+      for (const network of initialNetworks) {
+        await this.addNetworkToWallet(walletId, network);
+      }
+    });
 
     return walletId;
   }
@@ -247,7 +236,8 @@ export class DatabaseService {
     if (!mnemonic && wallet.encrypted_mnemonic) {
       // One-time migration of a legacy plaintext seed → secure enclave.
       mnemonic = wallet.encrypted_mnemonic;
-      await security.storeMnemonic(wallet.id, mnemonic);
+      const stored = await security.storeMnemonic(wallet.id, mnemonic);
+      if (!stored) return { ...wallet, encrypted_mnemonic: mnemonic };
       await this.db!.runAsync(
         'UPDATE wallets SET encrypted_mnemonic = NULL WHERE id = ?',
         [wallet.id],

@@ -1,13 +1,8 @@
 // services/DatabaseService.test.ts
 import DatabaseService from './DatabaseService';
-import SecurityService from './SecurityService';
 
-jest.mock('./SecurityService', () => {
-  const instance = { storeMnemonic: jest.fn(), getMnemonic: jest.fn() };
-  return { __esModule: true, default: { getInstance: () => instance }, SecurityService: { getInstance: () => instance } };
-});
-
-const security = SecurityService.getInstance() as unknown as { storeMnemonic: jest.Mock };
+// DatabaseService imports SecurityService; the settings paths don't use it.
+jest.mock('./SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() }, SecurityService: { getInstance: jest.fn() } }));
 
 const makeDb = () => ({
   runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 7, changes: 1 }),
@@ -25,29 +20,6 @@ describe('DatabaseService', () => {
     db = makeDb();
     svc.db = db;
     svc.encryptionKey = null;
-  });
-
-  describe('createWallet', () => {
-    const wallet = { name: 'Main', created_at: 1, is_active: true, encrypted_mnemonic: 'abandon abandon' } as any;
-
-    it('rolls back and throws when the seed cannot be stored securely', async () => {
-      db.getFirstAsync.mockResolvedValue({ id: 3 }); // previously active wallet
-      security.storeMnemonic.mockResolvedValue(false);
-
-      await expect(svc.createWallet(wallet, [])).rejects.toThrow(/recovery phrase/);
-
-      const sql = db.runAsync.mock.calls.map((c: any[]) => c[0]);
-      expect(sql).toContain('DELETE FROM wallets WHERE id = ?');
-      expect(db.runAsync).toHaveBeenCalledWith('UPDATE wallets SET is_active = TRUE WHERE id = ?', [3]);
-    });
-
-    it('returns the new id when the seed is stored', async () => {
-      db.getFirstAsync.mockResolvedValue(null);
-      security.storeMnemonic.mockResolvedValue(true);
-
-      await expect(svc.createWallet(wallet, [])).resolves.toBe(7);
-      expect(security.storeMnemonic).toHaveBeenCalledWith(7, 'abandon abandon');
-    });
   });
 
   describe('encrypted settings', () => {

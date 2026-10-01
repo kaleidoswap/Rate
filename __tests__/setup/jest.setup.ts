@@ -178,6 +178,10 @@ jest.mock('@react-native-clipboard/clipboard', () => ({
 
 // Mock react-native modules
 jest.mock('react-native', () => ({
+  Dimensions: { get: () => ({ width: 393, height: 852 }) },
+  StatusBar: 'StatusBar',
+  RefreshControl: 'RefreshControl',
+  DeviceEventEmitter: { addListener: jest.fn(() => ({ remove: jest.fn() })) },
   Platform: {
     OS: 'ios',
     select: jest.fn((obj) => obj.ios || obj.default),
