@@ -1,3 +1,4 @@
+import { isKaleidoPayCode } from '../services/kaleidoPay';
 // screens/QRScannerScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -110,6 +111,13 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       setTimeout(() => {
         navigation.navigate(returnScreen, { scannedContact: data.trim() });
       }, 700);
+      return;
+    }
+
+    if (returnScreen === 'KaleidoPay' || isKaleidoPayCode(data)) {
+      setProcessing(false);
+      setScanned(false);
+      navigation.navigate('KaleidoPay', { code: data.trim() });
       return;
     }
 

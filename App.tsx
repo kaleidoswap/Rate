@@ -43,6 +43,7 @@ import WalletSettingsScreen from './screens/WalletSettingsScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import { asModalScreen } from './components/ModalPresentation';
 import SendScreen from './screens/SendScreen';
+import KaleidoPayScreen from './screens/KaleidoPayScreen';
 import ReceiveScreen from './screens/ReceiveScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import AssetsScreen from './screens/AssetsScreen';
@@ -76,6 +77,7 @@ type RootStackParamList = {
   Dashboard: undefined;
   Settings: undefined;
   Send: { selectedAsset?: any } | undefined;
+  KaleidoPay: { code?: string } | undefined;
   Receive: { selectedAsset?: any } | undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   PaymentConfirmation: { paymentData: any };
@@ -470,6 +472,7 @@ function AppNavigator() {
             headerShown: false,
           }}
         />
+        <Stack.Screen name="KaleidoPay" component={asModalScreen(KaleidoPayScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="NostrSettings" component={asModalScreen(NostrSettingsScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={{ presentation: 'modal', headerShown: false }} />
