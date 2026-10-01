@@ -50,6 +50,12 @@ importers:
       '@kaleidorg/wdk-wallet-rln':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
+      '@noble/curves':
+        specifier: ^1.9.0
+        version: 1.9.7
+      '@noble/hashes':
+        specifier: ^1.8.0
+        version: 1.8.0
       '@nostr-dev-kit/ndk':
         specifier: ^2.18.1
         version: 2.18.1(nostr-tools@2.25.0(typescript@5.9.3))
@@ -89,6 +95,9 @@ importers:
       '@scure/bip39':
         specifier: ^2.3.0
         version: 2.4.0
+      '@scure/btc-signer':
+        specifier: ^1.8.0
+        version: 1.8.1
       '@tetherto/wdk-wallet-spark':
         specifier: 1.0.0-beta.17
         version: 1.0.0-beta.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))(bare-url@2.4.5)(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(sodium-javascript@0.8.0)(ws@8.21.0)
