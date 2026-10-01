@@ -20,7 +20,7 @@ import {
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
-import { formatDenominatedAmount, useBitcoinPrice } from '../utils/bitcoinUnits';
+import { formatDenominatedAmount, useBitcoinPriceIn } from '../utils/bitcoinUnits';
 import { loadBtcBalance, setActiveWallet } from '../store/slices/walletSlice';
 import { Button, Input, MainHeader } from '../components';
 import { theme } from '../theme';
@@ -326,7 +326,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
   // Which settings selector sheet is open (one bottom sheet at a time).
   const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'display'>(null);
-  const btcPrice = useBitcoinPrice();
+  const btcPrice = useBitcoinPriceIn(settings.currency);
 
   // Live previews for the unit selector (sample = 1,234,567 sats), matching
   // exactly how balances render elsewhere in the app.

@@ -2,6 +2,9 @@
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import CryptoJS from 'crypto-js';
+import { pbkdf2Async } from '@noble/hashes/pbkdf2';
+import { sha256 } from '@noble/hashes/sha2';
+import { bytesToHex, hexToBytes, randomBytes } from '@noble/hashes/utils';
 
 const SECURITY_KEYS = {
   PIN_HASH: 'rate_wallet_pin_hash',
@@ -17,6 +20,26 @@ const MNEMONIC_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
   // reads the seed for protocol initialization.
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
+
+// PIN hashes are stored as `pbkdf2-sha256$<iterations>$<saltHex>$<hashHex>`.
+// The hash already lives in the Keychain/Keystore; the salt defeats
+// precomputed tables and the work factor slows brute force of an extracted
+// hash. 10k iterations keeps unlock responsive on Hermes (no JIT); the count is
+// stored per hash, so raising it later re-hashes on the next successful unlock.
+const PIN_HASH_SCHEME = 'pbkdf2-sha256';
+const PIN_HASH_ITERATIONS = 10_000;
+
+async function derivePinHash(pin: string, salt: Uint8Array, iterations: number): Promise<string> {
+  const key = await pbkdf2Async(sha256, pin, salt, { c: iterations, dkLen: 32 });
+  return bytesToHex(key);
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
 export interface SecuritySettings {
   pinEnabled: boolean;
@@ -37,10 +60,29 @@ export class SecurityService {
   }
 
   /**
-   * Hash PIN using SHA-256
+   * Hash a PIN with a fresh random salt (PBKDF2-SHA256).
    */
-  private hashPin(pin: string): string {
-    return CryptoJS.SHA256(pin).toString();
+  private async hashPin(pin: string): Promise<string> {
+    const salt = randomBytes(16);
+    const hash = await derivePinHash(pin, salt, PIN_HASH_ITERATIONS);
+    return `${PIN_HASH_SCHEME}$${PIN_HASH_ITERATIONS}$${bytesToHex(salt)}$${hash}`;
+  }
+
+  /**
+   * Check a PIN against a stored hash. Also accepts the legacy unsalted
+   * SHA-256 format written by older builds; `needsRehash` tells the caller to
+   * upgrade it.
+   */
+  private async checkPinHash(pin: string, stored: string): Promise<{ ok: boolean; needsRehash: boolean }> {
+    const parts = stored.split('$');
+    if (parts.length === 4 && parts[0] === PIN_HASH_SCHEME) {
+      const iterations = Number(parts[1]);
+      if (!Number.isInteger(iterations) || iterations <= 0) return { ok: false, needsRehash: false };
+      const hash = await derivePinHash(pin, hexToBytes(parts[2]), iterations);
+      return { ok: constantTimeEqual(hash, parts[3]), needsRehash: iterations < PIN_HASH_ITERATIONS };
+    }
+    const legacy = CryptoJS.SHA256(pin).toString();
+    return { ok: constantTimeEqual(legacy, stored), needsRehash: true };
   }
 
   /**
@@ -48,7 +90,7 @@ export class SecurityService {
    */
   async savePin(pin: string): Promise<boolean> {
     try {
-      const hashedPin = this.hashPin(pin);
+      const hashedPin = await this.hashPin(pin);
       await SecureStore.setItemAsync(SECURITY_KEYS.PIN_HASH, hashedPin);
       await SecureStore.setItemAsync(SECURITY_KEYS.SECURITY_ENABLED, 'true');
       console.log('PIN saved successfully');
@@ -70,8 +112,16 @@ export class SecurityService {
         return false;
       }
 
-      const inputHash = this.hashPin(pin);
-      return inputHash === storedHash;
+      const { ok, needsRehash } = await this.checkPinHash(pin, storedHash);
+      if (ok && needsRehash) {
+        // Upgrade legacy / weaker hashes now that we know the PIN.
+        try {
+          await SecureStore.setItemAsync(SECURITY_KEYS.PIN_HASH, await this.hashPin(pin));
+        } catch (e) {
+          console.warn('Failed to upgrade PIN hash:', e);
+        }
+      }
+      return ok;
     } catch (error) {
       console.error('Failed to verify PIN:', error);
       return false;

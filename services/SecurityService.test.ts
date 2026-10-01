@@ -2,6 +2,7 @@
 import SecurityService from './SecurityService';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
+import CryptoJS from 'crypto-js';
 
 // Mock modules
 jest.mock('expo-secure-store');
@@ -466,6 +467,49 @@ describe('SecurityService', () => {
 
       await expect(securityService.revealMnemonic(42)).rejects.toThrow('Set a device passcode');
       expect(SecureStore.getItemAsync).not.toHaveBeenCalledWith('rate_wallet_mnemonic_42', expect.anything());
+    });
+  });
+
+  describe('PIN hashing', () => {
+    const wireStore = () => {
+      const store: Record<string, string> = {};
+      (SecureStore.setItemAsync as jest.Mock).mockImplementation((k: string, v: string) => {
+        store[k] = v;
+        return Promise.resolve();
+      });
+      (SecureStore.getItemAsync as jest.Mock).mockImplementation((k: string) =>
+        Promise.resolve(store[k] ?? null),
+      );
+      return store;
+    };
+
+    it('stores a salted PBKDF2 hash, never the plain or bare SHA-256 PIN', async () => {
+      const store = wireStore();
+      await securityService.savePin('123456');
+      const first = store.rate_wallet_pin_hash;
+      expect(first).toMatch(/^pbkdf2-sha256\$\d+\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
+      expect(first).not.toContain(CryptoJS.SHA256('123456').toString());
+
+      await securityService.savePin('123456');
+      expect(store.rate_wallet_pin_hash).not.toBe(first); // fresh salt each time
+    });
+
+    it('accepts a legacy SHA-256 hash and upgrades it on success', async () => {
+      const store = wireStore();
+      store.rate_wallet_pin_hash = CryptoJS.SHA256('123456').toString();
+
+      await expect(securityService.verifyPin('123456')).resolves.toBe(true);
+      expect(store.rate_wallet_pin_hash).toMatch(/^pbkdf2-sha256\$/);
+      await expect(securityService.verifyPin('123456')).resolves.toBe(true);
+    });
+
+    it('rejects a wrong PIN against a legacy hash without upgrading', async () => {
+      const store = wireStore();
+      const legacy = CryptoJS.SHA256('123456').toString();
+      store.rate_wallet_pin_hash = legacy;
+
+      await expect(securityService.verifyPin('654321')).resolves.toBe(false);
+      expect(store.rate_wallet_pin_hash).toBe(legacy);
     });
   });
 });

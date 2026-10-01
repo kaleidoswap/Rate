@@ -129,6 +129,7 @@ android {
         release {
             // Use the real release keystore when CI provides it; otherwise fall
             // back to the debug keystore so local release builds don't break.
+            // CI release builds without a keystore are rejected below.
             signingConfig findProperty('RELEASE_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
@@ -147,6 +148,18 @@ android {
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+}
+
+// Never let CI ship a release APK/AAB signed with the public debug keystore.
+// Checked against the task graph (not at configuration time) so CI debug
+// builds and tests are unaffected.
+gradle.taskGraph.whenReady { graph ->
+    def packagesRelease = graph.allTasks.any { t ->
+        t.project == project && t.name ==~ /(assemble|bundle|package)Release.*/
+    }
+    if (packagesRelease && System.getenv('CI') && !findProperty('RELEASE_STORE_FILE')) {
+        throw new GradleException('RELEASE_STORE_FILE is not set: refusing to sign a CI release build with the debug keystore.')
     }
 }
 

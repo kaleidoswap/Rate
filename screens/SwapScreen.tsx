@@ -37,7 +37,7 @@ import {
 import { protocolManager } from '../services/protocols';
 import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
 import { syncAssets } from '../store/slices/assetsSlice';
-import { getAssetDisplayBalance } from '../utils/assetAmount';
+import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
@@ -404,7 +404,16 @@ export default function SwapScreen({ navigation }: Props) {
             feeAmount = isBtcTicker(fromTicker) ? satsToBtcDisplay(rawFee) : rawFee / Math.pow(10, fromPrecision);
             rate = fromAmount > 0 ? toAmount / fromAmount : Number(sim?.executionPrice ?? 0);
           } catch (simErr) {
-            console.warn('[SwapScreen] Flashnet simulate failed, showing estimate:', simErr);
+            console.warn('[SwapScreen] Flashnet simulate failed:', simErr);
+          }
+
+          // Without a simulated output there is no basis for minAmountOut: a
+          // 0-output quote would execute with no slippage protection at all.
+          if (!(toAmountRaw > 0)) {
+            if (requestId === quoteRequestRef.current) {
+              dispatch(setError('Could not price this swap right now. Please try again.'));
+            }
+            return;
           }
 
           const quote: SwapQuote = {
@@ -595,8 +604,8 @@ export default function SwapScreen({ navigation }: Props) {
         const client = kaleidoClientManager.getClient();
         const fromAsset = pair ? (pair.base.ticker === quote.from_asset ? pair.base : pair.quote) : null;
         const toAsset = pair ? (pair.base.ticker === quote.to_asset ? pair.base : pair.quote) : null;
-        const fromPrecision = fromAsset?.precision || 8;
-        const toPrecision = toAsset?.precision || 8;
+        const fromPrecision = resolvePrecision(fromAsset?.precision);
+        const toPrecision = resolvePrecision(toAsset?.precision);
         // Prefer the exact integers the maker quoted (stored on the quote); only
         // fall back to re-deriving from the display amount for older quotes that
         // predate the raw fields. The maker encodes these exact values into the
@@ -662,7 +671,7 @@ export default function SwapScreen({ navigation }: Props) {
         setSwapProgress('done');
 
         // Start polling for final status
-        startStatusPolling(quote.rfq_id);
+        startStatusPolling(quote.rfq_id, quote, execution);
       }
     } catch (error) {
       console.error('Swap execution failed:', error);
@@ -678,9 +687,19 @@ export default function SwapScreen({ navigation }: Props) {
     }
   };
 
-  const startStatusPolling = (rfqId: string) => {
+  // `quote` and `execution` are passed in rather than read from swapState: the
+  // interval callback would otherwise see the values captured at render time
+  // (before setCurrentExecution landed), losing swap_string/txid in history.
+  const startStatusPolling = (rfqId: string, quote: SwapQuote, execution: SwapExecution) => {
     let pollCount = 0;
-    const maxPolls = 20;
+    const maxPolls = 20; // × 3s ≈ 1 minute
+
+    // Single exit path so every outcome clears the interval and the spinner.
+    const stop = (interval: ReturnType<typeof setInterval>) => {
+      clearInterval(interval);
+      setPollingInterval(null);
+      dispatch(setExecuting(false));
+    };
 
     const interval = setInterval(async () => {
       try {
@@ -690,7 +709,9 @@ export default function SwapScreen({ navigation }: Props) {
         const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
         if (!rgbAdapter?.isConnected()) {
           console.warn('[SwapScreen] RGB adapter not connected, stopping poll');
-          clearInterval(interval);
+          stop(interval);
+          setShowConfirmModal(false);
+          dispatch(setError('Lost connection to the RGB node. Check the swap in History.'));
           return;
         }
 
@@ -699,14 +720,7 @@ export default function SwapScreen({ navigation }: Props) {
           status = await rgbAdapter.getSwapStatus?.(rfqId);
         } catch {
           // Swap status not available yet
-          if (pollCount >= maxPolls) {
-            dispatch(updateExecutionStatus({ rfq_id: rfqId, status: 'failed', error_message: 'Swap timed out' }));
-            clearInterval(interval);
-            setPollingInterval(null);
-            setShowConfirmModal(false);
-            dispatch(setExecuting(false));
-          }
-          return;
+          status = undefined;
         }
 
         const swapStatus = status?.status || 'pending';
@@ -721,38 +735,34 @@ export default function SwapScreen({ navigation }: Props) {
           }));
 
           // Record an enriched history entry (amounts/tickers from the quote).
-          if (swapState.currentQuote) {
-            recordSwapHistory(
-              swapState.currentQuote,
-              swapStatus === 'failed' ? 'failed' : 'completed',
-              swapState.currentExecution?.txid,
-              swapState.currentExecution?.swap_string,
-            );
-          } else if (swapState.currentExecution) {
-            dispatch(addToHistory({
-              ...swapState.currentExecution,
-              status: swapStatus === 'failed' ? 'failed' : 'completed',
-            }));
-          }
+          recordSwapHistory(
+            quote,
+            swapStatus === 'failed' ? 'failed' : 'completed',
+            status?.txid ?? execution.txid,
+            execution.swap_string,
+          );
 
-          clearInterval(interval);
-          setPollingInterval(null);
-          dispatch(setExecuting(false));
+          stop(interval);
           if (swapStatus === 'failed') {
             setShowConfirmModal(false);
           } else {
-            const q = swapState.currentQuote;
-            if (q) {
-              setSwapSuccess({
-                fromAmount: q.from_amount,
-                fromTicker: q.from_asset,
-                toAmount: q.to_amount,
-                toTicker: q.to_asset,
-                txid: swapState.currentExecution?.txid,
-              });
-            }
+            setSwapSuccess({
+              fromAmount: quote.from_amount,
+              fromTicker: quote.from_asset,
+              toAmount: quote.to_amount,
+              toTicker: quote.to_asset,
+              txid: status?.txid ?? execution.txid,
+            });
           }
           refreshAfterSwap();
+          return;
+        }
+
+        // Still pending (or status unavailable): give up after maxPolls.
+        if (pollCount >= maxPolls) {
+          dispatch(updateExecutionStatus({ rfq_id: rfqId, status: 'failed', error_message: 'Swap timed out' }));
+          stop(interval);
+          setShowConfirmModal(false);
         }
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
@@ -1061,7 +1071,7 @@ export default function SwapScreen({ navigation }: Props) {
                   <Text style={styles.assetPickerTicker}>{asset.ticker}</Text>
                   <Text style={styles.assetPickerName}>{asset.name}</Text>
                   <Text style={styles.assetPickerBalance}>
-                    Balance: {asset.balance.toFixed(asset.precision || 8)}
+                    Balance: {asset.balance.toFixed(resolvePrecision(asset.precision))}
                   </Text>
                 </View>
               </TouchableOpacity>

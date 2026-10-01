@@ -54,7 +54,7 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 - `protocols/index.ts` – **ProtocolManager** singleton from `@kaleidorg/wallet-engine` shared lib; adapters for Spark, Arkade, RGB (kaleido-sdk). Entry point: `protocolManager`
 - `RGBApiService.ts` – **DEPRECATED** legacy RGB node REST API (being replaced by ProtocolManager)
 - `WalletManager.ts` – **DEPRECATED** thin facade over ProtocolManager
-- `DatabaseService.ts` – SQLite (expo-sqlite) with SQLCipher encryption
+- `DatabaseService.ts` – SQLite (expo-sqlite). The file is **not** encrypted (no SQLCipher yet), so it must never hold secrets: seeds live in SecureStore via `SecurityService`, and `setSetting(..., encrypted=true)` throws unless a key is set
 - `NostrService.ts` / `NWCService.ts` – Nostr protocol + NIP-47 Wallet Connect
 - `SecurityService.ts` – biometric auth, SecureStore encryption
 - `QVACService.ts` – on-device AI model lifecycle (LLM + Whisper via @qvac/sdk)
