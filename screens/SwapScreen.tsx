@@ -13,7 +13,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useDispatch, useSelector } from 'react-redux';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
@@ -46,6 +46,8 @@ import {
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
 import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
+import { ProviderSheet } from '../components/payments/ProviderSheet';
+import { fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer } from '../services/swapQuotes';
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import { theme } from '../theme';
 import { feedback } from '../utils/feedback';
@@ -66,17 +68,17 @@ interface Asset {
 }
 
 export default function SwapScreen({ navigation }: Props) {
-  const dispatch = useDispatch();
+  const dispatch = useAppDispatch();
   const { height: screenHeight } = useWindowDimensions();
-  const swapState = useSelector((state: RootState) => state.swap);
-  const walletState = useSelector((state: RootState) => state.wallet);
-  const assetsState = useSelector((state: RootState) => state.assets);
+  const swapState = useAppSelector((state: RootState) => state.swap);
+  const walletState = useAppSelector((state: RootState) => state.wallet);
+  const assetsState = useAppSelector((state: RootState) => state.assets);
   const rgbAssets = (assetsState?.rgbAssets || []);
   // The wallet is sats-first by default. The BTC-side amount field is therefore
   // entered/shown in this unit — NOT BTC. Treating the input as BTC (the old
   // behaviour) multiplied every BTC swap amount by 1e8, blowing past the maker's
   // max and silently returning no quote.
-  const bitcoinUnit = useSelector((state: RootState) => state.settings?.bitcoinUnit || 'sats');
+  const bitcoinUnit = useAppSelector((state: RootState) => state.settings?.bitcoinUnit || 'sats');
 
   // Convert a BTC-side display value (in the active unit) to integer sats, and back.
   const btcDisplayToSats = (val: number) => (bitcoinUnit === 'sats' ? Math.round(val) : Math.round(val * 1e8));
@@ -99,6 +101,10 @@ export default function SwapScreen({ navigation }: Props) {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [reviewQuote, setReviewQuote] = useState<SwapQuote | null>(null);
   const [previousReviewQuote, setPreviousReviewQuote] = useState<SwapQuote | null>(null);
+  const [providerOffers, setProviderOffers] = useState<SwapOffer[]>([]);
+  const [showProviders, setShowProviders] = useState(false);
+  const selectedProvider = React.useRef<string | undefined>(undefined);
+  const quotePairs = React.useRef(new WeakMap<SwapQuote, SwapPair>());
   const executingRef = React.useRef(false);
   const quoteRequestRef = React.useRef(0);
   const lastAutoRefreshRef = React.useRef(0);
@@ -173,10 +179,13 @@ export default function SwapScreen({ navigation }: Props) {
     };
   }, [pollingInterval]);
 
+  useEffect(() => { selectedProvider.current = undefined; }, [swapState.fromAsset, swapState.toAsset, venueFilter]);
+
   // Invalidate quotes immediately when the input changes, including in-flight responses.
   useEffect(() => {
     quoteRequestRef.current += 1;
     dispatch(setCurrentQuote(null));
+    setProviderOffers([]);
     dispatch(setQuoteLoading(false));
     const timer = setTimeout(() => {
       if (swapState.fromAmount && parseFloat(swapState.fromAmount) > 0 && swapState.fromAsset && swapState.toAsset) {
@@ -190,7 +199,7 @@ export default function SwapScreen({ navigation }: Props) {
     }, 500); // 500ms debounce
 
     return () => { clearTimeout(timer); quoteRequestRef.current += 1; };
-  }, [swapState.fromAmount, swapState.fromAsset, swapState.toAsset]);
+  }, [swapState.fromAmount, swapState.fromAsset, swapState.toAsset, venueFilter, bitcoinUnit, tradingPairs]);
 
   // Always-fresh handle to getQuote for use inside intervals (avoids stale closures).
   const getQuoteRef = React.useRef<() => void>(() => {});
@@ -350,163 +359,21 @@ export default function SwapScreen({ navigation }: Props) {
 
   const getQuote = async () => {
     const requestId = ++quoteRequestRef.current;
+    if (!Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0) return;
+    dispatch(setQuoteLoading(true)); dispatch(clearError());
     try {
-      if (!swapState.fromAmount) return;
-
-      dispatch(setQuoteLoading(true));
-      dispatch(clearError());
-
-      const fromAmount = parseFloat(swapState.fromAmount);
-      const fromTicker = swapState.fromAsset || 'BTC';
-      const toTicker = swapState.toAsset || 'USDT';
-
-      // Find the matching pair
-      const pair = findPair(filteredPairs, fromTicker, toTicker);
-
-      if (!pair) {
-        dispatch(setError(`No trading pair found for ${fromTicker}/${toTicker}`));
-        return;
-      }
-
-      if (isFlashnetPair(pair)) {
-        // Flashnet: simulate the swap against the pool to get a real output amount.
-        try {
-          const client = flashnetClientManager.getClient();
-          const poolId = pair.poolId || flashnetClientManager.getPoolId();
-          const fromAssetSide = pair.base.ticker === fromTicker ? pair.base : pair.quote;
-          const toAssetSide = pair.base.ticker === toTicker ? pair.base : pair.quote;
-          const fromAssetId = getAssetId(fromAssetSide);
-          const toAssetId = getAssetId(toAssetSide);
-          const fromPrecision = fromAssetSide.precision;
-          const toPrecision = toAssetSide.precision;
-          // Flashnet settles in sats (not msats). BTC input is in the active unit.
-          const rawAmount = isBtcTicker(fromTicker) ? btcDisplayToSats(fromAmount) : Math.round(fromAmount * Math.pow(10, fromPrecision));
-
-          let toAmount = 0;
-          let toAmountRaw = 0;
-          let feeAmount = 0;
-          let rate = 0;
-          try {
-            const sim: any = await client.simulateSwap({
-              poolId: poolId || '',
-              assetInAddress: fromAssetId,
-              assetOutAddress: toAssetId,
-              amountIn: String(rawAmount),
-              // maxSlippageBps: @flashnet/sdk dropped this from SimulateSwapRequest in a
-              // recent minor (surfaced by the dependency refresh, unrelated to the
-              // wallet-engine bump). Kept at runtime via the cast; verify on device.
-              maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
-            } as any);
-            const rawOut = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
-            toAmountRaw = rawOut;
-            toAmount = isBtcTicker(toTicker) ? satsToBtcDisplay(rawOut) : rawOut / Math.pow(10, toPrecision);
-            const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
-            feeAmount = isBtcTicker(fromTicker) ? satsToBtcDisplay(rawFee) : rawFee / Math.pow(10, fromPrecision);
-            rate = fromAmount > 0 ? toAmount / fromAmount : Number(sim?.executionPrice ?? 0);
-          } catch (simErr) {
-            console.warn('[SwapScreen] Flashnet simulate failed, showing estimate:', simErr);
-          }
-
-          const quote: SwapQuote = {
-            rfq_id: `flashnet-${Date.now()}`,
-            from_asset: fromTicker,
-            to_asset: toTicker,
-            from_amount: fromAmount,
-            to_amount: toAmount,
-            fee_amount: feeAmount,
-            exchange_rate: rate,
-            expiry_timestamp: Date.now() + 30000,
-            maker_pubkey: poolId || '',
-            venue: 'flashnet',
-            from_asset_id: fromAssetId,
-            to_asset_id: toAssetId,
-            // Flashnet works in sats (not msats): rawAmount is the exact input,
-            // and the simulated output in smallest units (used verbatim on execute).
-            from_amount_raw: rawAmount,
-            to_amount_raw: toAmountRaw,
-          };
-
-          if (requestId === quoteRequestRef.current) {
-            dispatch(setCurrentQuote(quote));
-            return quote;
-          }
-        } catch (err) {
-          console.error('[SwapScreen] Flashnet quote failed:', err);
-          dispatch(setError('Failed to get Flashnet quote'));
-        }
-      } else {
-        // Kaleidoswap: real quote via maker API (requires RGB node)
-        try {
-          if (!kaleidoClientManager.isInitialized()) {
-            dispatch(setError('KaleidoSwap requires an RGB node connection. Please configure in Settings.'));
-            return;
-          }
-          // (RGB connectivity already gated above via kaleidoClientManager.isInitialized().)
-          const fromAsset = pair.base.ticker === fromTicker ? pair.base : pair.quote;
-          const toAsset = pair.base.ticker === toTicker ? pair.base : pair.quote;
-          const fromAssetId = getAssetId(fromAsset);
-          const toAssetId = getAssetId(toAsset);
-          const fromPrecision = fromAsset.precision;
-          // BTC input is in the active unit (sats by default); the maker quotes
-          // the BTC leg in msats. sats → msats is ×1000.
-          const rawFromAmount = isBtcTicker(fromTicker)
-            ? btcDisplayToSats(fromAmount) * 1000 // active unit → sats → msats
-            : Math.round(fromAmount * Math.pow(10, fromPrecision));
-
-          const { fromLayer, toLayer } = getQuoteLayers(pair, fromAssetId, toAssetId);
-
-          const client = kaleidoClientManager.getClient();
-          const quoteResponse = await client.maker.getQuote({
-            from_asset: { asset_id: fromAssetId, layer: fromLayer as any, amount: rawFromAmount },
-            to_asset: { asset_id: toAssetId, layer: toLayer as any },
-          }) as any;
-
-          // Raw, maker-quoted integers (smallest units). The maker echoes the
-          // exact legs it will encode into the swapstring; keep these verbatim
-          // for initSwap + swapstring validation (re-deriving from the rounded
-          // display amount is what previously broke execution).
-          const rawToAmount = Number(quoteResponse.to_asset?.amount || 0);
-          const rawFromAmountQuoted = Number(quoteResponse.from_asset?.amount || rawFromAmount);
-          const quotedFromAssetId = quoteResponse.from_asset?.asset_id || fromAssetId;
-          const quotedToAssetId = quoteResponse.to_asset?.asset_id || toAssetId;
-          const toPrecision = toAsset.precision;
-          const displayToAmount = isBtcTicker(toTicker)
-            ? satsToBtcDisplay(rawToAmount / 1000) // msats → sats → active unit
-            : rawToAmount / Math.pow(10, toPrecision);
-
-          const quote: SwapQuote = {
-            rfq_id: quoteResponse.rfq_id || `kaleido-${Date.now()}`,
-            from_asset: fromTicker,
-            to_asset: toTicker,
-            from_amount: fromAmount,
-            to_amount: parseFloat(displayToAmount.toFixed(toPrecision)),
-            fee_amount: isBtcTicker(toTicker)
-              ? satsToBtcDisplay((quoteResponse.fee?.final_fee || 0) / 10 ** (quoteResponse.fee?.fee_asset_precision ?? 11) * 1e8)
-              : (quoteResponse.fee?.final_fee || 0) / 10 ** (quoteResponse.fee?.fee_asset_precision ?? toAsset.precision),
-            exchange_rate: fromAmount > 0 ? displayToAmount / fromAmount : 0,
-            expiry_timestamp: quoteResponse.expires_at ? quoteResponse.expires_at * 1000 : Date.now() + 60000,
-            maker_pubkey: quoteResponse.maker_pubkey || '',
-            from_asset_id: quotedFromAssetId,
-            to_asset_id: quotedToAssetId,
-            from_amount_raw: rawFromAmountQuoted,
-            to_amount_raw: rawToAmount,
-          };
-
-          if (requestId === quoteRequestRef.current) {
-            dispatch(setCurrentQuote(quote));
-            return quote;
-          }
-        } catch (err: any) {
-          console.error('[SwapScreen] Kaleidoswap quote failed:', err);
-          dispatch(setError(err?.message || 'Failed to get quote'));
-        }
-      }
-    } catch (error) {
-      console.error('Failed to get quote:', error);
-      dispatch(setError('Failed to fetch quote'));
-    } finally {
-      if (requestId === quoteRequestRef.current) dispatch(setQuoteLoading(false));
-    }
+      const offers = await fetchSwapOffers(filteredPairs, swapState.fromAsset, swapState.toAsset, Number(swapState.fromAmount), bitcoinUnit);
+      if (requestId !== quoteRequestRef.current) return;
+      setProviderOffers(offers);
+      offers.forEach(o => { if (o.quote) quotePairs.current.set(o.quote, o.pair); });
+      const selected = selectedProvider.current
+        ? offers.find(o => o.id === selectedProvider.current)
+        : bestSwapOffer(offers) ?? offers.find(o => o.quote);
+      if (selected) selectedProvider.current = selected.id;
+      dispatch(setCurrentQuote(selected?.quote ?? null));
+      if (!selected?.quote) dispatch(setError(selected?.unavailable ?? 'No live quote from the selected provider. Compare providers or refresh.'));
+      return selected?.quote;
+    } finally { if (requestId === quoteRequestRef.current) dispatch(setQuoteLoading(false)); }
   };
 
   // Keep the interval's handle pointing at the latest getQuote.
@@ -538,8 +405,10 @@ export default function SwapScreen({ navigation }: Props) {
     try {
       dispatch(setExecuting(true));
 
-      // Detect venue from the pair
-      const pair = findPair(filteredPairs, quote.from_asset, quote.to_asset);
+      // Execute the exact route that produced the reviewed quote. Never infer a provider from tickers.
+      const pair = quotePairs.current.get(quote);
+      if (!pair) throw new Error('This quote is no longer available. Refresh and review again.');
+      assertSwapQuoteProvider(quote);
 
       if (pair && isFlashnetPair(pair)) {
         // ── Flashnet execution (single step) ──
@@ -963,6 +832,11 @@ export default function SwapScreen({ navigation }: Props) {
         </View>
       </View>
 
+      {providerOffers.length > 0 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Compare swap providers"
+        onPress={() => setShowProviders(true)} style={styles.quoteInfoContainer}>
+        <View style={styles.quoteInfoRow}><Text style={styles.quoteInfoLabel}>Provider</Text><Text style={styles.quoteInfoValue}>{swapProviderName(providerOffers.find(o => o.id === selectedProvider.current)?.pair ?? providerOffers[0].pair)} ›</Text></View>
+        <Text style={styles.quoteInfoLabel}>{providerOffers.filter(o => o.quote).length} live quotes · Compare costs and accounts</Text>
+      </TouchableOpacity>}
       {/* Quote Info & Fees (Accordion Style) */}
       {swapState.currentQuote && (
         <View style={styles.quoteInfoContainer}>
@@ -998,7 +872,7 @@ export default function SwapScreen({ navigation }: Props) {
 
       {/* Main Action Button */}
       <Button
-        title={swapState.isQuoteLoading ? 'Fetching Best Price...' : (swapState.currentQuote ? 'Review swap' : 'Enter Amount')}
+        title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : 'Enter Amount')}
         onPress={() => {
           setReviewQuote(swapState.currentQuote);
           setPreviousReviewQuote(null);
@@ -1341,6 +1215,13 @@ export default function SwapScreen({ navigation }: Props) {
 
       {renderAssetPicker()}
       {renderConfirmModal()}
+      <ProviderSheet visible={showProviders} selectedId={selectedProvider.current} onClose={() => setShowProviders(false)}
+        options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: isFlashnetPair(o.pair) ? 'Spark account' : 'RGB Lightning account',
+          amountLabel: 'You receive', amount: o.quote ? `${formatDisplayAmount(o.quote.to_amount, o.quote.to_asset)} ${unitLabelFor(o.quote.to_asset)}` : 'Unavailable',
+          detail: o.quote ? `Fee ${formatDisplayAmount(o.quote.fee_amount, o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)} ${unitLabelFor(o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)}` : '',
+          unavailable: o.unavailable, expiresAt: o.quote?.expiry_timestamp, recommended: bestSwapOffer(providerOffers)?.id === o.id }))}
+        onSelect={id => { const chosen = providerOffers.find(o => o.id === id); if (!chosen?.quote || quoteHasExpired(chosen.quote.expiry_timestamp)) return;
+          quoteRequestRef.current++; dispatch(setQuoteLoading(false)); selectedProvider.current = id; dispatch(clearError()); dispatch(setCurrentQuote(chosen.quote)); }} />
     </View>
   );
 }

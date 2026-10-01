@@ -1,3 +1,4 @@
+import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -243,7 +244,7 @@ function DepositMonitorCard({
       : status === 'pending'
         ? `Pending deposit on ${layerLabel}`
         : status === 'claimed'
-          ? `Claimed deposit on ${layerLabel}`
+          ? `Payment received on ${layerLabel}`
           : status === 'failed'
             ? `Deposit failed on ${layerLabel}`
             : status === 'expired'
@@ -275,7 +276,7 @@ function DepositMonitorCard({
     return (
       <View style={styles.depositReadyRow}>
         <View style={[styles.depositReadyDot, { backgroundColor: theme.colors.success[500] }]} />
-        <Text style={styles.depositReadyText}>Ready to receive</Text>
+        <Text style={styles.depositReadyText}>Waiting for payment</Text>
         <Text style={styles.depositReadyMeta}>· {methodsLabel}</Text>
         <Ionicons name="radio-outline" size={15} color={theme.colors.text.tertiary} />
       </View>
@@ -392,7 +393,6 @@ export default function ReceiveScreen({ navigation }: Props) {
   // The raw address breakdown is hidden behind a collapsed section by default —
   // the QR (and its single "Copy" affordance) is the primary way to receive, so
   // the list of individual addresses only appears when the user expands it.
-  const [showAddresses, setShowAddresses] = useState(false);
   const [showPaymentOptions, setShowPaymentOptions] = useState(false);
   const [fallbackAddress, setFallbackAddress] = useState<{ label: string; value: string } | null>(null);
   // Per-address "show full" toggles in the unified address list (keyed by row).
@@ -1960,30 +1960,9 @@ export default function ReceiveScreen({ navigation }: Props) {
     const rgbConnected = !!getProtocolStatus().RGB;
     return (
       <View style={styles.addrListSection}>
-        {/* Collapsed by default — the QR above is the primary receive surface, so
-            the raw per-method addresses stay tucked away until tapped. */}
-        <TouchableOpacity
-          style={styles.addrListHeader}
-          onPress={() => setShowAddresses((v) => !v)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.addrListTitle}>Payment methods</Text>
-          <View style={styles.addrListHeaderRight}>
-            <Text style={styles.addrListCount}>
-              {unifiedAddresses.length} available
-            </Text>
-            <Ionicons
-              name={showAddresses ? 'chevron-up' : 'chevron-down'}
-              size={18}
-              color={theme.colors.text.tertiary}
-            />
-          </View>
-        </TouchableOpacity>
         <Text style={styles.universalRequestSubtitle}>{unifiedMethods.join(' · ')}</Text>
-        <TouchableOpacity accessibilityRole="button" style={styles.addrInfoToggle} onPress={() => setShowAddresses(true)}>
-          <Text style={styles.addrValue}>Sender can’t scan this? Choose a single payment method.</Text>
-        </TouchableOpacity>
-        {showAddresses && unifiedAddresses.map((a, idx) => {
+        <Text style={styles.addrValue}>Sender can’t scan the request? Share a single payment method below.</Text>
+        {unifiedAddresses.map((a, idx) => {
           const isOpen = !!expandedAddrs[a.key];
           const isCopied = copiedKey === a.key;
           const isLast = idx === unifiedAddresses.length - 1;
@@ -2043,7 +2022,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           );
         })}
 
-        {showAddresses && (
+        {(
           <>
             <TouchableOpacity
               style={styles.addrInfoToggle}
@@ -2297,7 +2276,8 @@ export default function ReceiveScreen({ navigation }: Props) {
     const required = isAmountRequired();
     return (
       <TouchableOpacity
-        style={styles.amountRow}
+        accessibilityRole="button" accessibilityLabel={summary ? `Edit requested amount, ${summary}` : 'Add requested amount'}
+        style={[styles.amountRow, { paddingVertical: theme.spacing[5] }]}
         onPress={() => {
           receiveLog('tap.amountRow', { amount, networkType, asset: selectedAsset.ticker });
           setShowAmountEditor(true);
@@ -2311,7 +2291,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           <Text style={styles.amountRowLabel}>
             {summary ? 'Requested amount' : required ? 'Amount required' : 'Add amount'}
           </Text>
-          <Text style={styles.amountRowValue} numberOfLines={2}>
+          <Text style={[styles.amountRowValue, summary ? { fontSize: theme.typography.fontSize['2xl'], fontWeight: '600' } : {}]} numberOfLines={2}>
             {summary || 'Optional — tap to set in BTC, USD or fiat'}
           </Text>
         </View>
@@ -2350,7 +2330,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   }) => (
     <View style={[styles.uriCard, { borderColor: accent + '40' }]}>
       {/* Header: method icon + label + the (truncated) value. Tapping copies. */}
-      <TouchableOpacity style={styles.uriCardRow} onPress={onCopy} activeOpacity={0.6}>
+      {label !== 'Payment request' && <TouchableOpacity style={styles.uriCardRow} onPress={onCopy} activeOpacity={0.6}>
         <View style={[styles.uriIconWrap, { backgroundColor: accent + '1A' }]}>{icon}</View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.uriLabel, { color: accent }]}>{label}</Text>
@@ -2370,7 +2350,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             />
           </TouchableOpacity>
         )}
-      </TouchableOpacity>
+      </TouchableOpacity>}
 
       {expanded && onToggle && <Text style={styles.uriFull} selectable>{value}</Text>}
 
@@ -2382,7 +2362,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           activeOpacity={0.85}
         >
           <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={16} color="#FFFFFF" />
-          <Text style={styles.uriPrimaryBtnText}>{copied ? 'Copied' : 'Copy'}</Text>
+          <Text style={styles.uriPrimaryBtnText}>{copied ? 'Copied' : label === 'Payment request' ? 'Copy request' : 'Copy'}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.uriSecondaryBtn, { borderColor: accent + '40' }]}
@@ -2502,6 +2482,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           </View>
         </View>
 
+        {unifiedAddresses.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
         {renderUriCard({
           value: unifiedUri,
           accent,
@@ -2612,6 +2593,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           </View>
         </View>
 
+        <InvoiceExpiry invoice={address} onRefresh={() => { void generateAddress(); }} />
         {renderUriCard({
           value: address,
           accent: netColor,
@@ -2661,14 +2643,13 @@ export default function ReceiveScreen({ navigation }: Props) {
           accent={currentAccent}
           methodCount={networkType === 'unified' ? unifiedMethods.length : 1}
         />
-        {networkType === 'unified' && renderUnifiedAddressList()}
         <TouchableOpacity style={styles.addrListHeader} accessibilityRole="button"
           accessibilityState={{ expanded: showPaymentOptions }}
           onPress={() => setShowPaymentOptions(value => !value)}>
           <Text style={styles.addrListTitle}>Payment options</Text>
           <Ionicons name={showPaymentOptions ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
         </TouchableOpacity>
-        {showPaymentOptions && <>{renderNetworkDropdown()}</>}
+        {showPaymentOptions && <>{networkType === 'unified' && renderUnifiedAddressList()}{renderNetworkDropdown()}</>}
       </ScrollView>
 
       <Modal visible={fallbackAddress !== null} animationType="slide" presentationStyle="pageSheet"

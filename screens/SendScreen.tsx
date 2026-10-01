@@ -803,7 +803,7 @@ function SendScreen({ navigation, route }: Props) {
 
   const renderHeader = () => (
     <ScreenHeader
-      title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
+      title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Paying…' : 'Pay'}
       showBack={paymentStep !== 'sending'}
       onBack={() => { if (paymentStep === 'review') { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); } else navigation.goBack(); }}
       rightAction={
@@ -1356,7 +1356,7 @@ function SendScreen({ navigation, route }: Props) {
               <Text style={styles.reviewAmount}>
                 {effectiveAmount} {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
               </Text>
-              <Text style={styles.reviewAsset}>{selectedAsset.name}</Text>
+              <Text style={styles.reviewAsset}>Recipient receives · {selectedAsset.name}</Text>
             </View>
           </View>
 
@@ -1405,6 +1405,19 @@ function SendScreen({ navigation, route }: Props) {
             )}
           </View>
 
+
+        </View>
+      </View>
+    );
+  };
+
+  const renderReviewActions = () => {
+    if (paymentStep !== 'review') return null;
+    const effectiveAmount = selectedAsset.asset_id === 'BTC'
+      ? formatBitcoinAmount(getEffectiveSats(), bitcoinUnit)
+      : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
+    const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
+    return <View style={styles.sendButtonContainer}>
           <View style={styles.reviewActions}>
             <Button
               title="Edit"
@@ -1414,7 +1427,7 @@ function SendScreen({ navigation, route }: Props) {
               style={styles.reviewEditButton}
             />
             <Button
-              title={`Send ${effectiveAmount} ${unit}`}
+              title={`Pay ${effectiveAmount} ${unit}`}
               disabled={estimatingFee || loading}
               variant="primary"
               onPress={handleSend}
@@ -1422,9 +1435,7 @@ function SendScreen({ navigation, route }: Props) {
               style={styles.reviewConfirmButton}
             />
           </View>
-        </View>
-      </View>
-    );
+    </View>;
   };
 
   return (
@@ -1463,6 +1474,7 @@ function SendScreen({ navigation, route }: Props) {
         </ScrollView>
 
         {renderSendButton()}
+        {renderReviewActions()}
       </KeyboardAvoidingView>
 
       <NostrContactsSelector
@@ -2184,13 +2196,13 @@ const styles = StyleSheet.create({
   },
 
   reviewActions: {
-    flexDirection: 'column',
+    flexDirection: 'row',
     gap: theme.spacing[3],
   },
 
-  reviewEditButton: { minHeight: 48 },
+  reviewEditButton: { minHeight: 48, flex: 1 },
 
-  reviewConfirmButton: { minHeight: 48 },
+  reviewConfirmButton: { minHeight: 48, flex: 2 },
 
   sendingOverlay: {
     position: 'absolute',
