@@ -52,3 +52,36 @@ jobs:
 
       - name: Unit tests
         run: pnpm exec jest --ci
+
+  # Builds the production JS bundle the release apps ship (Metro + Babel),
+  # catching resolution/transform breakage that tsc and Jest can't see, e.g. a
+  # dependency bump Metro can't load or a missing sibling package.
+  bundle:
+    name: Production bundle (Android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same sibling checkout as the checks job (needs UNIVERSAL_BOLT12_TOKEN).
+      - uses: actions/checkout@v4
+        with:
+          repository: kaleidoswap/universal-bolt12
+          token: ${{ secrets.UNIVERSAL_BOLT12_TOKEN }}
+          path: universal-bolt12
+      - name: Place universal-bolt12 beside the app
+        run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      # NODE_ENV=production also runs the console-stripping Babel plugin.
+      - name: Export Android bundle
+        run: pnpm exec expo export --platform android --output-dir "$RUNNER_TEMP/bundle"
+        env:
+          NODE_ENV: production

@@ -49,11 +49,11 @@ imported from source:
 - `@universal-bolt12/swap-market`: Electrum swap providers over Nostr (quotes,
   persisted attempts, claim, resume)
 
-Setup, once per machine:
+Setup, once per machine (clones or updates `../universal-bolt12` and installs
+its dependencies):
 
 ```bash
-git clone https://github.com/kaleidoswap/universal-bolt12 ../universal-bolt12
-(cd ../universal-bolt12 && npm install)
+pnpm run setup:siblings
 ```
 
 Metro (`metro.config.js`), TypeScript (`tsconfig.json` paths) and Jest
