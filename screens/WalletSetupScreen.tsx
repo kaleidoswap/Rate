@@ -31,6 +31,7 @@ import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { NWCClient, parseNwcUri } from '../services/nwc/NWCExternalClient';
 import { copySensitive } from '../utils/sensitiveClipboard';
+import { useScreenCaptureProtection } from '../hooks/useScreenCaptureProtection';
 
 /** SecureStore key shared with NwcRgbAdapter + NWCConnectScreen. */
 const NWC_CONNECTION_KEY = 'nwc_connection_string';
@@ -45,6 +46,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
   const [step, setStep] = useState<SetupStep>('welcome');
+  // No screenshots / recordings while the new recovery phrase is on screen.
+  useScreenCaptureProtection(step === 'backup' || step === 'confirmBackup');
   const [name, setName] = useState('My wallet');
   const [createdWalletId, setCreatedWalletId] = useState<number | null>(null);
   const [generatedMnemonic, setGeneratedMnemonic] = useState<string>('');
