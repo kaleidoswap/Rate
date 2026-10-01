@@ -5,7 +5,7 @@
 // memory and in SecureStore.
 import { createTransform } from 'redux-persist';
 import * as SecureStore from 'expo-secure-store';
-import { NOSTR_PRIVATE_KEY, NOSTR_NSEC_KEY } from './slices/nostrSlice';
+import { NOSTR_PRIVATE_KEY, NOSTR_NSEC_KEY } from './nostrKeys';
 
 // The Nostr keys are reloaded from SecureStore by restoreNostrConnection. The
 // NWC connection string embeds a spending secret.
@@ -17,6 +17,14 @@ export const stripNostrSecrets = <T>(nostr: T): T => {
   for (const field of NOSTR_SECRET_FIELDS) copy[field] = null;
   return copy;
 };
+
+/**
+ * Strip credentials before Redux Persist writes the Nostr slice to
+ * AsyncStorage (kept for callers of the earlier name).
+ */
+export function sanitizeNostrPersistedState<T extends Record<string, unknown>>(state: T): T {
+  return stripNostrSecrets(state);
+}
 
 // Stripped on write only. Outbound transforms run before `migrate`, and
 // migrateNostrSecretsV4 needs to see legacy plaintext keys to move them into

@@ -1,7 +1,6 @@
 // screens/NWCConnectScreen.tsx
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Alert, TouchableOpacity, Clipboard } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -14,16 +13,28 @@ import { setActiveWallet, loadBtcBalance } from '../store/slices/walletSlice';
 import { syncAssets } from '../store/slices/assetsSlice';
 import {
   setConnectedWallet,
-  setNWCConnectionString,
   setNwcWalletType,
+  upsertNwcConnection,
+  selectNwcConnection,
+  removeNwcConnection,
 } from '../store/slices/nostrSlice';
 import {
   NWCClient,
   parseNwcUri,
   type NwcGetInfoResult,
 } from '../services/nwc/NWCExternalClient';
-
-const STORAGE_KEY = 'nwc_connection_string';
+import {
+  connectionIdForUri,
+  deriveNwcCapabilities,
+  friendlyNwcError,
+  loadActiveNwcCredential,
+  removeNwcCredential,
+  saveAndSelectNwcCredential,
+  saveNwcCredential,
+  selectNwcCredential,
+  type NwcCapability,
+  type SavedNwcConnection,
+} from '../services/nwc/connectionStore';
 
 interface Props {
   navigation: any;
@@ -43,16 +54,17 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
   const dispatch = useDispatch();
   const activeWallet = useSelector((s: RootState) => s.wallet?.activeWallet);
   const storedType = useSelector((s: RootState) => s.nostr?.nwcWalletType);
+  const savedConnections = useSelector((s: RootState) => s.nostr?.nwcConnections ?? []);
+  const selectedConnectionId = useSelector((s: RootState) => s.nostr?.selectedNwcConnectionId);
 
   const [connectionString, setConnectionString] = useState('');
+  const [showConnectionString, setShowConnectionString] = useState(false);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const [info, setInfo] = useState<NwcGetInfoResult | null>(null);
   const [walletType, setWalletType] = useState<WalletType | null>(storedType ?? null);
   const [balanceSats, setBalanceSats] = useState<number | null>(null);
-
-  const [invoice, setInvoice] = useState('');
-  const [paying, setPaying] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
 
   // Enroll the connected wallet as an `rln` network on the active wallet so it
   // reconnects automatically on app launch (NwcRgbAdapter reads the string from
@@ -77,11 +89,30 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
 
   // Persist + enroll + activate + sync, then land on the Dashboard.
   const finalize = useCallback(
-    async (uri: string, type: WalletType, network: string, walletPubkey: string) => {
+    async (
+      uri: string,
+      type: WalletType,
+      network: string,
+      walletPubkey: string,
+      alias: string | undefined,
+      capabilities: NwcCapability[],
+      relays: string[],
+    ) => {
       setLoading(true);
+      setConnectionError(null);
+      let id = '';
+      let previous: { id: string | null; uri: string | null } = { id: null, uri: null };
+      let previousMetadata: SavedNwcConnection | undefined;
       try {
-        // 1) Persist the string (the adapter reads it from here).
-        await SecureStore.setItemAsync(STORAGE_KEY, uri);
+        id = connectionIdForUri(uri);
+        previous = await loadActiveNwcCredential();
+        previousMetadata = savedConnections.find((connection) => connection.id === previous.id);
+        // Force the shared adapter to reload its credential when replacing an
+        // already-connected wallet; ProtocolManager otherwise may reuse it.
+        await protocolManager.disconnect('RGB_LN').catch(() => undefined);
+        // 1) Persist the credential only in SecureStore and select it for the
+        // adapter. Redux receives display-safe metadata below.
+        await saveAndSelectNwcCredential(id, uri);
         // 2) Enroll the network so it reconnects on launch.
         await enrollNetwork(network);
         // 3) Activate the adapter now.
@@ -89,8 +120,17 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         await protocolManager.setActiveProtocol('RGB_LN');
         // 4) Reflect in Redux + pull fresh balances/assets through the new wallet.
         dispatch(setConnectedWallet(walletPubkey));
-        dispatch(setNWCConnectionString(uri));
         dispatch(setNwcWalletType(type));
+        dispatch(upsertNwcConnection({
+          id,
+          walletPubkey,
+          alias,
+          network,
+          type,
+          capabilities,
+          relays,
+          lastConnectedAt: Date.now(),
+        }));
         dispatch(loadBtcBalance() as any);
         if (activeWallet?.id) dispatch(syncAssets(activeWallet.id) as any);
 
@@ -98,12 +138,31 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         // 5) Done — go to the wallet home.
         navigation.navigate('Dashboard');
       } catch (e) {
-        Alert.alert('Connection failed', e instanceof Error ? e.message : 'Could not activate the wallet');
+        // Keep connection selection transactional. If activation failed, put
+        // the previous credential and adapter back instead of leaving SecureStore
+        // and Redux pointing at different wallets.
+        if (previous.id && previous.uri && previous.id !== id) {
+          try {
+            await saveAndSelectNwcCredential(previous.id, previous.uri);
+            if (previousMetadata) {
+              await enrollNetwork(previousMetadata.network);
+              await protocolManager.connect('RGB_LN', {
+                protocol: 'RGB_LN',
+                network: previousMetadata.network,
+              } as any);
+            }
+          } catch {
+            // Preserve the original activation error for the user.
+          }
+        } else if (!previous.id && id) {
+          await removeNwcCredential(id).catch(() => undefined);
+        }
+        setConnectionError(friendlyNwcError(e));
       } finally {
         setLoading(false);
       }
     },
-    [dispatch, enrollNetwork, activeWallet?.id, navigation],
+    [dispatch, enrollNetwork, activeWallet?.id, navigation, savedConnections],
   );
 
   // Probe the wallet (info + balance), detect its type, then ask the user to
@@ -121,33 +180,62 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
       let client: NWCClient | null = null;
       try {
         client = new NWCClient(uri, { timeoutMs: 20_000 });
-        const [nodeInfo, balance] = await Promise.all([client.getInfo(), client.getBalance()]);
+        const nodeInfo = await client.getInfo();
+        let sats: number | null = null;
+        try {
+          const balance = await client.getBalance();
+          sats = Math.floor(balance.balance / 1000);
+        } catch {
+          // Balance access is optional in NIP-47. A pay-only or receive-only
+          // connection remains useful and is described by its capabilities.
+        }
 
-        const isRln = (nodeInfo.methods ?? []).some((m) => m.startsWith('rln_'));
+        let isRln = (nodeInfo.methods ?? []).some((m) => m.startsWith('rln_'));
+        // Older RLN wallet services advertise only the standard NIP-47 method
+        // list. Probe the harmless node-info extension before classifying them
+        // as a plain Lightning wallet, matching NwcRgbAdapter.connect().
+        if (!isRln) {
+          try {
+            const rlnInfo = await client.rlnNodeInfo();
+            isRln = !!rlnInfo && typeof rlnInfo === 'object';
+          } catch {
+            // Expected for a normal NWC Lightning wallet.
+          }
+        }
         const type: WalletType = isRln ? 'rln' : 'ln';
+        const detectedCapabilities = deriveNwcCapabilities(nodeInfo.methods ?? [], isRln);
         const network = nodeInfo.network || 'regtest';
-        const sats = Math.floor(balance.balance / 1000);
-
         setInfo(nodeInfo);
         setWalletType(type);
         setBalanceSats(sats);
         setLoading(false); // probe done; finalize() manages its own loading
 
         const typeName = isRln ? 'RGB Lightning Node' : 'Lightning wallet';
-        const capabilities = isRln
+        const capabilitySummary = isRln
           ? '• Send & receive Bitcoin (Lightning)\n• Send & receive RGB assets (USDT, XAUT…)'
           : '• Send & receive Bitcoin (Lightning)\n• RGB assets not supported on this wallet';
         Alert.alert(
           `Connect ${typeName}?`,
-          `${nodeInfo.alias ? `${nodeInfo.alias}\n` : ''}Balance: ${sats.toLocaleString()} sats · ${network}\n\nThis wallet will be used to:\n${capabilities}`,
+          `${nodeInfo.alias ? `${nodeInfo.alias}\n` : ''}${sats == null ? '' : `Balance: ${sats.toLocaleString()} sats · `}${network}\n\nThis wallet will be used to:\n${capabilitySummary}`,
           [
             { text: 'Cancel', style: 'cancel', onPress: () => setLoading(false) },
-            { text: 'Connect', onPress: () => finalize(uri, type, network, parsed!.walletPubkey) },
+            {
+              text: 'Connect',
+              onPress: () => finalize(
+                uri,
+                type,
+                network,
+                parsed!.walletPubkey,
+                nodeInfo.alias,
+                detectedCapabilities,
+                parsed!.relays,
+              ),
+            },
           ],
         );
       } catch (e) {
         setLoading(false);
-        Alert.alert('Connection failed', e instanceof Error ? e.message : 'Could not reach the wallet');
+        setConnectionError(friendlyNwcError(e));
       } finally {
         client?.close();
       }
@@ -164,11 +252,12 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
       connect(scanned.trim());
       return;
     }
-    SecureStore.getItemAsync(STORAGE_KEY).then((stored) => {
-      if (stored) {
-        setConnectionString(stored);
-        setSaved(true);
-      }
+    loadActiveNwcCredential().then(async ({ id, uri }) => {
+      if (!uri) return;
+      setSaved(true);
+      // Migrate the old single active credential into the per-connection slot.
+      const migrationId = id ?? selectedConnectionId ?? savedConnections[0]?.id;
+      if (migrationId) await saveNwcCredential(migrationId, uri);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route?.params?.scanned]);
@@ -182,13 +271,37 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
     navigation.navigate('QRScanner');
   };
 
-  const handleDisconnect = async () => {
+  const handleDisconnect = async (connection?: SavedNwcConnection) => {
+    const targetId = connection?.id ?? selectedConnectionId;
+    if (!targetId) return;
+    const wasSelected = targetId === selectedConnectionId;
     try {
-      await protocolManager.disconnect('RGB_LN');
+      if (wasSelected) await protocolManager.disconnect('RGB_LN');
     } catch {
       /* ignore */
     }
-    await SecureStore.deleteItemAsync(STORAGE_KEY);
+    await removeNwcCredential(targetId);
+    dispatch(removeNwcConnection(targetId));
+    const fallback = savedConnections.find((item) => item.id !== targetId);
+    if (wasSelected && fallback) {
+      try {
+        await selectNwcCredential(fallback.id);
+        await enrollNetwork(fallback.network);
+        await protocolManager.connect('RGB_LN', { protocol: 'RGB_LN', network: fallback.network } as any);
+        dispatch(selectNwcConnection(fallback.id));
+        setWalletType(fallback.type);
+        setInfo({ alias: fallback.alias, network: fallback.network, methods: [] });
+        setSaved(true);
+        Alert.alert('Connection removed', `${fallback.alias || 'Another Lightning wallet'} is now active.`);
+        return;
+      } catch (error) {
+        setConnectionError(friendlyNwcError(error));
+      }
+    }
+    if (!wasSelected) {
+      Alert.alert('Connection removed', 'The saved Lightning wallet was removed.');
+      return;
+    }
     const walletId = activeWallet?.id;
     if (walletId) {
       try {
@@ -199,9 +312,9 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         /* ignore */
       }
     }
-    dispatch(setConnectedWallet(null));
-    dispatch(setNWCConnectionString(null));
-    dispatch(setNwcWalletType(null));
+    if (wasSelected) {
+      dispatch(selectNwcConnection(null));
+    }
     setConnectionString('');
     setSaved(false);
     setInfo(null);
@@ -210,23 +323,36 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
     Alert.alert('Disconnected', 'Lightning wallet removed');
   };
 
-  const handlePay = async () => {
-    const inv = invoice.trim();
-    if (!inv) return;
-    setPaying(true);
-    let client: NWCClient | null = null;
+  const handleSelectConnection = async (connection: SavedNwcConnection) => {
+    if (connection.id === selectedConnectionId || loading) return;
+    setLoading(true);
+    setConnectionError(null);
+    const previous = savedConnections.find((item) => item.id === selectedConnectionId);
     try {
-      client = new NWCClient(connectionString.trim(), { timeoutMs: 90_000 });
-      const res = await client.payInvoice({ invoice: inv });
-      Alert.alert('Payment sent', `Preimage ${res.preimage.slice(0, 16)}…`);
-      setInvoice('');
-      const balance = await client.getBalance();
-      setBalanceSats(Math.floor(balance.balance / 1000));
-    } catch (e) {
-      Alert.alert('Payment failed', e instanceof Error ? e.message : '');
+      await protocolManager.disconnect('RGB_LN').catch(() => undefined);
+      await selectNwcCredential(connection.id);
+      await enrollNetwork(connection.network);
+      await protocolManager.connect('RGB_LN', { protocol: 'RGB_LN', network: connection.network } as any);
+      dispatch(selectNwcConnection(connection.id));
+      dispatch(loadBtcBalance() as any);
+      setWalletType(connection.type);
+      setInfo({ alias: connection.alias, network: connection.network, methods: [] });
+      setBalanceSats(null);
+      setSaved(true);
+    } catch (error) {
+      if (previous) {
+        try {
+          await selectNwcCredential(previous.id);
+          await enrollNetwork(previous.network);
+          await protocolManager.connect('RGB_LN', { protocol: 'RGB_LN', network: previous.network } as any);
+          dispatch(selectNwcConnection(previous.id));
+        } catch {
+          // The actionable error below remains the primary failure.
+        }
+      }
+      setConnectionError(friendlyNwcError(error));
     } finally {
-      client?.close();
-      setPaying(false);
+      setLoading(false);
     }
   };
 
@@ -249,97 +375,132 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
           onChangeText={setConnectionString}
           autoCapitalize="none"
           autoCorrect={false}
-          multiline
+          multiline={showConnectionString}
+          secureTextEntry={!showConnectionString}
           editable={!loading}
+          accessibilityLabel="Nostr Wallet Connect connection string"
+          rightIcon={(
+            <TouchableOpacity
+              onPress={() => setShowConnectionString((visible) => !visible)}
+              accessibilityRole="button"
+              accessibilityLabel={showConnectionString ? 'Hide connection string' : 'Show connection string'}
+              hitSlop={8}
+            >
+              <Ionicons
+                name={showConnectionString ? 'eye-off-outline' : 'eye-outline'}
+                size={20}
+                color={theme.colors.text.tertiary}
+              />
+            </TouchableOpacity>
+          )}
         />
 
         <View style={styles.inputActions}>
-          <TouchableOpacity style={styles.actionChip} onPress={handlePaste} disabled={loading}>
+          <TouchableOpacity style={styles.actionChip} onPress={handlePaste} disabled={loading} accessibilityRole="button" accessibilityLabel="Paste NWC connection string">
             <Ionicons name="clipboard-outline" size={16} color={theme.colors.primary[500]} />
             <Text style={styles.actionChipText}>Paste</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionChip} onPress={handleScan} disabled={loading}>
+          <TouchableOpacity style={styles.actionChip} onPress={handleScan} disabled={loading} accessibilityRole="button" accessibilityLabel="Scan NWC QR code">
             <Ionicons name="qr-code-outline" size={16} color={theme.colors.primary[500]} />
             <Text style={styles.actionChipText}>Scan</Text>
           </TouchableOpacity>
         </View>
 
         <Button
-          title={loading ? 'Connecting…' : saved ? 'Reconnect' : 'Connect'}
+          title={loading ? 'Connecting…' : 'Add wallet'}
           onPress={() => connect(connectionString.trim())}
           disabled={loading || !connectionString.trim()}
           loading={loading}
         />
 
-        {saved && walletType && (
-          <View style={styles.card}>
-            <View style={styles.typeRow}>
-              <View
-                style={[
-                  styles.typeBadge,
-                  { backgroundColor: (isRln ? theme.colors.primary[500] : theme.colors.warning[500]) + '22' },
-                ]}
-              >
-                <Ionicons
-                  name={isRln ? 'cube' : 'flash'}
-                  size={14}
-                  color={isRln ? theme.colors.primary[500] : theme.colors.warning[500]}
-                />
-                <Text
-                  style={[
-                    styles.typeBadgeText,
-                    { color: isRln ? theme.colors.primary[500] : theme.colors.warning[500] },
-                  ]}
-                >
-                  {isRln ? 'RGB Lightning Node' : 'Lightning wallet'}
-                </Text>
-              </View>
-              <Text style={styles.connectedHint}>
-                <Ionicons name="checkmark-circle" size={13} color={theme.colors.success[500]} /> Connected
-              </Text>
-            </View>
-
-            <Text style={styles.connectedDesc}>
-              {isRln
-                ? 'Full RGB + Lightning: send/receive BTC and RGB assets through this node.'
-                : 'This is now your Lightning wallet for sending and balances. RGB assets are not available on a plain Lightning wallet.'}
-            </Text>
-
-            <View style={styles.statsRow}>
-              <View style={styles.stat}>
-                <Text style={styles.statLabel}>Balance</Text>
-                <Text style={styles.statValue}>
-                  {balanceSats !== null ? `${balanceSats.toLocaleString()} sats` : '—'}
-                </Text>
-              </View>
-              <View style={styles.stat}>
-                <Text style={styles.statLabel}>Network</Text>
-                <Text style={styles.statValue}>{info?.network ?? '—'}</Text>
-              </View>
-            </View>
-
-            <Input
-              label="Test: pay a Lightning invoice"
-              placeholder="lnbc..."
-              value={invoice}
-              onChangeText={setInvoice}
-              autoCapitalize="none"
-              autoCorrect={false}
-              multiline
-              editable={!paying}
-            />
-            <Button
-              title={paying ? 'Paying…' : 'Pay invoice'}
-              onPress={handlePay}
-              disabled={paying || !invoice.trim()}
-              loading={paying}
-            />
+        {connectionError && (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle-outline" size={20} color={theme.colors.error[500]} />
+            <Text style={styles.errorText}>{connectionError}</Text>
           </View>
         )}
 
-        {saved && (
-          <View style={styles.disconnect}>
-            <Button title="Disconnect wallet" variant="secondary" onPress={handleDisconnect} />
+        {savedConnections.length > 0 && (
+          <View style={styles.savedSection}>
+            <Text style={styles.sectionTitle}>Saved Lightning wallets</Text>
+            {savedConnections.map((connection) => {
+              const active = connection.id === selectedConnectionId;
+              const rln = connection.type === 'rln';
+              const accent = rln ? theme.colors.primary[500] : theme.colors.warning[500];
+              return (
+                <TouchableOpacity
+                  key={connection.id}
+                  style={[styles.card, active && { borderColor: accent }]}
+                  onPress={() => handleSelectConnection(connection)}
+                  activeOpacity={0.75}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active, disabled: loading }}
+                  accessibilityLabel={`${connection.alias || (rln ? 'RGB Lightning Node' : 'Lightning wallet')}, ${connection.network}${active ? ', active' : ''}`}
+                >
+                  <View style={styles.typeRow}>
+                    <View style={styles.walletIdentity}>
+                      <View style={[styles.walletIcon, { backgroundColor: accent + '1A' }]}>
+                        <Ionicons name={rln ? 'cube' : 'flash'} size={18} color={accent} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.walletName} numberOfLines={1}>
+                          {connection.alias || (rln ? 'RGB Lightning Node' : 'Lightning wallet')}
+                        </Text>
+                        <Text style={styles.walletMeta}>{connection.network} · NWC</Text>
+                      </View>
+                    </View>
+                    {active && (
+                      <View style={styles.activePill}>
+                        <View style={styles.activeDot} />
+                        <Text style={styles.activeText}>Active</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.capabilities}>
+                    {connection.capabilities.slice(0, 5).map((capability) => (
+                      <View key={capability} style={styles.capabilityChip}>
+                        <Text style={styles.capabilityText}>
+                          {{
+                            payInvoice: 'Pay',
+                            createInvoice: 'Receive',
+                            readBalance: 'Balance',
+                            readHistory: 'History',
+                            lookupInvoice: 'Status',
+                            manageChannels: 'Channels',
+                            rgbAssets: 'RGB',
+                            onchain: 'On-chain',
+                          }[capability]}
+                        </Text>
+                      </View>
+                    ))}
+                    {connection.capabilities.length > 5 && (
+                      <View style={styles.capabilityChip}>
+                        <Text style={styles.capabilityText}>+{connection.capabilities.length - 5}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {active && balanceSats !== null && (
+                    <Text style={styles.walletBalance}>{balanceSats.toLocaleString()} sats</Text>
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.removeButton}
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      handleDisconnect(connection);
+                    }}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Remove ${connection.alias || 'Lightning wallet'}`}
+                  >
+                    <Ionicons name="trash-outline" size={15} color={theme.colors.error[500]} />
+                    <Text style={styles.removeText}>Remove</Text>
+                  </TouchableOpacity>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -387,12 +548,115 @@ const styles = StyleSheet.create({
     borderRadius: theme.borderRadius.md,
     padding: theme.spacing[4],
     gap: theme.spacing[4],
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+  },
+  savedSection: {
+    gap: theme.spacing[3],
     marginTop: theme.spacing[2],
+  },
+  sectionTitle: {
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.bold,
   },
   typeRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  walletIdentity: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+  },
+  walletIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  walletName: {
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.bold,
+  },
+  walletMeta: {
+    marginTop: 2,
+    color: theme.colors.text.tertiary,
+    fontSize: theme.typography.fontSize.xs,
+  },
+  activePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.success[50],
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.colors.success[500],
+  },
+  activeText: {
+    color: theme.colors.success[500],
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  capabilities: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  capabilityChip: {
+    paddingHorizontal: theme.spacing[2],
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface.secondary,
+  },
+  capabilityText: {
+    color: theme.colors.text.secondary,
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  walletBalance: {
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+  },
+  removeButton: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: theme.spacing[1],
+  },
+  removeText: {
+    color: theme.colors.error[500],
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '600',
+  },
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing[2],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.base,
+    borderWidth: 1,
+    borderColor: theme.colors.error[500] + '35',
+    backgroundColor: theme.colors.error[50],
+  },
+  errorText: {
+    flex: 1,
+    color: theme.colors.error[500],
+    fontSize: theme.typography.fontSize.sm,
+    lineHeight: 19,
   },
   typeBadge: {
     flexDirection: 'row',

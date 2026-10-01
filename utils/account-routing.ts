@@ -102,7 +102,9 @@ export function getReceiveMethodsForAccount(account: AccountId, assetFamily: Ass
 
   switch (account) {
     case 'RGB': return ['bitcoin_l1', 'lightning']
-    case 'SPARK': return ['spark', 'lightning']
+    // Spark can receive natively, over Lightning, or through a single-use
+    // Bitcoin address that is claimed into the Spark balance after confirmation.
+    case 'SPARK': return ['spark', 'lightning', 'bitcoin_l1']
     case 'ARKADE': return ['arkade', 'boarding']
   }
 }

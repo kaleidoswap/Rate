@@ -56,7 +56,7 @@ const persistConfig: PersistConfig<RootReducerState> = {
   storage: AsyncStorage,
   whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: unread counts / paid markers only, never message content
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 4,
+  version: 5,
   // A timed-out migration rehydrates defaults and can overwrite the only keys.
   // Keep the gate closed until migration succeeds or the user retries.
   timeout: 0,
@@ -107,6 +107,35 @@ const persistConfig: PersistConfig<RootReducerState> = {
         c.paidInvoices = c.paidInvoices || {};
         if (c.activePubkey === undefined) c.activePubkey = null;
         if (!c.sendScheme) c.sendScheme = 'nip17';
+      }
+    } catch {
+      // Non-fatal.
+    }
+    // v5: capability-aware, multi-connection NWC metadata. Credentials remain
+    // in SecureStore; this list contains display-safe information only.
+    try {
+      if (state?.nostr) {
+        const n = state.nostr;
+        n.nwcConnections = Array.isArray(n.nwcConnections) ? n.nwcConnections : [];
+        n.nwcCapabilities = Array.isArray(n.nwcCapabilities) ? n.nwcCapabilities : [];
+        if (n.selectedNwcConnectionId === undefined) n.selectedNwcConnectionId = null;
+        if (n.connectedWallet && n.nwcConnections.length === 0) {
+          const type = n.nwcWalletType === 'rln' ? 'rln' : 'ln';
+          const capabilities = type === 'rln'
+            ? ['payInvoice', 'createInvoice', 'readBalance', 'readHistory', 'manageChannels', 'rgbAssets', 'onchain']
+            : ['payInvoice', 'createInvoice', 'readBalance'];
+          n.nwcConnections.push({
+            id: n.connectedWallet,
+            walletPubkey: n.connectedWallet,
+            network: 'unknown',
+            type,
+            capabilities,
+            relays: [],
+            lastConnectedAt: Date.now(),
+          });
+          n.selectedNwcConnectionId = n.connectedWallet;
+          n.nwcCapabilities = capabilities;
+        }
       }
     } catch {
       // Non-fatal.
@@ -184,4 +213,3 @@ export type AppDispatch = typeof store.dispatch;
 import { useDispatch, useSelector, TypedUseSelectorHook } from 'react-redux';
 export const useAppDispatch = () => useDispatch<AppDispatch>();
 export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
-

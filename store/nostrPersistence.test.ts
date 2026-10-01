@@ -2,11 +2,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { migrateNostrSecretsV4, nostrSecretsTransform, stripNostrSecrets } from './nostrPersistence';
 
-// The slice pulls in NostrService (NDK, relays); only its key names are needed.
-jest.mock('./slices/nostrSlice', () => ({
-  NOSTR_PRIVATE_KEY: 'nostr_private_key',
-  NOSTR_NSEC_KEY: 'nostr_nsec_key',
-}));
 
 const getItem = SecureStore.getItemAsync as jest.Mock;
 const setItem = SecureStore.setItemAsync as jest.Mock;

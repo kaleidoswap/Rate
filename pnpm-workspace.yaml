@@ -22,6 +22,8 @@ nodeLinker: hoisted
 # low impact): decode-uri-component (0.3+ is ESM-only and breaks query-string),
 # image-size (metro), uuid (xcode/config-plugins).
 overrides:
+  # Pinned to the version Expo SDK 54 expects (from chore/wallet-engine-beta69).
+  expo-constants: 18.0.14
   tar@7: ^7.5.21
   '@grpc/grpc-js@1': ^1.14.5
   '@xmldom/xmldom@0.8': ^0.8.15

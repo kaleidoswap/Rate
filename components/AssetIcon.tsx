@@ -1,15 +1,18 @@
 /**
  * AssetIcon — renders asset icons with protocol badge overlay.
- * Matches rate-extension pattern: local icons → CDN → DiceBear fallback → text placeholder.
+ * Resolution order: bundled canonical icons → supplied logo → CDN → text placeholder.
+ * The fallback is deterministic and offline-safe; no avatar service is used.
  */
-import React, { useState } from 'react';
-import { View, Image, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Image, Text, StyleSheet, type ImageSourcePropType } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { SparkIcon, ArkadeIcon, RgbIcon } from './ProtocolIcons';
 
 const ICON_CDN_BASE = 'https://raw.githubusercontent.com/kaleidoswap/coinmarketcap-icons-cryptos/refs/heads/main/icons/';
-const DICEBEAR_BASE = 'https://api.dicebear.com/9.x/shapes/svg';
+const LOCAL_ASSET_ICONS: Record<string, ImageSourcePropType> = {
+  BTC: require('../assets/icons/protocols/btc.png'),
+};
 
 const PROTOCOL_COLORS: Record<string, string> = {
   RGB: theme.colors.networks.unified,
@@ -46,10 +49,6 @@ function getCdnUrl(ticker: string): string {
   return `${ICON_CDN_BASE}${normalized.toLowerCase()}.png`;
 }
 
-function getFallbackUrl(ticker: string): string {
-  return `${DICEBEAR_BASE}?seed=${encodeURIComponent(ticker)}&backgroundType=gradientLinear&radius=50`;
-}
-
 /** The actual image URI the icon renders (asset logo → CDN by ticker). Empty
  *  string when neither resolves. Shared so other surfaces (e.g. the gradient
  *  average-color sampler) read the exact same image the icon shows. */
@@ -74,31 +73,30 @@ export const AssetIcon: React.FC<AssetIconProps> = ({
   showBadge = true,
 }) => {
   const [imageError, setImageError] = useState(false);
-  const [fallbackError, setFallbackError] = useState(false);
 
+  const localIcon = LOCAL_ASSET_ICONS[ticker.toUpperCase().trim()];
   const iconUri = logoUri || getCdnUrl(ticker);
-  const fallbackUri = getFallbackUrl(ticker);
   const bgColor = ASSET_COLORS[ticker.toUpperCase()] || ASSET_COLORS.DEFAULT;
   const badgeSize = Math.round(size * 0.4);
 
+  useEffect(() => setImageError(false), [ticker, logoUri]);
+
   const renderImage = () => {
+    if (localIcon) {
+      return (
+        <Image
+          source={localIcon}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+          resizeMode="contain"
+        />
+      );
+    }
     if (!imageError && iconUri) {
       return (
         <Image
           source={{ uri: iconUri }}
           style={{ width: size, height: size, borderRadius: size / 2 }}
           onError={() => setImageError(true)}
-          resizeMode="contain"
-        />
-      );
-    }
-
-    if (!fallbackError) {
-      return (
-        <Image
-          source={{ uri: fallbackUri }}
-          style={{ width: size, height: size, borderRadius: size / 2 }}
-          onError={() => setFallbackError(true)}
           resizeMode="contain"
         />
       );
