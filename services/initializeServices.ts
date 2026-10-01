@@ -68,14 +68,9 @@ export async function initializeNostrWalletConnect() {
     const success = await nostrService.initializeNWC();
 
     if (success) {
+      // Connection strings carry a spending secret; they are minted on demand
+      // from the NWC settings UI, never here, and never logged.
       console.log('Nostr Wallet Connect initialized successfully');
-      const connectionString = await nostrService.getWalletConnectInfo(
-        ['pay_invoice', 'make_invoice', 'get_balance', 'get_info'],
-        undefined
-      );
-      if (connectionString) {
-        console.log('NWC Connection String:', connectionString);
-      }
     } else {
       console.error('Failed to initialize Nostr Wallet Connect');
     }

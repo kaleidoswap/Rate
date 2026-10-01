@@ -25,8 +25,8 @@ payments. Your keys, your assets, and your AI all stay on your phone.
 - 🌐 **Nostr-native** — contacts, Lightning Zaps, Lightning Address, and NWC
   (Nostr Wallet Connect) to pair external apps.
 - 🗺️ **Real-world spending** — discover Bitcoin-accepting merchants via BTC Map.
-- 🔒 **Hardened by default** — biometric unlock, encrypted SQLite (SQLCipher), and
-  keys held in the device secure store.
+- 🔒 **Hardened by default** — biometric unlock, and seeds and keys held in the
+  device secure store (never in the local database).
 
 ---
 
@@ -93,7 +93,7 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 
 - **App** — React Native 0.81 + Expo SDK 54 (New Architecture), TypeScript
 - **State** — Redux Toolkit, Redux Persist
-- **Storage** — `expo-sqlite` with SQLCipher; `expo-secure-store` for keys
+- **Storage** — `expo-sqlite` for wallet metadata; `expo-secure-store` for seeds and keys
 - **AI / voice** — `@qvac/sdk` (on-device LLM + Whisper), `@kaleidorg/mind`
 - **Wallet engine** — `@kaleidorg/wallet-engine` + protocol SDKs (Spark, Arkade, RGB, Liquid, Flashnet)
 - **Nostr** — `@nostr-dev-kit/ndk`, `nostr-tools`

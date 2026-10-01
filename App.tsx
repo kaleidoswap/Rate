@@ -17,6 +17,9 @@ import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
+import { PersistenceLoading } from './components/PersistenceLoading';
+import { AppLockGate } from './components/AppLockGate';
+import { NwcPaymentApprover } from './components/NwcPaymentApprover';
 import ChatNotifications from './components/ChatNotifications';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
@@ -340,7 +343,7 @@ export default function App() {
       <SafeAreaProvider>
         <ErrorBoundary>
           <Provider store={store}>
-            <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
+            <PersistGate loading={<PersistenceLoading />} persistor={persistor}>
               <QVACEnabledSync />
               <ChatNotifications />
               <AppThemeProvider>
@@ -349,6 +352,8 @@ export default function App() {
                     <StatusBar style="light" backgroundColor="transparent" translucent={true} />
                     <AppNavigator />
                     <ToastContainer />
+                    <NwcPaymentApprover />
+                    <AppLockGate />
                   </ThemeProvider>
                 </KaleidoThemeProvider>
               </AppThemeProvider>

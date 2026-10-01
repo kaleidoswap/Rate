@@ -1,4 +1,4 @@
-import { encodeOffer, encodePaymentCode } from './universalCode';
+import { encodeOffer, encodePaymentCode } from '@universal-bolt12/universal-code';
 import { previewPayment, quotePayment, registerKaleidoPayAccount, isKaleidoPayCode } from './index';
 const offer = encodeOffer([{ type: 10n, value: new TextEncoder().encode('Coffee') }]);
 const code = encodePaymentCode({ offer, amountSat: 50000 }, 'signet');

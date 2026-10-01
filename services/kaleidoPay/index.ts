@@ -1,7 +1,9 @@
+import type { SwapAttempt } from '@universal-bolt12/swap-market';
+export type { SwapAttempt } from '@universal-bolt12/swap-market';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { acceptedRails, decodePaymentCode, planPayment } from './universalCode';
-import type { Network, PaymentCode, PaymentRequest, Plan, Route, SwapCapability, WalletSource } from './universalCode';
-export type { Network, Route } from './universalCode';
+import { acceptedRails, decodePaymentCode, planPayment } from '@universal-bolt12/universal-code';
+import type { Network, PaymentCode, PaymentRequest, Plan, Route, SwapCapability, WalletSource } from '@universal-bolt12/universal-code';
+export type { Network, Route } from '@universal-bolt12/universal-code';
 
 export interface Preview { code: PaymentCode; request: PaymentRequest; plan: Plan }
 export interface SpendAsset { id: string; ticker: string; precision: number }
@@ -13,7 +15,9 @@ export interface Quote {
   estimatedSeconds?: number;
 }
 export interface PaymentResult { status: 'completed' | 'pending' | 'unknown' | 'failed'; reference?: string }
+export interface AccountQuoteOption { id: string; name: string; quote?: Quote; unavailable?: string }
 export interface PayAccount {
+  pay?: (preview: Preview, route: Route, quote: Quote, onUpdate?: (attempt: SwapAttempt) => void) => Promise<SwapAttempt>;
   source: WalletSource;
   name?: string;
   spendAsset?: SpendAsset;
@@ -21,6 +25,7 @@ export interface PayAccount {
   swaps: SwapCapability[];
   // Quote must validate destination, amount, network, offer signature/expiry and liquidity.
   quote: (preview: Preview, route: Route) => Promise<Quote>;
+  quoteOptions?: (preview: Preview, route: Route) => Promise<AccountQuoteOption[]>;
   // Implementations must enforce the accepted quote, persist recovery data BEFORE
   // funding, and deduplicate attemptId. Never pay while generating a quote.
   execute?: (preview: Preview, route: Route, quote: Quote, attemptId: string) => Promise<PaymentResult>;
@@ -91,20 +96,34 @@ export async function quotePayment(preview: Preview, selectedRoute?: Route): Pro
 export async function quotePaymentOffers(preview: Preview): Promise<PaymentOffer[]> {
   if (preview.plan.status !== 'ready') return [];
   const routes = [preview.plan.route, ...preview.plan.alternatives];
-  return Promise.all(routes.map(async route => {
+  const groups = await Promise.all(routes.map(async route => {
     const account = accounts.get(route.sourceId);
-    const offer: PaymentOffer = {
+    const base = {
       id: JSON.stringify(route), route,
       provider: route.providerId ? account?.providerNames?.[route.providerId] ?? route.providerId : 'Direct payment',
       accountName: account?.name ?? route.sourceId, executable: !!account?.execute,
     };
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      offer.quote = await quotePayment(preview, route);
+      getAccount(preview, route);
+      const choices: AccountQuoteOption[] = account?.quoteOptions
+        ? await Promise.race([account.quoteOptions(preview, route), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond. Try refreshing quotes.')), 15000); })])
+        : [{ id: '', name: base.provider, quote: await quotePayment(preview, route) }];
       if (!account || accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Refresh quotes.');
-      owners.set(offer, { account, snapshot: JSON.stringify({ preview, route, quote: offer.quote }) });
-    } catch (error) { offer.unavailable = error instanceof Error ? error.message : 'Quote unavailable'; }
-    return offer;
+      return choices.map(choice => {
+        const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, quote: choice.quote, unavailable: choice.unavailable };
+        try {
+          if (offer.quote && !offer.unavailable) {
+            validateQuote(offer.quote, preview, account);
+            owners.set(offer, { account, snapshot: JSON.stringify({ preview, route, quote: offer.quote }) });
+          } else offer.unavailable ||= 'Quote unavailable';
+        } catch (error) { offer.quote = undefined; offer.unavailable = error instanceof Error ? error.message : 'Quote unavailable'; }
+        return offer;
+      });
+    } catch (error) { return [{ ...base, unavailable: error instanceof Error ? error.message : 'Quote unavailable' }]; }
+    finally { if (timer) clearTimeout(timer); }
   }));
+  return groups.flat();
 }
 /** Rank only offers using the same spend asset. Selection is explicit in the UI. */
 export function bestOffer(offers: PaymentOffer[]): PaymentOffer | undefined {
@@ -143,3 +162,17 @@ export async function checkPaymentStatus(sourceId: string, attemptId: string): P
   if (!account?.status) return { status: 'unknown' };
   try { return normalizeResult(await account.status(attemptId)); } catch { return { status: 'unknown' }; }
 }
+
+/** Pays a quote the user approved. Re-checks the account and expiry; the account persists before funding. */
+export async function executePayment(preview: Preview, quote: Quote, onUpdate?: (attempt: SwapAttempt) => void): Promise<SwapAttempt> {
+  if (preview.plan.status !== 'ready') throw new Error('No connected account supports this payment.');
+  if (quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('The quote expired. Review the payment again.');
+  const route = preview.plan.route;
+  const account = accounts.get(route.sourceId);
+  if (!account || account.source.network !== preview.request.network) throw new Error('Account disconnected. Review the request again.');
+  if (!account.pay) throw new Error('This account can quote but not pay yet.');
+  return account.pay(preview, route, quote, onUpdate);
+}
+
+export { createElectrumSwapAccount, resumeKaleidoPaySwaps } from './electrumSwapAccount';
+export { createAttemptStore, secureSecretStore } from './storage';

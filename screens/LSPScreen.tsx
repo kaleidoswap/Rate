@@ -18,6 +18,7 @@ import { Card, Button } from '../components';
 import { RootState } from '../store';
 import { protocolManager } from '../services/protocols';
 import { usePolicy } from '../hooks/usePolicy';
+import { lspOrderToPaymentData, type LspOrderLike } from '../utils/lspOrder';
 
 interface Props {
   navigation: any;
@@ -155,8 +156,13 @@ export default function LSPScreen({ navigation }: Props) {
 
       const order = await rgbAdapter.executeProtocolOperation!('createLspOrder', payload);
       setStep(3);
-      // Navigate to payment screen with order details
-      navigation.navigate('PaymentConfirmation', { order });
+      // Navigate to payment screen with the order's Lightning payment leg
+      const paymentData = lspOrderToPaymentData(order as LspOrderLike);
+      if (!paymentData) {
+        Alert.alert('Order created', 'The LSP did not return a Lightning invoice for this order.');
+        return;
+      }
+      navigation.navigate('PaymentConfirmation', { paymentData });
     } catch (err) {
       Alert.alert('Error', 'Failed to create channel order');
     } finally {

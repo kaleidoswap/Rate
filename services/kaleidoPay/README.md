@@ -37,19 +37,73 @@ expiry. The later Pay action must revalidate the quote, get approval and persist
 recovery material before funding. Request IDs here are local preview identifiers,
 not durable payment-attempt identifiers or reusable-offer identities.
 
-## Source package
+## Source packages
 
-`universalCode/` is a vendored TypeScript snapshot of
-`universal-bolt12/packages/universal-code/src/`, copied 2026-10-01. This follows
-this hackathon checkout's existing `services/swapMarket/` pattern and avoids
-introducing a sibling-path dependency that breaks a standalone checkout. Update
-all five files together from the package; do not fork the protocol locally.
-It uses dependencies already declared by Rate. See the source package README
-for the codec's intentionally limited validation and BIP321 subset.
+The protocol code is not copied here. It comes from the sibling checkout of
+[kaleidoswap/universal-bolt12](https://github.com/kaleidoswap/universal-bolt12),
+imported from source:
+
+- `@universal-bolt12/universal-code`: payment codes and route planning
+- `@universal-bolt12/swap-market`: Electrum swap providers over Nostr (quotes,
+  persisted attempts, claim, resume)
+
+Setup, once per machine:
+
+```bash
+git clone https://github.com/kaleidoswap/universal-bolt12 ../universal-bolt12
+(cd ../universal-bolt12 && npm install)
+```
+
+Metro (`metro.config.js`), TypeScript (`tsconfig.json` paths) and Jest
+(`moduleNameMapper`) map the two names to that checkout. Set
+`UNIVERSAL_BOLT12_DIR` when it lives elsewhere. A build without the sibling
+checkout fails to resolve them; this is a hackathon branch.
+
+## Paying an address from Lightning (Bark)
+
+`createElectrumSwapAccount` in `electrumSwapAccount.ts` is a ready executor for
+requests whose accepted rail is `btc:<network>`. Its quote agrees a swap with the
+cheapest provider that answers (nothing is paid) and its pay step funds it through
+the account's Lightning sender, waits for the provider's lockup and claims to the
+requested address.
+
+```ts
+import { createElectrumSwapAccount, resumeKaleidoPaySwaps } from './electrumSwapAccount';
+import { createAttemptStore, secureSecretStore } from './storage';
+
+const attempts = createAttemptStore();
+const disconnect = registerKaleidoPayAccount(createElectrumSwapAccount({
+  source: { id: 'bark', rail: 'ln', network: 'mainnet' },
+  payer: { payInvoices: invoices => bark.payInvoices(invoices) },
+  attempts,
+  secrets: secureSecretStore,
+}));
+// On app start, after the payer is available:
+await resumeKaleidoPaySwaps({ attempts, secrets: secureSecretStore });
+```
+
+`payInvoices` must send all invoices at once and must not wait for the first to
+settle: the provider holds the main payment until our claim reveals the preimage
+and releases the prepayment only when both arrive. The screen then calls
+`executePayment(preview, quote, onUpdate)` after the user approves; `onUpdate`
+receives each stage (`paying`, `waiting_lockup`, `lockup_seen`, `claiming`,
+`claimed`, or `recoverable`/`failed` with an error).
+
+The account also implements the pay-flow contract from `codex/payment-experience`:
+`execute(preview, route, quote, attemptId)` starts paying an approved quote and
+returns `{ status: 'pending', reference }` once the invoices are on their way
+(it is idempotent per `attemptId`), and `status(attemptId)` maps the swap stage to
+`pending | completed | unknown | failed`, with the claim txid as the reference on
+completion. Quotes ask up to four providers in parallel with a 10 s reply budget,
+inside the screen's 15 s quote timeout.
+
+Secrets: the preimage and claim key, and the signed claim (its witness carries
+the preimage), are kept in SecureStore; the attempt file in the app sandbox holds
+only public swap data.
 
 ## Checks
 
-`npm test -- --runInBand services/kaleidoPay/index.test.ts`
+`npm test -- --runInBand services/kaleidoPay`
 
 Tests cover routing recognition, fixed request amounts, unavailable accounts,
 network isolation, disconnects, quote arithmetic and expiry. No live payments.

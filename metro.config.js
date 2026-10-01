@@ -22,7 +22,12 @@ const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
 // The QVAC adapter ships as the @kaleidorg/mind/qvac subpath inside core, so
 // watching core covers it too — no separate watchFolder needed.
-const watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot]
+// KaleidoPay (bitcoin++ hackathon): packages from the sibling kaleidoswap/universal-bolt12
+// checkout, imported from source. Run `npm install` there so their own dependencies resolve.
+const universalBolt12Dir = path.resolve(__dirname, process.env.UNIVERSAL_BOLT12_DIR || '../universal-bolt12');
+// Metro watches real paths, so resolve a symlinked checkout.
+const universalBolt12Root = fs.existsSync(universalBolt12Dir) ? fs.realpathSync(universalBolt12Dir) : universalBolt12Dir;
+const watchFolders = [walletEngineRoot, kaleidoUiRoot, kaleidoMindRoot, universalBolt12Root]
   .filter(p => fs.existsSync(p));
 config.watchFolders = watchFolders;
 config.resolver.nodeModulesPaths = [
@@ -110,6 +115,10 @@ const previousResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (moduleName === '@kaleidorg/swap-sdk' || moduleName.startsWith('@kaleidorg/swap-sdk/')) {
     return { type: 'sourceFile', filePath: swapSdkStub };
+  }
+  const ub12 = /^@universal-bolt12\/(swap-market|universal-code)$/.exec(moduleName);
+  if (ub12) {
+    return { type: 'sourceFile', filePath: path.join(universalBolt12Root, 'packages', ub12[1], 'src/index.ts') };
   }
   return previousResolveRequest
     ? previousResolveRequest(context, moduleName, platform)

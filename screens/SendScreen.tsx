@@ -42,6 +42,7 @@ import { Card, Button, Input, ScreenHeader } from '../components';
 import { AssetIcon as TokenAssetIcon } from '../components/AssetIcon';
 import { useAssetIcon } from '../utils';
 import { formatBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { resolvePrecision } from '../utils/assetAmount';
 
 interface Props {
   navigation: any;
@@ -409,7 +410,7 @@ function SendScreen({ navigation, route }: Props) {
               setSelectedAsset(asset);
               // Set amount if specified in invoice
               if (invoiceAmount) {
-                const precision = asset.precision || 8;
+                const precision = resolvePrecision(asset.precision);
                 const formattedAmount = invoiceAmount / Math.pow(10, precision);
                 setAmount(formattedAmount.toString());
               }
@@ -473,7 +474,7 @@ function SendScreen({ navigation, route }: Props) {
         : (availableBalance / 100000000).toFixed(8);
     } else {
       const balance = selectedAsset.balance || 0;
-      const precision = selectedAsset.precision || 8;
+      const precision = resolvePrecision(selectedAsset.precision);
       return (balance / Math.pow(10, precision)).toFixed(precision);
     }
   };
@@ -523,7 +524,7 @@ function SendScreen({ navigation, route }: Props) {
     // otherwise a slow balance load blocks an otherwise-valid payment.
     if (selectedAsset && (selectedAsset.balance || 0) > 0) {
       const isBtc = selectedAsset.asset_id === 'BTC';
-      const precision = selectedAsset.precision || 8;
+      const precision = resolvePrecision(selectedAsset.precision);
       const availableRaw = selectedAsset.balance || 0;
       const inputRaw = isBtc
         ? (bitcoinUnit === 'BTC'
@@ -678,7 +679,7 @@ function SendScreen({ navigation, route }: Props) {
         }
         // RGB amounts are base units (input is whole tokens) — scale by precision,
         // otherwise "10" would send 10 base units (0.00001 of a precision-6 asset).
-        const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, selectedAsset.precision || 8));
+        const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, resolvePrecision(selectedAsset.precision)));
         result = await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: rgbBaseUnits });
         successType = 'rgb';
       }
@@ -1024,7 +1025,7 @@ function SendScreen({ navigation, route }: Props) {
             <View style={styles.invoiceDetailRow}>
               <Text style={styles.invoiceDetailLabel}>Amount:</Text>
               <Text style={styles.invoiceDetailValue}>
-                {(decodedRGBInvoice.amount / Math.pow(10, asset?.precision || 8)).toFixed(asset?.precision || 8)} {asset?.ticker}
+                {(decodedRGBInvoice.amount / Math.pow(10, resolvePrecision(asset?.precision))).toFixed(resolvePrecision(asset?.precision))} {asset?.ticker}
               </Text>
             </View>
           )}
@@ -1052,7 +1053,7 @@ function SendScreen({ navigation, route }: Props) {
     const isBtc = a.asset_id === 'BTC';
     const balanceStr = isBtc
       ? `${formatBitcoinAmount(a.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
-      : `${((a.balance || 0) / Math.pow(10, a.precision || 8)).toLocaleString(undefined, { maximumFractionDigits: a.precision || 8 })}`;
+      : `${((a.balance || 0) / Math.pow(10, resolvePrecision(a.precision))).toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(a.precision) })}`;
     return {
       id: a.asset_id,
       symbol: a.ticker,
@@ -1091,7 +1092,7 @@ function SendScreen({ navigation, route }: Props) {
             <Text style={styles.assetBalance}>
               Balance: {selectedAsset.asset_id === 'BTC'
                 ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
-                : `${((selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8)} ${selectedAsset.ticker}`}
+                : `${((selectedAsset.balance || 0) / Math.pow(10, resolvePrecision(selectedAsset.precision))).toFixed(resolvePrecision(selectedAsset.precision))} ${selectedAsset.ticker}`}
             </Text>
           </View>
           <Ionicons name="chevron-down" size={20} color={theme.colors.text.secondary} />
@@ -1168,7 +1169,7 @@ function SendScreen({ navigation, route }: Props) {
 
     const maxDecimals = selectedAsset.asset_id === 'BTC'
       ? (bitcoinUnit === 'BTC' ? 8 : 0)
-      : (selectedAsset.precision || 8);
+      : (resolvePrecision(selectedAsset.precision));
     if (parts[1] && parts[1].length > maxDecimals) return;
     const normalized = selectedAsset.asset_id === 'BTC' ? parseInputAmount(clean, bitcoinUnit) : clean;
     setAmountClamped(normalized);
@@ -1190,7 +1191,7 @@ function SendScreen({ navigation, route }: Props) {
     const tokenSymbol = isBtc ? bitcoinUnit : selectedAsset.ticker;
     const tokenBalance = isBtc
       ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)}`
-      : `${((selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8)).toLocaleString(undefined, { maximumFractionDigits: selectedAsset.precision || 8 })}`;
+      : `${((selectedAsset.balance || 0) / Math.pow(10, resolvePrecision(selectedAsset.precision))).toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(selectedAsset.precision) })}`;
     const tokenBalanceUSD = isBtc ? `$${formatSatoshisToUSD(selectedAsset.balance || 0)}` : '—';
 
     // Secondary conversion line.

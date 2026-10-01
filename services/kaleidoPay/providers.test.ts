@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { encodeOffer, encodePaymentCode } from './universalCode';
+import { encodeOffer, encodePaymentCode } from '@universal-bolt12/universal-code';
 import { registerKaleidoPayAccount, previewPayment, quotePaymentOffers, bestOffer, executePaymentOffer, checkPaymentStatus, PayAccount } from './index';
 import { beginPaymentAttempt, loadPaymentAttempt, PaymentAttempt } from './attempts';
 jest.mock('@react-native-async-storage/async-storage', () => {

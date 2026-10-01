@@ -1,0 +1,54 @@
+name: CI
+
+# Fast checks on every pull request: type-check and unit tests. Release builds
+# live in release.yml; this workflow never builds native code or signs anything.
+on:
+  pull_request:
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+
+# A newer push to the same PR/branch supersedes the running check.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Type-check & tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # KaleidoPay imports packages from the sibling kaleidoswap/universal-bolt12
+      # checkout (see services/kaleidoPay/README.md). It is private, so this needs
+      # UNIVERSAL_BOLT12_TOKEN: a fine-grained token with read access to it.
+      - uses: actions/checkout@v4
+        with:
+          repository: kaleidoswap/universal-bolt12
+          token: ${{ secrets.UNIVERSAL_BOLT12_TOKEN }}
+          path: universal-bolt12
+      - name: Place universal-bolt12 beside the app
+        run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)
+
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: pnpm }
+
+      # --frozen-lockfile fails the run if pnpm-lock.yaml drifts from
+      # package.json (the release workflow installs the same way).
+      # --ignore-scripts skips postinstall, which downloads native LWK/QVAC
+      # artifacts that type-checking and Jest don't need.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Type-check
+        run: pnpm exec tsc --noEmit
+
+      - name: Unit tests
+        run: pnpm exec jest --ci

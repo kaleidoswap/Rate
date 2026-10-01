@@ -48,7 +48,8 @@
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
         "FOREGROUND_SERVICE"
-      ]
+      ],
+      "allowBackup": false
     },
     "plugins": [
       [

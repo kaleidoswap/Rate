@@ -512,10 +512,11 @@ export class DatabaseService {
   async setSetting(key: string, value: string, encrypted: boolean = false): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
 
-    let finalValue = value;
-    if (encrypted && this.encryptionKey) {
-      finalValue = this.encrypt(value);
+    // Fail closed: never store plaintext under an `encrypted = 1` flag.
+    if (encrypted && !this.encryptionKey) {
+      throw new Error(`Cannot store "${key}" encrypted: no encryption key is set`);
     }
+    const finalValue = encrypted ? this.encrypt(value) : value;
 
     await this.db.runAsync(
       'INSERT OR REPLACE INTO app_settings (key, value, encrypted) VALUES (?, ?, ?)',
@@ -533,7 +534,11 @@ export class DatabaseService {
 
     if (!result) return null;
 
-    if (result.encrypted && this.encryptionKey) {
+    if (result.encrypted) {
+      // Never hand ciphertext back as if it were the value.
+      if (!this.encryptionKey) {
+        throw new Error(`Cannot read "${key}": it is encrypted and no encryption key is set`);
+      }
       return this.decrypt(result.value);
     }
 

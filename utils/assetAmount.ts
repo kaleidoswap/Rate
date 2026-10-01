@@ -7,6 +7,17 @@
  * 10^precision before display — doing `.toFixed(precision)` on the raw base
  * units (the previous bug) showed "10000000.000000" instead of "10".
  */
+/**
+ * An asset's decimal precision, falling back only when it is *missing*.
+ * `precision || 8` treated a legitimate precision of 0 (indivisible assets) as
+ * 8, so amounts were off by 10^8 in sends, invoices and balance checks.
+ */
+export function resolvePrecision(precision: unknown, fallback = 8): number {
+  return typeof precision === 'number' && Number.isInteger(precision) && precision >= 0
+    ? precision
+    : fallback;
+}
+
 export function formatAssetAmount(baseUnits: number, precision: number): string {
   const amount = Number(baseUnits) || 0;
   if (!precision) return String(amount);

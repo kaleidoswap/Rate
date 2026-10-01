@@ -59,10 +59,13 @@ import {
   type ReceiveMethod,
   type ReceiveProtocol,
 } from '../utils/receive-session';
+import { resolvePrecision } from '../utils/assetAmount';
 
 // Sentinel asset id for receiving an RGB asset the user doesn't hold yet
 // (generates a blind RGB invoice with no specific asset_id).
 const NEW_RGB_ASSET_ID = 'RGB_NEW';
+// Receive modes whose generated request embeds the requested amount.
+const AMOUNT_ENCODING_NETWORKS: readonly string[] = ['lightning', 'spark'];
 // Verbose receive logging is opt-in even in dev. In an Expo dev client every
 // console.log is a bridge round-trip, and the unified flow emits ~12+ lines per
 // generation plus one on every tap — enough to visibly stall the JS thread while
@@ -348,7 +351,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       return bitcoinUnit === 'BTC' ? 8 : 0; // 8 decimals for BTC, 0 for sats
     }
     const rgbAsset = rgbAssets.find(asset => asset.ticker === ticker);
-    return rgbAsset?.precision || 8; // Default to 8 if not found
+    return resolvePrecision(rgbAsset?.precision); // Default to 8 if not found
   };
 
   // Format asset amount with proper precision
@@ -1731,10 +1734,18 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   }, [selectedAsset, networkType]);
 
-  // Regenerate the Lightning invoice a moment after the amount changes (the amount
-  // is set via the AmountEditorModal, so debounce to avoid re-minting mid-edit).
+  // Regenerate a moment after the amount changes on networks whose request
+  // encodes it (Lightning, Spark), including when it is cleared, so the QR never
+  // shows a stale amount. The amount is set via the AmountEditorModal, so
+  // debounce to avoid re-minting mid-edit. Skip the first run: the effect above
+  // already generates on mount.
+  const amountEffectMounted = React.useRef(false);
   useEffect(() => {
-    if (networkType === 'lightning' && amount && isAmountValid()) {
+    if (!amountEffectMounted.current) {
+      amountEffectMounted.current = true;
+      return;
+    }
+    if (AMOUNT_ENCODING_NETWORKS.includes(networkType) && isAmountValid()) {
       const timeoutId = setTimeout(() => generateAddress(), 2000);
       return () => clearTimeout(timeoutId);
     }
@@ -2272,6 +2283,9 @@ export default function ReceiveScreen({ navigation }: Props) {
     // The amount editor works in BTC/sats/fiat — it can't express an RGB asset
     // amount, and RGB invoices are open-amount anyway, so hide it for RGB assets.
     if (selectedAsset?.isRGB) return null;
+    // Arkade and on-chain addresses don't carry an amount; offering one there
+    // would suggest the payer is asked for it when they aren't.
+    if (networkType === 'arkade' || networkType === 'onchain') return null;
     const summary = amountSummary();
     const required = isAmountRequired();
     return (

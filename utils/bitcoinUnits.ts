@@ -2,6 +2,7 @@ import { useSelector, useDispatch } from 'react-redux';
 import { useState, useEffect } from 'react';
 import { RootState } from '../store';
 import PriceService from '../services/PriceService';
+import { FIAT_SYMBOLS, useFiatRates } from '../hooks/useFiatRates';
 import {
   selectDisplayDenomination,
   cycleDisplayDenomination,
@@ -118,6 +119,20 @@ export function useBitcoinPrice() {
 /**
  * Custom hook that provides Bitcoin conversion utilities with live price data
  */
+/**
+ * BTC price in the given fiat currency. USD comes from the existing price feed;
+ * other currencies from the multi-fiat rates. 0 until a rate is known, which
+ * formatDenominatedAmount treats as "no price" (falls back to sats) rather than
+ * showing a USD figure under a EUR/JPY label.
+ */
+export function useBitcoinPriceIn(currency: string = 'USD'): number {
+  const usdPrice = useBitcoinPrice();
+  const isUsd = currency.toUpperCase() === 'USD';
+  const rates = useFiatRates(isUsd ? NO_EXTRA_FIATS : [currency]);
+  return isUsd ? usdPrice : rates[currency.toLowerCase()] ?? 0;
+}
+const NO_EXTRA_FIATS: readonly string[] = [];
+
 export function useBitcoinConversion() {
   const bitcoinPrice = useBitcoinPrice();
 
@@ -148,7 +163,8 @@ export interface DenominatedAmount {
  * Formats a satoshi amount for display in the chosen denomination, returning
  * both the primary figure and a secondary (alternate) representation.
  *
- * Pure: pass the live `price`/`currency` in. `sats` is ALWAYS satoshis. When
+ * Pure: pass the live `price`/`currency` in. `price` is BTC in `currency` (not
+ * always USD — see useBitcoinPriceIn). `sats` is ALWAYS satoshis. When
  * `fiat` is requested but no price is available, it degrades to `sats` rather
  * than rendering a misleading $0.
  */
@@ -170,10 +186,21 @@ export function formatDenominatedAmount(
   const satsNum = typeof sats === 'string' ? parseFloat(sats) : sats;
   const safeSats = isFinite(satsNum) ? satsNum : 0;
 
+  // Yen has no minor unit; everything else shows cents.
+  const fiatDecimals = currency === 'JPY' ? 0 : 2;
   const fiatFigure = (): string => {
-    const usd = parseFloat(formatSatoshisToUSD(safeSats, price));
-    return usd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const value = (safeSats / SATS_PER_BTC) * price;
+    return value.toLocaleString('en-US', {
+      minimumFractionDigits: fiatDecimals,
+      maximumFractionDigits: fiatDecimals,
+    });
   };
+  // "€12.00" for symbol currencies; codes like CHF read "CHF 12.00".
+  const symbol = FIAT_SYMBOLS[currency] ?? currency;
+  const fiatPrimary = (): string =>
+    symbol === currency ? `${currency} ${fiatFigure()}` : `${symbol}${fiatFigure()}`;
+  const fiatSecondary = (): string =>
+    symbol === currency ? fiatPrimary() : `${fiatPrimary()} ${currency}`;
 
   // Fiat is only meaningful with a live price; otherwise fall back to sats.
   const effective: DisplayDenomination =
@@ -184,12 +211,12 @@ export function formatDenominatedAmount(
       return {
         primary: formatBitcoinAmount(safeSats, 'BTC'),
         unitLabel: 'BTC',
-        secondary: price ? `$${fiatFigure()} ${currency}` : '',
+        secondary: price ? fiatSecondary() : '',
         hidden: false,
       };
     case 'fiat':
       return {
-        primary: `$${fiatFigure()}`,
+        primary: fiatPrimary(),
         unitLabel: currency,
         secondary: `${formatBitcoinAmount(safeSats, 'sats')} sats`,
         hidden: false,
@@ -199,7 +226,7 @@ export function formatDenominatedAmount(
       return {
         primary: formatBitcoinAmount(safeSats, 'sats'),
         unitLabel: 'sats',
-        secondary: price ? `$${fiatFigure()} ${currency}` : '',
+        secondary: price ? fiatSecondary() : '',
         hidden: false,
       };
   }
@@ -215,7 +242,7 @@ export function useDisplayAmount() {
   const denomination = useSelector(selectDisplayDenomination);
   const currency = useSelector((s: RootState) => s.settings.currency);
   const hideBalances = useSelector((s: RootState) => s.settings.hideBalances);
-  const price = useBitcoinPrice();
+  const price = useBitcoinPriceIn(currency);
 
   const format = (sats: string | number): DenominatedAmount =>
     formatDenominatedAmount(sats, { denomination, currency, price, hideBalances });

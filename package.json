@@ -71,6 +71,7 @@
     "expo-local-authentication": "~17.0.9",
     "expo-location": "~19.0.8",
     "expo-notifications": "~0.32.17",
+    "expo-screen-capture": "~8.0.10",
     "expo-secure-store": "~15.0.8",
     "expo-sharing": "^14.0.8",
     "expo-speech": "~14.0.8",

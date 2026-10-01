@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../theme';
 import { AssetIcon } from './AssetIcon';
+import { resolvePrecision } from '../utils/assetAmount';
 
 export interface SelectableAsset {
   asset_id: string;
@@ -95,7 +96,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
 
         {item.balance !== undefined && (
           <Text style={styles.assetBalance}>
-            {item.balance.toLocaleString(undefined, { maximumFractionDigits: item.precision || 8 })}
+            {item.balance.toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(item.precision) })}
           </Text>
         )}
 

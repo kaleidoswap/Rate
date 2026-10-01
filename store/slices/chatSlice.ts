@@ -1,10 +1,10 @@
 // store/slices/chatSlice.ts
 //
 // Encrypted direct-message (NIP-04 / NIP-44) state. Conversations are keyed by
-// the counterparty's hex pubkey. Decrypted plaintext is cached here (and
-// persisted via redux-persist) so chat history survives restarts and shows
-// instantly while the relays are re-queried — mirroring how `contacts` is
-// persisted. Sending/encryption is handled by NostrService.
+// the counterparty's hex pubkey. Decrypted plaintext is cached here in memory
+// only: store/chatPersistence.ts strips it before redux-persist writes to
+// AsyncStorage, and conversations are re-fetched from the relays when opened.
+// Sending/encryption is handled by NostrService.
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import NostrService, {
   DirectMessage,

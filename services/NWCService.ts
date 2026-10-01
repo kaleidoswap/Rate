@@ -9,6 +9,21 @@ import NDK, {
 } from '@nostr-dev-kit/ndk';
 import { nip04, getPublicKey, utils } from 'nostr-tools';
 import { protocolManager } from './protocols';
+import { decodeBolt11 } from '../utils/decodeInvoice';
+
+/**
+ * Hex-encoded bytes from the platform CSPRNG (polyfilled in index.ts via
+ * react-native-get-random-values / expo-crypto). Throws instead of degrading
+ * to a predictable source: these bytes become keys that authorise payments.
+ */
+function secureRandomHex(byteLength: number): string {
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    throw new Error('Secure random number generator unavailable');
+  }
+  const bytes = new Uint8Array(byteLength);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+}
 
 // NIP-47 Event Kinds
 export const NWC_KINDS = {
@@ -76,7 +91,35 @@ export interface NWCConnection {
   relayUrls: string[];
   permissions: string[];
   lud16?: string;
+  /** Largest single payment this client may make, in sats. */
+  maxPaymentSats: number;
+  /** Total this client may spend over the connection's lifetime, in sats. */
+  budgetSats: number;
+  /** Spent (or reserved for an in-flight payment) against `budgetSats`. */
+  spentSats: number;
 }
+
+export interface NWCSpendingLimits {
+  maxPaymentSats?: number;
+  budgetSats?: number;
+}
+
+/** What the user is asked to approve before an NWC client spends. */
+export interface NWCPaymentApprovalRequest {
+  amountSats: number;
+  description?: string;
+  invoice: string;
+}
+
+/** Resolves true to pay, false to refuse. Registered by the UI. */
+export type NWCPaymentApprover = (request: NWCPaymentApprovalRequest) => Promise<boolean>;
+
+/** An unanswered approval prompt is treated as a refusal after this long. */
+export const NWC_APPROVAL_TIMEOUT_MS = 60_000;
+
+// Conservative defaults: a leaked connection string can drain at most this much.
+export const DEFAULT_NWC_MAX_PAYMENT_SATS = 50_000;
+export const DEFAULT_NWC_BUDGET_SATS = 200_000;
 
 export interface NWCConnectionString {
   pubkey: string;
@@ -92,6 +135,8 @@ export class NWCService {
   private walletSigner: NDKPrivateKeySigner | null = null;
   private subscriptions: Map<string, NDKSubscription> = new Map();
   private connections: Map<string, NWCConnection> = new Map();
+  // In-app confirmation for pay_invoice. With none registered, payments are refused.
+  private paymentApprover: NWCPaymentApprover | null = null;
   private isRunning = false;
 
   // Supported capabilities
@@ -111,6 +156,28 @@ export class NWCService {
   ];
 
   private constructor() {}
+
+  /**
+   * Register (or clear, with null) the in-app prompt that approves NWC
+   * payments. Fail closed: without an approver every pay_invoice is refused.
+   */
+  public setPaymentApprover(approver: NWCPaymentApprover | null): void {
+    this.paymentApprover = approver;
+  }
+
+  private async requestApproval(request: NWCPaymentApprovalRequest): Promise<boolean> {
+    const approver = this.paymentApprover;
+    if (!approver) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), NWC_APPROVAL_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([approver(request).catch(() => false), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
 
   public static getInstance(): NWCService {
     if (!NWCService.instance) {
@@ -148,19 +215,7 @@ export class NWCService {
       await this.ndk.connect();
 
       // Generate wallet keypair for NWC
-      const randomArray = new Uint8Array(32);
-      
-      // Use crypto.getRandomValues for secure random generation
-      if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-        crypto.getRandomValues(randomArray);
-      } else {
-        // Fallback to Math.random if crypto is not available
-        for (let i = 0; i < 32; i++) {
-          randomArray[i] = Math.floor(Math.random() * 256);
-        }
-      }
-      
-      const privateKey = Array.from(randomArray, byte => byte.toString(16).padStart(2, '0')).join('');
+      const privateKey = secureRandomHex(32);
       this.walletSigner = new NDKPrivateKeySigner(privateKey);
       this.ndk.signer = this.walletSigner;
 
@@ -219,18 +274,16 @@ export class NWCService {
    */
   public async generateConnectionString(
     permissions: string[] = [],
-    lud16?: string
+    lud16?: string,
+    limits: NWCSpendingLimits = {}
   ): Promise<string> {
     try {
       if (!this.walletSigner) {
         throw new Error('NWC service not initialized');
       }
 
-      const randomArray = new Uint8Array(32);
-      for (let i = 0; i < 32; i++) {
-        randomArray[i] = Math.floor(Math.random() * 256);
-      }
-      const clientSecret = Array.from(randomArray, byte => byte.toString(16).padStart(2, '0')).join('');
+      // The client secret authorises spending, so it must come from a CSPRNG.
+      const clientSecret = secureRandomHex(32);
       
       // Handle Buffer conversion more safely
       let clientSecretUint8: Uint8Array;
@@ -255,6 +308,9 @@ export class NWCService {
         relayUrls: this.ndk?.explicitRelayUrls || [],
         permissions,
         lud16,
+        maxPaymentSats: limits.maxPaymentSats ?? DEFAULT_NWC_MAX_PAYMENT_SATS,
+        budgetSats: limits.budgetSats ?? DEFAULT_NWC_BUDGET_SATS,
+        spentSats: 0,
       });
 
       // Build connection string
@@ -400,7 +456,7 @@ export class NWCService {
       }
 
       // Route request to appropriate handler
-      const response = await this.processRequest(request);
+      const response = await this.processRequest(request, connection);
       
       // Send response
       await this.sendResponse(event, clientPubkey, response);
@@ -414,11 +470,11 @@ export class NWCService {
   /**
    * Process NWC request and return response
    */
-  private async processRequest(request: NWCRequest): Promise<NWCResponse> {
+  private async processRequest(request: NWCRequest, connection: NWCConnection): Promise<NWCResponse> {
     try {
       switch (request.method) {
         case NWC_METHODS.PAY_INVOICE:
-          return await this.handlePayInvoice(request.params);
+          return await this.handlePayInvoice(request.params, connection);
         
         case NWC_METHODS.MAKE_INVOICE:
           return await this.handleMakeInvoice(request.params);
@@ -455,27 +511,69 @@ export class NWCService {
   /**
    * Handle pay_invoice request
    */
-  private async handlePayInvoice(params: any): Promise<NWCResponse> {
+  private async handlePayInvoice(params: any, connection: NWCConnection): Promise<NWCResponse> {
+    let reservedSats = 0;
     try {
       if (!this.rgbApiService) {
         throw new Error('RGB API service not available');
       }
 
-      const { invoice, amount } = params;
+      const { invoice } = params;
       
       if (!invoice) {
         throw new Error('Invoice is required');
       }
 
+      // Enforce the connection's spending limits before touching the node.
+      // Amountless invoices are refused: their amount can't be checked.
+      const decoded = decodeBolt11(invoice);
+      const amountSats = decoded.amountSats;
+      if (!amountSats || amountSats <= 0) {
+        return this.payInvoiceError(NWC_ERROR_CODES.RESTRICTED, 'Amountless invoices are not allowed');
+      }
+      if (amountSats > connection.maxPaymentSats) {
+        return this.payInvoiceError(
+          NWC_ERROR_CODES.QUOTA_EXCEEDED,
+          `Payment exceeds the per-payment limit of ${connection.maxPaymentSats} sats`,
+        );
+      }
+      if (connection.spentSats + amountSats > connection.budgetSats) {
+        return this.payInvoiceError(NWC_ERROR_CODES.QUOTA_EXCEEDED, 'Connection budget exhausted');
+      }
+      // Reserve synchronously so concurrent requests can't overspend the budget.
+      connection.spentSats += amountSats;
+      reservedSats = amountSats;
+
+      // The user confirms every payment in the app; limits are only a backstop.
+      const approved = await this.requestApproval({
+        amountSats,
+        description: decoded.description,
+        invoice,
+      });
+      if (!approved) {
+        connection.spentSats -= reservedSats;
+        reservedSats = 0;
+        return this.payInvoiceError(NWC_ERROR_CODES.RESTRICTED, 'Payment was not approved in the wallet');
+      }
+
       const result = await this.rgbApiService.sendPayment({ invoice });
+
+      if (!result.preimage) {
+        // Funds may have moved; keep the reservation and don't fabricate a preimage.
+        reservedSats = 0;
+        return this.payInvoiceError(NWC_ERROR_CODES.INTERNAL, 'Payment sent but no preimage was returned');
+      }
 
       return {
         result_type: NWC_METHODS.PAY_INVOICE,
         result: {
-          preimage: result.paymentHash,
+          preimage: result.preimage,
         },
       };
     } catch (error) {
+      if (reservedSats) {
+        connection.spentSats -= reservedSats;
+      }
       return {
         result_type: NWC_METHODS.PAY_INVOICE,
         error: {
@@ -484,6 +582,10 @@ export class NWCService {
         },
       };
     }
+  }
+
+  private payInvoiceError(code: string, message: string): NWCResponse {
+    return { result_type: NWC_METHODS.PAY_INVOICE, error: { code, message } };
   }
 
   /**

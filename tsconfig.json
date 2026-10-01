@@ -1,7 +1,11 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "paths": {
+      "@/*": ["./*"],
+      "@universal-bolt12/*": ["../universal-bolt12/packages/*/src"]
+    }
   },
   "exclude": [
     "__tests__",

@@ -31,8 +31,11 @@ module.exports = {
       lines: 70
     }
   },
+  // Sibling packages (universal-bolt12) fall back to this app's node_modules for babel helpers.
+  modulePaths: ['<rootDir>/node_modules'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    '^@universal-bolt12/(swap-market|universal-code)$': '<rootDir>/../universal-bolt12/packages/$1/src/index.ts',
     '^react-native$': '<rootDir>/node_modules/react-native',
     // @kaleidorg/mind's exports map is import-only; point Jest's CJS resolver
     // straight at the dist files (babel transforms the ESM — see
