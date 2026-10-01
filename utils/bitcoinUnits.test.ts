@@ -128,6 +128,21 @@ describe('formatDenominatedAmount', () => {
     expect(r.secondary).toBe('');
   });
 
+  it('uses the selected currency symbol and code, not a hardcoded $', () => {
+    const eur = formatDenominatedAmount(50_000, { denomination: 'fiat', price: 90_000, currency: 'EUR' });
+    expect(eur.primary).toBe('€45.00');
+    expect(eur.unitLabel).toBe('EUR');
+    const sub = formatDenominatedAmount(50_000, { denomination: 'sats', price: 90_000, currency: 'GBP' });
+    expect(sub.secondary).toBe('£45.00 GBP');
+  });
+
+  it('formats JPY without decimals and CHF with its code', () => {
+    const jpy = formatDenominatedAmount(50_000, { denomination: 'fiat', price: 15_000_000, currency: 'JPY' });
+    expect(jpy.primary).toBe('¥7,500');
+    const chf = formatDenominatedAmount(50_000, { denomination: 'sats', price: 80_000, currency: 'CHF' });
+    expect(chf.secondary).toBe('CHF 40.00');
+  });
+
   it('treats unparseable input as zero', () => {
     expect(formatDenominatedAmount('xyz', { denomination: 'sats' }).primary).toBe('0');
   });

@@ -24,7 +24,8 @@ import { useAssetIcon } from '../utils';
 import LottieView from 'lottie-react-native';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
-import { useFormattedBitcoinAmount, parseInputAmount, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { useFormattedBitcoinAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { resolvePrecision } from '../utils/assetAmount';
 
 interface PaymentData {
   type: 'bitcoin' | 'bip21' | 'lightning' | 'rgb';
@@ -40,6 +41,7 @@ interface PaymentData {
     ticker: string;
     name: string;
     isRGB: boolean;
+    precision?: number;
   };
 }
 
@@ -53,7 +55,23 @@ interface Props {
 }
 
 export default function PaymentConfirmationScreen({ navigation, route }: Props) {
-  const { paymentData } = route.params;
+  const paymentData = route.params?.paymentData;
+  if (!paymentData) {
+    return <MissingPaymentData onBack={() => navigation.goBack()} />;
+  }
+  return <PaymentConfirmationContent navigation={navigation} paymentData={paymentData} />;
+}
+
+function MissingPaymentData({ onBack }: { onBack: () => void }) {
+  return (
+    <SafeAreaView style={[styles.container, styles.missingContainer]}>
+      <Text style={styles.missingText}>No payment details were provided.</Text>
+      <Button title="Back" variant="secondary" onPress={onBack} />
+    </SafeAreaView>
+  );
+}
+
+function PaymentConfirmationContent({ navigation, paymentData }: { navigation: any; paymentData: PaymentData }) {
   const [loading, setLoading] = useState(false);
   const [customAmount, setCustomAmount] = useState(paymentData.amount || '');
   const [showAmountInput, setShowAmountInput] = useState(!paymentData.amount);
@@ -63,6 +81,11 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
 
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD } = useBitcoinConversion();
+  const isBtc = paymentData.selectedAsset?.ticker === 'BTC';
+  // customAmount is typed in the display unit; fiat conversion needs sats.
+  const customAmountSats = isBtc && customAmount
+    ? convertAmountToUnit(customAmount, bitcoinUnit, 'sats')
+    : customAmount;
 
   const handleAmountChange = (text: string) => {
     // Remove any non-numeric characters except decimal point
@@ -72,8 +95,10 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
     const parts = cleanedText.split('.');
     if (parts.length > 2) return;
     
-    // Limit decimal places based on asset
-    const maxDecimals = paymentData.selectedAsset?.ticker === 'BTC' ? 8 : 2;
+    // Limit decimal places based on asset (and, for BTC, the display unit)
+    const maxDecimals = isBtc
+      ? (bitcoinUnit === 'BTC' ? 8 : 0)
+      : resolvePrecision(paymentData.selectedAsset?.precision, 2);
     if (parts[1] && parts[1].length > maxDecimals) return;
     
     setCustomAmount(cleanedText);
@@ -105,7 +130,12 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
       navigation.navigate('Send', {
         selectedAsset: paymentData.selectedAsset,
         prefilledAddress: paymentData.address || paymentData.invoice,
-        prefilledAmount: showAmountInput ? customAmount : paymentData.amount,
+        // Send reads amounts in the display unit; paymentData.amount is sats.
+        prefilledAmount: showAmountInput
+          ? customAmount
+          : (isBtc && paymentData.amount
+            ? convertAmountToUnit(paymentData.amount, 'sats', bitcoinUnit)
+            : paymentData.amount),
         label: paymentData.label,
         message: paymentData.message,
         decodedInvoice: paymentData.decodedInvoice,
@@ -338,9 +368,9 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
           <TextInput
             style={styles.amountInput}
             value={customAmount}
-            onChangeText={(value) => {
-              handleAmountChange(parseInputAmount(value, bitcoinUnit));
-            }}
+            // Keep the raw text while typing: normalising each keystroke to
+            // 8 decimals made the next digit fail the max-decimals check.
+            onChangeText={handleAmountChange}
             keyboardType="decimal-pad"
             placeholder={bitcoinUnit === 'BTC' ? "0.00000000" : "0"}
             placeholderTextColor={theme.colors.text.muted}
@@ -383,7 +413,7 @@ export default function PaymentConfirmationScreen({ navigation, route }: Props) 
 
         {paymentData.selectedAsset?.ticker === 'BTC' && customAmount ? (
           <Text style={styles.amountFiat}>
-            ≈ ${parseFloat(formatSatoshisToUSD(customAmount)).toLocaleString()} USD
+            ≈ ${parseFloat(formatSatoshisToUSD(customAmountSats)).toLocaleString()} USD
           </Text>
         ) : null}
       </Card>
@@ -436,6 +466,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.primary,
+  },
+  missingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[4],
+    padding: theme.spacing[6],
+  },
+  missingText: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
   },
   
   headerContainer: {
