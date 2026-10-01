@@ -19,6 +19,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import { PersistenceLoading } from './components/PersistenceLoading';
 import { AppLockGate } from './components/AppLockGate';
+import { KaleidoPayRecovery } from './components/KaleidoPayRecovery';
 import { NwcPaymentApprover } from './components/NwcPaymentApprover';
 import ChatNotifications from './components/ChatNotifications';
 import NetworkService from './services/NetworkService';
@@ -345,6 +346,7 @@ export default function App() {
           <Provider store={store}>
             <PersistGate loading={<PersistenceLoading />} persistor={persistor}>
               <QVACEnabledSync />
+              <KaleidoPayRecovery />
               <ChatNotifications />
               <AppThemeProvider>
                 <KaleidoThemeProvider>

@@ -189,3 +189,4 @@ export async function executePayment(preview: Preview, quote: Quote, onUpdate?: 
 
 export { createElectrumSwapAccount, resumeKaleidoPaySwaps } from './electrumSwapAccount';
 export { createAttemptStore, secureSecretStore } from './storage';
+export { kaleidoPayAttempts, kaleidoPayStores, recoverKaleidoPaySwaps } from './recovery';

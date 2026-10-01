@@ -71,18 +71,15 @@ the account's Lightning sender, waits for the provider's lockup and claims to th
 requested address.
 
 ```ts
-import { createElectrumSwapAccount, resumeKaleidoPaySwaps } from './electrumSwapAccount';
-import { createAttemptStore, secureSecretStore } from './storage';
+import { createElectrumSwapAccount } from './electrumSwapAccount';
+import { kaleidoPayStores } from './recovery';
 
-const attempts = createAttemptStore();
 const disconnect = registerKaleidoPayAccount(createElectrumSwapAccount({
   source: { id: 'bark', rail: 'ln', network: 'mainnet' },
   payer: { payInvoices: invoices => bark.payInvoices(invoices) },
-  attempts,
-  secrets: secureSecretStore,
+  ...kaleidoPayStores,
 }));
-// On app start, after the payer is available:
-await resumeKaleidoPaySwaps({ attempts, secrets: secureSecretStore });
+// Interrupted swaps are resumed on start by <KaleidoPayRecovery /> in App.tsx.
 ```
 
 `payInvoices` must send all invoices at once and must not wait for the first to
