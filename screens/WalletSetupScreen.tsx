@@ -13,7 +13,6 @@ import {
   Keyboard,
   Platform,
   KeyboardAvoidingView,
-  Clipboard,
 } from 'react-native';
 import { useDispatch } from 'react-redux';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,6 +30,7 @@ import { Button, Card, Input, ScreenHeader } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { NWCClient, parseNwcUri } from '../services/nwc/NWCExternalClient';
+import { copySensitive } from '../utils/sensitiveClipboard';
 
 /** SecureStore key shared with NwcRgbAdapter + NWCConnectScreen. */
 const NWC_CONNECTION_KEY = 'nwc_connection_string';
@@ -597,9 +597,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
           <TouchableOpacity
             style={styles.copyButton}
             onPress={() => {
-              Clipboard.setString(generatedMnemonic);
+              copySensitive(generatedMnemonic);
               setMnemonicCopied(true);
-              Alert.alert('Copied!', 'Recovery phrase copied to clipboard. Make sure to store it safely!');
+              Alert.alert('Copied!', 'Recovery phrase copied. Store it safely; the clipboard will be cleared in 60 seconds.');
             }}
           >
             <Ionicons 

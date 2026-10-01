@@ -187,8 +187,14 @@ export class DatabaseService {
   async createWallet(wallet: Omit<WalletRecord, 'id' | 'networks'>, initialNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[]): Promise<number> {
     if (!this.db) throw new Error('Database not initialized');
 
-    // Deactivate other wallets if this one is active
+    // Deactivate other wallets if this one is active (remembering which one was
+    // active, so a failed seed write below can be rolled back).
+    let previouslyActiveId: number | null = null;
     if (wallet.is_active) {
+      const prev = await this.db.getFirstAsync<{ id: number }>(
+        'SELECT id FROM wallets WHERE is_active = TRUE LIMIT 1'
+      );
+      previouslyActiveId = prev?.id ?? null;
       await this.db.runAsync('UPDATE wallets SET is_active = FALSE');
     }
 
@@ -209,7 +215,16 @@ export class DatabaseService {
     const walletId = result.lastInsertRowId;
 
     if (wallet.encrypted_mnemonic) {
-      await SecurityService.getInstance().storeMnemonic(walletId, wallet.encrypted_mnemonic);
+      const stored = await SecurityService.getInstance().storeMnemonic(walletId, wallet.encrypted_mnemonic);
+      if (!stored) {
+        // Without the seed in secure storage the wallet can't be reopened, so
+        // don't leave a half-created row behind or report success.
+        await this.db.runAsync('DELETE FROM wallets WHERE id = ?', [walletId]);
+        if (previouslyActiveId !== null) {
+          await this.db.runAsync('UPDATE wallets SET is_active = TRUE WHERE id = ?', [previouslyActiveId]);
+        }
+        throw new Error('Could not save the recovery phrase to secure storage. The wallet was not created.');
+      }
     }
 
     // Add initial networks
@@ -507,10 +522,11 @@ export class DatabaseService {
   async setSetting(key: string, value: string, encrypted: boolean = false): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
 
-    let finalValue = value;
-    if (encrypted && this.encryptionKey) {
-      finalValue = this.encrypt(value);
+    // Fail closed: never store plaintext under an `encrypted = 1` flag.
+    if (encrypted && !this.encryptionKey) {
+      throw new Error(`Cannot store "${key}" encrypted: no encryption key is set`);
     }
+    const finalValue = encrypted ? this.encrypt(value) : value;
 
     await this.db.runAsync(
       'INSERT OR REPLACE INTO app_settings (key, value, encrypted) VALUES (?, ?, ?)',
@@ -528,7 +544,11 @@ export class DatabaseService {
 
     if (!result) return null;
 
-    if (result.encrypted && this.encryptionKey) {
+    if (result.encrypted) {
+      // Never hand ciphertext back as if it were the value.
+      if (!this.encryptionKey) {
+        throw new Error(`Cannot read "${key}": it is encrypted and no encryption key is set`);
+      }
       return this.decrypt(result.value);
     }
 

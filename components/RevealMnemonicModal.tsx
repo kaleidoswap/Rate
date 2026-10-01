@@ -6,11 +6,11 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Clipboard,
   Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme, leading } from '../theme';
+import { copySensitive } from '../utils/sensitiveClipboard';
 
 interface RevealMnemonicModalProps {
   visible: boolean;
@@ -36,8 +36,8 @@ export const RevealMnemonicModal: React.FC<RevealMnemonicModalProps> = ({ visibl
 
   const handleCopy = () => {
     if (!mnemonic) return;
-    Clipboard.setString(mnemonic);
-    Alert.alert('Copied', 'Recovery phrase copied. Clear your clipboard once you have stored it safely.');
+    copySensitive(mnemonic);
+    Alert.alert('Copied', 'Recovery phrase copied. The clipboard will be cleared in 60 seconds.');
   };
 
   return (
