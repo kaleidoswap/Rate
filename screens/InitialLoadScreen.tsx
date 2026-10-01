@@ -25,8 +25,8 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
       if (!activeWallet) {
         const wallets = await dbService.getAllWallets();
         if (wallets.length > 0) {
-          activeWallet = wallets[0];
-          await dbService.setActiveWallet(activeWallet.id!);
+          await dbService.setActiveWallet(wallets[0].id!);
+          activeWallet = await dbService.getActiveWallet();
         }
       }
 

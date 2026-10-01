@@ -1,3 +1,5 @@
+import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
+import { useAppSelector } from '../store/hooks';
 import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
@@ -112,6 +114,8 @@ function buildGreeting(name?: string): string {
 
 export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
+  const activeWallet = useAppSelector(state => state.wallet.activeWallet);
+  const needsSetup = !activeWallet?.encrypted_mnemonic;
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
@@ -174,6 +178,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
   // Initialize protocol services (only once)
   const initializeApi = useCallback(async () => {
+    if (needsSetup) return false;
     if (protocolsReadyRef.current) return true; // Already initialized
 
     try {
@@ -236,7 +241,7 @@ export default function DashboardScreen({ navigation }: Props) {
       setConnectionError(error instanceof Error ? error.message : 'Failed to initialize');
       return null;
     }
-  }, []);
+  }, [needsSetup]);
 
   const checkNodeStatus = async (skipInitialization = false) => {
     try {
@@ -244,7 +249,7 @@ export default function DashboardScreen({ navigation }: Props) {
       setConnectionError(null);
 
       if (!skipInitialization && !protocolsReadyRef.current) {
-        await initializeApi();
+        if (!await initializeApi()) return false;
       }
 
       // Try any connected adapter
@@ -453,32 +458,47 @@ export default function DashboardScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [protocolsReady]);
 
-  // Update the useFocusEffect to handle screen focus
+  const connectAndLoad = async () => {
+    if (needsSetup) {
+      protocolsReadyRef.current = false;
+      setProtocolsReady(false);
+      setIsConnecting(false);
+      setLoading(false);
+      setConnectionError(null);
+      return;
+    }
+    setIsConnecting(true);
+    setConnectionError(null);
+    try {
+      if (!await initializeApi()) return;
+      await Promise.all([checkNodeStatus(true), loadDashboardData(true)]);
+    } finally {
+      // Both a failed connection and a missing wallet are terminal UI states.
+      setIsConnecting(false);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    protocolsReadyRef.current = false;
+    setProtocolsReady(false);
+  }, [activeWallet]);
+
   useFocusEffect(
     useCallback(() => {
-      const initializeAndLoad = async () => {
-        const ready = await initializeApi();
-        if (!ready) {
-          await checkNodeStatus(true);
-          return;
-        }
-
-        // Node metadata and balances are independent reads. Fetch them together
-        // so a slow getNodeInfo() call cannot hold the headline balance hostage.
-        await Promise.all([
-          checkNodeStatus(true),
-          loadDashboardData(true),
-        ]);
-      };
-
-      void initializeAndLoad();
-    }, [])
+      void connectAndLoad();
+    }, [activeWallet])
   );
 
   const onRefresh = async () => {
+    if (refreshing || isConnecting || needsSetup) return;
     setRefreshing(true);
-    await loadDashboardData();
-    setRefreshing(false);
+    try {
+      if (connectionError) protocolsReadyRef.current = false;
+      await connectAndLoad();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const formatSatoshis = (satoshis: number): string => {
@@ -759,6 +779,13 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         }
       >
+        {needsSetup ? (
+          <WalletSetupPrompt
+            hasExistingWallet={!!activeWallet}
+            onCreate={() => navigation.navigate('WalletSetup')}
+            onRestore={() => navigation.navigate('WalletRestore')}
+          />
+        ) : <>
         {(connectionError || balanceWarning) && (
           <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
             <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
@@ -769,6 +796,13 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
         {/* Unified wallet card: balance + per-network breakdown + action buttons. */}
         <View style={styles.walletCard}>
+          {connectionError && totalBalance === 0 ? (
+            <View style={{ padding: theme.spacing[6], gap: theme.spacing[2] }}>
+              <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg }}>Balance unavailable</Text>
+              <Text style={{ color: theme.colors.text.secondary }}>Reconnect to see your balance and make payments.</Text>
+            </View>
+          ) :
+
           <BalanceCard
             totalBalance={totalBalance}
             availableBtc={availableBtc}
@@ -799,7 +833,7 @@ export default function DashboardScreen({ navigation }: Props) {
                 onSwap={() => navigation.getParent()?.navigate('Swap')}
               />
             }
-          />
+          />}
         </View>
 
 
@@ -851,6 +885,7 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
+        </>}
         <TouchableOpacity
           accessibilityRole="button"
           onPress={() => navigation.navigate('Map')}
@@ -864,7 +899,7 @@ export default function DashboardScreen({ navigation }: Props) {
           <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
         </TouchableOpacity>
 
-        {policy.showChannelManagement && (
+        {!needsSetup && policy.showChannelManagement && (
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
