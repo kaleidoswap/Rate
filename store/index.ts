@@ -16,6 +16,7 @@ import swapReducer from './slices/swapSlice';
 import nostrReducer from './slices/nostrSlice';
 import { recoverPersistence } from './persistenceRecovery';
 import { nostrSecretsTransform, migrateNostrSecretsV4 } from './nostrPersistence';
+import { chatContentTransform } from './chatPersistence';
 import chatReducer from './slices/chatSlice';
 
 // Import middleware
@@ -53,13 +54,13 @@ type RootReducerState = ReturnType<typeof rootReducer>;
 const persistConfig: PersistConfig<RootReducerState> = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: persist decrypted DM history locally
+  whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: unread counts / paid markers only, never message content
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
   version: 4,
   // A timed-out migration rehydrates defaults and can overwrite the only keys.
   // Keep the gate closed until migration succeeds or the user retries.
   timeout: 0,
-  transforms: [nostrSecretsTransform],
+  transforms: [nostrSecretsTransform, chatContentTransform],
   migrate: async (state: any) => {
     // v2: replace the legacy default Nostr relay set with the current one.
     // The old defaults included relay.snort.social (frequently offline) and

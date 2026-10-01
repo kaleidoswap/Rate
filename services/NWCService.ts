@@ -104,6 +104,19 @@ export interface NWCSpendingLimits {
   budgetSats?: number;
 }
 
+/** What the user is asked to approve before an NWC client spends. */
+export interface NWCPaymentApprovalRequest {
+  amountSats: number;
+  description?: string;
+  invoice: string;
+}
+
+/** Resolves true to pay, false to refuse. Registered by the UI. */
+export type NWCPaymentApprover = (request: NWCPaymentApprovalRequest) => Promise<boolean>;
+
+/** An unanswered approval prompt is treated as a refusal after this long. */
+export const NWC_APPROVAL_TIMEOUT_MS = 60_000;
+
 // Conservative defaults: a leaked connection string can drain at most this much.
 export const DEFAULT_NWC_MAX_PAYMENT_SATS = 50_000;
 export const DEFAULT_NWC_BUDGET_SATS = 200_000;
@@ -122,6 +135,8 @@ export class NWCService {
   private walletSigner: NDKPrivateKeySigner | null = null;
   private subscriptions: Map<string, NDKSubscription> = new Map();
   private connections: Map<string, NWCConnection> = new Map();
+  // In-app confirmation for pay_invoice. With none registered, payments are refused.
+  private paymentApprover: NWCPaymentApprover | null = null;
   private isRunning = false;
 
   // Supported capabilities
@@ -141,6 +156,28 @@ export class NWCService {
   ];
 
   private constructor() {}
+
+  /**
+   * Register (or clear, with null) the in-app prompt that approves NWC
+   * payments. Fail closed: without an approver every pay_invoice is refused.
+   */
+  public setPaymentApprover(approver: NWCPaymentApprover | null): void {
+    this.paymentApprover = approver;
+  }
+
+  private async requestApproval(request: NWCPaymentApprovalRequest): Promise<boolean> {
+    const approver = this.paymentApprover;
+    if (!approver) return false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(false), NWC_APPROVAL_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([approver(request).catch(() => false), timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
 
   public static getInstance(): NWCService {
     if (!NWCService.instance) {
@@ -489,7 +526,8 @@ export class NWCService {
 
       // Enforce the connection's spending limits before touching the node.
       // Amountless invoices are refused: their amount can't be checked.
-      const amountSats = decodeBolt11(invoice).amountSats;
+      const decoded = decodeBolt11(invoice);
+      const amountSats = decoded.amountSats;
       if (!amountSats || amountSats <= 0) {
         return this.payInvoiceError(NWC_ERROR_CODES.RESTRICTED, 'Amountless invoices are not allowed');
       }
@@ -505,6 +543,18 @@ export class NWCService {
       // Reserve synchronously so concurrent requests can't overspend the budget.
       connection.spentSats += amountSats;
       reservedSats = amountSats;
+
+      // The user confirms every payment in the app; limits are only a backstop.
+      const approved = await this.requestApproval({
+        amountSats,
+        description: decoded.description,
+        invoice,
+      });
+      if (!approved) {
+        connection.spentSats -= reservedSats;
+        reservedSats = 0;
+        return this.payInvoiceError(NWC_ERROR_CODES.RESTRICTED, 'Payment was not approved in the wallet');
+      }
 
       const result = await this.rgbApiService.sendPayment({ invoice });
 

@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { theme, leading } from '../theme';
 import { copySensitive } from '../utils/sensitiveClipboard';
+import { useScreenCaptureProtection } from '../hooks/useScreenCaptureProtection';
 
 interface RevealMnemonicModalProps {
   visible: boolean;
@@ -26,6 +27,8 @@ interface RevealMnemonicModalProps {
  */
 export const RevealMnemonicModal: React.FC<RevealMnemonicModalProps> = ({ visible, mnemonic, onClose }) => {
   const [revealed, setRevealed] = useState(false);
+  // No screenshots / recordings while the recovery phrase can be shown.
+  useScreenCaptureProtection(visible);
 
   // Re-hide whenever the modal is re-opened.
   useEffect(() => {

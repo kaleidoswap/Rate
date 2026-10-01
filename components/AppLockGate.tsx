@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import SecurityService from '../services/SecurityService';
+import { setAppUnlocked } from '../services/appLockState';
 import { useAppSelector } from '../store/hooks';
 
 const PIN_LENGTH = 6;
@@ -53,6 +54,10 @@ async function resolveLockMethods(): Promise<LockMethods> {
 export function AppLockGate() {
   const autoLockTimeout = useAppSelector((s) => s.settings?.autoLockTimeout ?? 5);
   const [mode, setMode] = useState<LockMode>('checking');
+  // Publish the lock state for services (e.g. NWC payment approval).
+  useEffect(() => {
+    setAppUnlocked(mode === 'unlocked');
+  }, [mode]);
   const [methods, setMethods] = useState<LockMethods>({ pin: false, biometric: false });
   const [pin, setPin] = useState('');
   const [error, setError] = useState<string | null>(null);
