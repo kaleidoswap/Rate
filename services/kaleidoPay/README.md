@@ -89,6 +89,14 @@ and releases the prepayment only when both arrive. The screen then calls
 receives each stage (`paying`, `waiting_lockup`, `lockup_seen`, `claiming`,
 `claimed`, or `recoverable`/`failed` with an error).
 
+The account also implements the pay-flow contract from `codex/payment-experience`:
+`execute(preview, route, quote, attemptId)` starts paying an approved quote and
+returns `{ status: 'pending', reference }` once the invoices are on their way
+(it is idempotent per `attemptId`), and `status(attemptId)` maps the swap stage to
+`pending | completed | unknown | failed`, with the claim txid as the reference on
+completion. Quotes ask up to four providers in parallel with a 10 s reply budget,
+inside the screen's 15 s quote timeout.
+
 Secrets: the preimage and claim key, and the signed claim (its witness carries
 the preimage), are kept in SecureStore; the attempt file in the app sandbox holds
 only public swap data.

@@ -7,7 +7,7 @@ const mockQuotes = (expires = now() + 60) => [
 ];
 const mockStartAttempt = jest.fn(async ({ quote }: any) => {
   if (quote.provider === 'silent') throw new Error('swap server did not answer createswap');
-  return { id: 'a1', stage: 'created', quote };
+  return { id: `a-${quote.provider}`, stage: 'created', quote };
 });
 const mockPayAttempt = jest.fn(async (a: any) => ({ ...a, stage: 'claimed' }));
 jest.mock('@universal-bolt12/swap-market', () => ({
@@ -40,9 +40,9 @@ test('pays a bitcoin address from Lightning, skipping a provider that stays sile
     expect(quote).toMatchObject({ recipientSat: 25000, totalSat: 26600, feeSat: 1600 });
     const done = await executePayment(preview, quote);
     expect(done.stage).toBe('claimed');
-    expect(mockStartAttempt.mock.calls.map(c => (c[0] as any).quote.provider)).toEqual(['silent', 'cheap']);
-    expect((mockStartAttempt.mock.calls[1][0] as any).destination).toBe(address);
-    expect(mockPayAttempt).toHaveBeenCalledWith(expect.objectContaining({ id: 'a1' }), payer, expect.anything());
+    expect(mockStartAttempt.mock.calls.map(c => (c[0] as any).quote.provider)).toEqual(['silent', 'cheap', 'pricey']);
+    expect(mockStartAttempt.mock.calls.every(c => (c[0] as any).destination === address && (c[0] as any).timeoutMs === 10000)).toBe(true);
+    expect(mockPayAttempt).toHaveBeenCalledWith(expect.objectContaining({ id: 'a-cheap' }), payer, expect.anything());
   } finally { off(); }
 });
 
@@ -55,5 +55,32 @@ test('refuses to pay a total the user did not approve', async () => {
     mockPayAttempt.mockClear();
     await expect(executePayment(preview, { recipientSat: 25000, totalSat: 26000, feeSat: 1000, expiresAt: now() + 60 })).rejects.toThrow('approved total');
     expect(mockPayAttempt).not.toHaveBeenCalled();
+  } finally { off(); }
+});
+
+beforeEach(() => mockPayAttempt.mockClear());
+
+test('execute starts paying and status follows the swap to completion', async () => {
+  let finish: (a: any) => void = () => {};
+  mockPayAttempt.mockImplementationOnce((a: any, _p: any, deps: any) => {
+    deps.onUpdate({ ...a, stage: 'waiting_lockup' });
+    return new Promise(res => { finish = res; });
+  });
+  const account = createElectrumSwapAccount({ source: { id: 'bark3', rail: 'ln', network: 'mainnet' }, payer, attempts: store, secrets });
+  const off = registerKaleidoPayAccount(account);
+  try {
+    const preview = previewPayment(encodePaymentCode({ address, amountSat: 25000 }, 'mainnet'), 'mainnet', '', 'r3');
+    const quote = await quotePayment(preview);
+    if (preview.plan.status !== 'ready') throw new Error('plan');
+    const started = await account.execute(preview, preview.plan.route, quote, 'ui-1');
+    expect(started).toEqual({ status: 'pending', reference: 'a-cheap' });
+    expect(await account.execute(preview, preview.plan.route, quote, 'ui-1')).toMatchObject({ status: 'pending' });
+    expect(mockPayAttempt).toHaveBeenCalledTimes(1);
+    store.load.mockResolvedValueOnce(null);
+    expect(await account.status('ui-1')).toMatchObject({ status: 'pending' });
+    finish({ id: 'a-cheap', stage: 'claimed', claim: { txid: 'c1' } });
+    await new Promise(r => setTimeout(r, 0));
+    expect(await account.status('ui-1')).toEqual({ status: 'completed', reference: 'c1' });
+    expect(await account.status('nope')).toEqual({ status: 'unknown' });
   } finally { off(); }
 });
