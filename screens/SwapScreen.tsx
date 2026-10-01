@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   TextInput,
+  useWindowDimensions,
   View,
   Text,
   StyleSheet,
@@ -44,6 +45,7 @@ import {
   normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
+import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import { theme } from '../theme';
 import { feedback } from '../utils/feedback';
@@ -65,6 +67,7 @@ interface Asset {
 
 export default function SwapScreen({ navigation }: Props) {
   const dispatch = useDispatch();
+  const { height: screenHeight } = useWindowDimensions();
   const swapState = useSelector((state: RootState) => state.swap);
   const walletState = useSelector((state: RootState) => state.wallet);
   const assetsState = useSelector((state: RootState) => state.assets);
@@ -94,6 +97,11 @@ export default function SwapScreen({ navigation }: Props) {
   const [showAssetPicker, setShowAssetPicker] = useState<'from' | 'to' | null>(null);
   const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [reviewQuote, setReviewQuote] = useState<SwapQuote | null>(null);
+  const [previousReviewQuote, setPreviousReviewQuote] = useState<SwapQuote | null>(null);
+  const executingRef = React.useRef(false);
+  const quoteRequestRef = React.useRef(0);
+  const lastAutoRefreshRef = React.useRef(0);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
   const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
@@ -165,8 +173,11 @@ export default function SwapScreen({ navigation }: Props) {
     };
   }, [pollingInterval]);
 
-  // Auto-Quote Logic
+  // Invalidate quotes immediately when the input changes, including in-flight responses.
   useEffect(() => {
+    quoteRequestRef.current += 1;
+    dispatch(setCurrentQuote(null));
+    dispatch(setQuoteLoading(false));
     const timer = setTimeout(() => {
       if (swapState.fromAmount && parseFloat(swapState.fromAmount) > 0 && swapState.fromAsset && swapState.toAsset) {
         getQuote();
@@ -178,7 +189,7 @@ export default function SwapScreen({ navigation }: Props) {
       }
     }, 500); // 500ms debounce
 
-    return () => clearTimeout(timer);
+    return () => { clearTimeout(timer); quoteRequestRef.current += 1; };
   }, [swapState.fromAmount, swapState.fromAsset, swapState.toAsset]);
 
   // Always-fresh handle to getQuote for use inside intervals (avoids stale closures).
@@ -187,25 +198,24 @@ export default function SwapScreen({ navigation }: Props) {
   // Live quote expiry countdown + auto-refresh (mirrors the extension's behaviour:
   // quotes are short-lived, so we tick a countdown and refresh as it ages out).
   useEffect(() => {
-    const q = swapState.currentQuote;
-    if (!q || swapState.isExecuting || showConfirmModal) {
+    const q = showConfirmModal ? reviewQuote : swapState.currentQuote;
+    if (!q || swapState.isExecuting) {
       setQuoteSecsLeft(null);
       return;
     }
-    let lastRefresh = Date.now();
     const tick = () => {
       const left = Math.max(0, Math.round((q.expiry_timestamp - Date.now()) / 1000));
       setQuoteSecsLeft(left);
-      const aged = Date.now() - lastRefresh >= QUOTE_REFRESH_MS;
-      if (left <= 0 || aged) {
-        lastRefresh = Date.now();
+      const aged = Date.now() - q.expiry_timestamp >= -QUOTE_REFRESH_MS;
+      if (!showConfirmModal && !swapState.isQuoteLoading && (left <= 0 || aged) && Date.now() - lastAutoRefreshRef.current >= QUOTE_REFRESH_MS) {
+        lastAutoRefreshRef.current = Date.now();
         getQuoteRef.current?.();
       }
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [swapState.currentQuote, swapState.isExecuting, showConfirmModal]);
+  }, [swapState.currentQuote, swapState.isExecuting, showConfirmModal, reviewQuote, swapState.isQuoteLoading]);
 
   const loadTradingPairs = async () => {
     setPairsLoading(true);
@@ -339,6 +349,7 @@ export default function SwapScreen({ navigation }: Props) {
   }, [tradingPairs, venueFilter]);
 
   const getQuote = async () => {
+    const requestId = ++quoteRequestRef.current;
     try {
       if (!swapState.fromAmount) return;
 
@@ -415,7 +426,10 @@ export default function SwapScreen({ navigation }: Props) {
             to_amount_raw: toAmountRaw,
           };
 
-          dispatch(setCurrentQuote(quote));
+          if (requestId === quoteRequestRef.current) {
+            dispatch(setCurrentQuote(quote));
+            return quote;
+          }
         } catch (err) {
           console.error('[SwapScreen] Flashnet quote failed:', err);
           dispatch(setError('Failed to get Flashnet quote'));
@@ -466,8 +480,10 @@ export default function SwapScreen({ navigation }: Props) {
             to_asset: toTicker,
             from_amount: fromAmount,
             to_amount: parseFloat(displayToAmount.toFixed(toPrecision)),
-            fee_amount: quoteResponse.fee?.final_fee || 0,
-            exchange_rate: quoteResponse.price || 0,
+            fee_amount: isBtcTicker(toTicker)
+              ? satsToBtcDisplay((quoteResponse.fee?.final_fee || 0) / 10 ** (quoteResponse.fee?.fee_asset_precision ?? 11) * 1e8)
+              : (quoteResponse.fee?.final_fee || 0) / 10 ** (quoteResponse.fee?.fee_asset_precision ?? toAsset.precision),
+            exchange_rate: fromAmount > 0 ? displayToAmount / fromAmount : 0,
             expiry_timestamp: quoteResponse.expires_at ? quoteResponse.expires_at * 1000 : Date.now() + 60000,
             maker_pubkey: quoteResponse.maker_pubkey || '',
             from_asset_id: quotedFromAssetId,
@@ -476,7 +492,10 @@ export default function SwapScreen({ navigation }: Props) {
             to_amount_raw: rawToAmount,
           };
 
-          dispatch(setCurrentQuote(quote));
+          if (requestId === quoteRequestRef.current) {
+            dispatch(setCurrentQuote(quote));
+            return quote;
+          }
         } catch (err: any) {
           console.error('[SwapScreen] Kaleidoswap quote failed:', err);
           dispatch(setError(err?.message || 'Failed to get quote'));
@@ -486,16 +505,35 @@ export default function SwapScreen({ navigation }: Props) {
       console.error('Failed to get quote:', error);
       dispatch(setError('Failed to fetch quote'));
     } finally {
-      dispatch(setQuoteLoading(false));
+      if (requestId === quoteRequestRef.current) dispatch(setQuoteLoading(false));
     }
   };
 
   // Keep the interval's handle pointing at the latest getQuote.
   getQuoteRef.current = getQuote;
 
+  const refreshReviewQuote = async () => {
+    const updated = await getQuote();
+    if (updated) {
+      setPreviousReviewQuote(reviewQuote);
+      setReviewQuote(updated);
+    }
+  };
+
   const executeSwap = async () => {
-    if (!swapState.currentQuote) return;
-    const quote = swapState.currentQuote;
+    if (!reviewQuote || executingRef.current || swapState.isExecuting) return;
+    const quote = reviewQuote;
+    if (quoteHasExpired(quote.expiry_timestamp)) {
+      setQuoteSecsLeft(0);
+      return;
+    }
+    if (quote.to_amount <= 0 || quote.from_amount !== Number(swapState.fromAmount) ||
+        quote.from_asset !== swapState.fromAsset || quote.to_asset !== swapState.toAsset) {
+      dispatch(setError('The payment amount changed. Request a new quote.'));
+      setShowConfirmModal(false);
+      return;
+    }
+    executingRef.current = true;
 
     try {
       dispatch(setExecuting(true));
@@ -516,7 +554,7 @@ export default function SwapScreen({ navigation }: Props) {
           ? btcDisplayToSats(quote.from_amount)
           : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
         const rawToAmount = quote.to_amount_raw ?? Math.round(isBtcTicker(quote.to_asset)
-          ? quote.to_amount * 1e8
+          ? btcDisplayToSats(quote.to_amount)
           : quote.to_amount * Math.pow(10, toPrecision));
 
         const result = await client.executeSwap({
@@ -524,9 +562,8 @@ export default function SwapScreen({ navigation }: Props) {
           assetInAddress: fromAssetId,
           assetOutAddress: toAssetId,
           amountIn: String(rawAmount),
-          // Floor the output at 95% of the quote to bound slippage, matching
-          // rate-extension (a `minAmountOut` of '0' offered no protection).
-          minAmountOut: String(Math.floor(rawToAmount * 0.95)),
+          // Submit the same integer minimum shown in the review.
+          minAmountOut: String(minimumSwapOutput(rawToAmount, DEFAULT_FLASHNET_SLIPPAGE_BPS)),
           maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
         });
 
@@ -636,6 +673,8 @@ export default function SwapScreen({ navigation }: Props) {
         error_message: error instanceof Error ? error.message : 'Swap execution failed',
       }));
       dispatch(setExecuting(false));
+    } finally {
+      executingRef.current = false;
     }
   };
 
@@ -930,13 +969,13 @@ export default function SwapScreen({ navigation }: Props) {
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Rate</Text>
             <Text style={styles.quoteInfoValue}>
-              1 {swapState.fromAsset} ≈ {swapState.currentQuote.exchange_rate.toFixed(2)} {swapState.toAsset}
+              1 {unitLabelFor(swapState.fromAsset)} ≈ {swapState.currentQuote.exchange_rate.toFixed(2)} {unitLabelFor(swapState.toAsset)}
             </Text>
           </View>
           <View style={styles.quoteInfoRow}>
-            <Text style={styles.quoteInfoLabel}>Network Fee</Text>
+            <Text style={styles.quoteInfoLabel}>Swap fee</Text>
             <Text style={styles.quoteInfoValue}>
-              {swapState.currentQuote.fee_amount} {swapState.fromAsset}
+              {swapState.currentQuote.fee_amount} {unitLabelFor(swapState.currentQuote.venue === 'flashnet' ? swapState.fromAsset : swapState.toAsset)}
             </Text>
           </View>
           {quoteSecsLeft != null && (
@@ -959,9 +998,13 @@ export default function SwapScreen({ navigation }: Props) {
 
       {/* Main Action Button */}
       <Button
-        title={swapState.isQuoteLoading ? 'Fetching Best Price...' : (swapState.currentQuote ? 'Swap' : 'Enter Amount')}
-        onPress={() => setShowConfirmModal(true)}
-        disabled={!swapState.currentQuote || swapState.isQuoteLoading || !swapState.fromAmount}
+        title={swapState.isQuoteLoading ? 'Fetching Best Price...' : (swapState.currentQuote ? 'Review swap' : 'Enter Amount')}
+        onPress={() => {
+          setReviewQuote(swapState.currentQuote);
+          setPreviousReviewQuote(null);
+          setShowConfirmModal(true);
+        }}
+        disabled={!swapState.currentQuote || swapState.currentQuote.to_amount <= 0 || swapState.isQuoteLoading || !swapState.fromAmount}
         loading={swapState.isQuoteLoading}
         variant="primary"
         fullWidth
@@ -1030,7 +1073,7 @@ export default function SwapScreen({ navigation }: Props) {
   };
 
   const renderProgressSteps = () => {
-    const pair = findPair(filteredPairs, swapState.currentQuote!.from_asset, swapState.currentQuote!.to_asset);
+    const pair = reviewQuote ? findPair(filteredPairs, reviewQuote.from_asset, reviewQuote.to_asset) : undefined;
     const flash = pair ? isFlashnetPair(pair) : false;
     const steps = flash
       ? [{ key: 'execute', label: 'Executing swap' }, { key: 'done', label: 'Completed' }]
@@ -1112,49 +1155,77 @@ export default function SwapScreen({ navigation }: Props) {
       );
     }
 
-    if (!showConfirmModal || !swapState.currentQuote) return null;
+    if (!showConfirmModal || !reviewQuote) return null;
 
     // currentQuote stores tickers (see from_asset: fromTicker in loadQuote).
-    const fromTicker = swapState.currentQuote.from_asset;
-    const toTicker = swapState.currentQuote.to_asset;
+    const fromTicker = reviewQuote.from_asset;
+    const toTicker = reviewQuote.to_asset;
+
+    const isFlashnet = reviewQuote.venue === 'flashnet';
+    const pair = findPair(filteredPairs, fromTicker, toTicker);
+    const toPrecision = pair ? (pair.base.ticker === toTicker ? pair.base.precision : pair.quote.precision) : 8;
+    const rawOut = reviewQuote.to_amount_raw ?? (isBtcTicker(toTicker)
+      ? btcDisplayToSats(reviewQuote.to_amount) : Math.round(reviewQuote.to_amount * 10 ** toPrecision));
+    const validOutput = Number.isSafeInteger(rawOut) && rawOut > 0;
+    const minRaw = isFlashnet && validOutput ? minimumSwapOutput(rawOut, DEFAULT_FLASHNET_SLIPPAGE_BPS) : rawOut;
+    const minDisplay = !isFlashnet ? reviewQuote.to_amount : isBtcTicker(toTicker) ? satsToBtcDisplay(minRaw) : minRaw / 10 ** toPrecision;
+    const expired = quoteHasExpired(reviewQuote.expiry_timestamp);
 
     return (
       <View style={styles.modalOverlay}>
         <View style={styles.confirmModal}>
           <Text style={styles.confirmTitle}>Confirm Swap</Text>
+          {swapState.error && <Text style={styles.quoteChangeNotice}>{swapState.error}</Text>}
 
           {swapState.isExecuting ? (
             renderProgressSteps()
           ) : (
-          <View style={styles.confirmDetails}>
+          <ScrollView style={{ maxHeight: Math.min(440, screenHeight * 0.5) }} contentContainerStyle={styles.confirmDetails}>
+            {previousReviewQuote && (previousReviewQuote.to_amount !== reviewQuote.to_amount || previousReviewQuote.fee_amount !== reviewQuote.fee_amount) && (
+              <Text style={styles.quoteChangeNotice} accessibilityLiveRegion="polite">
+                Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {previousReviewQuote.fee_amount} → {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}. Review these changes before confirming.
+              </Text>
+            )}
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>Minimum received</Text>
+              <Text style={styles.confirmValue}>{validOutput ? `${formatDisplayAmount(minDisplay, toTicker)} ${unitLabelFor(toTicker)}` : 'Unavailable'}</Text>
+            </View>
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>Slippage tolerance</Text>
+              <Text style={styles.confirmValue}>{isFlashnet ? `${DEFAULT_FLASHNET_SLIPPAGE_BPS / 100}%` : 'Fixed quote'}</Text>
+            </View>
+            <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>Quote expires</Text>
+              <Text style={styles.confirmValue}>{expired ? 'Expired — refresh to continue' : `In ${quoteSecsLeft ?? Math.ceil((reviewQuote.expiry_timestamp - Date.now()) / 1000)}s`}</Text>
+            </View>
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>From:</Text>
               <Text style={styles.confirmValue}>
-                {formatDisplayAmount(swapState.currentQuote.from_amount, fromTicker)} {unitLabelFor(fromTicker)}
+                {formatDisplayAmount(reviewQuote.from_amount, fromTicker)} {unitLabelFor(fromTicker)}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>To:</Text>
               <Text style={styles.confirmValue}>
-                {formatDisplayAmount(swapState.currentQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}
+                {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Fee:</Text>
               <Text style={styles.confirmValue}>
-                {swapState.currentQuote.fee_amount} {unitLabelFor(fromTicker)}
+                {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}
               </Text>
             </View>
 
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Rate:</Text>
               <Text style={styles.confirmValue}>
-                1 {fromTicker} = {swapState.currentQuote.exchange_rate.toFixed(8)} {toTicker}
+                1 {unitLabelFor(fromTicker)} = {reviewQuote.exchange_rate.toFixed(8)} {unitLabelFor(toTicker)}
               </Text>
             </View>
-          </View>
+          </ScrollView>
           )}
 
           {!swapState.isExecuting && (
@@ -1166,9 +1237,11 @@ export default function SwapScreen({ navigation }: Props) {
                 style={styles.confirmActionButton}
               />
               <Button
-                title="Confirm Swap"
+                title={expired ? 'Refresh quote' : 'Confirm swap'}
                 variant="primary"
-                onPress={executeSwap}
+                onPress={expired ? refreshReviewQuote : executeSwap}
+                loading={swapState.isQuoteLoading}
+                disabled={swapState.isQuoteLoading || !validOutput}
                 style={styles.confirmActionButton}
               />
             </View>
@@ -1273,6 +1346,7 @@ export default function SwapScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  quoteChangeNotice: { color: theme.colors.warning[500], fontSize: theme.typography.fontSize.sm, lineHeight: 20, marginBottom: theme.spacing[3] },
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.secondary,

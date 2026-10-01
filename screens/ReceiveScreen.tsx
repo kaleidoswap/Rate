@@ -1,6 +1,7 @@
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo } from 'react';
 import {
+  Modal,
   View,
   Text,
   TouchableOpacity,
@@ -392,6 +393,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   // the QR (and its single "Copy" affordance) is the primary way to receive, so
   // the list of individual addresses only appears when the user expands it.
   const [showAddresses, setShowAddresses] = useState(false);
+  const [showPaymentOptions, setShowPaymentOptions] = useState(false);
+  const [fallbackAddress, setFallbackAddress] = useState<{ label: string; value: string } | null>(null);
   // Per-address "show full" toggles in the unified address list (keyed by row).
   const [expandedAddrs, setExpandedAddrs] = useState<Record<string, boolean>>({});
   // Collapse/expand the full address inside the single-network receive card.
@@ -405,6 +408,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   const isLite = disclosureLevel === 'lite';
   const [showAllNetworks, setShowAllNetworks] = useState(false);
   const [amount, setAmount] = useState('');
+  useEffect(() => { setFallbackAddress(null); }, [amount, networkType, selectedAsset.asset_id]);
+
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
   // "+" opens the new-asset chooser (Spark / Arkade / new RGB asset).
@@ -464,6 +469,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   const resetReceiveSurface = React.useCallback(() => {
     cancelReceiveWork();
+    setFallbackAddress(null);
     setShowNetworkDropdown(false);
     setError(null);
     setUnifiedError(null);
@@ -1961,10 +1967,10 @@ export default function ReceiveScreen({ navigation }: Props) {
           onPress={() => setShowAddresses((v) => !v)}
           activeOpacity={0.7}
         >
-          <Text style={styles.addrListTitle}>Addresses</Text>
+          <Text style={styles.addrListTitle}>Payment methods</Text>
           <View style={styles.addrListHeaderRight}>
             <Text style={styles.addrListCount}>
-              {unifiedAddresses.length} {unifiedAddresses.length === 1 ? 'address' : 'addresses'}
+              {unifiedAddresses.length} available
             </Text>
             <Ionicons
               name={showAddresses ? 'chevron-up' : 'chevron-down'}
@@ -1972,6 +1978,10 @@ export default function ReceiveScreen({ navigation }: Props) {
               color={theme.colors.text.tertiary}
             />
           </View>
+        </TouchableOpacity>
+        <Text style={styles.universalRequestSubtitle}>{unifiedMethods.join(' · ')}</Text>
+        <TouchableOpacity accessibilityRole="button" style={styles.addrInfoToggle} onPress={() => setShowAddresses(true)}>
+          <Text style={styles.addrValue}>Sender can’t scan this? Choose a single payment method.</Text>
         </TouchableOpacity>
         {showAddresses && unifiedAddresses.map((a, idx) => {
           const isOpen = !!expandedAddrs[a.key];
@@ -1999,6 +2009,10 @@ export default function ReceiveScreen({ navigation }: Props) {
                     <Text style={styles.addrValue} numberOfLines={1}>{trunc(a.value)}</Text>
                   )}
                 </View>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.addrIconBtn} accessibilityRole="button"
+                accessibilityLabel={`Show ${a.label} QR code`} onPress={() => setFallbackAddress(a)}>
+                <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.primary} />
               </TouchableOpacity>
               {/* Per-address "show full" — the full value lives here, not on the URI. */}
               <TouchableOpacity
@@ -2436,9 +2450,9 @@ export default function ReceiveScreen({ navigation }: Props) {
               <Ionicons name="apps" size={16} color={accent} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.universalRequestTitle}>Universal payment request</Text>
-              <Text style={styles.universalRequestSubtitle} numberOfLines={1}>
-                Automatically routes supported Bitcoin payments
+              <Text style={styles.universalRequestTitle}>Scan to pay</Text>
+              <Text style={styles.universalRequestSubtitle}>
+                One request for compatible wallets
               </Text>
             </View>
           </View>
@@ -2463,7 +2477,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           </View>
         )}
 
-        {!unifiedLoading
+        {showPaymentOptions && !unifiedLoading
           && getProtocolStatus().RGB
           && !receiveMethods.some((method) => method.protocol === 'RGB') && (
           <TouchableOpacity
@@ -2637,7 +2651,6 @@ export default function ReceiveScreen({ navigation }: Props) {
         keyboardDismissMode="on-drag"
       >
         {renderAssetTabs()}
-        {renderNetworkDropdown()}
         {renderAmountRow()}
         {renderContent()}
         <DepositMonitorCard
@@ -2649,7 +2662,41 @@ export default function ReceiveScreen({ navigation }: Props) {
           methodCount={networkType === 'unified' ? unifiedMethods.length : 1}
         />
         {networkType === 'unified' && renderUnifiedAddressList()}
+        <TouchableOpacity style={styles.addrListHeader} accessibilityRole="button"
+          accessibilityState={{ expanded: showPaymentOptions }}
+          onPress={() => setShowPaymentOptions(value => !value)}>
+          <Text style={styles.addrListTitle}>Payment options</Text>
+          <Ionicons name={showPaymentOptions ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+        {showPaymentOptions && <>{renderNetworkDropdown()}</>}
       </ScrollView>
+
+      <Modal visible={fallbackAddress !== null} animationType="slide" presentationStyle="pageSheet"
+        onRequestClose={() => setFallbackAddress(null)}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.receiveHeader}>
+            <Text style={styles.receiveHeaderTitle}>{fallbackAddress?.label}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close payment method"
+              style={styles.receiveBackButton} onPress={() => setFallbackAddress(null)}>
+              <Ionicons name="close" size={26} color={theme.colors.text.primary} />
+            </TouchableOpacity>
+          </View>
+          <ScrollView contentContainerStyle={styles.scrollContent}>
+            <Text style={styles.universalRequestSubtitle}>Ask the sender to use this payment method.</Text>
+            {fallbackAddress && <>
+              <View style={styles.qrContainer}><View style={styles.qrCodeWrapper}>
+                <DeferredQrCode value={fallbackAddress.value} size={qrSize} />
+              </View></View>
+              {renderUriCard({
+                value: fallbackAddress.value, label: fallbackAddress.label,
+                accent: theme.colors.primary[500], icon: <Ionicons name="qr-code-outline" size={18} color={theme.colors.text.primary} />,
+                onCopy: async () => { await Clipboard.setString(fallbackAddress.value); feedback.select(); setCopied(true); setTimeout(() => setCopied(false), 1600); },
+                onShare: async () => { try { await Share.share({ message: fallbackAddress.value }); } catch {} },
+              })}
+            </>}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
       {/* Asset picker (opened by the "+" tab) */}
       <AssetSelector

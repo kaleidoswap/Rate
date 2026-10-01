@@ -14,6 +14,11 @@ interface ProtocolBalance {
 
 interface BalanceCardProps {
     totalBalance: number;
+    hideAmounts?: boolean;
+    availableBtc?: number;
+    pendingBtc?: number;
+    includesTokenValue?: boolean;
+    rgbBalanceIsLightning?: boolean;
     bitcoinUnit: string;
     onRefresh: () => void;
     refreshing: boolean;
@@ -53,6 +58,11 @@ const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({
     totalBalance,
+    hideAmounts = false,
+    availableBtc,
+    pendingBtc = 0,
+    includesTokenValue = false,
+    rgbBalanceIsLightning = false,
     bitcoinUnit,
     onRefresh,
     refreshing,
@@ -75,7 +85,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     // Per-network balances are collapsed behind a chevron (extension parity).
     const [showBreakdown, setShowBreakdown] = useState(false);
 
-    // Vertical breakdown rows. On-chain is always present; the protocol legs
+    // Show on-chain funds only when the adapter reports them; the protocol legs
     // (RLN / Spark / Arkade) appear only when that key exists in `byProtocol`,
     // mirroring the `activeProtocols` presence logic as individual rows.
     const breakdownRows: Array<{
@@ -84,7 +94,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         subtitle: string;
         accent: string;
         value: number;
-    }> = [
+    }> = rgbBalanceIsLightning || !byProtocol?.RGB ? [] : [
         {
             key: 'BITCOIN',
             name: 'BTC on-chain',
@@ -93,7 +103,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             // On-chain = the RGB/RLN node's L1 balance (mirrors the extension's
             // `btcOnchain = onchainData.confirmedSat`). `onChainBalance` is the
             // aggregate spendable total, so it can't be used for this row.
-            value: byProtocol?.RGB?.total ?? 0,
+            value: byProtocol?.RGB?.confirmed ?? 0,
         },
     ];
     if (byProtocol && 'RGB' in byProtocol) {
@@ -103,7 +113,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             subtitle: 'RLN balance',
             accent: protocolColor('RGB'),
             // RLN = Lightning channel balance (extension's `btcLightning`).
-            value: lightningBalance,
+            value: rgbBalanceIsLightning ? (byProtocol.RGB?.total ?? 0) : lightningBalance,
         });
     }
     if (byProtocol && 'SPARK' in byProtocol) {
@@ -129,7 +139,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         <View style={styles.container}>
             {/* Total balance */}
             <View style={styles.totalBalanceContainer}>
-                <Text style={styles.balanceLabel}>Total Balance</Text>
+                <Text style={[styles.balanceLabel, { paddingRight: 100 }]}>{includesTokenValue ? 'Total estimated value' : 'Total balance'}</Text>
                 {loading ? (
                     <View style={{ gap: 10, marginTop: 4 }}>
                         <Skeleton width={180} height={34} radius={10} style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
@@ -144,9 +154,12 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}. Tap to change denomination.`}
                     >
                         <View style={styles.balanceRow}>
-                            <AmountText style={styles.balanceAmount}>{primaryText}</AmountText>
+                            <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{primaryText}</AmountText>
                             {!!primaryUnitLabel && (
-                                <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
+                                <View style={styles.unitChip}>
+                                    <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
+                                    <Ionicons name="chevron-down" size={14} color={theme.colors.text.secondary} />
+                                </View>
                             )}
                         </View>
                         <AmountText style={styles.balanceUsd}>{secondaryText ?? ''}</AmountText>
@@ -165,6 +178,24 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     </>
                 )}
             </View>
+
+            {!loading && availableBtc !== undefined && (
+                <View style={styles.availability}>
+                    <View style={styles.availabilityRow}>
+                        <Text style={styles.availabilityLabel}>Available bitcoin</Text>
+                        <AmountText style={styles.availabilityValue}>{hideAmounts ? '••••' : `${formatSatoshis(availableBtc)} ${bitcoinUnit}`}</AmountText>
+                    </View>
+                    {pendingBtc > 0 && (
+                        <View style={styles.availabilityRow}>
+                            <Text style={styles.availabilityLabel}>Pending / unavailable</Text>
+                            <AmountText style={styles.availabilityValue}>{hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</AmountText>
+                        </View>
+                    )}
+                    <Text style={styles.availabilityHint}>
+                        Spendable amount depends on the payment method and fees.{includesTokenValue ? ' Total value also includes priced tokens; tokens must be swapped before spending as bitcoin.' : ''}
+                    </Text>
+                </View>
+            )}
 
             {/* Top-right controls: refresh + (optional) network-balance toggle */}
             <View style={styles.topControls}>
@@ -224,10 +255,10 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                                 </View>
                                 <View style={styles.networkValueBlock}>
                                     <AmountText style={styles.networkValueFiat}>
-                                        {`$${formatUSD(row.value)}`}
+                                        {hideAmounts ? '••••' : `$${formatUSD(row.value)}`}
                                     </AmountText>
                                     <AmountText style={styles.networkValueSats}>
-                                        {`${formatSatoshis(row.value)} ${bitcoinUnit}`}
+                                        {hideAmounts ? '••••' : `${formatSatoshis(row.value)} ${bitcoinUnit}`}
                                     </AmountText>
                                 </View>
                             </View>
@@ -271,8 +302,15 @@ const styles = StyleSheet.create({
         color: theme.colors.text.muted,
         marginBottom: theme.spacing[1],
     },
+    unitChip: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1], padding: theme.spacing[2], borderRadius: theme.borderRadius.md, backgroundColor: theme.colors.surface.tertiary },
+    availability: { gap: theme.spacing[2] },
+    availabilityRow: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: theme.spacing[2] },
+    availabilityLabel: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm },
+    availabilityValue: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm },
+    availabilityHint: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.xs, lineHeight: 18 },
     balanceRow: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         alignItems: 'baseline',
         marginBottom: theme.spacing[1],
     },
@@ -306,8 +344,8 @@ const styles = StyleSheet.create({
         gap: theme.spacing[2],
     },
     controlButton: {
-        width: 36,
-        height: 36,
+        width: 44,
+        height: 44,
         borderRadius: theme.borderRadius.full,
         backgroundColor: 'rgba(255,255,255,0.12)',
         justifyContent: 'center',

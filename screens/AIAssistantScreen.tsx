@@ -19,13 +19,17 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import QVACService from '../services/QVACService';
+import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
+import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig } from '../store/slices/settingsSlice';
+import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, selectAiOnboarded, setAiOnboarded } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
@@ -137,6 +141,28 @@ export default function AIAssistantScreen({ navigation }: Props) {
   const btcPriceUSD = useSelector((s: any) => s?.wallet?.btcPriceUSD) || 0;
   const mindConfig = useSelector(selectMindConfig);
   const dispatch = useDispatch();
+  const aiOnboarded = useSelector(selectAiOnboarded);
+  const [mindOnboardingOpen, setMindOnboardingOpen] = useState(false);
+  const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
+  const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
+  const openMindSetup = useCallback(async () => {
+    const availability = await QVACService.getInstance().getAvailability().catch(() => null);
+    setMindAvailability(availability);
+    setMindOnboardingOpen(true);
+  }, []);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    if (!aiOnboarded) {
+      QVACService.getInstance().getAvailability().catch(() => null).then((availability) => {
+        if (active) { setMindAvailability(availability); setMindOnboardingOpen(true); }
+      });
+    }
+    return () => { active = false; setMindOnboardingOpen(false); setVoiceAgentOpen(false); };
+  }, [aiOnboarded]));
+  const finishMindSetup = () => {
+    dispatch(setAiOnboarded(true));
+    setMindOnboardingOpen(false);
+  };
   const qvac = useQVAC(aiEnabled);
   // Shared KaleidoMind agent — the SAME funnel the voice overlay uses (fast-path
   // → recipes → skill-scoped agentic loop over wallet/merchant/memory/RAG/skill
@@ -716,15 +742,14 @@ export default function AIAssistantScreen({ navigation }: Props) {
           <View style={styles.modelBannerRow}>
             <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary[600]} />
             <Text style={styles.modelBannerText}>
-              KaleidoMind (on-device AI) is off. Enable to download and run it locally.
-              It's experimental — it can make mistakes.
+              Ask about your wallet or pay by voice. Choose on-device AI or a paired desktop to get started.
             </Text>
             <TouchableOpacity
-              onPress={() => dispatch(setAiMode('local'))}
+              onPress={openMindSetup}
               style={styles.modelRetry}
-              accessibilityLabel="Enable on-device AI"
+              accessibilityLabel="Set up Mind"
             >
-              <Text style={styles.modelRetryText}>Enable</Text>
+              <Text style={styles.modelRetryText}>Set up</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -896,6 +921,14 @@ export default function AIAssistantScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
+      <KaleidoMindOnboarding
+        visible={mindOnboardingOpen}
+        availability={mindAvailability}
+        onSelectLocal={() => { dispatch(setAiMode('local')); finishMindSetup(); }}
+        onSelectDelegate={() => { finishMindSetup(); navigation.navigate('PairDesktop'); }}
+        onSkip={() => { finishMindSetup(); }}
+      />
+      <VoiceAgentOverlay visible={voiceAgentOpen} autoListen={true} onClose={() => setVoiceAgentOpen(false)} />
       <MainHeader
         title="KaleidoMind"
         subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
@@ -903,6 +936,12 @@ export default function AIAssistantScreen({ navigation }: Props) {
         titleBadge={<Badge label="Experimental" color={theme.colors.warning[500]} size="sm" />}
         rightAction={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {aiEnabled && (
+              <TouchableOpacity style={styles.headerBtn} accessibilityRole="button"
+                accessibilityLabel="Start a voice conversation" onPress={() => setVoiceAgentOpen(true)}>
+                <Ionicons name="mic-outline" size={20} color={theme.colors.text.primary} />
+              </TouchableOpacity>
+            )}
             {nostrState.isConnected && (
               <View style={styles.nostrIndicator}>
                 <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />

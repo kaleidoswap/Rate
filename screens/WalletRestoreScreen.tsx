@@ -197,7 +197,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   };
 
   const handleFinish = () => {
-    navigation.replace('NostrSetup', { isInitialSetup: true });
+    navigation.replace('Dashboard');
   };
 
   const handleWordChange = (index: number, value: string) => {
