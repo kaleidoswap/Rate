@@ -1,6 +1,8 @@
-import { acceptedRails, decodePaymentCode, planPayment } from './universalCode';
-import type { Network, PaymentCode, PaymentRequest, Plan, Route, SwapCapability, WalletSource } from './universalCode';
-export type { Network } from './universalCode';
+import { acceptedRails, decodePaymentCode, planPayment } from '@universal-bolt12/universal-code';
+import type { Network, PaymentCode, PaymentRequest, Plan, Route, SwapCapability, WalletSource } from '@universal-bolt12/universal-code';
+export type { Network } from '@universal-bolt12/universal-code';
+import type { SwapAttempt } from '@universal-bolt12/swap-market';
+export type { SwapAttempt } from '@universal-bolt12/swap-market';
 
 export interface Preview { code: PaymentCode; request: PaymentRequest; plan: Plan }
 export interface Quote { recipientSat: number; totalSat: number; feeSat: number; expiresAt: number }
@@ -9,6 +11,8 @@ export interface PayAccount {
   swaps: SwapCapability[];
   // Must validate offer semantics, chain, expiry and authenticated invoice terms before quoting.
   quote: (preview: Preview, route: Route) => Promise<Quote>;
+  /** Executes an approved quote; must persist recovery material before funding. */
+  pay?: (preview: Preview, route: Route, quote: Quote, onUpdate?: (attempt: SwapAttempt) => void) => Promise<SwapAttempt>;
 }
 const accounts = new Map<string, PayAccount>();
 export function registerKaleidoPayAccount(account: PayAccount): () => void {
@@ -45,3 +49,17 @@ export async function quotePayment(preview: Preview): Promise<Quote> {
     || quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('The payment quote is invalid or expired.');
   return quote;
 }
+
+/** Pays a quote the user approved. Re-checks the account and expiry; the account persists before funding. */
+export async function executePayment(preview: Preview, quote: Quote, onUpdate?: (attempt: SwapAttempt) => void): Promise<SwapAttempt> {
+  if (preview.plan.status !== 'ready') throw new Error('No connected account supports this payment.');
+  if (quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('The quote expired. Review the payment again.');
+  const route = preview.plan.route;
+  const account = accounts.get(route.sourceId);
+  if (!account || account.source.network !== preview.request.network) throw new Error('Account disconnected. Review the request again.');
+  if (!account.pay) throw new Error('This account can quote but not pay yet.');
+  return account.pay(preview, route, quote, onUpdate);
+}
+
+export { createElectrumSwapAccount, resumeKaleidoPaySwaps } from './electrumSwapAccount';
+export { createAttemptStore, secureSecretStore } from './storage';
