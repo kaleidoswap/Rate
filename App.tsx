@@ -17,6 +17,7 @@ import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
+import { AppLockGate } from './components/AppLockGate';
 import ChatNotifications from './components/ChatNotifications';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
@@ -349,6 +350,7 @@ export default function App() {
                     <StatusBar style="light" backgroundColor="transparent" translucent={true} />
                     <AppNavigator />
                     <ToastContainer />
+                    <AppLockGate />
                   </ThemeProvider>
                 </KaleidoThemeProvider>
               </AppThemeProvider>
