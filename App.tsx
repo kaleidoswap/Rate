@@ -19,6 +19,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
 import { PersistenceLoading } from './components/PersistenceLoading';
 import { AppLockGate } from './components/AppLockGate';
+import { NwcPaymentApprover } from './components/NwcPaymentApprover';
 import ChatNotifications from './components/ChatNotifications';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
@@ -351,6 +352,7 @@ export default function App() {
                     <StatusBar style="light" backgroundColor="transparent" translucent={true} />
                     <AppNavigator />
                     <ToastContainer />
+                    <NwcPaymentApprover />
                     <AppLockGate />
                   </ThemeProvider>
                 </KaleidoThemeProvider>

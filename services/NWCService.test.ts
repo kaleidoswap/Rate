@@ -4,6 +4,7 @@ import NWCService, {
   DEFAULT_NWC_MAX_PAYMENT_SATS,
   NWCConnection,
   NWC_ERROR_CODES,
+  NWC_APPROVAL_TIMEOUT_MS,
 } from './NWCService';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 
@@ -31,12 +32,15 @@ const makeConnection = (overrides: Partial<NWCConnection> = {}): NWCConnection =
 describe('NWCService pay_invoice spending limits', () => {
   const svc = NWCService.getInstance() as any;
   const sendPayment = jest.fn();
+  const approver = jest.fn();
   const pay = (connection: NWCConnection, invoice = 'lnbc1invoice') =>
     svc.handlePayInvoice({ invoice }, connection);
 
   beforeEach(() => {
     jest.clearAllMocks();
     svc.rgbApiService = { sendPayment };
+    svc.setPaymentApprover(approver);
+    approver.mockResolvedValue(true);
     sendPayment.mockResolvedValue({ paymentHash: 'hash', preimage: 'preimage' });
   });
 
@@ -110,5 +114,67 @@ describe('NWCService pay_invoice spending limits', () => {
     expect(res.error).toBeDefined();
     expect(res.result).toBeUndefined();
     expect(connection.spentSats).toBe(600);
+  });
+
+  describe('in-app approval', () => {
+    it('asks the user with the amount and description before paying', async () => {
+      decode.mockReturnValue({ amountSats: 1_000, description: 'coffee' });
+
+      await pay(makeConnection());
+
+      expect(approver).toHaveBeenCalledWith({ amountSats: 1_000, description: 'coffee', invoice: 'lnbc1invoice' });
+      expect(approver.mock.invocationCallOrder[0]).toBeLessThan(sendPayment.mock.invocationCallOrder[0]);
+    });
+
+    it('refuses and releases the budget when the user declines', async () => {
+      decode.mockReturnValue({ amountSats: 1_000 });
+      approver.mockResolvedValue(false);
+      const connection = makeConnection();
+
+      const res = await pay(connection);
+
+      expect(res.error.code).toBe(NWC_ERROR_CODES.RESTRICTED);
+      expect(sendPayment).not.toHaveBeenCalled();
+      expect(connection.spentSats).toBe(0);
+    });
+
+    it('fails closed when no approver is registered', async () => {
+      decode.mockReturnValue({ amountSats: 1_000 });
+      svc.setPaymentApprover(null);
+
+      const res = await pay(makeConnection());
+
+      expect(res.error).toBeDefined();
+      expect(sendPayment).not.toHaveBeenCalled();
+    });
+
+    it('treats an approver error as a refusal', async () => {
+      decode.mockReturnValue({ amountSats: 1_000 });
+      approver.mockRejectedValue(new Error('ui gone'));
+
+      const res = await pay(makeConnection());
+
+      expect(res.error).toBeDefined();
+      expect(sendPayment).not.toHaveBeenCalled();
+    });
+
+    it('refuses when the prompt is not answered in time', async () => {
+      jest.useFakeTimers();
+      try {
+        decode.mockReturnValue({ amountSats: 1_000 });
+        approver.mockReturnValue(new Promise(() => {}));
+        const connection = makeConnection();
+
+        const pending = pay(connection);
+        await jest.advanceTimersByTimeAsync(NWC_APPROVAL_TIMEOUT_MS);
+        const res = await pending;
+
+        expect(res.error).toBeDefined();
+        expect(sendPayment).not.toHaveBeenCalled();
+        expect(connection.spentSats).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 });
