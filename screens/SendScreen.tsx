@@ -1,3 +1,4 @@
+import { createRequestGuard } from '../utils/request-guard';
 import { isKaleidoPayCode } from '../services/kaleidoPay';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
@@ -163,6 +164,8 @@ function SendScreen({ navigation, route }: Props) {
   const [estimatingFee, setEstimatingFee] = useState(false);
   const sendingRef = useRef(false);
   const feeRequestRef = useRef(0);
+  const decodeGuard = useRef(createRequestGuard()).current;
+  useEffect(() => () => decodeGuard.invalidate(), [decodeGuard]);
 
   useEffect(() => navigation.addListener('beforeRemove', (event: any) => {
     if (sendingRef.current) event.preventDefault();
@@ -229,6 +232,7 @@ function SendScreen({ navigation, route }: Props) {
   }, [btcBalance, rgbAssets, activeRoute?.account]);
 
   useEffect(() => {
+    let reviewTimer: ReturnType<typeof setTimeout> | undefined;
     // Handle route parameters from QR scanner or other navigation
     if (route.params?.selectedAsset) {
       // If selectedAsset is provided directly, use it
@@ -273,11 +277,12 @@ function SendScreen({ navigation, route }: Props) {
       
       if (hasCompleteData) {
         // Small delay to allow state to settle, then show review
-        setTimeout(() => {
+        reviewTimer = setTimeout(() => {
           setPaymentStep('review');
         }, 300);
       }
     }
+    return () => { if (reviewTimer) clearTimeout(reviewTimer); };
   }, [route.params]);
 
   const isLightningAddress = (input: string): boolean => {
@@ -286,6 +291,13 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const detectAddressType = useCallback(async (input: string) => {
+    const isCurrent = decodeGuard.begin();
+    setIsDecodingInvoice(false);
+    setDecodedInvoice(null);
+    setDecodedRGBInvoice(null);
+    setValidationError(null);
+    setSendRoutes([]);
+    setActiveRoute(null);
     if (isKaleidoPayCode(input)) {
       setAddressType('unknown');
       navigation.navigate('KaleidoPay', { code: input.trim() });
@@ -293,17 +305,11 @@ function SendScreen({ navigation, route }: Props) {
     }
     if (!input) {
       setAddressType('unknown');
-      setDecodedInvoice(null);
-      setDecodedRGBInvoice(null);
-      setValidationError(null);
       return;
     }
 
     setIsDecodingInvoice(true);
     setAddressType('unknown');
-    setDecodedInvoice(null);
-    setDecodedRGBInvoice(null);
-    setValidationError(null);
 
     try {
       // Unified destination classification + route resolution
@@ -351,6 +357,7 @@ function SendScreen({ navigation, route }: Props) {
             } catch { /* keep the local decode */ }
           }
 
+          if (!isCurrent()) return;
           setDecodedInvoice(decoded);
           setAddressType('lightning');
 
@@ -375,6 +382,7 @@ function SendScreen({ navigation, route }: Props) {
             }
           }
         } catch (error) {
+          if (!isCurrent()) return;
           setAddressType('invalid');
           setValidationError('Failed to decode Lightning invoice');
         }
@@ -389,6 +397,7 @@ function SendScreen({ navigation, route }: Props) {
             return;
           }
           const decoded = await rgbAdapterRgb.decodeRgbInvoice?.({ invoice: input }) as any;
+          if (!isCurrent()) return;
           
           // Extract amount from assignment if it's a fungible assignment
           let invoiceAmount: number | null = null;
@@ -419,6 +428,7 @@ function SendScreen({ navigation, route }: Props) {
             }
           }
         } catch (error) {
+          if (!isCurrent()) return;
           setAddressType('invalid');
           setValidationError('Failed to decode RGB invoice');
         }
@@ -429,13 +439,14 @@ function SendScreen({ navigation, route }: Props) {
         setValidationError('Invalid address format. Please enter a valid Bitcoin, Lightning, Spark, Arkade, or RGB address.');
       }
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Failed to decode input:', error);
       setAddressType('invalid');
       setValidationError('Failed to decode input. Please check the address format.');
     } finally {
-      setIsDecodingInvoice(false);
+      if (isCurrent()) setIsDecodingInvoice(false);
     }
-  }, [allAssets, bitcoinUnit]);
+  }, [allAssets, bitcoinUnit, selectedAsset.asset_id, getProtocolStatus, navigation, decodeGuard]);
 
   const handlePasteFromClipboard = async () => {
     try {
@@ -1499,40 +1510,6 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.secondary,
   },
   
-  headerContainer: {
-    marginBottom: theme.spacing[4],
-  },
-  
-  headerGradient: {
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[6],
-    borderBottomLeftRadius: theme.borderRadius['2xl'],
-    borderBottomRightRadius: theme.borderRadius['2xl'],
-  },
-  
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[4],
-  },
-  
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  headerTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-  },
-  
   helpButton: {
     // Mirrors MainHeader's `iconBtn` so the two header controls are one shape.
     width: 38,
@@ -1656,39 +1633,6 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
-  },
-
-  addressTypeIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: theme.spacing[2],
-    gap: theme.spacing[2],
-  },
-  
-  addressTypeIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  lightningIcon: {
-    backgroundColor: theme.colors.networks.lightning,
-  },
-
-  bitcoinIcon: {
-    backgroundColor: theme.colors.networks.bitcoin,
-  },
-
-  rgbIcon: {
-    backgroundColor: theme.colors.primary[500],
-  },
-  
-  addressTypeText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.text.secondary,
   },
   
   decodingIndicator: {
@@ -1841,102 +1785,6 @@ const styles = StyleSheet.create({
     color: theme.colors.text.muted,
   },
   
-  assetDropdown: {
-    backgroundColor: theme.colors.surface.primary,
-    marginTop: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
-    maxHeight: 300,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 6.27,
-    elevation: 10,
-  },
-  
-  assetDropdownScroll: {
-    maxHeight: 280,
-  },
-  
-  assetOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-  
-  assetOptionSelected: {
-    backgroundColor: theme.colors.primary[50],
-  },
-  
-  assetOptionInfo: {
-    flex: 1,
-    marginLeft: theme.spacing[3],
-  },
-  
-  assetOptionTicker: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  assetOptionName: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[1],
-  },
-  
-  assetOptionBalance: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.muted,
-  },
-  
-  amountHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[4],
-  },
-  
-  maxButton: {
-    backgroundColor: theme.colors.primary[50],
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100], // Changed from 200 to 100
-    borderRadius: theme.borderRadius.base,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-  },
-  
-  maxButtonText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.primary[600],
-  },
-  
-  amountInput: {
-    marginBottom: theme.spacing[3],
-  },
-  
-  balanceInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  
-  balanceText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  
-  usdValue: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.text.primary,
-  },
-  
   feeSelector: {
     flexDirection: 'row',
     gap: theme.spacing[2],
@@ -1998,133 +1846,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 8,
-  },
-  
-  // Modal styles
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  
-  modalContent: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
-    marginHorizontal: theme.spacing[5],
-    width: '90%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 12,
-  },
-  
-  modalTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    textAlign: 'center',
-    marginBottom: theme.spacing[6],
-  },
-  
-  confirmationDetails: {
-    marginBottom: theme.spacing[6],
-  },
-  
-  confirmationRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: theme.spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-    gap: theme.spacing[4],
-  },
-  
-  confirmationLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    fontWeight: '500',
-    minWidth: 80,
-  },
-  
-  confirmationValue: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'right',
-  },
-  
-  modalActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-  
-  modalCancelButton: {
-    flex: 1,
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    backgroundColor: theme.colors.gray[100],
-    borderRadius: theme.borderRadius.lg,
-    alignItems: 'center',
-  },
-  
-  modalCancelText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.secondary,
-  },
-  
-  modalConfirmButton: {
-    flex: 1,
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    backgroundColor: theme.colors.primary[500],
-    borderRadius: theme.borderRadius.lg,
-    alignItems: 'center',
-  },
-  
-  modalConfirmText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.inverse,
-  },
-  
-  quickAmounts: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing[3],
-    marginBottom: theme.spacing[4],
-    gap: theme.spacing[2],
-  },
-  
-  quickAmountButton: {
-    flex: 1,
-    backgroundColor: theme.colors.primary[50],
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100],
-  },
-  
-  quickAmountText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[700],
-    fontWeight: '600',
   },
 
   reviewCard: {

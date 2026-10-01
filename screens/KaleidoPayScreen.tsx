@@ -1,3 +1,4 @@
+import { useForegroundClock } from '../hooks/useForegroundClock';
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, TextInput, ScrollView, TouchableOpacity, Clipboard, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,10 +29,10 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
   const [showProviders, setShowProviders] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [now, setNow] = useState(Date.now());
   const [reviewUpdated, setReviewUpdated] = useState(false);
   const [previousTotal, setPreviousTotal] = useState('');
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
+  const now = useForegroundClock(offers.some(offer => !!offer.quote) && !attempt);
   const [journalReady, setJournalReady] = useState(false);
   const revision = useRef(0);
   const paying = useRef(false);
@@ -56,7 +57,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
       .catch(() => { if (active) setError('Could not check your previous payment. Reopen this screen before paying.'); });
     return () => { active = false; revision.current++; };
   }, [walletId]);
-  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => { clearInterval(timer); revision.current++; }; }, []);
+  useEffect(() => () => { revision.current++; }, []);
   const selected = offers.find(o => o.id === selectedId);
   const quote = selected?.quote;
   const spend = quote ? quoteSpend(quote) : null;
@@ -68,7 +69,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
   const row = (label: string, value: string) => <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}><Text style={muted}>{label}</Text><Text style={{ ...text, textAlign: 'right', flexShrink: 1 }}>{value}</Text></View>;
   const choose = (id: string) => { setSelectedId(id); setReviewUpdated(false); setPreviousTotal(''); };
 
-  async function getOffers(p: Preview, refresh = false) {
+  async function getOffers(refresh = false) {
     const current = ++revision.current;
     setBusy(true); setError('');
     if (refresh) setPreviousTotal(total);
@@ -86,7 +87,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
   function review() {
     try {
       const p = previewPayment(code, network, amount, requestId.current);
-      setPreview(p); setError(''); void getOffers(p);
+      setPreview(p); setError(''); void getOffers();
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not read the payment request.'); }
   }
   async function pay() {
@@ -133,7 +134,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
   });
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }} edges={['left', 'right', 'bottom']}>
-      <ScreenHeader title="KaleidoPay" subtitle="Pay with what you have" onBack={() => { if (preview && !attempt && !paying.current) { revision.current++; setBusy(false); setPreview(null); } else if (!paying.current) navigation.goBack(); }} />
+      <ScreenHeader title={preview ? "Review payment" : "Pay"} subtitle="Pay with what you have" onBack={() => { if (preview && !attempt && !paying.current) { revision.current++; setBusy(false); setPreview(null); } else if (!paying.current) navigation.goBack(); }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
           {!!error && <Text accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500], marginBottom: t.spacing[4] }}>{error}</Text>}
@@ -143,7 +144,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
             {row('Recipient receives', attempt.recipient)}{row('Total', attempt.total)}{row('Provider', attempt.provider)}
             {!!attempt.reference && <Text selectable style={muted}>Reference: {attempt.reference}</Text>}
             <Text style={muted}>{unresolvedAttempt(attempt) ? 'Your payment may still be processing. Check its status before sending again. We will not switch providers or retry automatically.' : attempt.status === 'failed' ? 'This payment was not sent or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
-            {unresolvedAttempt(attempt) ? <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} /> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') navigation.goBack(); else { setAttempt(null); if (preview) void getOffers(preview, true); } }} />}
+            {unresolvedAttempt(attempt) ? <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} /> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') navigation.goBack(); else { setAttempt(null); if (preview) void getOffers(true); } }} />}
           </View> : !preview ? <>
             <View style={card}>
               <Text style={{ ...text, fontSize: t.typography.fontSize.xl, fontWeight: '600' }}>Who are you paying?</Text>
@@ -183,7 +184,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
           </>}
         </ScrollView>
         {!attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
-          {!preview ? <Button title="Review payment" disabled={!code.trim() || busy} onPress={review} /> : !quote || expired || selected?.unavailable ? <Button title={busy ? 'Getting quotes…' : 'Refresh quotes'} disabled={busy} onPress={() => void getOffers(preview, true)} /> : reviewUpdated ? <Button title="Review updated quote" disabled={busy} onPress={() => setReviewUpdated(false)} /> : <Button title={total ? `Pay ${total}` : 'Pay'} disabled={busy || !selected?.executable || !walletId || !journalReady} onPress={() => void pay()} />}
+          {!preview ? <Button title="Review payment" disabled={!code.trim() || busy} onPress={review} /> : !quote || expired || selected?.unavailable ? <Button title={busy ? 'Getting quotes…' : 'Refresh quotes'} disabled={busy} onPress={() => void getOffers(true)} /> : reviewUpdated ? <Button title="Review updated quote" disabled={busy} onPress={() => setReviewUpdated(false)} /> : <Button title={total ? `Pay ${total}` : 'Pay'} disabled={busy || !selected?.executable || !walletId || !journalReady} onPress={() => void pay()} />}
           {preview && <Text style={{ ...muted, textAlign: 'center' }}>{!walletId ? 'Set up a wallet to pay.' : 'Only the selected provider will receive this payment.'}</Text>}
         </View>}
       </KeyboardAvoidingView>

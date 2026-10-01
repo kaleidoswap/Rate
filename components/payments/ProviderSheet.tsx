@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import { useForegroundClock } from '../../hooks/useForegroundClock';
+import React from 'react';
 import { Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,8 +23,7 @@ export function ProviderSheet({ visible, options, selectedId, onSelect, onClose,
   onSelect: (id: string) => void; onClose: () => void; now?: number;
 }) {
   const t = useAppTheme();
-  const [clock, setClock] = useState(Date.now());
-  useEffect(() => { if (!visible) return; setClock(Date.now()); const timer = setInterval(() => setClock(Date.now()), 1000); return () => clearInterval(timer); }, [visible]);
+  const clock = useForegroundClock(visible && now === undefined);
   const currentTime = now ?? clock;
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -39,12 +39,16 @@ export function ProviderSheet({ visible, options, selectedId, onSelect, onClose,
             const expired = option.expiresAt !== undefined && option.expiresAt <= currentTime;
             const reason = option.unavailable || (expired ? 'Quote expired. Refresh to compare again.' : '');
             return (
-              <TouchableOpacity key={option.id} disabled={!!reason} accessibilityRole="radio" accessibilityState={{ selected: selectedId === option.id, disabled: !!reason }}
+              <TouchableOpacity key={option.id} disabled={!!reason} accessibilityRole="radio" accessibilityState={{ checked: selectedId === option.id, disabled: !!reason }}
                 accessibilityLabel={`${option.name}. ${option.amountLabel} ${option.amount}. ${reason || option.detail}`}
-                onPress={() => { onSelect(option.id); onClose(); }}
+                onPress={() => {
+                  if (option.expiresAt !== undefined && option.expiresAt <= (now ?? Date.now())) return;
+                  onSelect(option.id); onClose();
+                }}
                 style={{ padding: t.spacing[4], gap: t.spacing[2], borderRadius: t.borderRadius.xl, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: selectedId === option.id ? t.colors.primary[500] : t.colors.border.light }}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[2] }}>
                   <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.base, fontWeight: '600', flex: 1 }}>{option.name}</Text>
+                  {selectedId === option.id && <Ionicons name="checkmark-circle" size={22} color={t.colors.primary[500]} />}
                   {option.recommended && !reason && <Text style={{ color: t.colors.primary[500] }}>Best quote</Text>}
                 </View>
                 {!!option.account && <Text style={{ color: t.colors.text.secondary }}>{option.account}</Text>}

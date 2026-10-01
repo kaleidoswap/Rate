@@ -530,12 +530,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-  cameraContainer: {
-    flex: 1,
-  },
-  camera: {
-    flex: 1,
-  },
 
   // Overlay Mask
   overlayContainer: {
@@ -629,10 +623,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 20,
   },
-  feedbackAnimation: {
-    width: 200,
-    height: 200,
-  },
   processingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -646,15 +636,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
-  },
-
-  // Header & Controls
-  headerSafeArea: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 30,
   },
   header: {
     flexDirection: 'row',
@@ -671,34 +652,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-
-  bottomInstructionContainer: {
-    position: 'absolute',
-    bottom: 50,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    zIndex: 20,
-  },
-  instructionText: {
-    fontSize: 16,
-    color: 'white',
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
-    textShadowColor: 'rgba(0,0,0,0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  subInstructionText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
   },
 
   // Permissions

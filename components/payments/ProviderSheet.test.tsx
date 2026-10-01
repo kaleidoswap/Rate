@@ -17,3 +17,14 @@ test('expires while the sheet remains open', () => {
   fireEvent.press(screen.getByLabelText(/A\. Total/)); expect(select).not.toHaveBeenCalled();
   screen.unmount(); jest.useRealTimers();
 });
+
+test('rejects a quote that expires between the last clock tick and the tap', () => {
+  jest.useFakeTimers(); jest.setSystemTime(10000);
+  const select = jest.fn();
+  const screen = render(<ProviderSheet visible selectedId="a" options={[{ id: 'a', name: 'A', amount: '1', amountLabel: 'Total', detail: '', expiresAt: 10500 }]} onSelect={select} onClose={() => {}} />);
+  expect(screen.getByLabelText(/A\. Total/).props.accessibilityState.checked).toBe(true);
+  jest.setSystemTime(10600);
+  fireEvent.press(screen.getByLabelText(/A\. Total/));
+  expect(select).not.toHaveBeenCalled();
+  screen.unmount(); jest.useRealTimers();
+});

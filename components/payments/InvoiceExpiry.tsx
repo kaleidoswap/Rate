@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import { useForegroundClock } from '../../hooks/useForegroundClock';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { decode } from 'light-bolt11-decoder';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -17,8 +18,7 @@ export function invoiceExpiry(invoice: string): number | null {
 export function InvoiceExpiry({ invoice, onRefresh }: { invoice: string; onRefresh?: () => void }) {
   const t = useAppTheme();
   const expiresAt = useMemo(() => invoiceExpiry(invoice), [invoice]);
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => { setNow(Date.now()); if (!expiresAt) return; const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, [expiresAt]);
+  const now = useForegroundClock(expiresAt !== null);
   if (expiresAt === null) return null;
   const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
   return <View style={{ alignItems: 'center', padding: t.spacing[3], gap: t.spacing[2] }}>
