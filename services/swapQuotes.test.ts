@@ -43,3 +43,13 @@ test('bounds slow provider waits', async () => {
   await jest.advanceTimersByTimeAsync(15000);
   expect((await request)[0].unavailable).toMatch(/did not respond/);
 });
+
+test('rejects a provider replacement after a quote was reviewed', async () => {
+  const { assertSwapQuoteProvider } = require('./swapQuotes');
+  const client = { simulateSwap: async () => ({ amountOut: '20', feePaidAssetIn: '2' }) };
+  (flashnetClientManager.getClient as jest.Mock).mockReturnValue(client);
+  const [offer] = await fetchSwapOffers([pair('one')], 'BTC', 'TOK', 1000, 'sats');
+  expect(() => assertSwapQuoteProvider(offer.quote!)).not.toThrow();
+  (flashnetClientManager.getClient as jest.Mock).mockReturnValue({ ...client });
+  expect(() => assertSwapQuoteProvider(offer.quote!)).toThrow('connection changed');
+});

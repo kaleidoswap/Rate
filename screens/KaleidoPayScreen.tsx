@@ -8,7 +8,7 @@ import { Button } from '../components/Button';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppSelector } from '../store/hooks';
-import { previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, registerKaleidoPayAccount } from '../services/kaleidoPay';
+import { previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
 import type { Network, Preview, PaymentOffer } from '../services/kaleidoPay';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt } from '../services/kaleidoPay/attempts';
 import { protocolManager } from '../services/protocols';
@@ -108,7 +108,12 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
       // forces a status check on restart instead of allowing another payment.
       setAttempt(updated);
       await savePaymentAttempt(walletId, updated);
-    } catch { setAttempt({ ...next, status: 'unknown' }); setError('Payment status needs checking. Do not send again.'); }
+    } catch (e) {
+      const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown' };
+      setAttempt(updated);
+      setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.');
+      try { await savePaymentAttempt(walletId, updated); } catch { /* Keep the durable pending record; reopening requires a status check. */ }
+    }
     finally { paying.current = false; setBusy(false); }
   }
   async function checkStatus() {
@@ -137,7 +142,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
             <Text style={{ ...text, fontSize: t.typography.fontSize['2xl'], fontWeight: '600' }}>{attempt.status === 'completed' ? 'Payment completed' : attempt.status === 'failed' ? 'Payment failed' : 'Checking payment'}</Text>
             {row('Recipient receives', attempt.recipient)}{row('Total', attempt.total)}{row('Provider', attempt.provider)}
             {!!attempt.reference && <Text selectable style={muted}>Reference: {attempt.reference}</Text>}
-            <Text style={muted}>{unresolvedAttempt(attempt) ? 'Your payment may still be processing. Check its status before sending again. We will not switch providers or retry automatically.' : attempt.status === 'failed' ? 'The provider confirmed that this payment failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
+            <Text style={muted}>{unresolvedAttempt(attempt) ? 'Your payment may still be processing. Check its status before sending again. We will not switch providers or retry automatically.' : attempt.status === 'failed' ? 'This payment was not sent or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
             {unresolvedAttempt(attempt) ? <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} /> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') navigation.goBack(); else { setAttempt(null); if (preview) void getOffers(preview, true); } }} />}
           </View> : !preview ? <>
             <View style={card}>

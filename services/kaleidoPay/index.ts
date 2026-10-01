@@ -135,7 +135,9 @@ export function bestOffer(offers: PaymentOffer[]): PaymentOffer | undefined {
 }
 const executions = new Map<string, Promise<PaymentResult>>();
 const normalizeResult = (value: PaymentResult): PaymentResult => value && ['completed', 'pending', 'unknown', 'failed'].includes(value.status) ? value : { status: 'unknown' };
+export class PaymentNotSentError extends Error {}
 export async function executePaymentOffer(preview: Preview, offer: PaymentOffer, attemptId: string): Promise<PaymentResult> {
+  try {
   const owner = owners.get(offer);
   const account = getAccount(preview, offer.route);
   if (!owner || owner.account !== account || !offer.quote || !account.execute
@@ -149,18 +151,29 @@ export async function executePaymentOffer(preview: Preview, offer: PaymentOffer,
     // A persistent claim prevents retransmission after a timeout or application restart.
     if (await AsyncStorage.getItem(key)) return { status: 'unknown' };
     await AsyncStorage.setItem(key, 'started');
-    // Storage may have taken us beyond the quote deadline.
+    // Recheck after asynchronous storage: connection, terms and deadline may have changed.
+    if (accounts.get(offer.route.sourceId) !== account || owner.snapshot !== JSON.stringify({ preview, route: offer.route, quote: offer.quote })) throw new Error('Account or quote changed before payment.');
+    getAccount(preview, offer.route);
     validateQuote(offer.quote!, preview, account);
     try { return normalizeResult(await account.execute!(preview, offer.route, offer.quote!, attemptId)); }
     catch { return { status: 'unknown' }; }
   })();
   executions.set(key, execution);
   try { return await execution; } finally { executions.delete(key); }
+  } catch (error) {
+    // Executor errors are normalized to unknown above. Anything reaching here
+    // failed before handing a payment to the provider.
+    throw new PaymentNotSentError(error instanceof Error ? error.message : 'Payment could not be started.');
+  }
 }
 export async function checkPaymentStatus(sourceId: string, attemptId: string): Promise<PaymentResult> {
   const account = accounts.get(sourceId);
   if (!account?.status) return { status: 'unknown' };
-  try { return normalizeResult(await account.status(attemptId)); } catch { return { status: 'unknown' }; }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return normalizeResult(await Promise.race([account.status(attemptId), new Promise<PaymentResult>(resolve => { timer = setTimeout(() => resolve({ status: 'unknown' }), 15000); })]));
+  } catch { return { status: 'unknown' }; }
+  finally { if (timer) clearTimeout(timer); }
 }
 
 /** Pays a quote the user approved. Re-checks the account and expiry; the account persists before funding. */

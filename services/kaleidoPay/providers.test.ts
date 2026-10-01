@@ -75,3 +75,14 @@ test('times out quotes and rejects late disconnects', async () => {
   const request = quotePaymentOffers(preview()); await jest.advanceTimersByTimeAsync(15000);
   expect((await request)[0].unavailable).toMatch(/did not respond/);
 });
+
+test('rechecks disconnect after journaling and before submitting to the provider', async () => {
+  const a = account('disconnect'); const p = preview(); const [offer] = await quotePaymentOffers(p);
+  let release!: () => void;
+  (AsyncStorage.setItem as jest.Mock).mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+  const execution = executePaymentOffer(p, offer, 'disconnect-in-storage');
+  await Promise.resolve(); await Promise.resolve();
+  cleanups[0](); release();
+  await expect(execution).rejects.toThrow('changed before payment');
+  expect(a.execute).not.toHaveBeenCalled();
+});

@@ -1,3 +1,4 @@
+jest.mock('@react-native-async-storage/async-storage', () => ({ getItem: jest.fn(async () => null), setItem: jest.fn(async () => {}) }));
 const now = () => Math.floor(Date.now() / 1000);
 const mockOffers = [{ pubkey: 'cheap' }, { pubkey: 'silent' }, { pubkey: 'pricey' }];
 const mockQuotes = (expires = now() + 60) => [
@@ -22,7 +23,7 @@ jest.mock('@universal-bolt12/swap-market', () => ({
 
 import { encodePaymentCode } from '@universal-bolt12/universal-code';
 import { createElectrumSwapAccount } from './electrumSwapAccount';
-import { previewPayment, quotePayment, executePayment, registerKaleidoPayAccount } from './index';
+import { previewPayment, quotePayment, quotePaymentOffers, executePaymentOffer, executePayment, registerKaleidoPayAccount } from './index';
 
 const address = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
 const store = { save: jest.fn(), load: jest.fn(), list: jest.fn(async () => []) };
@@ -86,7 +87,6 @@ test('execute starts paying and status follows the swap to completion', async ()
 });
 
 test('exposes each provider and pays the explicitly selected offer even after refresh', async () => {
-  const { quotePaymentOffers, executePaymentOffer } = await import('./index');
   const account = createElectrumSwapAccount({ source: { id: 'choices', rail: 'ln', network: 'mainnet' }, payer, attempts: store, secrets });
   const off = registerKaleidoPayAccount(account);
   try {

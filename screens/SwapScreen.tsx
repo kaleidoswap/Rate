@@ -873,13 +873,14 @@ export default function SwapScreen({ navigation }: Props) {
 
       {/* Main Action Button */}
       <Button
-        title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : 'Enter Amount')}
+        title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : Number(swapState.fromAmount) > 0 ? 'Refresh quotes' : 'Enter Amount')}
         onPress={() => {
+          if (!swapState.currentQuote) { void getQuote(); return; }
           setReviewQuote(swapState.currentQuote);
           setPreviousReviewQuote(null);
           setShowConfirmModal(true);
         }}
-        disabled={!swapState.currentQuote || swapState.currentQuote.to_amount <= 0 || swapState.isQuoteLoading || !swapState.fromAmount}
+        disabled={swapState.isQuoteLoading || !Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0}
         loading={swapState.isQuoteLoading}
         variant="primary"
         fullWidth
@@ -948,7 +949,7 @@ export default function SwapScreen({ navigation }: Props) {
   };
 
   const renderProgressSteps = () => {
-    const pair = reviewQuote ? findPair(filteredPairs, reviewQuote.from_asset, reviewQuote.to_asset) : undefined;
+    const pair = reviewQuote ? quotePairs.current.get(reviewQuote) : undefined;
     const flash = pair ? isFlashnetPair(pair) : false;
     const steps = flash
       ? [{ key: 'execute', label: 'Executing swap' }, { key: 'done', label: 'Completed' }]
@@ -1037,7 +1038,7 @@ export default function SwapScreen({ navigation }: Props) {
     const toTicker = reviewQuote.to_asset;
 
     const isFlashnet = reviewQuote.venue === 'flashnet';
-    const pair = findPair(filteredPairs, fromTicker, toTicker);
+    const pair = quotePairs.current.get(reviewQuote);
     const toPrecision = pair ? (pair.base.ticker === toTicker ? pair.base.precision : pair.quote.precision) : 8;
     const rawOut = reviewQuote.to_amount_raw ?? (isBtcTicker(toTicker)
       ? btcDisplayToSats(reviewQuote.to_amount) : Math.round(reviewQuote.to_amount * 10 ** toPrecision));
@@ -1061,6 +1062,10 @@ export default function SwapScreen({ navigation }: Props) {
                 Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {previousReviewQuote.fee_amount} → {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}. Review these changes before confirming.
               </Text>
             )}
+            {pair && <View style={styles.confirmRow}>
+              <Text style={styles.confirmLabel}>Provider</Text>
+              <Text style={styles.confirmValue}>{swapProviderName(pair)} · {isFlashnetPair(pair) ? 'Spark' : 'RGB Lightning'}</Text>
+            </View>}
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Minimum received</Text>
               <Text style={styles.confirmValue}>{validOutput ? `${formatDisplayAmount(minDisplay, toTicker)} ${unitLabelFor(toTicker)}` : 'Unavailable'}</Text>

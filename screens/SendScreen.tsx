@@ -1405,8 +1405,6 @@ function SendScreen({ navigation, route }: Props) {
               </View>
             )}
           </View>
-
-
         </View>
       </View>
     );
@@ -1419,23 +1417,23 @@ function SendScreen({ navigation, route }: Props) {
       : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
     const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
     return <View style={styles.sendButtonContainer}>
-          <View style={styles.reviewActions}>
-            <Button
-              title="Edit"
-              disabled={loading}
-              variant="secondary"
-              onPress={() => { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); }}
-              style={styles.reviewEditButton}
-            />
-            <Button
-              title={`Pay ${effectiveAmount} ${unit}`}
-              disabled={estimatingFee || loading}
-              variant="primary"
-              onPress={handleSend}
-              loading={loading}
-              style={styles.reviewConfirmButton}
-            />
-          </View>
+      <View style={styles.reviewActions}>
+        <Button
+          title="Edit"
+          disabled={loading}
+          variant="secondary"
+          onPress={() => { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); }}
+          style={styles.reviewEditButton}
+        />
+        <Button
+          title={`Pay ${effectiveAmount} ${unit}`}
+          disabled={estimatingFee || loading}
+          variant="primary"
+          onPress={handleSend}
+          loading={loading}
+          style={styles.reviewConfirmButton}
+        />
+      </View>
     </View>;
   };
 
