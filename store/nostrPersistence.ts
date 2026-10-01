@@ -35,19 +35,15 @@ export const nostrSecretsTransform = createTransform(
 export async function migrateNostrSecretsV4(state: any): Promise<any> {
   const nostr = state?.nostr;
   if (!nostr) return state;
-  try {
-    const moves: Array<[string, string | null | undefined]> = [
-      [NOSTR_PRIVATE_KEY, nostr.privateKey],
-      [NOSTR_NSEC_KEY, nostr.nsec],
-    ];
-    for (const [key, value] of moves) {
-      if (value && !(await SecureStore.getItemAsync(key))) {
-        await SecureStore.setItemAsync(key, value);
-      }
+  const moves: Array<[string, string | null | undefined]> = [
+    [NOSTR_PRIVATE_KEY, nostr.privateKey],
+    [NOSTR_NSEC_KEY, nostr.nsec],
+  ];
+  for (const [key, value] of moves) {
+    if (value && !(await SecureStore.getItemAsync(key))) {
+      await SecureStore.setItemAsync(key, value);
     }
-  } catch {
-    // Non-fatal, but the plaintext copies are dropped regardless.
   }
-  state.nostr = stripNostrSecrets(nostr);
-  return state;
+  // Do not mutate the source: retry must retain every legacy key on failure.
+  return { ...state, nostr: stripNostrSecrets(nostr) };
 }

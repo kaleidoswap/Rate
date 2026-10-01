@@ -17,6 +17,7 @@ import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
+import { PersistenceLoading } from './components/PersistenceLoading';
 import { AppLockGate } from './components/AppLockGate';
 import ChatNotifications from './components/ChatNotifications';
 import NetworkService from './services/NetworkService';
@@ -341,7 +342,7 @@ export default function App() {
       <SafeAreaProvider>
         <ErrorBoundary>
           <Provider store={store}>
-            <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
+            <PersistGate loading={<PersistenceLoading />} persistor={persistor}>
               <QVACEnabledSync />
               <ChatNotifications />
               <AppThemeProvider>

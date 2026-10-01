@@ -72,13 +72,31 @@ describe('nostr secret persistence', () => {
     expect(state.nostr.privateKey).toBeNull();
   });
 
-  it('still drops plaintext keys if SecureStore fails', async () => {
+  it('retains the source and rejects when SecureStore cannot read keys', async () => {
     getItem.mockRejectedValue(new Error('keychain locked'));
+    const state = { nostr: legacyNostr() };
+    await expect(migrateNostrSecretsV4(state)).rejects.toThrow('keychain locked');
+    expect(state.nostr.privateKey).toBe('deadbeef');
+    expect(state.nostr.nsec).toBe('nsec1secret');
+  });
 
-    const state = await migrateNostrSecretsV4({ nostr: legacyNostr() });
-
-    expect(state.nostr.privateKey).toBeNull();
-    expect(state.nostr.nsec).toBeNull();
+  it('retries safely after only one of the two keys was saved', async () => {
+    const saved = new Map<string, string>();
+    getItem.mockImplementation(async key => saved.get(key) ?? null);
+    setItem.mockImplementation(async (key, value) => {
+      if (key === 'nostr_nsec_key') throw new Error('storage unavailable');
+      saved.set(key, value);
+    });
+    const state = { nostr: legacyNostr() };
+    await expect(migrateNostrSecretsV4(state)).rejects.toThrow('storage unavailable');
+    expect(state.nostr.nsec).toBe('nsec1secret');
+    setItem.mockImplementation(async (key, value) => { saved.set(key, value); });
+    const result = await migrateNostrSecretsV4(state);
+    expect(saved.get('nostr_private_key')).toBe('deadbeef');
+    expect(saved.get('nostr_nsec_key')).toBe('nsec1secret');
+    expect(result.nostr.privateKey).toBeNull();
+    expect(result.nostr.nsec).toBeNull();
+    expect(state.nostr.privateKey).toBe('deadbeef');
   });
 
   it('handles a fresh install with no stored state', async () => {

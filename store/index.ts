@@ -14,6 +14,7 @@ import uiReducer from './slices/uiSlice';
 import contactsReducer from './slices/contactsSlice';
 import swapReducer from './slices/swapSlice';
 import nostrReducer from './slices/nostrSlice';
+import { recoverPersistence } from './persistenceRecovery';
 import { nostrSecretsTransform, migrateNostrSecretsV4 } from './nostrPersistence';
 import chatReducer from './slices/chatSlice';
 
@@ -55,6 +56,9 @@ const persistConfig: PersistConfig<RootReducerState> = {
   whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: persist decrypted DM history locally
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
   version: 4,
+  // A timed-out migration rehydrates defaults and can overwrite the only keys.
+  // Keep the gate closed until migration succeeds or the user retries.
+  timeout: 0,
   transforms: [nostrSecretsTransform],
   migrate: async (state: any) => {
     // v2: replace the legacy default Nostr relay set with the current one.
@@ -107,7 +111,7 @@ const persistConfig: PersistConfig<RootReducerState> = {
       // Non-fatal.
     }
     // v4: move legacy plaintext Nostr keys into SecureStore, then drop them.
-    state = await migrateNostrSecretsV4(state);
+    state = await recoverPersistence(() => migrateNostrSecretsV4(state));
     return state;
   },
 };

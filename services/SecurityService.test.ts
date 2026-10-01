@@ -470,3 +470,14 @@ describe('SecurityService', () => {
   });
 });
 
+
+describe('security settings read failures', () => {
+  it('rejects a failed keychain read instead of reporting security disabled', async () => {
+    (SecureStore.getItemAsync as jest.Mock).mockRejectedValueOnce(new Error('keychain unavailable'));
+    await expect(SecurityService.getInstance().getSecuritySettings()).rejects.toThrow('Security settings are unavailable');
+  });
+  it('rejects a failed biometric preference read instead of treating it as disabled', async () => {
+    (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('keychain unavailable'));
+    await expect(SecurityService.getInstance().getSecuritySettings()).rejects.toThrow('Security settings are unavailable');
+  });
+});

@@ -27,7 +27,7 @@ const PIN_LENGTH = 6;
 const MAX_ATTEMPTS_BEFORE_COOLDOWN = 5;
 const BASE_COOLDOWN_MS = 30_000;
 
-type LockMode = 'checking' | 'locked' | 'unlocked';
+type LockMode = 'checking' | 'locked' | 'unlocked' | 'error';
 
 interface LockMethods {
   pin: boolean;
@@ -36,12 +36,14 @@ interface LockMethods {
 
 /**
  * Which unlock methods are actually usable right now. Biometric only counts
- * when the user enabled it AND the device still has enrolled hardware —
- * otherwise a biometric-only user who removed their fingerprint would be
- * locked out forever.
+ * when the user enabled it AND the device still has enrolled hardware.
+ * A configured but unavailable method must never silently disable the lock.
  */
 async function resolveLockMethods(): Promise<LockMethods> {
   const settings = await SecurityService.getInstance().getSecuritySettings();
+  if (settings.biometricEnabled && !settings.biometricType && !settings.pinEnabled) {
+    throw new Error('Biometric authentication is unavailable');
+  }
   return {
     pin: settings.pinEnabled,
     biometric: settings.biometricEnabled && settings.biometricType !== null,
@@ -74,8 +76,8 @@ export function AppLockGate() {
   }, []);
 
   // Decide whether to lock. Called on cold start and when resuming after the
-  // auto-lock timeout. With no usable unlock method the app stays open rather
-  // than bricking the wallet.
+  // auto-lock timeout. Only a successful check with no configured lock
+  // may uncover the app without authentication.
   const lock = useCallback(async () => {
     // Cover the UI straight away; it only uncovers once we know no lock applies.
     setMode((m) => (m === 'locked' ? m : 'checking'));
@@ -94,7 +96,8 @@ export function AppLockGate() {
       }
     } catch (e) {
       console.warn('App lock check failed:', e instanceof Error ? e.message : String(e));
-      setMode('unlocked');
+      setError('Unable to check wallet security. Unlock your device and try again.');
+      setMode('error');
     }
   }, [promptBiometric]);
 
@@ -177,6 +180,15 @@ export function AppLockGate() {
   return (
     <Modal visible animationType="none" transparent={false} onRequestClose={() => {}}>
       <SafeAreaView style={styles.container}>
+        {mode === 'error' && (
+          <View style={styles.header}>
+            <Text style={styles.title}>Wallet locked</Text>
+            <Text style={styles.subtitle}>{error}</Text>
+            <TouchableOpacity style={styles.bioButton} accessibilityRole="button" accessibilityLabel="Retry security check" onPress={lock}>
+              <Text style={styles.bioButtonText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        )}
         {mode === 'locked' && (
           <>
             <View style={styles.header}>

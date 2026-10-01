@@ -128,7 +128,7 @@ export class SecurityService {
   async getSecuritySettings(): Promise<SecuritySettings> {
     try {
       const pinHash = await SecureStore.getItemAsync(SECURITY_KEYS.PIN_HASH);
-      const biometricEnabled = await this.isBiometricEnabled();
+      const biometricEnabled = (await SecureStore.getItemAsync(SECURITY_KEYS.BIOMETRIC_ENABLED)) === 'true';
 
       let biometricType: 'fingerprint' | 'face' | 'iris' | null = null;
       
@@ -153,11 +153,7 @@ export class SecurityService {
       };
     } catch (error) {
       console.error('Failed to get security settings:', error);
-      return {
-        pinEnabled: false,
-        biometricEnabled: false,
-        biometricType: null,
-      };
+      throw new Error('Security settings are unavailable. Please try again.');
     }
   }
 
