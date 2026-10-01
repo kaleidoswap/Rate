@@ -1,3 +1,4 @@
+jest.mock('@react-native-async-storage/async-storage', () => ({ getItem: jest.fn(async () => null), setItem: jest.fn(async () => {}) }));
 const now = () => Math.floor(Date.now() / 1000);
 const mockOffers = [{ pubkey: 'cheap' }, { pubkey: 'silent' }, { pubkey: 'pricey' }];
 const mockQuotes = (expires = now() + 60) => [
@@ -22,7 +23,7 @@ jest.mock('@universal-bolt12/swap-market', () => ({
 
 import { encodePaymentCode } from '@universal-bolt12/universal-code';
 import { createElectrumSwapAccount } from './electrumSwapAccount';
-import { previewPayment, quotePayment, executePayment, registerKaleidoPayAccount } from './index';
+import { previewPayment, quotePayment, quotePaymentOffers, executePaymentOffer, executePayment, registerKaleidoPayAccount } from './index';
 
 const address = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
 const store = { save: jest.fn(), load: jest.fn(), list: jest.fn(async () => []) };
@@ -83,4 +84,28 @@ test('execute starts paying and status follows the swap to completion', async ()
     expect(await account.status('ui-1')).toEqual({ status: 'completed', reference: 'c1' });
     expect(await account.status('nope')).toEqual({ status: 'unknown' });
   } finally { off(); }
+});
+
+test('exposes each provider and pays the explicitly selected offer even after refresh', async () => {
+  const account = createElectrumSwapAccount({ source: { id: 'choices', rail: 'ln', network: 'mainnet' }, payer, attempts: store, secrets });
+  const off = registerKaleidoPayAccount(account);
+  try {
+    const preview = previewPayment(encodePaymentCode({ address, amountSat: 25000 }, 'mainnet'), 'mainnet', '', 'choices');
+    const offers = await quotePaymentOffers(preview);
+    expect(offers).toHaveLength(3);
+    expect(offers.find(o => o.id.endsWith(':silent'))?.unavailable).toMatch(/did not answer/);
+    const selected = offers.find(o => o.id.endsWith(':pricey'))!;
+    expect(selected.quote?.totalSat).toBe(27500);
+    await quotePaymentOffers(preview); // Refreshing must not overwrite the selected provider's attempt.
+    await executePaymentOffer(preview, selected, 'selected-pricey');
+    expect(mockPayAttempt).toHaveBeenCalledWith(expect.objectContaining({ id: 'a-pricey' }), payer, expect.anything());
+  } finally { off(); }
+});
+
+test('reconstructs status from the durable payment-attempt mapping after remount', async () => {
+  const saved = { id: 'swap-saved', requestId: 'restore:ui-saved', stage: 'claimed', claim: { txid: 'confirmed' } };
+  const persisted = { save: jest.fn(), load: jest.fn(async () => saved), list: jest.fn(async () => [saved]) } as any;
+  const account = createElectrumSwapAccount({ source: { id: 'restore', rail: 'ln', network: 'mainnet' }, payer, attempts: persisted, secrets });
+  expect(await account.status('ui-saved')).toEqual({ status: 'completed', reference: 'confirmed' });
+  expect(mockPayAttempt).not.toHaveBeenCalled();
 });

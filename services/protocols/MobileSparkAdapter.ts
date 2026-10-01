@@ -1,8 +1,21 @@
 import { SparkWdkAdapter } from '@kaleidorg/wallet-engine/adapters/wdk';
 import { validFeeSats, type PaymentFeeRequest } from '../paymentReview';
 
+import { createSparkPayAccount } from '../kaleidoPay/sparkAccount';
+
 /** Expose the WDK's read-only fee quotes without sending a payment. */
 export class MobileSparkAdapter extends SparkWdkAdapter {
+  createPaymentAccount(walletId: number) {
+    this.assertConnected();
+    if (this.network !== 'mainnet') return null;
+    const wallet = this.account?._wallet;
+    if (!wallet?.getWithdrawalFeeQuote || !wallet?.withdraw || !wallet?.getCoopExitRequest) return null;
+    return createSparkPayAccount(walletId, wallet, () => {
+      this.assertConnected();
+      if (this.account?._wallet !== wallet || this.network !== 'mainnet') throw new Error('Account changed. Review the payment again.');
+    });
+  }
+
   async quotePaymentFee(request: PaymentFeeRequest): Promise<number | null> {
     this.assertConnected();
     if (request.method === 'bitcoin_l1') {
