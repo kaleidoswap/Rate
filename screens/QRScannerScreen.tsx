@@ -100,7 +100,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       if (captureMode === 'contact') {
         navigation.navigate(returnScreen, { scannedContact: data }); return;
       }
-      if (returnScreen === 'KaleidoPay' || isKaleidoPayCode(data)) {
+      if (isKaleidoPayCode(data)) {
         navigation.navigate('KaleidoPay', { code: data }); return;
       }
       const paymentData = await processScannedData(data);
