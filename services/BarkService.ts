@@ -46,6 +46,22 @@ export async function sendBarkPayment(request: PaymentRequest) {
   return payment
 }
 
+/** Bark's separate on-chain (boarding) wallet balance. */
+export async function readBarkOnchain(): Promise<{ confirmedSats: number; pendingSats: number }> {
+  const adapter = getConnectedBark()
+  await adapter.backend.syncOnchain()
+  const { confirmedSats, pendingSats } = await adapter.backend.getOnchainBalance()
+  return { confirmedSats, pendingSats }
+}
+
+/** Bark's recovery state after opening/restoring a wallet. */
+export async function readBarkRecovery(): Promise<string | null> {
+  const adapter = protocolManager.getAdapterIfAvailable('BARK') as BarkReactNativeAdapter | undefined
+  if (!adapter?.isConnected()) return null
+  const info: any = await adapter.backend.getWalletInfo()
+  return info?.recovery ?? null
+}
+
 export async function getBarkBoardingTerms() {
   return getConnectedBark().boardingTerms()
 }

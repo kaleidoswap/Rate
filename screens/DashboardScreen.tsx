@@ -45,6 +45,7 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
+import { readBarkRecovery } from '../services/BarkService';
 
 const { width } = Dimensions.get('window');
 
@@ -323,8 +324,14 @@ export default function DashboardScreen({ navigation }: Props) {
         })
       );
       const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
-      setBalanceWarning(balanceResults.filter(Boolean).length < connectedCount
-        ? 'Some balances are unavailable. Your total may be incomplete.' : null);
+      // Bark recovery (moved from the old Bark screen): an incomplete restore can
+      // omit funds, so say so next to the total rather than on a separate page.
+      const barkRecovery = await readBarkRecovery().catch(() => null);
+      setBalanceWarning(
+        barkRecovery === 'failed' || barkRecovery === 'incomplete'
+          ? 'Bark recovery is incomplete, so its balance may omit funds.'
+          : balanceResults.filter(Boolean).length < connectedCount
+            ? 'Some balances are unavailable. Your total may be incomplete.' : null);
       for (const r of balanceResults) {
         if (!r) continue;
         // Bark is a layer like Arkade/Spark: counted in the total and shown in

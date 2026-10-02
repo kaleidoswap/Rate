@@ -143,7 +143,7 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
   const handleDone = () => {
     feedback.tap();
     // Dismiss the Send/Success modals back to the dashboard.
-    navigation.navigate(paymentType === 'bark' ? 'Bark' : 'Dashboard');
+    navigation.navigate('Dashboard');
   };
 
   const handleCopyReference = () => {

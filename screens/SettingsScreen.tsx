@@ -28,6 +28,7 @@ import { formatDenominatedAmount, useBitcoinPriceIn } from '../utils/bitcoinUnit
 import { loadBtcBalance, setActiveWallet } from '../store/slices/walletSlice';
 import { Button, Input, MainHeader } from '../components';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { protocolColor } from '../theme';
 import { PairingService, type DesktopPairing } from '../services/PairingService';
 import DatabaseService from '../services/DatabaseService';
 import SecurityService from '../services/SecurityService';
@@ -656,7 +657,6 @@ export default function SettingsScreen({ navigation }: Props) {
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark') && (
           <>
           <SectionLabel>Accounts & networks</SectionLabel>
-          {BARK_ENABLED && <Group><Row first icon="leaf-outline" label="Bark" description={`Second Ark · ${barkNetworkLabel()}`} value="Account" onPress={() => navigation.navigate('Bark')} /></Group>}
           <Group>
           {WALLET_PROTOCOLS.map((proto, idx) => {
             const connected = protocolStatus[proto];
@@ -704,6 +704,26 @@ export default function SettingsScreen({ navigation }: Props) {
               </View>
             );
           })}
+          {/* Bark is a layer like the rows above; its network is set at build time
+              (EXPO_PUBLIC_BARK_NETWORK), so it shows status without a network picker. */}
+          {BARK_ENABLED && (() => {
+            const barkConnected = !!protocolManager.getAdapterIfAvailable('BARK')?.isConnected();
+            const barkColor = protocolColor('BARK');
+            return (
+              <View style={[styles.row, styles.rowDivider]}>
+                <View style={[styles.rowIcon, { backgroundColor: barkColor + '1A', opacity: barkConnected ? 1 : 0.5 }]}>
+                  <NetworkIcon network="bark" size={18} color={barkColor} />
+                </View>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>Bark</Text>
+                  <Text style={styles.rowDescription} numberOfLines={1}>Off-chain Bitcoin (Second Ark) · {barkNetworkLabel()}</Text>
+                </View>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: barkConnected ? barkColor : theme.colors.text.tertiary }}>
+                  {barkConnected ? 'Connected' : 'Offline'}
+                </Text>
+              </View>
+            );
+          })()}
           </Group>
           </>
         )}

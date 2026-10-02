@@ -110,7 +110,7 @@ export function getReceiveMethodsForAccount(account: AccountId, assetFamily: Ass
     case 'ARKADE': return ['arkade', 'boarding']
     // Bark mints `tark1…` like Arkade but is a different Ark server: its own method,
     // routed by account, never by address prefix.
-    case 'BARK': return ['bark']
+    case 'BARK': return ['bark', 'lightning']
   }
 }
 

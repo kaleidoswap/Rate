@@ -141,7 +141,10 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         breakdownRows.push({
             key: 'BARK',
             name: 'BTC on Bark',
-            subtitle: 'Bark balance',
+            // Pending covers rounds, boarding and in-flight Lightning (old Bark screen).
+            subtitle: (byProtocol?.BARK?.unconfirmed ?? 0) > 0 && !hideAmounts
+                ? `Bark balance · ${formatSatoshis(byProtocol.BARK!.unconfirmed)} ${bitcoinUnit} pending`
+                : 'Bark balance',
             accent: protocolColor('BARK'),
             value: byProtocol?.BARK?.total ?? 0,
         });
