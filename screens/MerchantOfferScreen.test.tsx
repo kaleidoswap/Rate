@@ -44,10 +44,11 @@ test('saves ordered preferences without replacing an existing QR',async()=>{
  (loadMerchantOffer as jest.Mock).mockResolvedValue(saved);
  const view=render(<MerchantOfferScreen navigation={{goBack:jest.fn()}}/>);await act(async()=>{});
  fireEvent.press(view.getByText('Edit receiving preferences'));
- fireEvent.press(view.getByText('Add Bark address'));
+ fireEvent.press(view.getByLabelText('Add Bark address'));
+ fireEvent.press(view.getByText('Enter manually'));
  fireEvent.changeText(view.getByLabelText('Bark receiving address'),'bark-public');
  fireEvent.changeText(view.getByLabelText('Bark server public key'),'ab'.repeat(32));
- fireEvent.press(view.getByText('Move Lightning up'));
+ fireEvent.press(view.getByLabelText('Move Lightning up'));
  await act(async()=>{fireEvent.press(view.getByText('Save preferences'))});
  expect(saveReceiverPreferences).toHaveBeenCalledWith(mockConnection.id,expect.objectContaining({destinations:[{type:'lightning',source:'bolt12_offer'},{type:'bark',address:'bark-public',serverKey:'ab'.repeat(32)}]}));
  expect(view.getByText('lno1saved')).toBeTruthy();expect(createMerchantOffer).not.toHaveBeenCalled();

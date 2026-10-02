@@ -36,6 +36,8 @@ export interface PaymentOffer {
   id: string; provider: string; providerDetail?: string; accountName: string; route: Route;
   quote?: Quote; unavailable?: string; executable: boolean;
 }
+/** Demo builds (EXPO_PUBLIC_KALEIDOPAY_DEMO=1) simulate only the final payment; quotes stay live and the screen says so. */
+export const KALEIDOPAY_DEMO = process.env.EXPO_PUBLIC_KALEIDOPAY_DEMO === '1';
 const accounts = new Map<string, PayAccount>();
 const owners = new WeakMap<PaymentOffer, { account: PayAccount; snapshot: string }>();
 const preparers = new Set<() => Promise<void>>();
@@ -181,6 +183,7 @@ export async function executePaymentOffer(preview: Preview, offer: PaymentOffer,
     if (accounts.get(offer.route.sourceId) !== account || owner.snapshot !== JSON.stringify({ preview, route: offer.route, quote: offer.quote })) throw new Error('Account or quote changed before payment.');
     getAccount(preview, offer.route);
     validateQuote(offer.quote!, preview, account);
+    if (KALEIDOPAY_DEMO) { await new Promise(r => setTimeout(r, 2500)); return { status: 'completed', reference: 'simulated' }; }
     try { return normalizeResult(await account.execute!(preview, offer.route, offer.quote!, attemptId)); }
     catch { return { status: 'unknown' }; }
   })();

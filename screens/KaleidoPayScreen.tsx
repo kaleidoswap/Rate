@@ -11,7 +11,7 @@ import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppSelector } from '../store/hooks';
-import { codeNetwork, prepareKaleidoPay, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
+import { KALEIDOPAY_DEMO, codeNetwork, prepareKaleidoPay, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
 import type { Network, Preview, PaymentOffer } from '../services/kaleidoPay';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt } from '../services/kaleidoPay/attempts';
 import { protocolManager } from '../services/protocols';
@@ -182,10 +182,15 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
       <ScreenHeader title={preview ? "Review payment" : "Pay"} subtitle="Pay with what you have" onBack={() => { if (preview && !attempt && !paying.current) { revision.current++; setBusy(false); setPreview(null); } else if (!paying.current) navigation.goBack(); }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
+          {KALEIDOPAY_DEMO && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.warning[500] + '22', marginBottom: t.spacing[4] }}>
+            <Ionicons name="flask-outline" size={16} color={t.colors.warning[500]} />
+            <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: quotes are live, the payment step is simulated. No funds move.</Text>
+          </View>}
           {!!error && <Text accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500], marginBottom: t.spacing[4] }}>{error}</Text>}
           {attempt ? <View style={card}>
             <Ionicons name={attempt.status === 'completed' ? 'checkmark-circle-outline' : 'time-outline'} size={48} color={t.colors.primary[500]} />
             <Text style={{ ...text, fontSize: t.typography.fontSize['2xl'], fontWeight: '600' }}>{attempt.status === 'completed' ? 'Payment completed' : attempt.status === 'failed' ? 'Payment failed' : busy ? 'Sending payment' : attempt.status === 'unknown' ? 'Payment needs checking' : 'Payment in progress'}</Text>
+            {KALEIDOPAY_DEMO && attempt.status === 'completed' && <Text style={{ ...muted, color: t.colors.warning[500] }}>Simulated in this demo build. No funds moved.</Text>}
             {row('Recipient receives', attempt.recipient)}{row('Total', attempt.total)}{row('Provider', attempt.provider)}
             {!!attempt.reference && <Text selectable style={muted}>Reference: {attempt.reference}</Text>}
             <Text style={muted}>{unresolvedAttempt(attempt) ? 'Your payment is still being checked. You can leave and return here to check its status. Do not send it again.' : attempt.status === 'failed' ? 'This payment was not sent or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
