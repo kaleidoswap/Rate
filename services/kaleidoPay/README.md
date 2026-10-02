@@ -159,3 +159,22 @@ After restoring expo-image-picker 17.0.11 and its image-loader dependency locall
 a clean `expo export --platform ios --clear` succeeded (5,276 modules, Hermes
 bundle). The existing development server retained stale module resolution errors;
 the clean export verifies bundling, not native execution or payment settlement.
+
+## Bark pays BOLT12 offers
+
+When Bark connects, `connectBarkToKaleidoPay` registers one Bark account with two
+routes:
+
+- **direct**: a code with a BOLT12 offer whose rails include `ln` is paid by Bark
+  itself (`payLightningOffer`). A fixed-amount offer is paid at its own amount.
+- **swap**: a `btc:<network>` rail is paid through Electrum's swap providers.
+
+Both quotes include Bark's own Lightning fee from `estimatePaymentFee`; without
+that estimate the quote is unavailable, never a partial total. The swap adds
+Bark's fee for each of the provider's two invoices.
+
+wallet-engine beta.75 does not expose `payLightningOffer` yet, so
+`patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch` (declared in
+`pnpm-workspace.yaml`) adds it to the Bark wallet port and routes `lno1…` in the
+adapter's `sendPayment`. `barkOffer.test.ts` guards the patch. Drop it when
+wallet-engine ships the same change.
