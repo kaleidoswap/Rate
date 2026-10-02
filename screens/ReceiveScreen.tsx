@@ -1,3 +1,4 @@
+import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
 import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
 // screens/ReceiveScreen.tsx
@@ -60,8 +61,6 @@ import { resolvePrecision } from '../utils/assetAmount';
 // Sentinel asset id for receiving an RGB asset the user doesn't hold yet
 // (generates a blind RGB invoice with no specific asset_id).
 const NEW_RGB_ASSET_ID = 'RGB_NEW';
-// Receive modes whose generated request embeds the requested amount.
-const AMOUNT_ENCODING_NETWORKS: readonly string[] = ['lightning', 'spark'];
 // Verbose receive logging is opt-in even in dev. In an Expo dev client every
 // console.log is a bridge round-trip, and the unified flow emits ~12+ lines per
 // generation plus one on every tap — enough to visibly stall the JS thread while
@@ -205,7 +204,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // address disclosure, deposit monitoring, and Spark claiming all consume this.
   const [receiveMethods, setReceiveMethods] = useState<ReceiveMethod[]>([]);
   const unifiedMethods = receiveMethods.map((method) => method.label);
-  const unifiedAddresses = receiveMethods.map(({ key, label, value }) => ({ key, label, value }));
+  const unifiedAddresses = receiveMethods;
   // The raw address breakdown is hidden behind a collapsed section by default —
   // the QR (and its single "Copy" affordance) is the primary way to receive, so
   // the list of individual addresses only appears when the user expands it.
@@ -228,6 +227,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [selectedAccount, setSelectedAccount] = useState<AccountId | null>(null);
   const restoredBtcRoute = useRef(false);
   const [amount, setAmount] = useState('');
+  const [expirySeconds, setExpirySeconds] = useState(3600);
+  const [showCountdown, setShowCountdown] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [showAssetSelector, setShowAssetSelector] = useState(false);
@@ -238,8 +239,6 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [channelsLoading, setChannelsLoading] = useState(false);
   const [, setMaxDepositAmount] = useState<number>(0);
   const [arkadeSubMode, setArkadeSubMode] = useState<'ark' | 'boarding'>('ark');
-  // Network selector dropdown (All selected by default; specific networks hidden).
-  const [showNetworkDropdown, setShowNetworkDropdown] = useState(false);
   // Multi-currency amount editor (BTC / sats / USD / other fiat).
   const [showAmountEditor, setShowAmountEditor] = useState(false);
   const [showDepositSuccess, setShowDepositSuccess] = useState(false);
@@ -286,7 +285,6 @@ export default function ReceiveScreen({ navigation }: Props) {
   const resetReceiveSurface = React.useCallback(() => {
     cancelReceiveWork();
     setShowPaymentOptions(false);
-    setShowNetworkDropdown(false);
     setError(null);
     setUnifiedError(null);
     setAddress('');
@@ -566,6 +564,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   const generateAddress = async () => {
+    cancelScheduledAddress.current();
     if (!selectedAsset) return;
 
     const generationId = addressGenerationRef.current + 1;
@@ -602,9 +601,9 @@ export default function ReceiveScreen({ navigation }: Props) {
             // Amount-bound native Spark invoice (sats).
             const invoice = await runReceiveOperation('Create Spark invoice', () =>
               sparkAdapter.createInvoice({
-                amount: Math.round(numericAmount),
-                description: `Receive ${cleanAmount} sats`,
-                expirySeconds: 3600,
+                amount: receiveAmountSats(amount, bitcoinUnit),
+                description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+                expirySeconds,
               }));
             result = invoice.invoice;
             methodMeta = {
@@ -730,9 +729,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           // BTC Lightning invoice. Open-amount: if the user typed a number we bind
           // it (in sats); otherwise we mint an amount-less BOLT11 the sender fills in.
           const cleanAmount = amount.replace(/,/g, '');
-          const numericAmount = parseFloat(cleanAmount);
-          const amountSats =
-            !isNaN(numericAmount) && numericAmount > 0 ? Math.round(numericAmount) : undefined;
+          const amountSats = receiveAmountSats(amount, bitcoinUnit) || undefined;
 
           // Honour an explicit account choice; otherwise prefer the connected
           // NWC/RGB Lightning wallet and fall back to Spark.
@@ -751,8 +748,8 @@ export default function ReceiveScreen({ navigation }: Props) {
                 [{
                   layer: 'BTC_LN',
                   ...(amountSats ? { amount: amountSats } : {}),
-                  description: amountSats ? `Receive ${cleanAmount} sats` : 'Receive Bitcoin',
-                  expirySeconds: 3600,
+                  description: amountSats ? `Receive ${cleanAmount} ${bitcoinUnit}` : 'Receive Bitcoin',
+                  expirySeconds,
                 }],
                 signal,
               ));
@@ -771,8 +768,8 @@ export default function ReceiveScreen({ navigation }: Props) {
               sparkLn.createInvoice({
                 layer: 'BTC_LN',
                 ...(amountSats ? { amount: amountSats } : {}),
-                description: amountSats ? `Receive ${cleanAmount} sats` : 'Receive Bitcoin',
-                expirySeconds: 3600,
+                description: amountSats ? `Receive ${cleanAmount} ${bitcoinUnit}` : 'Receive Bitcoin',
+                expirySeconds,
               }));
             result = invoice.invoice;
             methodMeta = {
@@ -804,7 +801,7 @@ export default function ReceiveScreen({ navigation }: Props) {
               [{
                 ...(selectedAsset.asset_id === NEW_RGB_ASSET_ID ? {} : { asset_id: selectedAsset.asset_id }),
                 min_confirmations: 1,
-                duration_seconds: 3600,
+                duration_seconds: expirySeconds,
               }],
               signal,
             ));
@@ -844,7 +841,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                 description: assetAmount
                   ? `Receive ${cleanAmount} ${selectedAsset.ticker}`
                   : `Receive ${selectedAsset.ticker}`,
-                expirySeconds: 3600,
+                expirySeconds,
               }],
               signal,
             ));
@@ -1127,16 +1124,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     });
 
     // Optional amount (in sats) for the Lightning leg / BIP21 amount.
-    let amountSats = 0;
-    if (amount && isAmountValid()) {
-      const cleanAmount = amount.replace(/,/g, '');
-      const numericAmount = parseFloat(cleanAmount);
-      if (!isNaN(numericAmount) && numericAmount > 0) {
-        amountSats = bitcoinUnit === 'BTC'
-          ? Math.round(numericAmount * 1e8)
-          : Math.round(numericAmount);
-      }
-    }
+    const amountSats = receiveAmountSats(amount, bitcoinUnit);
 
     // Reuse native addresses only when the user explicitly refreshes Lightning.
     const cached = unifiedCollectedRef.current;
@@ -1367,7 +1355,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                     layer: 'BTC_LN', // force a BOLT11 (Spark would otherwise mint a native Spark invoice)
                     amount: amountSats > 0 ? amountSats : undefined,
                     description: 'Unified receive',
-                    expirySeconds: 3600,
+                    expirySeconds,
                   }],
                   signal,
                 ));
@@ -1453,10 +1441,11 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   const cancelScheduledUnified = useReceiveGeneration(
-    networkType === 'unified' ? JSON.stringify([unifiedAsset, amount]) : null,
+    networkType === 'unified' ? JSON.stringify([unifiedAsset, amount, expirySeconds]) : null,
     () => setUnifiedLoading(true),
     () => { void generateUnifiedUri({ includeLightning: true, reason: 'auto' }); },
     () => { unifiedGenerationRef.current += 1; },
+    isFocused && isAppActive && !unifiedUri,
   );
 
   // Keep the unified BTC/USD asset in sync with the selected asset tab.
@@ -1512,69 +1501,18 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
   }, [allAssets]);
 
-  // Auto-generate address when conditions change
-  useEffect(() => {
-    if (networkType === 'unified') return; // unified has its own generator
-    if (selectedAsset) {
-      setAddress('');
-      setError(null);
-
-      // Show the loader straight away (during the debounce window) when we know
-      // we'll auto-generate — otherwise the "Generate address" prompt flashes
-      // in between while switching networks.
-      const willAutoGenerate = !isAmountRequired() || isAmountValid();
-      if (willAutoGenerate) setLoading(true);
-
-      // Only auto-generate if amount is not required, or if it's valid
-      // Use a small delay to avoid interfering with user input
-      const timeoutId = setTimeout(() => {
-        if (!isAmountRequired() || isAmountValid()) {
-          generateAddress();
-        }
-      }, 300); // Increased delay to reduce interference
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [selectedAsset.asset_id, networkType, arkadeSubMode, selectedAccount]);
-
-  // Regenerate a moment after the amount changes on networks whose request
-  // encodes it (Lightning, Spark), including when it is cleared, so the QR never
-  // shows a stale amount. The amount is set via the AmountEditorModal, so
-  // debounce to avoid re-minting mid-edit. Skip the first run: the effect above
-  // already generates on mount.
-  const amountEffectMounted = React.useRef(false);
-  useEffect(() => {
-    if (!amountEffectMounted.current) {
-      amountEffectMounted.current = true;
-      return;
-    }
-    if (AMOUNT_ENCODING_NETWORKS.includes(networkType) && isAmountValid()) {
-      const timeoutId = setTimeout(() => generateAddress(), 2000);
-      return () => clearTimeout(timeoutId);
-    }
-  }, [amount]);
-
-  // Regenerate address when channels change (for lightning network)
-  useEffect(() => {
-    if (networkType === 'lightning' && selectedAsset && channels.length > 0 && !address && !loading) {
-      const timeoutId = setTimeout(() => {
-        if (!isAmountRequired() || isAmountValid()) {
-          generateAddress();
-        }
-      }, 500);
-      
-      return () => clearTimeout(timeoutId);
-    }
-  }, [channels]);
+  // A single request identity prevents overlapping amount/network regeneration.
+  const cancelScheduledAddress = useReceiveGeneration(
+    networkType !== 'unified' ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, selectedAccount, amount, expirySeconds]) : null,
+    () => { setAddress(''); setError(null); setLoading(true); },
+    () => { void generateAddress(); },
+    () => { addressGenerationRef.current += 1; },
+    isFocused && isAppActive && !address,
+  );
 
   // ── Amount <-> sats bridging for the multi-currency editor ────────────────
   const SATS_PER_BTC = 1e8;
-  const currentAmountSats = (() => {
-    if (!amount) return 0;
-    const n = parseFloat(amount.replace(/,/g, ''));
-    if (isNaN(n) || n <= 0) return 0;
-    return bitcoinUnit === 'BTC' ? Math.round(n * SATS_PER_BTC) : Math.round(n);
-  })();
+  const currentAmountSats = receiveAmountSats(amount, bitcoinUnit);
 
   const applyAmountSats = (sats: number) => {
     const next = !sats || sats <= 0 ? ''
@@ -1769,8 +1707,8 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
-  // ── Network selector: "All" by default, specific networks behind a dropdown ─
-  const renderNetworkDropdown = () => {
+  // Advanced route choices; the main list opens individual payment codes.
+  const renderNetworkChoices = () => {
     const canUseAll = selectedAsset.ticker === 'BTC' || /usd/i.test(selectedAsset.ticker);
     const isRgbAsset = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker) === 'RGB';
     const status = getProtocolStatus();
@@ -1816,7 +1754,6 @@ export default function ReceiveScreen({ navigation }: Props) {
     ];
     const current = options.find((o) => o.id === networkType) || options[0];
     if (!current) return null;
-    const color = NETWORK_COLORS[current.id] || theme.colors.primary[500];
 
     const glyph = (id: ReceiveMode, c: string) =>
       id === 'unified'
@@ -1825,89 +1762,45 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     return (
       <View style={styles.netSelectorWrap}>
-        <TouchableOpacity
-          style={[styles.netSelector, showNetworkDropdown && { borderColor: color }]}
-          onPress={() => {
-            receiveLog('tap.networkSelector', { current: current.id, open: !showNetworkDropdown });
-            feedback.select();
-            if (!showNetworkDropdown && !channelsLoading && getProtocolStatus().RGB) {
-              // Channel discovery is an advanced/network-specific NWC request.
-              // Start it only after the user asks to see network choices, never
-              // during the default Receive opening sequence.
-              setTimeout(() => void loadChannels(), 0);
-            }
-            setShowNetworkDropdown((v) => !v);
-          }}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.netGlyph, { backgroundColor: color + '1A' }]}>
-            {glyph(current.id, color)}
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.netSelectorLabel}>{current.label}</Text>
-            <Text style={styles.netSelectorSub} numberOfLines={1}>{current.sub}</Text>
-          </View>
-          <Ionicons
-            name={showNetworkDropdown ? 'chevron-up' : 'chevron-down'}
-            size={18}
-            color={theme.colors.text.tertiary}
-          />
-        </TouchableOpacity>
-
-        <View style={styles.routeSummary}>
-          <Ionicons name="information-circle-outline" size={15} color={color} />
-          <Text style={styles.routeSummaryText}>
-            {current.id === 'unified'
-              ? 'The QR lets the sender choose; funds land in the matching account.'
-              : current.id === 'lightning'
-                ? `Funds land in ${effectiveAccount === 'SPARK' ? 'Spark' : 'your connected Lightning wallet'}; instant with a routing fee.`
-                : current.sub}
-          </Text>
+        <View style={styles.netDropdown}>
+          {options.map((o) => {
+            const active = o.id === networkType;
+            const c = NETWORK_COLORS[o.id] || theme.colors.primary[500];
+            return (
+              <TouchableOpacity
+                key={o.id}
+                style={[styles.netOption, active && { backgroundColor: c + '12' }]}
+                onPress={() => {
+                  receiveLog('tap.networkOption', { from: networkType, to: o.id });
+                  feedback.select();
+                  if (active) {
+                    return;
+                  }
+                  resetReceiveSurface();
+                  setNetworkType(o.id);
+                  if (selectedAsset.ticker === 'BTC') {
+                    dispatch(setLastBtcReceiveRoute({
+                      axis: routeAxis,
+                      network: o.id,
+                      account: routeAxis === 'account' ? effectiveAccount : null,
+                    }));
+                  }
+                  setShowPaymentOptions(false);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.netGlyph, { backgroundColor: c + '1A' }]}>
+                  {glyph(o.id, c)}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.netOptionLabel, active && { color: c }]}>{o.label}</Text>
+                  <Text style={styles.netSelectorSub} numberOfLines={1}>{o.sub}</Text>
+                </View>
+                {active && <Ionicons name="checkmark-circle" size={18} color={c} />}
+              </TouchableOpacity>
+            );
+          })}
         </View>
-
-        {showNetworkDropdown && (
-          <View style={styles.netDropdown}>
-            {options.map((o) => {
-              const active = o.id === networkType;
-              const c = NETWORK_COLORS[o.id] || theme.colors.primary[500];
-              return (
-                <TouchableOpacity
-                  key={o.id}
-                  style={[styles.netOption, active && { backgroundColor: c + '12' }]}
-                  onPress={() => {
-                    receiveLog('tap.networkOption', { from: networkType, to: o.id });
-                    feedback.select();
-                    if (active) {
-                      setShowNetworkDropdown(false);
-                      return;
-                    }
-                    resetReceiveSurface();
-                    setNetworkType(o.id);
-                    if (selectedAsset.ticker === 'BTC') {
-                      dispatch(setLastBtcReceiveRoute({
-                        axis: routeAxis,
-                        network: o.id,
-                        account: routeAxis === 'account' ? effectiveAccount : null,
-                      }));
-                    }
-                    setShowNetworkDropdown(false);
-                    setShowPaymentOptions(false);
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.netGlyph, { backgroundColor: c + '1A' }]}>
-                    {glyph(o.id, c)}
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.netOptionLabel, active && { color: c }]}>{o.label}</Text>
-                    <Text style={styles.netSelectorSub} numberOfLines={1}>{o.sub}</Text>
-                  </View>
-                  {active && <Ionicons name="checkmark-circle" size={18} color={c} />}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        )}
       </View>
     );
   };
@@ -2014,7 +1907,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         </View>
         {renderAmountRow()}
 
-        {unifiedAddresses.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
+        {unifiedAddresses.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry showCountdown={showCountdown} key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
         <ReceiveRequestActions value={unifiedUri} />
       </View>
     );
@@ -2113,7 +2006,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         </View>
         {renderAmountRow()}
 
-        <InvoiceExpiry invoice={address} onRefresh={() => { void generateAddress(); }} />
+        <InvoiceExpiry showCountdown={showCountdown} invoice={address} onRefresh={() => { void generateAddress(); }} />
         <ReceiveRequestActions value={address} label={addrLabel} showValue />
       </View>
     );
@@ -2162,9 +2055,13 @@ export default function ReceiveScreen({ navigation }: Props) {
       </ScrollView>
 
       <ReceiveMethodsSheet visible={showPaymentOptions}
-        methods={networkType === 'unified' ? unifiedAddresses : []} qrSize={qrSize}
+        onAdvancedOpen={() => { if (!channelsLoading && getProtocolStatus().RGB) void loadChannels(); }}
+        methods={receiveMethods} qrSize={qrSize} showCountdown={showCountdown}
         onClose={() => setShowPaymentOptions(false)}
-        onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }}>
+        onRefresh={() => {
+          if (networkType === 'unified') void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' });
+          else void generateAddress();
+        }}>
         {networkType === 'unified' && !unifiedLoading
           && getProtocolStatus().RGB
           && !receiveMethods.some((method) => method.protocol === 'RGB') && (
@@ -2185,7 +2082,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         )}
 
         {renderRouteAxisSelector()}
-        {renderNetworkDropdown()}
+        {renderNetworkChoices()}
         {networkType === 'arkade' && <View>
           {(['ark', 'boarding'] as const).map(mode => <TouchableOpacity key={mode}
             accessibilityRole="radio" accessibilityState={{ checked: arkadeSubMode === mode }}
@@ -2239,11 +2136,15 @@ export default function ReceiveScreen({ navigation }: Props) {
       <AmountEditorModal
         visible={showAmountEditor}
         onClose={() => setShowAmountEditor(false)}
+        requestOptions={{ expirySeconds, showCountdown }}
         initialSats={currentAmountSats}
         rates={fiatRates}
         bitcoinUnit={bitcoinUnit}
-        balanceSats={btcBalance?.vanilla?.spendable || 0}
-        onConfirm={(sats) => {
+        onConfirm={(sats, options) => {
+          if (options) {
+            setShowCountdown(options.showCountdown);
+            if (options.expirySeconds !== expirySeconds) { resetReceiveSurface(); setExpirySeconds(options.expirySeconds); }
+          }
           receiveLog('amount.confirm', { sats, previousAmount: amount, networkType });
           applyAmountSats(sats);
         }}

@@ -9,6 +9,7 @@ jest.mock('react-redux', () => ({ useSelector: (cb: any) => cb({ settings: { bit
 jest.mock('expo-camera', () => ({ CameraView: 'CameraView', useCameraPermissions: jest.fn(), scanFromURLAsync: jest.fn() }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => undefined } }));
+jest.mock('../components/payments/InvoiceExpiry', () => ({ invoiceExpiry: jest.fn(() => null) }));
 jest.mock('../utils/decodeInvoice', () => ({ decodeBolt11: jest.fn() }));
 beforeEach(() => {
   (require('react-native') as any).Easing = { bezier: () => () => {} };
@@ -81,4 +82,15 @@ test('a token request is never silently treated as a BTC native request', async 
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
   expect(navigation.navigate).not.toHaveBeenCalled();
   expect(screen.getByText(/not a recognized/)).toBeTruthy();
+});
+
+test.each(['lnbc-expired', 'bitcoin:?lightning=lnbc-expired'])('rejects an expired invoice before navigating: %s', async code => {
+  const expiry = require('../components/payments/InvoiceExpiry').invoiceExpiry as jest.Mock;
+  expiry.mockImplementation((value: string) => value === 'lnbc-expired' ? Date.now() - 1000 : null);
+  (Clipboard.getString as jest.Mock).mockResolvedValue(code);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).not.toHaveBeenCalled(); expect(screen.getByText(/invoice has expired/)).toBeTruthy();
+  expiry.mockReturnValue(null);
 });

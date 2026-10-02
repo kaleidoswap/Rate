@@ -1,3 +1,5 @@
+import { paymentReceiptStatus } from '../utils/payment-receipt';
+import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { createRequestGuard } from '../utils/request-guard';
 import { isKaleidoPayCode } from '../services/kaleidoPay';
 import { toEngineProtocol } from '../utils/protocol-bridge'
@@ -582,6 +584,11 @@ function SendScreen({ navigation, route }: Props) {
 
   const handleSend = async () => {
     if (sendingRef.current || estimatingFee || !validateInputs()) return;
+    const expiresAt = invoiceExpiry(address.replace(/^lightning:(\/\/)?/i, ''));
+    if (expiresAt !== null && expiresAt <= Date.now()) {
+      Alert.alert('Invoice expired', 'Ask the recipient for a new invoice before paying.');
+      return;
+    }
     
     if (paymentStep === 'input') {
       setPaymentStep('review');
@@ -777,18 +784,18 @@ function SendScreen({ navigation, route }: Props) {
     // Surface the on-chain fee rate on the receipt for on-chain sends only
     // (same rule as the fee selector).
     const fee = result?.fee != null && Number.isFinite(Number(result.fee))
-      ? `${Number(result.fee).toLocaleString()} sats`
+      ? `${formatBitcoinAmount(Number(result.fee), bitcoinUnit)} ${bitcoinUnit}`
       : (addressType === 'bitcoin' || addressType === 'rgb')
       ? `${feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB`
       : undefined;
 
-    navigation.navigate('PaymentSuccess', {
-      amount: amount || '0',
+    navigation.replace('PaymentSuccess', {
+      amount: isBtc ? formatBitcoinAmount(getEffectiveSats(), bitcoinUnit) : amount || '0',
       unit,
       fiat,
       recipient: address,
       paymentType,
-      status: result?.status === 'pending' ? 'pending' : 'confirmed',
+      status: paymentReceiptStatus(result, ['bitcoin', 'boarding', 'rgb'].includes(paymentType)),
       fee,
       reference: typeof reference === 'string' ? reference : undefined,
       referenceLabel,

@@ -21,7 +21,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, scanFromURLAsync } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSelector } from 'react-redux';
+import { useAppSelector } from '../store/hooks';
+import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { protocolManager } from '../services/protocols';
 import { classifyWithdrawDestination } from '../utils/account-routing';
 import { decodeBolt11 } from '../utils/decodeInvoice';
@@ -42,7 +43,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   const returnScreen: string = route?.params?.returnScreen || 'Contacts';
   // Prefill amounts in the user's chosen entry unit so Send interprets them
   // correctly (Send reads a BTC amount as sats when bitcoinUnit === 'sats').
-  const bitcoinUnit = useSelector((s: RootState) => s.settings.bitcoinUnit);
+  const bitcoinUnit = useAppSelector((s: RootState) => s.settings.bitcoinUnit);
   const btcToEntryUnit = (btc: number): string =>
     bitcoinUnit === 'sats' ? String(Math.round(btc * 1e8)) : btc.toFixed(8);
   const [processing, setProcessing] = useState(false);
@@ -93,6 +94,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
     setScanned(true); setProcessing(true); setScanError('');
     try {
       data = data.trim();
+      const expiresAt = invoiceExpiry(data.replace(/^lightning:(\/\/)?/i, ''));
+      if (expiresAt !== null && expiresAt <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
       if (!data) throw new Error('Nothing to read. Paste a payment request or choose another image.');
       if (data.toLowerCase().startsWith('nostr+walletconnect://')) {
         navigation.navigate('NWCConnect', { scanned: data }); return;
@@ -298,6 +301,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
         }
       }
     }
+    const bundledExpiry = invoiceExpiry(params.get('lightning') ?? '');
+    if (bundledExpiry !== null && bundledExpiry <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
     throw new Error(UNRECOGNIZED_ERROR);
   };
 
@@ -340,6 +345,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const handleLightningInvoice = async (invoice: string) => {
+    const expiresAt = invoiceExpiry(invoice);
+    if (expiresAt !== null && expiresAt <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
     // Decode the BOLT11 locally first — this is node-independent, so a
     // Lightning invoice scans on any wallet (e.g. Spark-only), not just when
     // the RGB node is connected (same approach as the Send screen).

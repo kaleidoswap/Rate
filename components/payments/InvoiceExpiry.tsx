@@ -15,12 +15,13 @@ export function invoiceExpiry(invoice: string): number | null {
       ? (timestamp + duration) * 1000 : null;
   } catch { return null; }
 }
-export function InvoiceExpiry({ invoice, onRefresh }: { invoice: string; onRefresh?: () => void }) {
+export function InvoiceExpiry({ invoice, onRefresh, showCountdown = true }: { invoice: string; onRefresh?: () => void; showCountdown?: boolean }) {
   const t = useAppTheme();
   const expiresAt = useMemo(() => invoiceExpiry(invoice), [invoice]);
   const now = useForegroundClock(expiresAt !== null);
   if (expiresAt === null) return null;
   const seconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  if (seconds > 0 && !showCountdown) return null;
   return <View style={{ alignItems: 'center', padding: t.spacing[3], gap: t.spacing[2] }}>
     <Text style={{ color: seconds ? t.colors.text.secondary : t.colors.warning[500] }}>{seconds ? `Lightning invoice expires in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : 'Lightning invoice expired'}</Text>
     {!seconds && onRefresh && <TouchableOpacity accessibilityRole="button" onPress={onRefresh} style={{ padding: t.spacing[3] }}><Text style={{ color: t.colors.primary[500] }}>Create a fresh request</Text></TouchableOpacity>}

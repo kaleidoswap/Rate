@@ -38,7 +38,7 @@ export interface PaymentSuccessParams {
   recipient: string;
   paymentType: PaymentType;
   /** `pending` means the transfer was accepted/submitted but not fully settled. */
-  status?: 'confirmed' | 'pending';
+  status?: 'confirmed' | 'pending' | 'unknown';
   /** Optional network-fee line, pre-formatted (e.g. "2 sat/vB"). */
   fee?: string;
   /** Optional reference (txid / payment hash / preimage) with a copy affordance. */
@@ -71,12 +71,13 @@ const truncate = (s: string): string =>
 export default function PaymentSuccessScreen({ navigation, route }: Props) {
   const { amount, unit, fiat, recipient, paymentType, status = 'confirmed', fee, reference, referenceLabel } = route.params;
   const baseMeta = TYPE_META[paymentType] ?? TYPE_META.lightning;
-  const isPending = status === 'pending';
+  const isUnknown = status === 'unknown';
+  const isPending = status !== 'confirmed';
   const meta = isPending
     ? {
         ...baseMeta,
-        label: paymentType === 'boarding' ? 'Withdrawal Submitted' : 'Payment Submitted',
-        sub: paymentType === 'boarding' ? 'Awaiting on-chain settlement' : 'Awaiting network settlement',
+        label: isUnknown ? 'Payment status unavailable' : paymentType === 'boarding' ? 'Withdrawal Submitted' : 'Payment Submitted',
+        sub: isUnknown ? 'Check Activity before sending again' : paymentType === 'boarding' ? 'Awaiting on-chain settlement' : 'Awaiting network settlement',
       }
     : baseMeta;
 
@@ -154,7 +155,7 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
   const handleShare = () => {
     feedback.tap();
     const lines = [
-      `Sent ${amount} ${unit}${fiat ? ` (${fiat.replace('≈ ', '')})` : ''}`,
+      `${isUnknown ? 'Payment status unavailable:' : isPending ? 'Submitted' : 'Sent'} ${amount} ${unit}${fiat ? ` (${fiat.replace('≈ ', '')})` : ''}`,
       `To: ${recipient}`,
       `Via: ${meta.networkLabel}`,
       reference ? `${referenceLabel || 'Reference'}: ${reference}` : undefined,
@@ -174,13 +175,13 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
             style={[styles.pulseRing, { opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]}
           />
           <View style={styles.glow} />
-          <LottieView
+          {isPending ? <Ionicons name="time-outline" size={64} color={theme.colors.warning[500]} /> : <LottieView
             ref={checkAnim}
             source={require('../assets/animations/success.json')}
             style={styles.lottie}
             autoPlay={false}
             loop={false}
-          />
+          />}
         </Animated.View>
 
         <Animated.View style={{ opacity, alignItems: 'center' }}>
@@ -228,7 +229,7 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
               <View style={styles.divider} />
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Status</Text>
-                <Text style={styles.rowValue}>Pending settlement</Text>
+                <Text style={styles.rowValue}>{isUnknown ? 'Needs checking' : 'Pending settlement'}</Text>
               </View>
             </>
           )}

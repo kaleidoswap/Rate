@@ -26,3 +26,13 @@ test('back returns to methods and closing clears the selected method on reopenin
   screen.rerender(<ReceiveMethodsSheet {...props} />);
   expect(screen.getByLabelText('Show Spark payment code')).toBeTruthy();
 });
+
+test('keeps account and network controls behind an explicit advanced action', () => {
+  const { Text } = require('react-native'); const onAdvancedOpen = jest.fn();
+  const screen = render(<ReceiveMethodsSheet visible methods={methods} qrSize={248} onClose={jest.fn()} onAdvancedOpen={onAdvancedOpen}><Text>Account options</Text></ReceiveMethodsSheet>);
+  expect(screen.queryByText('Account options')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Advanced receive options'));
+  expect(screen.getByText('Account options')).toBeTruthy(); expect(onAdvancedOpen).toHaveBeenCalledTimes(1);
+  fireEvent.press(screen.getByLabelText('Advanced receive options'));
+  expect(screen.queryByText('Account options')).toBeNull();
+});

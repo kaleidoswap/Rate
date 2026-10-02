@@ -1,3 +1,6 @@
+import React from 'react';
+import { render } from '@testing-library/react-native';
+import { InvoiceExpiry } from './InvoiceExpiry';
 import { invoiceExpiry } from './InvoiceExpiry';
 import { decode } from 'light-bolt11-decoder';
 jest.mock('light-bolt11-decoder', () => ({ decode: jest.fn() }));
@@ -11,4 +14,14 @@ test('uses the BOLT11 default only for a missing expiry field and rejects malfor
   expect(invoiceExpiry('lnbc-invoice')).toBe(4600000);
   (decode as jest.Mock).mockReturnValue({ sections: [] }); expect(invoiceExpiry('lnbc-bad')).toBeNull();
   (decode as jest.Mock).mockImplementation(() => { throw new Error('invalid'); }); expect(invoiceExpiry('lnbc-bad')).toBeNull();
+});
+
+test('hiding the countdown still exposes an expired request and manual renewal', () => {
+  (decode as jest.Mock).mockReturnValue({ sections: [{ name: 'timestamp', value: Math.floor(Date.now() / 1000) }, { name: 'expiry', value: 3600 }] });
+  const screen = render(<InvoiceExpiry invoice="lnbc-valid" showCountdown={false} onRefresh={jest.fn()} />);
+  expect(screen.queryByText(/expires in/)).toBeNull();
+  (decode as jest.Mock).mockReturnValue({ sections: [{ name: 'timestamp', value: 1000 }, { name: 'expiry', value: 1 }] });
+  screen.rerender(<InvoiceExpiry invoice="lnbc-expired" showCountdown={false} onRefresh={jest.fn()} />);
+  expect(screen.getByText('Lightning invoice expired')).toBeTruthy();
+  expect(screen.getByText('Create a fresh request')).toBeTruthy();
 });

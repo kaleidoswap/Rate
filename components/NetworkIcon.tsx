@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { Image, ImageSourcePropType, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 
 interface NetworkIconProps {
@@ -33,6 +34,7 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
 export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) => {
   const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()];
 
+  if (network.toLowerCase() === 'liquid') return <Ionicons name="water" size={size} color={theme.colors.text.primary} />;
   if (!source) {
     return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: theme.colors.gray[500] }} />;
   }

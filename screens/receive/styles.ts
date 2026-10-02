@@ -280,16 +280,7 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     zIndex: 15,
     elevation: 15,
   },
-  netSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    padding: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border.medium,
-    backgroundColor: theme.colors.surface.primary,
-  },
+
   netGlyph: {
     width: 34,
     height: 34,
@@ -297,24 +288,13 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  netSelectorLabel: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
+
   netSelectorSub: {
     fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.tertiary,
     marginTop: 1,
   },
-  routeSummary: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing[2],
-    marginTop: theme.spacing[2], paddingHorizontal: theme.spacing[2],
-  },
-  routeSummaryText: {
-    flex: 1, fontSize: theme.typography.fontSize.xs, lineHeight: 17,
-    color: theme.colors.text.secondary,
-  },
+
   netDropdown: {
     marginTop: theme.spacing[2],
     backgroundColor: theme.colors.surface.primary,
