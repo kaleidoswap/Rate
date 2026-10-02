@@ -10,8 +10,8 @@
  *
  * ON by default on MAINNET (Second's public deployment). Set EXPO_PUBLIC_BARK_NETWORK=signet
  * for test sats, or disable with EXPO_PUBLIC_BARK=0.
- * Bark isn't a wallet `NetworkType` yet, so it doesn't come from the wallet's
- * network list — initializeWdkProtocols connects it alongside the listed networks.
+ * Settings stores a wallet-scoped network preference; env supplies the default
+ * for wallets without one. initializeWdkProtocols restores the saved preference.
  *
  * Distinct from Arkade: different Ark server, no interop, yet both mint `tark1…`
  * addresses — route by account, never by prefix.
@@ -111,9 +111,8 @@ export function prepareBarkDataDir(walletKey: string, network: BarkNetwork): { d
  * Adapter config for this seed, or null when Bark is disabled / unconfigured.
  * Touches the filesystem (creates the data directory).
  */
-export function buildBarkConfig(mnemonic: string): BarkConfig | null {
+export function buildBarkConfig(mnemonic: string, host = resolveBarkHostConfig()): BarkConfig | null {
   if (!BARK_ENABLED) return null
-  const host = resolveBarkHostConfig()
   if (!host) return null
   const { dataDir, isNew } = prepareBarkDataDir(barkWalletKey(mnemonic), host.network)
   return {

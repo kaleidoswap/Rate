@@ -28,6 +28,7 @@ export function networkTone(network: string): NetworkTone {
 
 interface NetworkBadgeProps {
   network: string;
+  label?: string;
   /** Show a chevron (when the badge is tappable to change network). */
   interactive?: boolean;
   onPress?: () => void;
@@ -37,6 +38,7 @@ interface NetworkBadgeProps {
 
 export const NetworkBadge: React.FC<NetworkBadgeProps> = ({
   network,
+  label,
   interactive,
   onPress,
   style,
@@ -57,7 +59,7 @@ export const NetworkBadge: React.FC<NetworkBadgeProps> = ({
     >
       <View style={[styles.dot, { backgroundColor: palette[500] }]} />
       <Text style={[styles.label, { color: palette[600] ?? palette[500] }]}>
-        {LABELS[network.toLowerCase()] ?? network}
+        {label ?? LABELS[network.toLowerCase()] ?? network}
       </Text>
       {interactive && <Ionicons name="chevron-down" size={11} color={palette[500]} />}
     </View>
@@ -65,7 +67,7 @@ export const NetworkBadge: React.FC<NetworkBadgeProps> = ({
 
   if (onPress) {
     return (
-      <TouchableOpacity onPress={onPress} accessibilityLabel={accessibilityLabel} activeOpacity={0.7}>
+      <TouchableOpacity accessibilityRole="button" style={{ minHeight: 44, justifyContent: 'center' }} onPress={onPress} accessibilityLabel={accessibilityLabel} activeOpacity={0.7}>
         {body}
       </TouchableOpacity>
     );

@@ -1,5 +1,5 @@
 import type { NWCClient } from '../nwc/NWCExternalClient';
-import { decodeOffer } from '@universal-bolt12/universal-code';
+import { decodeOffer,offerRails,encodeRails,validateRailEntries,paymentCodeNetwork,SSPS_RAILS,type RailEntry } from '@universal-bolt12/universal-code';
 
 type Client = Pick<NWCClient, 'request'>;
 export interface MerchantOffer { offer: string; offer_id: string; amount?: number }
@@ -7,15 +7,26 @@ export interface OfferReceipt { payment_hash: string; amount: number; state: 'se
 const METHODS = ['kaleidopay_make_offer', 'kaleidopay_list_offer_payments'];
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{64}$/i.test(id);
 
-export async function createMerchantOffer(client: Client, network: string, description: string, amountSats?: number): Promise<MerchantOffer> {
+export async function createMerchantOffer(client: Client, network: string, description: string, amountSats?: number, rails?: RailEntry[]): Promise<MerchantOffer> {
   if (!description.trim() || description.length > 256) throw new Error('Enter a description up to 256 characters.');
   if (amountSats !== undefined && (!Number.isSafeInteger(amountSats) || amountSats <= 0 || !Number.isSafeInteger(amountSats * 1000))) throw new Error('Enter a whole number of sats.');
-  const info = await client.request<{network: string; methods: string[]}>('get_info', {});
+  if (rails) { validateRailEntries(rails); for(const entry of rails){const rail=typeof entry==='string'?entry:entry.rail;if(/^(ln|btc):/.test(rail)&&rail.split(':')[1]!==network)throw new Error('Rail network conflicts with receiving wallet.');} }
+  const info = await client.request<{network: string; methods: string[]; kaleidopay?: {rails_versions?: number[]}}>('get_info', {});
   if (info.network !== network || !Array.isArray(info.methods) || !METHODS.every(m => info.methods.includes(m))) throw new Error('This wallet does not support reusable offers on the selected network.');
+  if(rails&&!info.kaleidopay?.rails_versions?.includes(1))throw new Error('This receiving node does not support address preferences yet. Your preferences remain saved; use a compatible node or create a Lightning-only offer.');
   const amount = amountSats === undefined ? undefined : amountSats * 1000;
-  const offer = await client.request<MerchantOffer>('kaleidopay_make_offer', { description, ...(amount === undefined ? {} : { amount }) });
+  const offer = await client.request<MerchantOffer>('kaleidopay_make_offer', { description, ...(rails ? {rails} : {}), ...(amount === undefined ? {} : { amount }) });
   if (!validId(offer.offer_id) || offer.amount !== amount) throw new Error('Wallet returned an unexpected offer.');
-  decodeOffer(offer.offer); // Structural check; the connected node owns protocol validation.
+  const fields=decodeOffer(offer.offer);
+  const encodedAmount=fields.find(f=>f.type===8n)?.value;
+  const offerAmount=encodedAmount?.reduce((n,b)=>(n<<8n)|BigInt(b),0n);
+  if(fields.some(f=>f.type===6n)||encodedAmount&&(encodedAmount.length>8||encodedAmount[0]===0)||offerAmount!==(amount===undefined?undefined:BigInt(amount)))throw new Error('Returned offer does not match the requested Bitcoin amount.');
+  const received=offerRails(offer.offer).map(r=>r.address===undefined?r.rail:{rail:r.rail,address:r.address});
+  if(rails) {
+   const expected=rails.some(r=>typeof r==='string'&&(r==='ln'||r.startsWith('ln:')))?rails:[...rails,'ln'];
+   if(!fields.some(f=>f.type===SSPS_RAILS)||String(encodeRails(received))!==String(encodeRails(expected)))throw new Error('Receiving node returned different destination preferences. No QR was saved.');
+  }else if(fields.some(f=>f.type===SSPS_RAILS))throw new Error('Receiving node returned unexpected destination preferences.');
+  if(network!=='regtest'&&paymentCodeNetwork(offer.offer)!==network)throw new Error('Returned offer uses a different or unknown Bitcoin network.');
   return offer;
 }
 

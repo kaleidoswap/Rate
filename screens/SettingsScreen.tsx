@@ -1,5 +1,5 @@
 import { BARK_ENABLED } from '../services/protocols/bark';
-import { barkNetworkLabel } from '../services/BarkService';
+import { currentBarkHost, loadBarkHost, saveBarkNetwork } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SettingsScreen.tsx
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
@@ -52,6 +52,7 @@ interface Props {
 }
 
 type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
+type SettingsAccount = WalletProtocol | 'BARK';
 const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
 const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0';
 
@@ -124,7 +125,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [settingsQuery, setSettingsQuery] = useState('');
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Assistant', advanced: 'Advanced' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Private Local AI Assistant', advanced: 'Advanced' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
@@ -194,18 +195,20 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const [protoNetworks, setProtoNetworks] = useState<Record<string, string>>({});
-  const [protocolStatus, setProtocolStatus] = useState<Record<WalletProtocol, boolean>>({
+  const [protocolStatus, setProtocolStatus] = useState<Record<SettingsAccount, boolean>>({
     RGB: false,
     SPARK: false,
     ARKADE: false,
+    BARK: false,
   });
-  const [protocolConnecting, setProtocolConnecting] = useState<Partial<Record<WalletProtocol, boolean>>>({});
-  const [protocolErrors, setProtocolErrors] = useState<Partial<Record<WalletProtocol, string>>>({});
+  const [protocolConnecting, setProtocolConnecting] = useState<Partial<Record<SettingsAccount, boolean>>>({});
+  const [protocolErrors, setProtocolErrors] = useState<Partial<Record<SettingsAccount, string>>>({});
   const refreshProtocolStatus = useCallback(() => {
     setProtocolStatus({
       RGB: protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false,
       SPARK: protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false,
       ARKADE: protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected() ?? false,
+      BARK: protocolManager.getAdapterIfAvailable('BARK')?.isConnected() ?? false,
     });
   }, []);
 
@@ -229,6 +232,10 @@ export default function SettingsScreen({ navigation }: Props) {
           } catch { /* keep default */ }
           if (n.type === 'spark') net = resolveSparkNetwork(net);
           map[n.type] = net;
+        }
+        const wallet = await DatabaseService.getInstance().getActiveWallet();
+        if (BARK_ENABLED && wallet && wallet.id === id && wallet.encrypted_mnemonic) {
+          map.bark = (await loadBarkHost(wallet.encrypted_mnemonic))?.network ?? '';
         }
         setProtoNetworks(map);
       } catch { /* ignore */ }
@@ -287,6 +294,42 @@ export default function SettingsScreen({ navigation }: Props) {
         setProtocolConnecting((prev) => ({ ...prev, [proto]: false }));
       }
     })();
+  };
+
+  const changeBarkNetwork = async (network: 'mainnet' | 'signet') => {
+    if (protocolConnecting.BARK) return;
+    setProtocolConnecting(prev => ({ ...prev, BARK: true }));
+    setProtocolErrors(prev => ({ ...prev, BARK: undefined }));
+    let saved = false;
+    try {
+      const wallet = await DatabaseService.getInstance().getActiveWallet();
+      if (!wallet?.encrypted_mnemonic || wallet.id !== activeWallet?.id) throw new Error('Unlock your active wallet before changing its network.');
+      await saveBarkNetwork(wallet.encrypted_mnemonic, network);
+      saved = true;
+      setProtoNetworks(prev => ({ ...prev, bark: network }));
+      await protocolManager.disconnect('BARK');
+      const results = await initializeProtocols(wallet.encrypted_mnemonic, []);
+      const result = results.get('BARK');
+      if (!result?.success) throw new Error(result?.error || 'Bark could not connect.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not connect Bark.';
+      setProtocolErrors(prev => ({ ...prev, BARK: message }));
+      Alert.alert(saved ? 'Network saved, connection failed' : 'Could not change network', message);
+    } finally {
+      refreshProtocolStatus();
+      await dispatch(loadBtcBalance());
+      setProtocolConnecting(prev => ({ ...prev, BARK: false }));
+    }
+  };
+  const pickBarkNetwork = () => {
+    const current = protoNetworks.bark ?? currentBarkHost()?.network;
+    Alert.alert('Bark network', 'Mainnet uses real bitcoin. Signet uses test bitcoin. Each network keeps a separate balance.', [
+      ...(['mainnet', 'signet'] as const).map(network => ({
+        text: `${network === 'mainnet' ? 'Mainnet' : 'Signet (test bitcoin)'}${current === network ? '  ✓' : ''}`,
+        onPress: () => { if (network !== current || !protocolStatus.BARK) void changeBarkNetwork(network); },
+      })),
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
 
   const pickProtocolNetwork = (proto: WalletProtocol) => {
@@ -452,22 +495,14 @@ export default function SettingsScreen({ navigation }: Props) {
         />}
 
         {atHome && <>
-          <View style={styles.walletSummary}>
-            <View style={styles.walletIcon}><Ionicons name="wallet-outline" size={24} color={theme.colors.primary[500]} /></View>
-            <View style={styles.rowText}>
-              <Text style={styles.rowDescription}>Current wallet</Text>
-              <Text style={styles.walletName}>{activeWallet?.name || 'Your wallet'}</Text>
-            </View>
-          </View>
-          <SectionLabel>Your wallet</SectionLabel>
           <Group>
-            <Row first icon="options-outline" label="Preferences" description="Units, currency and sounds" value={denominationLabel[displayDenomination]} onPress={() => openPage('preferences')} />
+            <Row first icon="options-outline" label="Preferences" description="Units, currency and sounds" onPress={() => openPage('preferences')} />
             <Row icon="shield-checkmark-outline" label="Security & backup" description="Recovery phrase and device data" onPress={() => openPage('security')} />
             <Row icon="link-outline" label="Connections" description="Lightning wallets and Nostr" onPress={() => openPage('connections')} />
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row first icon="sparkles-outline" label="Assistant" description="Desktop pairing and your AI preferences" onPress={() => openPage('assistant')} />
+            <Row first icon="sparkles-outline" label="Private Local AI Assistant" description="Models, privacy and desktop pairing" onPress={() => openPage('assistant')} />
             <Row icon="code-slash-outline" label="Advanced" description="Accounts and network configuration" onPress={() => openPage('advanced')} />
           </Group>
         </>}
@@ -658,7 +693,7 @@ export default function SettingsScreen({ navigation }: Props) {
           <>
           <SectionLabel>Accounts & networks</SectionLabel>
           <Group>
-          {WALLET_PROTOCOLS.map((proto, idx) => {
+          {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).map((proto, idx) => {
             const connected = protocolStatus[proto];
             const connecting = protocolConnecting[proto] ?? false;
             const error = protocolErrors[proto];
@@ -669,12 +704,14 @@ export default function SettingsScreen({ navigation }: Props) {
               RGB: theme.colors.primary[500],
               SPARK: theme.colors.networks.spark,
               ARKADE: theme.colors.networks.arkade,
+              BARK: protocolColor('BARK'),
             };
-            const labels: Record<string, string> = { RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade' };
+            const labels: Record<string, string> = { RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
             const descs: Record<string, string> = {
               RGB: 'On-chain, Lightning, RGB assets',
               SPARK: 'Spark L2 Bitcoin + tokens',
               ARKADE: 'Off-chain Bitcoin (VTXOs)',
+              BARK: 'Bitcoin via Second’s Ark network',
             };
             return (
               <View key={proto} style={[styles.row, idx > 0 && styles.rowDivider]}>
@@ -692,9 +729,10 @@ export default function SettingsScreen({ navigation }: Props) {
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: theme.spacing[1] }}>
                   <NetworkBadge
-                    network={protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]]}
+                    network={proto === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network ?? 'unknown' : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]]}
+                    label={proto === 'BARK' && (protoNetworks.bark ?? currentBarkHost()?.network) === 'signet' ? 'Signet' : undefined}
                     interactive
-                    onPress={() => !connecting && pickProtocolNetwork(proto)}
+                    onPress={() => { if (!connecting) proto === 'BARK' ? pickBarkNetwork() : pickProtocolNetwork(proto); }}
                     accessibilityLabel={`Change ${proto} network`}
                   />
                   <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.text.tertiary }}>
@@ -704,26 +742,6 @@ export default function SettingsScreen({ navigation }: Props) {
               </View>
             );
           })}
-          {/* Bark is a layer like the rows above; its network is set at build time
-              (EXPO_PUBLIC_BARK_NETWORK), so it shows status without a network picker. */}
-          {BARK_ENABLED && (() => {
-            const barkConnected = !!protocolManager.getAdapterIfAvailable('BARK')?.isConnected();
-            const barkColor = protocolColor('BARK');
-            return (
-              <View style={[styles.row, styles.rowDivider]}>
-                <View style={[styles.rowIcon, { backgroundColor: barkColor + '1A', opacity: barkConnected ? 1 : 0.5 }]}>
-                  <NetworkIcon network="bark" size={18} color={barkColor} />
-                </View>
-                <View style={styles.rowText}>
-                  <Text style={styles.rowLabel}>Bark</Text>
-                  <Text style={styles.rowDescription} numberOfLines={1}>Off-chain Bitcoin (Second Ark) · {barkNetworkLabel()}</Text>
-                </View>
-                <Text style={{ fontSize: 11, fontWeight: '600', color: barkConnected ? barkColor : theme.colors.text.tertiary }}>
-                  {barkConnected ? 'Connected' : 'Offline'}
-                </Text>
-              </View>
-            );
-          })()}
           </Group>
           </>
         )}
@@ -786,9 +804,6 @@ export default function SettingsScreen({ navigation }: Props) {
 
 const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   clearSearch: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  walletSummary: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingVertical: theme.spacing[5] },
-  walletIcon: { width: 48, height: 48, borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' },
-  walletName: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '600', marginTop: theme.spacing[1] },
   pageDescription: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, paddingTop: theme.spacing[4], lineHeight: 21 },
   container: {
     flex: 1,
@@ -803,7 +818,7 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
   },
   searchInput: {
     marginTop: theme.spacing[2],
-    marginBottom: theme.spacing[1],
+    marginBottom: theme.spacing[3],
   },
   searchEmpty: {
     alignItems: 'center',
