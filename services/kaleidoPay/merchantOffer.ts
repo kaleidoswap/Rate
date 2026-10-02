@@ -7,13 +7,20 @@ export interface OfferReceipt { payment_hash: string; amount: number; state: 'se
 const METHODS = ['kaleidopay_make_offer', 'kaleidopay_list_offer_payments'];
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{64}$/i.test(id);
 
+/** Read-only preflight; creation checks again before issuing an offer. */
+export async function checkMerchantCapabilities(client: Client, network: string): Promise<{addressPreferences:boolean}> {
+ const info = await client.request<{network:string;methods:string[];kaleidopay?:{rails_versions?:number[]}}>('get_info',{});
+ if(info.network!==network)throw new Error('This connection no longer matches the receiving wallet. Reconnect it.');
+ if(!Array.isArray(info.methods)||!METHODS.every(m=>info.methods.includes(m)))throw new Error('This wallet cannot create reusable payment QRs. Choose another wallet.');
+ return {addressPreferences:Array.isArray(info.kaleidopay?.rails_versions)&&info.kaleidopay.rails_versions.includes(1)};
+}
+
 export async function createMerchantOffer(client: Client, network: string, description: string, amountSats?: number, rails?: RailEntry[]): Promise<MerchantOffer> {
   if (!description.trim() || description.length > 256) throw new Error('Enter a description up to 256 characters.');
   if (amountSats !== undefined && (!Number.isSafeInteger(amountSats) || amountSats <= 0 || !Number.isSafeInteger(amountSats * 1000))) throw new Error('Enter a whole number of sats.');
   if (rails) { validateRailEntries(rails); for(const entry of rails){const rail=typeof entry==='string'?entry:entry.rail;if(/^(ln|btc):/.test(rail)&&rail.split(':')[1]!==network)throw new Error('Rail network conflicts with receiving wallet.');} }
-  const info = await client.request<{network: string; methods: string[]; kaleidopay?: {rails_versions?: number[]}}>('get_info', {});
-  if (info.network !== network || !Array.isArray(info.methods) || !METHODS.every(m => info.methods.includes(m))) throw new Error('This wallet does not support reusable offers on the selected network.');
-  if(rails&&!info.kaleidopay?.rails_versions?.includes(1))throw new Error('This receiving node does not support address preferences yet. Your preferences remain saved; use a compatible node or create a Lightning-only offer.');
+  const capabilities = await checkMerchantCapabilities(client, network);
+  if(rails&&!capabilities.addressPreferences)throw new Error('This wallet supports Lightning-only QRs. Choose a compatible wallet to include other accounts.');
   const amount = amountSats === undefined ? undefined : amountSats * 1000;
   const offer = await client.request<MerchantOffer>('kaleidopay_make_offer', { description, ...(rails ? {rails} : {}), ...(amount === undefined ? {} : { amount }) });
   if (!validId(offer.offer_id) || offer.amount !== amount) throw new Error('Wallet returned an unexpected offer.');
