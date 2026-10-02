@@ -345,6 +345,7 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
 
   // Amount row with pencil edit
   amountRow: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing[3],

@@ -15,7 +15,6 @@ interface ProtocolBalance {
 interface BalanceCardProps {
     totalBalance: number;
     hideAmounts?: boolean;
-    availableBtc?: number;
     pendingBtc?: number;
     includesTokenValue?: boolean;
     rgbBalanceIsLightning?: boolean;
@@ -59,7 +58,6 @@ const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
 export const BalanceCard: React.FC<BalanceCardProps> = ({
     totalBalance,
     hideAmounts = false,
-    availableBtc,
     pendingBtc = 0,
     includesTokenValue = false,
     rgbBalanceIsLightning = false,
@@ -137,33 +135,58 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 
     return (
         <View style={styles.container}>
-            {/* Total balance */}
+            <View style={styles.cardHeader}>
+                <Text style={styles.balanceLabel}>{includesTokenValue ? 'Total estimated value' : 'Total balance'}</Text>
+                {/* Refresh and balance details stay separate from denomination. */}
+                <View style={styles.topControls}>
+                    <TouchableOpacity
+                        style={styles.controlButton}
+                        onPress={onRefresh}
+                        disabled={refreshing}
+                        accessibilityLabel="Refresh balance"
+                    >
+                        <Ionicons
+                            name="refresh"
+                            size={16}
+                            color={theme.colors.text.secondary}
+                            style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
+                        />
+                    </TouchableOpacity>
+                    {activeProtocols.length > 0 && (
+                        <TouchableOpacity
+                            style={styles.controlButton}
+                            onPress={() => setShowBreakdown(v => !v)}
+                            accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
+                        >
+                            <Ionicons
+                                name={showBreakdown ? 'chevron-up' : 'chevron-down'}
+                                size={16}
+                                color={theme.colors.text.secondary}
+                            />
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </View>
             <View style={styles.totalBalanceContainer}>
-                <Text style={[styles.balanceLabel, { paddingRight: 100 }]}>{includesTokenValue ? 'Total estimated value' : 'Total balance'}</Text>
                 {loading ? (
                     <View style={{ gap: 10, marginTop: 4 }}>
                         <Skeleton width={180} height={34} radius={10} style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
                         <Skeleton width={110} height={15} radius={7} style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} />
                     </View>
                 ) : useDenominated ? (
-                    <TouchableOpacity
-                        activeOpacity={onCycleDenomination ? 0.6 : 1}
-                        onPress={onCycleDenomination}
-                        disabled={!onCycleDenomination}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}. Tap to change denomination.`}
-                    >
-                        <View style={styles.balanceRow}>
+                    <>
+                        <TouchableOpacity style={styles.primaryBalance} onPress={onCycleDenomination} disabled={!onCycleDenomination}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}. Tap to change denomination.`}>
                             <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{primaryText}</AmountText>
-                            {!!primaryUnitLabel && (
-                                <View style={styles.unitChip}>
-                                    <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
-                                    <Ionicons name="chevron-down" size={14} color={theme.colors.text.secondary} />
-                                </View>
-                            )}
-                        </View>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.unitChip} onPress={onCycleDenomination} disabled={!onCycleDenomination}
+                            accessibilityRole="button" accessibilityLabel={`Change balance unit. Current unit: ${primaryUnitLabel || bitcoinUnit}`}>
+                            <Text style={styles.balanceCurrency}>{primaryUnitLabel || bitcoinUnit}</Text>
+                            {!!onCycleDenomination && <Ionicons name="chevron-down" size={14} color={theme.colors.text.secondary} />}
+                        </TouchableOpacity>
                         <AmountText style={styles.balanceUsd}>{secondaryText ?? ''}</AmountText>
-                    </TouchableOpacity>
+                    </>
                 ) : (
                     <>
                         <View style={styles.balanceRow}>
@@ -179,60 +202,13 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                 )}
             </View>
 
-            {!loading && availableBtc !== undefined && (
-                <View style={styles.availability}>
-                    <View style={styles.availabilityRow}>
-                        <Text style={styles.availabilityLabel}>Available bitcoin</Text>
-                        <AmountText style={styles.availabilityValue}>{hideAmounts ? '••••' : `${formatSatoshis(availableBtc)} ${bitcoinUnit}`}</AmountText>
-                    </View>
-                    {pendingBtc > 0 && (
-                        <View style={styles.availabilityRow}>
-                            <Text style={styles.availabilityLabel}>Pending / unavailable</Text>
-                            <AmountText style={styles.availabilityValue}>{hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</AmountText>
-                        </View>
-                    )}
-                    <Text style={styles.availabilityHint}>
-                        Spendable amount depends on the payment method and fees.{includesTokenValue ? ' Total value also includes priced tokens; tokens must be swapped before spending as bitcoin.' : ''}
-                    </Text>
-                </View>
-            )}
-
-            {/* Top-right controls: refresh + (optional) network-balance toggle */}
-            <View style={styles.topControls}>
-                <TouchableOpacity
-                    style={styles.controlButton}
-                    onPress={onRefresh}
-                    disabled={refreshing}
-                    accessibilityLabel="Refresh balance"
-                >
-                    <Ionicons
-                        name="refresh"
-                        size={16}
-                        color={theme.colors.text.secondary}
-                        style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
-                    />
-                </TouchableOpacity>
-                {activeProtocols.length > 0 && (
-                    <TouchableOpacity
-                        style={styles.controlButton}
-                        onPress={() => setShowBreakdown(v => !v)}
-                        accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
-                    >
-                        <Ionicons
-                            name={showBreakdown ? 'chevron-up' : 'chevron-down'}
-                            size={16}
-                            color={theme.colors.text.secondary}
-                        />
-                    </TouchableOpacity>
-                )}
-            </View>
-
             {/* Per-network breakdown — vertical row list, collapsed behind the
                 chevron above. Mirrors the extension's BITCOIN section. */}
             {activeProtocols.length > 0 && showBreakdown && (
                 <View style={styles.breakdownSection}>
                     <View style={styles.breakdownHairline} />
                     <Text style={styles.breakdownEyebrow}>Bitcoin</Text>
+                    {pendingBtc > 0 && <Text style={styles.pendingBalance}>Pending: {hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</Text>}
                     <View style={styles.breakdownList}>
                         {breakdownRows.map((row) => (
                             <View
@@ -288,30 +264,27 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         padding: theme.spacing[4],
     },
+    cardHeader: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing[3],
+    },
     totalBalanceContainer: {
-        // Left-aligned to match the extension's TOTAL BALANCE card.
-        alignItems: 'flex-start',
-        marginBottom: theme.spacing[4],
+        alignItems: 'center', paddingTop: theme.spacing[3], paddingBottom: theme.spacing[4],
     },
+    primaryBalance: { width: '100%', alignItems: 'center' },
     balanceLabel: {
-        // Eyebrow label — matches the extension: uppercase, dimmed, wide tracking.
-        fontSize: 11,
-        fontWeight: theme.typography.fontWeight.semibold,
-        letterSpacing: 1.4,
-        textTransform: 'uppercase',
-        color: theme.colors.text.muted,
-        marginBottom: theme.spacing[1],
+        flex: 1, fontSize: theme.typography.fontSize.xs,
+        fontWeight: theme.typography.fontWeight.medium, color: theme.colors.text.secondary,
     },
-    unitChip: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1], padding: theme.spacing[2], borderRadius: theme.borderRadius.md, backgroundColor: theme.colors.surface.tertiary },
-    availability: { gap: theme.spacing[2] },
-    availabilityRow: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', gap: theme.spacing[2] },
-    availabilityLabel: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm },
-    availabilityValue: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm },
-    availabilityHint: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.xs, lineHeight: 18 },
+    unitChip: {
+        flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1], minHeight: 44,
+        paddingHorizontal: theme.spacing[3], borderRadius: theme.borderRadius.full,
+    },
+    pendingBalance: { color: theme.colors.text.secondary, marginBottom: theme.spacing[3] },
     balanceRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         alignItems: 'baseline',
+        justifyContent: 'center',
         marginBottom: theme.spacing[1],
     },
     balanceAmount: {
@@ -322,7 +295,7 @@ const styles = StyleSheet.create({
         fontWeight: '900',
         letterSpacing: -0.9,
         color: theme.colors.text.primary,
-        marginRight: theme.spacing[2],
+        textAlign: 'center',
     },
     balanceCurrency: {
         fontSize: theme.typography.fontSize.lg,
@@ -337,9 +310,6 @@ const styles = StyleSheet.create({
         minHeight: 18,
     },
     topControls: {
-        position: 'absolute',
-        top: theme.spacing[4],
-        right: theme.spacing[4],
         flexDirection: 'row',
         gap: theme.spacing[2],
     },
@@ -347,7 +317,7 @@ const styles = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: theme.borderRadius.full,
-        backgroundColor: 'rgba(255,255,255,0.12)',
+        backgroundColor: theme.colors.surface.secondary,
         justifyContent: 'center',
         alignItems: 'center',
     },

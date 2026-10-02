@@ -815,7 +815,6 @@ export default function DashboardScreen({ navigation }: Props) {
 
           <BalanceCard
             totalBalance={totalBalance}
-            availableBtc={availableBtc}
             pendingBtc={pendingBtc}
             includesTokenValue={tokenValueSats > 0}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
