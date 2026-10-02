@@ -23,7 +23,7 @@ import {
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const OTHER = 'zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo zoo wrong'
 const KEY = barkWalletKey(MNEMONIC)
-const DIR_URI = `file:///data/app/Documents/bark/${KEY}-signet/`
+const DIR_URI = `file:///data/app/Documents/bark/${KEY}-mainnet/`
 
 beforeEach(() => mockDirs.clear())
 
@@ -32,16 +32,23 @@ describe('bark host config', () => {
     expect(BARK_ENABLED).toBe(true)
   })
 
-  it('defaults to Second signet endpoints', () => {
+  it('defaults to Second mainnet endpoints', () => {
     expect(resolveBarkHostConfig({})).toEqual({
+      network: 'mainnet',
+      arkServerUrl: 'https://ark.second.tech',
+      esploraUrl: 'https://mempool.second.tech/api',
+    })
+  })
+
+  it('uses Second signet endpoints when signet is selected', () => {
+    expect(resolveBarkHostConfig({ EXPO_PUBLIC_BARK_NETWORK: 'signet' })).toEqual({
       network: 'signet',
       arkServerUrl: 'https://ark.signet.2nd.dev',
       esploraUrl: 'https://esplora.signet.2nd.dev',
     })
   })
 
-  it('requires explicit endpoints for mainnet', () => {
-    expect(resolveBarkHostConfig({ EXPO_PUBLIC_BARK_NETWORK: 'mainnet' })).toBeNull()
+  it('lets explicit endpoints override the defaults', () => {
     expect(resolveBarkHostConfig({
       EXPO_PUBLIC_BARK_NETWORK: 'mainnet',
       EXPO_PUBLIC_BARK_SERVER_URL: 'https://ark.example',
@@ -49,8 +56,8 @@ describe('bark host config', () => {
     })).toEqual({ network: 'mainnet', arkServerUrl: 'https://ark.example', esploraUrl: 'https://esplora.example' })
   })
 
-  it('ignores networks the Bark adapter does not support', () => {
-    expect(resolveBarkHostConfig({ EXPO_PUBLIC_BARK_NETWORK: 'regtest' })?.network).toBe('signet')
+  it('stays off for networks the Bark adapter does not support (never guesses mainnet)', () => {
+    expect(resolveBarkHostConfig({ EXPO_PUBLIC_BARK_NETWORK: 'regtest' })).toBeNull()
   })
 
   it('turns file URIs into absolute paths', () => {
@@ -74,10 +81,10 @@ describe('buildBarkConfig', () => {
     expect(buildBarkConfig(MNEMONIC)).toEqual({
       protocol: 'BARK',
       mnemonic: MNEMONIC,
-      network: 'signet',
-      arkServerUrl: 'https://ark.signet.2nd.dev',
-      esploraUrl: 'https://esplora.signet.2nd.dev',
-      dataDir: `/data/app/Documents/bark/${KEY}-signet`,
+      network: 'mainnet',
+      arkServerUrl: 'https://ark.second.tech',
+      esploraUrl: 'https://mempool.second.tech/api',
+      dataDir: `/data/app/Documents/bark/${KEY}-mainnet`,
       createIfMissing: true,
     })
     expect(mockDirs.has(DIR_URI)).toBe(true)
