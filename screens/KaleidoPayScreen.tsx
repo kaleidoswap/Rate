@@ -8,6 +8,7 @@ import * as Crypto from 'expo-crypto';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Button } from '../components/Button';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
+import { NetworkIcon } from '../components/NetworkIcon';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppSelector } from '../store/hooks';
 import { codeNetwork, prepareKaleidoPay, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
@@ -149,11 +150,33 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
     review();
   }, [journalReady, attempt, code, route.params?.code]);
 
+  const railId = (r: string) => r === 'ln' ? `ln:${network}` : r;
+  const railIcon = (r: string) => ({ ln: 'lightning', btc: 'onchain' } as Record<string, string>)[r.split(':')[0]] ?? r.split(':')[0];
+  const describe = (o: PaymentOffer) => o.route.kind === 'swap'
+    ? { icon: 'swap', group: 'Through a swap provider', subtitle: [`${o.accountName} via ${railLabel(o.route.from)}`, o.providerDetail].filter(Boolean).join(' · '), preferred: false }
+    : { icon: railIcon(o.route.to), group: 'Direct', subtitle: `${o.accountName} · direct, no swap`,
+      preferred: !!preview && o.route.to === railId(preview.request.acceptedRails[0]) };
+  const best = bestOffer(offers);
+  const feeText = (fee: number, asset: Parameters<typeof displaySpend>[1]) => fee === 0 ? 'No fee' : `${displaySpend(fee, asset)} fee`;
   const options = offers.map(o => {
     const s = o.quote ? quoteSpend(o.quote) : null;
-    return { id: o.id, name: o.provider, account: o.accountName, amount: s ? displaySpend(s.total, s.asset) : 'Unavailable', amountLabel: 'Total you pay', detail: s ? `Fees ${displaySpend(s.fee, s.asset)} · ${o.route.kind === 'swap' ? 'Conversion included' : 'Direct payment'}` : '', unavailable: o.unavailable,
-      expiresAt: o.quote ? o.quote.expiresAt * 1000 : undefined, recommended: bestOffer(offers)?.id === o.id };
+    return { id: o.id, name: o.provider, account: o.accountName, amount: s ? displaySpend(s.total, s.asset) : 'Unavailable', amountLabel: 'Total you pay', detail: s ? `Fees ${displaySpend(s.fee, s.asset)}` : '', unavailable: o.unavailable,
+      expiresAt: o.quote ? o.quote.expiresAt * 1000 : undefined, recommended: best?.id === o.id, fee: s ? feeText(s.fee, s.asset) : undefined, ...describe(o) };
   });
+  const selectedView = selected ? describe(selected) : null;
+  const liveOptions = options.filter(o => !o.unavailable).length;
+  const pill = (label: string, color: string) => (
+    <View key={label} style={{ paddingHorizontal: t.spacing[2], paddingVertical: 2, borderRadius: t.borderRadius.full, backgroundColor: color + '22' }}>
+      <Text style={{ color, fontSize: t.typography.fontSize.xs, fontWeight: '600' }}>{label}</Text>
+    </View>
+  );
+  const chip = (label: string, icon: string, index: number) => (
+    <View key={label + index} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: t.spacing[3], borderRadius: t.borderRadius.full, backgroundColor: t.colors.background.primary }}>
+      <Text style={{ ...muted, fontSize: t.typography.fontSize.xs }}>{index + 1}</Text>
+      {icon === 'swap' ? null : <NetworkIcon network={icon} size={14} />}
+      <Text style={{ ...text, fontSize: t.typography.fontSize.sm }}>{label}</Text>
+    </View>
+  );
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }} edges={['left', 'right', 'bottom']}>
       <ScreenHeader title={preview ? "Review payment" : "Pay"} subtitle="Pay with what you have" onBack={() => { if (preview && !attempt && !paying.current) { revision.current++; setBusy(false); setPreview(null); } else if (!paying.current) navigation.goBack(); }} />
@@ -186,18 +209,50 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
             <View style={card}>
               <Text style={muted}>{preview.code.label || 'Recipient'} receives</Text>
               <Text style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '600' }}>{formatSats(preview.request.amountSat)}</Text>
-              <Text style={muted}>Bitcoin · {network}</Text>
+              <Text numberOfLines={1} ellipsizeMode="middle" selectable style={muted}>Bitcoin · {network} · {preview.code.address || 'BOLT12 offer'}</Text>
               {!!preview.code.message && <Text style={text}>{preview.code.message}</Text>}
-              <Text selectable style={muted}>{preview.code.address || 'BOLT12 offer'}</Text>
-              {preview.request.acceptedRails.length > 1 && <Text style={muted}>Accepts, in their order: {preview.request.acceptedRails.map(railLabel).join(' · ')}</Text>}
+              {preview.request.acceptedRails.length > 1 && <>
+                <Text style={{ ...muted, fontSize: t.typography.fontSize.xs, letterSpacing: 1.2, textTransform: 'uppercase', marginTop: t.spacing[2] }}>They accept, in order</Text>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: t.spacing[2] }}>{preview.request.acceptedRails.map((r, i) => chip(railLabel(r), railIcon(r), i))}</View>
+              </>}
             </View>
             <View style={card}>
-              <Text style={muted}>You pay with</Text>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose account and provider" onPress={() => setShowProviders(true)}>{row(selected?.accountName ?? 'Choose an account', '›')}</TouchableOpacity>
-
-              {spend && <>{row('Payment', displaySpend(spend.amount, spend.asset))}{row('Conversion & fees', displaySpend(spend.fee, spend.asset))}<View style={{ height: 1, backgroundColor: t.colors.border.light }} />{row('Total', total)}</>}
-              {quote && <Text accessibilityLiveRegion="polite" style={muted}>{expired ? 'Quote expired. Refresh before paying.' : `Quote valid for ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}</Text>}
-              {!!selected?.unavailable && <Text accessibilityRole="alert" style={muted}>{selected.unavailable}</Text>}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={muted}>You pay with</Text>
+                {liveOptions > 1 && <TouchableOpacity accessibilityRole="button" onPress={() => setShowProviders(true)} hitSlop={8}><Text style={{ ...muted, color: t.colors.primary[500] }}>Compare {liveOptions} ways ›</Text></TouchableOpacity>}
+              </View>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose account and provider" onPress={() => setShowProviders(true)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.background.primary }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surface.primary }}>
+                  {!selectedView || selectedView.icon === 'swap' ? <Ionicons name="swap-horizontal" size={20} color={t.colors.text.secondary} /> : <NetworkIcon network={selectedView.icon} size={22} />}
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text numberOfLines={1} style={{ ...text, fontWeight: '600' }}>{selected?.provider ?? 'Choose how to pay'}</Text>
+                  {!!selectedView && <Text numberOfLines={1} style={{ ...muted, fontSize: t.typography.fontSize.sm }}>{selectedView.subtitle}</Text>}
+                  {!!selected && (selectedView?.preferred || best?.id === selected.id) && <View style={{ flexDirection: 'row', gap: t.spacing[2], marginTop: 4 }}>
+                    {selectedView?.preferred && pill('Their choice', t.colors.primary[500])}
+                    {best?.id === selected.id && pill('Best price', t.colors.success[500])}
+                  </View>}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={t.colors.text.secondary} />
+              </TouchableOpacity>
+              {spend && <>
+                {row('They receive', displaySpend(spend.amount, spend.asset))}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}>
+                  <Text style={muted}>{selected?.route.kind === 'swap' ? 'Swap & fees' : 'Fees'}</Text>
+                  <Text style={{ ...text, color: spend.fee === 0 ? t.colors.success[500] : t.colors.text.primary }}>{spend.fee === 0 ? 'No fee' : displaySpend(spend.fee, spend.asset)}</Text>
+                </View>
+                <View style={{ height: 1, backgroundColor: t.colors.border.light }} />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}>
+                  <Text style={{ ...text, fontWeight: '600' }}>You pay</Text>
+                  <Text style={{ ...text, fontWeight: '600', fontSize: t.typography.fontSize.lg }}>{total}</Text>
+                </View>
+              </>}
+              {quote && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="time-outline" size={14} color={expired ? t.colors.warning[500] : t.colors.text.secondary} />
+                <Text accessibilityLiveRegion="polite" style={{ ...muted, fontSize: t.typography.fontSize.sm, color: expired ? t.colors.warning[500] : t.colors.text.secondary }}>{expired ? 'Quote expired. Refresh before paying.' : `Quote valid for ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}</Text>
+              </View>}
+              {!!selected?.unavailable && <Text accessibilityRole="alert" style={{ ...muted, color: t.colors.warning[500] }}>{selected.unavailable}</Text>}
               {!!previousTotal && reviewUpdated && <Text accessibilityRole="alert" style={muted}>Previous total: {previousTotal}. Review the updated quote before paying.</Text>}
               {!busy && !offers.some(o => o.quote) && <Text style={muted}>No live offers available. Connect an account that supports this request and network, then refresh quotes.</Text>}
               {selected && !selected.executable && <Text style={muted}>This account supports quotes only. Payment execution is not available yet.</Text>}
@@ -208,7 +263,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
             {showDetails && <View style={card}>
               {selected && row('Provider', selected.provider)}
               {selected && row('Route', selected.route.kind === 'swap' ? 'Conversion included' : 'Direct payment')}
-              <Button title="Compare providers" variant="secondary" onPress={() => setShowProviders(true)} />
+              <Button title="Compare ways to pay" variant="secondary" onPress={() => setShowProviders(true)} />
             </View>}
           </>}
         </ScrollView>
@@ -217,7 +272,8 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
           {preview && <Text style={{ ...muted, textAlign: 'center' }}>{!walletId ? 'Set up a wallet to pay.' : 'Review the total before confirming.'}</Text>}
         </View>}
       </KeyboardAvoidingView>
-      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={choose} onClose={() => setShowProviders(false)} now={now} />
+      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={choose} onClose={() => setShowProviders(false)} now={now}
+        title="Ways to pay" intro="Same payment, different routes. Totals include every fee." />
     </SafeAreaView>
   );
 }

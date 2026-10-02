@@ -32,11 +32,12 @@ beforeEach(() => { mockExecute.mockClear(); mockQuoteOptions.mockReset(); });
 
 test('a swap quote adds Bark fees for both provider invoices, and executes the provider quote', async () => {
   const inner = { recipientSat: 25000, totalSat: 26600, feeSat: 1600, expiresAt: now() + 60 };
-  mockQuoteOptions.mockResolvedValue([{ id: 'p', name: 'Provider', quote: inner }, { id: 'off', name: 'Offline', unavailable: 'Provider did not respond' }]);
+  mockQuoteOptions.mockResolvedValue([{ id: 'p', name: 'Provider', detail: 'abc…def', quote: inner }, { id: 'off', name: 'Offline', unavailable: 'Provider did not respond' }]);
   const b = bark(20);
   const account = createBarkPayAccount(b, 'signet');
   const [live, offline] = await account.quoteOptions!(preview(amountOffer), swapRoute);
   expect(live.quote).toMatchObject({ recipientSat: 25000, totalSat: 26640, feeSat: 1640 });
+  expect(live.detail).toBe('abc…def');
   expect(offline.unavailable).toBe('Provider did not respond');
   await account.execute!(preview(amountOffer), swapRoute, live.quote!, 'ui-1');
   expect(mockExecute).toHaveBeenCalledWith(expect.anything(), swapRoute, inner, 'ui-1');

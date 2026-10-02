@@ -54,11 +54,11 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
       const inner = option.quote;
       // The provider bills a hold invoice and a prepayment; Bark charges per payment.
       const fees = [await barkFee(inner.totalSat!), await barkFee(Math.min(inner.totalSat!, 1000))];
-      if (fees.some(f => f === null)) return { id: option.id, name: option.name, unavailable: FEE_UNAVAILABLE };
+      if (fees.some(f => f === null)) return { id: option.id, name: option.name, detail: option.detail, unavailable: FEE_UNAVAILABLE };
       const extra = fees.reduce<number>((a, b) => a + (b ?? 0), 0);
       const quote: Quote = { recipientSat: inner.recipientSat, totalSat: inner.totalSat! + extra, feeSat: inner.feeSat! + extra, expiresAt: inner.expiresAt };
       swapQuotes.set(quote, inner);
-      return { id: option.id, name: option.name, quote };
+      return { id: option.id, name: option.name, detail: option.detail, quote };
     }));
   }
 
@@ -81,8 +81,8 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
 
     async quoteOptions(preview, route) {
       if (route.kind === 'direct') {
-        try { return [{ id: 'bark-offer', name: 'Bark · Lightning', quote: await offerQuote(preview) }]; }
-        catch (e) { return [{ id: 'bark-offer', name: 'Bark · Lightning', unavailable: e instanceof Error ? e.message : FEE_UNAVAILABLE }]; }
+        try { return [{ id: 'bark-offer', name: 'Lightning (BOLT12)', quote: await offerQuote(preview) }]; }
+        catch (e) { return [{ id: 'bark-offer', name: 'Lightning (BOLT12)', unavailable: e instanceof Error ? e.message : FEE_UNAVAILABLE }]; }
       }
       return swapOptions(preview, route);
     },
@@ -132,7 +132,7 @@ export function barkRail(serverPubkey: string): string | null {
 export function createBarkArkAccount(bark: BarkPaySender, network: Network, rail: string): PayAccount {
   const quotes = new WeakMap<Quote, string>();
   const ref = (attemptId: string) => `kaleidopay-bark-ark-${attemptId}`;
-  const name = 'Bark · to their Bark address';
+  const name = 'To their Bark address';
 
   async function quote(preview: Preview, route: Route): Promise<Quote> {
     const address = preview.addresses?.[route.to];
@@ -179,7 +179,7 @@ export function createBarkArkAccount(bark: BarkPaySender, network: Network, rail
 export function createBarkOnchainAccount(bark: BarkPaySender, network: Network): PayAccount {
   const quotes = new WeakMap<Quote, string>();
   const ref = (attemptId: string) => `kaleidopay-bark-onchain-${attemptId}`;
-  const name = 'Bark · on-chain send';
+  const name = 'On-chain send';
 
   async function quote(preview: Preview, route: Route): Promise<Quote> {
     const address = preview.code.address;

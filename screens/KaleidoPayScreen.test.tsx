@@ -27,7 +27,7 @@ test('allows explicit provider selection and pays only after the reviewed total 
   await act(async () => {});
   expect(executePaymentOffer).not.toHaveBeenCalled(); expect(screen.getByText('Pay 1010 sats')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Payment details'));
-  fireEvent.press(screen.getAllByText('Compare providers')[0]);
+  fireEvent.press(screen.getAllByText('Compare ways to pay')[0]);
   fireEvent.press(screen.getByLabelText(/^B\. Total you pay/));
   expect(screen.getByText('Pay 1020 sats')).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByText('Pay 1020 sats')); });

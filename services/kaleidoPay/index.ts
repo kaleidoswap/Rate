@@ -16,7 +16,7 @@ export interface Quote {
   estimatedSeconds?: number;
 }
 export interface PaymentResult { status: 'completed' | 'pending' | 'unknown' | 'failed'; reference?: string }
-export interface AccountQuoteOption { id: string; name: string; quote?: Quote; unavailable?: string }
+export interface AccountQuoteOption { id: string; name: string; detail?: string; quote?: Quote; unavailable?: string }
 export interface PayAccount {
   pay?: (preview: Preview, route: Route, quote: Quote, onUpdate?: (attempt: SwapAttempt) => void) => Promise<SwapAttempt>;
   source: WalletSource;
@@ -33,7 +33,7 @@ export interface PayAccount {
   status?: (attemptId: string) => Promise<PaymentResult>;
 }
 export interface PaymentOffer {
-  id: string; provider: string; accountName: string; route: Route;
+  id: string; provider: string; providerDetail?: string; accountName: string; route: Route;
   quote?: Quote; unavailable?: string; executable: boolean;
 }
 const accounts = new Map<string, PayAccount>();
@@ -137,7 +137,7 @@ export async function quotePaymentOffers(preview: Preview): Promise<PaymentOffer
         : [{ id: '', name: base.provider, quote: await quotePayment(preview, route) }];
       if (!account || accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Refresh quotes.');
       return choices.map(choice => {
-        const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, quote: choice.quote, unavailable: choice.unavailable };
+        const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, providerDetail: choice.detail, quote: choice.quote, unavailable: choice.unavailable };
         try {
           if (offer.quote && !offer.unavailable) {
             validateQuote(offer.quote, preview, account);

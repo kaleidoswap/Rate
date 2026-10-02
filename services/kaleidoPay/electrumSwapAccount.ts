@@ -78,7 +78,7 @@ export function createElectrumSwapAccount(opts: {
     if (!ranked.length) throw new Error('No swap provider can take this amount right now.');
     return Promise.all(ranked.slice(0, 4).map(async q => {
       const offer = list.find(o => o.pubkey === q.provider);
-      const option: AccountQuoteOption = { id: q.provider, name: `Electrum · ${q.provider.slice(0, 8)}…${q.provider.slice(-4)}` };
+      const option: AccountQuoteOption = { id: q.provider, name: 'Electrum swap', detail: `${q.provider.slice(0, 6)}…${q.provider.slice(-4)}` };
       try {
         if (!offer) throw new Error('Provider offer no longer available.');
         const attempt = await startAttempt({ quote: q, offer, destination, requestId: preview.request.id, relays: opts.relays, timeoutMs: QUOTE_REPLY_MS }, deps);
