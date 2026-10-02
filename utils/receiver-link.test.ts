@@ -5,5 +5,6 @@ test('only the exact receiver navigation link is accepted',()=>{
 });
 test('receiver links wait for initialization and unlock without bypassing onboarding',()=>{
  expect(canOpenReceiver(true,true,'Dashboard')).toBe(true);
+ expect(canOpenReceiver(true,true,'DashboardTab')).toBe(true);
  for(const args of [[false,true,'Dashboard'],[true,false,'Dashboard'],[true,true,'InitialLoad'],[true,true,'WalletSetup'],[true,true,undefined]] as const)expect(canOpenReceiver(...args)).toBe(false);
 });
