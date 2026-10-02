@@ -10,7 +10,7 @@ import { Button } from '../components/Button';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppSelector } from '../store/hooks';
-import { previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
+import { codeNetwork, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
 import type { Network, Preview, PaymentOffer } from '../services/kaleidoPay';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt } from '../services/kaleidoPay/attempts';
 import { protocolManager } from '../services/protocols';
@@ -53,6 +53,8 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
     } catch { /* Disconnected accounts are not advertised as payment routes. */ }
   }, [walletId]);
   useEffect(() => { if (route.params?.code !== undefined) setCode(route.params.code); }, [route.params?.code]);
+  // A scanned code names its network (offer chain or address); the picker stays as an override.
+  useEffect(() => { const detected = codeNetwork(code); if (detected) setNetwork(detected); }, [code]);
   useEffect(() => {
     revision.current++; setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setPreviousTotal('');
   }, [code, network, amount]);
@@ -185,6 +187,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
               <Text style={muted}>Bitcoin · {network}</Text>
               {!!preview.code.message && <Text style={text}>{preview.code.message}</Text>}
               <Text selectable style={muted}>{preview.code.address || 'BOLT12 offer'}</Text>
+              {preview.request.acceptedRails.length > 1 && <Text style={muted}>Accepts, in their order: {preview.request.acceptedRails.map(railLabel).join(' · ')}</Text>}
             </View>
             <View style={card}>
               <Text style={muted}>You pay with</Text>

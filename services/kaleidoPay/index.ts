@@ -1,11 +1,12 @@
 import type { SwapAttempt } from '@universal-bolt12/swap-market';
 export type { SwapAttempt } from '@universal-bolt12/swap-market';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { acceptedRails, decodePaymentCode, planPayment } from '@universal-bolt12/universal-code';
+import { decodePaymentCode, offerRails, paymentCodeNetwork, planPayment } from '@universal-bolt12/universal-code';
 import type { Network, PaymentCode, PaymentRequest, Plan, Route, SwapCapability, WalletSource } from '@universal-bolt12/universal-code';
 export type { Network, Route } from '@universal-bolt12/universal-code';
 
-export interface Preview { code: PaymentCode; request: PaymentRequest; plan: Plan }
+/** `addresses`: the receiver's address per rail, for rails it is paid on directly (Bark, Arkade). */
+export interface Preview { code: PaymentCode; request: PaymentRequest; plan: Plan; addresses: Record<string, string> }
 export interface SpendAsset { id: string; ticker: string; precision: number }
 export interface SpendQuote { asset: SpendAsset; amount: number; fee: number; total: number }
 export interface Quote {
@@ -48,15 +49,26 @@ export function isKaleidoPayCode(text: string): boolean {
   const code = normalizePaymentCode(text);
   return /^lno1/i.test(code) || /^bitcoin:/i.test(code) && /[?&]lno=/i.test(code);
 }
+const RAIL_LABELS: Record<string, string> = { bark: 'Bark', arkade: 'Arkade', ln: 'Lightning', btc: 'On-chain', liquid: 'Liquid', 'rgb-ln': 'RGB Lightning' };
+export function railLabel(rail: string): string {
+  return RAIL_LABELS[rail.split(':')[0]] ?? rail;
+}
+/** The network a scanned code is for, when it says; never throws on a half-typed code. */
+export function codeNetwork(text: string): Network | undefined {
+  try { return paymentCodeNetwork(normalizePaymentCode(text)); } catch { return undefined; }
+}
 export function previewPayment(text: string, network: Network, amount: string, requestId: string): Preview {
   const code = decodePaymentCode(normalizePaymentCode(text), network);
   if (code.amountSat === undefined && !/^[1-9]\d*$/.test(amount)) throw new Error('Enter a whole number of sats.');
   const amountSat = code.amountSat ?? Number(amount);
-  const rails = [...(code.address ? [`btc:${network}`] : []), ...(code.offer ? acceptedRails(code.offer) : [])];
+  // The offer's rails are the receiver's order; an Ark rail is payable only with its address.
+  const listed = code.offer ? offerRails(code.offer).filter(r => r.address || !/^(arkade|bark):/.test(r.rail)) : [];
+  const rails = [...listed.map(r => r.rail), ...(code.address ? [`btc:${network}`] : [])];
+  const addresses = Object.fromEntries(listed.flatMap(r => r.address ? [[r.rail, r.address]] : []));
   const request: PaymentRequest = { id: requestId, network, amountSat, acceptedRails: [...new Set(rails)] };
   const available = [...accounts.values()].filter(a => a.source.network === network);
   const plan = planPayment(request, available.map(a => a.source), available.flatMap(a => a.swaps));
-  return { code, request, plan };
+  return { code, request, plan, addresses };
 }
 export function quoteSpend(quote: Quote): SpendQuote {
   return quote.spend ?? { asset: { id: 'BTC', ticker: 'sats', precision: 0 }, amount: quote.recipientSat, fee: quote.feeSat!, total: quote.totalSat! };

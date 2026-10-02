@@ -10,7 +10,8 @@ jest.mock('./electrumSwapAccount', () => ({
 }));
 jest.mock('./recovery', () => ({ kaleidoPayStores: {} }));
 import { encodeOffer } from '@universal-bolt12/universal-code';
-import { createBarkPayAccount } from './bark';
+import { barkRail, connectBarkToKaleidoPay, createBarkArkAccount, createBarkPayAccount, disconnectBarkFromKaleidoPay } from './bark';
+import { offerRails } from '@universal-bolt12/universal-code';
 
 const now = () => Math.floor(Date.now() / 1000);
 const swapRoute = { kind: 'swap', sourceId: 'bark', from: 'ln:signet', to: 'btc:signet', providerId: 'electrum-nostr' } as any;
@@ -78,4 +79,54 @@ test('swap attempts keep their status recovery', async () => {
   const account = createBarkPayAccount(bark(), 'signet');
   await expect(account.status!('existing-attempt')).resolves.toEqual({ status: 'pending' });
   expect(mockStatus).toHaveBeenCalledWith('existing-attempt');
+});
+
+const SERVER = 'ab'.repeat(32);
+const RAIL = `bark:${SERVER}`;
+const arkRoute = { kind: 'direct', sourceId: 'bark-ark', from: RAIL, to: RAIL } as any;
+const arkPreview = (addresses: Record<string, string> = { [RAIL]: 'ark1receiver' }) =>
+  ({ code: { offer: openOffer }, request: { id: 'r', network: 'mainnet', amountSat: 2100, acceptedRails: [RAIL, 'ln'] }, plan: {}, addresses }) as any;
+
+test('barkRail takes a compressed or x-only server key', () => {
+  expect(barkRail('02' + SERVER)).toBe(RAIL);
+  expect(barkRail(SERVER.toUpperCase())).toBe(RAIL);
+  expect(barkRail('04' + SERVER)).toBeNull();
+});
+
+test("pays the receiver's Bark address directly, with Bark's Ark fee in the quote", async () => {
+  const b = bark(3);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending' });
+  const account = createBarkArkAccount(b, 'mainnet', RAIL);
+  const [option] = await account.quoteOptions!(arkPreview(), arkRoute);
+  expect(option.quote).toMatchObject({ recipientSat: 2100, feeSat: 3, totalSat: 2103 });
+  expect(b.backend.estimatePaymentFee).toHaveBeenCalledWith('ark', 2100);
+  await expect(account.execute!(arkPreview(), arkRoute, option.quote!, 'ark-1')).resolves.toEqual({ status: 'completed' });
+  expect(b.sendPayment).toHaveBeenCalledWith({ invoice: 'ark1receiver', amount: 2100 });
+  await expect(account.status!('ark-1')).resolves.toEqual({ status: 'completed' });
+  await expect(account.execute!(arkPreview(), arkRoute, option.quote!, 'ark-2')).rejects.toThrow('fresh quote');
+});
+
+test('no address on this server, a foreign address or no fee estimate means no Bark address quote', async () => {
+  const account = createBarkArkAccount(bark(3), 'mainnet', RAIL);
+  await expect(account.quote(arkPreview({}), arkRoute)).rejects.toThrow('no Bark address');
+  const foreign = { ...bark(3), backend: { ...bark(3).backend, isBarkAddress: () => false } };
+  await expect(createBarkArkAccount(foreign, 'mainnet', RAIL).quote(arkPreview(), arkRoute)).rejects.toThrow('cannot pay');
+  const [option] = await createBarkArkAccount(bark(null), 'mainnet', RAIL).quoteOptions!(arkPreview(), arkRoute);
+  expect(option.unavailable).toContain('fee estimate');
+});
+
+test('connecting Bark registers the Ark route once the server key is known', async () => {
+  const { previewPayment } = require('./index');
+  const offer = require('@universal-bolt12/universal-code').withAcceptedRails(openOffer, [{ rail: RAIL, address: 'ark1receiver' }]);
+  expect(offerRails(offer)[0]).toEqual({ rail: RAIL, address: 'ark1receiver' });
+  const b = { ...bark(3), getConnectionInfo: jest.fn().mockResolvedValue({ connected: true, nodeId: '03' + SERVER }) };
+  connectBarkToKaleidoPay(b, 'mainnet');
+  await new Promise(r => setImmediate(r));
+  const preview = previewPayment(offer, 'mainnet', '2100', 'req');
+  expect(preview.addresses).toEqual({ [RAIL]: 'ark1receiver' });
+  expect(preview.request.acceptedRails).toEqual([RAIL, 'ln']);
+  expect(preview.plan.route).toMatchObject({ kind: 'direct', sourceId: 'bark-ark', to: RAIL });
+  expect(preview.plan.alternatives).toEqual([expect.objectContaining({ kind: 'direct', sourceId: 'bark', to: 'ln:mainnet' })]);
+  disconnectBarkFromKaleidoPay();
+  expect(previewPayment(offer, 'mainnet', '2100', 'req').plan.status).toBe('unsupported');
 });

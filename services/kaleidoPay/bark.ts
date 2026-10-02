@@ -9,12 +9,17 @@ import { lightningPayerFrom } from './lightningPayer';
 import type { LightningSender } from './lightningPayer';
 import { kaleidoPayStores } from './recovery';
 
-/** Bark adapter surface: Lightning sends (BOLT11 and BOLT12 offers) plus the backend's fee estimate. */
+/** Bark adapter surface: Lightning sends (BOLT11, BOLT12 offers) and Ark addresses, plus the backend's checks. */
 export interface BarkPaySender extends LightningSender {
-  backend?: { estimatePaymentFee(kind: 'lightning', amount: number): Promise<{ feeSats: number }> };
+  backend?: {
+    estimatePaymentFee(kind: 'lightning' | 'ark', amount: number): Promise<{ feeSats: number }>;
+    isBarkAddress?(address: string): boolean;
+  };
+  getConnectionInfo?(): Promise<{ connected: boolean; nodeId?: string; network?: string }>;
 }
 
 let disconnect: (() => void) | null = null;
+let generation = 0;
 const FEE_UNAVAILABLE = 'Bark did not return a fee estimate, so a complete payment quote is not available.';
 const QUOTE_TTL_S = 120;
 
@@ -114,9 +119,70 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
   };
 }
 
+/** Ark rail id of a Bark server: `bark:<x-only key>` (SSPS §1.1). */
+export function barkRail(serverPubkey: string): string | null {
+  const key = serverPubkey.trim().toLowerCase();
+  if (/^0[23][0-9a-f]{64}$/.test(key)) return `bark:${key.slice(2)}`;
+  return /^[0-9a-f]{64}$/.test(key) ? `bark:${key}` : null;
+}
+
+/** Pays the receiver's Bark address straight from the Bark balance, when the offer lists this server. */
+export function createBarkArkAccount(bark: BarkPaySender, network: Network, rail: string): PayAccount {
+  const quotes = new WeakMap<Quote, string>();
+  const ref = (attemptId: string) => `kaleidopay-bark-ark-${attemptId}`;
+  const name = 'Bark · to their Bark address';
+
+  async function quote(preview: Preview, route: Route): Promise<Quote> {
+    const address = preview.addresses?.[route.to];
+    if (route.kind !== 'direct' || route.to !== rail || !address) throw new Error('The receiver listed no Bark address on this server.');
+    if (bark.backend?.isBarkAddress && !bark.backend.isBarkAddress(address)) throw new Error('This Bark wallet cannot pay that address.');
+    let fee: number | null = null;
+    try { fee = validFeeSats((await bark.backend?.estimatePaymentFee('ark', preview.request.amountSat))?.feeSats); } catch { /* below */ }
+    if (fee === null) throw new Error(FEE_UNAVAILABLE);
+    const result: Quote = { recipientSat: preview.request.amountSat, feeSat: fee, totalSat: preview.request.amountSat + fee,
+      expiresAt: Math.floor(Date.now() / 1000) + QUOTE_TTL_S, estimatedSeconds: 5 };
+    quotes.set(result, address);
+    return result;
+  }
+
+  return {
+    source: { id: 'bark-ark', rail, network },
+    name: 'Bark',
+    swaps: [],
+    quote,
+    async quoteOptions(preview, route) {
+      try { return [{ id: 'bark-ark', name, quote: await quote(preview, route) }]; }
+      catch (e) { return [{ id: 'bark-ark', name, unavailable: e instanceof Error ? e.message : FEE_UNAVAILABLE }]; }
+    },
+    async execute(preview, route, accepted, attemptId) {
+      const address = quotes.get(accepted);
+      if (!address || address !== preview.addresses?.[route.to] || accepted.expiresAt <= Math.floor(Date.now() / 1000)) {
+        throw new Error('Review the payment again to get a fresh quote.');
+      }
+      quotes.delete(accepted);
+      await bark.sendPayment({ invoice: address, amount: accepted.recipientSat });
+      // An out-of-round Ark payment is final once the server cosigns it, which is when the call returns.
+      const result: PaymentResult = { status: 'completed' };
+      await AsyncStorage.setItem(ref(attemptId), JSON.stringify(result));
+      return result;
+    },
+    async status(attemptId) {
+      const raw = await AsyncStorage.getItem(ref(attemptId));
+      return raw ? JSON.parse(raw) as PaymentResult : { status: 'unknown' };
+    },
+  };
+}
+
 export function connectBarkToKaleidoPay(bark: BarkPaySender, network: Network): void {
   disconnect?.();
-  disconnect = registerKaleidoPayAccount(createBarkPayAccount(bark, network));
+  const current = ++generation;
+  const unregister = [registerKaleidoPayAccount(createBarkPayAccount(bark, network))];
+  disconnect = () => { generation++; unregister.forEach(u => u()); };
+  // The Ark route needs the server key, which only a connected wallet knows.
+  void bark.getConnectionInfo?.().then(info => {
+    const rail = info?.connected && info.nodeId ? barkRail(info.nodeId) : null;
+    if (rail && current === generation) unregister.push(registerKaleidoPayAccount(createBarkArkAccount(bark, network, rail)));
+  }).catch(() => { /* Without the server key, Bark pays over Lightning only. */ });
 }
 
 export function disconnectBarkFromKaleidoPay(): void {
