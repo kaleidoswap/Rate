@@ -368,3 +368,38 @@ The next chapters of KaleidoSwap, grouped by horizon. Items move up as they land
 ## License
 
 MIT License — see [LICENSE](LICENSE).
+
+### Test Bark on mobile
+
+Bark is enabled by default on **signet**. Rebuild the native app after updating;
+Expo Go and a JavaScript-only reload cannot add the native SDK.
+
+```bash
+pnpm install
+EXPO_PUBLIC_BARK=1 EXPO_PUBLIC_BARK_NETWORK=signet pnpm exec expo prebuild --platform android
+EXPO_PUBLIC_BARK=1 EXPO_PUBLIC_BARK_NETWORK=signet pnpm android --device
+```
+
+On macOS, use `--platform ios` and `pnpm ios --device`. Keep a separate test wallet.
+
+- Open **Dashboard → Bark**, **Receive → Receive on Bark**, or **Settings → Wallet Protocols → Bark**.
+- Check the network and connection/recovery status. Bark balances are shown separately
+  and excluded from the dashboard total. Signet sats have no fiat valuation.
+- Under **Receive on Bark**, choose **Ark** and generate a request. Fund it from
+  [Second's signet faucet](https://signet.2nd.dev), then tap **Sync account**.
+- **Lightning** requires a positive whole-satoshi amount. **On-chain funding** creates
+  a BDK funding address; after confirmation, **Review boarding** explicitly moves
+  an entered amount into Bark, with a confirmation prompt and network fees.
+- **Send from Bark** opens the normal send flow with Bark selected. Shared `ark1` /
+  `tark1` addresses require account selection when opened from the generic send flow;
+  Bark and Arkade are separate servers. Check the network on the review screen.
+- Pending payments remain pending. For an unknown outcome, sync and check activity
+  before retrying. Unknown fees are shown as unavailable.
+- Restart the app and sync again to check persistence. Bark activity also appears in
+  the shared history with its network label.
+
+`EXPO_PUBLIC_BARK=0` disables Bark. Mainnet requires explicit
+`EXPO_PUBLIC_BARK_NETWORK=mainnet`, `EXPO_PUBLIC_BARK_SERVER_URL`, and
+`EXPO_PUBLIC_BARK_ESPLORA_URL`; these values are bundled at build time.
+Unilateral exit/recovery operations remain library APIs, without dedicated mobile controls.
+Native device linking and funded flows must be verified in a development build.

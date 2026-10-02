@@ -3,7 +3,7 @@
  * Wraps protocolManager from shared lib for use in components.
  */
 
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { setActiveProtocol } from '../store/slices/walletSlice'
 import { protocolManager } from '../services/protocols'
@@ -32,41 +32,21 @@ export function useActiveProtocol() {
   return { activeProtocol, setProtocol }
 }
 
-/**
- * Returns which protocols are currently connected.
- */
-export function useProtocolStatus(): RouteResolverAccounts {
-  // This is computed live from the protocol manager
-  // In a future version, this could be Redux-driven for reactivity
-  return useMemo(() => {
-    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN')
-    const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK')
-    const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE')
-
-    return {
-      RGB: rgbAdapter?.isConnected() ?? false,
-      SPARK: sparkAdapter?.isConnected() ?? false,
-      ARKADE: arkadeAdapter?.isConnected() ?? false,
-    }
-  }, [])
+/** Read current connections instead of retaining a mount-time snapshot. */
+function readProtocolStatus(): RouteResolverAccounts {
+  return {
+    RGB: protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false,
+    SPARK: protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false,
+    ARKADE: protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected() ?? false,
+    BARK: protocolManager.getAdapterIfAvailable('BARK')?.isConnected() ?? false,
+  }
 }
 
-/**
- * Returns a function to refresh protocol connection status.
- * Call this after connecting/disconnecting protocols.
- */
+export function useProtocolStatus(): RouteResolverAccounts {
+  return readProtocolStatus()
+}
+
+/** Call after connecting or disconnecting protocols to read current status. */
 export function useRefreshableProtocolStatus() {
-  const getStatus = useCallback((): RouteResolverAccounts => {
-    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN')
-    const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK')
-    const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE')
-
-    return {
-      RGB: rgbAdapter?.isConnected() ?? false,
-      SPARK: sparkAdapter?.isConnected() ?? false,
-      ARKADE: arkadeAdapter?.isConnected() ?? false,
-    }
-  }, [])
-
-  return getStatus
+  return useCallback(readProtocolStatus, [])
 }

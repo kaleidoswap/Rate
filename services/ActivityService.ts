@@ -16,7 +16,7 @@
 
 import { protocolManager } from './protocols';
 
-export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Swap';
+export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Bark' | 'Bark Signet' | 'Swap';
 
 export type ActivityItemType =
   | 'send'
@@ -99,7 +99,7 @@ function normalizePaymentStatus(status?: string): ActivityStatus {
 }
 
 function normalizeProtocolTransactionStatus(
-  proto: 'SPARK' | 'ARKADE',
+  proto: 'SPARK' | 'ARKADE' | 'BARK',
   tx: any,
 ): ActivityStatus {
   const status = normalizePaymentStatus(tx?.status);
@@ -266,11 +266,12 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
   }
 
   // 3. Spark / Arkade unified transactions
-  for (const proto of ['SPARK', 'ARKADE'] as const) {
+  for (const proto of ['SPARK', 'ARKADE', 'BARK'] as const) {
     const adapter = protocolManager.getAdapterIfAvailable(proto);
     if (!adapter?.isConnected()) continue;
     hadConnectedAdapter = true;
     try {
+      const network = proto === 'BARK' ? (await adapter.getConnectionInfo()).network : undefined;
       const txs = await adapter.listTransactions({ limit: 50 });
       for (const tx of txs) {
         if (tx.type !== 'send' && tx.type !== 'receive') continue;
@@ -290,7 +291,8 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           status: normalizeProtocolTransactionStatus(proto, tx),
           timestamp: tx.timestamp,
           txid: tx.id,
-          layer: proto === 'SPARK' ? 'Spark' : 'Arkade',
+          layer: proto === 'BARK' ? (network === 'mainnet' ? 'Bark' : 'Bark Signet') : proto === 'SPARK' ? 'Spark' : 'Arkade',
+          fee: tx.fee,
         });
       }
     } catch (err) {

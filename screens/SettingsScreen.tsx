@@ -1,3 +1,5 @@
+import { BARK_ENABLED } from '../services/protocols/bark';
+import { barkNetworkLabel } from '../services/BarkService';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SettingsScreen.tsx
 import React, { useCallback, useState, useEffect } from 'react';
@@ -629,9 +631,10 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {/* Network internals belong to Advanced mode. Lite mode keeps Settings
             focused on user choices and the single Lightning connection. */}
-        {disclosureLevel === 'advanced' && showSection('wallet protocols network spark arkade rgb') && (
+        {disclosureLevel === 'advanced' && showSection('wallet protocols network spark arkade rgb bark') && (
           <>
           <SectionLabel>Wallet Protocols</SectionLabel>
+          {BARK_ENABLED && <Group><Row first icon="leaf-outline" label="Bark" description={`Second Ark · ${barkNetworkLabel()}`} value="Account" onPress={() => navigation.navigate('Bark')} /></Group>}
           <Group>
           {WALLET_PROTOCOLS.map((proto, idx) => {
             const connected = protocolStatus[proto];
