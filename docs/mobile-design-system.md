@@ -32,7 +32,7 @@ General copy controls provide success/failure feedback and cancel stale feedback
 
 - All existing theme consumers receive the new surfaces, brand/status colors, type sizes and radii.
 - Shared buttons, inputs, cards, headers, badges, callouts, copy controls and settings option sheets use the updated components/tokens.
-- Bark uses metric and summary cards, status badges, form fields, notices, segmented receive methods and activity records. Its receive, boarding confirmation and Send routing handlers are retained.
+- Bark remains integrated into the regular wallet flows, following the latest universal-BOLT12 base. Shared controls and theme tokens apply there; the retired standalone Bark screen stays removed.
 - Merchant QR uses labeled fields, offer summary rows, receipt records and notices. Persistence-before-display and receipt fetching remain unchanged.
 
 ## Review on a device
@@ -41,6 +41,6 @@ General copy controls provide success/failure feedback and cancel stale feedback
 2. Start the development client with `npx expo start --dev-client`.
 3. Open **Settings → Component preview** in a development build. Inspect both themes, large system text, dialogs, menus, dates, copy feedback and chart data views. This route is omitted from release navigation.
 4. Check wallet setup, dashboard, Send, Receive, Swap, History and settings sheets at the smallest supported screen size.
-5. On a configured test wallet, verify Bark receive-method changes clear the old QR, Send selects Bark, and boarding requires confirmation. Verify the merchant QR reopens the saved offer and displays receipts.
+5. On a configured test wallet, review Bark through the regular Send/Receive flows. Verify the merchant QR reopens the saved offer, preserves receiving preferences and displays receipts.
 
 Automated checks cover token mapping, disabled controls, query-state precedence, clipboard failure/stale completion, date validation, pagination, modal dismissal, chart edge cases and the existing wallet regression suite. Android/iOS JavaScript exports check Metro and Hermes compilation. They do not replace native device, VoiceOver/TalkBack or live payment testing.
