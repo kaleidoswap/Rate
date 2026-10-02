@@ -74,6 +74,7 @@
         }
       ],
       "expo-secure-store",
+      "@secondts/bark-react-native",
       [
         "expo-build-properties",
         {
