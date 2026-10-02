@@ -25,7 +25,7 @@ import { NetworkIcon } from '../components/NetworkIcon';
 import { feedback } from '../utils/feedback';
 import { haptic } from '../utils/haptics';
 
-export type PaymentType = 'lightning' | 'bitcoin' | 'rgb' | 'spark' | 'arkade' | 'boarding';
+export type PaymentType = 'lightning' | 'bitcoin' | 'rgb' | 'spark' | 'arkade' | 'boarding' | 'bark';
 
 export interface PaymentSuccessParams {
   /** Display amount, already formatted in the unit below (e.g. "0.001", "10"). */
@@ -39,6 +39,7 @@ export interface PaymentSuccessParams {
   paymentType: PaymentType;
   /** `pending` means the transfer was accepted/submitted but not fully settled. */
   status?: 'confirmed' | 'pending' | 'unknown';
+  networkLabel?: string;
   /** Optional network-fee line, pre-formatted (e.g. "2 sat/vB"). */
   fee?: string;
   /** Optional reference (txid / payment hash / preimage) with a copy affordance. */
@@ -62,6 +63,7 @@ const TYPE_META: Record<PaymentType, {
   rgb: { label: 'Asset Sent', sub: 'RGB asset transferred', network: 'rgb', networkLabel: 'RGB' },
   spark: { label: 'Payment Sent', sub: 'Transferred over Spark', network: 'spark', networkLabel: 'Spark' },
   arkade: { label: 'Payment Sent', sub: 'Transferred over Arkade', network: 'arkade', networkLabel: 'Arkade' },
+  bark: { label: 'Payment Sent', sub: 'Sent from Bark', network: 'bark', networkLabel: 'Bark' },
   boarding: { label: 'Payment Submitted', sub: 'Arkade offboard is awaiting settlement', network: 'arkade', networkLabel: 'Arkade · on-chain' },
 };
 
@@ -69,8 +71,8 @@ const truncate = (s: string): string =>
   s.length > 24 ? `${s.slice(0, 10)}…${s.slice(-10)}` : s;
 
 export default function PaymentSuccessScreen({ navigation, route }: Props) {
-  const { amount, unit, fiat, recipient, paymentType, status = 'confirmed', fee, reference, referenceLabel } = route.params;
-  const baseMeta = TYPE_META[paymentType] ?? TYPE_META.lightning;
+  const { amount, unit, fiat, recipient, paymentType, status = 'confirmed', fee, reference, referenceLabel, networkLabel } = route.params;
+  const baseMeta = { ...(TYPE_META[paymentType] ?? TYPE_META.lightning), ...(networkLabel ? { networkLabel } : {}) };
   const isUnknown = status === 'unknown';
   const isPending = status !== 'confirmed';
   const meta = isPending
@@ -141,7 +143,7 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
   const handleDone = () => {
     feedback.tap();
     // Dismiss the Send/Success modals back to the dashboard.
-    navigation.navigate('Dashboard');
+    navigation.navigate(paymentType === 'bark' ? 'Bark' : 'Dashboard');
   };
 
   const handleCopyReference = () => {
@@ -175,7 +177,7 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
             style={[styles.pulseRing, { opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]}
           />
           <View style={styles.glow} />
-          {isPending ? <Ionicons name="time-outline" size={64} color={theme.colors.warning[500]} /> : <LottieView
+          {isPending ? <Ionicons name={status === 'unknown' ? 'help-circle-outline' : 'time-outline'} size={80} color={theme.colors.warning[500]} /> : <LottieView
             ref={checkAnim}
             source={require('../assets/animations/success.json')}
             style={styles.lottie}

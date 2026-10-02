@@ -1,6 +1,7 @@
 import { paymentReceiptStatus } from '../utils/payment-receipt';
 import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { createRequestGuard } from '../utils/request-guard';
+import { barkNetworkLabel, sendBarkPayment } from '../services/BarkService';
 import { isKaleidoPayCode } from '../services/kaleidoPay';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
@@ -172,6 +173,7 @@ function SendScreen({ navigation, route }: Props) {
   useEffect(() => navigation.addListener('beforeRemove', (event: any) => {
     if (sendingRef.current) event.preventDefault();
   }), [navigation]);
+  useEffect(() => { if (activeRoute?.account === 'BARK') setAmountMode('token'); }, [activeRoute?.account]);
 
   // All operations via protocolManager
   const getProtocolStatus = useRefreshableProtocolStatus();
@@ -208,11 +210,12 @@ function SendScreen({ navigation, route }: Props) {
   // route is resolved fall back to the cross-protocol total. This is what makes
   // the amount screen show a real balance instead of "0".
   const btcSpendableSats = useCallback((): number => {
-    const acct = activeRoute?.account as 'RGB' | 'SPARK' | 'ARKADE' | undefined;
-    const perAccount = acct ? (acct === 'RGB' ? btcBalance?.byProtocol?.[acct]?.total : btcBalance?.byProtocol?.[acct]?.confirmed) : undefined;
+    const acct = (activeRoute?.account ?? route.params?.preferredAccount) as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | undefined;
+    const perAccount = acct ? btcBalance?.byProtocol?.[acct]?.[acct === 'RGB' ? 'total' : 'confirmed'] : undefined;
+    if (acct === 'BARK') return perAccount ?? 0;
     if (typeof perAccount === 'number') return perAccount;
     return btcBalance?.vanilla?.spendable || 0;
-  }, [activeRoute?.account, btcBalance]);
+  }, [activeRoute?.account, btcBalance, route.params?.preferredAccount]);
 
   // Keep the selected asset's balance/precision in sync with live wallet data.
   // `selectedAsset` is seeded once from state at mount, so without this its
@@ -324,7 +327,7 @@ function SendScreen({ navigation, route }: Props) {
       const accounts = getProtocolStatus();
       const { routes } = resolveSendRoutes({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts });
       setSendRoutes(routes);
-      const active = resolveActiveSendRoute({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts });
+      const active = resolveActiveSendRoute({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts, preferredAccount: route.params?.preferredAccount });
       setActiveRoute(active || null);
 
       if (destKind === 'lightning') {
@@ -504,7 +507,7 @@ function SendScreen({ navigation, route }: Props) {
 
   const validateInputs = (): boolean => {
     if (!activeRoute) {
-      Alert.alert('No payment method available', 'Connect a compatible account in Settings or use a different address.');
+      Alert.alert('Choose an account', 'Select the account to send from. Ark addresses do not identify whether the recipient uses Bark or Arkade.');
       return false;
     }
     if (!address.trim()) {
@@ -616,7 +619,17 @@ function SendScreen({ navigation, route }: Props) {
       let successType: PaymentType = 'lightning';
       let result: any = null;
 
-      if (method === 'spark') {
+      if (protocol === 'BARK') {
+        let invoice = address;
+        const entered = amountSatsFromBtcUnits(amount);
+        if (addressType === 'lightning-address' || addressType === 'lnurl-pay') {
+          invoice = await resolveLightningAddressToInvoice(address, entered);
+        }
+        const fixed = addressType === 'lightning' && (decodedInvoice?.amt_msat ?? 0) > 0;
+        result = await sendBarkPayment({ invoice, ...(fixed ? {} : { amount: entered }) });
+        if (result.status === 'failed') throw new Error('Bark payment failed.');
+        successType = 'bark';
+      } else if (method === 'spark') {
         // Spark transfer
         const sparkAdapter = protocolManager.getAdapter('SPARK');
         const amountSats = bitcoinUnit === 'BTC'
@@ -704,11 +717,15 @@ function SendScreen({ navigation, route }: Props) {
 
       goToPaymentSuccess(successType, result);
     } catch (error) {
+      if (activeRoute?.account === 'BARK' && (error as any)?.code === 'PAYMENT_OUTCOME_UNKNOWN') {
+        goToPaymentSuccess('bark', { status: 'unknown', feeKnown: false });
+        return;
+      }
       console.error('Send error:', error);
       feedback.error();
       setPaymentStep('review');
       Alert.alert(
-        'Payment Failed',
+        'Payment failed',
         error instanceof Error ? error.message : 'Failed to send payment'
       );
     } finally {
@@ -769,7 +786,7 @@ function SendScreen({ navigation, route }: Props) {
   const goToPaymentSuccess = (paymentType: PaymentType, result: any) => {
     const isBtc = selectedAsset.asset_id === 'BTC';
     const unit = isBtc ? bitcoinUnit : selectedAsset.ticker;
-    const fiat = isBtc && bitcoinPrice > 0 && amount
+    const fiat = activeRoute?.account !== 'BARK' && isBtc && bitcoinPrice > 0 && amount
       ? `≈ $${parseFloat(formatSatoshisToUSD(amountSatsFromBtcUnits(amount))).toLocaleString()}`
       : undefined;
 
@@ -783,7 +800,7 @@ function SendScreen({ navigation, route }: Props) {
 
     // Surface the on-chain fee rate on the receipt for on-chain sends only
     // (same rule as the fee selector).
-    const fee = result?.fee != null && Number.isFinite(Number(result.fee))
+    const fee = result?.feeKnown === false ? 'Unavailable' : result?.fee != null && Number.isFinite(Number(result.fee))
       ? `${formatBitcoinAmount(Number(result.fee), bitcoinUnit)} ${bitcoinUnit}`
       : (addressType === 'bitcoin' || addressType === 'rgb')
       ? `${feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB`
@@ -796,6 +813,7 @@ function SendScreen({ navigation, route }: Props) {
       recipient: address,
       paymentType,
       status: paymentReceiptStatus(result, ['bitcoin', 'boarding', 'rgb'].includes(paymentType)),
+      networkLabel: activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : undefined,
       fee,
       reference: typeof reference === 'string' ? reference : undefined,
       referenceLabel,
@@ -854,7 +872,7 @@ function SendScreen({ navigation, route }: Props) {
     : addressType === 'lightning-address' ? 'Lightning Address'
     : addressType === 'lnurl-pay' ? 'LNURL Pay'
     : addressType === 'spark' ? 'Spark Address'
-    : addressType === 'arkade' ? 'Arkade Address'
+    : addressType === 'arkade' ? 'Ark address (Bark / Arkade)'
     : addressType === 'bitcoin' ? 'Bitcoin Address'
     : 'RGB Invoice';
 
@@ -933,7 +951,7 @@ function SendScreen({ navigation, route }: Props) {
       {/* Route selector — whenever more than one account can pay the
           destination, always let the user choose which to spend from. The
           auto-router still pre-selects the best route as the default. */}
-      {sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
+      {sendRoutes.length > 0 && addressType !== 'unknown' && addressType !== 'invalid' && (
         <View style={{ marginTop: 14, gap: 8 }}>
           <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.4 }}>
             Send via
@@ -959,7 +977,7 @@ function SendScreen({ navigation, route }: Props) {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text.primary }}>
-                      {METHOD_META[route.method]?.label || route.method}
+                      {route.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : `${route.account} · ${METHOD_META[route.method]?.label || route.method}`}
                     </Text>
                     {route.recommended && (
                       <View style={{ backgroundColor: theme.colors.primary[500], borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1 }}>
@@ -1200,19 +1218,19 @@ function SendScreen({ navigation, route }: Props) {
     }
 
     const isBtc = selectedAsset.asset_id === 'BTC';
-    const canEnterFiat = isBtc && bitcoinPrice > 0;
+    const canEnterFiat = activeRoute?.account !== 'BARK' && isBtc && bitcoinPrice > 0;
     const maxAmount = getMaxAmount();
 
     const tokenSymbol = isBtc ? bitcoinUnit : selectedAsset.ticker;
     const tokenBalance = isBtc
       ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)}`
       : `${((selectedAsset.balance || 0) / Math.pow(10, resolvePrecision(selectedAsset.precision))).toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(selectedAsset.precision) })}`;
-    const tokenBalanceUSD = isBtc ? `$${formatSatoshisToUSD(selectedAsset.balance || 0)}` : '—';
+    const tokenBalanceUSD = activeRoute?.account !== 'BARK' && isBtc ? `$${formatSatoshisToUSD(selectedAsset.balance || 0)}` : '—';
 
     // Secondary conversion line.
     const secondary = (() => {
       if (!amount) return '';
-      if (amountMode === 'token' && isBtc) {
+      if (amountMode === 'token' && isBtc && activeRoute?.account !== 'BARK') {
         return `≈ $${formatSatoshisToUSD(amountSatsFromBtcUnits(amount))} USD`;
       }
       if (amountMode === 'fiat') {
@@ -1378,6 +1396,11 @@ function SendScreen({ navigation, route }: Props) {
 
           <View style={styles.reviewDetails}>
             <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>From account</Text>
+              <Text style={styles.reviewValue}>{activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : activeRoute?.account || 'Choose an account'}</Text>
+            </View>
+            {activeRoute?.account === 'BARK' && <Text style={styles.reviewLabel}>Fee is determined by Bark. Settlement may remain pending; check Bark activity after sending.</Text>}
+            <View style={styles.reviewRow}>
               <Text style={styles.reviewLabel}>To</Text>
               <Text style={styles.reviewValue} numberOfLines={2}>
                 {address.length > 40 ? `${address.slice(0, 20)}...${address.slice(-20)}` : address}
@@ -1411,7 +1434,7 @@ function SendScreen({ navigation, route }: Props) {
               {feeEstimate === null ? 'This wallet provider does not currently supply a fee estimate. The final fee will be shown on the receipt when available.' : 'Fees are estimates and may change before the payment is sent.'}
             </Text>
 
-            {selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
+            {activeRoute?.account !== 'BARK' && selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
               <View style={styles.reviewRow}>
                 <Text style={styles.reviewLabel}>USD Value</Text>
                 <Text style={styles.reviewValue}>

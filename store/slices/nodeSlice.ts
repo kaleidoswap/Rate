@@ -49,7 +49,7 @@ export const startNode = createAsyncThunk(
       }
 
       // Try to get connection info from any adapter
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
