@@ -3,7 +3,7 @@
  * Ported from rate-extension/src/lib/account-routing.ts + route-resolver.ts
  */
 
-export type AccountId = 'RGB' | 'SPARK' | 'ARKADE'
+export type AccountId = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'
 export type AssetFamily = 'BTC' | 'RGB' | 'SPARK' | 'ARKADE'
 export type TransferMethod = 'bitcoin_l1' | 'lightning' | 'spark' | 'arkade' | 'boarding' | 'submarine_swap'
 export type DestinationKind =
@@ -17,6 +17,7 @@ export interface RouteResolverAccounts {
   RGB: boolean
   SPARK: boolean
   ARKADE: boolean
+  BARK?: boolean
 }
 
 export interface RouteOption {
@@ -106,6 +107,7 @@ export function getReceiveMethodsForAccount(account: AccountId, assetFamily: Ass
     // Bitcoin address that is claimed into the Spark balance after confirmation.
     case 'SPARK': return ['spark', 'lightning', 'bitcoin_l1']
     case 'ARKADE': return ['arkade', 'boarding']
+    case 'BARK': return [] // Dedicated Bark receive screen keeps networks separate.
   }
 }
 
@@ -124,6 +126,7 @@ export function resolveReceiveAccounts(args: {
         ...(accounts.RGB ? ['RGB' as const] : []),
         ...(accounts.SPARK ? ['SPARK' as const] : []),
         ...(accounts.ARKADE ? ['ARKADE' as const] : []),
+        ...(accounts.BARK ? ['BARK' as const] : []),
       ]
   }
 }
@@ -155,6 +158,13 @@ export function getSendRouteSummary(
   if (destinationType === 'spark') {
     if (account !== 'SPARK') return null
     return { method: 'spark', summary: 'Transfers directly to a Spark address.' }
+  }
+
+  if (account === 'BARK') {
+    if (destinationType === 'arkade') return { method: 'arkade', summary: 'Send through the Bark server. Check the recipient uses Bark.' }
+    if (destinationType === 'bitcoin') return { method: 'bitcoin_l1', summary: 'Send Bark BTC to a Bitcoin address.' }
+    if (['lightning', 'lightning-address', 'lnurl-pay'].includes(destinationType)) return { method: 'lightning', summary: 'Pay over Lightning from Bark.' }
+    return null
   }
 
   if (destinationType === 'bitcoin') {
@@ -191,7 +201,7 @@ export function resolveSendRoutes(args: {
     selectedAssetId !== 'BTC'
       ? (accounts.RGB ? ['RGB'] : [])
       : destinationType === 'arkade'
-        ? (accounts.ARKADE ? ['ARKADE'] : [])
+        ? [...(accounts.ARKADE ? ['ARKADE' as const] : []), ...(accounts.BARK ? ['BARK' as const] : [])]
         : destinationType === 'rgb'
           ? (accounts.RGB ? ['RGB'] : [])
           : destinationType === 'spark'
@@ -201,12 +211,14 @@ export function resolveSendRoutes(args: {
                   ...(accounts.SPARK ? ['SPARK' as const] : []),
                   ...(accounts.RGB ? ['RGB' as const] : []),
                   ...(accounts.ARKADE ? ['ARKADE' as const] : []),
+                  ...(accounts.BARK ? ['BARK' as const] : []),
                 ]
               : destinationType === 'bitcoin'
                 ? [
                     ...(accounts.RGB ? ['RGB' as const] : []),
                     ...(accounts.SPARK ? ['SPARK' as const] : []),
                     ...(accounts.ARKADE ? ['ARKADE' as const] : []),
+                  ...(accounts.BARK ? ['BARK' as const] : []),
                   ]
                 : []
 
@@ -214,7 +226,7 @@ export function resolveSendRoutes(args: {
     selectedAssetId !== 'BTC'
       ? (accounts.RGB ? 'RGB' : undefined)
       : destinationType === 'arkade'
-        ? (accounts.ARKADE ? 'ARKADE' : undefined)
+        ? undefined // Ark prefixes cannot identify the server; require account selection.
         : destinationType === 'spark'
           ? (accounts.SPARK ? 'SPARK' : undefined)
           : destinationType === 'lightning' || destinationType === 'lightning-address' || destinationType === 'lnurl-pay'
@@ -240,6 +252,8 @@ export function resolveActiveSendRoute(args: {
 }): ResolvedSendRoute | undefined {
   const { preferredAccount } = args
   const resolved = resolveSendRoutes(args)
+  if (preferredAccount && !resolved.routes.some(r => r.account === preferredAccount)) return undefined
+  if (args.destinationType === 'arkade' && !preferredAccount) return undefined
   const selected =
     (preferredAccount ? resolved.routes.find(r => r.account === preferredAccount) : undefined)
     ?? resolved.recommended ?? resolved.routes[0]

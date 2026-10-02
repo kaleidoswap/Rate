@@ -7,9 +7,10 @@ import { View, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { theme } from '../theme'
 
-export type ProtocolKey = 'RGB' | 'SPARK' | 'ARKADE' | 'BTC' | 'LIGHTNING'
+export type ProtocolKey = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | 'BTC' | 'LIGHTNING'
 
 export const PROTOCOL_COLORS: Record<ProtocolKey, string> = {
+  BARK: theme.colors.primary[500],
   BTC: theme.colors.networks.bitcoin,       // Bitcoin orange
   LIGHTNING: theme.colors.networks.lightning,  // Lightning yellow
   RGB: theme.colors.networks.unified,       // KaleidoSwap green (primary)
@@ -18,6 +19,7 @@ export const PROTOCOL_COLORS: Record<ProtocolKey, string> = {
 }
 
 export const PROTOCOL_ICONS: Record<ProtocolKey, keyof typeof Ionicons.glyphMap> = {
+  BARK: 'leaf-outline',
   BTC: 'logo-bitcoin',
   LIGHTNING: 'flash',
   RGB: 'diamond',
@@ -26,6 +28,7 @@ export const PROTOCOL_ICONS: Record<ProtocolKey, keyof typeof Ionicons.glyphMap>
 }
 
 export const PROTOCOL_LABELS: Record<ProtocolKey, string> = {
+  BARK: 'Bark',
   BTC: 'Bitcoin',
   LIGHTNING: 'Lightning',
   RGB: 'RGB & Lightning',
@@ -34,6 +37,7 @@ export const PROTOCOL_LABELS: Record<ProtocolKey, string> = {
 }
 
 export const PROTOCOL_SHORT_LABELS: Record<ProtocolKey, string> = {
+  BARK: 'Bark',
   BTC: 'BTC',
   LIGHTNING: 'LN',
   RGB: 'RLN',
@@ -48,6 +52,7 @@ export const NETWORK_COLORS: Record<string, string> = {
   'lightning': PROTOCOL_COLORS.LIGHTNING,
   'spark': PROTOCOL_COLORS.SPARK,
   'arkade': PROTOCOL_COLORS.ARKADE,
+  'bark': PROTOCOL_COLORS.BARK,
 }
 
 export const NETWORK_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -56,6 +61,7 @@ export const NETWORK_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   'lightning': 'flash',
   'spark': 'sparkles',
   'arkade': 'shield-checkmark',
+  'bark': 'leaf-outline',
 }
 
 export const NETWORK_LABELS: Record<string, string> = {
@@ -64,6 +70,7 @@ export const NETWORK_LABELS: Record<string, string> = {
   'lightning': 'Lightning',
   'spark': 'Spark',
   'arkade': 'Arkade',
+  'bark': 'Bark',
 }
 
 interface ProtocolIconProps {

@@ -60,6 +60,8 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
     'RGB-LN': 'RGB · LN',
     'Spark': 'Spark',
     'Arkade': 'Arkade',
+    'Bark': 'Bark',
+    'Bark Signet': 'Bark · Signet',
     'Swap': 'Swap',
 };
 

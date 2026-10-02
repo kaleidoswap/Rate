@@ -32,6 +32,7 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
 };
 
 export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) => {
+  if (network.toLowerCase() === 'bark') return <Ionicons name="leaf-outline" size={size} color={theme.colors.primary[500]} accessibilityLabel="Bark" />;
   const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()];
 
   if (network.toLowerCase() === 'liquid') return <Ionicons name="water" size={size} color={theme.colors.text.primary} />;

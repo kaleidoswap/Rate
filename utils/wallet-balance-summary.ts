@@ -16,6 +16,7 @@ export function summarizeBitcoinBalances(
   let total = 0;
   let available = 0;
   for (const [protocol, balance] of Object.entries(balances)) {
+    if (protocol === 'BARK') continue; // Separate network-labelled account; may contain test sats.
     total += nonNegative(balance.confirmed) + nonNegative(balance.unconfirmed);
     available += nonNegative(protocol === 'RGB' ? balance.total : balance.confirmed);
   }
