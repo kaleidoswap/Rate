@@ -17,7 +17,25 @@ import {defaultReceiverPreferences,receiverRails,loadReceiverPreferences,saveRec
 
 export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  const t=useAppTheme();
- const connection=useAppSelector(s=>s.nostr.nwcConnections.find(c=>c.id===s.nostr.selectedNwcConnectionId));
+ const connections=useAppSelector(s=>s.nostr.nwcConnections);
+ const selectedId=useAppSelector(s=>s.nostr.selectedNwcConnectionId);
+ const [receiverId,setReceiverId]=useState<string|null>(null);
+ const connection=connections.find(c=>c.id===(receiverId??selectedId))??connections[0];
+ const [accounts,setAccounts]=useState<Array<{type:'bark'|'arkade';compatible:boolean}>>([]);
+ useEffect(()=>{
+  let active=true;
+  async function refresh(){
+   const {protocolManager}=await import('../services/protocols');
+   const results=await Promise.all((['bark','arkade'] as const).map(async type=>{
+    try{const info=await protocolManager.getAdapterIfAvailable(type==='bark'?'BARK':'ARKADE')?.getConnectionInfo();
+     return info?.connected?{type,compatible:(info.network==='bitcoin'?'mainnet':info.network)===connection?.network}:null;
+    }catch{return null;}
+   }));
+   if(active)setAccounts(results.filter((a):a is {type:'bark'|'arkade';compatible:boolean}=>a!==null));
+  }
+  void refresh();const unsubscribe=navigation.addListener('focus',()=>void refresh());
+  return()=>{active=false;unsubscribe();};
+ },[connection?.network,navigation]);
  const [offer,setOffer]=useState<SavedMerchantOffer|null>(null),[receipts,setReceipts]=useState<OfferReceipt[]>([]);
  const [description,setDescription]=useState('KaleidoPay'),[amount,setAmount]=useState('');
  const [preferences,setPreferences]=useState<ReceiverPreferences>(defaultReceiverPreferences('mainnet'));
@@ -47,14 +65,18 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
   const revision=generation.current;working.current=true;setBusy(true);setError('');
   try{
    const endpoint=await loadConnectedReceiverDestination(type,connection.network);
-   if(generation.current===revision)updateDestinations(preferences.destinations.map(d=>d.type===type?endpoint:d));
+   if(generation.current===revision){
+    setEditing(true);
+    const exists=preferences.destinations.some(d=>d.type===type);
+    updateDestinations(exists?preferences.destinations.map(d=>d.type===type?endpoint:d):[...preferences.destinations.filter(d=>d.type!=='lightning'),endpoint,...preferences.destinations.filter(d=>d.type==='lightning')]);
+   }
   }catch(e){if(generation.current===revision)setError(e instanceof Error?e.message:'Could not load the receiving address.');}
   finally{if(generation.current===revision){working.current=false;setBusy(false)}}
  }
  async function saveDefaults(){
   if(!connection||!ready||working.current)return;
   const revision=generation.current;working.current=true;setBusy(true);setError('');setNotice('');
-  try{await saveReceiverPreferences(connection.id,preferences);if(generation.current===revision)setNotice('Preferences saved for future offers. Your existing QR is unchanged.');}
+  try{await saveReceiverPreferences(connection.id,preferences);if(generation.current===revision)setNotice('Preferences saved.');}
   catch(e){if(generation.current===revision)setError(e instanceof Error?e.message:'Could not save preferences.');}
   finally{if(generation.current===revision){working.current=false;setBusy(false)}}
  }
@@ -104,69 +126,77 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  const input={...text,borderWidth:1,borderColor:t.colors.border.light,backgroundColor:t.colors.background.primary,borderRadius:t.borderRadius.lg,padding:t.spacing[3]};
  const settled=receipts.filter(p=>p.state==='settled');
  const label=(type:string)=>type==='lightning'?'Lightning':type==='arkade'?'Arkade':type==='bitcoin'||type==='btc'?'Bitcoin on-chain':'Bark';
+ const section=(title:string,subtitle?:string)=><View style={{gap:4}}><Text style={{...text,fontSize:t.typography.fontSize.lg,fontWeight:'700'}}>{title}</Text>{subtitle&&<Text style={hint}>{subtitle}</Text>}</View>;
+ const badge=(name:keyof typeof Ionicons.glyphMap)=><View style={{width:44,height:44,borderRadius:16,backgroundColor:t.colors.primary[500]+'18',alignItems:'center',justifyContent:'center'}}><Ionicons name={name} size={23} color={t.colors.primary[500]}/></View>;
  return <SafeAreaView style={{flex:1,backgroundColor:t.colors.background.primary}}>
-  <ScreenHeader title="Reusable payment QR" onBack={()=>navigation.goBack()}/>
-  <ScrollView contentContainerStyle={{padding:t.spacing[5],gap:t.spacing[4]}} keyboardShouldPersistTaps="handled">
-   <Text style={text}>One QR for every payment. Choose where you prefer to receive; the payer chooses a supported route.</Text>
-   {!connection?<><Text style={text}>Connect a receiving wallet that supports reusable BOLT12 offers.</Text><Button title="Connect receiving wallet" onPress={()=>navigation.navigate('NWCConnect')}/></>:<>
-    <Text style={text}>{connection.alias||'Connected wallet'} · {connection.network}</Text>
-    {!!error&&<Text accessibilityRole="alert" style={{...text,color:t.colors.warning[500]}}>{error}</Text>}
-    {!!notice&&<Text accessibilityLiveRegion="polite" style={hint}>{notice}</Text>}
-    {offer&&<>
-     <Text style={text}>{offer.description} · {offer.amount===undefined?'Payer chooses amount':`${offer.amount/1000} sats`}</Text>
-     <ReceiveQr value={merchantPaymentCode(offer)} size={240}/>
-     <Text style={hint}>This QR accepts, in your order</Text>
-     <View style={{flexDirection:'row',flexWrap:'wrap',gap:t.spacing[2]}}>{(offer.rails?.length?offer.rails:['ln']).map((r,i)=>{const kind=(typeof r==='string'?r:r.rail).split(':')[0];const type=kind==='ln'?'lightning':kind==='btc'?'bitcoin':kind;return <View key={kind} style={{flexDirection:'row',alignItems:'center',gap:6,paddingVertical:6,paddingHorizontal:t.spacing[3],borderRadius:t.borderRadius.full,backgroundColor:t.colors.surface.primary}}>
-      <Text style={{...hint,fontSize:t.typography.fontSize.xs}}>{i+1}</Text><NetworkIcon network={icon(type)} size={14}/><Text style={{...text,fontSize:t.typography.fontSize.sm}}>{label(type)}</Text></View>})}</View>
-     <Button title="Share payment QR link" variant="secondary" disabled={busy} onPress={()=>{void Share.share({message:merchantPaymentCode(offer)}).catch(()=>setError('Could not share the payment request.'));}}/>
-     <Text style={hint}>Keep using this QR. Each Lightning payment gets its own invoice. The receiving node must stay online.</Text>
-     {!editing&&<Button title="Edit receiving preferences" variant="secondary" disabled={busy} onPress={()=>{setEditing(true);setNotice('');setError('');}}/>}
-     <Button title="Check received payments" variant="secondary" loading={busy&&!editing} disabled={busy} onPress={()=>void run(false)}/>
-     <Text accessibilityLiveRegion="polite" style={text}>{checked?`${settled.length} completed Lightning payments`:'Check payments to load Lightning receipts'}</Text>
-     <Text style={hint}>Direct Arkade and Bark payments are tracked by their respective wallets.</Text>
-     {receipts.map(p=><View key={p.payment_hash}><Text style={text}>{p.amount/1000} sats · {p.state}</Text><Text selectable style={hint}>{p.payment_hash}</Text></View>)}
+  <ScreenHeader title="Reusable payment" onBack={()=>navigation.goBack()}/>
+  <ScrollView contentContainerStyle={{padding:t.spacing[5],gap:t.spacing[5],paddingBottom:t.spacing[8]}} keyboardShouldPersistTaps="handled">
+   <View style={{flexDirection:'row',alignItems:'center',gap:t.spacing[3]}}>
+    {badge('qr-code-outline')}<View style={{flex:1,gap:4}}><Text style={{...text,fontSize:t.typography.fontSize.xl,fontWeight:'700'}}>One QR. Your way.</Text><Text style={hint}>Choose your accounts. Set your preference. Get paid.</Text></View>
+   </View>
+   {section('Receiving accounts', 'Choose a Lightning wallet to create your reusable QR.')}
+   <View style={{gap:t.spacing[2]}}>
+    {connections.map(c=><TouchableOpacity key={c.id} accessibilityRole="radio" accessibilityState={{checked:connection?.id===c.id,disabled:busy}} disabled={busy} onPress={()=>setReceiverId(c.id)} style={{...card,flexDirection:'row',alignItems:'center',borderColor:connection?.id===c.id?t.colors.primary[500]:t.colors.border.light}}>
+     <NetworkIcon network="lightning" size={30}/><View style={{flex:1,gap:3}}><Text style={{...text,fontWeight:'600'}}>{c.alias||'Lightning wallet'}</Text><Text style={hint}>Saved connection</Text></View><Ionicons name={connection?.id===c.id?'checkmark-circle':'ellipse-outline'} size={24} color={connection?.id===c.id?t.colors.primary[500]:t.colors.text.secondary}/>
+    </TouchableOpacity>)}
+    {accounts.map(a=><TouchableOpacity key={a.type} accessibilityRole="button" accessibilityLabel={`Add connected ${label(a.type)} account`} disabled={!connection||!ready||busy||!a.compatible} onPress={()=>void useConnectedWallet(a.type)} style={{...card,flexDirection:'row',alignItems:'center'}}>
+     <NetworkIcon network={a.type} size={30}/><View style={{flex:1,gap:3}}><Text style={{...text,fontWeight:'600'}}>{label(a.type)}</Text><Text style={hint}>{!connection?'Connected account':!a.compatible?'Not compatible with this receiving wallet':preferences.destinations.some(d=>d.type===a.type)?'Added to your QR':'Connected · Add to your QR'}</Text></View><Ionicons name={preferences.destinations.some(d=>d.type===a.type)?'checkmark-circle':'add-circle-outline'} size={24} color={t.colors.primary[500]}/>
+    </TouchableOpacity>)}
+    <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={()=>navigation.navigate('NWCConnect')} style={{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:t.spacing[3]}}><Ionicons name="add-circle-outline" size={22} color={t.colors.primary[500]}/><Text style={{...text,color:t.colors.primary[500],fontWeight:'600'}}>{connections.length?'Connect another wallet':'Connect Lightning wallet'}</Text></TouchableOpacity>
+   </View>
+   {!!error&&<View accessibilityRole="alert" style={{...card,flexDirection:'row',alignItems:'center'}}><Ionicons name="alert-circle-outline" size={22} color={t.colors.warning[500]}/><Text style={{...text,flex:1}}>{error}</Text></View>}
+   {!!notice&&<Text accessibilityLiveRegion="polite" style={{...hint,color:t.colors.primary[500]}}>{notice}</Text>}
+   {connection&&<>
+    {offer&&!editing&&<>
+     <View style={{...card,alignItems:'center',paddingVertical:t.spacing[6],gap:t.spacing[4]}}>
+      <Text style={{...text,fontSize:t.typography.fontSize.lg,fontWeight:'700'}}>{offer.description||'Your payment QR'}</Text>
+      <Text style={hint}>{offer.amount===undefined?'Any amount':`${offer.amount/1000} sats`}</Text>
+      <ReceiveQr value={merchantPaymentCode(offer)} size={240}/>
+      <View style={{flexDirection:'row',flexWrap:'wrap',justifyContent:'center',gap:t.spacing[2]}}>{(offer.rails?.length?offer.rails:['ln']).map((r,i)=>{const kind=(typeof r==='string'?r:r.rail).split(':')[0];const type=kind==='ln'?'lightning':kind==='btc'?'bitcoin':kind;return <View key={kind} style={{flexDirection:'row',alignItems:'center',gap:6,padding:8,borderRadius:t.borderRadius.full,backgroundColor:t.colors.background.primary}}><Text style={hint}>{i+1}</Text><NetworkIcon network={icon(type)} size={16}/><Text style={hint}>{label(type)}</Text></View>})}</View>
+      <Text style={hint}>Ready to share. Use it again and again.</Text>
+     </View>
+     <Button title="Share payment link" disabled={busy} onPress={()=>{void Share.share({message:merchantPaymentCode(offer)}).catch(()=>setError('Could not share the payment request.'));}}/>
+     <Button title="Edit payment QR" variant="secondary" disabled={busy} onPress={()=>{setEditing(true);setNotice('');setError('');}}/>
+     <View style={card}><View style={{flexDirection:'row',alignItems:'center',gap:8}}><Ionicons name="receipt-outline" size={22} color={t.colors.text.secondary}/><Text style={{...text,fontWeight:'600'}}>Lightning payments</Text></View>
+      {checked&&<Text accessibilityLiveRegion="polite" style={text}>{settled.length} received</Text>}
+      <Button title="Refresh payments" variant="secondary" loading={busy} disabled={busy} onPress={()=>void run(false)}/>
+      <Text style={hint}>Bark and Arkade payments appear in those accounts.</Text>
+      {receipts.map(p=><View key={p.payment_hash} style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={text}>{p.amount/1000} sats</Text><Text style={hint}>{p.state}</Text></View>)}
+     </View>
     </>}
     {(!offer||editing)&&<>
-     <Text style={{...text,fontSize:t.typography.fontSize.lg,fontWeight:'600'}}>Where you want to receive</Text>
-     <Text style={hint}>Order the layers you accept. The first is preferred; payers see your order and pick a route they can pay. Lightning is always accepted. Addresses are public, on {connection.network}.</Text>
+     {section('Receive in your order', 'Your first choice is preferred. Payers choose an available route.')}
      {preferences.destinations.map((d,index)=>{
       const filled=d.type!=='lightning'&&!!d.address&&(d.type==='bitcoin'||!!d.serverKey);
-      const status=d.type==='lightning'?'Your node issues the offer; always accepted':filled?`${short(d.address)}${d.type==='bitcoin'?'':' · from your wallet'}`:d.type==='bitcoin'?'Add a public on-chain address':`Use your ${label(d.type)} wallet or enter an address`;
       return <View key={d.type} style={{...card,borderColor:index===0?t.colors.primary[500]:t.colors.border.light}}>
        <View style={{flexDirection:'row',alignItems:'center',gap:t.spacing[3]}}>
-        <Text style={{...hint,width:18,textAlign:'center',fontWeight:'700',color:index===0?t.colors.primary[500]:t.colors.text.secondary}}>{index+1}</Text>
-        <View style={{width:40,height:40,borderRadius:20,alignItems:'center',justifyContent:'center',backgroundColor:t.colors.background.primary}}><NetworkIcon network={icon(d.type)} size={22}/></View>
-        <View style={{flex:1,gap:2}}>
-         <Text style={{...text,fontWeight:'600'}}>{label(d.type)}{index===0?'  ·  preferred':''}</Text>
-         <Text numberOfLines={1} style={{...hint,color:filled||d.type==='lightning'?t.colors.text.secondary:t.colors.warning[500]}}>{status}</Text>
-        </View>
+        <NetworkIcon network={icon(d.type)} size={30}/><View style={{flex:1,gap:4}}><Text style={{...text,fontWeight:'700'}}>{label(d.type)}</Text><Text style={{...hint,color:index===0?t.colors.primary[500]:t.colors.text.secondary}}>{index===0?'Preferred':`Choice ${index+1}`}{d.type==='lightning'?' · Always included':''}</Text></View>
         {index>0&&iconButton('chevron-up',`Move ${label(d.type)} up`,()=>move(index,-1))}
         {index<preferences.destinations.length-1&&iconButton('chevron-down',`Move ${label(d.type)} down`,()=>move(index,1))}
         {d.type!=='lightning'&&iconButton('close',`Remove ${label(d.type)}`,()=>updateDestinations(preferences.destinations.filter((_,i)=>i!==index)))}
        </View>
+       {filled&&<Text numberOfLines={1} style={hint}>{short(d.address)}</Text>}
        {d.type!=='lightning'&&<View style={{flexDirection:'row',flexWrap:'wrap',gap:t.spacing[2]}}>
-        {d.type!=='bitcoin'&&pill(`Use my ${label(d.type)} wallet`,()=>void useConnectedWallet(d.type as 'bark'|'arkade'),{primary:true})}
-        {d.type!=='bitcoin'&&pill(manual[d.type]?'Hide manual entry':'Enter manually',()=>setManual(m=>({...m,[d.type]:!m[d.type]})))}
+        {d.type!=='bitcoin'&&accounts.some(a=>a.type===d.type&&a.compatible)&&pill('Use connected account',()=>void useConnectedWallet(d.type as 'bark'|'arkade'),{primary:true})}
+        {d.type!=='bitcoin'&&pill(manual[d.type]?'Hide details':'Enter address',()=>setManual(m=>({...m,[d.type]:!m[d.type]})))}
        </View>}
        {d.type!=='lightning'&&(d.type==='bitcoin'||manual[d.type])&&<>
-        <TextInput accessibilityLabel={`${label(d.type)} receiving address`} placeholder="Public receiving address" placeholderTextColor={t.colors.text.secondary} value={d.address} onChangeText={value=>updateEndpoint(index,'address',value)} editable={!busy} autoCapitalize="none" autoCorrect={false} style={input}/>
-        {d.type!=='bitcoin'&&<TextInput accessibilityLabel={`${label(d.type)} server public key`} placeholder="Server x-only public key (64 hex characters)" placeholderTextColor={t.colors.text.secondary} value={d.serverKey} onChangeText={value=>updateEndpoint(index,'serverKey',value.toLowerCase())} editable={!busy} autoCapitalize="none" autoCorrect={false} style={input}/>}
+        <TextInput accessibilityLabel={`${label(d.type)} receiving address`} placeholder="Receiving address" placeholderTextColor={t.colors.text.secondary} value={d.address} onChangeText={value=>updateEndpoint(index,'address',value)} editable={!busy} autoCapitalize="none" autoCorrect={false} style={input}/>
+        {d.type!=='bitcoin'&&<TextInput accessibilityLabel={`${label(d.type)} server public key`} placeholder="Server public key" placeholderTextColor={t.colors.text.secondary} value={d.serverKey} onChangeText={value=>updateEndpoint(index,'serverKey',value.toLowerCase())} editable={!busy} autoCapitalize="none" autoCorrect={false} style={input}/>}
        </>}
       </View>;
      })}
-     {(['bark','arkade','bitcoin'] as const).some(type=>!preferences.destinations.some(d=>d.type===type))&&<View style={{gap:t.spacing[2]}}>
-      <Text style={hint}>Add a layer</Text>
-      <View style={{flexDirection:'row',flexWrap:'wrap',gap:t.spacing[2]}}>
-       {(['bark','arkade','bitcoin'] as const).filter(type=>!preferences.destinations.some(d=>d.type===type)).map(type=>pill(`+ ${label(type)}`,()=>add(type),{label:`Add ${label(type)} address`,disabled:!ready}))}
-      </View>
-     </View>}
-     <Button title="Save preferences" variant="secondary" disabled={!ready||busy} onPress={()=>void saveDefaults()}/>
-     <TextInput accessibilityLabel="Payment description" value={description} onChangeText={value=>{pending.current=null;setDescription(value)}} maxLength={256} editable={!busy} style={input}/>
-     <TextInput accessibilityLabel="Reusable QR amount in sats" value={amount} onChangeText={value=>{pending.current=null;setAmount(value)}} keyboardType="number-pad" placeholder="Amount in sats (optional)" placeholderTextColor={t.colors.text.secondary} editable={!busy} style={input}/>
-     <Text style={hint}>Leave the amount empty to let each payer choose. Extra destinations require a compatible issuing node. An on-chain address wraps the offer in one Bitcoin payment link.</Text>
-     {offer&&<Text style={hint}>Creating an updated QR replaces the one saved here. Previously shared offers may still receive payments; they are not revoked.</Text>}
-     <Button title={offer?'Create updated QR':'Create reusable QR'} disabled={!ready||busy} loading={busy} onPress={()=>void run(true)}/>
-     {offer&&<Button title="Close preferences" variant="secondary" disabled={busy} onPress={()=>setEditing(false)}/>}
+     <View style={{flexDirection:'row',flexWrap:'wrap',gap:t.spacing[2]}}>{(['bark','arkade','bitcoin'] as const).filter(type=>!preferences.destinations.some(d=>d.type===type)).map(type=><TouchableOpacity key={type} accessibilityRole="button" accessibilityLabel={`Add ${label(type)}`} disabled={!ready||busy} onPress={()=>add(type)} style={{...card,padding:t.spacing[3],flexDirection:'row',alignItems:'center',gap:8}}><NetworkIcon network={icon(type)} size={20}/><Text style={hint}>{label(type)}</Text><Ionicons name="add" size={18} color={t.colors.text.secondary}/></TouchableOpacity>)}</View>
+     <View style={card}>
+      <View style={{flexDirection:'row',gap:8,alignItems:'center'}}><Ionicons name="options-outline" size={22} color={t.colors.text.secondary}/><Text style={{...text,fontWeight:'700'}}>Payment details</Text></View>
+      <Text style={hint}>Name</Text><TextInput accessibilityLabel="Payment description" placeholder="My payment QR" placeholderTextColor={t.colors.text.secondary} value={description} onChangeText={value=>{pending.current=null;setDescription(value)}} maxLength={256} editable={!busy} style={input}/>
+      <Text style={hint}>Amount</Text><View style={{flexDirection:'row',gap:8}}>{pill('Any amount',()=>{pending.current=null;setAmount('')},{primary:!amount})}{pill('Fixed amount',()=>{pending.current=null;setAmount(amount||'1000')},{primary:!!amount})}</View>
+      {!!amount&&<TextInput accessibilityLabel="Reusable QR amount in sats" value={amount} onChangeText={value=>{pending.current=null;setAmount(value)}} keyboardType="number-pad" placeholder="Amount in sats" placeholderTextColor={t.colors.text.secondary} editable={!busy} style={input}/>}
+     </View>
+     <TouchableOpacity accessibilityRole="button" disabled={!ready||busy} onPress={()=>void saveDefaults()} style={{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:8}}><Ionicons name="bookmark-outline" size={20} color={t.colors.primary[500]}/><Text style={{...text,color:t.colors.primary[500]}}>Save as my defaults</Text></TouchableOpacity>
+     {offer&&<Text style={hint}>Previously shared QRs will still work.</Text>}
+     <Button title={offer?'Update payment QR':'Create payment QR'} disabled={!ready||busy} loading={busy} onPress={()=>void run(true)}/>
+     {offer&&<Button title="Cancel" variant="secondary" disabled={busy} onPress={()=>setEditing(false)}/>}
     </>}
    </>}
   </ScrollView>

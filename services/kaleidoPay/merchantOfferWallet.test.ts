@@ -7,7 +7,7 @@ test('imports SDK address and normalizes the compressed server key',async()=>{
 test('rejects network mismatch and wallet changes during address generation',async()=>{
  const info={connected:true,network:'signet',nodeId:key};
  const adapter={getConnectionInfo:jest.fn().mockResolvedValue(info),getReceiveAddress:jest.fn().mockResolvedValue({address:'ark1public'})};
- await expect(receiverDestinationFromWallet(adapter,'bark','mainnet')).rejects.toThrow('Connect Bark');expect(adapter.getReceiveAddress).not.toHaveBeenCalled();
+ await expect(receiverDestinationFromWallet(adapter,'bark','mainnet')).rejects.toThrow('Connect a compatible Bark account');expect(adapter.getReceiveAddress).not.toHaveBeenCalled();
  adapter.getConnectionInfo.mockResolvedValueOnce(info).mockResolvedValueOnce({...info,nodeId:'cd'.repeat(32)});
  await expect(receiverDestinationFromWallet(adapter,'bark','signet')).rejects.toThrow('changed');
 });
