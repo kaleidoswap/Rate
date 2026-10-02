@@ -10,10 +10,14 @@ import {Button} from '../components/Button';
 import {ReceiveQr} from '../components/receive/ReceiveQr';
 import {NWCClient,parseNwcUri} from '../services/nwc/NWCExternalClient';
 import {loadConnectedReceiverDestination} from '../services/kaleidoPay/merchantOfferWallet';
+import {protocolManager} from '../services/protocols';
 import {loadNwcCredential} from '../services/nwc/connectionStore';
 import {createMerchantOffer,checkMerchantCapabilities,listMerchantReceipts,type OfferReceipt} from '../services/kaleidoPay/merchantOffer';
 import {loadMerchantOffer,saveMerchantOffer,merchantPaymentCode,type SavedMerchantOffer} from '../services/kaleidoPay/merchantOfferStore';
 import {defaultReceiverPreferences,receiverRails,loadReceiverPreferences,saveReceiverPreferences,type ReceiverPreferences,type ReceiverDestination} from '../services/kaleidoPay/merchantOfferPreferences';
+
+// The QR receives only at the user's own connected accounts, so saved on-chain entries (typed in by hand) are dropped.
+const connectedOnly=(p:ReceiverPreferences):ReceiverPreferences=>({...p,destinations:p.destinations.filter(d=>d.type!=='bitcoin')});
 
 export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  const t=useAppTheme();
@@ -29,7 +33,6 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  useEffect(()=>{
   let active=true;
   async function refresh(){
-   const {protocolManager}=await import('../services/protocols');
    const results=await Promise.all((['bark','arkade'] as const).map(async type=>{
     try{const info=await protocolManager.getAdapterIfAvailable(type==='bark'?'BARK':'ARKADE')?.getConnectionInfo();
      return info?.connected?{type,compatible:(info.network==='bitcoin'?'mainnet':info.network)===connection?.network}:null;
@@ -43,7 +46,7 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  const [offer,setOffer]=useState<SavedMerchantOffer|null>(null),[receipts,setReceipts]=useState<OfferReceipt[]>([]);
  const [description,setDescription]=useState('KaleidoPay'),[amount,setAmount]=useState('');
  const [preferences,setPreferences]=useState<ReceiverPreferences>(defaultReceiverPreferences('mainnet'));
- const [editing,setEditing]=useState(false),[notice,setNotice]=useState(''),[manual,setManual]=useState<Record<string,boolean>>({});
+ const [editing,setEditing]=useState(false),[notice,setNotice]=useState('');
  const [checked,setChecked]=useState(false);
  const [busy,setBusy]=useState(false),[ready,setReady]=useState(false),[error,setError]=useState('');
  const generation=useRef(0),working=useRef(false),client=useRef<NWCClient|null>(null);
@@ -55,7 +58,7 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
   if(connection) {
    setPreferences(defaultReceiverPreferences(connection.network));
    void Promise.all([loadMerchantOffer(connection.id,connection.network),loadReceiverPreferences(connection.id,connection.network)])
-    .then(([saved,defaults])=>{if(generation.current===revision){setOffer(saved);setPreferences(defaults);setDescription(saved?.description??'KaleidoPay');setAmount(saved?.amount===undefined?'':String(saved.amount/1000));setReady(true)}})
+    .then(([saved,defaults])=>{if(generation.current===revision){setOffer(saved);setPreferences(connectedOnly(defaults));setDescription(saved?.description??'KaleidoPay');setAmount(saved?.amount===undefined?'':String(saved.amount/1000));setReady(true)}})
     .catch(()=>{if(generation.current===revision)setError('Could not read your saved receiving settings. Reopen this screen before creating another QR.');});
   }
   return ()=>{generation.current++;client.current?.close();client.current=null};
@@ -83,8 +86,6 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  }
  function updateDestinations(destinations:ReceiverDestination[]){pending.current=null;setPreferences(p=>({...p,destinations}));setNotice('');}
  function move(index:number,offset:number){const list=[...preferences.destinations];[list[index],list[index+offset]]=[list[index+offset],list[index]];updateDestinations(list)}
- function add(type:'arkade'|'bark'|'bitcoin'){if(type!=='bitcoin'&&accounts.some(a=>a.type===type&&a.compatible)){void useConnectedWallet(type);return;}setManual(m=>({...m,[type]:true}));updateDestinations([...preferences.destinations.filter(d=>d.type!=='lightning'),type==='bitcoin'?{type,address:''}:{type,address:'',serverKey:''},...preferences.destinations.filter(d=>d.type==='lightning')])}
- function updateEndpoint(index:number,field:'address'|'serverKey',value:string){updateDestinations(preferences.destinations.map((d,i)=>i===index&&d.type!=='lightning'?{...d,[field]:value.trim()}:d))}
  async function useConnectedWallet(type:'bark'|'arkade'){
   if(!connection||!ready||working.current)return;
   const revision=generation.current;working.current=true;setBusy(true);setError('');
@@ -126,8 +127,7 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
    if(create) {
     const result=await createMerchantOffer(active,connection.network,description,amount?Number(amount):undefined,rails);
     if(generation.current!==revision)return;
-    const bitcoin=preferences.destinations.find(d=>d.type==='bitcoin');
-    const saved={...result,description,network:connection.network,...(rails?{rails}:{}),...(bitcoin?.type==='bitcoin'?{onchainAddress:bitcoin.address}:{})};
+    const saved={...result,description,network:connection.network,...(rails?{rails}:{})};
     pending.current=saved;
     await saveMerchantOffer(connection.id,saved);
     if(generation.current===revision){pending.current=null;setOffer(saved);setEditing(false);setReceipts([]);setChecked(false)}
@@ -210,7 +210,7 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
     {(!offer||editing)&&<>
      {section('Receive in your order', 'Your first choice is preferred. Payers choose an available route.')}
      {preferences.destinations.map((d,index)=>{
-      const filled=d.type!=='lightning'&&!!d.address&&(d.type==='bitcoin'||!!d.serverKey);
+      const filled=d.type!=='lightning'&&!!d.address;
       return <View key={d.type} style={{...card,borderColor:index===0?t.colors.primary[500]:t.colors.border.light}}>
        <View style={{flexDirection:'row',alignItems:'center',gap:t.spacing[3]}}>
         <NetworkIcon network={icon(d.type)} size={30}/><View style={{flex:1,gap:4}}><Text style={{...text,fontWeight:'700'}}>{label(d.type)}</Text><Text style={{...hint,color:index===0?t.colors.primary[500]:t.colors.text.secondary}}>{index===0?'Preferred':`Choice ${index+1}`}{d.type==='lightning'?' · Always included':''}</Text></View>
@@ -219,17 +219,8 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
         {d.type!=='lightning'&&iconButton('close',`Remove ${label(d.type)}`,()=>updateDestinations(preferences.destinations.filter((_,i)=>i!==index)))}
        </View>
        {filled&&<Text numberOfLines={1} style={hint}>{short(d.address)}</Text>}
-       {d.type!=='lightning'&&<View style={{flexDirection:'row',flexWrap:'wrap',gap:t.spacing[2]}}>
-        {d.type!=='bitcoin'&&accounts.some(a=>a.type===d.type&&a.compatible)&&pill('Use connected account',()=>void useConnectedWallet(d.type as 'bark'|'arkade'),{primary:true})}
-        {d.type!=='bitcoin'&&pill(manual[d.type]?'Hide advanced':'Advanced',()=>setManual(m=>({...m,[d.type]:!m[d.type]})))}
-       </View>}
-       {d.type!=='lightning'&&(d.type==='bitcoin'||manual[d.type])&&<>
-        <TextInput accessibilityLabel={`${label(d.type)} receiving address`} placeholder="Receiving address" placeholderTextColor={t.colors.text.secondary} value={d.address} onChangeText={value=>updateEndpoint(index,'address',value)} editable={!busy} autoCapitalize="none" autoCorrect={false} style={input}/>
-        {d.type!=='bitcoin'&&<TextInput accessibilityLabel={`${label(d.type)} server public key`} placeholder="Server public key" placeholderTextColor={t.colors.text.secondary} value={d.serverKey} onChangeText={value=>updateEndpoint(index,'serverKey',value.toLowerCase())} editable={!busy} autoCapitalize="none" autoCorrect={false} style={input}/>}
-       </>}
       </View>;
      })}
-     <View style={{flexDirection:'row',flexWrap:'wrap',gap:t.spacing[2]}}>{(['bark','arkade','bitcoin'] as const).filter(type=>!preferences.destinations.some(d=>d.type===type)).map(type=><TouchableOpacity key={type} accessibilityRole="button" accessibilityLabel={`Add ${label(type)}`} disabled={!ready||busy} onPress={()=>add(type)} style={{...card,padding:t.spacing[3],flexDirection:'row',alignItems:'center',gap:8}}><NetworkIcon network={icon(type)} size={20}/><Text style={hint}>{label(type)}</Text><Ionicons name="add" size={18} color={t.colors.text.secondary}/></TouchableOpacity>)}</View>
      <View style={card}>
       <View style={{flexDirection:'row',gap:8,alignItems:'center'}}><Ionicons name="options-outline" size={22} color={t.colors.text.secondary}/><Text style={{...text,fontWeight:'700'}}>Payment details</Text></View>
       <Text style={hint}>Name</Text><TextInput accessibilityLabel="Payment description" placeholder="My payment QR" placeholderTextColor={t.colors.text.secondary} value={description} onChangeText={value=>{pending.current=null;setDescription(value)}} maxLength={256} editable={!busy} style={input}/>
