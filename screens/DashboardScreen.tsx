@@ -45,7 +45,7 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
-import { RecentActivityWidget } from '../components/RecentActivityWidget';
+import { readBarkRecovery } from '../services/BarkService';
 
 const { width } = Dimensions.get('window');
 
@@ -219,7 +219,7 @@ export default function DashboardScreen({ navigation }: Props) {
       }
 
       // Check if any adapter is already connected from a previous init
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
@@ -256,7 +256,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
       // Try any connected adapter
       let info: any = null;
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         try {
           const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
@@ -299,13 +299,14 @@ export default function DashboardScreen({ navigation }: Props) {
       const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
       const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
+      const barkAdapter = protocolManager.getAdapterIfAvailable('BARK');
 
       // Load BTC balance (aggregate from all connected adapters with per-protocol breakdown)
       console.log('Fetching BTC balance...');
       let totalConfirmed = 0, totalUnconfirmed = 0;
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
       const adapterProtoMap: Array<[any, string]> = [
-        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
+        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'], [barkAdapter, 'BARK'],
       ];
       // Fetch every adapter's BTC balance IN PARALLEL — previously serial, so the
       // headline balance waited on the sum of all adapter latencies. Now it waits
@@ -314,6 +315,7 @@ export default function DashboardScreen({ navigation }: Props) {
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
           try {
+            if (proto === 'BARK') await adapter.refreshBalances();
             return { proto, btc: await adapter.getBtcBalance() };
           } catch (e) {
             console.warn('Balance fetch error:', e);
@@ -322,10 +324,18 @@ export default function DashboardScreen({ navigation }: Props) {
         })
       );
       const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
-      setBalanceWarning(balanceResults.filter(Boolean).length < connectedCount
-        ? 'Some balances are unavailable. Your total may be incomplete.' : null);
+      // Bark recovery (moved from the old Bark screen): an incomplete restore can
+      // omit funds, so say so next to the total rather than on a separate page.
+      const barkRecovery = await readBarkRecovery().catch(() => null);
+      setBalanceWarning(
+        barkRecovery === 'failed' || barkRecovery === 'incomplete'
+          ? 'Bark recovery is incomplete, so its balance may omit funds.'
+          : balanceResults.filter(Boolean).length < connectedCount
+            ? 'Some balances are unavailable. Your total may be incomplete.' : null);
       for (const r of balanceResults) {
         if (!r) continue;
+        // Bark is a layer like Arkade/Spark: counted in the total and shown in
+        // the per-network breakdown.
         totalConfirmed += r.btc.confirmed;
         totalUnconfirmed += r.btc.unconfirmed;
         byProtocol[r.proto] = r.btc;
@@ -846,9 +856,6 @@ export default function DashboardScreen({ navigation }: Props) {
         </View>
 
 
-        <RecentActivityWidget
-          onViewAll={() => navigation.navigate('Activity')}
-        />
 
         {isLite && liteUsdDisplay > 0 && (
           <View style={styles.liteUsdCard}>

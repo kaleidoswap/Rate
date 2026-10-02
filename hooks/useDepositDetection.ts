@@ -13,8 +13,9 @@ import {
   type ReceiveMethod,
   type ReceiveProtocol,
 } from '../utils/receive-session';
+import { decode } from 'light-bolt11-decoder';
 
-export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'liquid';
+export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
 export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
 
 export interface DepositDetectionEvent {
@@ -78,22 +79,38 @@ async function readMethodBalance(
   }
 }
 
+/** Payment hash of a BOLT11 invoice, or null if it can't be decoded. */
+export function bolt11PaymentHash(invoice: string): string | null {
+  try {
+    const section = decode(invoice.trim()).sections.find((x: any) => x.name === 'payment_hash') as any;
+    return typeof section?.value === 'string' && /^[a-f0-9]{64}$/i.test(section.value) ? section.value : null;
+  } catch {
+    return null;
+  }
+}
+
 async function readInvoiceStatus(
   method: ReceiveMethod,
   parentSignal?: AbortSignal,
 ): Promise<DepositDetectionEvent | null> {
   const adapter = getConnectedAdapter(method.protocol);
-  if (!adapter?.getInvoiceStatus) return null;
+  // Adapters without getInvoiceStatus (Bark) report receives by payment hash.
+  const paymentHash = !adapter?.getInvoiceStatus && adapter?.getPaymentStatus
+    ? bolt11PaymentHash(method.value)
+    : null;
+  if (!adapter?.getInvoiceStatus && !paymentHash) return null;
 
   try {
     const result = await runReceiveOperation<any>(
       `${method.protocol} invoice status`,
-      (signal) => callAbortableAdapterMethod(
-        adapter,
-        'getInvoiceStatus',
-        [{ invoice: method.value }],
-        signal,
-      ),
+      (signal) => paymentHash
+        ? callAbortableAdapterMethod(adapter, 'getPaymentStatus', [paymentHash], signal)
+        : callAbortableAdapterMethod(
+          adapter,
+          'getInvoiceStatus',
+          [{ invoice: method.value }],
+          signal,
+        ),
       POLL_TIMEOUT_MS,
       parentSignal,
     );

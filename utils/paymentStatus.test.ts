@@ -37,10 +37,11 @@ describe('swapStatusVisual', () => {
 });
 
 describe('activityStatusVisual', () => {
-  it('maps the 3 canonical activity states', () => {
-    expect(activityStatusVisual('confirmed').label).toBe('Confirmed');
-    expect(activityStatusVisual('pending').label).toBe('Pending');
+  it('maps the 4 canonical activity states', () => {
+    expect(activityStatusVisual('confirmed').label).toBe('Completed');
+    expect(activityStatusVisual('pending').label).toBe('In progress');
     expect(activityStatusVisual('failed').label).toBe('Failed');
+    expect(activityStatusVisual('unknown').label).toBe('Needs checking');
   });
 
   it('falls back gracefully for an out-of-vocabulary status', () => {

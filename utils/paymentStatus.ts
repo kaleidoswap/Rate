@@ -11,7 +11,7 @@
  */
 import { theme } from '../theme';
 
-export type ActivityStatus = 'confirmed' | 'pending' | 'failed';
+export type ActivityStatus = 'confirmed' | 'pending' | 'failed' | 'unknown';
 
 // Full Kaleidoswap atomic-swap lifecycle (3-step: init → taker → execute).
 export type SwapExecutionStatus =
@@ -27,9 +27,10 @@ export interface StatusVisual {
 }
 
 export const ACTIVITY_STATUS_VISUAL: Record<ActivityStatus, StatusVisual> = {
-  confirmed: { label: 'Confirmed', color: theme.colors.success[500] },
-  pending: { label: 'Pending', color: theme.colors.warning[500] },
+  confirmed: { label: 'Completed', color: theme.colors.success[500] },
+  pending: { label: 'In progress', color: theme.colors.warning[500] },
   failed: { label: 'Failed', color: theme.colors.error[500] },
+  unknown: { label: 'Needs checking', color: theme.colors.warning[500] },
 };
 
 const SWAP_STATUS_VISUAL: Record<SwapExecutionStatus, StatusVisual> = {

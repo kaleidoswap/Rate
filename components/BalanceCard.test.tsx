@@ -12,13 +12,22 @@ const props = {
 };
 
 describe('balance disclosure', () => {
-  it('keeps the balance uncluttered and exposes a separate unit control', () => {
+  it('keeps the balance uncluttered: unit inline, tap the amount to change it', () => {
     const screen = render(<BalanceCard {...props} />);
     expect(screen.queryByText('Available bitcoin')).toBeNull();
     expect(screen.queryByText(/Spendable amount depends/)).toBeNull();
     expect(screen.queryByText(/Pending:/)).toBeNull();
-    fireEvent.press(screen.getByLabelText('Change balance unit. Current unit: sats'));
+    // No separate unit picker row below the amount.
+    expect(screen.queryByLabelText(/Change balance unit/)).toBeNull();
+    expect(screen.getByText('sats')).toBeTruthy();
+    fireEvent.press(screen.getByLabelText('Total balance 1500 sats. Tap to change unit.'));
     expect(props.onCycleDenomination).toHaveBeenCalled();
+  });
+
+  it('shows no inline unit for fiat, whose figure already carries the symbol', () => {
+    const screen = render(<BalanceCard {...props} primaryText="$12.00" primaryUnitLabel="USD" />);
+    expect(screen.getByText('$12.00')).toBeTruthy();
+    expect(screen.queryByText('USD')).toBeNull();
   });
   it('keeps new availability and network rows private when balances are hidden', () => {
     const screen = render(<BalanceCard {...props} hideAmounts primaryText="••••" primaryUnitLabel="" />);
@@ -27,5 +36,12 @@ describe('balance disclosure', () => {
     expect(screen.queryByText('500 sats')).toBeNull();
     expect(screen.queryByText('1500 sats')).toBeNull();
     expect(screen.queryByText('$15')).toBeNull();
+  });
+
+  it('lists Bark in the network breakdown like the other layers', () => {
+    const screen = render(<BalanceCard {...props} byProtocol={{ ...props.byProtocol, BARK: { confirmed: 700, unconfirmed: 0, total: 700 } }} />);
+    fireEvent.press(screen.getByLabelText('Show network balances'));
+    expect(screen.getByText('BTC on Bark')).toBeTruthy();
+    expect(screen.getByText('700 sats')).toBeTruthy();
   });
 });

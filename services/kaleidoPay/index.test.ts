@@ -1,5 +1,5 @@
 import { encodeOffer, encodePaymentCode } from '@universal-bolt12/universal-code';
-import { previewPayment, quotePayment, registerKaleidoPayAccount, isKaleidoPayCode } from './index';
+import { codeNetwork, previewPayment, quotePayment, railLabel, registerKaleidoPayAccount, isKaleidoPayCode } from './index';
 const offer = encodeOffer([{ type: 10n, value: new TextEncoder().encode('Coffee') }]);
 const code = encodePaymentCode({ offer, amountSat: 50000 }, 'signet');
 
@@ -35,4 +35,17 @@ test('normalizes a Lightning URI wrapper for both routing and preview', () => {
   expect(isKaleidoPayCode(`LIGHTNING:${offer}`)).toBe(true);
   expect(isKaleidoPayCode('lightning:lnbc1000')).toBe(false);
   expect(previewPayment(`lightning://${offer}`, 'signet', '1000', 'wrapped').request.amountSat).toBe(1000);
+});
+
+test('the offer sets the receiver order; Ark rails without an address are skipped; the address is a fallback', () => {
+  const { encodeOffer, withAcceptedRails } = require('@universal-bolt12/universal-code');
+  const base = encodeOffer([{ type: 10n, value: new TextEncoder().encode('Shop') }]);
+  const arkade = 'arkade:' + 'a'.repeat(64), bark = 'bark:' + 'b'.repeat(64);
+  const offer = withAcceptedRails(base, [bark, { rail: arkade, address: 'ark1shop' }, 'ln']);
+  const p = previewPayment(`bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.00001&lno=${offer}`, 'mainnet', '', 'order');
+  expect(p.request.acceptedRails).toEqual([arkade, 'ln', 'btc:mainnet']);
+  expect(p.addresses).toEqual({ [arkade]: 'ark1shop' });
+  expect(p.request.acceptedRails.map(railLabel)).toEqual(['Arkade', 'Lightning', 'On-chain']);
+  expect(codeNetwork(`lightning:${offer}`)).toBe('mainnet');
+  expect(codeNetwork('lno1notanoffer')).toBeUndefined();
 });

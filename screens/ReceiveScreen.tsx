@@ -1,6 +1,8 @@
+import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnectionNotice';
 import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
 import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
+import { barkNetworkLabel } from '../services/BarkService';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -57,6 +59,7 @@ import {
   type ReceiveProtocol,
 } from '../utils/receive-session';
 import { resolvePrecision } from '../utils/assetAmount';
+import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 
 // Sentinel asset id for receiving an RGB asset the user doesn't hold yet
 // (generates a blind RGB invoice with no specific asset_id).
@@ -165,7 +168,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Fit the QR within the phone width while preserving a generous quiet zone.
   const { width: screenWidth } = useWindowDimensions();
-  const qrSize = Math.max(172, Math.min(248, Math.round(screenWidth - 104)));
+  const qrSize = Math.max(96, Math.min(248, Math.round(screenWidth - 104)));
   
   // Safe destructuring with fallbacks
   const rgbAssets = (rgbAssetsRaw || []) as RGBAsset[];
@@ -674,6 +677,48 @@ export default function ReceiveScreen({ navigation }: Props) {
           throw new Error(`Arkade: ${err.message || 'Failed to generate address'}`);
         }
       }
+      // ── Bark (Second's Ark) ──
+      // Same `tark1…` prefix as Arkade but a different Ark server, so it is
+      // chosen by account/mode, never inferred from the address.
+      else if (networkType === 'bark') {
+        try {
+          const barkAdapter = protocolManager.getAdapter('BARK');
+          if (arkadeSubMode === 'boarding') {
+            // Funds Bark's separate on-chain wallet; BarkBoardingPanel boards it
+            // into Bark once confirmed (Bark doesn't settle boarding on its own).
+            result = await runReceiveOperation(
+              'Create Bark deposit address',
+              () => (barkAdapter as any).backend.getOnchainAddress(),
+            );
+            methodMeta = {
+              key: 'bark-boarding',
+              label: 'Bark deposit',
+              protocol: 'BARK',
+              kind: 'address',
+              layer: 'onchain',
+              monitor: 'none',
+              assetId: selectedAsset.asset_id,
+            };
+          } else {
+            const addr = await runReceiveOperation(
+              'Create Bark address',
+              () => barkAdapter.getReceiveAddress(),
+            );
+            result = addr.address;
+            methodMeta = {
+              key: 'bark',
+              label: 'Bark',
+              protocol: 'BARK',
+              kind: 'address',
+              layer: 'bark',
+              monitor: 'balance',
+              assetId: selectedAsset.asset_id,
+            };
+          }
+        } catch (err: any) {
+          throw new Error(`Bark: ${err.message || 'Failed to generate address'}`);
+        }
+      }
       // ── RGB / Legacy: on-chain + lightning ──
       else if (selectedAsset.asset_id === 'BTC') {
         if (networkType === 'onchain') {
@@ -737,10 +782,35 @@ export default function ReceiveScreen({ navigation }: Props) {
           // mints a native Spark sats invoice (a `spark…` string), not a BOLT11.
           const rgbLn = protocolManager.getAdapterIfAvailable('RGB_LN');
           const sparkLn = protocolManager.getAdapterIfAvailable('SPARK');
+          const barkLn = protocolManager.getAdapterIfAvailable('BARK');
           const preferSpark = selectedAccount === 'SPARK';
           const rgbCanCreateInvoice = rgbLn?.isConnected()
             && (nwcWalletType == null || nwcCapabilities.includes('createInvoice'));
-          if (!preferSpark && rgbCanCreateInvoice) {
+          const useBarkLn = selectedAccount === 'BARK'
+            || (!rgbCanCreateInvoice && !sparkLn?.isConnected() && !!barkLn?.isConnected());
+          if (useBarkLn) {
+            // Bark when chosen explicitly, or as the last resort when it is the only
+            // Lightning-capable wallet; otherwise the RGB → Spark default is unchanged.
+            if (!barkLn?.isConnected()) throw new Error('Bark is not connected');
+            if (!amountSats) throw new Error('Set an amount: Bark Lightning invoices need one.');
+            const invoice = await runReceiveOperation('Create Bark Lightning invoice', () =>
+              barkLn.createInvoice({
+                layer: 'BTC_LN',
+                amount: amountSats,
+                description: `Receive ${cleanAmount} ${bitcoinUnit}`,
+                expirySeconds,
+              }));
+            result = invoice.invoice;
+            methodMeta = {
+              key: 'lightning-bark',
+              label: 'Lightning invoice',
+              protocol: 'BARK',
+              kind: 'invoice',
+              layer: 'lightning',
+              monitor: 'invoice',
+              assetId: 'BTC',
+            };
+          } else if (!preferSpark && rgbCanCreateInvoice) {
             const invoice = await runReceiveOperation('Create RGB Lightning invoice', (signal) =>
               callAbortableAdapterMethod<any>(
                 rgbLn,
@@ -1671,6 +1741,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         nextNetwork = 'spark';
       } else if (account === 'ARKADE') {
         nextNetwork = 'arkade';
+      } else if (account === 'BARK') {
+        nextNetwork = 'bark';
       } else {
         nextNetwork = nwcWalletType === 'ln' && family === 'BTC' ? 'lightning' : 'onchain';
       }
@@ -1751,6 +1823,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Spark balance · instant · low fee' }] : []),
       ...(selectableNetworks.includes('arkade')
         ? [{ id: 'arkade' as ReceiveMode, label: 'Arkade', sub: 'Arkade balance · off-chain' }] : []),
+      ...(selectableNetworks.includes('bark')
+        ? [{ id: 'bark' as ReceiveMode, label: 'Bark', sub: `Bark balance · off-chain · ${barkNetworkLabel()}` }] : []),
     ];
     const current = options.find((o) => o.id === networkType) || options[0];
     if (!current) return null;
@@ -1812,7 +1886,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (selectedAsset?.isRGB) return null;
     // Arkade and on-chain addresses don't carry an amount; offering one there
     // would suggest the payer is asked for it when they aren't.
-    if (networkType === 'arkade' || networkType === 'onchain') return null;
+    if (networkType === 'arkade' || networkType === 'bark' || networkType === 'onchain') return null;
     const summary = amountSummary();
     const required = isAmountRequired();
     return (
@@ -1971,6 +2045,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     // Render QR code with network-aware title
     const qrTitle = networkType === 'spark' ? 'Spark Address'
       : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+      : networkType === 'bark' ? (arkadeSubMode === 'boarding' ? 'Bark Deposit Address' : 'Bark Address')
       : networkType === 'lightning' ? 'Lightning Invoice'
       : selectedAsset.isRGB ? 'RGB Invoice'
       : 'On-chain Address';
@@ -1979,6 +2054,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     const addrLabel = networkType === 'lightning' ? 'Lightning Invoice'
       : networkType === 'spark' ? 'Spark Address'
       : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+      : networkType === 'bark' ? (arkadeSubMode === 'boarding' ? 'Bark Deposit Address' : 'Bark Address')
       : 'Deposit Address';
     return (
       <View style={styles.qrSection}>
@@ -2034,11 +2110,18 @@ export default function ReceiveScreen({ navigation }: Props) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="always"
+        keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        <ReceiveConnectionNotice hasRequest={!!(unifiedUri || address)} />
         {renderAssetTabs()}
+        {selectedAsset.asset_id === 'BTC' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Create a reusable payment QR" onPress={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
+          style={{ padding: theme.spacing[4], marginBottom: theme.spacing[3] }}>
+          <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Reusable payment QR →</Text>
+          <Text style={{ color: theme.colors.text.secondary }}>Receive multiple payments with one BOLT12 offer</Text>
+        </TouchableOpacity>}
         {renderContent()}
+        {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
         <ReceiveStatus
           visible={monitorVisible}
           status={monitorStatus}
@@ -2083,13 +2166,15 @@ export default function ReceiveScreen({ navigation }: Props) {
 
         {renderRouteAxisSelector()}
         {renderNetworkChoices()}
-        {networkType === 'arkade' && <View>
+        {(networkType === 'arkade' || networkType === 'bark') && <View>
           {(['ark', 'boarding'] as const).map(mode => <TouchableOpacity key={mode}
             accessibilityRole="radio" accessibilityState={{ checked: arkadeSubMode === mode }}
             onPress={() => { resetReceiveSurface(); setArkadeSubMode(mode); }}
             style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] }}>
             <Ionicons name={arkadeSubMode === mode ? 'radio-button-on' : 'radio-button-off'} size={20} color={theme.colors.primary[500]} />
-            <Text style={{ color: theme.colors.text.primary }}>{mode === 'ark' ? 'Receive on Arkade' : 'Deposit from Bitcoin'}</Text>
+            <Text style={{ color: theme.colors.text.primary }}>
+              {mode === 'ark' ? `Receive on ${networkType === 'bark' ? 'Bark' : 'Arkade'}` : 'Deposit from Bitcoin'}
+            </Text>
           </TouchableOpacity>)}
         </View>}
       </ReceiveMethodsSheet>

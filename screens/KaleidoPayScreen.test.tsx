@@ -2,7 +2,7 @@ import React from 'react';
 import { render, fireEvent, act } from '@testing-library/react-native';
 import KaleidoPayScreen from './KaleidoPayScreen';
 import { quotePaymentOffers, executePaymentOffer } from '../services/kaleidoPay';
-const mockPreview = { code: {}, request: { amountSat: 1000 }, plan: { status: 'ready' } };
+const mockPreview = { code: {}, request: { amountSat: 1000, acceptedRails: ['ln'] }, plan: { status: 'ready' } };
 jest.mock('expo-crypto', () => ({ randomUUID: () => 'test-uuid' }));
 jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f({ settings: { bitcoinUnit: 'sats' }, wallet: { activeWallet: { id: 1 } } }) }));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapter: () => undefined } }));
@@ -13,7 +13,7 @@ jest.mock('../components/Button', () => ({ Button: ({ title, onPress, disabled }
 } }));
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), unresolvedAttempt: (a: any) => a?.status === 'pending' || a?.status === 'unknown' }));
 jest.mock('../services/kaleidoPay', () => ({
-  PaymentNotSentError: class extends Error {},
+  PaymentNotSentError: class extends Error {}, codeNetwork: () => undefined, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   previewPayment: () => mockPreview, quotePaymentOffers: jest.fn(), executePaymentOffer: jest.fn(), checkPaymentStatus: jest.fn(), registerKaleidoPayAccount: jest.fn(),
   quoteSpend: (q: any) => ({ asset: { ticker: 'sats' }, amount: q.recipientSat, fee: q.feeSat, total: q.totalSat }),
   formatSpend: (v: number) => `${v} sats`, bestOffer: (offers: any[]) => offers.filter(o => o.quote).sort((a, b) => a.quote.totalSat - b.quote.totalSat)[0],
@@ -27,7 +27,7 @@ test('allows explicit provider selection and pays only after the reviewed total 
   await act(async () => {});
   expect(executePaymentOffer).not.toHaveBeenCalled(); expect(screen.getByText('Pay 1010 sats')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Payment details'));
-  fireEvent.press(screen.getAllByText('Compare providers')[0]);
+  fireEvent.press(screen.getAllByText('Compare ways to pay')[0]);
   fireEvent.press(screen.getByLabelText(/^B\. Total you pay/));
   expect(screen.getByText('Pay 1020 sats')).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByText('Pay 1020 sats')); });

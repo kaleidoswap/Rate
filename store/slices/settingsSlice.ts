@@ -52,8 +52,8 @@ const DENOMINATION_CYCLE: DisplayDenomination[] = ['sats', 'BTC', 'fiat'];
 
 export interface LastBtcReceiveRoute {
   axis: 'method' | 'account';
-  network: 'unified' | 'onchain' | 'lightning' | 'spark' | 'arkade';
-  account: 'RGB' | 'SPARK' | 'ARKADE' | null;
+  network: 'unified' | 'onchain' | 'lightning' | 'spark' | 'arkade' | 'bark';
+  account: 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | null;
 }
 
 interface SettingsState {

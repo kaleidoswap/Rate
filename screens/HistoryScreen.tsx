@@ -1,3 +1,4 @@
+import { UnresolvedPaymentCard } from '../components/payments/UnresolvedPaymentCard';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     View,
@@ -9,7 +10,7 @@ import {
     StatusBar,
     ActivityIndicator,
 } from 'react-native';
-import { useSelector } from 'react-redux';
+import { useAppSelector } from '../store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { RootState } from '../store';
@@ -32,7 +33,7 @@ type FilterTab = 'pending' | 'all' | 'receive' | 'send' | 'swap';
 
 const FILTERS: { key: FilterTab; label: string }[] = [
     { key: 'all', label: 'All' },
-    { key: 'pending', label: 'Pending' },
+    { key: 'pending', label: 'In progress' },
     { key: 'receive', label: 'Received' },
     { key: 'send', label: 'Sent' },
     { key: 'swap', label: 'Swaps' },
@@ -66,6 +67,8 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
     'RGB-LN': 'RGB · LN',
     'Spark': 'Spark',
     'Arkade': 'Arkade',
+    'Bark': 'Bark',
+    'Bark Signet': 'Bark · Signet',
     'Swap': 'Swap',
 };
 
@@ -93,8 +96,8 @@ function layerChipColors(layer: ActivityLayer): { bg: string; text: string } {
 
 function typeLabel(item: ActivityItem): string {
     switch (item.type) {
-        case 'receive': return 'Received';
-        case 'send': return 'Sent';
+        case 'receive': return 'Receive';
+        case 'send': return 'Payment';
         case 'swap': return 'Atomic Swap';
         case 'issuance': return item.kind === 'Inflation' ? 'Inflation' : 'Issuance';
         case 'channel_open': return 'Channel Open';
@@ -128,8 +131,8 @@ function sectionTitle(ts?: number): string {
 export default function HistoryScreen() {
     const navigation = useNavigation<any>();
     const route = useRoute();
-    const swapHistory = useSelector((state: RootState) => state.swap.swapHistory);
-    const rgbAssets = useSelector((state: RootState) => state.assets.rgbAssets);
+    const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
+    const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
 
     const [items, setItems] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -161,13 +164,15 @@ export default function HistoryScreen() {
             setItems(result);
             if (!hadConnectedAdapter && result.length === 0) {
                 setSoftError('Wallet is offline. Connect a protocol to see your activity.');
-            } else if (failedSources > 0 && result.length === 0) {
-                setSoftError('Could not load some activity. Pull to refresh.');
+            } else if (failedSources > 0) {
+                setSoftError('Some accounts could not be checked. Pull to refresh.');
             } else {
                 setSoftError(null);
             }
+            return hadConnectedAdapter && failedSources === 0;
         } catch (e: any) {
             setSoftError(e?.message || 'Failed to load activity.');
+            return false;
         }
     }, [rgbAssets, swapHistory]);
 
@@ -186,7 +191,7 @@ export default function HistoryScreen() {
     }, [fetchActivity]);
 
     const filtered = items.filter((it) => {
-        if (filter === 'pending') return it.status === 'pending';
+        if (filter === 'pending') return it.status === 'pending' || it.status === 'unknown';
         if (filter === 'all') return true;
         if (filter === 'swap') return it.type === 'swap';
         return it.type === filter;
@@ -196,11 +201,11 @@ export default function HistoryScreen() {
     const sections = (() => {
         const map = new Map<string, ActivityItem[]>();
         for (const it of filtered) {
-            const key = it.status === 'pending' ? 'Pending' : sectionTitle(it.timestamp);
+            const key = it.status === 'unknown' ? 'Needs checking' : it.status === 'pending' ? 'In progress' : sectionTitle(it.timestamp);
             if (!map.has(key)) map.set(key, []);
             map.get(key)!.push(it);
         }
-        return Array.from(map.entries()).sort(([a], [b]) => a === 'Pending' ? -1 : b === 'Pending' ? 1 : 0).map(([title, data]) => ({ title, data }));
+        return Array.from(map.entries()).sort(([a], [b]) => ({ 'Needs checking': 0, 'In progress': 1 }[a] ?? 2) - ({ 'Needs checking': 0, 'In progress': 1 }[b] ?? 2)).map(([title, data]) => ({ title, data }));
     })();
 
     const renderItem = ({ item }: { item: ActivityItem }) => {
@@ -225,7 +230,7 @@ export default function HistoryScreen() {
                                 ]}
                                 numberOfLines={1}
                             >
-                                {amountPrefix(item.type)}{item.amount} {item.assetTicker}
+                                {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.amount} {item.assetTicker}
                             </Text>
                         )}
                     </View>
@@ -255,6 +260,7 @@ export default function HistoryScreen() {
             <StatusBar barStyle="light-content" />
             <MainHeader title="Activity" onBack={route.name === 'Activity' ? undefined : () => navigation.goBack()} />
 
+            <UnresolvedPaymentCard onCheck={() => navigation.navigate('KaleidoPay')} />
             {/* Filter tabs */}
             <SegmentedTabs
                 options={FILTERS}
@@ -293,13 +299,13 @@ export default function HistoryScreen() {
                         <EmptyState
                             icon="receipt-outline"
                             title={filter === 'pending' ? 'No pending payments' : 'No activity yet'}
-                            message={filter === 'pending' ? 'Payments waiting to complete will appear here.' : 'Your payments, transfers and swaps will appear here once you send or receive.'}
+                            message={filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : 'Your payments and transfers will appear here.'}
                         />
                     }
                 />
             )}
 
-            <ActivityDetailSheet item={selectedItem} onClose={() => setSelectedItem(null)} />
+            <ActivityDetailSheet onRefresh={fetchActivity} item={items.find(item => item.id === selectedItem?.id) ?? selectedItem} onClose={() => setSelectedItem(null)} />
         </View>
     );
 }

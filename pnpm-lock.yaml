@@ -26,6 +26,11 @@ overrides:
   protobufjs@7: ^7.6.5
   markdown-it: ^14.3.1
 
+patchedDependencies:
+  '@kaleidorg/wallet-engine@1.0.0-beta.75':
+    hash: 1578bf3164767820650213ed96d3e86efe13eacdfdf61298d2312055ddb2b421
+    path: patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
+
 importers:
 
   .:
@@ -68,7 +73,7 @@ importers:
         version: 0.7.2(97282afab3b61d4ec9bf2ebca2993c58)
       '@kaleidorg/wallet-engine':
         specifier: 1.0.0-beta.75
-        version: 1.0.0-beta.75(3447a120ea10a353293e6d6bae2b0f81)
+        version: 1.0.0-beta.75(patch_hash=1578bf3164767820650213ed96d3e86efe13eacdfdf61298d2312055ddb2b421)(3447a120ea10a353293e6d6bae2b0f81)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
@@ -9144,7 +9149,7 @@ snapshots:
       '@arkade-os/sdk': 0.4.72(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
       '@arkade-os/swap': 0.0.14(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.75(3447a120ea10a353293e6d6bae2b0f81)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.75(patch_hash=1578bf3164767820650213ed96d3e86efe13eacdfdf61298d2312055ddb2b421)(3447a120ea10a353293e6d6bae2b0f81)':
     dependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0

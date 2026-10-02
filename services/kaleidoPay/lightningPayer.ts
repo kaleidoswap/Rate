@@ -2,7 +2,7 @@ import type { LightningPayer } from '@universal-bolt12/swap-market';
 
 /** The part of a wallet-engine adapter KaleidoPay needs to pay Lightning invoices. */
 export interface LightningSender {
-  sendPayment(request: { invoice: string }): Promise<{ paymentHash: string; status: string }>;
+  sendPayment(request: { invoice: string; amount?: number }): Promise<{ paymentHash: string; status: string }>;
   getPaymentStatus(hash: string): Promise<{ status: string; error?: string }>;
 }
 

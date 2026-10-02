@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Clipboard, Share, Text, TouchableOpacity, View } from 'react-native';
+import { Clipboard, Share, Text, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
+import { PaymentNetworkLabel } from '../payments/PaymentNetworkLabel';
 import { feedback } from '../../utils/feedback';
 
 /** Copy/share feedback belongs to the exact request, never to another method. */
@@ -9,6 +10,7 @@ export function ReceiveRequestActions({ value, label = 'Payment request', showVa
   value: string; label?: string; showValue?: boolean;
 }) {
   const t = useAppTheme();
+  const { fontScale } = useWindowDimensions();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState('');
@@ -40,8 +42,9 @@ export function ReceiveRequestActions({ value, label = 'Payment request', showVa
     catch { if (current === generation.current) setError('Could not share. Try again or copy the request.'); }
   };
   const ink = t.colors.background.primary;
-  const button = { minHeight: 48, borderRadius: t.borderRadius.lg, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: t.spacing[2], paddingHorizontal: t.spacing[4] };
+  const button = { minHeight: 48, borderRadius: t.borderRadius.lg, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: t.spacing[2], paddingHorizontal: t.spacing[4], paddingVertical: t.spacing[3] };
   return <View style={{ width: '100%', gap: t.spacing[3], paddingTop: t.spacing[3] }}>
+    <PaymentNetworkLabel request={value} />
     {showValue && <View>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${expanded ? 'Hide' : 'Show'} full ${label}`} accessibilityState={{ expanded }}
         onPress={() => setExpanded(v => !v)} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
@@ -50,7 +53,7 @@ export function ReceiveRequestActions({ value, label = 'Payment request', showVa
       </TouchableOpacity>
       {expanded && <Text selectable style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.sm }}>{value}</Text>}
     </View>}
-    <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
+    <View style={{ flexDirection: fontScale > 1.3 ? 'column' : 'row', gap: t.spacing[3] }}>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Copy ${label}`} disabled={!value} onPress={() => void copy()}
         style={[button, { flex: 1, backgroundColor: t.colors.primary[500], opacity: value ? 1 : 0.5 }]}>
         <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={ink} />

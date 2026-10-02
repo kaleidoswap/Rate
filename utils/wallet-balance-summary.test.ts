@@ -18,3 +18,10 @@ describe('bitcoin balance disclosure', () => {
       .toEqual({ total: 1000, available: 0, unavailable: 1000 });
   });
 });
+
+it('keeps the separate Bark test account out of the combined wallet total', () => {
+  expect(summarizeBitcoinBalances({
+    SPARK: { confirmed: 100, unconfirmed: 0, total: 100 },
+    BARK: { confirmed: 50000, unconfirmed: 1000, total: 51000 },
+  }, [], true)).toEqual({ total: 100, available: 100, unavailable: 0 });
+});

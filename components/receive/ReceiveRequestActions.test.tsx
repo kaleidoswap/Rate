@@ -5,6 +5,7 @@ import { ReceiveRequestActions } from './ReceiveRequestActions';
 jest.mock('../../utils/feedback', () => ({ feedback: { select: jest.fn() } }));
 const share = jest.fn();
 beforeEach(() => {
+  (require('react-native') as any).useWindowDimensions = () => ({ width: 390, height: 844, fontScale: 1, scale: 3 });
   jest.useFakeTimers(); jest.clearAllMocks();
   (require('react-native') as any).Share = { share };
   share.mockResolvedValue({ action: 'sharedAction' });

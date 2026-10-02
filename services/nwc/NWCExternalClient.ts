@@ -29,6 +29,8 @@ export { parseNwcUri, type NwcConnectionInfo } from './NwcUri';
 import { parseNwcUri } from './NwcUri';
 
 export type NwcMethod =
+  | 'kaleidopay_make_offer'
+  | 'kaleidopay_list_offer_payments'
   | 'get_info'
   | 'get_balance'
   | 'make_invoice'

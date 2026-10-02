@@ -1,3 +1,4 @@
+import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection } from './barkPreferences'
 /**
  * WDK Protocol Wiring — KaleidoSwap App
  * -------------------------------------
@@ -35,8 +36,8 @@ import { NwcRgbAdapter, NWC_CONNECTION_KEY } from '../nwc/NwcRgbAdapter'
 import type { ProtocolType } from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
 import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
-import { BARK_ENABLED, buildBarkConfig, resolveBarkHostConfig, isBarkNativeAvailable } from './bark'
-import { connectBarkToKaleidoPay } from '../kaleidoPay/bark'
+import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
+import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
 
 /**
  * Mobile rollout gates.
@@ -51,7 +52,7 @@ import { connectBarkToKaleidoPay } from '../kaleidoPay/bark'
  *   (Boltz) needs swapProviderUrl. Disable with EXPO_PUBLIC_WDK_ARKADE=0.
  * - Bark: ON by default. Second's Ark via the native `@secondts/bark-react-native`
  *   SDK (needs a dev build). Not a wallet NetworkType yet, so it connects from
- *   ./bark.ts config rather than the network list. Disable with EXPO_PUBLIC_BARK=0.
+ *   the saved wallet preference with ./bark.ts defaults. Disable with EXPO_PUBLIC_BARK=0.
  */
 const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID !== '0'
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
@@ -273,37 +274,59 @@ export async function initializeWdkProtocols(
 }
 
 /**
- * Bark connects from host config (./bark.ts), not from a wallet NetworkConfig.
+ * Bark restores a wallet-scoped preference, falling back to host config on first use.
  * Same per-protocol contract as the loop above: record the outcome, never throw.
  */
+let barkConnecting: Promise<void> | null = null
+
 async function connectBark(
   manager: ProtocolManager,
   mnemonic: string,
   results: Map<ProtocolType, { success: boolean; error?: string }>,
 ): Promise<void> {
-  const existing = manager.getAdapterIfAvailable('BARK')
-  if (existing?.isConnected()) {
-    const network = resolveBarkHostConfig()?.network
-    if (network) connectBarkToKaleidoPay(existing, network)
-    results.set('BARK', { success: true })
-    return
+  // Initializations can overlap; a second open of Bark's data directory fails.
+  if (barkConnecting) {
+    await barkConnecting
+    return connectBark(manager, mnemonic, results)
   }
+  barkConnecting = connectBarkOnce(manager, mnemonic, results).finally(() => { barkConnecting = null })
+  return barkConnecting
+}
+
+async function connectBarkOnce(
+  manager: ProtocolManager,
+  mnemonic: string,
+  results: Map<ProtocolType, { success: boolean; error?: string }>,
+): Promise<void> {
   try {
-    if (!isBarkNativeAvailable()) {
-      results.set('BARK', { success: false, error: 'skipped: this app build does not include Bark; install a native build with Bark support' })
+    const host = await loadBarkHost(mnemonic)
+    if (!host) throw new Error('Bark network is not configured.')
+    const existing = manager.getAdapterIfAvailable('BARK')
+    if (existing?.isConnected() && barkConnectionMatches(mnemonic, host)) {
+      connectBarkToKaleidoPay(existing, host.network)
+      results.set('BARK', { success: true })
       return
     }
-    const config = buildBarkConfig(mnemonic)
+    if (!isBarkNativeAvailable()) {
+      results.set('BARK', { success: false, error: 'This app build does not include Bark. Install a native build with Bark support.' })
+      return
+    }
+    disconnectBarkFromKaleidoPay()
+    if (existing?.isConnected()) await manager.disconnect('BARK')
+    clearBarkConnection()
+    const config = buildBarkConfig(mnemonic, host)
     if (!config) {
       results.set('BARK', { success: false, error: 'skipped: no Bark server/esplora configured' })
       return
     }
     await manager.connect('BARK', config)
+    recordBarkConnection(mnemonic, host)
     // KaleidoPay pays bitcoin addresses from the Bark balance through Electrum swap providers.
     connectBarkToKaleidoPay(manager.getAdapter('BARK'), config.network ?? 'signet')
     results.set('BARK', { success: true })
     console.log(`[initializeWdkProtocols] BARK connected (${config.network}, ${config.createIfMissing ? 'created' : 'opened'})`)
   } catch (error: unknown) {
+    disconnectBarkFromKaleidoPay()
     // Engine errors are already scrubbed of seed/config material.
     const msg = error instanceof Error ? error.message : String(error)
     console.error('[initializeWdkProtocols] BARK failed:', msg)

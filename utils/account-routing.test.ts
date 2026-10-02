@@ -32,3 +32,18 @@ describe('receive account routing', () => {
     })).toEqual(['RGB', 'SPARK']);
   });
 });
+
+describe('Bark as a receive layer', () => {
+  it('receives on its own Bark method (not Arkade), routed by account', () => {
+    expect(getReceiveMethodsForAccount('BARK', 'BTC')).toEqual(['bark', 'lightning']);
+    expect(getNetworkTypesForAccount('BARK', 'BTC')).toEqual(['bark', 'lightning']);
+  });
+
+  it('is offered as a BTC receive account when connected', () => {
+    const accounts = resolveReceiveAccounts({
+      assetFamily: 'BTC',
+      accounts: { RGB: false, SPARK: false, ARKADE: true, BARK: true },
+    });
+    expect(accounts).toEqual(['ARKADE', 'BARK']);
+  });
+});

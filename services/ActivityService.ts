@@ -17,7 +17,7 @@
 
 import { protocolManager } from './protocols';
 
-export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Swap';
+export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Bark' | 'Bark Signet' | 'Swap';
 
 export type ActivityItemType =
   | 'send'
@@ -27,7 +27,8 @@ export type ActivityItemType =
   | 'channel_close'
   | 'issuance';
 
-export type ActivityStatus = 'confirmed' | 'pending' | 'failed';
+import type { ActivityStatus } from '../utils/paymentStatus';
+export type { ActivityStatus } from '../utils/paymentStatus';
 
 export interface ActivityItem {
   id: string;
@@ -47,10 +48,10 @@ export interface ActivityItem {
   txid: string;
   layer: ActivityLayer;
   fee?: number;
+  account?: string;
+  network?: string;
   paymentHash?: string;
   kind?: string;
-  /** Bitcoin network of an on-chain item, when known (mainnet, signet, …). */
-  network?: string;
   /** KaleidoPay/Electrum swap attempt behind this item. */
   swapAttemptId?: string;
 }
@@ -115,15 +116,16 @@ function normalizePaymentStatus(status?: string): ActivityStatus {
   const s = (status || '').toLowerCase();
   if (s === 'confirmed' || s === 'succeeded' || s === 'success' || s === 'settled' || s === 'completed') return 'confirmed';
   if (s === 'failed' || s === 'error' || s === 'expired') return 'failed';
-  return 'pending';
+  if (['pending', 'in_flight', 'processing', 'broadcast', 'unconfirmed', 'initiated'].includes(s)) return 'pending';
+  return 'unknown';
 }
 
 function normalizeProtocolTransactionStatus(
-  proto: 'SPARK' | 'ARKADE',
+  proto: 'SPARK' | 'ARKADE' | 'BARK',
   tx: any,
 ): ActivityStatus {
   const status = normalizePaymentStatus(tx?.status);
-  if (status !== 'pending') return status;
+  if (status === 'confirmed' || status === 'failed') return status;
 
   const raw = tx?.protocolData ?? tx ?? {};
   if (proto === 'SPARK' && tx?.type === 'receive') {
@@ -239,6 +241,8 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           txid: p.payment_hash || '',
           layer: isRgb ? 'RGB-LN' : 'LN',
           paymentHash: p.payment_hash,
+          account: 'RGB',
+          fee: typeof p.fee_msat === 'number' ? p.fee_msat / 1000 : undefined,
         });
       }
     } catch (err) {
@@ -287,11 +291,14 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
   }
 
   // 3. Spark / Arkade unified transactions
-  for (const proto of ['SPARK', 'ARKADE'] as const) {
+  for (const proto of ['SPARK', 'ARKADE', 'BARK'] as const) {
     const adapter = protocolManager.getAdapterIfAvailable(proto);
     if (!adapter?.isConnected()) continue;
     hadConnectedAdapter = true;
     try {
+      // Missing connection metadata must not hide otherwise readable history.
+      const info = await adapter.getConnectionInfo?.().catch(() => null);
+      const network = info?.network;
       const txs = await adapter.listTransactions({ limit: 50 });
       for (const tx of txs) {
         if (tx.type !== 'send' && tx.type !== 'receive') continue;
@@ -311,7 +318,10 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           status: normalizeProtocolTransactionStatus(proto, tx),
           timestamp: tx.timestamp,
           txid: tx.id,
-          layer: proto === 'SPARK' ? 'Spark' : 'Arkade',
+          layer: proto === 'BARK' ? (network === 'signet' ? 'Bark Signet' : 'Bark') : proto === 'SPARK' ? 'Spark' : 'Arkade',
+          fee: tx.fee,
+          account: proto,
+          network,
         });
       }
     } catch (err) {
