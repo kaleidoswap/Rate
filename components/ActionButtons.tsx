@@ -80,12 +80,12 @@ const styles = StyleSheet.create({
     actionButton: {
         alignItems: 'center',
         flex: 1,
-        gap: theme.spacing[2],
+        gap: theme.spacing[1.5],
     },
     actionButtonTile: {
-        width: 52,
-        height: 52,
-        borderRadius: 26,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
     },
