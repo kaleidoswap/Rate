@@ -3,13 +3,13 @@ import 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { View, Text, ActivityIndicator, Platform, SafeAreaView } from 'react-native';
+import { View, Text, ActivityIndicator, Platform, SafeAreaView, Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { WalletTabBar } from './components/WalletTabBar';
 import { ThemeProvider } from '@react-navigation/native';
@@ -47,6 +47,8 @@ import SendScreen from './screens/SendScreen';
 import KaleidoPayScreen from './screens/KaleidoPayScreen';
 import ReceiveScreen from './screens/ReceiveScreen';
 import MerchantOfferScreen from './screens/MerchantOfferScreen';
+import {useAppSelector} from './store/hooks';
+import {isReceiverLink,canOpenReceiver} from './utils/receiver-link';
 import QRScannerScreen from './screens/QRScannerScreen';
 import AssetsScreen from './screens/AssetsScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -196,11 +198,29 @@ function DashboardTabs() {
 }
 
 function AppNavigator() {
+  const receiverNavigation = React.useRef(createNavigationContainerRef<RootStackParamList>()).current;
+  const pendingReceiverLink = React.useRef(false);
+  const initialized = useAppSelector(s => s.wallet.isInitialized);
+  const unlocked = useAppSelector(s => s.wallet.isUnlocked);
+  const openPendingReceiver = React.useCallback(() => {
+    const route = receiverNavigation.getCurrentRoute()?.name;
+    if (!pendingReceiverLink.current || !receiverNavigation.isReady() || !canOpenReceiver(initialized, unlocked, route)) return;
+    pendingReceiverLink.current = false;
+    if (route !== 'MerchantOffer') receiverNavigation.navigate('MerchantOffer');
+  }, [initialized, unlocked, receiverNavigation]);
+  React.useEffect(() => {
+    let active = true;
+    const accept = (url: string | null) => { if (active && url && isReceiverLink(url)) { pendingReceiverLink.current = true; openPendingReceiver(); } };
+    const subscription = Linking.addEventListener('url', event => accept(event.url));
+    void Linking.getInitialURL().then(accept).catch(() => {});
+    openPendingReceiver();
+    return () => { active = false; subscription.remove(); };
+  }, [openPendingReceiver]);
   const navigationTheme = createNavigationTheme();
   const theme = useAppTheme();
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer ref={receiverNavigation} onReady={openPendingReceiver} onStateChange={openPendingReceiver} theme={navigationTheme}>
       <Stack.Navigator
         initialRouteName="InitialLoad"
         screenOptions={{
