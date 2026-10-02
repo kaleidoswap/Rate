@@ -135,3 +135,22 @@ The image picker adds a native module: reinstall pods and rebuild the developmen
 client before testing image imports. A JavaScript reload alone is insufficient.
 Tests use mocked providers; they do not send funds. Live camera, image selection,
 provider liquidity and transaction settlement still require device/provider tests.
+
+## Native integration check — 2026-10-02
+
+The hackathon app registers Bark's native adapter, defaulting to Second signet.
+The two successful mainnet Bark/Arkade tests were separate SDK harnesses; they
+are not evidence of a completed native app payment. This app currently registers
+Bark for Electrum on-chain swaps, not the Arkade Intents receive flow. Metro also
+stubs the swap SDK, so Intents must be enabled and verified before wiring it.
+
+Bark's Electrum provider quotes exclude wallet Lightning fees. The Bark account
+therefore exposes provider availability and existing payment status recovery,
+but no payable quote or executor until a complete wallet cost/approval policy is
+implemented. Never display the provider subtotal as the total wallet debit.
+The native adapter explicitly rejects maxFeeSats; an estimate is not a fee cap.
+
+Validation: all 71 Jest suites / 491 tests passed, including two regression tests
+for incomplete Bark quotes and preservation of payment status recovery. Native
+simulator interaction was not verified: Device Hub access timed out. The first
+iOS bundle attempt also found missing installed expo-image-picker dependencies.
