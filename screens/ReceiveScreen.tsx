@@ -2041,6 +2041,11 @@ export default function ReceiveScreen({ navigation }: Props) {
         keyboardDismissMode="on-drag"
       >
         {renderAssetTabs()}
+        {selectedAsset.asset_id === 'BTC' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Create a reusable payment QR" onPress={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
+          style={{ padding: theme.spacing[4], marginBottom: theme.spacing[3] }}>
+          <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Reusable payment QR →</Text>
+          <Text style={{ color: theme.colors.text.secondary }}>Receive multiple payments with one BOLT12 offer</Text>
+        </TouchableOpacity>}
         {BARK_ENABLED && selectedAsset.asset_id === 'BTC' && (
           <TouchableOpacity accessibilityRole="button" onPress={() => { cancelReceiveWork(); navigation.navigate('Bark'); }}
             style={{ padding: theme.spacing[4], marginBottom: theme.spacing[3], borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.background.secondary }}>
