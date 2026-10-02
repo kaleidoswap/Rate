@@ -37,7 +37,7 @@ General copy controls provide success/failure feedback and cancel stale feedback
 
 ## Review on a device
 
-1. Check out `feat/partner-panel-mobile-ui`; install using `pnpm install --frozen-lockfile` and the repository's native setup instructions.
+1. Check out `feat/general-component-update`; install using `pnpm install --frozen-lockfile` and the repository's native setup instructions.
 2. Start the development client with `npx expo start --dev-client`.
 3. Open **Settings → Component preview** in a development build. Inspect both themes, large system text, dialogs, menus, dates, copy feedback and chart data views. This route is omitted from release navigation.
 4. Check wallet setup, dashboard, Send, Receive, Swap, History and settings sheets at the smallest supported screen size.
