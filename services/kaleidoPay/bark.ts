@@ -20,6 +20,7 @@ export interface BarkPaySender extends LightningSender {
 
 let disconnect: (() => void) | null = null;
 let generation = 0;
+const ARK_INFO_RETRY_MS = [0, 2000, 5000, 10000, 30000, 60000];
 const FEE_UNAVAILABLE = 'Bark did not return a fee estimate, so a complete payment quote is not available.';
 const QUOTE_TTL_S = 120;
 
@@ -224,11 +225,17 @@ export function connectBarkToKaleidoPay(bark: BarkPaySender, network: Network): 
   const current = ++generation;
   const unregister = [registerKaleidoPayAccount(createBarkPayAccount(bark, network)), registerKaleidoPayAccount(createBarkOnchainAccount(bark, network))];
   disconnect = () => { generation++; unregister.forEach(u => u()); };
-  // The Ark route needs the server key, which only a connected wallet knows.
-  void bark.getConnectionInfo?.().then(info => {
-    const rail = info?.connected && info.nodeId ? barkRail(info.nodeId) : null;
-    if (rail && current === generation) unregister.push(registerKaleidoPayAccount(createBarkArkAccount(bark, network, rail)));
-  }).catch(() => { /* Without the server key, Bark pays over Lightning only. */ });
+  // The Ark route needs the server key, which the wallet learns once it has reached the server.
+  void (async () => {
+    for (const delay of ARK_INFO_RETRY_MS) {
+      if (delay) await new Promise(r => setTimeout(r, delay));
+      if (current !== generation) return;
+      const info = await bark.getConnectionInfo?.().catch(() => undefined);
+      const rail = info?.connected && info.nodeId ? barkRail(info.nodeId) : null;
+      if (rail) { unregister.push(registerKaleidoPayAccount(createBarkArkAccount(bark, network, rail))); return; }
+    }
+    // Without the server key, Bark pays over Lightning and on-chain only.
+  })();
 }
 
 export function disconnectBarkFromKaleidoPay(): void {

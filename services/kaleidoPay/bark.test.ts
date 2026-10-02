@@ -119,9 +119,12 @@ test('connecting Bark registers the Ark route once the server key is known', asy
   const { previewPayment } = require('./index');
   const offer = require('@universal-bolt12/universal-code').withAcceptedRails(openOffer, [{ rail: RAIL, address: 'ark1receiver' }]);
   expect(offerRails(offer)[0]).toEqual({ rail: RAIL, address: 'ark1receiver' });
-  const b = { ...bark(3), getConnectionInfo: jest.fn().mockResolvedValue({ connected: true, nodeId: '03' + SERVER }) };
+  jest.useFakeTimers();
+  const b = { ...bark(3), getConnectionInfo: jest.fn().mockResolvedValueOnce({ connected: true }).mockResolvedValue({ connected: true, nodeId: '03' + SERVER }) };
   connectBarkToKaleidoPay(b, 'mainnet');
-  await new Promise(r => setImmediate(r));
+  await jest.advanceTimersByTimeAsync(2500); // the first read has no server key yet
+  jest.useRealTimers();
+  expect(b.getConnectionInfo).toHaveBeenCalledTimes(2);
   const preview = previewPayment(offer, 'mainnet', '2100', 'req');
   expect(preview.addresses).toEqual({ [RAIL]: 'ark1receiver' });
   expect(preview.request.acceptedRails).toEqual([RAIL, 'ln']);
