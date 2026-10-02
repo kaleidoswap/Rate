@@ -1,3 +1,4 @@
+import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
 import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -7,7 +8,6 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  InteractionManager,
   AppState,
   useWindowDimensions,
 } from 'react-native';
@@ -261,10 +261,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     timeoutMs,
     receiveAbortRef.current.signal,
   ), []);
-  // Caches the non-Lightning legs (on-chain / Spark / Arkade / Liquid addresses)
-  // from the fast first pass so the follow-up "add Lightning" pass can reuse them
-  // instead of re-deriving every address — halving the adapter/Spark-crypto work
-  // (and JS-thread stalls) on mount. See generateUnifiedUri's two-pass flow.
+  // Explicit Lightning refreshes reuse the existing native/deposit addresses.
   const unifiedCollectedRef = React.useRef<{
     collected: {
       btcAddress?: string;
@@ -1089,6 +1086,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     preserveExisting?: boolean;
     reason?: string;
   } = {}) => {
+    cancelScheduledUnified.current();
     const startedAt = nowMs();
     const generationId = unifiedGenerationRef.current + 1;
     unifiedGenerationRef.current = generationId;
@@ -1140,16 +1138,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
     }
 
-    // Query every adapter in parallel, then publish one final QR. Updating the
-    // QR progressively for each method made the screen feel frozen on mobile:
-    // each new URI forces a full QR matrix rebuild and SVG reconciliation.
-    //
-    // The two-pass flow (fast pass without Lightning, then a follow-up that adds
-    // the LN invoice) used to re-derive ALL addresses on the second pass. The
-    // on-chain/Spark/Arkade/Liquid addresses don't change between passes, so when
-    // this is the LN-upgrade pass (preserveExisting + includeLightning) we reuse
-    // the cached legs and only mint the Lightning invoice — halving the adapter
-    // work and Spark-crypto JS-thread stalls on mount.
+    // Reuse native addresses only when the user explicitly refreshes Lightning.
     const cached = unifiedCollectedRef.current;
     const reuseAddrs = preserveExisting && includeLightning && !!cached;
     const collected: {
@@ -1406,23 +1395,11 @@ export default function ReceiveScreen({ navigation }: Props) {
         ]
       : [];
 
-    // Run adapters sequentially so synchronous native/crypto work cannot pile up
-    // in one event-loop turn. Publish the first usable URI immediately, keep it
-    // stable while collecting the rest, then publish one final enriched URI.
-    let publishedFirstMethod = !!unifiedUri && preserveExisting;
+    // Collect all methods before publishing. A visible request must never be
+    // silently replaced by a partial/final version or an automatic upgrade.
     for (const task of [...addressTasks, ...lightningTasks]) {
       if (!isCurrentGeneration()) return;
       await task();
-      if (!publishedFirstMethod && nextMethods.length > 0 && isCurrentGeneration()) {
-        try {
-          setReceiveMethods([...nextMethods]);
-          setUnifiedUri(buildCurrentUnifiedUri());
-          publishedFirstMethod = true;
-        } catch {
-          // A partial method may not yet be representable; the final build below
-          // will surface a useful error if no combination succeeds.
-        }
-      }
     }
     if (!isCurrentGeneration()) {
       receiveLog('unified.stale', { generationId, activeGenerationId: unifiedGenerationRef.current });
@@ -1453,8 +1430,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     try {
       const uri = buildCurrentUnifiedUri();
 
-      // Cache the legs so the follow-up "add Lightning" pass can reuse them
-      // instead of re-deriving every address (see reuseAddrs above).
+      // Keep addresses available for an explicit invoice refresh.
       unifiedCollectedRef.current = {
         collected: { ...collected },
         sparkDeposit: nextSparkDepositAddress,
@@ -1476,42 +1452,12 @@ export default function ReceiveScreen({ navigation }: Props) {
     setUnifiedLoading(false);
   };
 
-  // Generate the unified URI when that mode is selected, or amount changes.
-  // Two passes: a fast one (on-chain + Spark address) so a QR appears quickly,
-  // then a follow-up that mints the Lightning invoice and merges it in (reusing
-  // the already-derived addresses — see reuseAddrs in generateUnifiedUri).
-  //
-  // Adapter calls can perform synchronous crypto on the JS thread, so the fast
-  // pass waits for the navigation transition. A later Lightning enrichment is
-  // only automatic when Spark is connected; RGB/NWC remains explicit.
-  useEffect(() => {
-    if (networkType !== 'unified') return;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let lightningTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    const fastInteraction = InteractionManager.runAfterInteractions(() => {
-      timeoutId = setTimeout(() => {
-        generateUnifiedUri({ includeLightning: false, reason: 'auto-fast' });
-      }, 450);
-    });
-    const lightningInteraction = InteractionManager.runAfterInteractions(() => {
-      lightningTimeoutId = setTimeout(() => {
-        // Do not launch an automatic RGB/NWC request in the background. On
-        // devices where the relay is slow that request can monopolize the JS
-        // thread for its full timeout, including the Back gesture. Spark's
-        // invoice path is local enough to safely enrich the unified QR.
-        if (protocolManager.getAdapterIfAvailable('SPARK')?.isConnected()) {
-          generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'auto-lightning' });
-        }
-      }, 5000);
-    });
-    return () => {
-      fastInteraction.cancel();
-      lightningInteraction.cancel();
-      if (timeoutId) clearTimeout(timeoutId);
-      if (lightningTimeoutId) clearTimeout(lightningTimeoutId);
-      unifiedGenerationRef.current += 1;
-    };
-  }, [networkType, amount, unifiedAsset]);
+  const cancelScheduledUnified = useReceiveGeneration(
+    networkType === 'unified' ? JSON.stringify([unifiedAsset, amount]) : null,
+    () => setUnifiedLoading(true),
+    () => { void generateUnifiedUri({ includeLightning: true, reason: 'auto' }); },
+    () => { unifiedGenerationRef.current += 1; },
+  );
 
   // Keep the unified BTC/USD asset in sync with the selected asset tab.
   useEffect(() => {
@@ -1530,7 +1476,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (!isBtcOrUsd && networkType === 'unified') {
       setNetworkType('onchain');
     }
-  }, [selectedAsset, networkType, arkadeSubMode, selectedAccount]);
+  }, [selectedAsset.asset_id, networkType, arkadeSubMode, selectedAccount]);
 
   // Update max amounts when network or channels change
   useEffect(() => {
@@ -1589,7 +1535,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       
       return () => clearTimeout(timeoutId);
     }
-  }, [selectedAsset, networkType, arkadeSubMode, selectedAccount]);
+  }, [selectedAsset.asset_id, networkType, arkadeSubMode, selectedAccount]);
 
   // Regenerate a moment after the amount changes on networks whose request
   // encodes it (Lightning, Spark), including when it is cleared, so the QR never
@@ -1610,7 +1556,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Regenerate address when channels change (for lightning network)
   useEffect(() => {
-    if (networkType === 'lightning' && selectedAsset && channels.length > 0) {
+    if (networkType === 'lightning' && selectedAsset && channels.length > 0 && !address && !loading) {
       const timeoutId = setTimeout(() => {
         if (!isAmountRequired() || isAmountValid()) {
           generateAddress();
@@ -2006,8 +1952,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   );
 
   const renderUnifiedBody = (accent: string) => {
-    // Only block on the spinner until the FIRST method is ready; after that the
-    // QR is shown and remaining methods stream in (see the inline indicator).
+    // Show the loader until the complete request is ready to be published.
     if (unifiedLoading && !unifiedUri) {
       return renderQrLoading(accent);
     }
@@ -2059,9 +2004,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           <View style={styles.qrStreamHint}>
             <ActivityIndicator size="small" color={accent} />
             <Text style={styles.qrStreamHintText}>
-              {unifiedMethods.length > 0
-                ? `${unifiedMethods.length} ${unifiedMethods.length === 1 ? 'method' : 'methods'} ready · adding another…`
-                : 'Creating the first payment method…'}
+              Updating your request…
             </Text>
           </View>
         )}
