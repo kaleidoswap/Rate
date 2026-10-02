@@ -244,7 +244,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [showAmountEditor, setShowAmountEditor] = useState(false);
   const [showDepositSuccess, setShowDepositSuccess] = useState(false);
   const [depositMonitor, setDepositMonitor] = useState<DepositMonitorState>({ status: 'idle' });
-  // The Spark single-use BTC L1 deposit address currently on screen (if any).
+  // The Spark BTC L1 deposit address currently on screen (if any).
   // Spark on-chain deposits must be claimed in — useSparkAutoClaim polls this.
   const sparkDepositAddress =
     receiveMethods.find((method) => method.monitor === 'spark-claim')?.value ?? null;
@@ -344,7 +344,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     onStatus: handleDepositStatus,
   });
   // Spark on-chain deposits don't show up via balance polling until claimed —
-  // sweep on mount + poll-claim the on-screen single-use deposit address.
+  // sweep on mount + poll-claim the on-screen deposit address.
   useSparkAutoClaim({
     address: sparkDepositAddress,
     enabled: !showDepositSuccess && isFocused && isAppActive,
@@ -707,7 +707,7 @@ export default function ReceiveScreen({ navigation }: Props) {
               assetId: 'BTC',
             };
           } else if (sparkAdapter?.isConnected()) {
-            // Spark provides a single-use deposit address for on-chain BTC; the
+            // Spark provides a static deposit address for on-chain BTC; the
             // deposit must be claimed in — track it for useSparkAutoClaim.
             const addr = await runReceiveOperation<any>(
               'Create Spark Bitcoin deposit address',
@@ -1148,7 +1148,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       arkadeAddress?: string;
       liquidAddress?: string;
     } = reuseAddrs ? { ...cached!.collected, lightningInvoice: undefined } : {};
-    // When reusing, carry the Spark single-use deposit address forward.
+    // When reusing, carry the Spark deposit address forward.
     let nextSparkDepositAddress: string | null = reuseAddrs ? cached!.sparkDeposit : null;
     let nextMethods: ReceiveMethod[] = reuseAddrs
       ? cached!.methods.filter((method) => method.layer !== 'lightning')
@@ -1167,7 +1167,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     });
 
     const addressTasks: Array<() => Promise<void>> = reuseAddrs ? [] : [
-      // 1) BTC on-chain — prefer RGB, then Spark single-use deposit, then Arkade boarding.
+      // 1) BTC on-chain — prefer RGB, then Spark static deposit, then Arkade boarding.
       async () => {
         const taskStartedAt = nowMs();
         try {

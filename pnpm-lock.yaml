@@ -67,8 +67,8 @@ importers:
         specifier: ^0.7.2
         version: 0.7.2(97282afab3b61d4ec9bf2ebca2993c58)
       '@kaleidorg/wallet-engine':
-        specifier: 1.0.0-beta.70
-        version: 1.0.0-beta.70(b9b559ea20048c95b012f4746834fdb8)
+        specifier: 1.0.0-beta.74
+        version: 1.0.0-beta.74(b9b559ea20048c95b012f4746834fdb8)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
@@ -1688,8 +1688,8 @@ packages:
       '@arkade-os/swap':
         optional: true
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.70':
-    resolution: {integrity: sha512-fwfQqzpulWjYgEi7atQomhquBhka2aA17DmrEVhw1o8kj9o12mtBT0k1GBlhPCL+/aDh36Bb13NDsA49B8+Zow==}
+  '@kaleidorg/wallet-engine@1.0.0-beta.74':
+    resolution: {integrity: sha512-sxvtxoOueitWIxqHID/Ykf2ZvO9iRQQi/kWtMIPSEFajVAiQnDxdX8jZDOqti8SKC++JxvYNBTzYIraTImGTsQ==}
     peerDependencies:
       '@arkade-os/boltz-swap': ^0.3.22
       '@arkade-os/sdk': ^0.4.72
@@ -1699,6 +1699,8 @@ packages:
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': ^1.0.0-beta.3
       '@kaleidorg/wdk-wallet-liquid': ^1.0.0-beta.9
       '@kaleidorg/wdk-wallet-rln': ^1.0.0-beta.5
+      '@secondts/bark': ^0.24.0
+      '@secondts/bark-react-native': 0.25.0
       '@tetherto/wdk-wallet-spark': ^1.0.0-beta.17
       '@utexo/rgb-lib-wasm': ^1.0.0-beta.3
       '@utexo/wdk-wallet-rgb': ^2.0.3
@@ -1719,6 +1721,10 @@ packages:
       '@kaleidorg/wdk-wallet-liquid':
         optional: true
       '@kaleidorg/wdk-wallet-rln':
+        optional: true
+      '@secondts/bark':
+        optional: true
+      '@secondts/bark-react-native':
         optional: true
       '@tetherto/wdk-wallet-spark':
         optional: true
@@ -9122,7 +9128,7 @@ snapshots:
       '@arkade-os/sdk': 0.4.72(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
       '@arkade-os/swap': 0.0.14(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.70(b9b559ea20048c95b012f4746834fdb8)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.74(b9b559ea20048c95b012f4746834fdb8)':
     dependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0

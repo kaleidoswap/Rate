@@ -1,6 +1,6 @@
 // hooks/useSparkAutoClaim.ts
 //
-// Spark on-chain (L1) deposits land at a single-use deposit address and must be
+// Spark on-chain (L1) deposits land at the static (reusable) deposit address and must be
 // CLAIMED into the wallet before they show up in the balance — a plain balance
 // poll never sees them. This mirrors rate-extension's useSparkAutoClaim:
 //
@@ -38,7 +38,7 @@ type SparkClaimAdapter = {
 };
 
 interface UseSparkAutoClaimArgs {
-  // The Spark single-use BTC L1 deposit address currently shown, or null when
+  // The Spark BTC L1 deposit address currently shown, or null when
   // the on-screen receive isn't a Spark on-chain deposit.
   address: string | null;
   enabled: boolean;
@@ -125,7 +125,7 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
         if (cancelled) return;
         if (res.status === 'awaiting') {
           // 'awaiting' simply means there is no confirmed, claimable UTXO at this
-          // single-use address yet — it fires on EVERY poll while nothing has been
+          // deposit address yet — it fires on EVERY poll while nothing has been
           // sent. Surfacing it as a "Waiting for on-chain confirmation" deposit
           // would wrongly imply an incoming Spark deposit is pending, even when the
           // user is actually receiving a Spark token/native transfer (which settle
