@@ -26,7 +26,7 @@ it('shows categorized test balances and opens Send with Bark selected', () => {
   const navigation = { navigate: jest.fn() }
   const ui = render(<BarkScreen navigation={navigation} />)
   expect(ui.getByText('1,200 sats')).toBeTruthy()
-  expect(ui.getByText('Pending boarding: 50 sats')).toBeTruthy()
+  expect(ui.getByLabelText('Pending boarding: 50 sats')).toBeTruthy()
   expect(ui.getByText('Bark activity · Signet · test sats')).toBeTruthy()
   fireEvent.press(ui.getByText('Send from Bark'))
   expect(navigation.navigate).toHaveBeenCalledWith('Send', { preferredAccount: 'BARK' })
