@@ -49,6 +49,6 @@ If the mobile demo or issuer is unavailable, record the web inspector and label 
 
 ## Submission readiness
 
-The public app source and these docs are available for judges. A public landing-page URL and demo-video URL still need to be added when published. Do not submit localhost URLs. The separate universal-bolt12 repository is private; it is not currently a judge-accessible source link.
+The public app source and these docs are available for judges. Landing page, demo videos and slides: https://kaleidoswap.github.io/kaleido-pay/. Protocol packages: https://github.com/kaleidoswap/kaleido-pay. Do not submit localhost URLs. The protocol packages are public at https://github.com/kaleidoswap/kaleido-pay (formerly universal-bolt12).
 
 Before the live demo, the selected NWC bridge needs the updated rails-capable LDK issuer and `get_info.kaleidopay.rails_versions: [1]`. See the receiver guide for the contract. Do not enable a capability flag on a stock issuer and assume it adds support.

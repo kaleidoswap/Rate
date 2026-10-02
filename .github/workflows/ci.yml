@@ -24,13 +24,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # KaleidoPay imports packages from the sibling kaleidoswap/universal-bolt12
-      # checkout (see services/kaleidoPay/README.md). It is private, so this needs
-      # UNIVERSAL_BOLT12_TOKEN: a fine-grained token with read access to it.
+      # KaleidoPay imports packages from the sibling kaleidoswap/kaleido-pay
+      # checkout (see services/kaleidoPay/README.md).
       - uses: actions/checkout@v4
         with:
-          repository: kaleidoswap/universal-bolt12
-          token: ${{ secrets.UNIVERSAL_BOLT12_TOKEN }}
+          repository: kaleidoswap/kaleido-pay
           path: universal-bolt12
       - name: Place universal-bolt12 beside the app
         run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)
@@ -66,8 +64,7 @@ jobs:
       # Same sibling checkout as the checks job (needs UNIVERSAL_BOLT12_TOKEN).
       - uses: actions/checkout@v4
         with:
-          repository: kaleidoswap/universal-bolt12
-          token: ${{ secrets.UNIVERSAL_BOLT12_TOKEN }}
+          repository: kaleidoswap/kaleido-pay
           path: universal-bolt12
       - name: Place universal-bolt12 beside the app
         run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)
