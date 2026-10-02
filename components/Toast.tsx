@@ -13,6 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import ToastService, { Toast as ToastType, ToastPosition } from '../services/ToastService';
 
+// Height of the app header bar (MainHeader) below the status bar, plus a gap.
+const HEADER_CLEARANCE = 64;
+
 interface ToastProps {
   toast: ToastType;
   onDismiss: (id: string) => void;
@@ -108,7 +111,9 @@ const ToastItem: React.FC<ToastProps> = ({ toast, onDismiss }) => {
         // Keep the toast clear of the status bar / home indicator. Using the raw
         // inset is more reliable than a nested SafeAreaView, which returned 0 here
         // and let the toast ride up over the clock/Wi-Fi.
-        isTop ? { paddingTop: insets.top + 8 } : { paddingBottom: insets.bottom + 8 },
+        // Top toasts also clear the screen header (MainHeader is ~60pt tall below
+        // the status bar), so they never hide its title or Settings button.
+        isTop ? { paddingTop: insets.top + HEADER_CLEARANCE } : { paddingBottom: insets.bottom + 8 },
         {
           opacity,
           transform: [{ translateY }],

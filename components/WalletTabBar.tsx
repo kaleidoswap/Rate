@@ -33,7 +33,10 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
   };
   return (
     <View style={[tabStyles.bar, {
-      paddingBottom: Math.max(insets.bottom, theme.spacing[2]),
+      // The home indicator sits in the lower part of the inset, so the full
+      // 34pt inset under the labels read as dead space. Labels may sit within
+      // its top portion; keep at least 8pt on devices without one.
+      paddingBottom: insets.bottom > 0 ? Math.max(insets.bottom - 16, theme.spacing[2]) : theme.spacing[2],
       backgroundColor: theme.colors.surface.primary,
       borderTopColor: theme.colors.border.light,
     }]}>
@@ -57,9 +60,9 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
 const tabStyles = StyleSheet.create({
   bar: {
     flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: theme.spacing[2], paddingHorizontal: theme.spacing[2],
+    paddingTop: theme.spacing[1.5], paddingHorizontal: theme.spacing[2],
   },
-  item: { flex: 1, minHeight: 60, alignItems: 'center', justifyContent: 'center', gap: theme.spacing[1] },
+  item: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 2 },
   label: { fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.semibold },
-  scan: { width: 44, height: 36, borderRadius: theme.borderRadius.lg, alignItems: 'center', justifyContent: 'center' },
+  scan: { width: 44, height: 32, borderRadius: theme.borderRadius.lg, alignItems: 'center', justifyContent: 'center' },
 });

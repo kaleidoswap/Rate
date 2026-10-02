@@ -222,6 +222,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
 
   // Better error message handling
   const getErrorMessage = (error: any): string => {
+    if (/not connected|Nothing to read/i.test(error?.message ?? '')) return error.message;
     if (error?.message?.includes('decode')) {
       return 'Invalid QR code format. Please scan a valid Bitcoin address, Lightning invoice, or RGB invoice.';
     }
@@ -517,7 +518,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void pasteRequest()} style={styles.entryAction}><Ionicons name="clipboard-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Paste</Text></TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void chooseImage()} style={styles.entryAction}><Ionicons name="image-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Choose image</Text></TouchableOpacity>
           </View>
-          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Review every payment before sending.'}</Text>
+          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Scan an invoice, address or multi-method request. You’ll review the amount, account and fees before paying.'}</Text>
         </View>
       </SafeAreaView>
     </View>

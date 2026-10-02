@@ -4,10 +4,10 @@
 // pickers (Swap), network selectors (Receive). Replaces the per-screen
 // hand-rolled TouchableOpacity strips, and ships the accessibility the
 // inline versions were missing (role="tab" + selected state + haptic tick).
-import React from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 import { feedback } from '../utils/feedback';
 import { PressableScale } from './PressableScale';
 
@@ -36,6 +36,8 @@ export function SegmentedTabs<T extends string = string>({
   fill = false,
   style,
 }: SegmentedTabsProps<T>) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
   const row = (
     <View style={[styles.row, fill && !scrollable && styles.rowFill]}>
       {options.map((opt) => {
@@ -82,19 +84,23 @@ export function SegmentedTabs<T extends string = string>({
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.scrollContent}
-      style={style}
+      style={[style, styles.scroll]}
     >
       {row}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
+  // A horizontal ScrollView otherwise grows into the available vertical space.
+  scroll: { flexGrow: 0, flexShrink: 0 },
   scrollContent: {
+    alignItems: 'flex-start',
     paddingRight: theme.spacing[4],
   },
   row: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: theme.spacing[2],
   },
   rowFill: {
@@ -107,7 +113,7 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing[2],
     borderRadius: theme.borderRadius.full,
     borderWidth: 1,
-    minHeight: 36,
+    minHeight: 44,
   },
   tabFill: {
     flex: 1,

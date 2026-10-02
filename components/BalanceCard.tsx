@@ -49,6 +49,9 @@ interface BalanceCardProps {
     footer?: React.ReactNode;
 }
 
+// The round controls are drawn at 34pt; hit slop keeps a 44pt touch target.
+const CONTROL_HIT_SLOP = { top: 5, bottom: 5, left: 5, right: 5 };
+
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
     { key: 'RGB', label: 'RLN', color: protocolColor('RGB') },
     { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
@@ -141,6 +144,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                 <View style={styles.topControls}>
                     <TouchableOpacity
                         style={styles.controlButton}
+                        hitSlop={CONTROL_HIT_SLOP}
                         onPress={onRefresh}
                         disabled={refreshing}
                         accessibilityLabel="Refresh balance"
@@ -155,6 +159,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     {activeProtocols.length > 0 && (
                         <TouchableOpacity
                             style={styles.controlButton}
+                            hitSlop={CONTROL_HIT_SLOP}
                             onPress={() => setShowBreakdown(v => !v)}
                             accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
                         >
@@ -175,17 +180,20 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     </View>
                 ) : useDenominated ? (
                     <>
+                        {/* Tap the amount to cycle sats / BTC / fiat. The unit sits inline
+                            next to the figure; no separate picker row below it. */}
                         <TouchableOpacity style={styles.primaryBalance} onPress={onCycleDenomination} disabled={!onCycleDenomination}
                             accessibilityRole="button"
-                            accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}. Tap to change denomination.`}>
-                            <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{primaryText}</AmountText>
+                            accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}.${onCycleDenomination ? ' Tap to change unit.' : ''}`}>
+                            <View style={styles.balanceRow}>
+                                <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{primaryText}</AmountText>
+                                {/* Fiat figures already carry their symbol, so only sats/BTC get a unit label. */}
+                                {!hideAmounts && (primaryUnitLabel === 'sats' || primaryUnitLabel === 'BTC') && (
+                                    <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
+                                )}
+                            </View>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.unitChip} onPress={onCycleDenomination} disabled={!onCycleDenomination}
-                            accessibilityRole="button" accessibilityLabel={`Change balance unit. Current unit: ${primaryUnitLabel || bitcoinUnit}`}>
-                            <Text style={styles.balanceCurrency}>{primaryUnitLabel || bitcoinUnit}</Text>
-                            {!!onCycleDenomination && <Ionicons name="chevron-down" size={14} color={theme.colors.text.secondary} />}
-                        </TouchableOpacity>
-                        <AmountText style={styles.balanceUsd}>{secondaryText ?? ''}</AmountText>
+                        {!!secondaryText && <AmountText style={styles.balanceUsd}>{secondaryText}</AmountText>}
                     </>
                 ) : (
                     <>
@@ -262,22 +270,19 @@ const styles = StyleSheet.create({
         // card (#0F1C33, 16px radius, hairline border on the navy background).
         backgroundColor: theme.colors.surface.primary,
         borderRadius: 16,
-        padding: theme.spacing[4],
+        paddingHorizontal: theme.spacing[4],
+        paddingVertical: theme.spacing[3],
     },
     cardHeader: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing[3],
     },
     totalBalanceContainer: {
-        alignItems: 'center', paddingTop: theme.spacing[3], paddingBottom: theme.spacing[4],
+        alignItems: 'center', paddingTop: theme.spacing[1], paddingBottom: theme.spacing[2],
     },
     primaryBalance: { width: '100%', alignItems: 'center' },
     balanceLabel: {
         flex: 1, fontSize: theme.typography.fontSize.xs,
         fontWeight: theme.typography.fontWeight.medium, color: theme.colors.text.secondary,
-    },
-    unitChip: {
-        flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1], minHeight: 44,
-        paddingHorizontal: theme.spacing[3], borderRadius: theme.borderRadius.full,
     },
     pendingBalance: { color: theme.colors.text.secondary, marginBottom: theme.spacing[3] },
     balanceRow: {
@@ -285,20 +290,20 @@ const styles = StyleSheet.create({
         flexWrap: 'wrap',
         alignItems: 'baseline',
         justifyContent: 'center',
-        marginBottom: theme.spacing[1],
+        gap: theme.spacing[1.5],
     },
     balanceAmount: {
         // Large display headline, black (900 — Satoshi Black face via the global
         // text patch), tight tracking — matches the extension's prominent
         // TOTAL BALANCE figure.
-        fontSize: 44,
+        fontSize: 36,
         fontWeight: '900',
-        letterSpacing: -0.9,
+        letterSpacing: -0.7,
         color: theme.colors.text.primary,
         textAlign: 'center',
     },
     balanceCurrency: {
-        fontSize: theme.typography.fontSize.lg,
+        fontSize: theme.typography.fontSize.base,
         fontWeight: theme.typography.fontWeight.medium,
         color: theme.colors.text.secondary,
     },
@@ -307,15 +312,15 @@ const styles = StyleSheet.create({
         fontFamily: theme.typography.fontFamily.mono,
         fontSize: theme.typography.fontSize.sm,
         color: theme.colors.text.tertiary,
-        minHeight: 18,
+        marginTop: theme.spacing[0.5],
     },
     topControls: {
         flexDirection: 'row',
         gap: theme.spacing[2],
     },
     controlButton: {
-        width: 44,
-        height: 44,
+        width: 34,
+        height: 34,
         borderRadius: theme.borderRadius.full,
         backgroundColor: theme.colors.surface.secondary,
         justifyContent: 'center',
@@ -395,7 +400,8 @@ const styles = StyleSheet.create({
         // card edges, leaving a little breathing room before the borders.
         height: StyleSheet.hairlineWidth,
         backgroundColor: theme.colors.border.medium,
-        marginVertical: theme.spacing[3],
+        marginTop: theme.spacing[1],
+        marginBottom: theme.spacing[3],
         marginHorizontal: theme.spacing[1],
     },
 });
