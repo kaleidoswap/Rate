@@ -2,7 +2,6 @@ import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnection
 import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
 import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
-import { BARK_ENABLED } from '../services/protocols/bark';
 import { barkNetworkLabel } from '../services/BarkService';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -675,6 +674,30 @@ export default function ReceiveScreen({ navigation }: Props) {
           }
         } catch (err: any) {
           throw new Error(`Arkade: ${err.message || 'Failed to generate address'}`);
+        }
+      }
+      // ── Bark (Second's Ark) ──
+      // Same `tark1…` prefix as Arkade but a different Ark server, so it is
+      // chosen by account/mode, never inferred from the address.
+      else if (networkType === 'bark') {
+        try {
+          const barkAdapter = protocolManager.getAdapter('BARK');
+          const addr = await runReceiveOperation(
+            'Create Bark address',
+            () => barkAdapter.getReceiveAddress(),
+          );
+          result = addr.address;
+          methodMeta = {
+            key: 'bark',
+            label: 'Bark',
+            protocol: 'BARK',
+            kind: 'address',
+            layer: 'bark',
+            monitor: 'balance',
+            assetId: selectedAsset.asset_id,
+          };
+        } catch (err: any) {
+          throw new Error(`Bark: ${err.message || 'Failed to generate address'}`);
         }
       }
       // ── RGB / Legacy: on-chain + lightning ──
@@ -1666,7 +1689,6 @@ export default function ReceiveScreen({ navigation }: Props) {
       ?? accounts[0]
       ?? null;
     const chooseAccount = (account: AccountId) => {
-      if (account === 'BARK') { cancelReceiveWork(); navigation.navigate('Bark'); return; }
       feedback.select();
       resetReceiveSurface();
       setSelectedAccount(account);
@@ -1675,6 +1697,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         nextNetwork = 'spark';
       } else if (account === 'ARKADE') {
         nextNetwork = 'arkade';
+      } else if (account === 'BARK') {
+        nextNetwork = 'bark';
       } else {
         nextNetwork = nwcWalletType === 'ln' && family === 'BTC' ? 'lightning' : 'onchain';
       }
@@ -1755,6 +1779,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Spark balance · instant · low fee' }] : []),
       ...(selectableNetworks.includes('arkade')
         ? [{ id: 'arkade' as ReceiveMode, label: 'Arkade', sub: 'Arkade balance · off-chain' }] : []),
+      ...(selectableNetworks.includes('bark')
+        ? [{ id: 'bark' as ReceiveMode, label: 'Bark', sub: `Bark balance · off-chain · ${barkNetworkLabel()}` }] : []),
     ];
     const current = options.find((o) => o.id === networkType) || options[0];
     if (!current) return null;
@@ -1786,7 +1812,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                     dispatch(setLastBtcReceiveRoute({
                       axis: routeAxis,
                       network: o.id,
-                      account: routeAxis === 'account' && effectiveAccount !== 'BARK' ? effectiveAccount : null,
+                      account: routeAxis === 'account' ? effectiveAccount : null,
                     }));
                   }
                   setShowPaymentOptions(false);
@@ -1816,7 +1842,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (selectedAsset?.isRGB) return null;
     // Arkade and on-chain addresses don't carry an amount; offering one there
     // would suggest the payer is asked for it when they aren't.
-    if (networkType === 'arkade' || networkType === 'onchain') return null;
+    if (networkType === 'arkade' || networkType === 'bark' || networkType === 'onchain') return null;
     const summary = amountSummary();
     const required = isAmountRequired();
     return (
@@ -1975,6 +2001,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     // Render QR code with network-aware title
     const qrTitle = networkType === 'spark' ? 'Spark Address'
       : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+      : networkType === 'bark' ? 'Bark Address'
       : networkType === 'lightning' ? 'Lightning Invoice'
       : selectedAsset.isRGB ? 'RGB Invoice'
       : 'On-chain Address';
@@ -1983,6 +2010,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     const addrLabel = networkType === 'lightning' ? 'Lightning Invoice'
       : networkType === 'spark' ? 'Spark Address'
       : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
+      : networkType === 'bark' ? 'Bark Address'
       : 'Deposit Address';
     return (
       <View style={styles.qrSection}>
@@ -2048,13 +2076,6 @@ export default function ReceiveScreen({ navigation }: Props) {
           <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Reusable payment QR →</Text>
           <Text style={{ color: theme.colors.text.secondary }}>Receive multiple payments with one BOLT12 offer</Text>
         </TouchableOpacity>}
-        {BARK_ENABLED && selectedAsset.asset_id === 'BTC' && (
-          <TouchableOpacity accessibilityRole="button" onPress={() => { cancelReceiveWork(); navigation.navigate('Bark'); }}
-            style={{ padding: theme.spacing[4], marginBottom: theme.spacing[3], borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.background.secondary }}>
-            <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Receive on Bark · {barkNetworkLabel()} →</Text>
-            <Text style={{ color: theme.colors.text.secondary }}>Ark, Lightning or on-chain funding · separate request</Text>
-          </TouchableOpacity>
-        )}
         {renderContent()}
         <ReceiveStatus
           visible={monitorVisible}

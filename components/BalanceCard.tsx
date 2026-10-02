@@ -29,6 +29,7 @@ interface BalanceCardProps {
         RGB?: ProtocolBalance;
         SPARK?: ProtocolBalance;
         ARKADE?: ProtocolBalance;
+        BARK?: ProtocolBalance;
     };
     /** Show shimmer placeholders instead of the balance while first loading. */
     loading?: boolean;
@@ -56,6 +57,7 @@ const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
     { key: 'RGB', label: 'RLN', color: protocolColor('RGB') },
     { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
     { key: 'ARKADE', label: 'Arkade', color: protocolColor('ARKADE') },
+    { key: 'BARK', label: 'Bark', color: protocolColor('BARK') },
 ];
 
 export const BalanceCard: React.FC<BalanceCardProps> = ({
@@ -90,7 +92,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     // (RLN / Spark / Arkade) appear only when that key exists in `byProtocol`,
     // mirroring the `activeProtocols` presence logic as individual rows.
     const breakdownRows: Array<{
-        key: 'BITCOIN' | 'RGB' | 'SPARK' | 'ARKADE';
+        key: 'BITCOIN' | 'RGB' | 'SPARK' | 'ARKADE' | 'BARK';
         name: string;
         subtitle: string;
         accent: string;
@@ -133,6 +135,15 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             subtitle: 'Arkade balance',
             accent: protocolColor('ARKADE'),
             value: byProtocol?.ARKADE?.total ?? 0,
+        });
+    }
+    if (byProtocol && 'BARK' in byProtocol) {
+        breakdownRows.push({
+            key: 'BARK',
+            name: 'BTC on Bark',
+            subtitle: 'Bark balance',
+            accent: protocolColor('BARK'),
+            value: byProtocol?.BARK?.total ?? 0,
         });
     }
 

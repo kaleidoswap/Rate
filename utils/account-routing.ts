@@ -5,13 +5,13 @@
 
 export type AccountId = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'
 export type AssetFamily = 'BTC' | 'RGB' | 'SPARK' | 'ARKADE'
-export type TransferMethod = 'bitcoin_l1' | 'lightning' | 'spark' | 'arkade' | 'boarding' | 'submarine_swap'
+export type TransferMethod = 'bitcoin_l1' | 'lightning' | 'spark' | 'arkade' | 'bark' | 'boarding' | 'submarine_swap'
 export type DestinationKind =
   | 'unknown' | 'bitcoin' | 'spark' | 'arkade'
   | 'lightning' | 'lightning-address' | 'lnurl-pay'
   | 'rgb' | 'invalid'
 
-export type NetworkType = 'onchain' | 'lightning' | 'spark' | 'arkade'
+export type NetworkType = 'onchain' | 'lightning' | 'spark' | 'arkade' | 'bark'
 
 export interface RouteResolverAccounts {
   RGB: boolean
@@ -47,6 +47,7 @@ export const METHOD_META: Record<TransferMethod, MethodMeta> = {
   lightning: { id: 'lightning', label: 'Lightning invoice', summary: 'Fast payment over Lightning.', eta: 'instant when liquidity is available', feeHint: 'low routing fee' },
   spark: { id: 'spark', label: 'Spark transfer', summary: 'Funds land directly in the Spark account.', eta: 'instant', feeHint: 'minimal network fee' },
   arkade: { id: 'arkade', label: 'Arkade transfer', summary: 'Funds land directly in the Arkade account.', eta: 'fast', feeHint: 'account fee' },
+  bark: { id: 'bark', label: 'Bark transfer', summary: 'Funds land directly in the Bark account.', eta: 'fast', feeHint: 'account fee' },
   boarding: { id: 'boarding', label: 'Boarding', summary: 'Send on-chain BTC into Arkade.', eta: '1+ confirmations', feeHint: 'on-chain fee' },
   submarine_swap: { id: 'submarine_swap', label: 'LN via swap', summary: 'Uses Arkade as the source account and bridges to Lightning.', eta: 'quote then settlement', feeHint: 'swap + routing fee' },
 }
@@ -107,7 +108,9 @@ export function getReceiveMethodsForAccount(account: AccountId, assetFamily: Ass
     // Bitcoin address that is claimed into the Spark balance after confirmation.
     case 'SPARK': return ['spark', 'lightning', 'bitcoin_l1']
     case 'ARKADE': return ['arkade', 'boarding']
-    case 'BARK': return [] // Dedicated Bark receive screen keeps networks separate.
+    // Bark mints `tark1…` like Arkade but is a different Ark server: its own method,
+    // routed by account, never by address prefix.
+    case 'BARK': return ['bark']
   }
 }
 
@@ -139,6 +142,7 @@ export function getNetworkTypesForAccount(account: AccountId, assetFamily: Asset
       case 'lightning': return 'lightning'
       case 'spark': return 'spark'
       case 'arkade': return 'arkade'
+      case 'bark': return 'bark'
       case 'boarding': return 'arkade'
       default: return 'onchain'
     }

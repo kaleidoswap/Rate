@@ -1,7 +1,6 @@
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
 import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
-import { BarkAccountCard } from '../components/BarkAccountCard';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -46,7 +45,6 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
-import { RecentActivityWidget } from '../components/RecentActivityWidget';
 
 const { width } = Dimensions.get('window');
 
@@ -329,11 +327,10 @@ export default function DashboardScreen({ navigation }: Props) {
         ? 'Some balances are unavailable. Your total may be incomplete.' : null);
       for (const r of balanceResults) {
         if (!r) continue;
-        // Bark has its own network-labelled card, separate from the total.
-        if (r.proto !== 'BARK') {
-          totalConfirmed += r.btc.confirmed;
-          totalUnconfirmed += r.btc.unconfirmed;
-        }
+        // Bark is a layer like Arkade/Spark: counted in the total and shown in
+        // the per-network breakdown.
+        totalConfirmed += r.btc.confirmed;
+        totalUnconfirmed += r.btc.unconfirmed;
         byProtocol[r.proto] = r.btc;
       }
       const balance = {
@@ -852,9 +849,6 @@ export default function DashboardScreen({ navigation }: Props) {
         </View>
 
 
-        <RecentActivityWidget
-          onViewAll={() => navigation.navigate('Activity')}
-        />
 
         {isLite && liteUsdDisplay > 0 && (
           <View style={styles.liteUsdCard}>
@@ -900,7 +894,6 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
-        <BarkAccountCard onOpen={() => navigation.navigate('Bark')} ready={protocolsReady} refreshing={isUpdating} />
         </>}
         <TouchableOpacity
           accessibilityRole="button"

@@ -37,4 +37,11 @@ describe('balance disclosure', () => {
     expect(screen.queryByText('1500 sats')).toBeNull();
     expect(screen.queryByText('$15')).toBeNull();
   });
+
+  it('lists Bark in the network breakdown like the other layers', () => {
+    const screen = render(<BalanceCard {...props} byProtocol={{ ...props.byProtocol, BARK: { confirmed: 700, unconfirmed: 0, total: 700 } }} />);
+    fireEvent.press(screen.getByLabelText('Show network balances'));
+    expect(screen.getByText('BTC on Bark')).toBeTruthy();
+    expect(screen.getByText('700 sats')).toBeTruthy();
+  });
 });

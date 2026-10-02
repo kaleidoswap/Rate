@@ -292,11 +292,9 @@ export const loadBtcBalance = createAsyncThunk(
         if (adapter?.isConnected()) {
           try {
             const btc = await adapter.getBtcBalance();
-            // Bark is displayed separately, including its explicit network.
-            if (proto !== 'BARK') {
-              totalConfirmed += btc.confirmed;
-              totalUnconfirmed += btc.unconfirmed;
-            }
+            // Bark is a layer like Arkade/Spark and counts toward the total.
+            totalConfirmed += btc.confirmed;
+            totalUnconfirmed += btc.unconfirmed;
             byProtocol[proto] = btc;
           } catch { /* skip */ }
         }

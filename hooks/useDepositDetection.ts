@@ -14,7 +14,7 @@ import {
   type ReceiveProtocol,
 } from '../utils/receive-session';
 
-export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'liquid';
+export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
 export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
 
 export interface DepositDetectionEvent {
