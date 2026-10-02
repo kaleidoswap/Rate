@@ -47,6 +47,7 @@ import SendScreen from './screens/SendScreen';
 import KaleidoPayScreen from './screens/KaleidoPayScreen';
 import ReceiveScreen from './screens/ReceiveScreen';
 import MerchantOfferScreen from './screens/MerchantOfferScreen';
+import DesignSystemScreen from './screens/DesignSystemScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import AssetsScreen from './screens/AssetsScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -85,6 +86,7 @@ type RootStackParamList = {
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   PaymentConfirmation: { paymentData: any };
   PaymentSuccess: PaymentSuccessParams;
+  DesignSystem: undefined;
   AIAssistant: undefined;
   Assets: undefined;
   Swap: undefined;
@@ -229,6 +231,7 @@ function AppNavigator() {
         <Stack.Screen name="KaleidoPay" component={asModalScreen(KaleidoPayScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="NostrSettings" component={asModalScreen(NostrSettingsScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        {__DEV__ && <Stack.Screen name="DesignSystem" component={asModalScreen(DesignSystemScreen)} options={{ presentation: 'modal', headerShown: false }} />}
         <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
