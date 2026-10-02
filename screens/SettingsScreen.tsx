@@ -1,3 +1,4 @@
+import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
 import { currentBarkHost, loadBarkHost, saveBarkNetwork } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
@@ -124,6 +125,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const [settingsQuery, setSettingsQuery] = useState('');
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
+  const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
   const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Private Local AI Assistant', advanced: 'Advanced' };
   const sections = [
@@ -137,17 +139,18 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'security', terms: 'danger remove delete wallet' },
   ];
   const query = settingsQuery.trim().toLowerCase();
-  const showSection = (terms: string) => query
+  const showSection = (terms: string) => account ? false : query
     ? query.split(/\s+/).every(word => terms.includes(word))
     : sections.find(section => section.terms === terms)?.page === page;
   const hasSettingsSearchResults = !query || sections.some(section => showSection(section.terms));
   const atHome = page === null && !query;
   const openPage = (next: SettingsPage) => { Keyboard.dismiss(); setSettingsQuery(''); setPage(next); };
   const goBack = useCallback(() => {
-    if (settingsQuery) { setSettingsQuery(''); Keyboard.dismiss(); }
+    if (account) setAccount(null);
+    else if (settingsQuery) { setSettingsQuery(''); Keyboard.dismiss(); }
     else if (page) setPage(null);
     else navigation.goBack();
-  }, [settingsQuery, page, navigation]);
+  }, [settingsQuery, page, navigation, account]);
   useFocusEffect(useCallback(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!page && !settingsQuery) return false;
@@ -242,11 +245,13 @@ export default function SettingsScreen({ navigation }: Props) {
     })();
   }, [activeWallet]);
 
-  const changeProtocolNetwork = (proto: WalletProtocol, network: ProtocolNetwork) => {
+  const changeProtocolNetwork = (proto: WalletProtocol, network: ProtocolNetwork, patch: Record<string, unknown> = {}) => {
+    if (protocolConnecting[proto]) return;
     const id = (activeWallet as any)?.id;
     const type = PROTOCOL_TO_NETWORK_TYPE[proto];
     if (!id) return;
     (async () => {
+      let saved = false;
       setProtocolConnecting((prev) => ({ ...prev, [proto]: true }));
       setProtocolErrors((prev) => ({ ...prev, [proto]: undefined }));
       try {
@@ -254,7 +259,7 @@ export default function SettingsScreen({ navigation }: Props) {
         const nets = await db.getWalletNetworks(id);
         const existing = nets.find((n) => n.type === type);
         const cfg = existing?.config ? JSON.parse(existing.config) : JSON.parse(buildDefaultNetworkConfig(type));
-        const nextConfig = buildNetworkConfig(type, network, cfg);
+        const nextConfig = buildNetworkConfig(type, network, { ...cfg, ...patch });
         const effectiveNetwork = JSON.parse(nextConfig).network as ProtocolNetwork;
         if (existing) {
           await db.updateNetworkConfig(id, type, { enabled: true, config: nextConfig });
@@ -262,6 +267,7 @@ export default function SettingsScreen({ navigation }: Props) {
           await db.addNetworkToWallet(id, { type, enabled: true, config: nextConfig });
         }
 
+        saved = true;
         await protocolManager.disconnect(toEngineProtocol(proto));
         const refreshedWallet = await db.getActiveWallet();
         const updatedNetwork = refreshedWallet?.networks?.find((n) => n.type === type);
@@ -287,9 +293,9 @@ export default function SettingsScreen({ navigation }: Props) {
       } catch (e: any) {
         refreshProtocolStatus();
         const effectiveNetwork = type === 'spark' ? resolveSparkNetwork(network) : network;
-        setProtoNetworks((prev) => ({ ...prev, [type]: effectiveNetwork }));
+        if (saved) setProtoNetworks((prev) => ({ ...prev, [type]: effectiveNetwork }));
         setProtocolErrors((prev) => ({ ...prev, [proto]: e?.message ?? 'Connection failed' }));
-        Alert.alert('Network saved, connection failed', e?.message ?? 'Please try again.');
+        Alert.alert(saved ? 'Settings saved, connection failed' : 'Could not save settings', e?.message ?? 'Please try again.');
       } finally {
         setProtocolConnecting((prev) => ({ ...prev, [proto]: false }));
       }
@@ -479,8 +485,8 @@ export default function SettingsScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <MainHeader title={query ? 'Search settings' : page ? titles[page] : 'Settings'} onBack={goBack} />
-      <ScrollView key={page ?? 'home'} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <MainHeader title={account ? ({ RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : query ? 'Search settings' : page ? titles[page] : 'Settings'} onBack={goBack} />
+      <ScrollView key={account ?? page ?? 'home'} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {!page && <Input
           value={settingsQuery}
@@ -506,7 +512,7 @@ export default function SettingsScreen({ navigation }: Props) {
             <Row icon="code-slash-outline" label="Advanced" description="Accounts and network configuration" onPress={() => openPage('advanced')} />
           </Group>
         </>}
-        {page === 'advanced' && <Text style={styles.pageDescription}>Manage the networks used by your wallet accounts. Test networks use separate test funds.</Text>}
+        {page === 'advanced' && !account && <Text style={styles.pageDescription}>Manage the networks used by your wallet accounts. Test networks use separate test funds.</Text>}
         {page === 'security' && <Text style={styles.pageDescription}>Keep your recovery phrase private. It gives access to your funds.</Text>}
 
 
@@ -688,6 +694,15 @@ export default function SettingsScreen({ navigation }: Props) {
         </Group>
         </>}
 
+        {account && activeWallet?.id != null && <AccountSettings account={account} walletId={activeWallet.id}
+          network={account === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network ?? 'mainnet' : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[account]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[account]]}
+          connected={protocolStatus[account]} busy={!!protocolConnecting[account]} error={protocolErrors[account]}
+          onNetwork={() => account === 'BARK' ? pickBarkNetwork() : pickProtocolNetwork(account)}
+          onReconnect={() => account === 'BARK' ? void changeBarkNetwork((protoNetworks.bark ?? currentBarkHost()?.network ?? 'mainnet') as 'mainnet' | 'signet') : changeProtocolNetwork(account, (protoNetworks[PROTOCOL_TO_NETWORK_TYPE[account]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[account]]) as ProtocolNetwork)}
+          onConnection={RGB_VIA_NWC ? () => navigation.navigate('NWCConnect') : undefined}
+          onSave={patch => { if (account === 'ARKADE') changeProtocolNetwork(account, (protoNetworks.arkade ?? 'signet') as ProtocolNetwork, patch); }}
+        />}
+
         {/* Network changes live in the explicit Advanced section in both display modes. */}
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark') && (
           <>
@@ -718,15 +733,15 @@ export default function SettingsScreen({ navigation }: Props) {
                 <View style={[styles.rowIcon, { backgroundColor: colors[proto] + '1A', opacity: connected ? 1 : 0.5 }]}>
                   <NetworkIcon network={proto} size={18} color={colors[proto]} />
                 </View>
-                <View style={styles.rowText}>
+                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${labels[proto]} account settings`} onPress={() => { setSettingsQuery(''); setPage('advanced'); setAccount(proto); }} style={[styles.rowText, { minHeight: 48, justifyContent: 'center' }]}>
                   <Text style={styles.rowLabel}>{labels[proto]}</Text>
-                  <Text style={styles.rowDescription} numberOfLines={1}>{descs[proto]}</Text>
+                  <Text style={styles.rowDescription} numberOfLines={1}>Account settings · {descs[proto]}</Text>
                   {!!error && !connecting && (
                     <Text style={[styles.rowDescription, { color: theme.colors.error[500] }]} numberOfLines={1}>
                       {error}
                     </Text>
                   )}
-                </View>
+                </TouchableOpacity>
                 <View style={{ alignItems: 'flex-end', gap: theme.spacing[1] }}>
                   <NetworkBadge
                     network={proto === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network ?? 'unknown' : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]]}

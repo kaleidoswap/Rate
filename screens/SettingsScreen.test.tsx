@@ -90,3 +90,23 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
   expect(protocolManager.disconnect).toHaveBeenCalledWith('BARK');
   expect(initializeProtocols).toHaveBeenCalledWith('public test fixture', []);
 });
+
+test('account pages expose supported controls and back returns to the account list', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Spark account settings'));
+  expect(screen.getByText('Reconnect account')).toBeTruthy();
+  expect(screen.queryByLabelText('Ark server URL')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Back'));
+  fireEvent.press(screen.getByLabelText('Arkade account settings'));
+  await act(async () => {});
+  fireEvent.changeText(screen.getByLabelText('Ark server URL'), 'http://unsafe.example');
+  fireEvent.press(screen.getByText('Save and reconnect'));
+  expect(screen.getByText('Use an HTTPS URL without credentials, query parameters or a fragment.')).toBeTruthy();
+  expect(require('../services/protocols').protocolManager.disconnect).not.toHaveBeenCalled();
+  fireEvent.press(screen.getByLabelText('Back'));
+  fireEvent.press(screen.getByLabelText('RGB Lightning account settings'));
+  fireEvent.press(screen.getByText('Manage wallet connection'));
+  expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
+});
