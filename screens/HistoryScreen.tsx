@@ -298,7 +298,7 @@ export default function HistoryScreen() {
                         <EmptyState
                             icon="receipt-outline"
                             title={filter === 'pending' ? 'No pending payments' : 'No activity yet'}
-                            message={filter === 'pending' ? 'Payments waiting to complete will appear here.' : 'Your payments, transfers and swaps will appear here once you send or receive.'}
+                            message={filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : 'Your payments and transfers will appear here.'}
                         />
                     }
                 />
