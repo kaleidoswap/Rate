@@ -7,9 +7,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 
-export type BadgeTone = 'neutral' | 'primary' | 'success' | 'warning' | 'error' | 'info';
+export type BadgeTone =
+  'neutral' | 'primary' | 'success' | 'warning' | 'error' | 'info';
 type BadgeSize = 'sm' | 'md';
 
 interface BadgeProps {
@@ -24,15 +25,6 @@ interface BadgeProps {
   style?: ViewStyle;
 }
 
-const TONE_COLOR: Record<BadgeTone, string> = {
-  neutral: theme.colors.text.tertiary,
-  primary: theme.colors.primary[500],
-  success: theme.colors.success[500],
-  warning: theme.colors.warning[500],
-  error: theme.colors.error[500],
-  info: theme.colors.info[500],
-};
-
 export const Badge: React.FC<BadgeProps> = ({
   label,
   tone = 'neutral',
@@ -42,57 +34,75 @@ export const Badge: React.FC<BadgeProps> = ({
   solid = false,
   style,
 }) => {
+  const theme = useAppTheme();
+  const styles = createStyles(theme);
+  const TONE_COLOR: Record<BadgeTone, string> = {
+    neutral: theme.colors.text.secondary,
+    primary: theme.colors.primary[500],
+    success: theme.colors.success[500],
+    warning: theme.colors.warning[500],
+    error: theme.colors.error[500],
+    info: theme.colors.info[500],
+  };
   const accent = color ?? TONE_COLOR[tone];
   const isSm = size === 'sm';
-  const fg = solid ? '#FFFFFF' : accent;
+  const fg = solid ? theme.colors.text.inverse : accent;
 
   return (
     <View
       style={[
         styles.base,
         isSm ? styles.sm : styles.md,
-        { backgroundColor: solid ? accent : accent + '22' },
+        { backgroundColor: solid ? accent : accent + '26' },
         style,
       ]}
       accessible
       accessibilityLabel={label}
     >
       {icon && (
-        <Ionicons name={icon} size={isSm ? 10 : 12} color={fg} style={styles.icon} />
+        <Ionicons
+          name={icon}
+          size={isSm ? 10 : 12}
+          color={fg}
+          style={styles.icon}
+        />
       )}
-      <Text style={[isSm ? styles.textSm : styles.textMd, { color: fg }]}>{label}</Text>
+      <Text style={[isSm ? styles.textSm : styles.textMd, { color: fg }]}>
+        {label}
+      </Text>
     </View>
   );
 };
 
-const styles = StyleSheet.create({
-  base: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    borderRadius: theme.borderRadius.full,
-  },
-  sm: {
-    paddingHorizontal: theme.spacing[1.5],
-    paddingVertical: theme.spacing[0.5],
-  },
-  md: {
-    paddingHorizontal: 9,
-    paddingVertical: theme.spacing[1],
-  },
-  icon: {
-    marginRight: 3,
-  },
-  textSm: {
-    fontSize: 10,
-    fontWeight: theme.typography.fontWeight.bold,
-    letterSpacing: 0.3,
-  },
-  textMd: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: theme.typography.fontWeight.semibold,
-    letterSpacing: 0.2,
-  },
-});
+const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    base: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      alignSelf: 'flex-start',
+      borderRadius: theme.borderRadius.full,
+    },
+    sm: {
+      paddingHorizontal: theme.spacing[1.5],
+      paddingVertical: theme.spacing[0.5],
+    },
+    md: {
+      paddingHorizontal: 9,
+      paddingVertical: theme.spacing[1],
+    },
+    icon: {
+      marginRight: 3,
+    },
+    textSm: {
+      fontSize: 10,
+      fontWeight: theme.typography.fontWeight.bold,
+      letterSpacing: 0.3,
+    },
+    textMd: {
+      fontSize: theme.typography.fontSize.xs,
+      fontWeight: theme.typography.fontWeight.semibold,
+      letterSpacing: 0.2,
+    },
+  });
 
 export default Badge;

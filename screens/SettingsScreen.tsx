@@ -504,6 +504,7 @@ export default function SettingsScreen({ navigation }: Props) {
           <Group>
             <Row first icon="sparkles-outline" label="Private Local AI Assistant" description="Models, privacy and desktop pairing" onPress={() => openPage('assistant')} />
             <Row icon="code-slash-outline" label="Advanced" description="Accounts and network configuration" onPress={() => openPage('advanced')} />
+            {__DEV__ && <Row icon="color-palette-outline" label="Component preview" description="Review shared mobile components" onPress={() => navigation.navigate('DesignSystem')} />}
           </Group>
         </>}
         {page === 'advanced' && <Text style={styles.pageDescription}>Manage the networks used by your wallet accounts. Test networks use separate test funds.</Text>}

@@ -1,77 +1,88 @@
-// components/CopyButton.tsx
-//
-// One canonical "copy to clipboard" affordance. The hand-rolled versions across
-// screens signalled success with a colour change alone (invisible to colour-blind
-// users and screen readers); this swaps the icon to a checkmark AND flips the
-// label to "Copied", fires a success haptic, and announces via accessibilityLabel.
-import React, { useRef, useState, useCallback } from 'react';
-// eslint-disable-next-line react-native/no-deprecated -- matches existing app-wide Clipboard usage
-import { Clipboard, Text, StyleSheet, ViewStyle } from 'react-native';
+import React from 'react';
+import { Text, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 import { feedback } from '../utils/feedback';
+import { useCopyToClipboard } from '../hooks/useCopyToClipboard';
 import { PressableScale } from './PressableScale';
 
 interface CopyButtonProps {
   value: string;
-  /** Optional text shown next to the icon (icon-only when omitted). */
   label?: string;
-  /** Text shown briefly after copying (default "Copied"). */
   copiedLabel?: string;
   size?: number;
   color?: string;
   onCopied?: () => void;
   style?: ViewStyle;
 }
-
-export const CopyButton: React.FC<CopyButtonProps> = ({
+export function CopyButton({
   value,
   label,
   copiedLabel = 'Copied',
   size = 18,
-  color = theme.colors.text.secondary,
+  color,
   onCopied,
   style,
-}) => {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handlePress = useCallback(() => {
-    Clipboard.setString(value);
-    feedback.success();
-    setCopied(true);
-    onCopied?.();
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopied(false), 1600);
-  }, [value, onCopied]);
-
-  const tint = copied ? theme.colors.success[500] : color;
-  const text = copied ? copiedLabel : label;
-
+}: CopyButtonProps) {
+  const t = useAppTheme();
+  const { state, copy } = useCopyToClipboard(value);
+  const copied = state === 'copied',
+    failed = state === 'error';
+  const text = copied
+    ? copiedLabel
+    : failed
+      ? 'Could not copy. Try again'
+      : label;
+  const tint = copied
+    ? t.colors.success[500]
+    : failed
+      ? t.colors.error[500]
+      : (color ?? t.colors.text.secondary);
   return (
     <PressableScale
-      onPress={handlePress}
-      style={[styles.button, style]}
-      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      onPress={async () => {
+        if (await copy()) {
+          feedback.success();
+          onCopied?.();
+        }
+      }}
+      style={[
+        {
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: t.spacing[1.5],
+          minHeight: 44,
+          minWidth: 44,
+        },
+        style,
+      ]}
       accessibilityRole="button"
-      accessibilityLabel={copied ? `${copiedLabel}` : `Copy ${label ?? 'to clipboard'}`}
+      accessibilityLabel={text ?? 'Copy to clipboard'}
+      accessibilityLiveRegion="polite"
     >
-      <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={size} color={tint} />
-      {!!text && <Text style={[styles.label, { color: tint }]}>{text}</Text>}
+      <Ionicons
+        name={
+          copied
+            ? 'checkmark'
+            : failed
+              ? 'alert-circle-outline'
+              : 'copy-outline'
+        }
+        size={size}
+        color={tint}
+      />
+      {!!text && (
+        <Text
+          style={{
+            fontSize: t.typography.fontSize.sm,
+            color: tint,
+            flexShrink: 1,
+          }}
+        >
+          {text}
+        </Text>
+      )}
     </PressableScale>
   );
-};
-
-const styles = StyleSheet.create({
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[1.5],
-  },
-  label: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.semibold,
-  },
-});
-
+}
 export default CopyButton;

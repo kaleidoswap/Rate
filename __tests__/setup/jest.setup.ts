@@ -179,6 +179,9 @@ jest.mock('@react-native-clipboard/clipboard', () => ({
 // Mock react-native modules
 jest.mock('react-native', () => ({
   Dimensions: { get: () => ({ width: 393, height: 852 }) },
+  useWindowDimensions: () => ({ width: 393, height: 852, scale: 1, fontScale: 1 }),
+  AccessibilityInfo: { setAccessibilityFocus: jest.fn() },
+  findNodeHandle: jest.fn(() => 1),
   StatusBar: 'StatusBar',
   RefreshControl: 'RefreshControl',
   DeviceEventEmitter: { addListener: jest.fn(() => ({ remove: jest.fn() })) },
@@ -210,7 +213,8 @@ jest.mock('react-native', () => ({
   ScrollView: 'ScrollView',
   Switch: 'Switch',
   Modal: 'Modal',
-  Pressable: 'Pressable',
+  Pressable: ({ onPress, disabled, children, ...props }) =>
+    require('react').createElement('Pressable', { ...props, disabled, onPress: (...args) => { if (!disabled) onPress?.(...args); } }, children),
   FlatList: 'FlatList',
   Image: 'Image',
   ActivityIndicator: 'ActivityIndicator',

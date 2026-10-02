@@ -4,10 +4,11 @@
 // design tokens wherever a canonical token exists, so this app stays visually
 // in sync with the web (rate-extension) and any other KaleidoSwap surface.
 // `k` is the flat web-facing palette (brand/intent colors, text/border ladders);
-// `kdDark` is the runtime dark palette (`makeTheme`) whose surface/text/border
+// `kdDark` is the legacy runtime palette (`makeTheme`) whose surface/text/border
 // values are the RN-shaped twins the web mirrors. Only genuinely app-specific
 // values (shade ramps, per-protocol/per-network leg colors) remain as literals
-// below — those are flagged as candidates to promote into kaleido-ui.
+// below. withPartnerTokens maps both themes to the merged slate design tokens.
+import { withPartnerTokens } from './partner'
 import { colors as k, makeTheme } from '@kaleidorg/kaleido-ui/tokens'
 
 // Equivalent/tabular balances render in Geist Mono — the same monospaced face
@@ -269,7 +270,7 @@ export interface ThemeType {
 
 export { ColorGradient }
 
-export const lightTheme: ThemeType = {
+const legacyLightTheme: ThemeType = {
   dark: false,
   colors: {
     // Primary: KaleidoSwap Green — Brand identity
@@ -674,22 +675,22 @@ export const lightTheme: ThemeType = {
  * Dark theme — KaleidoSwap's brand-default. Built from the light theme with
  * dark-blue (navy) surfaces, white-on-dark text and darker shadows/components.
  */
-export const darkTheme: ThemeType = {
-  ...lightTheme,
+const legacyDarkTheme: ThemeType = {
+  ...legacyLightTheme,
   dark: true,
   colors: {
-    ...lightTheme.colors,
+    ...legacyLightTheme.colors,
     // Override the lightest tint shades (used app-wide as subtle "tinted
     // surface" backgrounds) so they read as dark tints instead of bright
     // patches on the dark canvas. Mid/strong shades (text/icon) stay as-is.
-    primary: { ...lightTheme.colors.primary, 50: 'rgba(43, 238, 121, 0.12)', 100: 'rgba(43, 238, 121, 0.18)' },
-    secondary: { ...lightTheme.colors.secondary, 50: 'rgba(111, 50, 255, 0.14)', 100: 'rgba(111, 50, 255, 0.20)' },
-    accent: { ...lightTheme.colors.accent, 50: 'rgba(111, 50, 255, 0.14)', 100: 'rgba(111, 50, 255, 0.20)' },
-    success: { ...lightTheme.colors.success, 50: 'rgba(43, 238, 121, 0.12)', 100: 'rgba(43, 238, 121, 0.18)' },
-    warning: { ...lightTheme.colors.warning, 50: 'rgba(250, 204, 21, 0.12)', 100: 'rgba(250, 204, 21, 0.18)' },
-    error: { ...lightTheme.colors.error, 50: 'rgba(249, 64, 64, 0.12)', 100: 'rgba(249, 64, 64, 0.18)' },
-    info: { ...lightTheme.colors.info, 50: 'rgba(66, 144, 255, 0.12)', 100: 'rgba(66, 144, 255, 0.18)' },
-    gray: { ...lightTheme.colors.gray, 50: '#0F1C33', 100: '#11203B', 200: '#18294C', 300: '#20335C' },
+    primary: { ...legacyLightTheme.colors.primary, 50: 'rgba(43, 238, 121, 0.12)', 100: 'rgba(43, 238, 121, 0.18)' },
+    secondary: { ...legacyLightTheme.colors.secondary, 50: 'rgba(111, 50, 255, 0.14)', 100: 'rgba(111, 50, 255, 0.20)' },
+    accent: { ...legacyLightTheme.colors.accent, 50: 'rgba(111, 50, 255, 0.14)', 100: 'rgba(111, 50, 255, 0.20)' },
+    success: { ...legacyLightTheme.colors.success, 50: 'rgba(43, 238, 121, 0.12)', 100: 'rgba(43, 238, 121, 0.18)' },
+    warning: { ...legacyLightTheme.colors.warning, 50: 'rgba(250, 204, 21, 0.12)', 100: 'rgba(250, 204, 21, 0.18)' },
+    error: { ...legacyLightTheme.colors.error, 50: 'rgba(249, 64, 64, 0.12)', 100: 'rgba(249, 64, 64, 0.18)' },
+    info: { ...legacyLightTheme.colors.info, 50: 'rgba(66, 144, 255, 0.12)', 100: 'rgba(66, 144, 255, 0.18)' },
+    gray: { ...legacyLightTheme.colors.gray, 50: '#0F1C33', 100: '#11203B', 200: '#18294C', 300: '#20335C' },
     background: {
       primary: kdDark.background,    // #0A1326
       secondary: '#0C1730',          // app-local mid-tone (no shared token)
@@ -722,33 +723,36 @@ export const darkTheme: ThemeType = {
     },
   },
   shadows: {
-    ...lightTheme.shadows,
-    sm: { ...lightTheme.shadows.sm, shadowColor: '#000000', shadowOpacity: 0.3 },
-    base: { ...lightTheme.shadows.base, shadowColor: '#000000', shadowOpacity: 0.4 },
-    md: { ...lightTheme.shadows.md, shadowColor: '#000000', shadowOpacity: 0.4 },
-    lg: { ...lightTheme.shadows.lg, shadowColor: '#000000', shadowOpacity: 0.5 },
-    xl: { ...lightTheme.shadows.xl, shadowColor: '#000000', shadowOpacity: 0.5 },
-    '2xl': { ...lightTheme.shadows['2xl'], shadowColor: '#000000', shadowOpacity: 0.6 },
+    ...legacyLightTheme.shadows,
+    sm: { ...legacyLightTheme.shadows.sm, shadowColor: '#000000', shadowOpacity: 0.3 },
+    base: { ...legacyLightTheme.shadows.base, shadowColor: '#000000', shadowOpacity: 0.4 },
+    md: { ...legacyLightTheme.shadows.md, shadowColor: '#000000', shadowOpacity: 0.4 },
+    lg: { ...legacyLightTheme.shadows.lg, shadowColor: '#000000', shadowOpacity: 0.5 },
+    xl: { ...legacyLightTheme.shadows.xl, shadowColor: '#000000', shadowOpacity: 0.5 },
+    '2xl': { ...legacyLightTheme.shadows['2xl'], shadowColor: '#000000', shadowOpacity: 0.6 },
   },
   components: {
-    ...lightTheme.components,
+    ...legacyLightTheme.components,
     button: {
-      ...lightTheme.components.button,
-      secondary: { ...lightTheme.components.button.secondary, backgroundColor: '#18294C', borderColor: 'rgba(255,255,255,0.10)' },
-      ghost: { ...lightTheme.components.button.ghost, backgroundColor: 'transparent' },
+      ...legacyLightTheme.components.button,
+      secondary: { ...legacyLightTheme.components.button.secondary, backgroundColor: '#18294C', borderColor: 'rgba(255,255,255,0.10)' },
+      ghost: { ...legacyLightTheme.components.button.ghost, backgroundColor: 'transparent' },
     },
     card: {
-      ...lightTheme.components.card,
-      default: { ...lightTheme.components.card.default, backgroundColor: '#0F1C33', shadowColor: '#000000', shadowOpacity: 0.3 },
-      elevated: { ...lightTheme.components.card.elevated, backgroundColor: '#16273F', shadowColor: '#000000', shadowOpacity: 0.4 },
+      ...legacyLightTheme.components.card,
+      default: { ...legacyLightTheme.components.card.default, backgroundColor: '#0F1C33', shadowColor: '#000000', shadowOpacity: 0.3 },
+      elevated: { ...legacyLightTheme.components.card.elevated, backgroundColor: '#16273F', shadowColor: '#000000', shadowOpacity: 0.4 },
     },
     input: {
-      ...lightTheme.components.input,
-      default: { ...lightTheme.components.input.default, backgroundColor: '#11203B', borderColor: 'rgba(255,255,255,0.10)' },
+      ...legacyLightTheme.components.input,
+      default: { ...legacyLightTheme.components.input.default, backgroundColor: '#11203B', borderColor: 'rgba(255,255,255,0.10)' },
       focused: { borderColor: k.primary, backgroundColor: '#0F1C33' },
     },
   },
 };
+
+export const lightTheme = withPartnerTokens(legacyLightTheme);
+export const darkTheme = withPartnerTokens(legacyDarkTheme);
 
 /**
  * The active app theme. Dark is the brand default ("dark backgrounds anchor

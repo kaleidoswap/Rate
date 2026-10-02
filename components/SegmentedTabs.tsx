@@ -14,6 +14,7 @@ import { PressableScale } from './PressableScale';
 export interface SegmentOption<T extends string = string> {
   key: T;
   label: string;
+  disabled?: boolean;
   icon?: keyof typeof Ionicons.glyphMap;
 }
 
@@ -45,6 +46,7 @@ export function SegmentedTabs<T extends string = string>({
         return (
           <PressableScale
             key={opt.key}
+            disabled={opt.disabled}
             onPress={() => {
               if (!active) feedback.select();
               onChange(opt.key);
@@ -53,20 +55,30 @@ export function SegmentedTabs<T extends string = string>({
               styles.tab,
               fill && !scrollable && styles.tabFill,
               active ? styles.tabActive : styles.tabInactive,
+              opt.disabled && { opacity: 0.5 },
             ]}
             accessibilityRole="tab"
-            accessibilityState={{ selected: active }}
+            accessibilityState={{ selected: active, disabled: !!opt.disabled }}
             accessibilityLabel={opt.label}
           >
             {opt.icon && (
               <Ionicons
                 name={opt.icon}
                 size={14}
-                color={active ? theme.colors.text.inverse : theme.colors.text.secondary}
+                color={
+                  active
+                    ? theme.colors.text.inverse
+                    : theme.colors.text.secondary
+                }
                 style={styles.tabIcon}
               />
             )}
-            <Text style={[styles.tabText, active ? styles.tabTextActive : styles.tabTextInactive]}>
+            <Text
+              style={[
+                styles.tabText,
+                active ? styles.tabTextActive : styles.tabTextInactive,
+              ]}
+            >
               {opt.label}
             </Text>
           </PressableScale>
@@ -91,55 +103,56 @@ export function SegmentedTabs<T extends string = string>({
   );
 }
 
-const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
-  // A horizontal ScrollView otherwise grows into the available vertical space.
-  scroll: { flexGrow: 0, flexShrink: 0 },
-  scrollContent: {
-    alignItems: 'flex-start',
-    paddingRight: theme.spacing[4],
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-  },
-  rowFill: {
-    flex: 1,
-  },
-  tab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[2],
-    borderRadius: theme.borderRadius.full,
-    borderWidth: 1,
-    minHeight: 44,
-  },
-  tabFill: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  tabActive: {
-    backgroundColor: theme.colors.primary[500],
-    borderColor: theme.colors.primary[500],
-  },
-  tabInactive: {
-    backgroundColor: theme.colors.surface.secondary,
-    borderColor: theme.colors.border.light,
-  },
-  tabIcon: {
-    marginRight: 5,
-  },
-  tabText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.semibold,
-  },
-  tabTextActive: {
-    color: theme.colors.text.inverse,
-  },
-  tabTextInactive: {
-    color: theme.colors.text.secondary,
-  },
-});
+const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    // A horizontal ScrollView otherwise grows into the available vertical space.
+    scroll: { flexGrow: 0, flexShrink: 0 },
+    scrollContent: {
+      alignItems: 'flex-start',
+      paddingRight: theme.spacing[4],
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[2],
+    },
+    rowFill: {
+      flex: 1,
+    },
+    tab: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: theme.spacing[4],
+      paddingVertical: theme.spacing[2],
+      borderRadius: theme.borderRadius.full,
+      borderWidth: 1,
+      minHeight: 44,
+    },
+    tabFill: {
+      flex: 1,
+      justifyContent: 'center',
+    },
+    tabActive: {
+      backgroundColor: theme.colors.primary[500],
+      borderColor: theme.colors.primary[500],
+    },
+    tabInactive: {
+      backgroundColor: theme.colors.surface.secondary,
+      borderColor: theme.colors.border.light,
+    },
+    tabIcon: {
+      marginRight: 5,
+    },
+    tabText: {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.semibold,
+    },
+    tabTextActive: {
+      color: theme.colors.text.inverse,
+    },
+    tabTextInactive: {
+      color: theme.colors.text.secondary,
+    },
+  });
 
 export default SegmentedTabs;
