@@ -13,7 +13,7 @@ jest.mock('../components/Button', () => ({ Button: ({ title, onPress, disabled }
 } }));
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), unresolvedAttempt: (a: any) => a?.status === 'pending' || a?.status === 'unknown' }));
 jest.mock('../services/kaleidoPay', () => ({
-  PaymentNotSentError: class extends Error {}, codeNetwork: () => undefined, railLabel: (r: string) => r,
+  PaymentNotSentError: class extends Error {}, codeNetwork: () => undefined, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   previewPayment: () => mockPreview, quotePaymentOffers: jest.fn(), executePaymentOffer: jest.fn(), checkPaymentStatus: jest.fn(), registerKaleidoPayAccount: jest.fn(),
   quoteSpend: (q: any) => ({ asset: { ticker: 'sats' }, amount: q.recipientSat, fee: q.feeSat, total: q.totalSat }),
   formatSpend: (v: number) => `${v} sats`, bestOffer: (offers: any[]) => offers.filter(o => o.quote).sort((a, b) => a.quote.totalSat - b.quote.totalSat)[0],

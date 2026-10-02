@@ -276,7 +276,23 @@ export async function initializeWdkProtocols(
  * Bark connects from host config (./bark.ts), not from a wallet NetworkConfig.
  * Same per-protocol contract as the loop above: record the outcome, never throw.
  */
+let barkConnecting: Promise<void> | null = null
+
 async function connectBark(
+  manager: ProtocolManager,
+  mnemonic: string,
+  results: Map<ProtocolType, { success: boolean; error?: string }>,
+): Promise<void> {
+  // Initializations can overlap; a second open of Bark's data directory fails.
+  if (barkConnecting) {
+    await barkConnecting
+    return connectBark(manager, mnemonic, results)
+  }
+  barkConnecting = connectBarkOnce(manager, mnemonic, results).finally(() => { barkConnecting = null })
+  return barkConnecting
+}
+
+async function connectBarkOnce(
   manager: ProtocolManager,
   mnemonic: string,
   results: Map<ProtocolType, { success: boolean; error?: string }>,

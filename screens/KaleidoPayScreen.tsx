@@ -10,7 +10,7 @@ import { Button } from '../components/Button';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppSelector } from '../store/hooks';
-import { codeNetwork, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
+import { codeNetwork, prepareKaleidoPay, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
 import type { Network, Preview, PaymentOffer } from '../services/kaleidoPay';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt } from '../services/kaleidoPay/attempts';
 import { protocolManager } from '../services/protocols';
@@ -83,6 +83,8 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
     setBusy(true); setError('');
     if (refresh) setPreviousTotal(total);
     try {
+      await prepareKaleidoPay();
+      if (current !== revision.current) return;
       const fresh = previewPayment(code, network, amountInSats, requestId.current);
       const result = await quotePaymentOffers(fresh);
       if (current !== revision.current) return;

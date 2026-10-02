@@ -38,6 +38,16 @@ export interface PaymentOffer {
 }
 const accounts = new Map<string, PayAccount>();
 const owners = new WeakMap<PaymentOffer, { account: PayAccount; snapshot: string }>();
+const preparers = new Set<() => Promise<void>>();
+/** An account that needs async setup before it can route (e.g. a server key) registers here. */
+export function registerKaleidoPayPreparer(prepare: () => Promise<void>): () => void {
+  preparers.add(prepare);
+  return () => { preparers.delete(prepare); };
+}
+/** Run before previewing a payment; never throws, waits at most 8 s. */
+export async function prepareKaleidoPay(): Promise<void> {
+  await Promise.race([Promise.allSettled([...preparers].map(p => p())), new Promise(r => setTimeout(r, 8000))]);
+}
 export function registerKaleidoPayAccount(account: PayAccount): () => void {
   accounts.set(account.source.id, account);
   return () => { if (accounts.get(account.source.id) === account) accounts.delete(account.source.id); };

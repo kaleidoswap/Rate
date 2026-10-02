@@ -148,3 +148,20 @@ test('Bark sends on-chain itself, next to the swap providers, with its own fee q
   await expect(account.status!('oc-1')).resolves.toEqual({ status: 'completed', reference: 'ef'.repeat(32) });
   await expect(account.quote({ ...p, code: {} }, route)).rejects.toThrow('no bitcoin address');
 });
+
+test('reviewing a payment syncs Bark and adds the Ark route when the key arrived late', async () => {
+  const { previewPayment, prepareKaleidoPay } = require('./index');
+  const offer = require('@universal-bolt12/universal-code').withAcceptedRails(openOffer, [{ rail: RAIL, address: 'ark1receiver' }]);
+  jest.useFakeTimers();
+  let synced = false;
+  const b = { ...bark(3), backend: { ...bark(3).backend, sync: jest.fn(async () => { synced = true; }) },
+    getConnectionInfo: jest.fn(async () => synced ? { connected: true, nodeId: SERVER } : { connected: true }) };
+  connectBarkToKaleidoPay(b, 'mainnet');
+  await jest.advanceTimersByTimeAsync(0);
+  expect(previewPayment(offer, 'mainnet', '2100', 'req').plan.route.sourceId).toBe('bark');
+  jest.useRealTimers();
+  await prepareKaleidoPay();
+  expect(b.backend.sync).toHaveBeenCalled();
+  expect(previewPayment(offer, 'mainnet', '2100', 'req').plan.route).toMatchObject({ sourceId: 'bark-ark', to: RAIL });
+  disconnectBarkFromKaleidoPay();
+});

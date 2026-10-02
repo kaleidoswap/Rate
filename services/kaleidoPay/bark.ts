@@ -3,7 +3,7 @@ import { decodeOffer } from '@universal-bolt12/universal-code';
 import type { Network, Route } from '@universal-bolt12/universal-code';
 import { validFeeSats } from '../paymentReview';
 import { createElectrumSwapAccount } from './electrumSwapAccount';
-import { registerKaleidoPayAccount } from './index';
+import { registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
 import type { AccountQuoteOption, PayAccount, PaymentResult, Preview, Quote } from './index';
 import { lightningPayerFrom } from './lightningPayer';
 import type { LightningSender } from './lightningPayer';
@@ -14,6 +14,7 @@ export interface BarkPaySender extends LightningSender {
   backend?: {
     estimatePaymentFee(kind: 'lightning' | 'ark' | 'onchain', amount: number, address?: string): Promise<{ feeSats: number }>;
     isBarkAddress?(address: string): boolean;
+    sync?(): Promise<unknown>;
   };
   getConnectionInfo?(): Promise<{ connected: boolean; nodeId?: string; network?: string }>;
 }
@@ -224,17 +225,27 @@ export function connectBarkToKaleidoPay(bark: BarkPaySender, network: Network): 
   disconnect?.();
   const current = ++generation;
   const unregister = [registerKaleidoPayAccount(createBarkPayAccount(bark, network)), registerKaleidoPayAccount(createBarkOnchainAccount(bark, network))];
+  let ark: Promise<boolean> | null = null;
+  // The Ark route needs the server key, which the wallet reports only once it has reached the server.
+  const tryArk = async (sync: boolean): Promise<boolean> => {
+    if (sync) await bark.backend?.sync?.().catch(() => undefined);
+    const info = await bark.getConnectionInfo?.().catch(() => undefined);
+    const rail = info?.connected && info.nodeId ? barkRail(info.nodeId) : null;
+    if (!rail || current !== generation) return false;
+    unregister.push(registerKaleidoPayAccount(createBarkArkAccount(bark, network, rail)));
+    return true;
+  };
+  const ensureArk = (sync: boolean) => {
+    ark = ark ?? tryArk(sync).then(ok => { if (!ok) ark = null; return ok; });
+    return ark;
+  };
+  unregister.push(registerKaleidoPayPreparer(async () => { await ensureArk(true); }));
   disconnect = () => { generation++; unregister.forEach(u => u()); };
-  // The Ark route needs the server key, which the wallet learns once it has reached the server.
   void (async () => {
     for (const delay of ARK_INFO_RETRY_MS) {
       if (delay) await new Promise(r => setTimeout(r, delay));
-      if (current !== generation) return;
-      const info = await bark.getConnectionInfo?.().catch(() => undefined);
-      const rail = info?.connected && info.nodeId ? barkRail(info.nodeId) : null;
-      if (rail) { unregister.push(registerKaleidoPayAccount(createBarkArkAccount(bark, network, rail))); return; }
+      if (current !== generation || await ensureArk(false)) return;
     }
-    // Without the server key, Bark pays over Lightning and on-chain only.
   })();
 }
 
