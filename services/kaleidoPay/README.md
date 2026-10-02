@@ -154,3 +154,8 @@ Validation: all 71 Jest suites / 491 tests passed, including two regression test
 for incomplete Bark quotes and preservation of payment status recovery. Native
 simulator interaction was not verified: Device Hub access timed out. The first
 iOS bundle attempt also found missing installed expo-image-picker dependencies.
+
+After restoring expo-image-picker 17.0.11 and its image-loader dependency locally,
+a clean `expo export --platform ios --clear` succeeded (5,276 modules, Hermes
+bundle). The existing development server retained stale module resolution errors;
+the clean export verifies bundling, not native execution or payment settlement.
