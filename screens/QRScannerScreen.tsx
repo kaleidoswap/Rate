@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { isKaleidoPayCode } from '../services/kaleidoPay';
+import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
 // screens/QRScannerScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -103,7 +103,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       if (captureMode === 'contact') {
         navigation.navigate(returnScreen, { scannedContact: data }); return;
       }
-      if (isKaleidoPayCode(data)) {
+      // With Bark connected, a plain address also goes to KaleidoPay: Bark on-chain and swap providers compete there.
+      if (isKaleidoPayCode(data) || (isSwappableAddress(data) && !!protocolManager.getAdapterIfAvailable('BARK')?.isConnected())) {
         navigation.navigate('KaleidoPay', { code: data }); return;
       }
       const paymentData = await processScannedData(data);

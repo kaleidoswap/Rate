@@ -1,5 +1,5 @@
 import { encodeOffer, encodePaymentCode } from '@universal-bolt12/universal-code';
-import { codeNetwork, previewPayment, quotePayment, railLabel, registerKaleidoPayAccount, isKaleidoPayCode } from './index';
+import { isSwappableAddress, codeNetwork, previewPayment, quotePayment, railLabel, registerKaleidoPayAccount, isKaleidoPayCode } from './index';
 const offer = encodeOffer([{ type: 10n, value: new TextEncoder().encode('Coffee') }]);
 const code = encodePaymentCode({ offer, amountSat: 50000 }, 'signet');
 
@@ -48,4 +48,11 @@ test('the offer sets the receiver order; Ark rails without an address are skippe
   expect(p.request.acceptedRails.map(railLabel)).toEqual(['Arkade', 'Lightning', 'On-chain']);
   expect(codeNetwork(`lightning:${offer}`)).toBe('mainnet');
   expect(codeNetwork('lno1notanoffer')).toBeUndefined();
+});
+
+test('plain mainnet and signet addresses can go to KaleidoPay; regtest and offers cannot', () => {
+  expect(isSwappableAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq')).toBe(true);
+  expect(isSwappableAddress('bitcoin:tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx?amount=0.001')).toBe(true);
+  expect(isSwappableAddress('bcrt1pssfktumhecj6fehwfwsd3vt3w0000000000000000000000000000')).toBe(false);
+  expect(isSwappableAddress('lno1qqqq')).toBe(false);
 });

@@ -61,6 +61,12 @@ export function isKaleidoPayCode(text: string): boolean {
   const code = normalizePaymentCode(text);
   return /^lno1/i.test(code) || /^bitcoin:/i.test(code) && /[?&]lno=/i.test(code);
 }
+/** A plain mainnet/test-network bitcoin address (not regtest): KaleidoPay can pay it through swap providers. */
+export function isSwappableAddress(text: string): boolean {
+  const code = normalizePaymentCode(text);
+  const body = /^bitcoin:/i.test(code) ? code.slice(8).split('?')[0] : code;
+  return !/[?&]lno=/i.test(code) && /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/.test(body) && !/^bcrt1/i.test(body);
+}
 const RAIL_LABELS: Record<string, string> = { bark: 'Bark', arkade: 'Arkade', ln: 'Lightning', btc: 'On-chain', liquid: 'Liquid', 'rgb-ln': 'RGB Lightning' };
 export function railLabel(rail: string): string {
   return RAIL_LABELS[rail.split(':')[0]] ?? rail;
