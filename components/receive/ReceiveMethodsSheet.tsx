@@ -6,12 +6,11 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import { ReceiveQr } from './ReceiveQr';
 import { ReceiveRequestActions } from './ReceiveRequestActions';
 import { NetworkIcon } from '../NetworkIcon';
-import { PaymentNetworkLabel } from '../payments/PaymentNetworkLabel';
 import { InvoiceExpiry } from '../payments/InvoiceExpiry';
 
 export interface ReceiveCodeMethod { key: string; label: string; value: string; layer?: string; protocol?: string }
-export function ReceiveMethodsSheet({ visible, methods, qrSize, onClose, children, onRefresh, showCountdown = false, onAdvancedOpen }: {
-  visible: boolean; methods: ReceiveCodeMethod[]; qrSize: number; onClose: () => void; children?: React.ReactNode; onRefresh?: () => void; showCountdown?: boolean; onAdvancedOpen?: () => void;
+export function ReceiveMethodsSheet({ visible, methods, qrSize, onClose, children, onRefresh, showCountdown = false, onAdvancedOpen, additionalMethods }: {
+  additionalMethods?: React.ReactNode; visible: boolean; methods: ReceiveCodeMethod[]; qrSize: number; onClose: () => void; children?: React.ReactNode; onRefresh?: () => void; showCountdown?: boolean; onAdvancedOpen?: () => void;
 }) {
   const t = useAppTheme();
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -37,7 +36,6 @@ export function ReceiveMethodsSheet({ visible, methods, qrSize, onClose, childre
           <InvoiceExpiry showCountdown={showCountdown} invoice={selected.value} onRefresh={onRefresh} />
           <ReceiveRequestActions key={selected.key} value={selected.value} label={selected.label} showValue />
         </> : <>
-          {methods.length > 0 && <Text style={{ color: t.colors.text.secondary }}>Your main QR includes these methods. Choose one for a separate code.</Text>}
           {methods.map(method => <TouchableOpacity key={method.key} accessibilityRole="button" accessibilityLabel={`Show ${method.label} payment code`}
             onPress={() => setSelectedKey(method.key)} style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], borderBottomWidth: 1, borderBottomColor: t.colors.border.light }}>
             <View style={{ width: 40, height: 40, borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
@@ -45,14 +43,11 @@ export function ReceiveMethodsSheet({ visible, methods, qrSize, onClose, childre
             </View>
             <View style={{ flex: 1, gap: t.spacing[1] }}>
               <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.base }}>{method.label}</Text>
-              <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>
-                {method.layer === 'lightning' ? `Lightning · ${method.protocol === 'SPARK' ? 'Spark' : 'Connected wallet'}` : 'Show QR and share'}
-              </Text>
-              <PaymentNetworkLabel request={method.value} />
             </View>
             <Ionicons name="chevron-forward" size={18} color={t.colors.text.secondary} />
           </TouchableOpacity>)}
-          {!!children && <>
+          {additionalMethods}
+          {React.Children.toArray(children).length > 0 && <>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Advanced receive options" accessibilityState={{ expanded: showAdvanced }}
               onPress={() => { if (!showAdvanced) onAdvancedOpen?.(); setShowAdvanced(v => !v); }} style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: t.spacing[3] }}>
               <Ionicons name="options-outline" size={20} color={t.colors.text.secondary} />

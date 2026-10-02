@@ -1783,32 +1783,12 @@ export default function ReceiveScreen({ navigation }: Props) {
   const renderNetworkChoices = () => {
     const canUseAll = selectedAsset.ticker === 'BTC' || /usd/i.test(selectedAsset.ticker);
     const isRgbAsset = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker) === 'RGB';
-    const status = getProtocolStatus();
-    const family = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
-    const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
-    const effectiveAccount =
-      (selectedAccount && accounts.includes(selectedAccount) ? selectedAccount : null)
-      ?? accounts[0]
-      ?? null;
-    const accountNetworks = effectiveAccount
-      ? getNetworkTypesForAccount(effectiveAccount, family).filter(
-          (network) => {
-            if (effectiveAccount === 'RGB' && nwcWalletType === 'ln' && network === 'onchain') return false;
-            if (effectiveAccount === 'RGB' && nwcWalletType === 'ln' && network === 'lightning') {
-              return nwcCapabilities.includes('createInvoice');
-            }
-            return true;
-          },
-        )
-      : [];
-    const selectableNetworks = routeAxis === 'account'
-      ? availableNetworkTypes.filter((network) => accountNetworks.includes(network))
-      : availableNetworkTypes;
+    const selectableNetworks = availableNetworkTypes;
     const options: Array<{ id: ReceiveMode; label: string; sub: string }> = [
-      ...(canUseAll && routeAxis === 'method'
+      ...(canUseAll && networkType !== 'unified'
         ? [{
             id: 'unified' as ReceiveMode,
-            label: 'All networks',
+            label: 'Combined QR',
             // USD is a different protocol set than BTC — reflect it in the hint.
             sub: /usd/i.test(selectedAsset.ticker)
               ? 'Liquid · Spark · optional RGB'
@@ -1835,42 +1815,47 @@ export default function ReceiveScreen({ navigation }: Props) {
         : <NetworkIcon network={id as ProtocolNetworkType} size={18} color={c} />;
 
     return (
-      <View style={styles.netSelectorWrap}>
-        <View style={styles.netDropdown}>
-          {options.map((o) => {
+      <View>
+        <View>
+          {options.filter(o => o.id === 'unified' || !receiveMethods.some(method => method.layer === o.id || method.key === o.id || (o.id === 'arkade' && method.protocol === 'ARKADE' && method.layer !== 'lightning'))).map((o) => {
             const active = o.id === networkType;
             const c = NETWORK_COLORS[o.id] || theme.colors.primary[500];
             return (
               <TouchableOpacity
                 key={o.id}
-                style={[styles.netOption, active && { backgroundColor: c + '12' }]}
+                accessibilityRole="button" accessibilityLabel={`Receive with ${o.label}`}
+                style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], borderBottomWidth: 1, borderBottomColor: theme.colors.border.light }}
                 onPress={() => {
                   receiveLog('tap.networkOption', { from: networkType, to: o.id });
                   feedback.select();
                   if (active) {
+                    void generateAddress();
+                    setShowPaymentOptions(false);
                     return;
                   }
                   resetReceiveSurface();
+                  setRouteAxis('method');
+                  setSelectedAccount(null);
                   setNetworkType(o.id);
                   if (selectedAsset.ticker === 'BTC') {
                     dispatch(setLastBtcReceiveRoute({
-                      axis: routeAxis,
+                      axis: 'method',
                       network: o.id,
-                      account: routeAxis === 'account' ? effectiveAccount : null,
+                      account: null,
                     }));
                   }
                   setShowPaymentOptions(false);
                 }}
                 activeOpacity={0.7}
               >
-                <View style={[styles.netGlyph, { backgroundColor: c + '1A' }]}>
+                <View style={{ width: 40, height: 40, borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
                   {glyph(o.id, c)}
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[styles.netOptionLabel, active && { color: c }]}>{o.label}</Text>
-                  <Text style={styles.netSelectorSub} numberOfLines={1}>{o.sub}</Text>
+
                 </View>
-                {active && <Ionicons name="checkmark-circle" size={18} color={c} />}
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
               </TouchableOpacity>
             );
           })}
@@ -2139,6 +2124,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
       <ReceiveMethodsSheet visible={showPaymentOptions}
         onAdvancedOpen={() => { if (!channelsLoading && getProtocolStatus().RGB) void loadChannels(); }}
+        additionalMethods={renderNetworkChoices()}
         methods={receiveMethods} qrSize={qrSize} showCountdown={showCountdown}
         onClose={() => setShowPaymentOptions(false)}
         onRefresh={() => {
@@ -2164,8 +2150,6 @@ export default function ReceiveScreen({ navigation }: Props) {
           </TouchableOpacity>
         )}
 
-        {renderRouteAxisSelector()}
-        {renderNetworkChoices()}
         {(networkType === 'arkade' || networkType === 'bark') && <View>
           {(['ark', 'boarding'] as const).map(mode => <TouchableOpacity key={mode}
             accessibilityRole="radio" accessibilityState={{ checked: arkadeSubMode === mode }}

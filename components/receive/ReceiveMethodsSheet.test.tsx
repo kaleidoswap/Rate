@@ -36,3 +36,15 @@ test('keeps account and network controls behind an explicit advanced action', ()
   fireEvent.press(screen.getByLabelText('Advanced receive options'));
   expect(screen.queryByText('Account options')).toBeNull();
 });
+
+test('shows additional available methods directly without repetitive instructions', () => {
+  const { Text, TouchableOpacity } = require('react-native');
+  const openBark = jest.fn();
+  const screen = render(<ReceiveMethodsSheet visible methods={methods} qrSize={248} onClose={jest.fn()}
+    additionalMethods={<TouchableOpacity accessibilityLabel="Receive with Bark" onPress={openBark}><Text>Bark</Text></TouchableOpacity>} />);
+  expect(screen.getByText('Bark')).toBeTruthy();
+  expect(screen.queryByText('Show QR and share')).toBeNull();
+  expect(screen.queryByText('Advanced options')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Receive with Bark'));
+  expect(openBark).toHaveBeenCalledTimes(1);
+});
