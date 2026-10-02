@@ -10,7 +10,7 @@ import {
     TouchableOpacity,
     ActivityIndicator,
 } from 'react-native';
-import { useSelector } from 'react-redux';
+import { useAppSelector } from '../store/hooks';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
@@ -44,8 +44,8 @@ function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyph
 
 function typeLabel(type: ActivityItemType): string {
     switch (type) {
-        case 'receive': return 'Received';
-        case 'send': return 'Sent';
+        case 'receive': return 'Receive';
+        case 'send': return 'Payment';
         case 'swap': return 'Swap';
         case 'issuance': return 'Issuance';
         case 'channel_open': return 'Channel Open';
@@ -75,8 +75,8 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
 const MAX_ITEMS = 4;
 
 export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
-    const swapHistory = useSelector((state: RootState) => state.swap.swapHistory);
-    const rgbAssets = useSelector((state: RootState) => state.assets.rgbAssets);
+    const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
+    const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
 
     const [items, setItems] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -102,10 +102,11 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
             venue: s.venue,
         }));
         try {
-            const { items: result } = await loadActivity({ assets, swaps });
-            setItems([...result].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).slice(0, MAX_ITEMS));
+            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps });
+            setItems([...result].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status))).slice(0, MAX_ITEMS));
+            return hadConnectedAdapter && failedSources === 0;
         } catch {
-            // Non-critical widget — fail silently.
+            return false;
         }
     }, [rgbAssets, swapHistory]);
 
@@ -169,7 +170,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                         ]}
                         numberOfLines={1}
                     >
-                        {amountPrefix(item.type)}{item.amount} {item.assetTicker}
+                        {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.amount} {item.assetTicker}
                     </Text>
                 )}
             </TouchableOpacity>
@@ -194,7 +195,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                 <View style={styles.list}>{items.map(renderRow)}</View>
             )}
 
-            <ActivityDetailSheet item={selected} onClose={() => setSelected(null)} />
+            <ActivityDetailSheet onRefresh={fetchRecent} item={items.find(item => item.id === selected?.id) ?? selected} onClose={() => setSelected(null)} />
         </View>
     );
 };

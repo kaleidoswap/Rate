@@ -1,3 +1,4 @@
+import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnectionNotice';
 import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
 import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
@@ -167,7 +168,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Fit the QR within the phone width while preserving a generous quiet zone.
   const { width: screenWidth } = useWindowDimensions();
-  const qrSize = Math.max(172, Math.min(248, Math.round(screenWidth - 104)));
+  const qrSize = Math.max(96, Math.min(248, Math.round(screenWidth - 104)));
   
   // Safe destructuring with fallbacks
   const rgbAssets = (rgbAssetsRaw || []) as RGBAsset[];
@@ -2037,9 +2038,10 @@ export default function ReceiveScreen({ navigation }: Props) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="always"
+        keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        <ReceiveConnectionNotice hasRequest={!!(unifiedUri || address)} />
         {renderAssetTabs()}
         {BARK_ENABLED && selectedAsset.asset_id === 'BTC' && (
           <TouchableOpacity accessibilityRole="button" onPress={() => { cancelReceiveWork(); navigation.navigate('Bark'); }}

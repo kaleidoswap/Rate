@@ -26,7 +26,8 @@ export type ActivityItemType =
   | 'channel_close'
   | 'issuance';
 
-export type ActivityStatus = 'confirmed' | 'pending' | 'failed';
+import type { ActivityStatus } from '../utils/paymentStatus';
+export type { ActivityStatus } from '../utils/paymentStatus';
 
 export interface ActivityItem {
   id: string;
@@ -46,6 +47,8 @@ export interface ActivityItem {
   txid: string;
   layer: ActivityLayer;
   fee?: number;
+  account?: string;
+  network?: string;
   paymentHash?: string;
   kind?: string;
 }
@@ -95,7 +98,8 @@ function normalizePaymentStatus(status?: string): ActivityStatus {
   const s = (status || '').toLowerCase();
   if (s === 'confirmed' || s === 'succeeded' || s === 'success' || s === 'settled' || s === 'completed') return 'confirmed';
   if (s === 'failed' || s === 'error' || s === 'expired') return 'failed';
-  return 'pending';
+  if (['pending', 'in_flight', 'processing', 'broadcast', 'unconfirmed', 'initiated'].includes(s)) return 'pending';
+  return 'unknown';
 }
 
 function normalizeProtocolTransactionStatus(
@@ -103,7 +107,7 @@ function normalizeProtocolTransactionStatus(
   tx: any,
 ): ActivityStatus {
   const status = normalizePaymentStatus(tx?.status);
-  if (status !== 'pending') return status;
+  if (status === 'confirmed' || status === 'failed') return status;
 
   const raw = tx?.protocolData ?? tx ?? {};
   if (proto === 'SPARK' && tx?.type === 'receive') {
@@ -218,6 +222,8 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           txid: p.payment_hash || '',
           layer: isRgb ? 'RGB-LN' : 'LN',
           paymentHash: p.payment_hash,
+          account: 'RGB',
+          fee: typeof p.fee_msat === 'number' ? p.fee_msat / 1000 : undefined,
         });
       }
     } catch (err) {
@@ -271,7 +277,9 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
     if (!adapter?.isConnected()) continue;
     hadConnectedAdapter = true;
     try {
-      const network = proto === 'BARK' ? (await adapter.getConnectionInfo()).network : undefined;
+      // Missing connection metadata must not hide otherwise readable history.
+      const info = await adapter.getConnectionInfo?.().catch(() => null);
+      const network = info?.network;
       const txs = await adapter.listTransactions({ limit: 50 });
       for (const tx of txs) {
         if (tx.type !== 'send' && tx.type !== 'receive') continue;
@@ -291,8 +299,10 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           status: normalizeProtocolTransactionStatus(proto, tx),
           timestamp: tx.timestamp,
           txid: tx.id,
-          layer: proto === 'BARK' ? (network === 'mainnet' ? 'Bark' : 'Bark Signet') : proto === 'SPARK' ? 'Spark' : 'Arkade',
+          layer: proto === 'BARK' ? (network === 'signet' ? 'Bark Signet' : 'Bark') : proto === 'SPARK' ? 'Spark' : 'Arkade',
           fee: tx.fee,
+          account: proto,
+          network,
         });
       }
     } catch (err) {

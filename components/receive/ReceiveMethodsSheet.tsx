@@ -6,6 +6,7 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import { ReceiveQr } from './ReceiveQr';
 import { ReceiveRequestActions } from './ReceiveRequestActions';
 import { NetworkIcon } from '../NetworkIcon';
+import { PaymentNetworkLabel } from '../payments/PaymentNetworkLabel';
 import { InvoiceExpiry } from '../payments/InvoiceExpiry';
 
 export interface ReceiveCodeMethod { key: string; label: string; value: string; layer?: string; protocol?: string }
@@ -47,6 +48,7 @@ export function ReceiveMethodsSheet({ visible, methods, qrSize, onClose, childre
               <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>
                 {method.layer === 'lightning' ? `Lightning · ${method.protocol === 'SPARK' ? 'Spark' : 'Connected wallet'}` : 'Show QR and share'}
               </Text>
+              <PaymentNetworkLabel request={method.value} />
             </View>
             <Ionicons name="chevron-forward" size={18} color={t.colors.text.secondary} />
           </TouchableOpacity>)}

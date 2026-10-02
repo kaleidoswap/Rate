@@ -1,3 +1,4 @@
+import { routeSpendable } from '../utils/payment-balance';
 import { paymentReceiptStatus } from '../utils/payment-receipt';
 import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { createRequestGuard } from '../utils/request-guard';
@@ -5,7 +6,7 @@ import { barkNetworkLabel, sendBarkPayment } from '../services/BarkService';
 import { isKaleidoPayCode } from '../services/kaleidoPay';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,7 +22,10 @@ import {
 import { AmountInput as WdkAmountInput, AssetSelector as WdkAssetSelector } from '@kaleidorg/kaleido-ui/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAvoidingView, Platform } from 'react-native';
-import { useSelector, useDispatch } from 'react-redux';
+import { useAppTheme } from '../theme/ThemeProvider';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { PaymentNetworkLabel } from '../components/payments/PaymentNetworkLabel';
+import { paymentRequestLabel } from '../utils/payment-network';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
@@ -118,13 +122,15 @@ interface DecodedRGBInvoice extends BaseRGBInvoiceResponse {
 }
 
 function SendScreen({ navigation, route }: Props) {
-  const dispatch = useDispatch<any>();
-  const walletState = useSelector((state: RootState) => state.wallet);
-  const assetsState = useSelector((state: RootState) => state.assets);
+  const dispatch = useAppDispatch();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const walletState = useAppSelector((state: RootState) => state.wallet);
+  const assetsState = useAppSelector((state: RootState) => state.assets);
   const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
-  const isBalanceLoading = useSelector((state: RootState) => state.wallet.isBalanceLoading);
-  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  const isBalanceLoading = useAppSelector((state: RootState) => state.wallet.isBalanceLoading);
+  const bitcoinUnit = useAppSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD, bitcoinPrice } = useBitcoinConversion();
 
   // Refresh BTC balances when the screen opens — balances aren't persisted, so
@@ -205,17 +211,25 @@ function SendScreen({ navigation, route }: Props) {
     })) : [])
   ];
 
-  // Spendable BTC for the currently chosen route. When a route is selected
-  // (e.g. "Pays from Spark") show that account's balance specifically; before a
-  // route is resolved fall back to the cross-protocol total. This is what makes
-  // the amount screen show a real balance instead of "0".
+  const [spendChannels, setSpendChannels] = useState<any[]>([]);
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
+  const rgbBalanceIsLightning = typeof (rgbAdapter as any)?.walletType === 'function';
+  useEffect(() => {
+    let active = true;
+    setSpendChannels([]);
+    if (rgbAdapter?.isConnected() && !rgbBalanceIsLightning && rgbAdapter.listChannels) {
+      void rgbAdapter.listChannels().then(channels => { if (active) setSpendChannels(channels as any[]); }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [rgbAdapter, rgbBalanceIsLightning, activeRoute?.account, activeRoute?.method]);
+  const availableForRoute = (account: string, method: string) => routeSpendable(
+    btcBalance?.byProtocol?.[account as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'], account, method, spendChannels, rgbBalanceIsLightning,
+  );
   const btcSpendableSats = useCallback((): number => {
-    const acct = (activeRoute?.account ?? route.params?.preferredAccount) as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | undefined;
-    const perAccount = acct ? btcBalance?.byProtocol?.[acct]?.[acct === 'RGB' ? 'total' : 'confirmed'] : undefined;
-    if (acct === 'BARK') return perAccount ?? 0;
-    if (typeof perAccount === 'number') return perAccount;
-    return btcBalance?.vanilla?.spendable || 0;
-  }, [activeRoute?.account, btcBalance, route.params?.preferredAccount]);
+    const account = activeRoute?.account ?? route.params?.preferredAccount;
+    if (!account) return 0;
+    return routeSpendable(btcBalance?.byProtocol?.[account as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'], account, activeRoute?.method, spendChannels, rgbBalanceIsLightning);
+  }, [activeRoute?.account, activeRoute?.method, btcBalance, route.params?.preferredAccount, spendChannels, rgbBalanceIsLightning]);
 
   // Keep the selected asset's balance/precision in sync with live wallet data.
   // `selectedAsset` is seeded once from state at mount, so without this its
@@ -234,7 +248,7 @@ function SendScreen({ navigation, route }: Props) {
       return { ...prev, balance: live.balance, precision: live.precision };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [btcBalance, rgbAssets, activeRoute?.account]);
+  }, [btcBalance, rgbAssets, btcSpendableSats]);
 
   useEffect(() => {
     let reviewTimer: ReturnType<typeof setTimeout> | undefined;
@@ -962,7 +976,7 @@ function SendScreen({ navigation, route }: Props) {
             return (
               <PressableScale
                 key={`${route.account}-${route.method}`}
-                onPress={() => { if (!disabled) { feedback.select(); setActiveRoute({ ...route, protocol: route.account }); } }}
+                onPress={() => { if (!disabled) { feedback.select(); feeRequestRef.current += 1; setFeeEstimate(null); setEstimatingFee(false); setPaymentStep('input'); setActiveRoute({ ...route, protocol: route.account }); } }}
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
                   backgroundColor: selected ? theme.colors.primary[50] : theme.colors.background.secondary,
@@ -985,8 +999,8 @@ function SendScreen({ navigation, route }: Props) {
                       </View>
                     )}
                   </View>
-                  <Text style={{ fontSize: 11.5, color: disabled ? theme.colors.error[500] : theme.colors.text.tertiary, marginTop: 1 }} numberOfLines={1}>
-                    {disabled ? (route.disabledReason || 'Unavailable') : route.summary}
+                  <Text style={{ fontSize: 11.5, color: disabled ? theme.colors.error[500] : theme.colors.text.tertiary, marginTop: 1 }}>
+                    {disabled ? (route.disabledReason || 'Unavailable') : `${route.summary}${selectedAsset.asset_id === 'BTC' ? ` · ${formatBitcoinAmount(availableForRoute(route.account, route.method), bitcoinUnit)} ${bitcoinUnit} available before fees` : ''}`}
                   </Text>
                 </View>
                 <Ionicons
@@ -1377,7 +1391,7 @@ function SendScreen({ navigation, route }: Props) {
       : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
     const totalSats = paymentTotal(effectiveAmountSats, feeEstimate);
     const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
-    const formatCost = (sats: number) => `${sats.toLocaleString()} sats${bitcoinPrice > 0 ? ` · ≈ $${formatSatoshisToUSD(sats)}` : ''}`;
+    const formatCost = (sats: number) => `${formatBitcoinAmount(sats, bitcoinUnit)} ${bitcoinUnit}${activeRoute?.account !== 'BARK' && bitcoinPrice > 0 ? ` · ≈ $${formatSatoshisToUSD(sats)}` : ''}`;
 
     return (
       <View style={styles.section}>
@@ -1395,6 +1409,23 @@ function SendScreen({ navigation, route }: Props) {
           </View>
 
           <View style={styles.reviewDetails}>
+            <PaymentNetworkLabel request={address} />
+            {selectedAsset.asset_id === 'BTC' && <>
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Available in this account</Text>
+                <Text style={styles.reviewValue}>{formatCost(btcSpendableSats())}</Text>
+              </View>
+              {totalSats !== null && totalSats <= btcSpendableSats() && <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>After payment and fee</Text>
+                <Text style={styles.reviewValue}>{formatCost(btcSpendableSats() - totalSats)}</Text>
+              </View>}
+              {(totalSats ?? effectiveAmountSats) > btcSpendableSats() && <Text accessibilityRole="alert" style={styles.sectionDescription}>Insufficient balance in this account. Tap Edit to choose another available account or lower the amount.</Text>}
+              {(totalSats ?? effectiveAmountSats) > btcSpendableSats() && sendRoutes.filter(option => !option.disabled && option.account !== activeRoute?.account && availableForRoute(option.account, option.method) >= effectiveAmountSats).map(option => <TouchableOpacity key={`${option.account}-${option.method}`} accessibilityRole="button" style={{ paddingVertical: theme.spacing[3] }} onPress={() => {
+                feeRequestRef.current += 1; setFeeEstimate(null); setEstimatingFee(false);
+                setActiveRoute({ ...option, protocol: option.account }); setPaymentStep('input');
+              }}><Text style={{ color: theme.colors.primary[500] }}>Review using {option.account} · fees recalculated</Text></TouchableOpacity>)}
+            </>}
+
             <View style={styles.reviewRow}>
               <Text style={styles.reviewLabel}>From account</Text>
               <Text style={styles.reviewValue}>{activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : activeRoute?.account || 'Choose an account'}</Text>
@@ -1415,8 +1446,8 @@ function SendScreen({ navigation, route }: Props) {
             )}
 
             <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Pays from</Text>
-              <Text style={styles.reviewValue}>{activeRoute?.account ?? 'Wallet'}</Text>
+              <Text style={styles.reviewLabel}>Request</Text>
+              <Text style={styles.reviewValue}>{paymentRequestLabel(address)}</Text>
             </View>
             <View style={styles.reviewRow}>
               <Text style={styles.reviewLabel}>Estimated fee</Text>
@@ -1465,7 +1496,7 @@ function SendScreen({ navigation, route }: Props) {
         />
         <Button
           title={`Pay ${effectiveAmount} ${unit}`}
-          disabled={estimatingFee || loading}
+          disabled={estimatingFee || loading || (selectedAsset.asset_id === 'BTC' && (paymentTotal(getEffectiveSats(), feeEstimate) ?? getEffectiveSats()) > btcSpendableSats())}
           variant="primary"
           onPress={handleSend}
           loading={loading}
@@ -1534,7 +1565,7 @@ function SendScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.secondary,

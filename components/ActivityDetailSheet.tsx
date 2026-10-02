@@ -2,7 +2,10 @@
 //
 // Bottom-sheet modal for a single activity item. Shows full detail: amount,
 // status, network layer, timestamp, fee, and a copyable txid/payment hash.
-import React from 'react';
+import React, { useMemo, useState } from 'react';
+import { useAppTheme } from '../theme/ThemeProvider';
+import { useAppSelector } from '../store/hooks';
+import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 import {
     Modal,
     View,
@@ -21,6 +24,7 @@ import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 interface Props {
     item: ActivityItem | null;
     onClose: () => void;
+    onRefresh?: () => Promise<boolean | void>;
 }
 
 function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
@@ -37,8 +41,8 @@ function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyph
 
 function typeLabel(item: ActivityItem): string {
     switch (item.type) {
-        case 'receive': return 'Received';
-        case 'send': return 'Sent';
+        case 'receive': return item.status === 'confirmed' ? 'Received' : 'Receive';
+        case 'send': return item.status === 'confirmed' ? 'Sent' : 'Payment';
         case 'swap': return 'Atomic Swap';
         case 'issuance': return item.kind === 'Inflation' ? 'Inflation' : 'Issuance';
         case 'channel_open': return 'Channel Open';
@@ -65,14 +69,19 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
     'Swap': 'Swap',
 };
 
-export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
+export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh }) => {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
+    const unit = useAppSelector(state => state.settings.bitcoinUnit);
+    const [checking, setChecking] = useState(false);
+    const [checkMessage, setCheckMessage] = useState('');
     if (!item) return null;
 
     const v = typeVisual(item.type);
     const st = ACTIVITY_STATUS_VISUAL[item.status];
     const hasAmount = item.amount !== '';
     const isIncoming = item.type === 'receive' || item.type === 'issuance';
-    const txLabel = item.source === 'payment' ? 'Payment hash' : 'Transaction ID';
+    const txLabel = item.paymentHash ? 'Payment hash' : 'Transaction ID';
 
     return (
         <Modal
@@ -84,6 +93,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
             <View style={styles.container}>
                 <View style={styles.handle} />
 
+                <ScrollView contentContainerStyle={styles.body}>
                 {/* Icon + type + amount */}
                 <View style={styles.header}>
                     <View style={[styles.bigIcon, { backgroundColor: v.color + '1A' }]}>
@@ -92,12 +102,11 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
                     <Text style={styles.typeLabel}>{typeLabel(item)}</Text>
                     {hasAmount && (
                         <Text style={[styles.amount, { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary }]}>
-                            {amountPrefix(item.type)}{item.amount} {item.assetTicker}
+                            {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
                         </Text>
                     )}
                 </View>
 
-                <ScrollView contentContainerStyle={styles.body}>
                     {/* Status */}
                     <View style={styles.row}>
                         <Text style={styles.rowLabel}>Status</Text>
@@ -109,12 +118,22 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
 
                     {/* Network layer */}
                     <View style={styles.row}>
-                        <Text style={styles.rowLabel}>Network</Text>
+                        <Text style={styles.rowLabel}>Payment method</Text>
                         <View style={styles.layerChip}>
                             <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
                         </View>
                     </View>
 
+                    <View style={styles.row}>
+                        <Text style={styles.rowLabel}>Account</Text>
+                        <Text style={styles.rowValue}>{item.account ?? (['LN', 'RGB-LN', 'RGB-L1', 'L1'].includes(item.layer) ? 'RGB' : item.layer)}</Text>
+                    </View>
+                    <View style={styles.row}>
+                        <Text style={styles.rowLabel}>Network</Text>
+                        <Text style={styles.rowValue}>{item.network ?? 'Not provided'}</Text>
+                    </View>
+                    {item.status === 'unknown' && <Text style={styles.rowLabel}>The provider has not confirmed the outcome. Check the status before sending again.</Text>}
+                    {item.status === 'pending' && <Text style={styles.rowLabel}>Submitted and waiting for confirmation. You can leave this screen and check again later.</Text>}
                     {/* Asset name */}
                     {!!item.assetName && (
                         <View style={styles.row}>
@@ -140,10 +159,10 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
                     )}
 
                     {/* Fee */}
-                    {item.fee != null && (
+                    {(
                         <View style={styles.row}>
                             <Text style={styles.rowLabel}>Fee</Text>
-                            <Text style={styles.rowValue}>{item.fee} sats</Text>
+                            <Text style={styles.rowValue}>{item.fee != null ? `${formatBitcoinAmount(item.fee, unit)} ${unit}` : 'Not provided'}</Text>
                         </View>
                     )}
 
@@ -157,6 +176,13 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
                             <Text style={styles.txidText} selectable numberOfLines={3}>{item.txid}</Text>
                         </View>
                     )}
+                    {onRefresh && <TouchableOpacity accessibilityRole="button" disabled={checking} style={styles.closeButton} onPress={async () => {
+                        setChecking(true); setCheckMessage('');
+                        try { const refreshed = await onRefresh(); setCheckMessage(refreshed === false ? 'Some accounts could not be checked. Try again when connected.' : 'Latest available activity checked.'); }
+                        catch { setCheckMessage('Could not check the status. Try again.'); }
+                        finally { setChecking(false); }
+                    }}><Text style={styles.closeButtonText}>{checking ? 'Checking…' : 'Check status'}</Text></TouchableOpacity>}
+                    {!!checkMessage && <Text accessibilityLiveRegion="polite" style={styles.rowLabel}>{checkMessage}</Text>}
                 </ScrollView>
 
                 <TouchableOpacity style={styles.closeButton} onPress={onClose} activeOpacity={0.8}>
@@ -167,7 +193,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose }) => {
     );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: theme.colors.background.primary,
