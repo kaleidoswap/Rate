@@ -25,6 +25,7 @@ import {
     type ActivityStatus,
     type AssetMeta,
 } from '../services/ActivityService';
+import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 
@@ -159,7 +160,7 @@ export default function HistoryScreen() {
             venue: s.venue,
         }));
         try {
-            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps });
+            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() });
             setItems(result);
             if (!hadConnectedAdapter && result.length === 0) {
                 setSoftError('Wallet is offline. Connect a protocol to see your activity.');

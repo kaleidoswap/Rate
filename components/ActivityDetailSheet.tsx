@@ -2,7 +2,8 @@
 //
 // Bottom-sheet modal for a single activity item. Shows full detail: amount,
 // status, network layer, timestamp, fee, and a copyable txid/payment hash.
-import React, { useMemo, useState } from 'react';
+// Pending on-chain items get an "Accelerate" action (AccelerationPanel).
+import React, { useEffect, useMemo, useState } from 'react';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppSelector } from '../store/hooks';
 import { formatBitcoinAmount } from '../utils/bitcoinUnits';
@@ -20,6 +21,8 @@ import { theme } from '../theme';
 import { CopyButton } from './CopyButton';
 import type { ActivityItem, ActivityItemType, ActivityLayer } from '../services/ActivityService';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { AccelerationPanel } from './AccelerationPanel';
+import { accelerationTarget } from '../services/TxAccelerationService';
 
 interface Props {
     item: ActivityItem | null;
@@ -75,6 +78,8 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const unit = useAppSelector(state => state.settings.bitcoinUnit);
     const [checking, setChecking] = useState(false);
     const [checkMessage, setCheckMessage] = useState('');
+    const [accelerating, setAccelerating] = useState(false);
+    useEffect(() => setAccelerating(false), [item?.id]);
     if (!item) return null;
 
     const v = typeVisual(item.type);
@@ -82,6 +87,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const hasAmount = item.amount !== '';
     const isIncoming = item.type === 'receive' || item.type === 'issuance';
     const txLabel = item.paymentHash ? 'Payment hash' : 'Transaction ID';
+    const target = accelerationTarget(item);
 
     return (
         <Modal
@@ -93,6 +99,11 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
             <View style={styles.container}>
                 <View style={styles.handle} />
 
+                {accelerating && target ? (
+                    <ScrollView contentContainerStyle={styles.body}>
+                        <AccelerationPanel target={target} onBack={() => setAccelerating(false)} />
+                    </ScrollView>
+                ) : (<>
                 <ScrollView contentContainerStyle={styles.body}>
                 {/* Icon + type + amount */}
                 <View style={styles.header}>
@@ -176,6 +187,12 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             <Text style={styles.txidText} selectable numberOfLines={3}>{item.txid}</Text>
                         </View>
                     )}
+                    {target && (
+                        <TouchableOpacity style={styles.accelerateButton} onPress={() => setAccelerating(true)} activeOpacity={0.8}>
+                            <Ionicons name="rocket-outline" size={18} color={theme.colors.primary[500]} />
+                            <Text style={styles.accelerateButtonText}>Accelerate</Text>
+                        </TouchableOpacity>
+                    )}
                     {onRefresh && <TouchableOpacity accessibilityRole="button" disabled={checking} style={styles.closeButton} onPress={async () => {
                         setChecking(true); setCheckMessage('');
                         try { const refreshed = await onRefresh(); setCheckMessage(refreshed === false ? 'Some accounts could not be checked. Try again when connected.' : 'Latest available activity checked.'); }
@@ -184,6 +201,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     }}><Text style={styles.closeButtonText}>{checking ? 'Checking…' : 'Check status'}</Text></TouchableOpacity>}
                     {!!checkMessage && <Text accessibilityLiveRegion="polite" style={styles.rowLabel}>{checkMessage}</Text>}
                 </ScrollView>
+                </>)}
 
                 <TouchableOpacity style={styles.closeButton} onPress={onClose} activeOpacity={0.8}>
                     <Text style={styles.closeButtonText}>Close</Text>
@@ -305,6 +323,22 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
         color: theme.colors.text.secondary,
         lineHeight: 18,
+    },
+    accelerateButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: theme.spacing[2],
+        marginTop: theme.spacing[2],
+        paddingVertical: theme.spacing[3.5],
+        borderRadius: theme.borderRadius.xl,
+        borderWidth: 1,
+        borderColor: theme.colors.primary[500],
+    },
+    accelerateButtonText: {
+        fontSize: theme.typography.fontSize.base,
+        fontWeight: '600',
+        color: theme.colors.primary[500],
     },
     closeButton: {
         marginHorizontal: theme.spacing[4],

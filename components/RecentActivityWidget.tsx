@@ -24,6 +24,7 @@ import {
     type ActivityLayer,
     type AssetMeta,
 } from '../services/ActivityService';
+import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 
 interface Props {
@@ -102,7 +103,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
             venue: s.venue,
         }));
         try {
-            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps });
+            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() });
             setItems([...result].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status))).slice(0, MAX_ITEMS));
             return hadConnectedAdapter && failedSources === 0;
         } catch {
