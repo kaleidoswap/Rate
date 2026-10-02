@@ -10,13 +10,14 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "setup:native": "bash scripts/fetch-lwk-artifacts.sh && bash scripts/link-bare-addons.sh",
+    "setup:native": "node scripts/prepare-bark-native.js && bash scripts/fetch-lwk-artifacts.sh && bash scripts/link-bare-addons.sh",
     "setup:siblings": "bash scripts/setup-siblings.sh",
     "testflight": "bash scripts/testflight.sh",
     "bundle-skills": "node node_modules/@kaleidorg/mind/scripts/bundle-skills.mjs --out skills.bundle.json skills",
     "sync-qvac-bundle": "node scripts/sync-qvac-bundle.js",
     "sync-mind": "bash scripts/sync-mind.sh",
-    "postinstall": "bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js && node scripts/patch-bare-kit-linker.js && npm run sync-mind"
+    "postinstall": "node scripts/prepare-bark-native.js && bash scripts/fetch-lwk-artifacts.sh && node scripts/sync-qvac-bundle.js && node scripts/patch-bare-kit-linker.js && npm run sync-mind",
+    "test:native-setup": "node --test scripts/prepare-bark-native.test.cjs"
   },
   "dependencies": {
     "@arkade-os/sdk": "^0.4.72",

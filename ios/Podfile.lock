@@ -1,4 +1,26 @@
 PODS:
+  - BarkReactNative (0.25.0):
+    - hermes-engine
+    - RCTRequired
+    - RCTTypeSafety
+    - React-Core
+    - React-Core-prebuilt
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - ReactNativeDependencies
+    - Yoga
   - EXApplication (7.0.8):
     - ExpoModulesCore
   - EXConstants (18.0.14):
@@ -2484,6 +2506,7 @@ PODS:
     - ZXingObjC/Core
 
 DEPENDENCIES:
+  - "BarkReactNative (from `../node_modules/@secondts/bark-react-native`)"
   - EXApplication (from `../node_modules/expo-application/ios`)
   - EXConstants (from `../node_modules/expo-constants/ios`)
   - EXImageLoader (from `../node_modules/expo-image-loader/ios`)
@@ -2614,6 +2637,8 @@ SPEC REPOS:
     - ZXingObjC
 
 EXTERNAL SOURCES:
+  BarkReactNative:
+    :path: "../node_modules/@secondts/bark-react-native"
   EXApplication:
     :path: "../node_modules/expo-application/ios"
   EXConstants:
@@ -2861,6 +2886,7 @@ EXTERNAL SOURCES:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
 SPEC CHECKSUMS:
+  BarkReactNative: 674e7379be787570bb9017758e7ad09df242c5bc
   EXApplication: 1e98d4b1dccdf30627f92917f4b2c5a53c330e5f
   EXConstants: 18ac927605517285307ea8f7ffe6fe7ca538eb5d
   EXImageLoader: 189e3476581efe3ad4d1d3fb4735b7179eb26f05

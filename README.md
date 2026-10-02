@@ -126,7 +126,7 @@ those checked out next to this repo.
 
 > ⚠️ **Do not symlink `node_modules`** (e.g. `ln -s` into another checkout). A self-referencing link causes `ELOOP: too many symbolic links`. If you hit it: `rm node_modules && pnpm install`.
 
-### Native setup (lwk-rn artifacts)
+### Native setup (Liquid and Bark)
 
 The Liquid protocol uses the `lwk-rn` native module, whose prebuilt native artifacts
 (iOS `LwkRnFramework.xcframework` + Android `jniLibs`) are **excluded** from its npm
@@ -162,6 +162,8 @@ npx expo run:ios --device "iPhone 16 Pro"
 Notes:
 - The **first build is slow** — it compiles the native modules, including `lwk-rn` (Liquid) and the Spark/RGB SDKs.
 - `lwk-rn` pins the pod `uniffi-bindgen-react-native` to `0.28.3-3` (already in `package.json`); don't bump it independently or `pod install` will fail with a version conflict.
+- Bark 0.25.0 uses UniFFI 0.31.0-5. `scripts/prepare-bark-native.js` runs during `postinstall` and `setup:native`: it copies Bark's exact header-only runtime into its native package, isolates C++ namespaces and FFI type names, and removes only Bark's shared CocoaPods runtime dependency. Liquid keeps its 0.28 runtime unchanged. Do not replace this with a global version override: their string/buffer APIs differ. Native artifacts are fetched by Bark's checksum-verifying installer when missing.
+- When upgrading Bark or its UniFFI runtime, review the isolation script's version checks, run `pnpm run test:native-setup`, and rebuild the native app. A JavaScript reload cannot add the Bark native module to an old client.
 - If `pod install` crashes with a Ruby `Unicode Normalization … ASCII-8BIT` error, you forgot the `LANG=en_US.UTF-8` export above.
 - The **QVAC AI assistant requires a physical device** (no simulator support); the wallet itself runs fine on a simulator.
 
