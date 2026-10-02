@@ -2010,8 +2010,9 @@ export default function ReceiveScreen({ navigation }: Props) {
         )}
 
         <View style={styles.qrContainer}>
-<ReceiveQr value={unifiedUri} size={qrSize} />
+          <ReceiveQr value={unifiedUri} size={qrSize} />
         </View>
+        {renderAmountRow()}
 
         {unifiedAddresses.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
         <ReceiveRequestActions value={unifiedUri} />
@@ -2051,6 +2052,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           <Text style={styles.promptText}>
             Please enter an amount to generate a Lightning invoice
           </Text>
+          {renderAmountRow()}
         </View>
       );
     }
@@ -2107,8 +2109,9 @@ export default function ReceiveScreen({ navigation }: Props) {
         </View>
 
         <View style={styles.qrContainer}>
-<ReceiveQr value={address} size={qrSize} />
+          <ReceiveQr value={address} size={qrSize} />
         </View>
+        {renderAmountRow()}
 
         <InvoiceExpiry invoice={address} onRefresh={() => { void generateAddress(); }} />
         <ReceiveRequestActions value={address} label={addrLabel} showValue />
@@ -2142,7 +2145,6 @@ export default function ReceiveScreen({ navigation }: Props) {
         keyboardDismissMode="on-drag"
       >
         {renderAssetTabs()}
-        {renderAmountRow()}
         {renderContent()}
         <ReceiveStatus
           visible={monitorVisible}
