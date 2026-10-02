@@ -3,7 +3,7 @@ import { paymentReceiptStatus } from '../utils/payment-receipt';
 import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { createRequestGuard } from '../utils/request-guard';
 import { barkNetworkLabel, sendBarkPayment } from '../services/BarkService';
-import { isKaleidoPayCode } from '../services/kaleidoPay';
+import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -317,7 +317,7 @@ function SendScreen({ navigation, route }: Props) {
     setValidationError(null);
     setSendRoutes([]);
     setActiveRoute(null);
-    if (isKaleidoPayCode(input)) {
+    if (isKaleidoPayCode(input) || isSwappableAddress(input)) {
       setAddressType('unknown');
       navigation.navigate('KaleidoPay', { code: input.trim() });
       return;

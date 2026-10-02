@@ -103,8 +103,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       if (captureMode === 'contact') {
         navigation.navigate(returnScreen, { scannedContact: data }); return;
       }
-      // With Bark connected, a plain address also goes to KaleidoPay: Bark on-chain and swap providers compete there.
-      if (isKaleidoPayCode(data) || (isSwappableAddress(data) && !!protocolManager.getAdapterIfAvailable('BARK')?.isConnected())) {
+      // Every bitcoin address goes to KaleidoPay too: direct sends and swap providers are compared there.
+      if (isKaleidoPayCode(data) || isSwappableAddress(data)) {
         navigation.navigate('KaleidoPay', { code: data }); return;
       }
       const paymentData = await processScannedData(data);
