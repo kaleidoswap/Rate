@@ -6,10 +6,10 @@ const mockState = { settings: { currency: 'USD', bitcoinUnit: 'sats', disclosure
 jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f(mockState), useAppDispatch: () => mockDispatch }));
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: (f: any) => require('react').useEffect(f, [f]) }));
 jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
-jest.mock('../services/BarkService', () => ({ barkNetworkLabel: () => 'Signet' }));
-jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null } }));
+jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
 jest.mock('../services/PairingService', () => ({ PairingService: { getActive: async () => null } }));
-jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => [] }) } }));
+jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => [], getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
 jest.mock('../services/nwc/connectionStore', () => ({ removeNwcCredential: jest.fn() }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: jest.fn(), setActiveWallet: jest.fn() }));
@@ -26,7 +26,10 @@ beforeEach(() => { jest.clearAllMocks(); (require('react-native') as any).BackHa
 test('home shows categories and keeps sensitive and technical actions in their sections', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  expect(screen.getByText('Daily wallet')).toBeTruthy();
+  expect(screen.queryByText('Daily wallet')).toBeNull();
+  expect(screen.queryByText('Your wallet')).toBeNull();
+  expect(screen.queryByText('Sats')).toBeNull();
+  expect(screen.getByLabelText('Private Local AI Assistant')).toBeTruthy();
   expect(screen.getByLabelText('Preferences')).toBeTruthy();
   expect(screen.queryByText('View recovery phrase')).toBeNull();
   expect(screen.queryByText('Remove Wallet')).toBeNull();
@@ -57,4 +60,33 @@ test('preferences remain actionable and connections retain their destinations', 
   fireEvent.press(screen.getByLabelText('Connections'));
   fireEvent.press(screen.getByLabelText('Lightning node'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
+});
+
+test('Bark uses the same interactive network control and describes real versus test bitcoin', async () => {
+  const { Alert } = require('react-native');
+  const alert = jest.spyOn(Alert, 'alert');
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Change BARK network'));
+  expect(alert).toHaveBeenCalledWith('Bark network', expect.stringContaining('real bitcoin'), expect.arrayContaining([
+    expect.objectContaining({ text: 'Mainnet', onPress: expect.any(Function) }),
+    expect.objectContaining({ text: 'Signet (test bitcoin)  ✓', onPress: expect.any(Function) }),
+  ]));
+});
+
+test('selecting Bark mainnet saves the preference and reconnects through protocol initialization', async () => {
+  const { Alert } = require('react-native');
+  const alert = jest.spyOn(Alert, 'alert');
+  const { saveBarkNetwork } = require('../services/protocols/barkPreferences');
+  const { protocolManager, initializeProtocols } = require('../services/protocols');
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Change BARK network'));
+  const choices = alert.mock.calls[0][2];
+  await act(async () => { choices.find((choice: any) => choice.text === 'Mainnet').onPress(); });
+  expect(saveBarkNetwork).toHaveBeenCalledWith('public test fixture', 'mainnet');
+  expect(protocolManager.disconnect).toHaveBeenCalledWith('BARK');
+  expect(initializeProtocols).toHaveBeenCalledWith('public test fixture', []);
 });

@@ -110,3 +110,11 @@ test('a dev client without Bark native support does not try to load its enforcin
   expect(isBarkNativeAvailable()).toBe(true);
   rn.TurboModuleRegistry = previous;
 });
+
+it('builds a separately stored wallet on the explicitly selected network', () => {
+  const mainnet = buildBarkConfig(MNEMONIC)!;
+  const signet = buildBarkConfig(MNEMONIC, { network: 'signet', arkServerUrl: 'https://ark.signet.2nd.dev', esploraUrl: 'https://esplora.signet.2nd.dev' })!;
+  expect(signet.network).toBe('signet');
+  expect(signet.dataDir).not.toBe(mainnet.dataDir);
+  expect(signet.arkServerUrl).toBe('https://ark.signet.2nd.dev');
+});

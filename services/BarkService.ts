@@ -1,9 +1,9 @@
 import type { PaymentRequest } from '@kaleidorg/wallet-engine'
 import type { BarkReactNativeAdapter } from '@kaleidorg/wallet-engine/adapters/bark-react-native'
 import { protocolManager } from './protocols'
-import { resolveBarkHostConfig } from './protocols/bark'
+import { currentBarkHost } from './protocols/barkPreferences'
 
-export const barkNetworkLabel = () => resolveBarkHostConfig()?.network === 'mainnet' ? 'Mainnet' : 'Signet · test sats'
+export const barkNetworkLabel = () => currentBarkHost()?.network === 'mainnet' ? 'Mainnet' : currentBarkHost()?.network === 'signet' ? 'Signet · test sats' : 'Not configured'
 
 export function getConnectedBark(): BarkReactNativeAdapter {
   const adapter = protocolManager.getAdapterIfAvailable('BARK') as BarkReactNativeAdapter | undefined
