@@ -61,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Same sibling checkout as the checks job (needs UNIVERSAL_BOLT12_TOKEN).
+      # Same sibling checkout as the checks job.
       - uses: actions/checkout@v4
         with:
           repository: kaleidoswap/kaleido-pay

@@ -69,8 +69,7 @@ jobs:
 
       # KaleidoPay imports packages from the sibling kaleidoswap/kaleido-pay
       # checkout (see services/kaleidoPay/README.md); without it Metro can't
-      # resolve them and the release bundle fails. It is private, so this needs
-      # UNIVERSAL_BOLT12_TOKEN: a fine-grained token with read access to it.
+      # resolve them and the release bundle fails.
       - uses: actions/checkout@v4
         with:
           repository: kaleidoswap/kaleido-pay
@@ -141,8 +140,7 @@ jobs:
 
       # KaleidoPay imports packages from the sibling kaleidoswap/kaleido-pay
       # checkout (see services/kaleidoPay/README.md); without it Metro can't
-      # resolve them and the release bundle fails. It is private, so this needs
-      # UNIVERSAL_BOLT12_TOKEN: a fine-grained token with read access to it.
+      # resolve them and the release bundle fails.
       - uses: actions/checkout@v4
         with:
           repository: kaleidoswap/kaleido-pay
