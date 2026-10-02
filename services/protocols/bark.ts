@@ -16,10 +16,16 @@
  * addresses — route by account, never by prefix.
  */
 
+import { TurboModuleRegistry } from 'react-native'
 import { Directory, Paths } from 'expo-file-system'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import type { BarkConfig } from '@kaleidorg/wallet-engine'
+
+/** OTA/JS updates may run on a dev client built before Bark was added. */
+export function isBarkNativeAvailable(): boolean {
+  return !!TurboModuleRegistry?.get('BarkReactNative')
+}
 
 export type BarkNetwork = NonNullable<BarkConfig['network']>
 

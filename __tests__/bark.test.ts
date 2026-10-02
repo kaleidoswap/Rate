@@ -92,3 +92,14 @@ describe('buildBarkConfig', () => {
     expect(buildBarkConfig(OTHER)?.dataDir).not.toBe(buildBarkConfig(MNEMONIC)?.dataDir)
   })
 })
+
+test('a dev client without Bark native support does not try to load its enforcing module', () => {
+  const { isBarkNativeAvailable } = require('../services/protocols/bark');
+  const rn = require('react-native');
+  const previous = rn.TurboModuleRegistry;
+  rn.TurboModuleRegistry = { get: jest.fn(() => null) };
+  expect(isBarkNativeAvailable()).toBe(false);
+  rn.TurboModuleRegistry.get.mockReturnValue({});
+  expect(isBarkNativeAvailable()).toBe(true);
+  rn.TurboModuleRegistry = previous;
+});

@@ -35,7 +35,7 @@ import { NwcRgbAdapter, NWC_CONNECTION_KEY } from '../nwc/NwcRgbAdapter'
 import type { ProtocolType } from '@kaleidorg/wallet-engine'
 import { buildArkadeStorage } from './arkadeStorage'
 import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
-import { BARK_ENABLED, buildBarkConfig, resolveBarkHostConfig } from './bark'
+import { BARK_ENABLED, buildBarkConfig, resolveBarkHostConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay } from '../kaleidoPay/bark'
 
 /**
@@ -289,6 +289,10 @@ async function connectBark(
     return
   }
   try {
+    if (!isBarkNativeAvailable()) {
+      results.set('BARK', { success: false, error: 'skipped: this app build does not include Bark; install a native build with Bark support' })
+      return
+    }
     const config = buildBarkConfig(mnemonic)
     if (!config) {
       results.set('BARK', { success: false, error: 'skipped: no Bark server/esplora configured' })
