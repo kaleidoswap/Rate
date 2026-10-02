@@ -29,7 +29,7 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  const selectedId=useAppSelector(s=>s.nostr.selectedNwcConnectionId);
  const [receiverId,setReceiverId]=useState<string|null>(null);
  const connection=connections.find(c=>c.id===(receiverId??selectedId))??connections[0];
- const [accounts,setAccounts]=useState<Array<{type:'bark'|'arkade';compatible:boolean}>>([]);
+ const [accounts,setAccounts]=useState<Array<{type:'bark'|'arkade'|'bitcoin';compatible:boolean}>>([]);
  useEffect(()=>{
   let active=true;
   async function refresh(){
@@ -38,7 +38,10 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
      return info?.connected?{type,compatible:(info.network==='bitcoin'?'mainnet':info.network)===connection?.network}:null;
     }catch{return null;}
    }));
-   if(active)setAccounts(results.filter((a):a is {type:'bark'|'arkade';compatible:boolean}=>a!==null));
+   const found=results.filter((a):a is {type:'bark'|'arkade';compatible:boolean}=>a!==null);
+   // Bark's on-chain wallet gives the QR a bitcoin address (BIP321), so on-chain payers and swap providers can pay too.
+   const bark=found.find(a=>a.type==='bark');
+   if(active)setAccounts([...found,...(bark?[{type:'bitcoin' as const,compatible:bark.compatible}]:[])]);
   }
   void refresh();const unsubscribe=navigation.addListener('focus',()=>void refresh());
   return()=>{active=false;unsubscribe();};
@@ -86,11 +89,16 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
  }
  function updateDestinations(destinations:ReceiverDestination[]){pending.current=null;setPreferences(p=>({...p,destinations}));setNotice('');}
  function move(index:number,offset:number){const list=[...preferences.destinations];[list[index],list[index+offset]]=[list[index+offset],list[index]];updateDestinations(list)}
- async function useConnectedWallet(type:'bark'|'arkade'){
+ async function useConnectedWallet(type:'bark'|'arkade'|'bitcoin'){
   if(!connection||!ready||working.current)return;
   const revision=generation.current;working.current=true;setBusy(true);setError('');
   try{
-   const endpoint=await loadConnectedReceiverDestination(type,connection.network);
+   const endpoint:ReceiverDestination=type==='bitcoin'?await (async()=>{
+    const address=await (protocolManager.getAdapter('BARK') as any).backend.getOnchainAddress();
+    const mainnet=/^(bc1|[13])/i.test(address);
+    if(typeof address!=='string'||mainnet!==(connection.network==='mainnet'))throw Error('Bark on-chain address is on another network than your receiving wallet.');
+    return {type:'bitcoin',address} as ReceiverDestination;
+   })():await loadConnectedReceiverDestination(type,connection.network);
    if(generation.current===revision){
     setEditing(true);
     const exists=preferences.destinations.some(d=>d.type===type);
@@ -127,7 +135,8 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
    if(create) {
     const result=await createMerchantOffer(active,connection.network,description,amount?Number(amount):undefined,rails);
     if(generation.current!==revision)return;
-    const saved={...result,description,network:connection.network,...(rails?{rails}:{})};
+    const onchain=preferences.destinations.find(d=>d.type==='bitcoin');
+    const saved={...result,description,network:connection.network,...(rails?{rails}:{}),...(onchain&&onchain.type==='bitcoin'?{onchainAddress:onchain.address}:{})};
     pending.current=saved;
     await saveMerchantOffer(connection.id,saved);
     if(generation.current===revision){pending.current=null;setOffer(saved);setEditing(false);setReceipts([]);setChecked(false)}
@@ -177,7 +186,7 @@ export default function MerchantOfferScreen({navigation}: {navigation:any}) {
      <NetworkIcon network="lightning" size={30}/><View style={{flex:1,gap:3}}><Text style={{...text,fontWeight:'600'}}>{c.alias||'Lightning wallet'}</Text><Text style={hint}>Saved connection</Text></View><Ionicons name={connection?.id===c.id?'checkmark-circle':'ellipse-outline'} size={24} color={connection?.id===c.id?t.colors.primary[500]:t.colors.text.secondary}/>
     </TouchableOpacity>)}
     {accounts.map(a=><TouchableOpacity key={a.type} accessibilityRole="button" accessibilityLabel={`Add connected ${label(a.type)} account`} disabled={!connection||!ready||busy||!a.compatible} onPress={()=>void useConnectedWallet(a.type)} style={{...card,flexDirection:'row',alignItems:'center'}}>
-     <NetworkIcon network={a.type} size={30}/><View style={{flex:1,gap:3}}><Text style={{...text,fontWeight:'600'}}>{label(a.type)}</Text><Text style={hint}>{!connection?'Connected account':!a.compatible?'Not compatible with this receiving wallet':preferences.destinations.some(d=>d.type===a.type)?'Added to your QR':'Connected · Add to your QR'}</Text></View><Ionicons name={preferences.destinations.some(d=>d.type===a.type)?'checkmark-circle':'add-circle-outline'} size={24} color={t.colors.primary[500]}/>
+     <NetworkIcon network={a.type==='bitcoin'?'onchain':a.type} size={30}/><View style={{flex:1,gap:3}}><Text style={{...text,fontWeight:'600'}}>{label(a.type)}</Text><Text style={hint}>{!connection?'Connected account':!a.compatible?'Not compatible with this receiving wallet':preferences.destinations.some(d=>d.type===a.type)?'Added to your QR':'Connected · Add to your QR'}</Text></View><Ionicons name={preferences.destinations.some(d=>d.type===a.type)?'checkmark-circle':'add-circle-outline'} size={24} color={t.colors.primary[500]}/>
     </TouchableOpacity>)}
     <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={()=>navigation.navigate('NWCConnect')} style={{flexDirection:'row',alignItems:'center',gap:8,paddingVertical:t.spacing[3]}}><Ionicons name="add-circle-outline" size={22} color={t.colors.primary[500]}/><Text style={{...text,color:t.colors.primary[500],fontWeight:'600'}}>{connections.length?'Connect another wallet':'Connect Lightning wallet'}</Text></TouchableOpacity>
    </View>

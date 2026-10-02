@@ -65,7 +65,7 @@ test('adds the connected account address without manual address or server key fi
 test('drops a previously saved on-chain address from the receiving order',async()=>{
  (loadReceiverPreferences as jest.Mock).mockResolvedValue({version:1,network:'regtest',destinations:[{type:'bitcoin',address:'bcrt1qtyped'},bark,lightning]});
  const view=await open();
- expect(view.queryByText('Bitcoin on-chain')).toBeNull();
+ expect(view.queryByText(/bcrt1qtyped/)).toBeNull();
  await act(async()=>{fireEvent.press(view.getByText('Save as my defaults'))});
  expect(saveReceiverPreferences).toHaveBeenCalledWith(mockConnection.id,expect.objectContaining({destinations:[bark,lightning]}));
 });
