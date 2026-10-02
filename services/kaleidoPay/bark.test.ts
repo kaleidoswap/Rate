@@ -10,7 +10,7 @@ jest.mock('./electrumSwapAccount', () => ({
 }));
 jest.mock('./recovery', () => ({ kaleidoPayStores: {} }));
 import { encodeOffer } from '@universal-bolt12/universal-code';
-import { barkRail, connectBarkToKaleidoPay, createBarkArkAccount, createBarkPayAccount, disconnectBarkFromKaleidoPay } from './bark';
+import { barkRail, connectBarkToKaleidoPay, createBarkArkAccount, createBarkOnchainAccount, createBarkPayAccount, disconnectBarkFromKaleidoPay } from './bark';
 import { offerRails } from '@universal-bolt12/universal-code';
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -129,4 +129,19 @@ test('connecting Bark registers the Ark route once the server key is known', asy
   expect(preview.plan.alternatives).toEqual([expect.objectContaining({ kind: 'direct', sourceId: 'bark', to: 'ln:mainnet' })]);
   disconnectBarkFromKaleidoPay();
   expect(previewPayment(offer, 'mainnet', '2100', 'req').plan.status).toBe('unsupported');
+});
+
+test('Bark sends on-chain itself, next to the swap providers, with its own fee quoted', async () => {
+  const b = bark(150);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: 'ef'.repeat(32), status: 'pending' });
+  const account = createBarkOnchainAccount(b, 'mainnet');
+  const route = { kind: 'direct', sourceId: 'bark-onchain', from: 'btc:mainnet', to: 'btc:mainnet' } as any;
+  const p = { code: { address: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' }, request: { id: 'r', network: 'mainnet', amountSat: 30000, acceptedRails: ['btc:mainnet'] }, plan: {}, addresses: {} } as any;
+  const [option] = await account.quoteOptions!(p, route);
+  expect(option.quote).toMatchObject({ recipientSat: 30000, feeSat: 150, totalSat: 30150 });
+  expect(b.backend.estimatePaymentFee).toHaveBeenCalledWith('onchain', 30000, 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq');
+  await expect(account.execute!(p, route, option.quote!, 'oc-1')).resolves.toEqual({ status: 'completed', reference: 'ef'.repeat(32) });
+  expect(b.sendPayment).toHaveBeenCalledWith({ invoice: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', amount: 30000 });
+  await expect(account.status!('oc-1')).resolves.toEqual({ status: 'completed', reference: 'ef'.repeat(32) });
+  await expect(account.quote({ ...p, code: {} }, route)).rejects.toThrow('no bitcoin address');
 });
