@@ -6,6 +6,7 @@ import React from 'react'
 import { View, StyleSheet } from 'react-native'
 import { Ionicons } from '@expo/vector-icons'
 import { theme } from '../theme'
+import { NetworkIcon } from './NetworkIcon'
 
 export type ProtocolKey = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | 'BTC' | 'LIGHTNING'
 
@@ -83,15 +84,16 @@ export function ProtocolIcon({ protocol, size = 20, showBackground = false }: Pr
   const color = PROTOCOL_COLORS[protocol] || PROTOCOL_COLORS.BTC
   const icon = PROTOCOL_ICONS[protocol] || PROTOCOL_ICONS.BTC
 
+  const glyph = protocol === 'BARK' ? <NetworkIcon network="bark" size={size} /> : <Ionicons name={icon} size={size} color={color} />
   if (showBackground) {
     return (
       <View style={[styles.iconBg, { width: size + 12, height: size + 12, borderRadius: (size + 12) / 2, backgroundColor: color + '20' }]}>
-        <Ionicons name={icon} size={size} color={color} />
+        {glyph}
       </View>
     )
   }
 
-  return <Ionicons name={icon} size={size} color={color} />
+  return glyph
 }
 
 interface ProtocolBadgeProps {
@@ -106,7 +108,7 @@ export function ProtocolBadge({ protocol, size = 'sm' }: ProtocolBadgeProps) {
 
   return (
     <View style={[styles.badge, { backgroundColor: color + '20', borderColor: color + '40' }]}>
-      <Ionicons name={icon} size={iconSize} color={color} />
+      {protocol === 'BARK' ? <NetworkIcon network="bark" size={iconSize} /> : <Ionicons name={icon} size={iconSize} color={color} />}
     </View>
   )
 }

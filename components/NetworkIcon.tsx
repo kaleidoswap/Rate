@@ -27,12 +27,14 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
   bitcoin: require('../assets/icons/protocols/btc.png'),
   onchain: require('../assets/icons/protocols/btc.png'),
   lightning: require('../assets/icons/protocols/lightning.png'),
+  // Second's mark (second.tech/docs); Bark is Second's Ark wallet.
+  bark: require('../assets/icons/protocols/bark.png'),
+  BARK: require('../assets/icons/protocols/bark.png'),
   LN: require('../assets/icons/protocols/lightning.png'),
   ln: require('../assets/icons/protocols/lightning.png'),
 };
 
 export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) => {
-  if (network.toLowerCase() === 'bark') return <Ionicons name="leaf-outline" size={size} color={theme.colors.primary[500]} accessibilityLabel="Bark" />;
   const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()];
 
   if (network.toLowerCase() === 'liquid') return <Ionicons name="water" size={size} color={theme.colors.text.primary} />;
@@ -43,7 +45,7 @@ export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) 
   return (
     <Image
       source={source}
-      style={{ width: size, height: size, borderRadius: size / 2 }}
+      style={{ width: size, height: size, borderRadius: network.toLowerCase() === 'bark' ? size * 0.22 : size / 2 }}
       resizeMode="contain"
     />
   );
