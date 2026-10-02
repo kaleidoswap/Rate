@@ -47,3 +47,7 @@ overrides:
 # Bark pays BOLT12 offers (payLightningOffer); remove once wallet-engine ships it.
 patchedDependencies:
   '@kaleidorg/wallet-engine@1.0.0-beta.75': patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
+
+# Bark downloads checksum-verified native binaries during installation.
+onlyBuiltDependencies:
+  - '@secondts/bark-react-native'

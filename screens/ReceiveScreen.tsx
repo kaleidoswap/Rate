@@ -1,6 +1,8 @@
 import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
 import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
+import { BARK_ENABLED } from '../services/protocols/bark';
+import { barkNetworkLabel } from '../services/BarkService';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -1663,6 +1665,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       ?? accounts[0]
       ?? null;
     const chooseAccount = (account: AccountId) => {
+      if (account === 'BARK') { cancelReceiveWork(); navigation.navigate('Bark'); return; }
       feedback.select();
       resetReceiveSurface();
       setSelectedAccount(account);
@@ -1782,7 +1785,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                     dispatch(setLastBtcReceiveRoute({
                       axis: routeAxis,
                       network: o.id,
-                      account: routeAxis === 'account' ? effectiveAccount : null,
+                      account: routeAxis === 'account' && effectiveAccount !== 'BARK' ? effectiveAccount : null,
                     }));
                   }
                   setShowPaymentOptions(false);
@@ -2038,6 +2041,13 @@ export default function ReceiveScreen({ navigation }: Props) {
         keyboardDismissMode="on-drag"
       >
         {renderAssetTabs()}
+        {BARK_ENABLED && selectedAsset.asset_id === 'BTC' && (
+          <TouchableOpacity accessibilityRole="button" onPress={() => { cancelReceiveWork(); navigation.navigate('Bark'); }}
+            style={{ padding: theme.spacing[4], marginBottom: theme.spacing[3], borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.background.secondary }}>
+            <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Receive on Bark · {barkNetworkLabel()} →</Text>
+            <Text style={{ color: theme.colors.text.secondary }}>Ark, Lightning or on-chain funding · separate request</Text>
+          </TouchableOpacity>
+        )}
         {renderContent()}
         <ReceiveStatus
           visible={monitorVisible}

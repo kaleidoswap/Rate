@@ -1,6 +1,7 @@
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
 import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
+import { BarkAccountCard } from '../components/BarkAccountCard';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -219,7 +220,7 @@ export default function DashboardScreen({ navigation }: Props) {
       }
 
       // Check if any adapter is already connected from a previous init
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
@@ -256,7 +257,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
       // Try any connected adapter
       let info: any = null;
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         try {
           const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
@@ -299,13 +300,14 @@ export default function DashboardScreen({ navigation }: Props) {
       const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
       const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
+      const barkAdapter = protocolManager.getAdapterIfAvailable('BARK');
 
       // Load BTC balance (aggregate from all connected adapters with per-protocol breakdown)
       console.log('Fetching BTC balance...');
       let totalConfirmed = 0, totalUnconfirmed = 0;
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
       const adapterProtoMap: Array<[any, string]> = [
-        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
+        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'], [barkAdapter, 'BARK'],
       ];
       // Fetch every adapter's BTC balance IN PARALLEL — previously serial, so the
       // headline balance waited on the sum of all adapter latencies. Now it waits
@@ -314,6 +316,7 @@ export default function DashboardScreen({ navigation }: Props) {
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
           try {
+            if (proto === 'BARK') await adapter.refreshBalances();
             return { proto, btc: await adapter.getBtcBalance() };
           } catch (e) {
             console.warn('Balance fetch error:', e);
@@ -326,8 +329,11 @@ export default function DashboardScreen({ navigation }: Props) {
         ? 'Some balances are unavailable. Your total may be incomplete.' : null);
       for (const r of balanceResults) {
         if (!r) continue;
-        totalConfirmed += r.btc.confirmed;
-        totalUnconfirmed += r.btc.unconfirmed;
+        // Bark has its own network-labelled card, separate from the total.
+        if (r.proto !== 'BARK') {
+          totalConfirmed += r.btc.confirmed;
+          totalUnconfirmed += r.btc.unconfirmed;
+        }
         byProtocol[r.proto] = r.btc;
       }
       const balance = {
@@ -894,6 +900,7 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
+        <BarkAccountCard onOpen={() => navigation.navigate('Bark')} ready={protocolsReady} refreshing={isUpdating} />
         </>}
         <TouchableOpacity
           accessibilityRole="button"

@@ -26,11 +26,13 @@ export function ReceiveRouteSelector({
   const accountLabel = (account: AccountId) => {
     if (account === 'RGB') return nwcWalletType === 'ln' ? 'Lightning' : 'RGB + Lightning';
     if (account === 'SPARK') return 'Spark';
+    if (account === 'BARK') return 'Bark';
     return 'Arkade';
   };
   const accountSubtitle = (account: AccountId) => {
     if (account === 'RGB') return nwcWalletType === 'ln' ? 'Connected over NWC' : 'On-chain and channels';
     if (account === 'SPARK') return 'Native Spark balance';
+    if (account === 'BARK') return 'Open Bark account and network';
     return 'Ark and boarding';
   };
 
@@ -67,7 +69,7 @@ export function ReceiveRouteSelector({
           {accounts.map((account) => {
             const active = selectedAccount === account;
             const iconNetwork = account === 'RGB' ? 'lightning' : account;
-            const accent = account === 'RGB'
+            const accent = account === 'BARK' ? theme.colors.primary[500] : account === 'RGB'
               ? theme.colors.networks.lightning
               : theme.colors.networks[account.toLowerCase() as 'spark' | 'arkade'];
             return (

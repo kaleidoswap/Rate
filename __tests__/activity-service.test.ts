@@ -84,3 +84,14 @@ describe('ActivityService', () => {
     );
   });
 });
+
+it('labels Bark signet history and preserves pending sends', async () => {
+  for (const key of Object.keys(adapters)) delete adapters[key];
+  adapters.BARK = {
+    isConnected: () => true,
+    getConnectionInfo: async () => ({ network: 'signet' }),
+    listTransactions: async () => [{ id: 'movement-1', type: 'send', amount: 1000, fee: 12, status: 'pending', timestamp: 2000 }],
+  };
+  const { items } = await loadActivity();
+  expect(items).toEqual([expect.objectContaining({ id: 'bark-movement-1', layer: 'Bark Signet', status: 'pending', rawSats: 1000, fee: 12 })]);
+});
