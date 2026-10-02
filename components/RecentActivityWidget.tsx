@@ -24,6 +24,7 @@ import {
     type ActivityLayer,
     type AssetMeta,
 } from '../services/ActivityService';
+import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 
 interface Props {
@@ -100,7 +101,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
             venue: s.venue,
         }));
         try {
-            const { items: result } = await loadActivity({ assets, swaps });
+            const { items: result } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() });
             setItems([...result].sort((a, b) => Number(b.status === 'pending') - Number(a.status === 'pending')).slice(0, MAX_ITEMS));
         } catch {
             // Non-critical widget — fail silently.

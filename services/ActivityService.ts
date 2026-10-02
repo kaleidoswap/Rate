@@ -11,6 +11,7 @@
 //   2. RGB on-chain transfers (per asset)   — RGB adapter `listTransfers()`
 //   3. Spark / Arkade unified transactions   — adapter `listTransactions()`
 //   4. KaleidoSwap atomic swaps              — provided from Redux swap history
+//   5. Electrum swap payments (on-chain)     — provided from KaleidoPay attempts
 //
 // Every source is fetched defensively: a failure in one never blocks the rest.
 
@@ -48,6 +49,10 @@ export interface ActivityItem {
   fee?: number;
   paymentHash?: string;
   kind?: string;
+  /** Bitcoin network of an on-chain item, when known (mainnet, signet, …). */
+  network?: string;
+  /** KaleidoPay/Electrum swap attempt behind this item. */
+  swapAttemptId?: string;
 }
 
 export interface AssetMeta {
@@ -69,6 +74,21 @@ export interface SwapActivityInput {
   from_amount?: number;
   to_amount?: number;
   venue?: 'kaleidoswap' | 'flashnet';
+}
+
+/** An Electrum swap that paid an on-chain address (see services/kaleidoPay/activity.ts). */
+export interface SwapAttemptActivityInput {
+  id: string;
+  failed: boolean;
+  network: string;
+  /** Sats the destination receives. */
+  amountSat: number;
+  /** Claim fee, once the claim is built. */
+  fee?: number;
+  /** Claim txid, or the provider's lockup before the claim exists. */
+  txid?: string;
+  confirmed: boolean;
+  updatedAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +171,7 @@ function normalizeSwapStatus(status?: string): ActivityStatus {
 export interface LoadActivityOptions {
   assets?: AssetMeta[];
   swaps?: SwapActivityInput[];
+  swapAttempts?: SwapAttemptActivityInput[];
 }
 
 export interface ActivityResult {
@@ -165,7 +186,7 @@ export interface ActivityResult {
  * plus the supplied swap history.
  */
 export async function loadActivity(opts: LoadActivityOptions = {}): Promise<ActivityResult> {
-  const { assets = [], swaps = [] } = opts;
+  const { assets = [], swaps = [], swapAttempts = [] } = opts;
   const items: ActivityItem[] = [];
   let failedSources = 0;
   let hadConnectedAdapter = false;
@@ -327,6 +348,28 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
       timestamp: swap.created_at,
       txid: swap.txid || swap.rfq_id,
       layer: 'Swap',
+    });
+  }
+
+  // 5. Electrum swap payments: Lightning in, on-chain out to the requested address
+  for (const a of swapAttempts) {
+    items.push({
+      id: `electrum-${a.id}`,
+      type: 'send',
+      source: 'onchain',
+      asset: 'BTC',
+      assetName: 'Electrum swap',
+      assetTicker: 'sats',
+      assetPrecision: 0,
+      amount: a.amountSat.toLocaleString('en-US'),
+      rawSats: a.amountSat,
+      status: a.failed ? 'failed' : a.confirmed ? 'confirmed' : 'pending',
+      timestamp: a.updatedAt,
+      txid: a.txid ?? '',
+      layer: 'L1',
+      fee: a.fee,
+      network: a.network,
+      swapAttemptId: a.id,
     });
   }
 
