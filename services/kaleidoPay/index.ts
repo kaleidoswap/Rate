@@ -36,8 +36,9 @@ export interface PaymentOffer {
   id: string; provider: string; providerDetail?: string; accountName: string; route: Route;
   quote?: Quote; unavailable?: string; executable: boolean;
 }
-/** Demo builds (EXPO_PUBLIC_KALEIDOPAY_DEMO=1) simulate only the final payment; quotes stay live and the screen says so. */
-export const KALEIDOPAY_DEMO = process.env.EXPO_PUBLIC_KALEIDOPAY_DEMO === '1';
+/** Development builds with EXPO_PUBLIC_KALEIDOPAY_DEMO=1 simulate only the final payment; quotes stay live and
+ *  the screen says so. Never in a release build: a simulated "completed" there would look like a real payment. */
+export const KALEIDOPAY_DEMO = typeof __DEV__ !== 'undefined' && __DEV__ && process.env.EXPO_PUBLIC_KALEIDOPAY_DEMO === '1';
 const accounts = new Map<string, PayAccount>();
 const owners = new WeakMap<PaymentOffer, { account: PayAccount; snapshot: string }>();
 const preparers = new Set<() => Promise<void>>();
