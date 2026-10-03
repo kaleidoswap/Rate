@@ -1,6 +1,13 @@
+import { routeSpendable } from '../utils/payment-balance';
+import { paymentReceiptStatus } from '../utils/payment-receipt';
+import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
+import { createRequestGuard } from '../utils/request-guard';
+import { barkNetworkLabel, sendBarkPayment } from '../services/BarkService';
+import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
+import { KaleidoPayFlow } from '../components/payments/KaleidoPayFlow';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,7 +23,10 @@ import {
 import { AmountInput as WdkAmountInput, AssetSelector as WdkAssetSelector } from '@kaleidorg/kaleido-ui/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { KeyboardAvoidingView, Platform } from 'react-native';
-import { useSelector, useDispatch } from 'react-redux';
+import { useAppTheme } from '../theme/ThemeProvider';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { PaymentNetworkLabel } from '../components/payments/PaymentNetworkLabel';
+import { paymentRequestLabel } from '../utils/payment-network';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
@@ -35,11 +45,13 @@ import {
   classifyWithdrawDestination, resolveSendRoutes, resolveActiveSendRoute,
   METHOD_META, type DestinationKind, type ResolvedSendRoute, type RouteOption,
 } from '../utils/account-routing';
+import { estimatePaymentFee, paymentTotal, type PaymentFeeAdapter } from '../services/paymentReview';
 import { theme } from '../theme';
 import { Card, Button, Input, ScreenHeader } from '../components';
 import { AssetIcon as TokenAssetIcon } from '../components/AssetIcon';
 import { useAssetIcon } from '../utils';
 import { formatBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
+import { resolvePrecision } from '../utils/assetAmount';
 
 interface Props {
   navigation: any;
@@ -111,13 +123,15 @@ interface DecodedRGBInvoice extends BaseRGBInvoiceResponse {
 }
 
 function SendScreen({ navigation, route }: Props) {
-  const dispatch = useDispatch<any>();
-  const walletState = useSelector((state: RootState) => state.wallet);
-  const assetsState = useSelector((state: RootState) => state.assets);
+  const dispatch = useAppDispatch();
+  const theme = useAppTheme();
+  const styles = useMemo(() => createStyles(theme), [theme]);
+  const walletState = useAppSelector((state: RootState) => state.wallet);
+  const assetsState = useAppSelector((state: RootState) => state.assets);
   const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
   const btcBalance = walletState?.btcBalance;
-  const isBalanceLoading = useSelector((state: RootState) => state.wallet.isBalanceLoading);
-  const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
+  const isBalanceLoading = useAppSelector((state: RootState) => state.wallet.isBalanceLoading);
+  const bitcoinUnit = useAppSelector((state: RootState) => state.settings.bitcoinUnit);
   const { formatSatoshisToUSD, bitcoinPrice } = useBitcoinConversion();
 
   // Refresh BTC balances when the screen opens — balances aren't persisted, so
@@ -148,6 +162,9 @@ function SendScreen({ navigation, route }: Props) {
   const [showAssetSelector, setShowAssetSelector] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'input' | 'review' | 'sending'>('input');
+  // Codes KaleidoPay pays (offers, universal QRs, plain addresses) are reviewed and paid
+  // by its flow inside this screen; '' reopens an unresolved KaleidoPay payment.
+  const [kaleidoPayCode, setKaleidoPayCode] = useState<string | null>(route.params?.resumePayment ? '' : null);
   const [sendRoutes, setSendRoutes] = useState<RouteOption[]>([]);
   const [activeRoute, setActiveRoute] = useState<ResolvedSendRoute | null>(null);
   // Amount entry mode for the WDK AmountInput. Fiat entry is only meaningful
@@ -155,15 +172,27 @@ function SendScreen({ navigation, route }: Props) {
   const [amountMode, setAmountMode] = useState<'token' | 'fiat'>('token');
   const [fiatInput, setFiatInput] = useState('');
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const [showAdvancedFees, setShowAdvancedFees] = useState(false);
+  const [feeEstimate, setFeeEstimate] = useState<number | null>(null);
+  const [estimatingFee, setEstimatingFee] = useState(false);
+  const sendingRef = useRef(false);
+  const feeRequestRef = useRef(0);
+  const decodeGuard = useRef(createRequestGuard()).current;
+  useEffect(() => () => decodeGuard.invalidate(), [decodeGuard]);
+
+  useEffect(() => navigation.addListener('beforeRemove', (event: any) => {
+    if (sendingRef.current) event.preventDefault();
+  }), [navigation]);
+  useEffect(() => { if (activeRoute?.account === 'BARK') setAmountMode('token'); }, [activeRoute?.account]);
 
   // All operations via protocolManager
   const getProtocolStatus = useRefreshableProtocolStatus();
 
   // Fee rate options
   const feeRates = [
-    { label: 'Slow', value: 'slow', rate: 1, icon: 'time-outline' },
+    { label: 'Low', value: 'slow', rate: 1, icon: 'time-outline' },
     { label: 'Normal', value: 'normal', rate: 2, icon: 'flash-outline' },
-    { label: 'Fast', value: 'fast', rate: 3, icon: 'rocket-outline' },
+    { label: 'High', value: 'fast', rate: 3, icon: 'rocket-outline' },
     { label: 'Custom', value: 'custom', rate: customFee, icon: 'settings-outline' },
   ];
 
@@ -186,16 +215,25 @@ function SendScreen({ navigation, route }: Props) {
     })) : [])
   ];
 
-  // Spendable BTC for the currently chosen route. When a route is selected
-  // (e.g. "Pays from Spark") show that account's balance specifically; before a
-  // route is resolved fall back to the cross-protocol total. This is what makes
-  // the amount screen show a real balance instead of "0".
+  const [spendChannels, setSpendChannels] = useState<any[]>([]);
+  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
+  const rgbBalanceIsLightning = typeof (rgbAdapter as any)?.walletType === 'function';
+  useEffect(() => {
+    let active = true;
+    setSpendChannels([]);
+    if (rgbAdapter?.isConnected() && !rgbBalanceIsLightning && rgbAdapter.listChannels) {
+      void rgbAdapter.listChannels().then(channels => { if (active) setSpendChannels(channels as any[]); }).catch(() => {});
+    }
+    return () => { active = false; };
+  }, [rgbAdapter, rgbBalanceIsLightning, activeRoute?.account, activeRoute?.method]);
+  const availableForRoute = (account: string, method: string) => routeSpendable(
+    btcBalance?.byProtocol?.[account as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'], account, method, spendChannels, rgbBalanceIsLightning,
+  );
   const btcSpendableSats = useCallback((): number => {
-    const acct = activeRoute?.account as 'RGB' | 'SPARK' | 'ARKADE' | undefined;
-    const perAccount = acct ? btcBalance?.byProtocol?.[acct]?.total : undefined;
-    if (typeof perAccount === 'number') return perAccount;
-    return btcBalance?.vanilla?.spendable || 0;
-  }, [activeRoute?.account, btcBalance]);
+    const account = activeRoute?.account ?? route.params?.preferredAccount;
+    if (!account) return 0;
+    return routeSpendable(btcBalance?.byProtocol?.[account as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'], account, activeRoute?.method, spendChannels, rgbBalanceIsLightning);
+  }, [activeRoute?.account, activeRoute?.method, btcBalance, route.params?.preferredAccount, spendChannels, rgbBalanceIsLightning]);
 
   // Keep the selected asset's balance/precision in sync with live wallet data.
   // `selectedAsset` is seeded once from state at mount, so without this its
@@ -214,9 +252,10 @@ function SendScreen({ navigation, route }: Props) {
       return { ...prev, balance: live.balance, precision: live.precision };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [btcBalance, rgbAssets, activeRoute?.account]);
+  }, [btcBalance, rgbAssets, btcSpendableSats]);
 
   useEffect(() => {
+    let reviewTimer: ReturnType<typeof setTimeout> | undefined;
     // Handle route parameters from QR scanner or other navigation
     if (route.params?.selectedAsset) {
       // If selectedAsset is provided directly, use it
@@ -234,6 +273,8 @@ function SendScreen({ navigation, route }: Props) {
       setAddress(addressToSet);
       detectAddressType(addressToSet);
     }
+
+    if (route.params?.resumePayment) setKaleidoPayCode('');
 
     if (route.params?.prefilledAmount) {
       setAmount(route.params.prefilledAmount);
@@ -261,11 +302,12 @@ function SendScreen({ navigation, route }: Props) {
       
       if (hasCompleteData) {
         // Small delay to allow state to settle, then show review
-        setTimeout(() => {
+        reviewTimer = setTimeout(() => {
           setPaymentStep('review');
         }, 300);
       }
     }
+    return () => { if (reviewTimer) clearTimeout(reviewTimer); };
   }, [route.params]);
 
   const isLightningAddress = (input: string): boolean => {
@@ -274,19 +316,25 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const detectAddressType = useCallback(async (input: string) => {
+    const isCurrent = decodeGuard.begin();
+    setIsDecodingInvoice(false);
+    setDecodedInvoice(null);
+    setDecodedRGBInvoice(null);
+    setValidationError(null);
+    setSendRoutes([]);
+    setActiveRoute(null);
+    if (isKaleidoPayCode(input) || isSwappableAddress(input)) {
+      setAddressType('unknown');
+      setKaleidoPayCode(input.trim());
+      return;
+    }
     if (!input) {
       setAddressType('unknown');
-      setDecodedInvoice(null);
-      setDecodedRGBInvoice(null);
-      setValidationError(null);
       return;
     }
 
     setIsDecodingInvoice(true);
     setAddressType('unknown');
-    setDecodedInvoice(null);
-    setDecodedRGBInvoice(null);
-    setValidationError(null);
 
     try {
       // Unified destination classification + route resolution
@@ -299,7 +347,7 @@ function SendScreen({ navigation, route }: Props) {
       const accounts = getProtocolStatus();
       const { routes } = resolveSendRoutes({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts });
       setSendRoutes(routes);
-      const active = resolveActiveSendRoute({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts });
+      const active = resolveActiveSendRoute({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts, preferredAccount: route.params?.preferredAccount });
       setActiveRoute(active || null);
 
       if (destKind === 'lightning') {
@@ -334,6 +382,7 @@ function SendScreen({ navigation, route }: Props) {
             } catch { /* keep the local decode */ }
           }
 
+          if (!isCurrent()) return;
           setDecodedInvoice(decoded);
           setAddressType('lightning');
 
@@ -358,6 +407,7 @@ function SendScreen({ navigation, route }: Props) {
             }
           }
         } catch (error) {
+          if (!isCurrent()) return;
           setAddressType('invalid');
           setValidationError('Failed to decode Lightning invoice');
         }
@@ -372,6 +422,7 @@ function SendScreen({ navigation, route }: Props) {
             return;
           }
           const decoded = await rgbAdapterRgb.decodeRgbInvoice?.({ invoice: input }) as any;
+          if (!isCurrent()) return;
           
           // Extract amount from assignment if it's a fungible assignment
           let invoiceAmount: number | null = null;
@@ -393,7 +444,7 @@ function SendScreen({ navigation, route }: Props) {
               setSelectedAsset(asset);
               // Set amount if specified in invoice
               if (invoiceAmount) {
-                const precision = asset.precision || 8;
+                const precision = resolvePrecision(asset.precision);
                 const formattedAmount = invoiceAmount / Math.pow(10, precision);
                 setAmount(formattedAmount.toString());
               }
@@ -402,6 +453,7 @@ function SendScreen({ navigation, route }: Props) {
             }
           }
         } catch (error) {
+          if (!isCurrent()) return;
           setAddressType('invalid');
           setValidationError('Failed to decode RGB invoice');
         }
@@ -412,13 +464,14 @@ function SendScreen({ navigation, route }: Props) {
         setValidationError('Invalid address format. Please enter a valid Bitcoin, Lightning, Spark, Arkade, or RGB address.');
       }
     } catch (error) {
+      if (!isCurrent()) return;
       console.error('Failed to decode input:', error);
       setAddressType('invalid');
       setValidationError('Failed to decode input. Please check the address format.');
     } finally {
-      setIsDecodingInvoice(false);
+      if (isCurrent()) setIsDecodingInvoice(false);
     }
-  }, [allAssets, bitcoinUnit]);
+  }, [allAssets, bitcoinUnit, selectedAsset.asset_id, getProtocolStatus, navigation, decodeGuard]);
 
   const handlePasteFromClipboard = async () => {
     try {
@@ -457,7 +510,7 @@ function SendScreen({ navigation, route }: Props) {
         : (availableBalance / 100000000).toFixed(8);
     } else {
       const balance = selectedAsset.balance || 0;
-      const precision = selectedAsset.precision || 8;
+      const precision = resolvePrecision(selectedAsset.precision);
       return (balance / Math.pow(10, precision)).toFixed(precision);
     }
   };
@@ -473,6 +526,10 @@ function SendScreen({ navigation, route }: Props) {
     : `${maxAmount} ${selectedAsset?.ticker || ''}`;
 
   const validateInputs = (): boolean => {
+    if (!activeRoute) {
+      Alert.alert('Choose an account', 'Select the account to send from. Ark addresses do not identify whether the recipient uses Bark or Arkade.');
+      return false;
+    }
     if (!address.trim()) {
       Alert.alert('Missing Address', 'Please enter a recipient address or scan a QR code.');
       return false;
@@ -503,7 +560,7 @@ function SendScreen({ navigation, route }: Props) {
     // otherwise a slow balance load blocks an otherwise-valid payment.
     if (selectedAsset && (selectedAsset.balance || 0) > 0) {
       const isBtc = selectedAsset.asset_id === 'BTC';
-      const precision = selectedAsset.precision || 8;
+      const precision = resolvePrecision(selectedAsset.precision);
       const availableRaw = selectedAsset.balance || 0;
       const inputRaw = isBtc
         ? (bitcoinUnit === 'BTC'
@@ -517,7 +574,7 @@ function SendScreen({ navigation, route }: Props) {
           : `${(availableRaw / Math.pow(10, precision)).toFixed(precision)} ${selectedAsset.ticker}`;
         Alert.alert(
           'Insufficient Balance',
-          `You don't have enough ${selectedAsset.ticker}. Available: ${availableDisplay}`
+          `Available ${activeRoute ? `from ${activeRoute.account}` : 'to spend'}: ${availableDisplay}. Other accounts or pending funds may be included in your total balance. Lower the amount, choose another payment method, or add funds.`
         );
         return false;
       }
@@ -526,14 +583,48 @@ function SendScreen({ navigation, route }: Props) {
     return true;
   };
 
+  const getEffectiveSats = () => decodedInvoice?.amt_msat
+    ? Math.ceil(decodedInvoice.amt_msat / 1000)
+    : amountSatsFromBtcUnits(amount);
+
+  const loadFeeEstimate = async () => {
+    const requestId = ++feeRequestRef.current;
+    setFeeEstimate(null);
+    setEstimatingFee(true);
+    try {
+      const adapter = activeRoute ? protocolManager.getAdapterIfAvailable(toEngineProtocol(activeRoute.protocol)) : null;
+      const fee = selectedAsset.asset_id === 'BTC' ? await estimatePaymentFee(adapter as PaymentFeeAdapter | null, {
+        method: activeRoute?.method ?? '', destination: address, amountSats: getEffectiveSats(),
+        amountless: !decodedInvoice?.amt_msat,
+      }) : null;
+      if (requestId === feeRequestRef.current) setFeeEstimate(fee);
+    } catch {
+      // An unavailable provider estimate is never presented as a free payment.
+    } finally {
+      if (requestId === feeRequestRef.current) setEstimatingFee(false);
+    }
+  };
+
   const handleSend = async () => {
-    if (!validateInputs()) return;
-    
-    if (paymentStep === 'input') {
-      setPaymentStep('review');
+    if (sendingRef.current || estimatingFee || !validateInputs()) return;
+    const expiresAt = invoiceExpiry(address.replace(/^lightning:(\/\/)?/i, ''));
+    if (expiresAt !== null && expiresAt <= Date.now()) {
+      Alert.alert('Invoice expired', 'Ask the recipient for a new invoice before paying.');
       return;
     }
     
+    if (paymentStep === 'input') {
+      setPaymentStep('review');
+      void loadFeeEstimate();
+      return;
+    }
+    
+    const totalSats = paymentTotal(getEffectiveSats(), feeEstimate);
+    if (selectedAsset.asset_id === 'BTC' && totalSats !== null && totalSats > btcSpendableSats()) {
+      Alert.alert('Amount and fee exceed available funds', 'Lower the amount, choose another available payment method, or add funds to this account.');
+      return;
+    }
+    sendingRef.current = true;
     // We're in review step, proceed with sending
     setPaymentStep('sending');
     setLoading(true);
@@ -548,7 +639,17 @@ function SendScreen({ navigation, route }: Props) {
       let successType: PaymentType = 'lightning';
       let result: any = null;
 
-      if (method === 'spark') {
+      if (protocol === 'BARK') {
+        let invoice = address;
+        const entered = amountSatsFromBtcUnits(amount);
+        if (addressType === 'lightning-address' || addressType === 'lnurl-pay') {
+          invoice = await resolveLightningAddressToInvoice(address, entered);
+        }
+        const fixed = addressType === 'lightning' && (decodedInvoice?.amt_msat ?? 0) > 0;
+        result = await sendBarkPayment({ invoice, ...(fixed ? {} : { amount: entered }) });
+        if (result.status === 'failed') throw new Error('Bark payment failed.');
+        successType = 'bark';
+      } else if (method === 'spark') {
         // Spark transfer
         const sparkAdapter = protocolManager.getAdapter('SPARK');
         const amountSats = bitcoinUnit === 'BTC'
@@ -564,12 +665,12 @@ function SendScreen({ navigation, route }: Props) {
           ? Math.round(parseFloat(amount) * 1e8)
           : Math.round(parseFloat(amount));
 
-        const feeSats = await assertArkadeFeeCovered(arkadeAdapter, address, amountSats);
+        const feeSats = await assertArkadeBalanceCovered(arkadeAdapter, amountSats);
         result = method === 'boarding' && typeof arkadeAdapter.sendBtcOnchain === 'function'
           ? await arkadeAdapter.sendBtcOnchain({ address, amount: amountSats })
           : await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
         ensureSuccessfulArkadeResult(result);
-        if (result.fee == null || Number(result.fee) === 0) {
+        if (feeSats !== null && result.fee == null) {
           result = { ...result, fee: feeSats };
         }
         successType = method === 'boarding' ? 'boarding' : 'arkade';
@@ -629,47 +730,44 @@ function SendScreen({ navigation, route }: Props) {
         }
         // RGB amounts are base units (input is whole tokens) — scale by precision,
         // otherwise "10" would send 10 base units (0.00001 of a precision-6 asset).
-        const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, selectedAsset.precision || 8));
+        const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, resolvePrecision(selectedAsset.precision)));
         result = await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: rgbBaseUnits });
         successType = 'rgb';
       }
 
       goToPaymentSuccess(successType, result);
     } catch (error) {
+      if (activeRoute?.account === 'BARK' && (error as any)?.code === 'PAYMENT_OUTCOME_UNKNOWN') {
+        goToPaymentSuccess('bark', { status: 'unknown', feeKnown: false });
+        return;
+      }
       console.error('Send error:', error);
       feedback.error();
       setPaymentStep('review');
       Alert.alert(
-        'Payment Failed',
+        'Payment failed',
         error instanceof Error ? error.message : 'Failed to send payment'
       );
     } finally {
+      sendingRef.current = false;
       setLoading(false);
     }
   };
 
-  const assertArkadeFeeCovered = async (
+  const assertArkadeBalanceCovered = async (
     arkadeAdapter: any,
-    destination: string,
     amountSats: number,
-  ): Promise<number> => {
-    const quote = await arkadeAdapter.executeProtocolOperation?.('quoteSendTransaction', {
-      to: destination,
-      value: amountSats,
-    });
-    const feeSats = Number(quote?.fee);
-    if (!Number.isFinite(feeSats)) {
-      throw new Error('Could not estimate the Arkade network fee. Please try again.');
-    }
+  ): Promise<number | null> => {
+    const feeSats = feeEstimate;
 
     const balance = await arkadeAdapter.getBtcBalance?.();
-    const availableSats = Number(balance?.total ?? balance?.confirmed ?? 0);
+    const availableSats = Number(balance?.confirmed);
     if (!Number.isFinite(availableSats)) {
       throw new Error('Could not read your Arkade balance. Please try again.');
     }
-    if (amountSats + feeSats > availableSats) {
+    if (amountSats + (feeSats ?? 0) > availableSats) {
       throw new Error(
-        `Insufficient Arkade balance. This payment needs ${amountSats.toLocaleString()} sats plus a ${feeSats.toLocaleString()} sats network fee.`
+        `Insufficient Arkade balance. This payment needs ${amountSats.toLocaleString()} sats plus ${feeSats === null ? 'a network fee (estimate unavailable)' : `an estimated ${feeSats.toLocaleString()} sats fee`}.`
       );
     }
 
@@ -708,7 +806,7 @@ function SendScreen({ navigation, route }: Props) {
   const goToPaymentSuccess = (paymentType: PaymentType, result: any) => {
     const isBtc = selectedAsset.asset_id === 'BTC';
     const unit = isBtc ? bitcoinUnit : selectedAsset.ticker;
-    const fiat = isBtc && bitcoinPrice > 0 && amount
+    const fiat = activeRoute?.account !== 'BARK' && isBtc && bitcoinPrice > 0 && amount
       ? `≈ $${parseFloat(formatSatoshisToUSD(amountSatsFromBtcUnits(amount))).toLocaleString()}`
       : undefined;
 
@@ -722,19 +820,20 @@ function SendScreen({ navigation, route }: Props) {
 
     // Surface the on-chain fee rate on the receipt for on-chain sends only
     // (same rule as the fee selector).
-    const fee = result?.fee != null && Number.isFinite(Number(result.fee))
-      ? `${Number(result.fee).toLocaleString()} sats`
+    const fee = result?.feeKnown === false ? 'Unavailable' : result?.fee != null && Number.isFinite(Number(result.fee))
+      ? `${formatBitcoinAmount(Number(result.fee), bitcoinUnit)} ${bitcoinUnit}`
       : (addressType === 'bitcoin' || addressType === 'rgb')
       ? `${feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB`
       : undefined;
 
-    navigation.navigate('PaymentSuccess', {
-      amount: amount || '0',
+    navigation.replace('PaymentSuccess', {
+      amount: isBtc ? formatBitcoinAmount(getEffectiveSats(), bitcoinUnit) : amount || '0',
       unit,
       fiat,
       recipient: address,
       paymentType,
-      status: result?.status === 'pending' ? 'pending' : 'confirmed',
+      status: paymentReceiptStatus(result, ['bitcoin', 'boarding', 'rgb'].includes(paymentType)),
+      networkLabel: activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : undefined,
       fee,
       reference: typeof reference === 'string' ? reference : undefined,
       referenceLabel,
@@ -761,8 +860,9 @@ function SendScreen({ navigation, route }: Props) {
 
   const renderHeader = () => (
     <ScreenHeader
-      title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
-      showBack={true}
+      title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Paying…' : 'Pay'}
+      showBack={paymentStep !== 'sending'}
+      onBack={() => { if (paymentStep === 'review') { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); } else navigation.goBack(); }}
       rightAction={
         <TouchableOpacity
           onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
@@ -792,7 +892,7 @@ function SendScreen({ navigation, route }: Props) {
     : addressType === 'lightning-address' ? 'Lightning Address'
     : addressType === 'lnurl-pay' ? 'LNURL Pay'
     : addressType === 'spark' ? 'Spark Address'
-    : addressType === 'arkade' ? 'Arkade Address'
+    : addressType === 'arkade' ? 'Ark address (Bark / Arkade)'
     : addressType === 'bitcoin' ? 'Bitcoin Address'
     : 'RGB Invoice';
 
@@ -871,7 +971,7 @@ function SendScreen({ navigation, route }: Props) {
       {/* Route selector — whenever more than one account can pay the
           destination, always let the user choose which to spend from. The
           auto-router still pre-selects the best route as the default. */}
-      {sendRoutes.length > 1 && addressType !== 'unknown' && addressType !== 'invalid' && (
+      {sendRoutes.length > 0 && addressType !== 'unknown' && addressType !== 'invalid' && (
         <View style={{ marginTop: 14, gap: 8 }}>
           <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.4 }}>
             Send via
@@ -882,7 +982,7 @@ function SendScreen({ navigation, route }: Props) {
             return (
               <PressableScale
                 key={`${route.account}-${route.method}`}
-                onPress={() => { if (!disabled) { feedback.select(); setActiveRoute({ ...route, protocol: route.account }); } }}
+                onPress={() => { if (!disabled) { feedback.select(); feeRequestRef.current += 1; setFeeEstimate(null); setEstimatingFee(false); setPaymentStep('input'); setActiveRoute({ ...route, protocol: route.account }); } }}
                 style={{
                   flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
                   backgroundColor: selected ? theme.colors.primary[50] : theme.colors.background.secondary,
@@ -897,7 +997,7 @@ function SendScreen({ navigation, route }: Props) {
                 <View style={{ flex: 1 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text.primary }}>
-                      {METHOD_META[route.method]?.label || route.method}
+                      {route.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : `${route.account} · ${METHOD_META[route.method]?.label || route.method}`}
                     </Text>
                     {route.recommended && (
                       <View style={{ backgroundColor: theme.colors.primary[500], borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1 }}>
@@ -905,8 +1005,8 @@ function SendScreen({ navigation, route }: Props) {
                       </View>
                     )}
                   </View>
-                  <Text style={{ fontSize: 11.5, color: disabled ? theme.colors.error[500] : theme.colors.text.tertiary, marginTop: 1 }} numberOfLines={1}>
-                    {disabled ? (route.disabledReason || 'Unavailable') : route.summary}
+                  <Text style={{ fontSize: 11.5, color: disabled ? theme.colors.error[500] : theme.colors.text.tertiary, marginTop: 1 }}>
+                    {disabled ? (route.disabledReason || 'Unavailable') : `${route.summary}${selectedAsset.asset_id === 'BTC' ? ` · ${formatBitcoinAmount(availableForRoute(route.account, route.method), bitcoinUnit)} ${bitcoinUnit} available before fees` : ''}`}
                   </Text>
                 </View>
                 <Ionicons
@@ -978,7 +1078,7 @@ function SendScreen({ navigation, route }: Props) {
             <View style={styles.invoiceDetailRow}>
               <Text style={styles.invoiceDetailLabel}>Amount:</Text>
               <Text style={styles.invoiceDetailValue}>
-                {(decodedRGBInvoice.amount / Math.pow(10, asset?.precision || 8)).toFixed(asset?.precision || 8)} {asset?.ticker}
+                {(decodedRGBInvoice.amount / Math.pow(10, resolvePrecision(asset?.precision))).toFixed(resolvePrecision(asset?.precision))} {asset?.ticker}
               </Text>
             </View>
           )}
@@ -1006,7 +1106,7 @@ function SendScreen({ navigation, route }: Props) {
     const isBtc = a.asset_id === 'BTC';
     const balanceStr = isBtc
       ? `${formatBitcoinAmount(a.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
-      : `${((a.balance || 0) / Math.pow(10, a.precision || 8)).toLocaleString(undefined, { maximumFractionDigits: a.precision || 8 })}`;
+      : `${((a.balance || 0) / Math.pow(10, resolvePrecision(a.precision))).toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(a.precision) })}`;
     return {
       id: a.asset_id,
       symbol: a.ticker,
@@ -1045,7 +1145,7 @@ function SendScreen({ navigation, route }: Props) {
             <Text style={styles.assetBalance}>
               Balance: {selectedAsset.asset_id === 'BTC'
                 ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
-                : `${((selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8)} ${selectedAsset.ticker}`}
+                : `${((selectedAsset.balance || 0) / Math.pow(10, resolvePrecision(selectedAsset.precision))).toFixed(resolvePrecision(selectedAsset.precision))} ${selectedAsset.ticker}`}
             </Text>
           </View>
           <Ionicons name="chevron-down" size={20} color={theme.colors.text.secondary} />
@@ -1122,7 +1222,7 @@ function SendScreen({ navigation, route }: Props) {
 
     const maxDecimals = selectedAsset.asset_id === 'BTC'
       ? (bitcoinUnit === 'BTC' ? 8 : 0)
-      : (selectedAsset.precision || 8);
+      : (resolvePrecision(selectedAsset.precision));
     if (parts[1] && parts[1].length > maxDecimals) return;
     const normalized = selectedAsset.asset_id === 'BTC' ? parseInputAmount(clean, bitcoinUnit) : clean;
     setAmountClamped(normalized);
@@ -1138,19 +1238,19 @@ function SendScreen({ navigation, route }: Props) {
     }
 
     const isBtc = selectedAsset.asset_id === 'BTC';
-    const canEnterFiat = isBtc && bitcoinPrice > 0;
+    const canEnterFiat = activeRoute?.account !== 'BARK' && isBtc && bitcoinPrice > 0;
     const maxAmount = getMaxAmount();
 
     const tokenSymbol = isBtc ? bitcoinUnit : selectedAsset.ticker;
     const tokenBalance = isBtc
       ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)}`
-      : `${((selectedAsset.balance || 0) / Math.pow(10, selectedAsset.precision || 8)).toLocaleString(undefined, { maximumFractionDigits: selectedAsset.precision || 8 })}`;
-    const tokenBalanceUSD = isBtc ? `$${formatSatoshisToUSD(selectedAsset.balance || 0)}` : '—';
+      : `${((selectedAsset.balance || 0) / Math.pow(10, resolvePrecision(selectedAsset.precision))).toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(selectedAsset.precision) })}`;
+    const tokenBalanceUSD = activeRoute?.account !== 'BARK' && isBtc ? `$${formatSatoshisToUSD(selectedAsset.balance || 0)}` : '—';
 
     // Secondary conversion line.
     const secondary = (() => {
       if (!amount) return '';
-      if (amountMode === 'token' && isBtc) {
+      if (amountMode === 'token' && isBtc && activeRoute?.account !== 'BARK') {
         return `≈ $${formatSatoshisToUSD(amountSatsFromBtcUnits(amount))} USD`;
       }
       if (amountMode === 'fiat') {
@@ -1195,16 +1295,20 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderFeeSelector = () => {
-    // Match rate-extension: the sat/vB fee rate applies to on-chain operations
-    // only — a plain Bitcoin send and an RGB transfer (which anchors a UTXO on
-    // L1). Lightning, Spark and Arkade transfers carry no on-chain fee rate.
-    if (addressType !== 'bitcoin' && addressType !== 'rgb') {
+    // Only the RLN on-chain send consumes this user-selected fee rate.
+    if (addressType !== 'bitcoin' || activeRoute?.protocol !== 'RGB') {
       return null;
     }
 
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Network Fee</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showAdvancedFees }}
+          style={styles.reviewRow} onPress={() => setShowAdvancedFees(value => !value)}>
+          <Text style={styles.sectionTitle}>Advanced · network fee rate</Text>
+          <Ionicons name={showAdvancedFees ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+        {showAdvancedFees && <>
+        <Text style={styles.sectionDescription}>Fee rates do not guarantee a confirmation time. The final cost depends on transaction size and network conditions.</Text>
         <View style={styles.feeSelector}>
           {feeRates.map((fee, index) => (
             <TouchableOpacity
@@ -1248,6 +1352,7 @@ function SendScreen({ navigation, route }: Props) {
             />
           </View>
         )}
+        </>}
       </View>
     );
   };
@@ -1284,20 +1389,15 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderPaymentReview = () => {
-    if (paymentStep !== 'review') return null;
+    if (paymentStep !== 'review' && paymentStep !== 'sending') return null;
 
-    const effectiveAmount = amount ||
-      (decodedInvoice?.amt_msat ? (decodedInvoice.amt_msat / 100000000000).toFixed(8) : '0') ||
-      (decodedRGBInvoice?.amount ? (decodedRGBInvoice.amount / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8) : '0');
-
-    // USD conversion needs SATS, not the display string. `amount` is in the
-    // active unit (BTC or sats) so route it through amountSatsFromBtcUnits;
-    // an amountless typed send falls back to the invoice's msat value.
-    const effectiveAmountSats = amount
-      ? amountSatsFromBtcUnits(amount)
-      : decodedInvoice?.amt_msat
-        ? Math.round(decodedInvoice.amt_msat / 1000)
-        : 0;
+    const effectiveAmountSats = getEffectiveSats();
+    const effectiveAmount = selectedAsset.asset_id === 'BTC'
+      ? formatBitcoinAmount(effectiveAmountSats, bitcoinUnit)
+      : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
+    const totalSats = paymentTotal(effectiveAmountSats, feeEstimate);
+    const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
+    const formatCost = (sats: number) => `${formatBitcoinAmount(sats, bitcoinUnit)} ${bitcoinUnit}${activeRoute?.account !== 'BARK' && bitcoinPrice > 0 ? ` · ≈ $${formatSatoshisToUSD(sats)}` : ''}`;
 
     return (
       <View style={styles.section}>
@@ -1310,11 +1410,33 @@ function SendScreen({ navigation, route }: Props) {
               <Text style={styles.reviewAmount}>
                 {effectiveAmount} {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
               </Text>
-              <Text style={styles.reviewAsset}>{selectedAsset.name}</Text>
+              <Text style={styles.reviewAsset}>Recipient receives · {selectedAsset.name}</Text>
             </View>
           </View>
 
           <View style={styles.reviewDetails}>
+            <PaymentNetworkLabel request={address} />
+            {selectedAsset.asset_id === 'BTC' && <>
+              <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>Available in this account</Text>
+                <Text style={styles.reviewValue}>{formatCost(btcSpendableSats())}</Text>
+              </View>
+              {totalSats !== null && totalSats <= btcSpendableSats() && <View style={styles.reviewRow}>
+                <Text style={styles.reviewLabel}>After payment and fee</Text>
+                <Text style={styles.reviewValue}>{formatCost(btcSpendableSats() - totalSats)}</Text>
+              </View>}
+              {(totalSats ?? effectiveAmountSats) > btcSpendableSats() && <Text accessibilityRole="alert" style={styles.sectionDescription}>Insufficient balance in this account. Tap Edit to choose another available account or lower the amount.</Text>}
+              {(totalSats ?? effectiveAmountSats) > btcSpendableSats() && sendRoutes.filter(option => !option.disabled && option.account !== activeRoute?.account && availableForRoute(option.account, option.method) >= effectiveAmountSats).map(option => <TouchableOpacity key={`${option.account}-${option.method}`} accessibilityRole="button" style={{ paddingVertical: theme.spacing[3] }} onPress={() => {
+                feeRequestRef.current += 1; setFeeEstimate(null); setEstimatingFee(false);
+                setActiveRoute({ ...option, protocol: option.account }); setPaymentStep('input');
+              }}><Text style={{ color: theme.colors.primary[500] }}>Review using {option.account} · fees recalculated</Text></TouchableOpacity>)}
+            </>}
+
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>From account</Text>
+              <Text style={styles.reviewValue}>{activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : activeRoute?.account || 'Choose an account'}</Text>
+            </View>
+            {activeRoute?.account === 'BARK' && <Text style={styles.reviewLabel}>Fee is determined by Bark. Settlement may remain pending; check Bark activity after sending.</Text>}
             <View style={styles.reviewRow}>
               <Text style={styles.reviewLabel}>To</Text>
               <Text style={styles.reviewValue} numberOfLines={2}>
@@ -1329,16 +1451,27 @@ function SendScreen({ navigation, route }: Props) {
               </View>
             )}
 
-            {(addressType === 'bitcoin' || addressType === 'rgb') && (
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Network Fee</Text>
-                <Text style={styles.reviewValue}>
-                  {feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB
-                </Text>
-              </View>
-            )}
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Request</Text>
+              <Text style={styles.reviewValue}>{paymentRequestLabel(address)}</Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Estimated fee</Text>
+              <Text style={styles.reviewValue}>{estimatingFee ? 'Estimating…' : feeEstimate === null ? 'Unavailable for this payment method' : formatCost(feeEstimate)}</Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Estimated total</Text>
+              <Text style={styles.reviewValue}>{selectedAsset.asset_id === 'BTC' && totalSats !== null ? formatCost(totalSats) : `${effectiveAmount} ${unit} + network fee`}</Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Arrival</Text>
+              <Text style={styles.reviewValue}>{addressType === 'bitcoin' || addressType === 'rgb' ? 'After network confirmation; timing varies' : 'Usually seconds; routing can take longer'}</Text>
+            </View>
+            <Text style={styles.sectionDescription}>
+              {feeEstimate === null ? 'This wallet provider does not currently supply a fee estimate. The final fee will be shown on the receipt when available.' : 'Fees are estimates and may change before the payment is sent.'}
+            </Text>
 
-            {selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
+            {activeRoute?.account !== 'BARK' && selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
               <View style={styles.reviewRow}>
                 <Text style={styles.reviewLabel}>USD Value</Text>
                 <Text style={styles.reviewValue}>
@@ -1347,30 +1480,47 @@ function SendScreen({ navigation, route }: Props) {
               </View>
             )}
           </View>
-
-          <View style={styles.reviewActions}>
-            <Button
-              title="Edit"
-              variant="secondary"
-              onPress={() => setPaymentStep('input')}
-              style={styles.reviewEditButton}
-            />
-            <Button
-              title={
-                addressType === 'lightning' ? 'Pay Invoice' :
-                addressType === 'rgb' ? 'Send RGB Asset' :
-                'Send Bitcoin'
-              }
-              variant="primary"
-              onPress={handleSend}
-              loading={loading}
-              style={styles.reviewConfirmButton}
-            />
-          </View>
         </View>
       </View>
     );
   };
+
+  const renderReviewActions = () => {
+    if (paymentStep !== 'review') return null;
+    const effectiveAmount = selectedAsset.asset_id === 'BTC'
+      ? formatBitcoinAmount(getEffectiveSats(), bitcoinUnit)
+      : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
+    const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
+    return <View style={styles.sendButtonContainer}>
+      <View style={styles.reviewActions}>
+        <Button
+          title="Edit"
+          disabled={loading}
+          variant="secondary"
+          onPress={() => { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); }}
+          style={styles.reviewEditButton}
+        />
+        <Button
+          title={`Pay ${effectiveAmount} ${unit}`}
+          disabled={estimatingFee || loading || (selectedAsset.asset_id === 'BTC' && (paymentTotal(getEffectiveSats(), feeEstimate) ?? getEffectiveSats()) > btcSpendableSats())}
+          variant="primary"
+          onPress={handleSend}
+          loading={loading}
+          style={styles.reviewConfirmButton}
+        />
+      </View>
+    </View>;
+  };
+
+  if (kaleidoPayCode !== null) {
+    return (
+      <KaleidoPayFlow
+        code={kaleidoPayCode}
+        onExit={() => { setKaleidoPayCode(null); setAddress(''); detectAddressType(''); }}
+        onDone={() => navigation.goBack()}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
@@ -1408,6 +1558,7 @@ function SendScreen({ navigation, route }: Props) {
         </ScrollView>
 
         {renderSendButton()}
+        {renderReviewActions()}
       </KeyboardAvoidingView>
 
       <NostrContactsSelector
@@ -1430,44 +1581,10 @@ function SendScreen({ navigation, route }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.secondary,
-  },
-  
-  headerContainer: {
-    marginBottom: theme.spacing[4],
-  },
-  
-  headerGradient: {
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[6],
-    borderBottomLeftRadius: theme.borderRadius['2xl'],
-    borderBottomRightRadius: theme.borderRadius['2xl'],
-  },
-  
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[4],
-  },
-  
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  headerTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
   },
   
   helpButton: {
@@ -1593,39 +1710,6 @@ const styles = StyleSheet.create({
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '600',
     color: theme.colors.text.primary,
-  },
-
-  addressTypeIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: theme.spacing[2],
-    gap: theme.spacing[2],
-  },
-  
-  addressTypeIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  lightningIcon: {
-    backgroundColor: theme.colors.networks.lightning,
-  },
-
-  bitcoinIcon: {
-    backgroundColor: theme.colors.networks.bitcoin,
-  },
-
-  rgbIcon: {
-    backgroundColor: theme.colors.primary[500],
-  },
-  
-  addressTypeText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.text.secondary,
   },
   
   decodingIndicator: {
@@ -1778,102 +1862,6 @@ const styles = StyleSheet.create({
     color: theme.colors.text.muted,
   },
   
-  assetDropdown: {
-    backgroundColor: theme.colors.surface.primary,
-    marginTop: theme.spacing[2],
-    borderRadius: theme.borderRadius.lg,
-    maxHeight: 300,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.15,
-    shadowRadius: 6.27,
-    elevation: 10,
-  },
-  
-  assetDropdownScroll: {
-    maxHeight: 280,
-  },
-  
-  assetOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-  
-  assetOptionSelected: {
-    backgroundColor: theme.colors.primary[50],
-  },
-  
-  assetOptionInfo: {
-    flex: 1,
-    marginLeft: theme.spacing[3],
-  },
-  
-  assetOptionTicker: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  assetOptionName: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[1],
-  },
-  
-  assetOptionBalance: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.muted,
-  },
-  
-  amountHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[4],
-  },
-  
-  maxButton: {
-    backgroundColor: theme.colors.primary[50],
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100], // Changed from 200 to 100
-    borderRadius: theme.borderRadius.base,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-  },
-  
-  maxButtonText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.primary[600],
-  },
-  
-  amountInput: {
-    marginBottom: theme.spacing[3],
-  },
-  
-  balanceInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  
-  balanceText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  
-  usdValue: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.text.primary,
-  },
-  
   feeSelector: {
     flexDirection: 'row',
     gap: theme.spacing[2],
@@ -1935,133 +1923,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 6,
     elevation: 8,
-  },
-  
-  // Modal styles
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-  
-  modalContent: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
-    marginHorizontal: theme.spacing[5],
-    width: '90%',
-    maxWidth: 400,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 12,
-  },
-  
-  modalTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    textAlign: 'center',
-    marginBottom: theme.spacing[6],
-  },
-  
-  confirmationDetails: {
-    marginBottom: theme.spacing[6],
-  },
-  
-  confirmationRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: theme.spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-    gap: theme.spacing[4],
-  },
-  
-  confirmationLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    fontWeight: '500',
-    minWidth: 80,
-  },
-  
-  confirmationValue: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'right',
-  },
-  
-  modalActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-  
-  modalCancelButton: {
-    flex: 1,
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    backgroundColor: theme.colors.gray[100],
-    borderRadius: theme.borderRadius.lg,
-    alignItems: 'center',
-  },
-  
-  modalCancelText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.secondary,
-  },
-  
-  modalConfirmButton: {
-    flex: 1,
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    backgroundColor: theme.colors.primary[500],
-    borderRadius: theme.borderRadius.lg,
-    alignItems: 'center',
-  },
-  
-  modalConfirmText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.inverse,
-  },
-  
-  quickAmounts: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing[3],
-    marginBottom: theme.spacing[4],
-    gap: theme.spacing[2],
-  },
-  
-  quickAmountButton: {
-    flex: 1,
-    backgroundColor: theme.colors.primary[50],
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100],
-  },
-  
-  quickAmountText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[700],
-    fontWeight: '600',
   },
 
   reviewCard: {
@@ -2133,13 +1994,9 @@ const styles = StyleSheet.create({
     gap: theme.spacing[3],
   },
 
-  reviewEditButton: {
-    flex: 1,
-  },
+  reviewEditButton: { minHeight: 48, flex: 1 },
 
-  reviewConfirmButton: {
-    flex: 2,
-  },
+  reviewConfirmButton: { minHeight: 48, flex: 2 },
 
   sendingOverlay: {
     position: 'absolute',

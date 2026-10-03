@@ -33,6 +33,7 @@ export function useFiatRates(currencies: readonly string[] = SUPPORTED_FIATS) {
     const svc = PriceService.getInstance();
 
     const update = async () => {
+      if (currenciesRef.current.length === 0) return;
       try {
         const next = await svc.getBitcoinRates([...currenciesRef.current]);
         if (!cancelled) setRates(next);

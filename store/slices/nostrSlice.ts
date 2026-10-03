@@ -2,10 +2,14 @@
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import * as SecureStore from 'expo-secure-store';
 import NostrService, { NostrProfile, NostrContact, NostrSettings } from '../../services/NostrService';
+import type {
+  NwcCapability,
+  SavedNwcConnection,
+} from '../../services/nwc/connectionStore';
 
 // Secure storage keys
-const NOSTR_PRIVATE_KEY = 'nostr_private_key';
-const NOSTR_NSEC_KEY = 'nostr_nsec_key';
+import { NOSTR_PRIVATE_KEY, NOSTR_NSEC_KEY } from '../nostrKeys';
+export { NOSTR_PRIVATE_KEY, NOSTR_NSEC_KEY };
 
 // Async thunks for secure key operations
 export const saveKeysSecurely = createAsyncThunk(
@@ -46,6 +50,8 @@ export const restoreNostrConnection = createAsyncThunk(
       throw new Error('No stored private key found');
     }
 
+    const nsec = await SecureStore.getItemAsync(NOSTR_NSEC_KEY);
+
     const nostrService = NostrService.getInstance();
     const settings: NostrSettings = {
       privateKey,
@@ -53,7 +59,7 @@ export const restoreNostrConnection = createAsyncThunk(
     };
     
     const success = await nostrService.initialize(settings);
-    return { success, privateKey };
+    return { success, privateKey, nsec };
   }
 );
 
@@ -141,10 +147,10 @@ interface NostrState {
   profileError: string | null;
   
   // Keys and identity (private keys stored securely, public data persisted)
-  privateKey: string | null; // NOT persisted - loaded from secure storage
+  privateKey: string | null; // NOT persisted (stripped in store/nostrPersistence.ts) - loaded from secure storage
   publicKey: string | null; // persisted
   npub: string | null; // persisted  
-  nsec: string | null; // NOT persisted - loaded from secure storage
+  nsec: string | null; // NOT persisted (stripped in store/nostrPersistence.ts) - loaded from secure storage
   hasStoredKeys: boolean; // persisted - indicates if keys are saved securely
   
   // Contacts (persisted)
@@ -160,10 +166,15 @@ interface NostrState {
   // Wallet Connect (persisted settings, not connection state)
   walletConnectEnabled: boolean;
   connectedWallet: string | null;
-  nwcConnectionString: string | null; // persisted for easy access
+  // NOT persisted: embeds a spending secret. The NWC service's connections are
+  // in-memory, so a string generated in a previous session is dead anyway.
+  nwcConnectionString: string | null;
   // Type of the connected NWC wallet: plain Lightning ('ln') vs KaleidoSwap
   // RGB Lightning Node ('rln'). Drives which capabilities the UI exposes.
   nwcWalletType: 'ln' | 'rln' | null;
+  nwcCapabilities: NwcCapability[];
+  nwcConnections: SavedNwcConnection[];
+  selectedNwcConnectionId: string | null;
   
   // UI State (some persisted, some not)
   showContactSync: boolean;
@@ -206,6 +217,9 @@ const initialState: NostrState = {
   connectedWallet: null,
   nwcConnectionString: null,
   nwcWalletType: null,
+  nwcCapabilities: [],
+  nwcConnections: [],
+  selectedNwcConnectionId: null,
   
   showContactSync: false,
   subscriptionId: null,
@@ -329,6 +343,48 @@ const nostrSlice = createSlice({
     setNwcWalletType: (state, action: PayloadAction<'ln' | 'rln' | null>) => {
       state.nwcWalletType = action.payload;
     },
+
+    setNwcCapabilities: (state, action: PayloadAction<NwcCapability[]>) => {
+      state.nwcCapabilities = action.payload;
+    },
+
+    upsertNwcConnection: (state, action: PayloadAction<SavedNwcConnection>) => {
+      const index = state.nwcConnections.findIndex((item) => item.id === action.payload.id);
+      if (index >= 0) state.nwcConnections[index] = action.payload;
+      else state.nwcConnections.push(action.payload);
+      state.selectedNwcConnectionId = action.payload.id;
+      state.connectedWallet = action.payload.walletPubkey;
+      state.nwcWalletType = action.payload.type;
+      state.nwcCapabilities = action.payload.capabilities;
+    },
+
+    selectNwcConnection: (state, action: PayloadAction<string | null>) => {
+      state.selectedNwcConnectionId = action.payload;
+      const selected = state.nwcConnections.find((item) => item.id === action.payload);
+      state.connectedWallet = selected?.walletPubkey ?? null;
+      state.nwcWalletType = selected?.type ?? null;
+      state.nwcCapabilities = selected?.capabilities ?? [];
+    },
+
+    removeNwcConnection: (state, action: PayloadAction<string>) => {
+      state.nwcConnections = state.nwcConnections.filter((item) => item.id !== action.payload);
+      if (state.selectedNwcConnectionId === action.payload) {
+        const fallback = state.nwcConnections[0];
+        state.selectedNwcConnectionId = fallback?.id ?? null;
+        state.connectedWallet = fallback?.walletPubkey ?? null;
+        state.nwcWalletType = fallback?.type ?? null;
+        state.nwcCapabilities = fallback?.capabilities ?? [];
+      }
+    },
+
+    clearNwcConnections: (state) => {
+      state.nwcConnections = [];
+      state.selectedNwcConnectionId = null;
+      state.connectedWallet = null;
+      state.nwcWalletType = null;
+      state.nwcCapabilities = [];
+      state.nwcConnectionString = null;
+    },
     
     // UI State
     setShowContactSync: (state, action: PayloadAction<boolean>) => {
@@ -422,6 +478,9 @@ const nostrSlice = createSlice({
         state.isConnected = action.payload.success;
         if (action.payload.privateKey) {
           state.privateKey = action.payload.privateKey;
+        }
+        if (action.payload.nsec) {
+          state.nsec = action.payload.nsec;
         }
       })
       .addCase(restoreNostrConnection.rejected, (state, action) => {
@@ -531,6 +590,11 @@ export const {
   setConnectedWallet,
   setNWCConnectionString,
   setNwcWalletType,
+  setNwcCapabilities,
+  upsertNwcConnection,
+  selectNwcConnection,
+  removeNwcConnection,
+  clearNwcConnections,
   setShowContactSync,
   setSubscriptionId,
   setError,
@@ -540,4 +604,4 @@ export const {
   resetNostr,
 } = nostrSlice.actions;
 
-export default nostrSlice.reducer; 
+export default nostrSlice.reducer;

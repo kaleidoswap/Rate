@@ -8,6 +8,7 @@ type ScreenHeaderProps = {
   rightAction?: React.ReactNode;
   icon?: React.ComponentProps<typeof MainHeader>['icon'];
   showBack?: boolean;
+  onBack?: () => void;
   children?: React.ReactNode;
 };
 
@@ -17,6 +18,7 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
   rightAction,
   icon,
   showBack,
+  onBack,
   children,
 }) => {
   const navigation = useNavigation<any>();
@@ -29,7 +31,7 @@ export const ScreenHeader: React.FC<ScreenHeaderProps> = ({
       subtitle={subtitle}
       icon={icon}
       rightAction={rightAction}
-      onBack={shouldShowBack ? () => navigation.goBack() : undefined}
+      onBack={shouldShowBack ? (onBack ?? (() => navigation.goBack())) : undefined}
     >
       {children}
     </MainHeader>

@@ -84,3 +84,31 @@ describe('ActivityService', () => {
     );
   });
 });
+
+it('labels Bark signet history and preserves pending sends', async () => {
+  for (const key of Object.keys(adapters)) delete adapters[key];
+  adapters.BARK = {
+    isConnected: () => true,
+    getConnectionInfo: async () => ({ network: 'signet' }),
+    listTransactions: async () => [{ id: 'movement-1', type: 'send', amount: 1000, fee: 12, status: 'pending', timestamp: 2000 }],
+  };
+  const { items } = await loadActivity();
+  expect(items).toEqual([expect.objectContaining({ id: 'bark-movement-1', layer: 'Bark Signet', status: 'pending', rawSats: 1000, fee: 12 })]);
+});
+
+test('unknown payment outcomes stay distinct from pending and keep account metadata', async () => {
+  for (const key of Object.keys(adapters)) delete adapters[key];
+  adapters.SPARK = {
+    isConnected: () => true,
+    getConnectionInfo: async () => ({ network: 'regtest' }),
+    listTransactions: async () => [
+      { id: 'uncertain', type: 'send', status: 'unknown', amount: 10 },
+      { id: 'submitted', type: 'send', status: 'pending', amount: 20 },
+      { id: 'unexpected', type: 'send', status: 'new_provider_state', amount: 30 },
+    ],
+  };
+  const { items } = await loadActivity();
+  expect(items.find(i => i.id === 'spark-uncertain')).toMatchObject({ status: 'unknown', account: 'SPARK', network: 'regtest' });
+  expect(items.find(i => i.id === 'spark-submitted')?.status).toBe('pending');
+  expect(items.find(i => i.id === 'spark-unexpected')?.status).toBe('unknown');
+});

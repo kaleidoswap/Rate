@@ -1,0 +1,38 @@
+diff --git a/dist/adapters/BarkReactNativeAdapter.js b/dist/adapters/BarkReactNativeAdapter.js
+index ae3ecd9307f6157f68811f6fdde9247c199b0e22..64da2605866fd6fb138f2f7cd8c826f7adb5c37c 100644
+--- a/dist/adapters/BarkReactNativeAdapter.js
++++ b/dist/adapters/BarkReactNativeAdapter.js
+@@ -71,6 +71,21 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
+             throw new CapabilityError('Bark cannot enforce a payment fee cap', 'BARK');
+         const wallet = this.backend.getWalletPort();
+         const timestamp = this.runtime.now();
++        if (/^lno1/i.test(target)) {
++            // BOLT12 offer: Bark fetches the invoice and pays it; wait for the outcome.
++            if (amountOverride !== undefined)
++                positiveSats(amountOverride);
++            const result = await wallet.payLightningOffer({ offer: target, amountSats: amountOverride, wait: true });
++            if (result.type === 'paid' && preimageMatchesPaymentHash(result.preimage, result.payment_hash)) {
++                return { paymentHash: result.payment_hash, preimage: result.preimage, amount: amountOverride ?? 0, fee: 0,
++                    feeKnown: false, status: 'confirmed', timestamp };
++            }
++            if (result.type === 'inProgress') {
++                return { paymentHash: '', amount: result.send.amountSats, fee: result.send.feeSats, feeKnown: true,
++                    status: 'pending', timestamp };
++            }
++            return { paymentHash: '', amount: amountOverride ?? 0, fee: 0, feeKnown: false, status: 'unknown', timestamp };
++        }
+         if (classifyDestination(target).kind === 'BTC_ONCHAIN') {
+             positiveSats(amountOverride);
+             const txid = await wallet.sendOnchain(target, amountOverride);
+diff --git a/dist/backends/BarkReactNativeBackend.js b/dist/backends/BarkReactNativeBackend.js
+index fdeaf8294348cbe6d25979bfdc758e71a189513d..9cb93f15ef2871df2fcc8a2485e7567a62736ca0 100644
+--- a/dist/backends/BarkReactNativeBackend.js
++++ b/dist/backends/BarkReactNativeBackend.js
+@@ -284,6 +284,7 @@ export class BarkReactNativeBackend {
+                 return { invoice: invoice.invoice, paymentHash: invoice.paymentHash, amountSats: sats(invoice.amountSats) };
+             }),
+             payLightningInvoice: r => this.mutate(async (w) => this.lightningStatus(await w.payLightningInvoice(r.invoice, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait))),
++            payLightningOffer: r => this.mutate(async (w) => this.lightningStatus(await w.payLightningOffer(r.offer, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait))),
+             lightningSendState: hash => this.withWallet(async (w) => this.lightningStatus(await w.lightningSendState(hash))),
+             lightningReceiveState: hash => this.withWallet(async (w) => {
+                 const r = await w.lightningReceiveState(hash);

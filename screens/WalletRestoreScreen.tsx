@@ -24,6 +24,7 @@ import { NetworkType, NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
+import { useScreenCaptureProtection } from '../hooks/useScreenCaptureProtection';
 
 interface Props {
   navigation: any;
@@ -32,6 +33,8 @@ interface Props {
 type RestoreStep = 'input' | 'networks' | 'restoring' | 'success';
 
 export default function WalletRestoreScreen({ navigation }: Props) {
+  // The recovery phrase is typed on this screen: keep it out of screenshots.
+  useScreenCaptureProtection(true);
   const dispatch = useDispatch();
   const [step, setStep] = useState<RestoreStep>('input');
   const [name, setName] = useState('');
@@ -197,7 +200,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   };
 
   const handleFinish = () => {
-    navigation.replace('NostrSetup', { isInitialSetup: true });
+    navigation.replace('Dashboard');
   };
 
   const handleWordChange = (index: number, value: string) => {

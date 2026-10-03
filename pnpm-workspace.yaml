@@ -11,3 +11,43 @@
 # pnpm >=10 no longer reads node-linker from .npmrc — it must be declared
 # here in pnpm-workspace.yaml.
 nodeLinker: hoisted
+
+# Security overrides for transitive dependencies (GitHub issue #37). Each pins a
+# vulnerable package to its patched release within the same major version.
+# markdown-it is the one major bump (10 -> 14, pulling linkify-it 5): it renders
+# chat messages via react-native-markdown-display, and the old versions have
+# quadratic-time DoS paths reachable from message content. Covered by
+# components/chat/markdownRender.test.tsx.
+# Deliberately not overridden (major bumps with breaking changes, build-time or
+# low impact): decode-uri-component (0.3+ is ESM-only and breaks query-string),
+# image-size (metro), uuid (xcode/config-plugins).
+overrides:
+  # Pinned to the version Expo SDK 54 expects (from chore/wallet-engine-beta69).
+  expo-constants: 18.0.14
+  tar@7: ^7.5.21
+  '@grpc/grpc-js@1': ^1.14.5
+  '@xmldom/xmldom@0.8': ^0.8.15
+  '@xmldom/xmldom@0.9': ^0.9.12
+  brace-expansion@1: ^1.1.21
+  brace-expansion@2: ^2.1.7
+  brace-expansion@5: ^5.0.12
+  browserslist@4: ^4.28.7
+  baseline-browser-mapping@2: ^2.11.0
+  fast-uri@3: ^3.1.8
+  js-yaml@3: ^3.15.2
+  js-yaml@4: ^4.3.2
+  nanoid@3: ^3.3.18
+  postcss@8: ^8.5.23
+  shell-quote@1: ^1.9.0
+  undici@6: ^6.28.1
+  ip-address@10: ^10.7.1
+  protobufjs@7: ^7.6.5
+  markdown-it: ^14.3.1
+
+# Bark pays BOLT12 offers (payLightningOffer); remove once wallet-engine ships it.
+patchedDependencies:
+  '@kaleidorg/wallet-engine@1.0.0-beta.75': patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
+
+# Bark downloads checksum-verified native binaries during installation.
+onlyBuiltDependencies:
+  - '@secondts/bark-react-native'

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
 import { RootState } from '../store';
 import {
   initializeNostr,
@@ -32,6 +33,7 @@ import { theme, leading } from '../theme';
 import { Card } from './Card';
 import { Button } from './Button';
 import { Input } from './Input';
+import { WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 
 interface Props {
   navigation?: any;
@@ -81,6 +83,15 @@ export default function NostrProfileManager({ navigation }: Props) {
       });
     }
   }, [profile]);
+
+  useEffect(() => {
+    if (!walletConnectEnabled || nwcConnectionString) return;
+    SecureStore.getItemAsync(WALLET_SERVICE_NWC_URI_KEY)
+      .then((uri) => {
+        if (uri) dispatch(setNWCConnectionString(uri));
+      })
+      .catch(() => undefined);
+  }, [dispatch, walletConnectEnabled, nwcConnectionString]);
 
   const handleGenerateKeys = async () => {
     Alert.alert(
@@ -373,6 +384,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       const connectionString = await nostrService.getWalletConnectInfo(permissions, profile?.lud16);
 
       if (connectionString) {
+        await SecureStore.setItemAsync(WALLET_SERVICE_NWC_URI_KEY, connectionString);
         dispatch(setNWCConnectionString(connectionString));
         dispatch(setWalletConnectEnabled(true));
 
@@ -434,7 +446,8 @@ export default function NostrProfileManager({ navigation }: Props) {
         {
           text: 'Disable',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
+            await SecureStore.deleteItemAsync(WALLET_SERVICE_NWC_URI_KEY);
             dispatch(setWalletConnectEnabled(false));
             dispatch(setNWCConnectionString(null));
             Alert.alert('Disabled', 'Nostr Wallet Connect has been disabled');

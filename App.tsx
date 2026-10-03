@@ -3,24 +3,25 @@ import 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import React from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { View, Text, ActivityIndicator, Platform, TouchableOpacity, StyleSheet, SafeAreaView, DeviceEventEmitter } from 'react-native';
-import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { View, Text, ActivityIndicator, Platform, SafeAreaView, Linking } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { WalletTabBar } from './components/WalletTabBar';
 import { ThemeProvider } from '@react-navigation/native';
 import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ToastContainer } from './components/Toast';
+import { PersistenceLoading } from './components/PersistenceLoading';
+import { AppLockGate } from './components/AppLockGate';
+import { KaleidoPayRecovery } from './components/KaleidoPayRecovery';
+import { NwcPaymentApprover } from './components/NwcPaymentApprover';
 import ChatNotifications from './components/ChatNotifications';
-import { OrbitFAB, type OrbitAction } from './components/OrbitFAB';
-import { BrandMark } from './components/BrandMark';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
 
@@ -44,6 +45,9 @@ import DashboardScreen from './screens/DashboardScreen';
 import { asModalScreen } from './components/ModalPresentation';
 import SendScreen from './screens/SendScreen';
 import ReceiveScreen from './screens/ReceiveScreen';
+import MerchantOfferScreen from './screens/MerchantOfferScreen';
+import {useAppSelector} from './store/hooks';
+import {isReceiverLink,canOpenReceiver} from './utils/receiver-link';
 import QRScannerScreen from './screens/QRScannerScreen';
 import AssetsScreen from './screens/AssetsScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -75,7 +79,8 @@ type RootStackParamList = {
   NostrSetup: { isInitialSetup?: boolean } | undefined;
   Dashboard: undefined;
   Settings: undefined;
-  Send: { selectedAsset?: any } | undefined;
+  Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; resumePayment?: boolean } | undefined;
+  MerchantOffer: undefined;
   Receive: { selectedAsset?: any } | undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   PaymentConfirmation: { paymentData: any };
@@ -86,6 +91,7 @@ type RootStackParamList = {
   NostrSettings: undefined;
   AssetDetail: { asset: any };
   History: undefined;
+  Map: undefined;
   LSP: undefined;
   OpenChannel: undefined;
   IssueAsset: undefined;
@@ -105,258 +111,12 @@ type TabBarIconProps = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator();
 
-/**
- * Floating "island" tab bar (extension parity): a rounded, detached bar with a
- * lighter rounded pill behind the selected item's icon. The pill uses the same
- * rounded language as the island so the selection reads as part of it.
- */
-function IslandTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
-  const insets = useSafeAreaInsets();
-  const routes = state.routes;
-  // Split the tabs so a gap opens in the middle for the center FAB.
-  const mid = Math.ceil(routes.length / 2);
-  // The floating "island" (scroll-under, rounded pill) is reserved for the
-  // wallet. Every other tab uses a fixed, in-flow bar that reserves layout
-  // space so the scene's interactive content sits above it.
-  const isWallet = routes[state.index]?.name === 'DashboardTab';
-
-  // Quick actions on the center FAB, clustered toward the right thumb (see the
-  // arc on OrbitFAB below). Order = arcStart → arcEnd, so Voice sits lowest/right
-  // (easiest reach). Scan also has a double-tap shortcut and Voice a hold
-  // shortcut (doubleTapKey / holdKey below).
-  const orbitActions: OrbitAction[] = [
-    {
-      key: 'swap',
-      label: 'Swap',
-      color: theme.colors.brand.violet,
-      renderIcon: () => <Ionicons name="swap-horizontal" size={24} color="#FFFFFF" />,
-      onSelect: () => navigation.navigate('Swap'),
-    },
-    {
-      key: 'scan',
-      label: 'Scan',
-      color: theme.colors.info[500],
-      renderIcon: () => <Ionicons name="scan" size={24} color="#FFFFFF" />,
-      onSelect: () => navigation.navigate('QRScanner'),
-    },
-    {
-      key: 'voice',
-      label: 'Voice',
-      color: theme.colors.primary[500],
-      renderIcon: () => <Ionicons name="mic" size={24} color={theme.colors.primary[950]} />,
-      onSelect: () => {
-        // The voice overlay lives on the Wallet/dashboard screen — focus it, then open.
-        navigation.navigate(routes[0].name);
-        DeviceEventEmitter.emit('rate.openVoice');
-      },
-    },
-  ];
-
-  const renderItem = (route: typeof routes[number], index: number) => {
-    const { options } = descriptors[route.key];
-    const rawLabel = options.tabBarLabel ?? options.title ?? route.name;
-    const label = typeof rawLabel === 'string' ? rawLabel : route.name;
-    const focused = state.index === index;
-    const color = focused ? theme.colors.primary[500] : theme.colors.text.muted;
-    const onPress = () => {
-      const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-      if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
-    };
-    return (
-      <TouchableOpacity
-        key={route.key}
-        accessibilityRole="button"
-        accessibilityState={focused ? { selected: true } : {}}
-        onPress={onPress}
-        activeOpacity={0.7}
-        style={[islandStyles.item, focused && islandStyles.itemActive]}
-      >
-        {options.tabBarIcon?.({ focused, color, size: 22 })}
-        <Text style={[islandStyles.label, { color }]} numberOfLines={1}>
-          {label}
-        </Text>
-      </TouchableOpacity>
-    );
-  };
-
-  const centerFab = (
-    <OrbitFAB
-      renderCenterIcon={() => <BrandMark size={48} />}
-      actions={orbitActions}
-      // Even fan across the top now that there are three actions.
-      arcStart={150}
-      arcEnd={30}
-      // Shortcuts: double-tap → Scan, press-and-hold → Voice/mic.
-      doubleTapKey="scan"
-      holdKey="voice"
-    />
-  );
-
-  // Non-wallet tabs (Contacts / Map / Mind): a fixed, in-flow bar. Because the
-  // root is NOT absolute, the navigator reserves its height and pushes scene
-  // content above it (no overlap). The FAB stays centered within the bar bounds
-  // so it remains tappable on Android.
-  if (!isWallet) {
-    // Trim the safe-area gap: the icons otherwise leave a tall block of solid
-    // bar below them. Keep just enough clearance above the home indicator.
-    return (
-      <View style={[fixedStyles.outer, { paddingBottom: Math.max(insets.bottom - 12, 8) }]}>
-        <View style={fixedStyles.row}>
-          {routes.slice(0, mid).map((r, i) => renderItem(r, i))}
-          <View style={islandStyles.centerGap} />
-          {routes.slice(mid).map((r, i) => renderItem(r, i + mid))}
-        </View>
-        <View pointerEvents="box-none" style={fixedStyles.micWrap}>
-          {centerFab}
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    // box-none: the bar floats over the scene (absolute), so let touches pass
-    // through everywhere except the actual island/mic/tabs below.
-    <View pointerEvents="box-none" style={[islandStyles.outer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-      {/* "Scroll-out" gradient: sits BEHIND the island, fading from transparent
-          at the top to the page background at the bottom, so content appears to
-          scroll out of the page behind the floating nav. Never blocks touches. */}
-      <LinearGradient
-        colors={[`${theme.colors.background.primary}00`, theme.colors.background.primary]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        pointerEvents="none"
-        style={islandStyles.scrollOutGradient}
-      />
-      <View style={islandStyles.island}>
-        {routes.slice(0, mid).map((r, i) => renderItem(r, i))}
-        <View style={islandStyles.centerGap} />
-        {routes.slice(mid).map((r, i) => renderItem(r, i + mid))}
-      </View>
-      {/* Center FAB — overflows the island top. Press for the quick-actions orbit. */}
-      <View pointerEvents="box-none" style={islandStyles.micWrap}>
-        {centerFab}
-      </View>
-    </View>
-  );
-}
-
-const islandStyles = StyleSheet.create({
-  outer: {
-    // Float the nav so scene content scrolls UNDERNEATH it. Transparent so the
-    // content + scroll-out gradient show through (no solid background here).
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    // Headroom for the orbit petals (which also render beyond via overflow).
-    paddingTop: 16,
-  },
-  // Fades from transparent (top) to the page background (bottom), beginning the
-  // fade ABOVE the island so content reads as scrolling out behind the nav.
-  scrollOutGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 160,
-  },
-  island: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    alignSelf: 'center',
-    width: '92%',
-    maxWidth: 360,
-    // Fully-rounded pill (extension `rounded-full`), translucent card (card/60),
-    // shadow, no border.
-    borderRadius: 999,
-    paddingVertical: 6,
-    paddingHorizontal: 6,
-    backgroundColor: `${theme.colors.surface.primary}`,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.3,
-    shadowRadius: 14,
-    elevation: 10,
-  },
-  item: {
-    // Active item nearly fills the island interior so the fully-rounded pill
-    // reads as concentric with the island's curve (extension `h-52` in a `py-2`).
-    width: 60,
-    height: 58,
-    borderRadius: 999,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 2,
-  },
-  itemActive: {
-    backgroundColor: 'rgba(255, 255, 255, 0.10)',
-  },
-  centerGap: {
-    // Snug to the FAB (68px) so the two tabs on each side sit close to it,
-    // symmetrically — no extra gap pushing the right pair away.
-    width: 68,
-  },
-  label: {
-    fontSize: 10,
-    fontWeight: theme.typography.fontWeight.semibold,
-    marginTop: 1,
-  },
-  micWrap: {
-    position: 'absolute',
-    // Span the island pill (top = outer paddingTop, height = pill height: items
-    // 58 + paddingVertical 6·2) and center within it, so the K mark sits level
-    // with the tab icons instead of floating above them.
-    top: 16,
-    height: 70,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    // Let the orbit petals + scrim render beyond the bar's bounds.
-    overflow: 'visible',
-  },
-});
-
-// Fixed (non-island) bar used on every tab except the wallet. In-flow (not
-// absolute) so React Navigation reserves its height and the scene's content
-// sits above it instead of scrolling underneath.
-const fixedStyles = StyleSheet.create({
-  outer: {
-    backgroundColor: theme.colors.surface.primary,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.border.light,
-    paddingTop: 4,
-    paddingHorizontal: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    minHeight: 58,
-  },
-  micWrap: {
-    position: 'absolute',
-    // Span the tab row (top = paddingTop, height = row) and center within it, so
-    // the K mark sits level with the other tab icons.
-    top: 4,
-    height: 58,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'visible',
-  },
-});
-
 function DashboardTabs() {
   const theme = useAppTheme();
 
   return (
     <Tab.Navigator
-      tabBar={(props) => <IslandTabBar {...props} />}
+      tabBar={(props) => <WalletTabBar {...props} />}
       screenOptions={{
         tabBarActiveTintColor: theme.colors.primary[600],
         tabBarInactiveTintColor: theme.colors.gray[400],
@@ -398,6 +158,16 @@ function DashboardTabs() {
         }}
       />
       <Tab.Screen
+        name="Activity"
+        component={HistoryScreen}
+        options={{
+          tabBarLabel: 'Activity',
+          tabBarIcon: ({ focused, color }: TabBarIconProps) => (
+            <Ionicons name={focused ? 'receipt' : 'receipt-outline'} size={22} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
         name="Contacts"
         component={ContactsScreen}
         options={{
@@ -405,20 +175,6 @@ function DashboardTabs() {
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
             <Ionicons
               name={focused ? 'people' : 'people-outline'}
-              size={24}
-              color={color}
-            />
-          ),
-        }}
-      />
-      <Tab.Screen
-        name="Map"
-        component={MapScreen}
-        options={{
-          tabBarLabel: 'Map',
-          tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <Ionicons
-              name={focused ? 'map' : 'map-outline'}
               size={24}
               color={color}
             />
@@ -440,11 +196,29 @@ function DashboardTabs() {
 }
 
 function AppNavigator() {
+  const receiverNavigation = React.useRef(createNavigationContainerRef<RootStackParamList>()).current;
+  const pendingReceiverLink = React.useRef(false);
+  const initialized = useAppSelector(s => s.wallet.isInitialized);
+  const unlocked = useAppSelector(s => s.wallet.isUnlocked);
+  const openPendingReceiver = React.useCallback(() => {
+    const route = receiverNavigation.getCurrentRoute()?.name;
+    if (!pendingReceiverLink.current || !receiverNavigation.isReady() || !canOpenReceiver(initialized, unlocked, route)) return;
+    pendingReceiverLink.current = false;
+    if (route !== 'MerchantOffer') receiverNavigation.navigate('MerchantOffer');
+  }, [initialized, unlocked, receiverNavigation]);
+  React.useEffect(() => {
+    let active = true;
+    const accept = (url: string | null) => { if (active && url && isReceiverLink(url)) { pendingReceiverLink.current = true; openPendingReceiver(); } };
+    const subscription = Linking.addEventListener('url', event => accept(event.url));
+    void Linking.getInitialURL().then(accept).catch(() => {});
+    openPendingReceiver();
+    return () => { active = false; subscription.remove(); };
+  }, [openPendingReceiver]);
   const navigationTheme = createNavigationTheme();
   const theme = useAppTheme();
 
   return (
-    <NavigationContainer theme={navigationTheme}>
+    <NavigationContainer ref={receiverNavigation} onReady={openPendingReceiver} onStateChange={openPendingReceiver} theme={navigationTheme}>
       <Stack.Navigator
         initialRouteName="InitialLoad"
         screenOptions={{
@@ -472,6 +246,7 @@ function AppNavigator() {
         />
         <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="NostrSettings" component={asModalScreen(NostrSettingsScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
           name="QRScanner"
@@ -500,6 +275,7 @@ function AppNavigator() {
           component={PaymentSuccessScreen}
           options={{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false }}
         />
+        <Stack.Screen name="Map" component={MapScreen} />
         <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
         <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
@@ -588,8 +364,9 @@ export default function App() {
       <SafeAreaProvider>
         <ErrorBoundary>
           <Provider store={store}>
-            <PersistGate loading={<AppLoadingScreen />} persistor={persistor}>
+            <PersistGate loading={<PersistenceLoading />} persistor={persistor}>
               <QVACEnabledSync />
+              <KaleidoPayRecovery />
               <ChatNotifications />
               <AppThemeProvider>
                 <KaleidoThemeProvider>
@@ -597,6 +374,8 @@ export default function App() {
                     <StatusBar style="light" backgroundColor="transparent" translucent={true} />
                     <AppNavigator />
                     <ToastContainer />
+                    <NwcPaymentApprover />
+                    <AppLockGate />
                   </ThemeProvider>
                 </KaleidoThemeProvider>
               </AppThemeProvider>

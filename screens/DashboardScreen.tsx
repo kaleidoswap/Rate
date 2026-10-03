@@ -1,3 +1,6 @@
+import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
+import { useAppSelector } from '../store/hooks';
+import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -27,17 +30,10 @@ import { setRgbAssets } from '../store/slices/assetsSlice';
 import { loadNostrProfile } from '../store/slices/nostrSlice';
 import {
   selectDisclosureLevel,
-  selectAiEnabled,
-  selectAiOnboarded,
-  setAiMode,
-  setAiOnboarded,
 } from '../store/slices/settingsSlice';
-import QVACService from '../services/QVACService';
-import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
 import { policyFor, aggregateForLite } from '@kaleidorg/wallet-engine';
 
 import { theme } from '../theme';
-import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
 import {
   BalanceCard,
   ActionButtons,
@@ -49,7 +45,7 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
-import { RecentActivityWidget } from '../components/RecentActivityWidget';
+import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
 
 const { width } = Dimensions.get('window');
 
@@ -118,6 +114,8 @@ function buildGreeting(name?: string): string {
 
 export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
+  const activeWallet = useAppSelector(state => state.wallet.activeWallet);
+  const needsSetup = !activeWallet?.encrypted_mnemonic;
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
@@ -136,6 +134,8 @@ export default function DashboardScreen({ navigation }: Props) {
     (state: RootState) => !!(state.nostr?.isConnected || state.nostr?.hasStoredKeys),
   );
   const nostrProfileLoaded = useSelector((state: RootState) => !!state.nostr?.profile);
+  const nwcWalletType = useSelector((state: RootState) => state.nostr?.nwcWalletType);
+  const nwcCapabilities = useSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
   const triedNostrProfile = useRef(false);
   useEffect(() => {
     if (nostrConnected && !nostrProfileLoaded && !triedNostrProfile.current) {
@@ -144,19 +144,11 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   }, [nostrConnected, nostrProfileLoaded, dispatch]);
   const disclosureLevel = useSelector(selectDisclosureLevel);
-  // On-device AI is opt-in; only surface the voice agent FAB once it's enabled
-  // so the QVAC Bare worklet can't be started (and crash) before a native rebuild.
-  const aiEnabled = useSelector(selectAiEnabled);
-  const aiOnboarded = useSelector(selectAiOnboarded);
   const policy = policyFor(disclosureLevel);
   const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
-  const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
-  const [voiceAutoListen, setVoiceAutoListen] = useState(false);
-  // One-time KaleidoMind onboarding (lets the user pick local / delegate / off).
-  const [mindOnboardingOpen, setMindOnboardingOpen] = useState(false);
-  const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
+  const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [protocolsReady, setProtocolsReady] = useState(false);
   // Startup initializes protocols and then fetches balances in the same async
@@ -186,77 +178,9 @@ export default function DashboardScreen({ navigation }: Props) {
   const [channelModalVisible, setChannelModalVisible] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
 
-  // Open the KaleidoMind voice agent. `autoListen` is set when triggered via a
-  // press-and-hold on the FAB, so the assistant starts listening immediately.
-  const openVoiceAgent = useCallback((autoListen: boolean) => {
-    if (aiEnabled) {
-      setVoiceAutoListen(autoListen);
-      setVoiceAgentOpen(true);
-      return;
-    }
-    // AI is opt-in (off by default). Re-open the one-time setup so the user
-    // can pick how KaleidoMind runs — nothing starts the worklet unprompted.
-    QVACService.getInstance()
-      .getAvailability()
-      .then((a) => setMindAvailability(a))
-      .catch(() => {})
-      .finally(() => setMindOnboardingOpen(true));
-  }, [aiEnabled]);
-
-  // The bottom-nav island's green mic button (in App.tsx, global across tabs)
-  // emits this event; it focuses the Wallet tab first so this screen is active.
-  useEffect(() => {
-    const sub = DeviceEventEmitter.addListener('rate.openVoice', () => openVoiceAgent(true));
-    return () => sub.remove();
-  }, [openVoiceAgent]);
-
-  // First run: probe whether KaleidoMind can run here, then show the one-time
-  // setup so the user decides once (local / delegate / off). Never boots the
-  // worklet — getAvailability() only reads device capability.
-  useEffect(() => {
-    if (aiOnboarded) return;
-    let active = true;
-    QVACService.getInstance()
-      .getAvailability()
-      .then((a) => {
-        if (active) {
-          setMindAvailability(a);
-          setMindOnboardingOpen(true);
-        }
-      })
-      .catch(() => {
-        if (active) setMindOnboardingOpen(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [aiOnboarded]);
-
-  const finishMindOnboarding = useCallback(() => {
-    dispatch(setAiOnboarded(true));
-    setMindOnboardingOpen(false);
-  }, [dispatch]);
-
-  const handleMindLocal = useCallback(() => {
-    dispatch(setAiMode('local'));
-    finishMindOnboarding();
-  }, [dispatch, finishMindOnboarding]);
-
-  const handleMindDelegate = useCallback(() => {
-    // Don't commit to 'delegate' until pairing actually succeeds — otherwise
-    // backing out of the scanner would strand the user in a desktop mode with no
-    // connection. PairDesktopScreen sets aiMode='delegate' on a successful pair.
-    finishMindOnboarding();
-    navigation.getParent()?.navigate('PairDesktop');
-  }, [finishMindOnboarding, navigation]);
-
-  const handleMindSkip = useCallback(() => {
-    dispatch(setAiMode('off'));
-    finishMindOnboarding();
-  }, [dispatch, finishMindOnboarding]);
-
   // Initialize protocol services (only once)
   const initializeApi = useCallback(async () => {
+    if (needsSetup) return false;
     if (protocolsReadyRef.current) return true; // Already initialized
 
     try {
@@ -295,7 +219,7 @@ export default function DashboardScreen({ navigation }: Props) {
       }
 
       // Check if any adapter is already connected from a previous init
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
@@ -319,7 +243,7 @@ export default function DashboardScreen({ navigation }: Props) {
       setConnectionError(error instanceof Error ? error.message : 'Failed to initialize');
       return null;
     }
-  }, []);
+  }, [needsSetup]);
 
   const checkNodeStatus = async (skipInitialization = false) => {
     try {
@@ -327,12 +251,12 @@ export default function DashboardScreen({ navigation }: Props) {
       setConnectionError(null);
 
       if (!skipInitialization && !protocolsReadyRef.current) {
-        await initializeApi();
+        if (!await initializeApi()) return false;
       }
 
       // Try any connected adapter
       let info: any = null;
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         try {
           const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
@@ -375,13 +299,14 @@ export default function DashboardScreen({ navigation }: Props) {
       const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
       const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
       const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
+      const barkAdapter = protocolManager.getAdapterIfAvailable('BARK');
 
       // Load BTC balance (aggregate from all connected adapters with per-protocol breakdown)
       console.log('Fetching BTC balance...');
       let totalConfirmed = 0, totalUnconfirmed = 0;
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
       const adapterProtoMap: Array<[any, string]> = [
-        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'],
+        [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'], [barkAdapter, 'BARK'],
       ];
       // Fetch every adapter's BTC balance IN PARALLEL — previously serial, so the
       // headline balance waited on the sum of all adapter latencies. Now it waits
@@ -390,6 +315,8 @@ export default function DashboardScreen({ navigation }: Props) {
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
           try {
+            // A failed sync (server unreachable) must not hide the last known Bark balance.
+            if (proto === 'BARK') await syncBarkForUpdates().catch((e) => console.warn('Bark sync failed:', e));
             return { proto, btc: await adapter.getBtcBalance() };
           } catch (e) {
             console.warn('Balance fetch error:', e);
@@ -397,8 +324,19 @@ export default function DashboardScreen({ navigation }: Props) {
           }
         })
       );
+      const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
+      // Bark recovery (moved from the old Bark screen): an incomplete restore can
+      // omit funds, so say so next to the total rather than on a separate page.
+      const barkRecovery = await readBarkRecovery().catch(() => null);
+      setBalanceWarning(
+        barkRecovery === 'failed' || barkRecovery === 'incomplete'
+          ? 'Bark recovery is incomplete, so its balance may omit funds.'
+          : balanceResults.filter(Boolean).length < connectedCount
+            ? 'Some balances are unavailable. Your total may be incomplete.' : null);
       for (const r of balanceResults) {
         if (!r) continue;
+        // Bark is a layer like Arkade/Spark: counted in the total and shown in
+        // the per-network breakdown.
         totalConfirmed += r.btc.confirmed;
         totalUnconfirmed += r.btc.unconfirmed;
         byProtocol[r.proto] = r.btc;
@@ -474,7 +412,11 @@ export default function DashboardScreen({ navigation }: Props) {
       // Load Lightning channels (RGB only)
       console.log('Fetching Lightning channels...');
       let channelsList: any[] = [];
-      if (rgbAdapter?.isConnected()) {
+      // Plain NIP-47 wallets can create/pay invoices but do not expose RLN
+      // channel management. Only query channels from an actual RLN/direct node.
+      const connectedWalletType = (rgbAdapter as any)?.walletType?.() ?? nwcWalletType;
+      const canManageChannels = connectedWalletType == null || nwcCapabilities.includes('manageChannels');
+      if (rgbAdapter?.isConnected() && connectedWalletType !== 'ln' && canManageChannels) {
         try { channelsList = await rgbAdapter.listChannels(); } catch { /* no channels */ }
       }
       setChannels(channelsList);
@@ -533,32 +475,47 @@ export default function DashboardScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [protocolsReady]);
 
-  // Update the useFocusEffect to handle screen focus
+  const connectAndLoad = async () => {
+    if (needsSetup) {
+      protocolsReadyRef.current = false;
+      setProtocolsReady(false);
+      setIsConnecting(false);
+      setLoading(false);
+      setConnectionError(null);
+      return;
+    }
+    setIsConnecting(true);
+    setConnectionError(null);
+    try {
+      if (!await initializeApi()) return;
+      await Promise.all([checkNodeStatus(true), loadDashboardData(true)]);
+    } finally {
+      // Both a failed connection and a missing wallet are terminal UI states.
+      setIsConnecting(false);
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    protocolsReadyRef.current = false;
+    setProtocolsReady(false);
+  }, [activeWallet]);
+
   useFocusEffect(
     useCallback(() => {
-      const initializeAndLoad = async () => {
-        const ready = await initializeApi();
-        if (!ready) {
-          await checkNodeStatus(true);
-          return;
-        }
-
-        // Node metadata and balances are independent reads. Fetch them together
-        // so a slow getNodeInfo() call cannot hold the headline balance hostage.
-        await Promise.all([
-          checkNodeStatus(true),
-          loadDashboardData(true),
-        ]);
-      };
-
-      void initializeAndLoad();
-    }, [])
+      void connectAndLoad();
+    }, [activeWallet])
   );
 
   const onRefresh = async () => {
+    if (refreshing || isConnecting || needsSetup) return;
     setRefreshing(true);
-    await loadDashboardData();
-    setRefreshing(false);
+    try {
+      if (connectionError) protocolsReadyRef.current = false;
+      await connectAndLoad();
+    } finally {
+      setRefreshing(false);
+    }
   };
 
   const formatSatoshis = (satoshis: number): string => {
@@ -578,6 +535,10 @@ export default function DashboardScreen({ navigation }: Props) {
     (sum, channel) => sum + channel.local_balance_sat,
     0
   );
+  const hasChannelCapableNode =
+    (protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false)
+    && ((protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType?.() ?? nwcWalletType) !== 'ln'
+    && (nwcWalletType == null || nwcCapabilities.includes('manageChannels'));
 
   // Aggregate priced tokens into a sats-equivalent and fold them into the total,
   // matching the extension (totalBTC = btc across protocols + tokenValueSats).
@@ -596,7 +557,13 @@ export default function DashboardScreen({ navigation }: Props) {
     return sats;
   })();
 
-  const totalBalance = offChainBalance + getTotalBtcBalance() + tokenValueSats;
+  const protocolBalances = (btcBalance as any).byProtocol as Record<string, { confirmed: number; unconfirmed: number; total: number }> | undefined;
+  // NWC reports Lightning funds already; HTTP RLN reports on-chain funds.
+  const rgbBalanceIsLightning = typeof (protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType === 'function';
+  const bitcoinSummary = summarizeBitcoinBalances(protocolBalances ?? {}, channels, rgbBalanceIsLightning);
+  const availableBtc = bitcoinSummary.available;
+  const pendingBtc = bitcoinSummary.unavailable;
+  const totalBalance = bitcoinSummary.total + tokenValueSats;
   const denominatedTotal = formatDisplayAmount(totalBalance);
 
   // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
@@ -648,7 +615,7 @@ export default function DashboardScreen({ navigation }: Props) {
     ticker: 'BTC',
     name: 'Bitcoin',
     precision: bitcoinUnit === 'BTC' ? 8 : 0,
-    balance: { spendable: getTotalBtcBalance() },
+    balance: { spendable: availableBtc },
   } as any;
 
   const renderChannelModal = () => (
@@ -833,15 +800,41 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         }
       >
+        {needsSetup ? (
+          <WalletSetupPrompt
+            hasExistingWallet={!!activeWallet}
+            onCreate={() => navigation.navigate('WalletSetup')}
+            onRestore={() => navigation.navigate('WalletRestore')}
+          />
+        ) : <>
+        {(connectionError || balanceWarning) && (
+          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
+            <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
+            <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
+              {connectionError ? 'Wallet connection unavailable. Tap to retry.' : `${balanceWarning} Tap to retry.`}
+            </Text>
+          </TouchableOpacity>
+        )}
         {/* Unified wallet card: balance + per-network breakdown + action buttons. */}
         <View style={styles.walletCard}>
+          {connectionError && totalBalance === 0 ? (
+            <View style={{ padding: theme.spacing[6], gap: theme.spacing[2] }}>
+              <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg }}>Balance unavailable</Text>
+              <Text style={{ color: theme.colors.text.secondary }}>Reconnect to see your balance and make payments.</Text>
+            </View>
+          ) :
+
           <BalanceCard
             totalBalance={totalBalance}
+            pendingBtc={pendingBtc}
+            includesTokenValue={tokenValueSats > 0}
+            rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}
             onRefresh={onRefresh}
             refreshing={refreshing}
             formatSatoshis={formatSatoshis}
             formatUSD={formatUSD}
+            hideAmounts={denominatedTotal.hidden}
             primaryText={denominatedTotal.primary}
             primaryUnitLabel={denominatedTotal.unitLabel}
             secondaryText={denominatedTotal.secondary}
@@ -860,8 +853,9 @@ export default function DashboardScreen({ navigation }: Props) {
                 onSwap={() => navigation.getParent()?.navigate('Swap')}
               />
             }
-          />
+          />}
         </View>
+
 
 
         {isLite && liteUsdDisplay > 0 && (
@@ -908,11 +902,21 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
-        <RecentActivityWidget
-          onViewAll={() => navigation.getParent()?.navigate('History')}
-        />
+        </>}
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('Map')}
+          style={styles.placesLink}
+        >
+          <Ionicons name="map-outline" size={22} color={theme.colors.text.secondary} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base }}>Places to pay</Text>
+            <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm }}>Find nearby businesses accepting bitcoin</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
 
-        {policy.showChannelManagement && (
+        {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
@@ -930,22 +934,6 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
       </ScrollView>
 
-      {/* Voice is triggered from the green mic button in the bottom nav island,
-          which emits 'rate.openVoice' (see the listener effect above). */}
-      <VoiceAgentOverlay
-        visible={voiceAgentOpen}
-        autoListen={voiceAutoListen}
-        onClose={() => setVoiceAgentOpen(false)}
-      />
-
-      <KaleidoMindOnboarding
-        visible={mindOnboardingOpen}
-        availability={mindAvailability}
-        onSelectLocal={handleMindLocal}
-        onSelectDelegate={handleMindDelegate}
-        onSkip={handleMindSkip}
-      />
-
       {renderChannelModal()}
     </View>
   );
@@ -957,9 +945,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.primary,
   },
   scrollContent: {
-    // Clear the floating (absolutely-positioned) nav island so the last rows
-    // stay reachable above it.
-    paddingBottom: theme.spacing[32],
+    paddingBottom: theme.spacing[6],
+  },
+  placesLink: {
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3],
+    margin: theme.spacing[4], padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.surface.primary,
   },
   walletCard: {
     // The unified balance + actions card sits just below the sticky header.

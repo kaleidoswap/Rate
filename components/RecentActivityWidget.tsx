@@ -1,6 +1,6 @@
 // components/RecentActivityWidget.tsx
 //
-// Dashboard snippet: shows the last 3 activity items with a "View All" link.
+// Dashboard snippet: shows up to 4 activity items, with pending payments first with a "View All" link.
 // Tapping a row opens the ActivityDetailSheet inline.
 import React, { useState, useCallback } from 'react';
 import {
@@ -10,10 +10,9 @@ import {
     TouchableOpacity,
     ActivityIndicator,
 } from 'react-native';
-import { useSelector } from 'react-redux';
+import { useAppSelector } from '../store/hooks';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { RootState } from '../store';
 import { theme } from '../theme';
 import { SectionHeader } from './SectionHeader';
@@ -45,8 +44,8 @@ function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyph
 
 function typeLabel(type: ActivityItemType): string {
     switch (type) {
-        case 'receive': return 'Received';
-        case 'send': return 'Sent';
+        case 'receive': return 'Receive';
+        case 'send': return 'Payment';
         case 'swap': return 'Swap';
         case 'issuance': return 'Issuance';
         case 'channel_open': return 'Channel Open';
@@ -68,14 +67,16 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
     'RGB-LN': 'RGB · LN',
     'Spark': 'Spark',
     'Arkade': 'Arkade',
+    'Bark': 'Bark',
+    'Bark Signet': 'Bark · Signet',
     'Swap': 'Swap',
 };
 
-const MAX_ITEMS = 2;
+const MAX_ITEMS = 4;
 
 export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
-    const swapHistory = useSelector((state: RootState) => state.swap.swapHistory);
-    const rgbAssets = useSelector((state: RootState) => state.assets.rgbAssets);
+    const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
+    const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
 
     const [items, setItems] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -101,10 +102,11 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
             venue: s.venue,
         }));
         try {
-            const { items: result } = await loadActivity({ assets, swaps });
-            setItems(result.slice(0, MAX_ITEMS));
+            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps });
+            setItems([...result].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status))).slice(0, MAX_ITEMS));
+            return hadConnectedAdapter && failedSources === 0;
         } catch {
-            // Non-critical widget — fail silently.
+            return false;
         }
     }, [rgbAssets, swapHistory]);
 
@@ -168,7 +170,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                         ]}
                         numberOfLines={1}
                     >
-                        {amountPrefix(item.type)}{item.amount} {item.assetTicker}
+                        {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.amount} {item.assetTicker}
                     </Text>
                 )}
             </TouchableOpacity>
@@ -190,28 +192,10 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                     <ActivityIndicator size="small" color={theme.colors.primary[500]} />
                 </View>
             ) : (
-                <View>
-                    {/* First item shows in full; everything from the second down
-                        fades into the page background as a "there's more" teaser. */}
-                    {renderRow(items[0])}
-                    {items.length > 1 && (
-                        <View style={styles.restWrap}>
-                            <View style={styles.list}>
-                                {items.slice(1).map(renderRow)}
-                            </View>
-                            <LinearGradient
-                                colors={[`${theme.colors.background.primary}00`, theme.colors.background.primary]}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 0, y: 1 }}
-                                pointerEvents="none"
-                                style={StyleSheet.absoluteFill}
-                            />
-                        </View>
-                    )}
-                </View>
+                <View style={styles.list}>{items.map(renderRow)}</View>
             )}
 
-            <ActivityDetailSheet item={selected} onClose={() => setSelected(null)} />
+            <ActivityDetailSheet onRefresh={fetchRecent} item={items.find(item => item.id === selected?.id) ?? selected} onClose={() => setSelected(null)} />
         </View>
     );
 };

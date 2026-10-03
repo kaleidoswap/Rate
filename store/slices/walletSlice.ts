@@ -27,6 +27,7 @@ export interface BtcBalance {
     RGB?: ProtocolBalance;
     SPARK?: ProtocolBalance;
     ARKADE?: ProtocolBalance;
+    BARK?: ProtocolBalance;
   };
 }
 
@@ -285,12 +286,13 @@ export const loadBtcBalance = createAsyncThunk(
     try {
       let totalConfirmed = 0, totalUnconfirmed = 0;
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
-      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
+      const protocols: Array<'RGB' | 'SPARK' | 'ARKADE' | 'BARK'> = ['RGB', 'SPARK', 'ARKADE', 'BARK'];
       for (const proto of protocols) {
         const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
         if (adapter?.isConnected()) {
           try {
             const btc = await adapter.getBtcBalance();
+            // Bark is a layer like Arkade/Spark and counts toward the total.
             totalConfirmed += btc.confirmed;
             totalUnconfirmed += btc.unconfirmed;
             byProtocol[proto] = btc;

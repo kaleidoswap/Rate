@@ -120,7 +120,8 @@ export default function MapScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <MainHeader
-        title="Bitcoin Map"
+        title="Places to pay"
+        onBack={() => navigation.goBack()}
         subtitle="Discover Bitcoin-accepting venues near you"
         icon="map"
       />

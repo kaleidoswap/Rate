@@ -1,7 +1,7 @@
-export type ReceiveProtocol = 'RGB' | 'SPARK' | 'ARKADE' | 'LIQUID';
+export type ReceiveProtocol = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | 'LIQUID';
 export type ReceiveMethodKind = 'address' | 'invoice';
 export type ReceiveMonitorKind = 'balance' | 'invoice' | 'spark-claim' | 'none';
-export type ReceiveLayer = 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'liquid';
+export type ReceiveLayer = 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
 
 export interface ReceiveMethod {
   key: string;
@@ -68,7 +68,7 @@ export async function runReceiveOperation<T>(
     if (timeoutId) clearTimeout(timeoutId);
     parentSignal?.removeEventListener('abort', abortFromParent);
     const durationMs = (globalThis.performance?.now?.() ?? Date.now()) - startedAt;
-    if (__DEV__ && durationMs >= 500) {
+    if (__DEV__ && process.env.EXPO_PUBLIC_RECEIVE_DEBUG === '1' && durationMs >= 500) {
       console.warn(`[ReceivePerformance] ${operation} took ${Math.round(durationMs)}ms`);
     }
   }

@@ -76,8 +76,8 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
   onSelectDelegate,
   onSkip,
 }) => {
-  const runtimeAvailable = availability?.runtimeAvailable ?? true;
-  const localCapable = availability?.localCapable ?? true;
+  const runtimeAvailable = availability?.runtimeAvailable ?? false;
+  const localCapable = availability?.localCapable ?? false;
   const localRecommended = runtimeAvailable && localCapable;
 
   return (

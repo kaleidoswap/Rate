@@ -25,8 +25,8 @@ payments. Your keys, your assets, and your AI all stay on your phone.
 - 🌐 **Nostr-native** — contacts, Lightning Zaps, Lightning Address, and NWC
   (Nostr Wallet Connect) to pair external apps.
 - 🗺️ **Real-world spending** — discover Bitcoin-accepting merchants via BTC Map.
-- 🔒 **Hardened by default** — biometric unlock, encrypted SQLite (SQLCipher), and
-  keys held in the device secure store.
+- 🔒 **Hardened by default** — biometric unlock, and seeds and keys held in the
+  device secure store (never in the local database).
 
 ---
 
@@ -93,7 +93,7 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 
 - **App** — React Native 0.81 + Expo SDK 54 (New Architecture), TypeScript
 - **State** — Redux Toolkit, Redux Persist
-- **Storage** — `expo-sqlite` with SQLCipher; `expo-secure-store` for keys
+- **Storage** — `expo-sqlite` for wallet metadata; `expo-secure-store` for seeds and keys
 - **AI / voice** — `@qvac/sdk` (on-device LLM + Whisper), `@kaleidorg/mind`
 - **Wallet engine** — `@kaleidorg/wallet-engine` + protocol SDKs (Spark, Arkade, RGB, Liquid, Flashnet)
 - **Nostr** — `@nostr-dev-kit/ndk`, `nostr-tools`
@@ -126,7 +126,7 @@ those checked out next to this repo.
 
 > ⚠️ **Do not symlink `node_modules`** (e.g. `ln -s` into another checkout). A self-referencing link causes `ELOOP: too many symbolic links`. If you hit it: `rm node_modules && pnpm install`.
 
-### Native setup (lwk-rn artifacts)
+### Native setup (Liquid and Bark)
 
 The Liquid protocol uses the `lwk-rn` native module, whose prebuilt native artifacts
 (iOS `LwkRnFramework.xcframework` + Android `jniLibs`) are **excluded** from its npm
@@ -162,6 +162,8 @@ npx expo run:ios --device "iPhone 16 Pro"
 Notes:
 - The **first build is slow** — it compiles the native modules, including `lwk-rn` (Liquid) and the Spark/RGB SDKs.
 - `lwk-rn` pins the pod `uniffi-bindgen-react-native` to `0.28.3-3` (already in `package.json`); don't bump it independently or `pod install` will fail with a version conflict.
+- Bark 0.25.0 uses UniFFI 0.31.0-5. `scripts/prepare-bark-native.js` runs during `postinstall` and `setup:native`: it copies Bark's exact header-only runtime into its native package, isolates C++ namespaces and FFI type names, and removes only Bark's shared CocoaPods runtime dependency. Liquid keeps its 0.28 runtime unchanged. Do not replace this with a global version override: their string/buffer APIs differ. Native artifacts are fetched by Bark's checksum-verifying installer when missing.
+- When upgrading Bark or its UniFFI runtime, review the isolation script's version checks, run `pnpm run test:native-setup`, and rebuild the native app. A JavaScript reload cannot add the Bark native module to an old client.
 - If `pod install` crashes with a Ruby `Unicode Normalization … ASCII-8BIT` error, you forgot the `LANG=en_US.UTF-8` export above.
 - The **QVAC AI assistant requires a physical device** (no simulator support); the wallet itself runs fine on a simulator.
 
@@ -366,3 +368,38 @@ The next chapters of KaleidoSwap, grouped by horizon. Items move up as they land
 ## License
 
 MIT License — see [LICENSE](LICENSE).
+
+### Test Bark on mobile
+
+Bark is enabled by default on **signet**. Rebuild the native app after updating;
+Expo Go and a JavaScript-only reload cannot add the native SDK.
+
+```bash
+pnpm install
+EXPO_PUBLIC_BARK=1 EXPO_PUBLIC_BARK_NETWORK=signet pnpm exec expo prebuild --platform android
+EXPO_PUBLIC_BARK=1 EXPO_PUBLIC_BARK_NETWORK=signet pnpm android --device
+```
+
+On macOS, use `--platform ios` and `pnpm ios --device`. Keep a separate test wallet.
+
+- Open **Dashboard → Bark**, **Receive → Receive on Bark**, or **Settings → Wallet Protocols → Bark**.
+- Check the network and connection/recovery status. Bark balances are shown separately
+  and excluded from the dashboard total. Signet sats have no fiat valuation.
+- Under **Receive on Bark**, choose **Ark** and generate a request. Fund it from
+  [Second's signet faucet](https://signet.2nd.dev), then tap **Sync account**.
+- **Lightning** requires a positive whole-satoshi amount. **On-chain funding** creates
+  a BDK funding address; after confirmation, **Review boarding** explicitly moves
+  an entered amount into Bark, with a confirmation prompt and network fees.
+- **Send from Bark** opens the normal send flow with Bark selected. Shared `ark1` /
+  `tark1` addresses require account selection when opened from the generic send flow;
+  Bark and Arkade are separate servers. Check the network on the review screen.
+- Pending payments remain pending. For an unknown outcome, sync and check activity
+  before retrying. Unknown fees are shown as unavailable.
+- Restart the app and sync again to check persistence. Bark activity also appears in
+  the shared history with its network label.
+
+`EXPO_PUBLIC_BARK=0` disables Bark. Mainnet requires explicit
+`EXPO_PUBLIC_BARK_NETWORK=mainnet`, `EXPO_PUBLIC_BARK_SERVER_URL`, and
+`EXPO_PUBLIC_BARK_ESPLORA_URL`; these values are bundled at build time.
+Unilateral exit/recovery operations remain library APIs, without dedicated mobile controls.
+Native device linking and funded flows must be verified in a development build.

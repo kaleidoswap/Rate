@@ -10,7 +10,7 @@ module.exports = {
     // expo(-.*)? / react-native(-.*)? cover the whole expo-* and react-native-* families
     // (expo-font, react-native-reanimated, …), not just the bare packages — the
     // hyphenated ones ship ESM too and need the same transform.
-    'node_modules/(?!(react-native(-.*)?|@react-native|@react-navigation|expo(-.*)?|@expo|@react-native-community|@nostr-dev-kit|nostr-tools|react-redux|@reduxjs|@testing-library|@kaleidorg|@scure)/)'
+    'node_modules/(?!(react-native(-.*)?|@react-native|@react-navigation|expo(-.*)?|@expo|@react-native-community|@nostr-dev-kit|nostr-tools|react-redux|@reduxjs|@testing-library|@kaleidorg|@scure|@noble|micro-packed)/)'
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   testMatch: ['**/__tests__/**/*.test.[jt]s?(x)', '**/?(*.)+(spec|test).[jt]s?(x)'],
@@ -31,8 +31,11 @@ module.exports = {
       lines: 70
     }
   },
+  // Sibling packages (universal-bolt12) fall back to this app's node_modules for babel helpers.
+  modulePaths: ['<rootDir>/node_modules'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    '^@universal-bolt12/(swap-market|universal-code)$': '<rootDir>/../universal-bolt12/packages/$1/src/index.ts',
     '^react-native$': '<rootDir>/node_modules/react-native',
     // @kaleidorg/mind's exports map is import-only; point Jest's CJS resolver
     // straight at the dist files (babel transforms the ESM — see

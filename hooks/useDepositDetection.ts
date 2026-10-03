@@ -1,3 +1,4 @@
+import { normalizeDepositStatus } from '../utils/deposit-status';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // Monitor only the receive methods actually encoded in the visible QR.
 // Polling is deliberately single-flight: the next cycle is scheduled only after
@@ -12,8 +13,10 @@ import {
   type ReceiveMethod,
   type ReceiveProtocol,
 } from '../utils/receive-session';
+import { decode } from 'light-bolt11-decoder';
+import { syncBarkForUpdates } from '../services/BarkService';
 
-export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'liquid';
+export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
 export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
 
 export interface DepositDetectionEvent {
@@ -34,6 +37,20 @@ interface UseDepositDetectionArgs {
 const POLL_MS = 8_000;
 const INITIAL_DELAY_MS = 4_000;
 const POLL_TIMEOUT_MS = 6_000;
+const BARK_SYNC_WAIT_MS = 20_000;
+
+/**
+ * Bark runs without its daemon, so a receive only shows up (and a Lightning receive is
+ * only claimed) after a sync. Bounded so a slow server can't stall the watcher.
+ */
+async function syncIfBark(method: ReceiveMethod): Promise<void> {
+  if (method.protocol !== 'BARK') return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    syncBarkForUpdates().catch(() => undefined),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, BARK_SYNC_WAIT_MS); }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 function getConnectedAdapter(protocol: ReceiveProtocol): any | null {
   const adapter: any = protocolManager.getAdapterIfAvailable(toEngineProtocol(protocol));
@@ -46,6 +63,7 @@ async function readMethodBalance(
 ): Promise<number | null> {
   const adapter = getConnectedAdapter(method.protocol);
   if (!adapter) return null;
+  await syncIfBark(method);
 
   try {
     if (!method.assetId || method.assetId === 'BTC' || method.assetId === 'USD' || method.assetId === 'RGB_NEW') {
@@ -77,23 +95,14 @@ async function readMethodBalance(
   }
 }
 
-function normalizeDepositStatus(raw: unknown): DepositDetectionStatus | null {
-  const state = String(raw ?? '').trim().toLowerCase();
-  if (!state) return null;
-  if (['settled', 'paid', 'succeeded', 'success', 'complete', 'completed', 'confirmed', 'claimed'].includes(state)) {
-    return 'confirmed';
+/** Payment hash of a BOLT11 invoice, or null if it can't be decoded. */
+export function bolt11PaymentHash(invoice: string): string | null {
+  try {
+    const section = decode(invoice.trim()).sections.find((x: any) => x.name === 'payment_hash') as any;
+    return typeof section?.value === 'string' && /^[a-f0-9]{64}$/i.test(section.value) ? section.value : null;
+  } catch {
+    return null;
   }
-  if (['pending', 'processing', 'created', 'open', 'unpaid', 'unconfirmed', 'awaiting', 'inflight'].includes(state)) {
-    return 'pending';
-  }
-  if (['expired', 'timeout', 'timed_out'].includes(state)) return 'expired';
-  if (['failed', 'error', 'cancelled', 'canceled', 'rejected'].includes(state)) return 'failed';
-  if (state.includes('unconfirm') || state.includes('not_confirm')) return 'pending';
-  if (state.includes('confirm') || state.includes('settle') || state.includes('paid')) return 'confirmed';
-  if (state.includes('pending') || state.includes('await') || state.includes('process') || state.includes('open')) return 'pending';
-  if (state.includes('expir')) return 'expired';
-  if (state.includes('fail') || state.includes('cancel') || state.includes('reject')) return 'failed';
-  return null;
 }
 
 async function readInvoiceStatus(
@@ -101,17 +110,24 @@ async function readInvoiceStatus(
   parentSignal?: AbortSignal,
 ): Promise<DepositDetectionEvent | null> {
   const adapter = getConnectedAdapter(method.protocol);
-  if (!adapter?.getInvoiceStatus) return null;
+  // Adapters without getInvoiceStatus (Bark) report receives by payment hash.
+  const paymentHash = !adapter?.getInvoiceStatus && adapter?.getPaymentStatus
+    ? bolt11PaymentHash(method.value)
+    : null;
+  if (!adapter?.getInvoiceStatus && !paymentHash) return null;
+  await syncIfBark(method);
 
   try {
     const result = await runReceiveOperation<any>(
       `${method.protocol} invoice status`,
-      (signal) => callAbortableAdapterMethod(
-        adapter,
-        'getInvoiceStatus',
-        [{ invoice: method.value }],
-        signal,
-      ),
+      (signal) => paymentHash
+        ? callAbortableAdapterMethod(adapter, 'getPaymentStatus', [paymentHash], signal)
+        : callAbortableAdapterMethod(
+          adapter,
+          'getInvoiceStatus',
+          [{ invoice: method.value }],
+          signal,
+        ),
       POLL_TIMEOUT_MS,
       parentSignal,
     );

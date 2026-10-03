@@ -4,6 +4,7 @@
  */
 import React from 'react';
 import { Image, ImageSourcePropType, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 
 interface NetworkIconProps {
@@ -26,6 +27,9 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
   bitcoin: require('../assets/icons/protocols/btc.png'),
   onchain: require('../assets/icons/protocols/btc.png'),
   lightning: require('../assets/icons/protocols/lightning.png'),
+  // Second's mark (second.tech/docs); Bark is Second's Ark wallet.
+  bark: require('../assets/icons/protocols/bark.png'),
+  BARK: require('../assets/icons/protocols/bark.png'),
   LN: require('../assets/icons/protocols/lightning.png'),
   ln: require('../assets/icons/protocols/lightning.png'),
 };
@@ -33,6 +37,7 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
 export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) => {
   const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()];
 
+  if (network.toLowerCase() === 'liquid') return <Ionicons name="water" size={size} color={theme.colors.text.primary} />;
   if (!source) {
     return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: theme.colors.gray[500] }} />;
   }
@@ -40,7 +45,7 @@ export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) 
   return (
     <Image
       source={source}
-      style={{ width: size, height: size, borderRadius: size / 2 }}
+      style={{ width: size, height: size, borderRadius: network.toLowerCase() === 'bark' ? size * 0.22 : size / 2 }}
       resizeMode="contain"
     />
   );

@@ -789,6 +789,7 @@ export function protocolColor(p?: string | null): string {
     case 'RGB': return theme.colors.protocol.rgb;
     case 'SPARK': return theme.colors.protocol.spark;
     case 'ARKADE': return theme.colors.protocol.arkade;
+    case 'BARK': return theme.colors.primary[500];
     default: return theme.colors.gray[400];
   }
 }

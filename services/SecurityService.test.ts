@@ -2,6 +2,7 @@
 import SecurityService from './SecurityService';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
+import CryptoJS from 'crypto-js';
 
 // Mock modules
 jest.mock('expo-secure-store');
@@ -224,6 +225,14 @@ describe('SecurityService', () => {
   });
 
   describe('authenticateWithBiometric', () => {
+    it('never offers the phone passcode when the wallet PIN is the fallback', async () => {
+      (LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(true);
+      (LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(true);
+      (LocalAuthentication.authenticateAsync as jest.Mock).mockResolvedValue({ success: false, error: 'user_fallback' });
+      await expect(securityService.authenticateWithBiometric('Unlock', { allowDeviceFallback: false })).resolves.toBe(false);
+      expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledWith(expect.objectContaining({ disableDeviceFallback: true, fallbackLabel: 'Use wallet PIN' }));
+    });
+
     it('should authenticate successfully', async () => {
       const mockHasHardware = LocalAuthentication.hasHardwareAsync as jest.Mock;
       const mockIsEnrolled = LocalAuthentication.isEnrolledAsync as jest.Mock;
@@ -275,7 +284,8 @@ describe('SecurityService', () => {
       const result = await securityService.clearSecuritySettings();
 
       expect(result).toBe(true);
-      expect(mockDeleteItemAsync).toHaveBeenCalledTimes(3);
+      expect(mockDeleteItemAsync).toHaveBeenCalledTimes(4);
+      expect(mockDeleteItemAsync).toHaveBeenCalledWith('rate_wallet_pin_failures');
       expect(mockDeleteItemAsync).toHaveBeenCalledWith('rate_wallet_pin_hash');
       expect(mockDeleteItemAsync).toHaveBeenCalledWith('rate_wallet_biometric_enabled');
       expect(mockDeleteItemAsync).toHaveBeenCalledWith('rate_wallet_security_enabled');
@@ -468,5 +478,99 @@ describe('SecurityService', () => {
       expect(SecureStore.getItemAsync).not.toHaveBeenCalledWith('rate_wallet_mnemonic_42', expect.anything());
     });
   });
+
+  describe('PIN hashing', () => {
+    const wireStore = () => {
+      const store: Record<string, string> = {};
+      (SecureStore.setItemAsync as jest.Mock).mockImplementation((k: string, v: string) => {
+        store[k] = v;
+        return Promise.resolve();
+      });
+      (SecureStore.getItemAsync as jest.Mock).mockImplementation((k: string) =>
+        Promise.resolve(store[k] ?? null),
+      );
+      return store;
+    };
+
+    it('stores a salted PBKDF2 hash, never the plain or bare SHA-256 PIN', async () => {
+      const store = wireStore();
+      await securityService.savePin('123456');
+      const first = store.rate_wallet_pin_hash;
+      expect(first).toMatch(/^pbkdf2-sha256\$\d+\$[0-9a-f]{32}\$[0-9a-f]{64}$/);
+      expect(first).not.toContain(CryptoJS.SHA256('123456').toString());
+
+      await securityService.savePin('123456');
+      expect(store.rate_wallet_pin_hash).not.toBe(first); // fresh salt each time
+    });
+
+    it('accepts a legacy SHA-256 hash and upgrades it on success', async () => {
+      const store = wireStore();
+      store.rate_wallet_pin_hash = CryptoJS.SHA256('123456').toString();
+
+      await expect(securityService.verifyPin('123456')).resolves.toBe(true);
+      expect(store.rate_wallet_pin_hash).toMatch(/^pbkdf2-sha256\$/);
+      await expect(securityService.verifyPin('123456')).resolves.toBe(true);
+    });
+
+    it('rejects a wrong PIN against a legacy hash without upgrading', async () => {
+      const store = wireStore();
+      const legacy = CryptoJS.SHA256('123456').toString();
+      store.rate_wallet_pin_hash = legacy;
+
+      await expect(securityService.verifyPin('654321')).resolves.toBe(false);
+      expect(store.rate_wallet_pin_hash).toBe(legacy);
+    });
+  });
 });
 
+
+describe('security settings read failures', () => {
+  it('rejects a failed keychain read instead of reporting security disabled', async () => {
+    (SecureStore.getItemAsync as jest.Mock).mockRejectedValueOnce(new Error('keychain unavailable'));
+    await expect(SecurityService.getInstance().getSecuritySettings()).rejects.toThrow('Security settings are unavailable');
+  });
+  it('rejects a failed biometric preference read instead of treating it as disabled', async () => {
+    (SecureStore.getItemAsync as jest.Mock).mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('keychain unavailable'));
+    await expect(SecurityService.getInstance().getSecuritySettings()).rejects.toThrow('Security settings are unavailable');
+  });
+  describe('wrong-PIN lockout', () => {
+    const securityService = SecurityService.getInstance();
+    const wireStore = () => {
+      const store: Record<string, string> = {};
+      (SecureStore.setItemAsync as jest.Mock).mockImplementation((k: string, v: string) => { store[k] = v; return Promise.resolve(); });
+      (SecureStore.getItemAsync as jest.Mock).mockImplementation((k: string) => Promise.resolve(store[k] ?? null));
+      (SecureStore.deleteItemAsync as jest.Mock).mockImplementation((k: string) => { delete store[k]; return Promise.resolve(); });
+      return store;
+    };
+
+    it('stores the count, so a restart gives no extra attempts, and refuses even the right PIN while locked', async () => {
+      const store = wireStore();
+      await securityService.savePin('123456');
+      for (let i = 0; i < 5; i++) await expect(securityService.verifyPin('000000')).resolves.toBe(false);
+      expect(JSON.parse(store.rate_wallet_pin_failures)).toMatchObject({ count: 5 });
+      const lockedUntil = await securityService.getPinLockedUntil();
+      expect(lockedUntil).toBeGreaterThan(Date.now());
+      // A fresh read (as after a restart) sees the same lockout.
+      await expect(securityService.verifyPin('123456')).resolves.toBe(false);
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(lockedUntil + 1);
+      try {
+        await expect(securityService.verifyPin('123456')).resolves.toBe(true);
+        expect(store.rate_wallet_pin_failures).toBeUndefined();
+      } finally { clock.mockRestore(); }
+    });
+
+    it('doubles the cooldown after each further wrong PIN', async () => {
+      wireStore();
+      await securityService.savePin('123456');
+      let t = 1_000_000;
+      const clock = jest.spyOn(Date, 'now').mockImplementation(() => t);
+      try {
+        for (let i = 0; i < 5; i++) await securityService.verifyPin('000000');
+        expect(await securityService.getPinLockedUntil()).toBe(t + 30_000);
+        t += 30_001;
+        await securityService.verifyPin('000000');
+        expect(await securityService.getPinLockedUntil()).toBe(t + 60_000);
+      } finally { clock.mockRestore(); }
+    });
+  });
+});

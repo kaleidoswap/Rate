@@ -1,3 +1,6 @@
+import { useFocusEffect } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
+import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
 // screens/QRScannerScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -11,18 +14,20 @@ import {
   Easing,
   StatusBar,
   ActivityIndicator,
+  Clipboard,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions, scanFromURLAsync } from 'expo-camera';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useSelector } from 'react-redux';
+import { useAppSelector } from '../store/hooks';
+import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { protocolManager } from '../services/protocols';
 import { classifyWithdrawDestination } from '../utils/account-routing';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import { theme } from '../theme';
 import type { RootState } from '../store';
-import LottieView from 'lottie-react-native';
 
 const { width, height } = Dimensions.get('window');
 
@@ -38,26 +43,25 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   const returnScreen: string = route?.params?.returnScreen || 'Contacts';
   // Prefill amounts in the user's chosen entry unit so Send interprets them
   // correctly (Send reads a BTC amount as sats when bitcoinUnit === 'sats').
-  const bitcoinUnit = useSelector((s: RootState) => s.settings.bitcoinUnit);
+  const bitcoinUnit = useAppSelector((s: RootState) => s.settings.bitcoinUnit);
   const btcToEntryUnit = (btc: number): string =>
     bitcoinUnit === 'sats' ? String(Math.round(btc * 1e8)) : btc.toFixed(8);
   const [processing, setProcessing] = useState(false);
+  const [scanError, setScanError] = useState('');
+  const scanLock = useRef(false);
+  const entryAction = useRef(false);
+  const scanRevision = useRef(0);
+  useFocusEffect(React.useCallback(() => {
+    scanLock.current = false; entryAction.current = false; setScanned(false); setProcessing(false); setScanError('');
+    return () => { scanRevision.current++; scanLock.current = true; };
+  }, []));
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
-  const [scanSuccess, setScanSuccess] = useState<boolean | null>(null);
 
   const scanLineAnim = useRef(new Animated.Value(0)).current;
-  const successAnim = useRef<LottieView>(null);
-  const errorAnim = useRef<LottieView>(null);
 
   const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
-
-  useEffect(() => {
-    if (!permission) {
-      requestPermission();
-    }
-  }, [permission, requestPermission]);
 
   useEffect(() => {
     // Start scanning animation
@@ -80,91 +84,77 @@ export default function QRScannerScreen({ navigation, route }: Props) {
     } else {
       scanLineAnim.stopAnimation();
     }
+    return () => scanLineAnim.stopAnimation();
   }, [scanned, processing]);
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
-    if (scanned || processing) return;
-
-    setScanned(true);
-    setProcessing(true);
-    scanLineAnim.stopAnimation();
-
-    // NWC connection string: route to the Connect-a-wallet flow regardless of
-    // the scanner mode (it's neither a payment nor a contact).
-    if (data.trim().toLowerCase().startsWith('nostr+walletconnect://')) {
-      setProcessing(false);
-      setScanSuccess(true);
-      successAnim.current?.play();
-      setTimeout(() => {
-        navigation.navigate('NWCConnect', { scanned: data.trim() });
-      }, 700);
-      return;
-    }
-
-    // Contact-capture mode: don't decode as a payment — return the raw string
-    // to the requesting screen, which classifies it (npub / NIP-05 / LN addr…).
-    if (captureMode === 'contact') {
-      setProcessing(false);
-      setScanSuccess(true);
-      successAnim.current?.play();
-      setTimeout(() => {
-        navigation.navigate(returnScreen, { scannedContact: data.trim() });
-      }, 700);
-      return;
-    }
-
-    // Haptic feedback
-
+    if (scanLock.current) return;
+    scanLock.current = true;
+    const current = scanRevision.current;
+    setScanned(true); setProcessing(true); setScanError('');
     try {
+      data = data.trim();
+      const expiresAt = invoiceExpiry(data.replace(/^lightning:(\/\/)?/i, ''));
+      if (expiresAt !== null && expiresAt <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
+      if (!data) throw new Error('Nothing to read. Paste a payment request or choose another image.');
+      if (data.toLowerCase().startsWith('nostr+walletconnect://')) {
+        navigation.navigate('NWCConnect', { scanned: data }); return;
+      }
+      if (captureMode === 'contact') {
+        navigation.navigate(returnScreen, { scannedContact: data }); return;
+      }
+      // Offers and plain addresses: Send opens its KaleidoPay review, which compares direct sends and swap providers.
+      if (isKaleidoPayCode(data) || isSwappableAddress(data)) {
+        navigation.navigate('Send', { prefilledAddress: data }); return;
+      }
       const paymentData = await processScannedData(data);
-      setProcessing(false);
-      setScanSuccess(true);
-      successAnim.current?.play();
-
-      // Always go directly to Send screen - no PaymentConfirmation
-      setTimeout(() => {
-        setScanSuccess(null);
-        setScanned(false);
-        setProcessing(false);
-
-        navigation.navigate('Send', {
-          selectedAsset: paymentData.selectedAsset,
-          prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
-          prefilledAmount: 'amount' in paymentData ? paymentData.amount : undefined,
-          label: 'label' in paymentData ? paymentData.label : undefined,
-          message: 'message' in paymentData ? paymentData.message : undefined,
-          decodedInvoice: 'decodedInvoice' in paymentData ? paymentData.decodedInvoice : undefined,
-          decodedRGBInvoice: 'decodedRGBInvoice' in paymentData ? paymentData.decodedRGBInvoice : undefined,
-          isLightning: paymentData.type === 'lightning',
-          fromQRScanner: true,
-          paymentType: paymentData.type,
-        });
-      }, 1000); // Slightly longer to show success animation
+      if (current !== scanRevision.current) return;
+      navigation.navigate('Send', {
+        selectedAsset: paymentData.selectedAsset,
+        prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
+        prefilledAmount: 'amount' in paymentData ? paymentData.amount : undefined,
+        label: 'label' in paymentData ? paymentData.label : undefined,
+        message: 'message' in paymentData ? paymentData.message : undefined,
+        decodedInvoice: 'decodedInvoice' in paymentData ? paymentData.decodedInvoice : undefined,
+        decodedRGBInvoice: 'decodedRGBInvoice' in paymentData ? paymentData.decodedRGBInvoice : undefined,
+        isLightning: paymentData.type === 'lightning', fromQRScanner: true, paymentType: paymentData.type,
+      });
     } catch (error) {
-      console.error('Error processing scanned data:', error);
-      setProcessing(false);
-      setScanSuccess(false);
-      errorAnim.current?.play();
+      if (current === scanRevision.current) setScanError(getErrorMessage(error));
+      // Keep scanning paused until the user chooses to retry.
+    } finally { if (current === scanRevision.current) { entryAction.current = false; setProcessing(false); } }
+  };
 
-      setTimeout(() => {
-        setScanSuccess(null);
-        setScanned(false);
-
-        const errorMessage = getErrorMessage(error);
-        Alert.alert('Scan Error', errorMessage, [
-          {
-            text: 'Try Again',
-            onPress: () => resetScanner(),
-            style: 'default'
-          },
-          {
-            text: 'Cancel',
-            onPress: () => navigation.goBack(),
-            style: 'cancel'
-          }
-        ]);
-      }, 1000);
-    }
+  const pasteRequest = async () => {
+    if (entryAction.current || (scanLock.current && !scanError)) return;
+    entryAction.current = true;
+    const current = scanRevision.current;
+    scanLock.current = true; setProcessing(true); setScanned(true); setScanError('');
+    try {
+      const data = await Clipboard.getString();
+      if (current !== scanRevision.current) return;
+      scanLock.current = false; await handleBarCodeScanned({ data });
+    } catch { if (current === scanRevision.current) setScanError('Could not read the clipboard. Try again.'); }
+    finally { if (current === scanRevision.current) { entryAction.current = false; setProcessing(false); } }
+  };
+  const chooseImage = async () => {
+    if (entryAction.current || (scanLock.current && !scanError)) return;
+    entryAction.current = true;
+    const current = scanRevision.current;
+    scanLock.current = true; setScanned(true); setProcessing(true); setScanError('');
+    try {
+      const image = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      if (current !== scanRevision.current) return;
+      if (image.canceled) { resetScanner(); return; }
+      const codes = await scanFromURLAsync(image.assets[0].uri, ['qr']);
+      if (current !== scanRevision.current) return;
+      const values = [...new Set(codes.map(qr => qr.data).filter(Boolean))];
+      if (!values.length) throw new Error('No QR code found. Choose a clearer image or paste the request.');
+      if (values.length > 1) throw new Error('More than one QR code found. Crop the image to the code you want to use.');
+      scanLock.current = false;
+      await handleBarCodeScanned({ data: values[0] });
+    } catch (error) { if (current === scanRevision.current) setScanError(error instanceof Error ? error.message : 'Could not read this image.'); }
+    finally { if (current === scanRevision.current) { entryAction.current = false; setProcessing(false); } }
   };
 
   const UNRECOGNIZED_ERROR =
@@ -233,6 +223,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
 
   // Better error message handling
   const getErrorMessage = (error: any): string => {
+    if (/not connected|Nothing to read/i.test(error?.message ?? '')) return error.message;
     if (error?.message?.includes('decode')) {
       return 'Invalid QR code format. Please scan a valid Bitcoin address, Lightning invoice, or RGB invoice.';
     }
@@ -298,6 +289,22 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       };
     }
 
+    // A universal BTC request may contain only a native rail, with no Bitcoin
+    // path or Lightning invoice. Do not reinterpret token requests as BTC.
+    if (!params.has('assetid')) {
+      for (const [key, kind] of [['spark', 'spark'], ['ark', 'arkade']] as const) {
+        const nativeAddress = params.get(key);
+        if (nativeAddress && classifyWithdrawDestination(nativeAddress) === kind) {
+          const amountBtc = Number(params.get('amount'));
+          return {
+            ...handlePassthroughAddress(nativeAddress, kind),
+            amount: Number.isFinite(amountBtc) && amountBtc > 0 ? btcToEntryUnit(amountBtc) : undefined,
+          };
+        }
+      }
+    }
+    const bundledExpiry = invoiceExpiry(params.get('lightning') ?? '');
+    if (bundledExpiry !== null && bundledExpiry <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
     throw new Error(UNRECOGNIZED_ERROR);
   };
 
@@ -340,6 +347,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const handleLightningInvoice = async (invoice: string) => {
+    const expiresAt = invoiceExpiry(invoice);
+    if (expiresAt !== null && expiresAt <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
     // Decode the BOLT11 locally first — this is node-independent, so a
     // Lightning invoice scans on any wallet (e.g. Spark-only), not just when
     // the RGB node is connected (same approach as the Send screen).
@@ -430,7 +439,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const resetScanner = () => {
-    setScanned(false);
+    scanLock.current = false; entryAction.current = false; setScanned(false); setProcessing(false); setScanError('');
   };
 
   const renderScanOverlay = () => (
@@ -445,7 +454,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
           <View style={[styles.corner, styles.bottomLeft]} />
           <View style={[styles.corner, styles.bottomRight]} />
 
-          {!processing && !scanSuccess && (
+          {!processing && !scanned && (
             <Animated.View
               style={[
                 styles.scanLine,
@@ -479,101 +488,38 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       );
     }
 
-    if (scanSuccess !== null) {
-      return (
-        <View style={styles.feedbackContainer}>
-          <LottieView
-            ref={scanSuccess ? successAnim : errorAnim}
-            source={scanSuccess ? require('../assets/animations/success.json') : require('../assets/animations/error.json')}
-            style={styles.feedbackAnimation}
-            autoPlay={false}
-            loop={false}
-          />
-        </View>
-      );
-    }
-
     return null;
   };
 
-  if (!permission) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <SafeAreaView style={styles.centerContent}>
-          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-        </SafeAreaView>
-      </View>
-    );
-  }
-
-  if (!permission.granted) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-        <SafeAreaView style={styles.centerContent}>
-          <Text style={styles.permissionText}>
-            Camera permission is required to scan QR codes
-          </Text>
-          <TouchableOpacity style={styles.permissionButton} onPress={requestPermission}>
-            <Text style={styles.permissionButtonText}>Grant Permission</Text>
-          </TouchableOpacity>
-        </SafeAreaView>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-
-      <View style={styles.cameraContainer}>
-        <CameraView
-          style={styles.camera}
-          facing="back"
-          barcodeScannerSettings={{
-            barcodeTypes: ["qr", "code128", "code39", "aztec", "datamatrix", "ean13", "ean8", "pdf417"],
-          }}
-          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-          enableTorch={flashEnabled}
-        />
-
-        {renderScanOverlay()}
-        {renderFeedback()}
-
-        <View style={styles.bottomInstructionContainer}>
-          <Text style={styles.instructionText}>
-            Align QR code within the frame
-          </Text>
-          <Text style={styles.subInstructionText}>
-            {captureMode === 'contact'
-              ? 'npub • NIP-05 • Lightning address • node pubkey'
-              : 'Bitcoin • Lightning • RGB • Spark • Arkade'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Header Controls */}
-      <SafeAreaView style={styles.headerSafeArea} edges={['top']}>
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => navigation.goBack()}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="close" size={24} color="white" />
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={toggleFlash}
-          >
-            <Ionicons
-              name={flashEnabled ? "flash" : "flash-off"}
-              size={24}
-              color={flashEnabled ? "#FFD700" : "white"}
-            />
-          </TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close scanner" style={styles.iconButton} onPress={() => navigation.goBack()}><Ionicons name="close" size={24} color={theme.colors.text.primary} /></TouchableOpacity>
+          <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '600' }}>{captureMode === 'contact' ? 'Scan contact' : 'Scan to pay'}</Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={flashEnabled ? 'Turn torch off' : 'Turn torch on'} disabled={!permission?.granted} style={styles.iconButton} onPress={toggleFlash}><Ionicons name={flashEnabled ? 'flash' : 'flash-off'} size={24} color={theme.colors.text.primary} /></TouchableOpacity>
+        </View>
+        <View style={{ flex: 1, overflow: 'hidden' }}>
+          {permission?.granted ? <>
+            <CameraView style={StyleSheet.absoluteFillObject} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={scanned ? undefined : handleBarCodeScanned} enableTorch={flashEnabled} />
+            {renderScanOverlay()}{renderFeedback()}
+          </> : <View style={styles.centerContent}>
+            <Ionicons name="scan-outline" size={64} color={theme.colors.primary[500]} />
+            <Text style={styles.permissionText}>Scan a payment QR code</Text>
+            <Text style={{ color: theme.colors.text.secondary, textAlign: 'center', marginBottom: theme.spacing[5] }}>Allow camera access, or use a saved image or copied request below.</Text>
+            <TouchableOpacity accessibilityRole="button" style={styles.permissionButton} onPress={() => { if (permission?.canAskAgain === false) void Linking.openSettings().catch(() => setScanError('Open your device settings to enable the camera.')); else void requestPermission().catch(() => setScanError('Camera access could not be requested. Try again.')); }}>
+              <Text style={styles.permissionButtonText}>{permission?.canAskAgain === false ? 'Open settings' : 'Enable camera'}</Text>
+            </TouchableOpacity>
+          </View>}
+        </View>
+        <View style={{ padding: theme.spacing[5], gap: theme.spacing[4], backgroundColor: theme.colors.background.primary }}>
+          {!!scanError && <View style={{ gap: theme.spacing[3] }}><Text accessibilityRole="alert" style={{ color: theme.colors.warning[500] }}>{scanError}</Text><TouchableOpacity accessibilityRole="button" onPress={resetScanner}><Text style={{ color: theme.colors.primary[500], paddingVertical: theme.spacing[3] }}>Scan again</Text></TouchableOpacity></View>}
+          <View style={{ flexDirection: 'row', gap: theme.spacing[3] }}>
+            <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void pasteRequest()} style={styles.entryAction}><Ionicons name="clipboard-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Paste</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void chooseImage()} style={styles.entryAction}><Ionicons name="image-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Choose image</Text></TouchableOpacity>
+          </View>
+          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Scan an invoice, address or multi-method request. You’ll review the amount, account and fees before paying.'}</Text>
         </View>
       </SafeAreaView>
     </View>
@@ -581,6 +527,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
+  entryAction: { flex: 1, alignItems: 'center', gap: theme.spacing[2], padding: theme.spacing[4], borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary },
+  entryLabel: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base },
   container: {
     flex: 1,
     backgroundColor: 'black',
@@ -590,12 +538,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-  },
-  cameraContainer: {
-    flex: 1,
-  },
-  camera: {
-    flex: 1,
   },
 
   // Overlay Mask
@@ -690,10 +632,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 20,
   },
-  feedbackAnimation: {
-    width: 200,
-    height: 200,
-  },
   processingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -707,15 +645,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
-  },
-
-  // Header & Controls
-  headerSafeArea: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 30,
   },
   header: {
     flexDirection: 'row',
@@ -732,34 +661,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-
-  bottomInstructionContainer: {
-    position: 'absolute',
-    bottom: 50,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    zIndex: 20,
-  },
-  instructionText: {
-    fontSize: 16,
-    color: 'white',
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
-    textShadowColor: 'rgba(0,0,0,0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  subInstructionText: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
-    textAlign: 'center',
-    textShadowColor: 'rgba(0,0,0,0.75)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
   },
 
   // Permissions

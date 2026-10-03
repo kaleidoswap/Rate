@@ -14,6 +14,9 @@ import uiReducer from './slices/uiSlice';
 import contactsReducer from './slices/contactsSlice';
 import swapReducer from './slices/swapSlice';
 import nostrReducer from './slices/nostrSlice';
+import { recoverPersistence } from './persistenceRecovery';
+import { nostrSecretsTransform, migrateNostrSecretsV4 } from './nostrPersistence';
+import { chatContentTransform } from './chatPersistence';
 import chatReducer from './slices/chatSlice';
 
 // Import middleware
@@ -51,10 +54,14 @@ type RootReducerState = ReturnType<typeof rootReducer>;
 const persistConfig: PersistConfig<RootReducerState> = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: persist decrypted DM history locally
+  whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: unread counts / paid markers only, never message content
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 3,
-  migrate: (state: any) => {
+  version: 5,
+  // A timed-out migration rehydrates defaults and can overwrite the only keys.
+  // Keep the gate closed until migration succeeds or the user retries.
+  timeout: 0,
+  transforms: [nostrSecretsTransform, chatContentTransform],
+  migrate: async (state: any) => {
     // v2: replace the legacy default Nostr relay set with the current one.
     // The old defaults included relay.snort.social (frequently offline) and
     // nostr.wine (paid/auth-gated), which made Nostr appear broken. Only swap
@@ -104,7 +111,38 @@ const persistConfig: PersistConfig<RootReducerState> = {
     } catch {
       // Non-fatal.
     }
-    return Promise.resolve(state);
+    // v5: capability-aware, multi-connection NWC metadata. Credentials remain
+    // in SecureStore; this list contains display-safe information only.
+    try {
+      if (state?.nostr) {
+        const n = state.nostr;
+        n.nwcConnections = Array.isArray(n.nwcConnections) ? n.nwcConnections : [];
+        n.nwcCapabilities = Array.isArray(n.nwcCapabilities) ? n.nwcCapabilities : [];
+        if (n.selectedNwcConnectionId === undefined) n.selectedNwcConnectionId = null;
+        if (n.connectedWallet && n.nwcConnections.length === 0) {
+          const type = n.nwcWalletType === 'rln' ? 'rln' : 'ln';
+          const capabilities = type === 'rln'
+            ? ['payInvoice', 'createInvoice', 'readBalance', 'readHistory', 'manageChannels', 'rgbAssets', 'onchain']
+            : ['payInvoice', 'createInvoice', 'readBalance'];
+          n.nwcConnections.push({
+            id: n.connectedWallet,
+            walletPubkey: n.connectedWallet,
+            network: 'unknown',
+            type,
+            capabilities,
+            relays: [],
+            lastConnectedAt: Date.now(),
+          });
+          n.selectedNwcConnectionId = n.connectedWallet;
+          n.nwcCapabilities = capabilities;
+        }
+      }
+    } catch {
+      // Non-fatal.
+    }
+    // v4: move legacy plaintext Nostr keys into SecureStore, then drop them.
+    state = await recoverPersistence(() => migrateNostrSecretsV4(state));
+    return state;
   },
 };
 
@@ -125,7 +163,7 @@ export const store = configureStore({
           'persist/PAUSE',
           'persist/PURGE',
         ],
-        ignoredPaths: ['register', 'nostr.privateKey'],
+        ignoredPaths: ['register'],
       },
       immutableCheck: {
         ignoredPaths: ['register'],
@@ -175,4 +213,3 @@ export type AppDispatch = typeof store.dispatch;
 import { useDispatch, useSelector, TypedUseSelectorHook } from 'react-redux';
 export const useAppDispatch = () => useDispatch<AppDispatch>();
 export const useAppSelector: TypedUseSelectorHook<RootState> = useSelector;
-

@@ -25,8 +25,8 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
       if (!activeWallet) {
         const wallets = await dbService.getAllWallets();
         if (wallets.length > 0) {
-          activeWallet = wallets[0];
-          await dbService.setActiveWallet(activeWallet.id!);
+          await dbService.setActiveWallet(wallets[0].id!);
+          activeWallet = await dbService.getActiveWallet();
         }
       }
 
@@ -36,16 +36,20 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
 
         // Initialize protocol services — timeout after 8s so a slow/unreachable
         // node never blocks the load screen on Android or low-connectivity devices.
+        let startupTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
             initializeProtocolServices(),
-            new Promise<void>((_, reject) =>
-              setTimeout(() => reject(new Error('protocol init timeout')), 8000)
-            ),
+            new Promise<void>((resolve) => {
+              startupTimer = setTimeout(resolve, 8000);
+            }),
           ]);
         } catch (e) {
-          console.warn('Protocol init skipped:', e instanceof Error ? e.message : String(e));
+          console.warn('Protocol initialization failed:', e instanceof Error ? e.message : String(e));
+        } finally {
+          if (startupTimer) clearTimeout(startupTimer);
         }
+        // Slow connections continue in the background. Dashboard joins the same initialization.
 
         dispatch(setInitialized(true));
         dispatch(setUnlocked(true));

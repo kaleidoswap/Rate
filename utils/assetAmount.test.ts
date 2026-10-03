@@ -2,6 +2,7 @@ import {
   formatAssetAmount,
   getAssetBaseUnitBalance,
   getAssetDisplayBalance,
+  resolvePrecision,
 } from './assetAmount';
 
 describe('asset amount helpers', () => {
@@ -21,5 +22,23 @@ describe('asset amount helpers', () => {
   it('converts base-unit balances to display units', () => {
     expect(getAssetDisplayBalance(25_000_000, 6)).toBe(25);
     expect(getAssetDisplayBalance({ spendable: 123_456_000 }, 6)).toBe(123.456);
+  });
+});
+
+describe('resolvePrecision', () => {
+  it('keeps a legitimate precision of 0', () => {
+    expect(resolvePrecision(0)).toBe(0);
+  });
+
+  it('passes through valid precisions', () => {
+    expect(resolvePrecision(6)).toBe(6);
+  });
+
+  it('falls back only when precision is missing or invalid', () => {
+    expect(resolvePrecision(undefined)).toBe(8);
+    expect(resolvePrecision(null)).toBe(8);
+    expect(resolvePrecision(-1)).toBe(8);
+    expect(resolvePrecision(2.5)).toBe(8);
+    expect(resolvePrecision(undefined, 2)).toBe(2);
   });
 });

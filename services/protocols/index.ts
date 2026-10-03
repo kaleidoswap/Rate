@@ -1,3 +1,4 @@
+import { coalesceInFlight } from '../../utils/coalesce-in-flight'
 /**
  * Protocol Layer — KaleidoSwap App Entry Point (WDK engine)
  * ---------------------------------------------------------
@@ -27,11 +28,13 @@ export const protocolManager = getProtocolManager()
 /**
  * Initialize protocols from the active wallet's network configs (WDK engine).
  */
+const initializeOnce = coalesceInFlight(initializeWdkProtocols)
+
 export async function initializeProtocols(
   mnemonic: string,
   networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>,
 ): Promise<Map<ProtocolType, { success: boolean; error?: string }>> {
-  return initializeWdkProtocols(mnemonic, networkConfigs)
+  return initializeOnce(mnemonic, networkConfigs)
 }
 
 // Re-export everything consumers need from the shared lib.

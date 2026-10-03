@@ -1,320 +1,99 @@
-// components/AmountEditorModal.tsx
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  Platform,
-  KeyboardAvoidingView,
-  ScrollView,
-  Keyboard,
-  useWindowDimensions,
-} from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Modal, View, Text, TextInput, TouchableOpacity, Switch, KeyboardAvoidingView, Platform, ScrollView, Keyboard } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { AmountInput } from '@kaleidorg/kaleido-ui/native';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
+import { receiveAmountSats } from '../utils/receive-request';
 import { feedback } from '../utils/feedback';
 
-const SATS_PER_BTC = 1e8;
-const AMOUNT_DEBUG = typeof __DEV__ !== 'undefined' ? __DEV__ : true;
-const amountLog = (event: string, details?: Record<string, unknown>) => {
-  if (!AMOUNT_DEBUG) return;
-  if (details) {
-    console.log(`[AmountEditorModal] ${event}`, details);
-  } else {
-    console.log(`[AmountEditorModal] ${event}`);
-  }
-};
-
+export interface ReceiveRequestOptions { expirySeconds: number; showCountdown: boolean }
 interface Props {
   visible: boolean;
   onClose: () => void;
-  /** Current value in satoshis (0 / undefined = empty). */
   initialSats?: number;
-  /** BTC→fiat rates, lowercase-keyed (e.g. { usd: 65000 }). */
   rates: Record<string, number>;
-  /** Preferred crypto unit from settings ('BTC' | 'sats'). Kept for API compat. */
   bitcoinUnit?: 'BTC' | 'sats';
-  /** Optional spendable balance (sats) used by the WDK input's balance row. */
-  balanceSats?: number;
-  /** Called with the resolved satoshi amount (0 to clear). */
-  onConfirm: (sats: number) => void;
+  requestOptions?: ReceiveRequestOptions;
+  onConfirm: (sats: number, options?: ReceiveRequestOptions) => void;
 }
 
-function fmt(n: number, decimals = 0): string {
-  return n.toLocaleString(undefined, {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-}
-
-// WDK AmountInput toggles token ↔ fiat; token = BTC, fiat = USD.
-type Mode = 'token' | 'fiat';
-
-export const AmountEditorModal: React.FC<Props> = ({
-  visible,
-  onClose,
-  initialSats,
-  rates,
-  balanceSats,
-  bitcoinUnit = 'BTC',
-  onConfirm,
-}) => {
-  const [inputMode, setInputMode] = useState<Mode>('token');
+/** Edits stay local until Save; opening or dismissing never replaces the QR. */
+export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoinUnit = 'sats', requestOptions, onConfirm }: Props) {
+  const t = useAppTheme();
   const [value, setValue] = useState('');
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const usdRate = rates['usd'];
-  const { height } = useWindowDimensions();
-  // The "token" input is denominated per the caller's preference: sats (integer)
-  // or BTC (8 decimals). The receive flow uses sats.
-  const unitIsSats = bitcoinUnit === 'sats';
-  // sats → the token-mode string shown in the input.
-  const satsToToken = (sats: number): string =>
-    unitIsSats ? String(Math.round(sats)) : (sats / SATS_PER_BTC).toString();
-
-  const computeSats = (v: string, mode: Mode): number => {
-    const n = parseFloat(v.replace(/,/g, ''));
-    if (isNaN(n) || n <= 0) return 0;
-    if (mode === 'token') return unitIsSats ? Math.round(n) : Math.round(n * SATS_PER_BTC);
-    if (!usdRate) return 0;
-    return Math.round((n / usdRate) * SATS_PER_BTC); // USD → sats
-  };
-
-  // Seed the input from the incoming sats whenever the sheet opens.
-  React.useEffect(() => {
-    if (!visible) return;
-    amountLog('open', { initialSats, hasUsdRate: !!usdRate, height });
-    setInputMode('token');
-    setValue(initialSats && initialSats > 0 ? satsToToken(initialSats) : '');
-  }, [visible, initialSats, usdRate]);
-
+  const [fiat, setFiat] = useState(false);
+  const [expirySeconds, setExpirySeconds] = useState(3600);
+  const [showCountdown, setShowCountdown] = useState(false);
+  const rate = rates.usd;
+  const tokenValue = (sats: number) => bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8);
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (event) => {
-      const nextHeight = event.endCoordinates?.height || 0;
-      amountLog('keyboardShow', { height: nextHeight });
-      setKeyboardHeight(nextHeight);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      amountLog('keyboardHide');
-      setKeyboardHeight(0);
-    });
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
-  const sats = computeSats(value, inputMode);
-
-  // Secondary line: the value in the other domains (BTC · sats · $).
-  const secondary = useMemo(() => {
-    if (!sats) return null;
-    const btc = sats / SATS_PER_BTC;
-    const parts: string[] = [`${btc.toFixed(8)} BTC`, `${fmt(sats)} sats`];
-    if (usdRate) parts.push(`$${fmt(btc * usdRate, 2)}`);
-    return parts.join('  ·  ');
-  }, [sats, usdRate]);
-
-  // Toggle BTC ↔ USD, carrying the entered value across for continuity.
-  const toggleMode = () => {
-    amountLog('toggleMode', { from: inputMode, value });
+    if (!visible) return;
+    setValue(initialSats ? tokenValue(initialSats) : '');
+    setFiat(false);
+    setExpirySeconds(requestOptions?.expirySeconds ?? 3600);
+    setShowCountdown(requestOptions?.showCountdown ?? false);
+  }, [visible]);
+  const numeric = Number(value.replace(',', '.'));
+  const sats = fiat ? Math.round(numeric / rate * 1e8) : receiveAmountSats(value.replace(',', '.'), bitcoinUnit);
+  const empty = !value.trim();
+  const valid = empty || Number.isFinite(numeric) && numeric > 0 && Number.isSafeInteger(sats) && sats > 0;
+  const close = () => { Keyboard.dismiss(); onClose(); };
+  const save = () => {
+    if (!valid) return;
     feedback.select();
-    const s = computeSats(value, inputMode);
-    const next: Mode = inputMode === 'token' ? 'fiat' : 'token';
-    if (s > 0) {
-      if (next === 'token') setValue(satsToToken(s));
-      else if (usdRate) setValue(((s / SATS_PER_BTC) * usdRate).toFixed(2));
-    }
-    setInputMode(next);
+    onConfirm(empty ? 0 : sats, requestOptions ? { expirySeconds, showCountdown } : undefined);
+    close();
   };
-
-  const balBtc = balanceSats && balanceSats > 0 ? balanceSats / SATS_PER_BTC : 0;
-  const tokenBalance = unitIsSats
-    ? String(Math.round(balanceSats || 0))
-    : (balBtc ? balBtc.toFixed(8) : '0');
-  const tokenBalanceUSD = usdRate ? `$${fmt(balBtc * usdRate, 2)}` : '$0.00';
-  const onUseMax = () => {
-    if (!balanceSats) return;
-    amountLog('useMax', { balanceSats, inputMode });
-    feedback.select();
-    if (inputMode === 'token') setValue(satsToToken(balanceSats));
-    else if (usdRate) setValue((balBtc * usdRate).toFixed(2));
-  };
-
-  const handleConfirm = () => {
-    amountLog('confirm', { sats, inputMode, value });
-    feedback.success();
-    Keyboard.dismiss();
-    onConfirm(sats);
-    onClose();
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      presentationStyle="overFullScreen"
-      statusBarTranslucent
-    >
-      <KeyboardAvoidingView style={styles.backdrop} behavior={undefined}>
-        <TouchableOpacity
-          style={styles.backdropTouch}
-          activeOpacity={1}
-          onPress={() => {
-            amountLog('backdropClose');
-            Keyboard.dismiss();
-            onClose();
-          }}
-        />
-        <ScrollView
-          style={[
-            styles.sheetScroll,
-            {
-              maxHeight: Math.max(260, Math.round((height - keyboardHeight) * 0.92)),
-              marginBottom: keyboardHeight,
-            },
-          ]}
-          contentContainerStyle={styles.sheetScrollContent}
-          keyboardShouldPersistTaps="handled"
-          bounces={false}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.sheet}>
-            <View style={styles.handle} />
-            <View style={styles.headerRow}>
-              <Text style={styles.title}>Enter amount</Text>
-              <TouchableOpacity
-                onPress={() => {
-                  amountLog('close');
-                  Keyboard.dismiss();
-                  onClose();
-                }}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={22} color={theme.colors.text.tertiary} />
-              </TouchableOpacity>
+  const muted = { color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm };
+  const label = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base, fontWeight: '600' as const };
+  return <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: t.colors.background.backdrop }}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Dismiss request editor" onPress={close} style={{ flex: 1 }} />
+      <View style={{ maxHeight: '85%', backgroundColor: t.colors.surface.primary, borderTopLeftRadius: t.borderRadius.xl, borderTopRightRadius: t.borderRadius.xl }}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5], paddingBottom: t.spacing[8], gap: t.spacing[4] }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text accessibilityRole="header" style={{ ...label, fontSize: t.typography.fontSize.xl }}>{requestOptions ? 'Edit request' : 'Enter amount'}</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close request editor" onPress={close} style={{ minHeight: 44, minWidth: 44, justifyContent: 'center', alignItems: 'center' }}>
+              <Ionicons name="close" size={24} color={t.colors.text.secondary} />
+            </TouchableOpacity>
+          </View>
+          <Text style={label}>Amount · optional</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], borderBottomWidth: 1, borderColor: t.colors.border.light }}>
+            <TextInput accessibilityLabel="Requested amount" value={value} keyboardType={bitcoinUnit === 'sats' && !fiat ? 'number-pad' : 'decimal-pad'}
+              onChangeText={setValue} placeholder="Any amount" placeholderTextColor={t.colors.text.muted}
+              style={{ flex: 1, minHeight: 56, fontSize: t.typography.fontSize['2xl'], color: t.colors.text.primary }} />
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change amount entry unit" disabled={!rate} onPress={() => {
+              if (valid && !empty) setValue(fiat ? tokenValue(sats) : ((sats / 1e8) * rate).toFixed(2));
+              setFiat(v => !v);
+            }} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
+              <Text style={label}>{fiat ? 'USD' : bitcoinUnit}</Text>
+              {!!rate && <Ionicons name="swap-vertical" size={18} color={t.colors.text.secondary} />}
+            </TouchableOpacity>
+          </View>
+          <Text style={muted}>{!valid ? 'Enter a valid amount of at least 1 sat.' : empty ? 'The sender chooses the amount.' : fiat ? `${tokenValue(sats)} ${bitcoinUnit}` : rate ? `≈ $${((sats / 1e8) * rate).toFixed(2)} USD` : `${sats.toLocaleString()} sats`}</Text>
+          {requestOptions && <>
+            <Text style={label}>Invoice expiry</Text>
+            <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
+              {([[600, '10 min'], [3600, '1 hour'], [86400, '24 hours']] as const).map(([seconds, title]) => <TouchableOpacity key={seconds}
+                accessibilityRole="radio" accessibilityLabel={`Expire after ${title}`} accessibilityState={{ checked: expirySeconds === seconds }} onPress={() => setExpirySeconds(seconds)}
+                style={{ minHeight: 44, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.md, backgroundColor: expirySeconds === seconds ? t.colors.primary[500] : t.colors.surface.secondary }}>
+                <Text style={{ color: expirySeconds === seconds ? t.colors.text.inverse : t.colors.text.primary }}>{title}</Text>
+              </TouchableOpacity>)}
             </View>
-
-            {/* WDK amount input (sats|BTC ↔ USD toggle) */}
-            <AmountInput
-              label="Amount to receive"
-              value={value}
-              onChangeText={(t) =>
-                // sats are whole numbers — strip decimals in sats token mode;
-                // BTC and fiat keep the decimal separators.
-                setValue(
-                  unitIsSats && inputMode === 'token'
-                    ? t.replace(/[^\d]/g, '')
-                    : t.replace(/[^\d.,]/g, ''),
-                )
-              }
-              tokenSymbol={unitIsSats ? 'sats' : 'BTC'}
-              tokenBalance={tokenBalance}
-              tokenBalanceUSD={tokenBalanceUSD}
-              inputMode={inputMode}
-              onToggleInputMode={toggleMode}
-              onUseMax={onUseMax}
-            />
-
-            {/* Live conversion across all domains */}
-            <Text style={styles.secondary} numberOfLines={1}>
-              {secondary || 'Enter an amount to see conversions'}
-            </Text>
-
-            {/* Actions */}
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={styles.clearBtn}
-                onPress={() => {
-                  amountLog('clear');
-                  Keyboard.dismiss();
-                  onConfirm(0);
-                  onClose();
-                }}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.clearText}>Clear</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmBtn} onPress={handleConfirm} activeOpacity={0.8}>
-                <Text style={styles.confirmText}>Set amount</Text>
-              </TouchableOpacity>
+            <Text style={muted}>Applies to new invoices. The wallet may limit the duration; addresses do not expire.</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={label}>Show countdown</Text>
+              <Switch accessibilityLabel="Show expiry countdown" value={showCountdown} onValueChange={setShowCountdown} />
             </View>
+          </>}
+          <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
+            <TouchableOpacity accessibilityRole="button" onPress={() => setValue('')} style={{ minHeight: 48, paddingHorizontal: t.spacing[4], justifyContent: 'center' }}><Text style={muted}>Clear amount</Text></TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" disabled={!valid} onPress={save} style={{ flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: t.borderRadius.lg, backgroundColor: t.colors.primary[500], opacity: valid ? 1 : 0.5 }}>
+              <Text style={{ ...label, color: t.colors.text.inverse }}>{requestOptions ? 'Save request' : 'Set amount'}</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-};
-
-const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
-
-const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: theme.colors.background.backdrop },
-  backdropTouch: { ...StyleSheet.absoluteFillObject },
-  sheetScroll: {
-    width: '100%',
-    zIndex: 2,
-    elevation: 12,
-  },
-  sheetScrollContent: {
-    flexGrow: 1,
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: theme.colors.surface.primary,
-    borderTopLeftRadius: theme.borderRadius.xl,
-    borderTopRightRadius: theme.borderRadius.xl,
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[2.5],
-    paddingBottom: theme.spacing[8],
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: theme.colors.border.medium,
-    marginBottom: theme.spacing[3.5],
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing[4],
-  },
-  title: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
-  secondary: {
-    marginTop: 2,
-    fontSize: 13,
-    color: theme.colors.text.secondary,
-    fontFamily: mono,
-  },
-  actions: { flexDirection: 'row', gap: theme.spacing[3], marginTop: 26 },
-  clearBtn: {
-    paddingHorizontal: theme.spacing[5],
-    paddingVertical: 14,
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 1.5,
-    borderColor: theme.colors.border.medium,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearText: { fontSize: 15, fontWeight: '600', color: theme.colors.text.secondary },
-  confirmBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.primary[500],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmText: { fontSize: 15, fontWeight: '700', color: theme.colors.text.inverse },
-});
-
+      </View>
+    </KeyboardAvoidingView>
+  </Modal>;
+}
 export default AmountEditorModal;
