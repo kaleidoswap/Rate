@@ -10,6 +10,46 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-10-03
+
+KaleidoPay and universal BOLT12 payments, Second's Bark as a regular wallet
+layer, a reusable merchant QR, and a round of security and payment hardening.
+
+### Added
+- **KaleidoPay**: pay BOLT12 offers, universal payment QRs and plain bitcoin
+  addresses by comparing direct payment with Electrum swap providers over
+  Nostr. Shown inside Send, so paying has one screen. Interrupted swaps are
+  resumed on start.
+- **Bark (Second's Ark)** as a regular layer, on mainnet by default
+  (`EXPO_PUBLIC_BARK_NETWORK=signet` for test sats): balance, Ark address and
+  Lightning receive, boarding from on-chain, and payments over Lightning,
+  BOLT12, Ark and on-chain.
+- **Reusable merchant QR**: a persistent BOLT12 offer that lists the user's
+  connected accounts as receiving layers, created over NWC, with receipts.
+- Per-account settings, Arkade server configuration and searchable settings.
+
+### Changed
+- Receive, Scan, Pay and the payment review were reworked; the dashboard is
+  more compact and Recent Activity lives in the Activity tab.
+- KaleidoPay quotes are priced from providers' published offers; a swap is
+  opened only when the user pays.
+
+### Security
+- The wrong-PIN lockout is stored and survives restarts; with a wallet PIN set,
+  biometrics fall back to that PIN instead of the phone passcode.
+- Salted PIN hashes, fail-closed secure storage, Nostr/NWC secrets kept out of
+  AsyncStorage, in-app approval for Wallet Connect payments, screenshots blocked
+  while a recovery phrase is shown, decrypted messages no longer persisted, and
+  console logging stripped from release builds.
+
+### Fixed
+- Plain addresses and combined bitcoin + Lightning QRs are routed correctly;
+  fixed-amount BOLT12 offers are paid exactly the amount reviewed.
+- A failed KaleidoPay payment no longer blocks later payments.
+- Bark Lightning invoices, detection of incoming Bark payments, Bark fee
+  checks in Send, and the boarding panel.
+- RGB Lightning invoices are always open-amount.
+
 ## [0.2.1] — 2026-08-31
 
 Dependency refresh (patch/minor bumps within existing semver ranges, plus an
