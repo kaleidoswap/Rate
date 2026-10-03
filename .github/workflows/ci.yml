@@ -26,9 +26,14 @@ jobs:
 
       # KaleidoPay imports packages from the sibling kaleidoswap/kaleido-pay
       # checkout (see services/kaleidoPay/README.md).
+      # Payment code from kaleido-pay is pinned to the commit in kaleido-pay.ref.
+      - name: Read pinned kaleido-pay commit
+        id: kaleido-pay
+        run: echo "ref=$(tr -d '[:space:]' < kaleido-pay.ref)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: kaleidoswap/kaleido-pay
+          ref: ${{ steps.kaleido-pay.outputs.ref }}
           path: universal-bolt12
       - name: Place universal-bolt12 beside the app
         run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)
@@ -62,9 +67,14 @@ jobs:
       - uses: actions/checkout@v4
 
       # Same sibling checkout as the checks job.
+      # Payment code from kaleido-pay is pinned to the commit in kaleido-pay.ref.
+      - name: Read pinned kaleido-pay commit
+        id: kaleido-pay
+        run: echo "ref=$(tr -d '[:space:]' < kaleido-pay.ref)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
           repository: kaleidoswap/kaleido-pay
+          ref: ${{ steps.kaleido-pay.outputs.ref }}
           path: universal-bolt12
       - name: Place universal-bolt12 beside the app
         run: mv universal-bolt12 ../universal-bolt12 && (cd ../universal-bolt12 && npm ci --ignore-scripts)

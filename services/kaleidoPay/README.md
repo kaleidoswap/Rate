@@ -43,15 +43,19 @@ not durable payment-attempt identifiers or reusable-offer identities.
 ## Source packages
 
 The protocol code is not copied here. It comes from the sibling checkout of
-[kaleidoswap/universal-bolt12](https://github.com/kaleidoswap/universal-bolt12),
+[kaleidoswap/kaleido-pay](https://github.com/kaleidoswap/kaleido-pay) (formerly universal-bolt12),
 imported from source:
 
 - `@universal-bolt12/universal-code`: payment codes and route planning
 - `@universal-bolt12/swap-market`: Electrum swap providers over Nostr (quotes,
   persisted attempts, claim, resume)
 
-Setup, once per machine (clones or updates `../universal-bolt12` and installs
-its dependencies):
+The commit used is pinned in `kaleido-pay.ref` at the repo root; CI, release
+builds and the setup script all check out that commit. Bump it deliberately,
+in its own commit, after reviewing the kaleido-pay changes.
+
+Setup, once per machine and after each bump (clones `../universal-bolt12` if
+needed, checks out the pinned commit and installs its dependencies):
 
 ```bash
 pnpm run setup:siblings
