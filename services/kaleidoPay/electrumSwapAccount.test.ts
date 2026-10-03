@@ -23,26 +23,32 @@ jest.mock('@universal-bolt12/swap-market', () => ({
 
 import { encodePaymentCode } from '@universal-bolt12/universal-code';
 import { createElectrumSwapAccount } from './electrumSwapAccount';
-import { previewPayment, quotePayment, quotePaymentOffers, executePaymentOffer, executePayment, registerKaleidoPayAccount } from './index';
+import { previewPayment, quotePayment, quotePaymentOffers, executePaymentOffer, executePayment, registerKaleidoPayAccount, PaymentNotSentError } from './index';
 
 const address = 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq';
 const store = { save: jest.fn(), load: jest.fn(), list: jest.fn(async () => []) };
 const secrets = { put: jest.fn(), get: jest.fn() };
 const payer = { payInvoices: jest.fn() };
 
-test('pays a bitcoin address from Lightning, skipping a provider that stays silent', async () => {
+beforeEach(() => mockStartAttempt.mockClear());
+
+test('quotes from published offers without opening swaps; a silent provider at pay time sends nothing', async () => {
   const account = createElectrumSwapAccount({ source: { id: 'bark', rail: 'ln', network: 'mainnet' }, payer, attempts: store, secrets });
   const off = registerKaleidoPayAccount(account);
   try {
     const preview = previewPayment(encodePaymentCode({ address, amountSat: 25000 }, 'mainnet'), 'mainnet', '', 'r1');
     expect(preview.plan.status).toBe('ready');
     if (preview.plan.status === 'ready') expect(preview.plan.route).toMatchObject({ kind: 'swap', to: 'btc:mainnet', providerId: 'electrum-nostr' });
-    const quote = await quotePayment(preview);
-    expect(quote).toMatchObject({ recipientSat: 25000, totalSat: 26600, feeSat: 1600 });
-    const done = await executePayment(preview, quote);
-    expect(done.stage).toBe('claimed');
-    expect(mockStartAttempt.mock.calls.map(c => (c[0] as any).quote.provider)).toEqual(['silent', 'cheap', 'pricey']);
-    expect(mockStartAttempt.mock.calls.every(c => (c[0] as any).destination === address && (c[0] as any).timeoutMs === 10000)).toBe(true);
+    const silent = await quotePayment(preview);
+    expect(silent).toMatchObject({ recipientSat: 25000, totalSat: 26500, feeSat: 1500 });
+    expect(mockStartAttempt).not.toHaveBeenCalled(); // reviewing never opens a swap or stores its secrets
+    expect(secrets.put).not.toHaveBeenCalled();
+    await expect(executePayment(preview, silent)).rejects.toBeInstanceOf(PaymentNotSentError);
+    expect(mockPayAttempt).not.toHaveBeenCalled();
+    const offers = await quotePaymentOffers(preview);
+    const cheap = offers.find(o => o.id.endsWith(':cheap'))!;
+    await executePaymentOffer(preview, cheap, 'pay-cheap');
+    expect(mockStartAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ destination: address, timeoutMs: 10000, requestId: 'bark:pay-cheap', quote: expect.objectContaining({ provider: 'cheap' }) }), expect.anything());
     expect(mockPayAttempt).toHaveBeenCalledWith(expect.objectContaining({ id: 'a-cheap' }), payer, expect.anything());
   } finally { off(); }
 });
@@ -67,6 +73,7 @@ test('execute starts paying and status follows the swap to completion', async ()
     deps.onUpdate({ ...a, stage: 'waiting_lockup' });
     return new Promise(res => { finish = res; });
   });
+  mockStartAttempt.mockImplementationOnce(async ({ quote }: any) => ({ id: 'a-silent-ok', stage: 'created', quote }));
   const account = createElectrumSwapAccount({ source: { id: 'bark3', rail: 'ln', network: 'mainnet' }, payer, attempts: store, secrets });
   const off = registerKaleidoPayAccount(account);
   try {
@@ -74,12 +81,12 @@ test('execute starts paying and status follows the swap to completion', async ()
     const quote = await quotePayment(preview);
     if (preview.plan.status !== 'ready') throw new Error('plan');
     const started = await account.execute(preview, preview.plan.route, quote, 'ui-1');
-    expect(started).toEqual({ status: 'pending', reference: 'a-cheap' });
+    expect(started).toEqual({ status: 'pending', reference: 'a-silent-ok' });
     expect(await account.execute(preview, preview.plan.route, quote, 'ui-1')).toMatchObject({ status: 'pending' });
     expect(mockPayAttempt).toHaveBeenCalledTimes(1);
     store.load.mockResolvedValueOnce(null);
     expect(await account.status('ui-1')).toMatchObject({ status: 'pending' });
-    finish({ id: 'a-cheap', stage: 'claimed', claim: { txid: 'c1' } });
+    finish({ id: 'a-silent-ok', stage: 'claimed', claim: { txid: 'c1' } });
     await new Promise(r => setTimeout(r, 0));
     expect(await account.status('ui-1')).toEqual({ status: 'completed', reference: 'c1' });
     expect(await account.status('nope')).toEqual({ status: 'unknown' });
@@ -93,7 +100,7 @@ test('exposes each provider and pays the explicitly selected offer even after re
     const preview = previewPayment(encodePaymentCode({ address, amountSat: 25000 }, 'mainnet'), 'mainnet', '', 'choices');
     const offers = await quotePaymentOffers(preview);
     expect(offers).toHaveLength(3);
-    expect(offers.find(o => o.id.endsWith(':silent'))?.unavailable).toMatch(/did not answer/);
+    expect(offers.every(o => o.quote && !o.unavailable)).toBe(true);
     const selected = offers.find(o => o.id.endsWith(':pricey'))!;
     expect(selected.quote?.totalSat).toBe(27500);
     await quotePaymentOffers(preview); // Refreshing must not overwrite the selected provider's attempt.

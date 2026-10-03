@@ -69,9 +69,11 @@ checkout fails to resolve them; this is a hackathon branch.
 ## Paying an address from Lightning (Bark)
 
 `createElectrumSwapAccount` in `electrumSwapAccount.ts` is a ready executor for
-requests whose accepted rail is `btc:<network>`. Its quote agrees a swap with the
-cheapest provider that answers (nothing is paid) and its pay step funds it through
-the account's Lightning sender, waits for the provider's lockup and claims to the
+requests whose accepted rail is `btc:<network>`. Its quotes are priced
+locally from the providers' published offers, so reviewing contacts no provider and
+stores no swap secrets. Its pay step opens the swap with the chosen provider (a
+provider that does not answer means nothing was sent), funds it through the
+account's Lightning sender, waits for the provider's lockup and claims to the
 requested address.
 
 ```ts

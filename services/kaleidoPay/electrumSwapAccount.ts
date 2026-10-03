@@ -48,7 +48,9 @@ export function createElectrumSwapAccount(opts: {
   const esplora = new Esplora(ESPLORA[network]);
   const deps: AttemptDeps = { attempts: opts.attempts, secrets: opts.secrets, esplora, zeroConf: opts.zeroConf };
   let offers: { at: number; list: SwapOffer[] } | null = null;
-  const agreed = new WeakMap<Quote, { attempt: SwapAttempt; terms: string }>();
+  // A quote is priced locally from the provider's published offer; the swap itself is only
+  // opened with the provider when the user pays, so reviewing never creates swaps or secrets.
+  const agreed = new WeakMap<Quote, { swapQuote: SwapQuote; offer: SwapOffer; destination: string; terms: string }>();
   const running = new Map<string, { swapId: string; latest: SwapAttempt }>();
 
   async function currentOffers(): Promise<SwapOffer[]> {
@@ -66,28 +68,35 @@ export function createElectrumSwapAccount(opts: {
 
   const terms = (preview: Preview, route: Route) => JSON.stringify({ request: preview.request, code: preview.code, route });
   function approved(preview: Preview, route: Route, quote: Quote) {
-    check(preview, route);
-    const value = agreed.get(quote);
-    if (!value || value.terms !== terms(preview, route) || value.attempt.quote.payerSat !== quote.totalSat) throw new Error('The swap no longer matches the approved total or destination. Review the payment again.');
-    if (value.attempt.stage !== 'created' || quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('Review the payment again to get a fresh quote.');
-    return value.attempt;
+    try {
+      const destination = check(preview, route);
+      const value = agreed.get(quote);
+      if (!value || value.terms !== terms(preview, route) || value.destination !== destination || value.swapQuote.payerSat !== quote.totalSat) throw new Error('The swap no longer matches the approved total or destination. Review the payment again.');
+      if (quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('Review the payment again to get a fresh quote.');
+      return value;
+    } catch (error) { throw new PaymentNotSentError(error instanceof Error ? error.message : 'Review the payment again.'); }
+  }
+  /** Opens the approved swap with its provider. Nothing is paid yet, so a failure here is "not sent". */
+  async function open(approval: ReturnType<typeof approved>, requestId: string): Promise<SwapAttempt> {
+    try {
+      return await startAttempt({ quote: approval.swapQuote, offer: approval.offer, destination: approval.destination, requestId, relays: opts.relays, timeoutMs: QUOTE_REPLY_MS }, deps);
+    } catch (error) {
+      throw new PaymentNotSentError(`The swap provider did not open the swap (${error instanceof Error ? error.message : 'no answer'}). Choose another way to pay.`);
+    }
   }
   async function quoteOptions(preview: Preview, route: Route): Promise<AccountQuoteOption[]> {
     const destination = check(preview, route);
     const list = await currentOffers();
     const ranked: SwapQuote[] = rankedReverseQuotes(list, network, preview.request.amountSat, await esplora.feeRate());
     if (!ranked.length) throw new Error('No swap provider can take this amount right now.');
-    return Promise.all(ranked.slice(0, 4).map(async q => {
+    return ranked.slice(0, 4).map(q => {
       const offer = list.find(o => o.pubkey === q.provider);
       const option: AccountQuoteOption = { id: q.provider, name: 'Electrum swap', detail: `${q.provider.slice(0, 6)}…${q.provider.slice(-4)}` };
-      try {
-        if (!offer) throw new Error('Provider offer no longer available.');
-        const attempt = await startAttempt({ quote: q, offer, destination, requestId: preview.request.id, relays: opts.relays, timeoutMs: QUOTE_REPLY_MS }, deps);
-        option.quote = { recipientSat: preview.request.amountSat, totalSat: attempt.quote.payerSat, feeSat: attempt.quote.payerSat - preview.request.amountSat, expiresAt: attempt.quote.expiresAt };
-        agreed.set(option.quote, { attempt, terms: terms(preview, route) });
-      } catch (e) { option.unavailable = e instanceof Error ? e.message : 'Provider did not respond.'; }
+      if (!offer) { option.unavailable = 'Provider offer no longer available.'; return option; }
+      option.quote = { recipientSat: preview.request.amountSat, totalSat: q.payerSat, feeSat: q.payerSat - preview.request.amountSat, expiresAt: q.expiresAt };
+      agreed.set(option.quote, { swapQuote: q, offer, destination, terms: terms(preview, route) });
       return option;
-    }));
+    });
   }
 
   return {
@@ -104,25 +113,22 @@ export function createElectrumSwapAccount(opts: {
     },
 
     async pay(preview, route, quote, onUpdate) {
-      let attempt: ReturnType<typeof approved>;
-      try { attempt = approved(preview, route, quote); }
-      catch (error) { throw new PaymentNotSentError(error instanceof Error ? error.message : 'Review the payment again.'); }
+      const approval = approved(preview, route, quote);
       agreed.delete(quote);
+      const attempt = await open(approval, preview.request.id);
       return payAttempt(attempt, opts.payer, { ...deps, onUpdate });
     },
 
     async execute(preview, route, quote, attemptId) {
       const existing = running.get(attemptId);
       if (existing) return paymentResult(existing.latest);
-      let attempt: ReturnType<typeof approved>;
-      try { attempt = approved(preview, route, quote); }
-      catch (error) { throw new PaymentNotSentError(error instanceof Error ? error.message : 'Review the payment again.'); }
+      const approval = approved(preview, route, quote);
       const recoveryId = `${opts.source.id}:${attemptId}`;
       const prior = (await opts.attempts.list()).find(a => a.requestId === recoveryId);
       if (prior) return paymentResult(prior); // Never fund an already journaled attempt again.
       agreed.delete(quote);
-      attempt.requestId = recoveryId;
-      await opts.attempts.save(attempt); // Persist UI-to-swap recovery mapping BEFORE paying.
+      // startAttempt persists the swap under the UI-to-swap recovery id BEFORE anything is paid.
+      const attempt = await open(approval, recoveryId);
       const entry = { swapId: attempt.id, latest: attempt as SwapAttempt };
       running.set(attemptId, entry);
       // Runs until claimed; the screen polls status().
