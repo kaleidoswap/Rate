@@ -9,7 +9,7 @@ KaleidoPay is a payment experience inside Rate. Receivers save an ordered list o
 - [Hackathon app source](https://github.com/kaleidoswap/Rate/tree/hack/universal-bolt12)
 - [Receiver implementation and verification](./kaleidopay-receiver.md)
 - Receiver screen: `screens/MerchantOfferScreen.tsx`
-- Payer screen: `screens/KaleidoPayScreen.tsx`
+- Payer flow: `components/payments/KaleidoPayFlow.tsx`, shown inside `screens/SendScreen.tsx`
 - Receiving services: `services/kaleidoPay/merchantOffer*.ts`
 
 The offer/address extension and custom NWC methods are experimental project interfaces. They are not adopted BOLT12 or NIP-47 standards. Static Ark addresses do not implement negotiated SSPS locks.

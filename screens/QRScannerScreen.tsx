@@ -103,9 +103,9 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       if (captureMode === 'contact') {
         navigation.navigate(returnScreen, { scannedContact: data }); return;
       }
-      // Every bitcoin address goes to KaleidoPay too: direct sends and swap providers are compared there.
+      // Offers and plain addresses: Send opens its KaleidoPay review, which compares direct sends and swap providers.
       if (isKaleidoPayCode(data) || isSwappableAddress(data)) {
-        navigation.navigate('KaleidoPay', { code: data }); return;
+        navigation.navigate('Send', { prefilledAddress: data }); return;
       }
       const paymentData = await processScannedData(data);
       if (current !== scanRevision.current) return;

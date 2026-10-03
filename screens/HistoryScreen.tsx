@@ -259,7 +259,7 @@ export default function HistoryScreen() {
             <StatusBar barStyle="light-content" />
             <MainHeader title="Activity" onBack={route.name === 'Activity' ? undefined : () => navigation.goBack()} />
 
-            <UnresolvedPaymentCard onCheck={() => navigation.navigate('KaleidoPay')} />
+            <UnresolvedPaymentCard onCheck={() => navigation.navigate('Send', { resumePayment: true })} />
             {/* Filter tabs */}
             <SegmentedTabs
                 options={FILTERS}

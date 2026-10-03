@@ -42,18 +42,18 @@ test('cancels late clipboard navigation after leaving the screen and ignores dou
   await act(async () => { resolve('contact'); }); expect(navigation.navigate).not.toHaveBeenCalled();
 });
 
-test.each(['lno1testoffer', 'LIGHTNING:lno1testoffer', 'bitcoin:?lno=lno1testoffer'])('automatically routes %s to KaleidoPay', async code => {
+test.each(['lno1testoffer', 'LIGHTNING:lno1testoffer', 'bitcoin:?lno=lno1testoffer'])('opens Send with %s for its KaleidoPay review', async code => {
   (Clipboard.getString as jest.Mock).mockResolvedValue(code);
   const navigation = { navigate: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
-  expect(navigation.navigate).toHaveBeenCalledWith('KaleidoPay', { code });
+  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: code });
 });
-test('a Lightning invoice scanned from KaleidoPay still goes to the regular Send flow', async () => {
+test('a Lightning invoice goes to Send already decoded', async () => {
   (require('../utils/decodeInvoice').decodeBolt11 as jest.Mock).mockReturnValue({ amountSats: 1000, description: 'Coffee' });
   (Clipboard.getString as jest.Mock).mockResolvedValue('lnbc1000testinvoice');
   const navigation = { navigate: jest.fn(), goBack: jest.fn() };
-  const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { returnScreen: 'KaleidoPay' } }} />);
+  const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
   expect(navigation.navigate).toHaveBeenCalledWith('Send', expect.objectContaining({ isLightning: true, prefilledAddress: 'lnbc1000testinvoice' }));
 });

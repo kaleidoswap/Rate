@@ -1,24 +1,38 @@
-import { formatBitcoinAmount } from '../utils/bitcoinUnits';
-import { useForegroundClock } from '../hooks/useForegroundClock';
+import { formatBitcoinAmount } from '../../utils/bitcoinUnits';
+import { useForegroundClock } from '../../hooks/useForegroundClock';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, Clipboard, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
-import { ScreenHeader } from '../components/ScreenHeader';
-import { Button } from '../components/Button';
-import { ProviderSheet } from '../components/payments/ProviderSheet';
-import { NetworkIcon } from '../components/NetworkIcon';
-import { useAppTheme } from '../theme/ThemeProvider';
-import { useAppSelector } from '../store/hooks';
-import { KALEIDOPAY_DEMO, codeNetwork, prepareKaleidoPay, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../services/kaleidoPay';
-import type { Network, Preview, PaymentOffer } from '../services/kaleidoPay';
-import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt } from '../services/kaleidoPay/attempts';
-import { protocolManager } from '../services/protocols';
-import { MobileSparkAdapter } from '../services/protocols/MobileSparkAdapter';
-import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
+import { ScreenHeader } from '../ScreenHeader';
+import { Button } from '../Button';
+import { ProviderSheet } from './ProviderSheet';
+import { NetworkIcon } from '../NetworkIcon';
+import { useAppTheme } from '../../theme/ThemeProvider';
+import { useAppSelector } from '../../store/hooks';
+import { KALEIDOPAY_DEMO, codeNetwork, prepareKaleidoPay, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../../services/kaleidoPay';
+import type { Network, Preview, PaymentOffer } from '../../services/kaleidoPay';
+import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt } from '../../services/kaleidoPay/attempts';
+import { protocolManager } from '../../services/protocols';
+import { MobileSparkAdapter } from '../../services/protocols/MobileSparkAdapter';
+import type { PaymentAttempt } from '../../services/kaleidoPay/attempts';
 
-export default function KaleidoPayScreen({ navigation, route }: { navigation: any; route: any }) {
+interface Props {
+  /** The payment code entered on Send; empty to reopen an unresolved payment. */
+  code: string;
+  /** Back to Send's input, e.g. to pay something else. */
+  onExit: () => void;
+  /** Leave Send after a completed payment. */
+  onDone: () => void;
+}
+
+/**
+ * Send's review and pay step for codes KaleidoPay pays (BOLT12 offers, universal
+ * QRs, plain addresses): it compares direct payment with swap providers and keeps
+ * the payment journal. Rendered by SendScreen, so paying has one screen.
+ */
+export function KaleidoPayFlow({ code, onExit, onDone }: Props) {
   const t = useAppTheme();
   const bitcoinUnit = useAppSelector(s => s.settings.bitcoinUnit);
   const [showDetails, setShowDetails] = useState(false);
@@ -26,7 +40,6 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
   const formatSats = (sats: number) => `${formatBitcoinAmount(sats, bitcoinUnit)} ${bitcoinUnit}`;
   const displaySpend: typeof formatSpend = (value, asset) => asset.id === 'BTC' && asset.ticker === 'sats' ? formatSats(value) : formatSpend(value, asset);
   const walletId = useAppSelector(s => s.wallet.activeWallet?.id);
-  const [code, setCode] = useState(route.params?.code ?? '');
   const [network, setNetwork] = useState<Network>('signet');
   const [showNetworks, setShowNetworks] = useState(false);
   const [amount, setAmount] = useState('');
@@ -53,7 +66,6 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
       if (account) return registerKaleidoPayAccount(account);
     } catch { /* Disconnected accounts are not advertised as payment routes. */ }
   }, [walletId]);
-  useEffect(() => { if (route.params?.code !== undefined) setCode(route.params.code); }, [route.params?.code]);
   // A scanned code names its network (offer chain or address); the picker stays as an override.
   useEffect(() => { const detected = codeNetwork(code); if (detected) setNetwork(detected); }, [code]);
   useEffect(() => {
@@ -143,12 +155,15 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
   useEffect(() => {
     // Scanning an amount-bound request opens its review directly; amountless
     // requests keep the editor visible. No payment is executed by this effect.
-    if (!journalReady || attempt || !route.params?.code || code !== route.params.code || autoReviewed.current === code) return;
+    if (!journalReady || attempt || !code || autoReviewed.current === code) return;
     autoReviewed.current = code;
     try { previewPayment(code, network, amountInSats, requestId.current); }
     catch { return; }
     review();
-  }, [journalReady, attempt, code, route.params?.code]);
+  }, [journalReady, attempt, code]);
+
+  // Reopened from Activity with no unresolved payment left: back to Send's input.
+  useEffect(() => { if (journalReady && !attempt && !code) onExit(); }, [journalReady, attempt, code]);
 
   const railId = (r: string) => r === 'ln' ? `ln:${network}` : r;
   const railIcon = (r: string) => ({ ln: 'lightning', btc: 'onchain' } as Record<string, string>)[r.split(':')[0]] ?? r.split(':')[0];
@@ -179,7 +194,7 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
   );
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }} edges={['left', 'right', 'bottom']}>
-      <ScreenHeader title={preview ? "Review payment" : "Pay"} subtitle="Pay with what you have" onBack={() => { if (preview && !attempt && !paying.current) { revision.current++; setBusy(false); setPreview(null); } else if (!paying.current) navigation.goBack(); }} />
+      <ScreenHeader title={preview ? 'Review Payment' : 'Pay'} onBack={() => { if (preview && !attempt && !paying.current) { revision.current++; setBusy(false); setPreview(null); } else if (!paying.current) { if (attempt && !unresolvedAttempt(attempt)) onDone(); else onExit(); } }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
           {KALEIDOPAY_DEMO && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.warning[500] + '22', marginBottom: t.spacing[4] }}>
@@ -194,16 +209,13 @@ export default function KaleidoPayScreen({ navigation, route }: { navigation: an
             {row('Recipient receives', attempt.recipient)}{row('Total', attempt.total)}{row('Provider', attempt.provider)}
             {!!attempt.reference && <Text selectable style={muted}>Reference: {attempt.reference}</Text>}
             <Text style={muted}>{unresolvedAttempt(attempt) ? 'Your payment is still being checked. You can leave and return here to check its status. Do not send it again.' : attempt.status === 'failed' ? 'This payment was not sent or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
-            {unresolvedAttempt(attempt) ? <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} /> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') navigation.goBack(); else { setAttempt(null); if (preview) void getOffers(true); } }} />}
+            {unresolvedAttempt(attempt) ? <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} /> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') onDone(); else { setAttempt(null); if (preview) void getOffers(true); } }} />}
           </View> : !preview ? <>
-            <View style={card}>
-              <Text style={{ ...text, fontSize: t.typography.fontSize.xl, fontWeight: '600' }}>Who are you paying?</Text>
-              <TextInput accessibilityLabel="Payment request" value={code} onChangeText={setCode} multiline autoCapitalize="none" autoCorrect={false} placeholder="Payment link or BOLT12 offer" placeholderTextColor={t.colors.text.muted} style={{ ...text, minHeight: 90, paddingVertical: t.spacing[3] }} />
-              <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
-                <Button title="Scan QR" onPress={() => navigation.navigate('QRScanner', { returnScreen: 'KaleidoPay' })} style={{ flex: 1 }} />
-                <Button title="Paste" variant="secondary" onPress={() => { Clipboard.getString().then(setCode).catch(() => setError('Could not read the clipboard.')); }} style={{ flex: 1 }} />
-              </View>
-            </View>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change recipient" onPress={onExit} style={card}>
+              <Text style={muted}>Paying</Text>
+              <Text numberOfLines={2} ellipsizeMode="middle" selectable style={text}>{code}</Text>
+              <Text style={{ ...muted, color: t.colors.primary[500] }}>Change</Text>
+            </TouchableOpacity>
             <View style={card}>
               <Text style={text}>Recipient amount</Text><Text style={muted}>Leave empty if the request includes an amount.</Text>
               <TextInput accessibilityLabel={`Amount in ${bitcoinUnit}`} keyboardType="decimal-pad" value={amount} onChangeText={setAmount} placeholder={`Amount in ${bitcoinUnit}`} placeholderTextColor={t.colors.text.muted} style={{ ...text, paddingVertical: t.spacing[3] }} />
