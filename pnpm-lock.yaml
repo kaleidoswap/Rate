@@ -47,6 +47,9 @@ importers:
       '@buildonspark/spark-sdk':
         specifier: ^0.7.17
         version: 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
+      '@cashu/cashu-ts':
+        specifier: ^4.11.0
+        version: 4.11.0
       '@expo/metro-runtime':
         specifier: ~6.1.2
         version: 6.1.2(expo@54.0.37)(react-dom@19.1.4(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
@@ -1329,6 +1332,10 @@ packages:
         optional: true
       react-native-get-random-values:
         optional: true
+
+  '@cashu/cashu-ts@4.11.0':
+    resolution: {integrity: sha512-euNst5ZZCCAYDpIs9qXm0CElJYgvUargsODu+WvlI7SiRCVjTEPOIoeSsdBuEfj30qYfyufBopEDipVzS0d22Q==}
+    engines: {node: '>=22.4.0'}
 
   '@codesandbox/nodebox@0.1.8':
     resolution: {integrity: sha512-2VRS6JDSk+M+pg56GA6CryyUSGPjBEe8Pnae0QL3jJF1mJZJVMDKr93gJRtBbLkfZN6LD/DwMtf+2L0bpWrjqg==}
@@ -8489,6 +8496,13 @@ snapshots:
       - react-native-b4a
       - utf-8-validate
       - ws
+
+  '@cashu/cashu-ts@4.11.0':
+    dependencies:
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+      '@scure/bip32': 2.4.0
 
   '@codesandbox/nodebox@0.1.8':
     dependencies:
