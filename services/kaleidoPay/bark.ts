@@ -8,6 +8,7 @@ import { PaymentNotSentError } from './errors';
 import { lightningPayerFrom } from './lightningPayer';
 import type { LightningSender } from './lightningPayer';
 import { kaleidoPayStores } from './recovery';
+import { throttledSync } from '../../utils/throttled-sync';
 
 /** Bark adapter surface: Lightning sends (BOLT11, BOLT12 offers) and Ark addresses, plus the backend's checks. */
 export interface BarkPaySender extends LightningSender {
@@ -34,10 +35,23 @@ function resultOf(r: { paymentHash: string; status: string } | null | undefined)
   return { status: 'unknown', reference };
 }
 
+/**
+ * Bark runs without its daemon: a Lightning send started with wait:false only settles
+ * (and its status only changes) once the wallet syncs, so status checks sync first.
+ */
+function syncedStatus(bark: BarkPaySender): (hash: string) => ReturnType<BarkPaySender['getPaymentStatus']> {
+  const sync = throttledSync(() => bark.backend?.sync?.() ?? Promise.resolve(), 5_000);
+  return async hash => {
+    await sync().catch(() => undefined);
+    return bark.getPaymentStatus(hash);
+  };
+}
+
 export function createBarkPayAccount(bark: BarkPaySender, network: Network): PayAccount {
+  const paymentStatus = syncedStatus(bark);
   const swap = createElectrumSwapAccount({
     source: { id: 'bark', rail: 'ln', network },
-    payer: lightningPayerFrom(bark),
+    payer: lightningPayerFrom({ sendPayment: request => bark.sendPayment(request), getPaymentStatus: paymentStatus }),
     ...kaleidoPayStores,
   });
   const swapQuotes = new WeakMap<Quote, Quote>(); // our total (provider + Bark fees) -> provider quote
@@ -124,7 +138,7 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
       // Bark reported the offer payment in flight without a hash to follow it by: its outcome
       // can only be read from Bark's activity, so it needs checking rather than staying pending.
       if (!saved.paymentHash) return { status: 'unknown' };
-      return resultOf({ paymentHash: saved.paymentHash, status: (await bark.getPaymentStatus(saved.paymentHash)).status });
+      return resultOf({ paymentHash: saved.paymentHash, status: (await paymentStatus(saved.paymentHash)).status });
     },
   };
 }

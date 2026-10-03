@@ -5,7 +5,7 @@
 // confirmed they are boarded into Bark (Ark) here, after an explicit review.
 // (Arkade settles its boarding address automatically; Bark needs this step.)
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { theme } from '../../theme';
 import { Button } from '../Button';
 import {
@@ -15,15 +15,28 @@ import {
   readBarkOnchain,
 } from '../../services/BarkService';
 
+// The deposit address has no other watcher, so the panel polls while it is open:
+// a deposit shows up as pending, then confirmed, without leaving the screen.
+const REFRESH_MS = 30_000;
+
 export function BarkBoardingPanel() {
   const [onchain, setOnchain] = useState<{ confirmedSats: number; pendingSats: number } | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [amount, setAmount] = useState('');
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    try { setOnchain(await readBarkOnchain()); } catch { setOnchain(null); }
+    setRefreshing(true);
+    try { setOnchain(await readBarkOnchain()); setLoadFailed(false); }
+    catch { setLoadFailed(true); } // keep the last balance shown; say it couldn't refresh
+    finally { setRefreshing(false); }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const id = setInterval(() => { void load(); }, REFRESH_MS);
+    return () => clearInterval(id);
+  }, [load]);
 
   const review = async () => {
     const value = Number(amount);
@@ -72,10 +85,18 @@ export function BarkBoardingPanel() {
       <Text style={styles.body}>
         After the deposit confirms, move it into your Bark balance. Leave enough on-chain for fees.
       </Text>
-      {onchain === null ? <ActivityIndicator color={theme.colors.primary[500]} /> : (
-        <Text style={styles.body}>
-          On-chain: {onchain.confirmedSats.toLocaleString()} sats confirmed · {onchain.pendingSats.toLocaleString()} pending
-        </Text>
+      {onchain === null && !loadFailed ? <ActivityIndicator color={theme.colors.primary[500]} /> : (
+        <View style={styles.row}>
+          <Text style={[styles.body, styles.flex]}>
+            {onchain
+              ? `On-chain: ${onchain.confirmedSats.toLocaleString()} sats confirmed · ${onchain.pendingSats.toLocaleString()} pending`
+              : 'Could not read the on-chain balance.'}
+            {onchain && loadFailed ? ' (could not refresh)' : ''}
+          </Text>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh on-chain balance" onPress={() => void load()} disabled={refreshing} hitSlop={8}>
+            {refreshing ? <ActivityIndicator size="small" color={theme.colors.primary[500]} /> : <Text style={styles.link}>Refresh</Text>}
+          </TouchableOpacity>
+        </View>
       )}
       <TextInput
         accessibilityLabel="Boarding amount in sats"
@@ -106,6 +127,9 @@ const styles = StyleSheet.create({
     color: theme.colors.text.primary,
   },
   body: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
+  row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] },
+  flex: { flex: 1 },
+  link: { fontSize: theme.typography.fontSize.sm, color: theme.colors.primary[500], fontWeight: theme.typography.fontWeight.semibold },
   input: {
     color: theme.colors.text.primary,
     padding: theme.spacing[3],

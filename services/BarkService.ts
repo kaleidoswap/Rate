@@ -2,6 +2,7 @@ import type { PaymentRequest } from '@kaleidorg/wallet-engine'
 import type { BarkReactNativeAdapter } from '@kaleidorg/wallet-engine/adapters/bark-react-native'
 import { protocolManager } from './protocols'
 import { currentBarkHost } from './protocols/barkPreferences'
+import { throttledSync } from '../utils/throttled-sync'
 
 export const barkNetworkLabel = () => currentBarkHost()?.network === 'mainnet' ? 'Mainnet' : currentBarkHost()?.network === 'signet' ? 'Signet · test sats' : 'Not configured'
 
@@ -9,6 +10,24 @@ export function getConnectedBark(): BarkReactNativeAdapter {
   const adapter = protocolManager.getAdapterIfAvailable('BARK') as BarkReactNativeAdapter | undefined
   if (!adapter?.isConnected()) throw new Error('Bark is not connected. Return to the dashboard to connect your wallet.')
   return adapter
+}
+
+// Bark runs without its background daemon: incoming Ark payments, Lightning receives
+// (claimed during sync) and in-flight Lightning sends only move forward when the app
+// syncs. A sync blocks other Bark calls while it runs, so watchers share a throttled one.
+const BARK_SYNC_INTERVAL_MS = 5_000
+const barkSyncs = new WeakMap<object, () => Promise<void>>()
+
+/** Syncs the connected Bark wallet so new receives and send outcomes become visible. No-op without Bark. */
+export function syncBarkForUpdates(): Promise<void> {
+  const adapter = protocolManager.getAdapterIfAvailable('BARK') as BarkReactNativeAdapter | undefined
+  if (!adapter?.isConnected()) return Promise.resolve()
+  let sync = barkSyncs.get(adapter)
+  if (!sync) {
+    sync = throttledSync(() => adapter.backend.sync(), BARK_SYNC_INTERVAL_MS)
+    barkSyncs.set(adapter, sync)
+  }
+  return sync()
 }
 
 export async function readBarkAccount(sync = false) {

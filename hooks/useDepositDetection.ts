@@ -14,6 +14,7 @@ import {
   type ReceiveProtocol,
 } from '../utils/receive-session';
 import { decode } from 'light-bolt11-decoder';
+import { syncBarkForUpdates } from '../services/BarkService';
 
 export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
 export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
@@ -36,6 +37,20 @@ interface UseDepositDetectionArgs {
 const POLL_MS = 8_000;
 const INITIAL_DELAY_MS = 4_000;
 const POLL_TIMEOUT_MS = 6_000;
+const BARK_SYNC_WAIT_MS = 20_000;
+
+/**
+ * Bark runs without its daemon, so a receive only shows up (and a Lightning receive is
+ * only claimed) after a sync. Bounded so a slow server can't stall the watcher.
+ */
+async function syncIfBark(method: ReceiveMethod): Promise<void> {
+  if (method.protocol !== 'BARK') return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    syncBarkForUpdates().catch(() => undefined),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, BARK_SYNC_WAIT_MS); }),
+  ]).finally(() => clearTimeout(timer));
+}
 
 function getConnectedAdapter(protocol: ReceiveProtocol): any | null {
   const adapter: any = protocolManager.getAdapterIfAvailable(toEngineProtocol(protocol));
@@ -48,6 +63,7 @@ async function readMethodBalance(
 ): Promise<number | null> {
   const adapter = getConnectedAdapter(method.protocol);
   if (!adapter) return null;
+  await syncIfBark(method);
 
   try {
     if (!method.assetId || method.assetId === 'BTC' || method.assetId === 'USD' || method.assetId === 'RGB_NEW') {
@@ -99,6 +115,7 @@ async function readInvoiceStatus(
     ? bolt11PaymentHash(method.value)
     : null;
   if (!adapter?.getInvoiceStatus && !paymentHash) return null;
+  await syncIfBark(method);
 
   try {
     const result = await runReceiveOperation<any>(

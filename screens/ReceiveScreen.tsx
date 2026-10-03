@@ -788,7 +788,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                 layer: 'BTC_LN',
                 amount: amountSats,
                 description: `Receive ${cleanAmount} ${bitcoinUnit}`,
-                expirySeconds,
+                // No expirySeconds: Bark sets its own invoice expiry and rejects a custom one.
               }));
             result = invoice.invoice;
             methodMeta = {

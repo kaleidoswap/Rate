@@ -101,6 +101,19 @@ test('a stale direct quote is refused as not sent', async () => {
   await expect(account.execute!(preview(openOffer, 1200), directRoute, { ...quote }, 'ui-stale')).rejects.toBeInstanceOf(PaymentNotSentError);
 });
 
+test('a pending offer payment is re-checked only after Bark syncs', async () => {
+  const b: any = bark(15);
+  const order: string[] = [];
+  b.backend.sync = jest.fn(async () => { order.push('sync'); });
+  b.getPaymentStatus.mockImplementation(async () => { order.push('status'); return { status: 'confirmed' }; });
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: 'ef'.repeat(32), status: 'pending' });
+  const account = createBarkPayAccount(b, 'signet');
+  const quote = await account.quote(preview(openOffer, 1200), directRoute);
+  await account.execute!(preview(openOffer, 1200), directRoute, quote, 'ui-sync');
+  await expect(account.status!('ui-sync')).resolves.toMatchObject({ status: 'completed' });
+  expect(order).toEqual(['sync', 'status']);
+});
+
 test('swap attempts keep their status recovery', async () => {
   const account = createBarkPayAccount(bark(), 'signet');
   await expect(account.status!('existing-attempt')).resolves.toEqual({ status: 'pending' });
