@@ -1,12 +1,36 @@
 import type { SwapAttempt } from '@universal-bolt12/swap-market';
 export type { SwapAttempt } from '@universal-bolt12/swap-market';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodeOffer, decodePaymentCode, offerRails, paymentCodeNetwork, planPayment } from '@universal-bolt12/universal-code';
-import type { Network, PaymentCode, PaymentRequest, Plan, Route, SwapCapability, WalletSource } from '@universal-bolt12/universal-code';
-export type { Network, Route } from '@universal-bolt12/universal-code';
+import { decodeBolt11 } from '../../utils/decodeInvoice';
+import { resolveLightningAddressToInvoice } from '../../utils/lnurl';
+import { decodeTarget, targetOfferRails, TEST_NETWORKS, bitcoinAddressNetworks } from './target';
+import type { ChainNetwork, PayTarget } from './target';
+export { decodeTarget, offerAmountSat } from './target';
+export type { ChainNetwork, PayTarget, TargetKind } from './target';
+
+/** A chain an account or request is on. */
+export type Network = ChainNetwork;
+/** For an RGB payment: the asset and amount (in base units) the recipient asks for. */
+export interface RequestAsset { id: string; ticker: string; precision: number; amount: number }
+export interface PaymentRequest {
+  id: string;
+  /** The network shown for the request; `networks` lists every one it may be on. */
+  network: Network;
+  networks: Network[];
+  /** Sats the recipient receives; 0 for an RGB asset payment (see `asset`). */
+  amountSat: number;
+  /** Rails the recipient accepts, in their order of preference. */
+  acceptedRails: string[];
+  asset?: RequestAsset;
+}
+export interface WalletSource { id: string; rail: string; network: Network }
+export interface SwapCapability { id: string; from: string; to: string; network: Network }
+export type Route = { kind: 'direct' | 'swap'; sourceId: string; from: string; to: string; providerId?: string };
+export type Plan = { status: 'ready'; requestId: string; route: Route; alternatives: Route[] }
+  | { status: 'unsupported'; requestId: string; reason: string };
 
 /** `addresses`: the receiver's address per rail, for rails it is paid on directly (Bark, Arkade). */
-export interface Preview { code: PaymentCode; request: PaymentRequest; plan: Plan; addresses: Record<string, string> }
+export interface Preview { code: PayTarget; request: PaymentRequest; plan: Plan; addresses: Record<string, string> }
 export interface SpendAsset { id: string; ticker: string; precision: number }
 export interface SpendQuote { asset: SpendAsset; amount: number; fee: number; total: number }
 export interface Quote {
@@ -55,70 +79,152 @@ export function registerKaleidoPayAccount(account: PayAccount): () => void {
   accounts.set(account.source.id, account);
   return () => { if (accounts.get(account.source.id) === account) accounts.delete(account.source.id); };
 }
-const BARE_ADDRESS = /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/;
-// BIP21 parameters KaleidoPay reads for a plain address; anything else (lightning=, spark=, …) is a
-// payment leg it would drop, so such codes stay on the regular Send flow.
-const ADDRESS_PARAMS = new Set(['amount', 'label', 'message']);
-/** Strips a `lightning:` prefix and gives a bare bitcoin address the `bitcoin:` scheme the decoder needs. */
-function normalizePaymentCode(text: string): string {
-  const code = text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
-  return BARE_ADDRESS.test(code) && !/^bcrt1/i.test(code) ? `bitcoin:${code}` : code;
+
+// ---------------------------------------------------------------------------
+// Planning. A rail is either network-bound (`btc`, `ln`, `liquid`, `spark`, `rgb`,
+// `ark`, optionally suffixed with a network) or keyed to one server (`bark:<key>`,
+// `arkade:<key>`). Accounts and swaps name their own network; a request lists the
+// networks it may be on, so a test-network code reaches accounts on any test chain.
+// ---------------------------------------------------------------------------
+const NETWORK_BOUND = /^(btc|ln|liquid|rgb-ln|rgb|spark|ark)(?::(mainnet|signet|mutinynet|testnet|regtest))?$/;
+const railBase = (rail: string) => NETWORK_BOUND.exec(rail)?.[1];
+/** A rail as seen from an account on `network`: network-bound rails get that network. */
+function onNetwork(rail: string, network: Network): string {
+  const base = railBase(rail);
+  return base ? `${base}:${network}` : rail;
 }
-export function isKaleidoPayCode(text: string): boolean {
-  const code = normalizePaymentCode(text);
-  return /^lno1/i.test(code) || /^bitcoin:/i.test(code) && /[?&]lno=/i.test(code);
+
+/** Capability planning only: no liquidity, quote, balance or invoice verification is implied. */
+export function planRoutes(request: PaymentRequest, sources: WalletSource[], swaps: SwapCapability[] = []): Plan {
+  const direct: Route[] = [], routed: Route[] = [];
+  for (const rail of request.acceptedRails) {
+    const railNetwork = NETWORK_BOUND.exec(rail)?.[2] as Network | undefined;
+    for (const source of sources) {
+      if (!request.networks.includes(source.network)) continue;
+      if (railNetwork && railNetwork !== source.network) continue;
+      const from = onNetwork(source.rail, source.network);
+      const to = onNetwork(rail, source.network);
+      if (from === to) direct.push({ kind: 'direct', sourceId: source.id, from, to });
+      else for (const swap of swaps) {
+        if (swap.network !== source.network) continue;
+        if (onNetwork(swap.from, swap.network) === from && onNetwork(swap.to, swap.network) === to) {
+          routed.push({ kind: 'swap', sourceId: source.id, from, to, providerId: swap.id });
+        }
+      }
+    }
+  }
+  const routes = [...direct, ...routed].filter((r, i, all) => all.findIndex(x => JSON.stringify(x) === JSON.stringify(r)) === i);
+  return routes.length ? { status: 'ready', requestId: request.id, route: routes[0], alternatives: routes.slice(1) }
+    : { status: 'unsupported', requestId: request.id, reason: 'None of your connected accounts can pay this request.' };
 }
-/** A valid (checksummed) mainnet/test-network bitcoin address, not regtest, with no other payment leg
- *  (e.g. a `lightning=` invoice): KaleidoPay can pay it through swap providers. */
-export function isSwappableAddress(text: string): boolean {
-  const code = normalizePaymentCode(text);
-  if (!/^bitcoin:/i.test(code)) return false;
-  const [body, query = ''] = code.slice(8).split('?');
-  if (!BARE_ADDRESS.test(body) || /^bcrt1/i.test(body)) return false;
-  const keys = query.split('&').filter(Boolean).map(p => p.split('=')[0].toLowerCase());
-  if (keys.some(k => !ADDRESS_PARAMS.has(k))) return false;
-  // Checksum check: a half-typed address must not navigate away from Send.
-  return (['mainnet', 'signet'] as Network[]).some(network => {
-    try { decodePaymentCode(code, network); return true; } catch { return false; }
-  });
-}
-/** The amount a BOLT12 offer fixes, in whole sats; undefined for an open-amount offer. */
-export function offerAmountSat(offer: string): number | undefined {
-  const fields = decodeOffer(offer);
-  if (fields.some(f => f.type === 6n)) throw new Error('This offer is priced in another currency, which KaleidoPay cannot pay.');
-  const encoded = fields.find(f => f.type === 8n)?.value;
-  if (!encoded) return undefined;
-  if (encoded.length === 0 || encoded.length > 8 || encoded[0] === 0) throw new Error('This offer has an invalid amount.');
-  const msat = encoded.reduce((n, b) => (n << 8n) | BigInt(b), 0n);
-  if (msat === 0n || msat % 1000n !== 0n || msat / 1000n > 2100000000000000n) throw new Error('This offer asks for an amount KaleidoPay cannot pay in whole sats.');
-  return Number(msat / 1000n);
-}
-const RAIL_LABELS: Record<string, string> = { bark: 'Bark', arkade: 'Arkade', ln: 'Lightning', btc: 'On-chain', liquid: 'Liquid', 'rgb-ln': 'RGB Lightning' };
+
+const RAIL_LABELS: Record<string, string> = {
+  bark: 'Bark', arkade: 'Arkade', ark: 'Ark', ln: 'Lightning', btc: 'On-chain', liquid: 'Liquid',
+  'rgb-ln': 'RGB Lightning', rgb: 'RGB', spark: 'Spark',
+};
 export function railLabel(rail: string): string {
   return RAIL_LABELS[rail.split(':')[0]] ?? rail;
 }
-/** The network a scanned code is for, when it says; never throws on a half-typed code. */
-export function codeNetwork(text: string): Network | undefined {
-  try { return paymentCodeNetwork(normalizePaymentCode(text)); } catch { return undefined; }
+
+export interface PreviewOptions {
+  /** Restrict to these networks (e.g. the network a merchant QR names). */
+  networks?: Network[];
+  /** For RGB invoices: the asset and amount, decoded by the RGB account. */
+  asset?: RequestAsset;
 }
-export function previewPayment(text: string, network: Network, amount: string, requestId: string): Preview {
-  const code = decodePaymentCode(normalizePaymentCode(text), network);
-  // A fixed-amount offer is paid exactly that amount, so it is what the review shows.
-  const offerSat = code.offer ? offerAmountSat(code.offer) : undefined;
-  if (offerSat !== undefined && code.amountSat !== undefined && offerSat !== code.amountSat) {
-    throw new Error('The payment code asks for two different amounts.');
+const ALL_NETWORKS: Network[] = ['mainnet', ...TEST_NETWORKS, 'regtest'];
+
+/** Builds the request for a decoded target. `amountSat` is used when the target fixes none. */
+export function previewTarget(target: PayTarget, amountSat: number | undefined, requestId: string, opts: PreviewOptions = {}): Preview {
+  if (target.kind === 'lnurl') throw new Error('Enter an amount to pay this Lightning address.');
+  if (!requestId || requestId.length > 128) throw new Error('Invalid request.');
+  const asset = target.kind === 'rgb' ? opts.asset : undefined;
+  if (target.kind === 'rgb' && (!asset || !Number.isSafeInteger(asset.amount) || asset.amount <= 0)) {
+    throw new Error('Enter the asset amount to send.');
   }
-  const fixedSat = code.amountSat ?? offerSat;
-  if (fixedSat === undefined && !/^[1-9]\d*$/.test(amount)) throw new Error('Enter a whole number of sats.');
-  const amountSat = fixedSat ?? Number(amount);
-  // The offer's rails are the receiver's order; an Ark rail is payable only with its address.
-  const listed = code.offer ? offerRails(code.offer).filter(r => r.address || !/^(arkade|bark):/.test(r.rail)) : [];
-  const rails = [...listed.map(r => r.rail), ...(code.address ? [`btc:${network}`] : [])];
-  const addresses = Object.fromEntries(listed.flatMap(r => r.address ? [[r.rail, r.address]] : []));
-  const request: PaymentRequest = { id: requestId, network, amountSat, acceptedRails: [...new Set(rails)] };
-  const available = [...accounts.values()].filter(a => a.source.network === network);
-  const plan = planPayment(request, available.map(a => a.source), available.flatMap(a => a.swaps));
-  return { code, request, plan, addresses };
+  const fixed = target.amountSat;
+  const amount = asset ? 0 : fixed ?? amountSat;
+  if (!asset && (amount === undefined || !Number.isSafeInteger(amount) || amount <= 0 || amount > 2100000000000000)) {
+    throw new Error('Enter a whole number of sats.');
+  }
+  // The receiver's order: an offer's listed rails first, then what the code itself carries.
+  const listed = targetOfferRails(target);
+  const rails = [
+    ...listed.map(r => r.rail),
+    ...(target.invoice ? ['ln'] : []),
+    ...(target.address ? ['btc'] : []),
+    ...(target.sparkAddress ? ['spark'] : []),
+    ...(target.arkAddress ? ['ark'] : []),
+    ...(target.liquidAddress ? ['liquid'] : []),
+    ...(target.rgbInvoice ? ['rgb'] : []),
+  ];
+  const addresses: Record<string, string> = Object.fromEntries(listed.flatMap(r => r.address ? [[r.rail, r.address]] : []));
+  if (target.arkAddress) addresses.ark = target.arkAddress;
+  const networks = (opts.networks ?? target.networks ?? ALL_NETWORKS).filter(n => !target.networks || target.networks.includes(n));
+  if (!networks.length) throw new Error('This request is for a different network.');
+  const request: PaymentRequest = {
+    id: requestId, network: networks[0], networks, amountSat: amount!,
+    acceptedRails: [...new Set(rails)], ...(asset ? { asset } : {}),
+  };
+  if (!request.acceptedRails.length) throw new Error('This request has nothing to pay.');
+  const available = [...accounts.values()];
+  const plan = planRoutes(request, available.map(a => a.source), available.flatMap(a => a.swaps));
+  return { code: target, request, plan, addresses };
+}
+
+/**
+ * Decodes whatever the user entered and builds its request. A Lightning address or LNURL
+ * is resolved to an invoice for `amountSat`, which must then ask for exactly that amount.
+ */
+export async function previewInput(text: string, amountSat: number | undefined, requestId: string, opts: PreviewOptions = {}): Promise<Preview> {
+  let target = decodeTarget(text);
+  if (target.kind === 'lnurl') {
+    if (amountSat === undefined || !Number.isSafeInteger(amountSat) || amountSat <= 0) throw new Error('Enter an amount to pay this Lightning address.');
+    const invoice = await resolveLightningAddressToInvoice(target.lnurl!, amountSat);
+    const decoded = decodeBolt11(invoice);
+    if (decoded.amountSats !== amountSat) throw new Error('The Lightning address returned an invoice for a different amount.');
+    target = { ...decodeTarget(invoice), raw: target.raw, lnurl: target.lnurl };
+  }
+  return previewTarget(target, amountSat, requestId, opts);
+}
+
+/** Networks a code says it is for (undefined when it doesn't say); never throws on a half-typed code. */
+export function codeNetworks(text: string): Network[] | undefined {
+  try { return decodeTarget(text).networks; } catch { return undefined; }
+}
+/** The single network a code is for, when it names exactly one. */
+export function codeNetwork(text: string): Network | undefined {
+  const networks = codeNetworks(text);
+  return networks?.length === 1 ? networks[0] : undefined;
+}
+/** Anything Send can pay (used to decide when typed text is complete enough to review). */
+export function isPayable(text: string): boolean {
+  try { decodeTarget(text); return true; } catch { return false; }
+}
+
+// Kept for callers that still route only universal codes here.
+export function isKaleidoPayCode(text: string): boolean {
+  const code = text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
+  return /^lno1/i.test(code) || /^bitcoin:/i.test(code) && /[?&]lno=/i.test(code);
+}
+/** A valid (checksummed) non-regtest bitcoin address, or a BIP21 with only amount/label/message. */
+export function isSwappableAddress(text: string): boolean {
+  const code = text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
+  const query = /^bitcoin:/i.test(code) ? code.split('?')[1] ?? '' : '';
+  if (query.split('&').filter(Boolean).some(p => !['amount', 'label', 'message'].includes(p.split('=')[0].toLowerCase()))) return false;
+  try {
+    const t = decodeTarget(code);
+    const networks = t.kind === 'bitcoin' && t.address ? bitcoinAddressNetworks(t.address) : null;
+    return !!networks && !networks.includes('regtest');
+  } catch { return false; }
+}
+
+/** Legacy entry point: decode a universal code for one known network. */
+export function previewPayment(text: string, network: Network, amount: string, requestId: string): Preview {
+  const target = decodeTarget(text);
+  if (target.amountSat === undefined && !/^[1-9]\d*$/.test(amount)) throw new Error('Enter a whole number of sats.');
+  // The caller names the network explicitly (as before), so it overrides what the code implies.
+  return previewTarget({ ...target, networks: undefined }, target.amountSat ?? Number(amount), requestId, { networks: [network] });
 }
 export function quoteSpend(quote: Quote): SpendQuote {
   return quote.spend ?? { asset: { id: 'BTC', ticker: 'sats', precision: 0 }, amount: quote.recipientSat, fee: quote.feeSat!, total: quote.totalSat! };
@@ -128,14 +234,19 @@ export function formatSpend(value: number, asset: SpendAsset): string {
 }
 function getAccount(preview: Preview, route: Route) {
   const account = accounts.get(route.sourceId);
-  if (!account || account.source.network !== preview.request.network) throw new Error('Account disconnected. Review the request again.');
-  const plan = planPayment(preview.request, [account.source], account.swaps);
+  if (!account || !preview.request.networks.includes(account.source.network)) throw new Error('Account disconnected. Review the request again.');
+  const plan = planRoutes(preview.request, [account.source], account.swaps);
   if (plan.status !== 'ready' || ![plan.route, ...plan.alternatives].some(r => JSON.stringify(r) === JSON.stringify(route))) throw new Error('Account capabilities changed. Review the request again.');
   return account;
 }
 function validateQuote(quote: Quote, preview: Preview, account: PayAccount) {
   const spend = quoteSpend(quote);
   const asset = account.spendAsset ?? { id: 'BTC', ticker: 'sats', precision: 0 };
+  const requested = preview.request.asset;
+  // An RGB payment is checked in the asset's base units; a bitcoin payment in sats.
+  if (requested && (!quote.spend || spend.asset.id !== requested.id || spend.amount !== requested.amount)) {
+    throw new Error('The payment quote is for a different asset or amount.');
+  }
   if (![quote.recipientSat, quote.expiresAt, spend.amount, spend.fee, spend.total].every(Number.isSafeInteger)
     || quote.recipientSat !== preview.request.amountSat || spend.amount <= 0 || spend.fee < 0
     || spend.total !== spend.amount + spend.fee || !Number.isSafeInteger(spend.amount + spend.fee)
@@ -255,7 +366,7 @@ export async function executePayment(preview: Preview, quote: Quote, onUpdate?: 
   if (quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('The quote expired. Review the payment again.');
   const route = preview.plan.route;
   const account = accounts.get(route.sourceId);
-  if (!account || account.source.network !== preview.request.network) throw new Error('Account disconnected. Review the request again.');
+  if (!account || !preview.request.networks.includes(account.source.network)) throw new Error('Account disconnected. Review the request again.');
   if (!account.pay) throw new Error('This account can quote but not pay yet.');
   return account.pay(preview, route, quote, onUpdate);
 }

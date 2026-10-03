@@ -44,7 +44,7 @@ test('the offer sets the receiver order; Ark rails without an address are skippe
   const arkade = 'arkade:' + 'a'.repeat(64), bark = 'bark:' + 'b'.repeat(64);
   const offer = withAcceptedRails(base, [bark, { rail: arkade, address: 'ark1shop' }, 'ln']);
   const p = previewPayment(`bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.00001&lno=${offer}`, 'mainnet', '', 'order');
-  expect(p.request.acceptedRails).toEqual([arkade, 'ln', 'btc:mainnet']);
+  expect(p.request.acceptedRails).toEqual([arkade, 'ln', 'btc']);
   expect(p.addresses).toEqual({ [arkade]: 'ark1shop' });
   expect(p.request.acceptedRails.map(railLabel)).toEqual(['Arkade', 'Lightning', 'On-chain']);
   expect(codeNetwork(`lightning:${offer}`)).toBe('mainnet');
@@ -61,7 +61,7 @@ test('plain mainnet and signet addresses can go to KaleidoPay; regtest and offer
 test('a bare address is previewed as a bitcoin: URI on its own network', () => {
   const p = previewPayment('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'mainnet', '1500', 'bare');
   expect(p.code.address).toBe('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq');
-  expect(p.request).toMatchObject({ amountSat: 1500, acceptedRails: ['btc:mainnet'] });
+  expect(p.request).toMatchObject({ amountSat: 1500, acceptedRails: ['btc'] });
   expect(codeNetwork('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq')).toBe('mainnet');
 });
 
