@@ -7,7 +7,6 @@ import { protocolManager, initializeProtocols } from './protocols';
 
 export enum WalletType {
     SPARK = 'spark',
-    LIQUID = 'liquid',
     ARKADE = 'arkade',
 }
 
@@ -41,7 +40,6 @@ export class WalletManager {
         const protocolMap: Record<string, string> = {
             spark: 'SPARK',
             arkade: 'ARKADE',
-            liquid: 'RGB', // No liquid adapter, fallback to RGB
         };
         try {
             return protocolManager.getAdapter(protocolMap[type] as any);

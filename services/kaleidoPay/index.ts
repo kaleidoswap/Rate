@@ -81,12 +81,12 @@ export function registerKaleidoPayAccount(account: PayAccount): () => void {
 }
 
 // ---------------------------------------------------------------------------
-// Planning. A rail is either network-bound (`btc`, `ln`, `liquid`, `spark`, `rgb`,
+// Planning. A rail is either network-bound (`btc`, `ln`, `spark`, `rgb`,
 // `ark`, optionally suffixed with a network) or keyed to one server (`bark:<key>`,
 // `arkade:<key>`). Accounts and swaps name their own network; a request lists the
 // networks it may be on, so a test-network code reaches accounts on any test chain.
 // ---------------------------------------------------------------------------
-const NETWORK_BOUND = /^(btc|ln|liquid|rgb-ln|rgb|spark|ark)(?::(mainnet|signet|mutinynet|testnet|regtest))?$/;
+const NETWORK_BOUND = /^(btc|ln|rgb-ln|rgb|spark|ark)(?::(mainnet|signet|mutinynet|testnet|regtest))?$/;
 const railBase = (rail: string) => NETWORK_BOUND.exec(rail)?.[1];
 /** A rail as seen from an account on `network`: network-bound rails get that network. */
 function onNetwork(rail: string, network: Network): string {
@@ -119,7 +119,7 @@ export function planRoutes(request: PaymentRequest, sources: WalletSource[], swa
 }
 
 const RAIL_LABELS: Record<string, string> = {
-  bark: 'Bark', arkade: 'Arkade', ark: 'Ark', ln: 'Lightning', btc: 'On-chain', liquid: 'Liquid',
+  bark: 'Bark', arkade: 'Arkade', ark: 'Ark', ln: 'Lightning', btc: 'On-chain',
   'rgb-ln': 'RGB Lightning', rgb: 'RGB', spark: 'Spark',
 };
 export function railLabel(rail: string): string {
@@ -155,7 +155,6 @@ export function previewTarget(target: PayTarget, amountSat: number | undefined, 
     ...(target.address ? ['btc'] : []),
     ...(target.sparkAddress ? ['spark'] : []),
     ...(target.arkAddress ? ['ark'] : []),
-    ...(target.liquidAddress ? ['liquid'] : []),
     ...(target.rgbInvoice ? ['rgb'] : []),
   ];
   const addresses: Record<string, string> = Object.fromEntries(listed.flatMap(r => r.address ? [[r.rail, r.address]] : []));

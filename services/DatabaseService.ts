@@ -4,7 +4,7 @@ import * as SecureStore from 'expo-secure-store';
 import CryptoJS from 'crypto-js';
 import { SecurityService } from './SecurityService';
 
-export type NetworkType = 'spark' | 'arkade' | 'rln' | 'liquid';
+export type NetworkType = 'spark' | 'arkade' | 'rln';
 export type RlnNodeType = 'local' | 'remote';
 
 export interface NetworkConfig {
@@ -118,7 +118,8 @@ export class DatabaseService {
         encrypted_mnemonic TEXT
       )`,
 
-      // Wallet Networks table
+      // Wallet Networks table. 'liquid' stays in the CHECK so existing databases keep the
+      // same schema; Liquid was removed from the app and its rows are ignored on read.
       `CREATE TABLE IF NOT EXISTS wallet_networks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         wallet_id INTEGER NOT NULL,
@@ -334,7 +335,7 @@ export class DatabaseService {
     if (!this.db) throw new Error('Database not initialized');
 
     const results = await this.db.getAllAsync<NetworkConfig>(
-      'SELECT * FROM wallet_networks WHERE wallet_id = ?',
+      "SELECT * FROM wallet_networks WHERE wallet_id = ? AND type != 'liquid'",
       [walletId]
     );
 

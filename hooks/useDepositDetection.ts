@@ -16,7 +16,7 @@ import {
 import { decode } from 'light-bolt11-decoder';
 import { syncBarkForUpdates } from '../services/BarkService';
 
-export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
+export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark';
 export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
 
 export interface DepositDetectionEvent {

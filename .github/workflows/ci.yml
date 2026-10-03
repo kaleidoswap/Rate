@@ -45,7 +45,7 @@ jobs:
 
       # --frozen-lockfile fails the run if pnpm-lock.yaml drifts from
       # package.json (the release workflow installs the same way).
-      # --ignore-scripts skips postinstall, which downloads native LWK/QVAC
+      # --ignore-scripts skips postinstall, which downloads native Bark/QVAC
       # artifacts that type-checking and Jest don't need.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts

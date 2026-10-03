@@ -20,11 +20,9 @@ import { ProtocolManager, networkTypeToProtocol } from '@kaleidorg/wallet-engine
 // legacy client managers behind /adapters/native (protocol SDKs are now optional peers).
 import {
   registerWdkModule,
-  LiquidWdkAdapter,
   RlnWdkAdapter,
   ArkadeWdkAdapter,
   type SparkAdapterConfig,
-  type LiquidAdapterConfig,
   type RlnAdapterConfig,
   type ArkadeAdapterConfig,
 } from '@kaleidorg/wallet-engine/adapters/wdk'
@@ -57,10 +55,6 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
 /**
  * Mobile rollout gates.
  * - Spark + RLN + the (pure-JS) swap module: no WASM, SDKs the app already ships — always on.
- * - Liquid: ON by default. Uses the native `lwk-rn` binding (UniFFI→JSI, no WASM) via the
- *   `react-native` condition of @kaleidorg/wdk-wallet-liquid's `#lwk` map. The adapter loads
- *   lazily (only when a Liquid network connects), and `lwk-rn` needs a native build
- *   (expo prebuild / pod-install). Disable with EXPO_PUBLIC_WDK_LIQUID=0.
  * - Arkade: ON by default. Uses @arkade-os/wdk over @arkade-os/sdk (RN-compatible; the
  *   manager defaults to in-memory VTXO repositories — no IndexedDB). Persistent VTXO
  *   state needs SQLite repos injected via arkadeConfig.storage (follow-up). Lightning
@@ -69,7 +63,6 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
  *   SDK (needs a dev build). Not a wallet NetworkType yet, so it connects from
  *   the saved wallet preference with ./bark.ts defaults. Disable with EXPO_PUBLIC_BARK=0.
  */
-const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID !== '0'
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
 // On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
 // drives a remote node via an NWC connection string instead of a direct HTTP
@@ -88,9 +81,6 @@ function registerWdkModuleLoaders(): void {
   registerWdkModule('@kaleidorg/wdk-protocol-swap-kaleidoswap', () =>
     require('@kaleidorg/wdk-protocol-swap-kaleidoswap'),
   )
-  if (LIQUID_ENABLED) {
-    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => require('@kaleidorg/wdk-wallet-liquid'))
-  }
   if (ARKADE_ENABLED) {
     registerWdkModule('@arkade-os/wdk', () => require('@arkade-os/wdk'))
   }
@@ -111,8 +101,8 @@ export function getWdkProtocolManager(): ProtocolManager {
     } else {
       _wdkManager.registerAdapter(new RlnWdkAdapter())
     }
-    // Liquid / Arkade: opt-in (see flags above) so the default build stays WASM-free.
-    if (LIQUID_ENABLED) _wdkManager.registerAdapter(new LiquidWdkAdapter())
+    // Liquid is not part of the app: its native library alone was ~175 MB of the APK.
+    // Wallets saved with a Liquid network skip it (no LIQUID case below).
     if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())
     if (BARK_ENABLED) _wdkManager.registerAdapter(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
   }
@@ -154,15 +144,6 @@ export async function initializeWdkProtocols(
             mnemonic,
             network: resolveSparkNetwork(parsed.network),
           } as SparkAdapterConfig
-          break
-
-        case 'LIQUID':
-          config = {
-            protocol: 'LIQUID',
-            mnemonic,
-            network: parsed.network || 'mainnet',
-            esploraUrl: parsed.esploraUrl,
-          } as LiquidAdapterConfig
           break
 
         case 'ARKADE': {

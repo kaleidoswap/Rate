@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Keep Bark's UniFFI 0.31 JSI bridge private to Bark. Liquid's lwk-rn bridge was
- * generated with 0.28, whose string/buffer API is different. A Pod version
+ * Keep Bark's UniFFI 0.31 JSI bridge private to Bark, so another UniFFI-based
+ * native module (Liquid's lwk-rn used 0.28) can't clash with it. A Pod version
  * override alone either fails compilation or mixes weak C++ bridge symbols.
  *
  * Both runtimes are header-only. Copy Bark's exact headers under unique names,
@@ -68,7 +68,7 @@ function patchBarkRuntime(root = ROOT) {
 if (require.main === module) {
   const bark = patchBarkRuntime();
   if (bark) {
-    console.log('[prepare-bark-native] Isolated Bark UniFFI 0.31; Liquid keeps UniFFI 0.28.');
+    console.log('[prepare-bark-native] Isolated Bark UniFFI 0.31.');
     const iosMissing = process.platform === 'darwin' && !fs.existsSync(path.join(bark, 'build/RnBark.xcframework'));
     const androidMissing = !fs.existsSync(path.join(bark, 'android/src/main/jniLibs'));
     if (!process.argv.includes('--patch-only') && (iosMissing || androidMissing)) {

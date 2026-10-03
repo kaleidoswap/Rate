@@ -22,7 +22,6 @@ export const PROTOCOL_DEFAULT_NETWORK: Record<NetworkType, ProtocolNetwork> = {
   spark: 'regtest',
   arkade: 'signet',
   rln: 'regtest',
-  liquid: 'testnet',
 };
 
 export const NETWORK_LABEL: Record<ProtocolNetwork, string> = {

@@ -16,7 +16,7 @@
 import type { ProtocolType } from '@kaleidorg/wallet-engine'
 
 /** The app's account-family identifiers (kept stable across the beta.55 rename). */
-export type AppProtocol = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | 'LIQUID' | 'BTC'
+export type AppProtocol = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | 'BTC'
 
 /** App family → engine ProtocolType. `'RGB'` becomes the RGB-over-LN protocol. */
 export function toEngineProtocol(p: AppProtocol): ProtocolType {

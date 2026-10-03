@@ -7,7 +7,7 @@ import type { AccountQuoteOption, Network, PayAccount, PaymentResult, Preview, Q
 import { PaymentNotSentError } from './errors';
 
 // ---------------------------------------------------------------------------
-// Shared by sparkPay / rgbPay / liquidPay: a direct (same-rail) account that quotes
+// Shared by sparkPay / rgbPay: a direct (same-rail) account that quotes
 // from the wallet's own fee estimate and balance, pays only an approved quote, and
 // keeps the outcome per attempt so it can be followed after the screen closes.
 // ---------------------------------------------------------------------------

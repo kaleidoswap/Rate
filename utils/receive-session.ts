@@ -1,7 +1,7 @@
-export type ReceiveProtocol = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK' | 'LIQUID';
+export type ReceiveProtocol = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK';
 export type ReceiveMethodKind = 'address' | 'invoice';
 export type ReceiveMonitorKind = 'balance' | 'invoice' | 'spark-claim' | 'none';
-export type ReceiveLayer = 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
+export type ReceiveLayer = 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark';
 
 export interface ReceiveMethod {
   key: string;

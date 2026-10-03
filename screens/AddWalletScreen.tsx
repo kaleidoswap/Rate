@@ -23,7 +23,6 @@ export default function AddWalletScreen({ navigation }: Props) {
     // Network selection state
     const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
         spark: true,
-        liquid: false,
         arkade: false,
         rln: false,
     });
@@ -64,9 +63,6 @@ export default function AddWalletScreen({ navigation }: Props) {
 
             if (networks.spark) {
                 selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
-            }
-            if (networks.liquid) {
-                selectedNetworks.push({ type: 'liquid', enabled: true, config: buildDefaultNetworkConfig('liquid') });
             }
             if (networks.arkade) {
                 selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
@@ -156,14 +152,6 @@ export default function AddWalletScreen({ navigation }: Props) {
                             <Switch
                                 value={networks.spark}
                                 onValueChange={(v) => setNetworks(prev => ({ ...prev, spark: v }))}
-                            />
-                        </View>
-
-                        <View style={styles.networkItem}>
-                            <Text style={styles.networkLabel}>Liquid</Text>
-                            <Switch
-                                value={networks.liquid}
-                                onValueChange={(v) => setNetworks(prev => ({ ...prev, liquid: v }))}
                             />
                         </View>
 

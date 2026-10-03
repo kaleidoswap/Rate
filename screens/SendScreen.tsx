@@ -1,7 +1,7 @@
 // screens/SendScreen.tsx
 //
 // The one way to pay. Whatever is entered (Lightning invoice or address, BOLT12
-// offer, bitcoin address, Spark, Ark, Liquid or RGB invoice) is decoded into a
+// offer, bitcoin address, Spark, Ark or RGB invoice) is decoded into a
 // payment request; every connected account then offers its ways to pay it, directly
 // or through a swap provider, priced the same way. The user reviews the total and
 // pays; the payment journal keeps an unresolved payment from being paid twice.
@@ -27,7 +27,7 @@ import {
   bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError,
 } from '../services/kaleidoPay';
 import type { PayTarget, Preview, PaymentOffer, RequestAsset } from '../services/kaleidoPay';
-import { usePayAccounts, prepareRgbRequest, unavailableOffers } from '../services/kaleidoPay/connect';
+import { usePayAccounts, prepareRgbRequest } from '../services/kaleidoPay/connect';
 import type { RgbRequestAsset } from '../services/kaleidoPay/connect';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
 import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
@@ -36,7 +36,7 @@ interface Props { navigation: any; route: any }
 
 const KIND_LABEL: Record<PayTarget['kind'], string> = {
   bolt11: 'Lightning invoice', lnurl: 'Lightning address', offer: 'Lightning offer', bitcoin: 'Bitcoin address',
-  spark: 'Spark address', ark: 'Ark address', liquid: 'Liquid address', rgb: 'RGB invoice',
+  spark: 'Spark address', ark: 'Ark address', rgb: 'RGB invoice',
 };
 const NETWORK_LABEL: Record<string, string> = { mainnet: '', signet: 'Signet', mutinynet: 'Mutinynet', testnet: 'Testnet', regtest: 'Regtest' };
 
@@ -138,10 +138,10 @@ export default function SendScreen({ navigation, route }: Props) {
       }
       const fresh = await previewInput(input, fixedSat ?? amountSat, requestId.current, { asset });
       if (current !== revision.current) return;
-      if (fresh.plan.status !== 'ready') { setPreview(fresh); setOffers(unavailableOffers(fresh)); setError(fresh.plan.reason); return; }
+      if (fresh.plan.status !== 'ready') { setPreview(fresh); setOffers([]); setError(fresh.plan.reason); return; }
       const result = await quotePaymentOffers(fresh);
       if (current !== revision.current) return;
-      setPreview(fresh); setOffers([...result, ...unavailableOffers(fresh)]);
+      setPreview(fresh); setOffers(result);
       if (!refresh) setSelectedId((bestOffer(result.filter(o => o.executable)) ?? result.find(o => o.executable && o.quote && !o.unavailable) ?? bestOffer(result))?.id);
       // Refresh never switches the chosen way to pay, even when its quote fails.
       setReviewUpdated(refresh);

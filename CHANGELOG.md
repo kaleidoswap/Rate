@@ -10,6 +10,13 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Removed
+- **Liquid.** The Liquid wallet layer is gone: wallet setup, Receive (including
+  Liquid USDt in the USD request) and Send no longer offer it, and pasting a
+  Liquid address says it isn't supported. Its native library (`lwk-rn`) was the
+  largest single part of the Android APK. Wallets that had Liquid enabled keep
+  working; the Liquid setting is ignored.
+
 ## [0.3.0] — 2026-10-03
 
 KaleidoPay and universal BOLT12 payments, Second's Bark as a regular wallet

@@ -99,7 +99,6 @@ interface Colors {
     lightning: string;
     spark: string;
     arkade: string;
-    liquid: string;
     rgb: string;
     unified: string;
   };
@@ -111,7 +110,6 @@ interface Colors {
     arkade: string;
     spark: string;
     lightning: string;
-    liquid: string;
   };
   networkText: {
     bitcoin: string;
@@ -119,7 +117,6 @@ interface Colors {
     arkade: string;
     spark: string;
     lightning: string;
-    liquid: string;
   };
   // Transaction-direction colors (shared with web) — used by the activity feed.
   tx: {
@@ -436,7 +433,6 @@ export const lightTheme: ThemeType = {
       lightning: k.network.lightning, // #F6C343
       spark: k.network.spark,         // #FF6D00
       arkade: k.network.arkade,       // #7C3AED
-      liquid: k.network.liquid,       // #22e1c9
       rgb: k.network.rgb,             // #DD352E
       unified: k.primary,             // #2BEE79 — all-networks brand green
     },

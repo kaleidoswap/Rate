@@ -46,7 +46,6 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   // Network selection state
   const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
     spark: true,
-    liquid: false,
     arkade: false,
     rln: false,
   });
@@ -157,9 +156,6 @@ export default function WalletRestoreScreen({ navigation }: Props) {
 
       if (networks.spark) {
         selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
-      }
-      if (networks.liquid) {
-        selectedNetworks.push({ type: 'liquid', enabled: true, config: buildDefaultNetworkConfig('liquid') });
       }
       if (networks.arkade) {
         selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });

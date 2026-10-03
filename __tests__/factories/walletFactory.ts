@@ -3,7 +3,7 @@
 export interface TestWallet {
   id: number;
   name: string;
-  type: 'spark' | 'liquid' | 'arkade';
+  type: 'spark' | 'arkade';
   balance: number;
   network: string;
   created_at: number;
@@ -34,14 +34,6 @@ export const createSparkWallet = (overrides: Partial<TestWallet> = {}): TestWall
   return createTestWallet({
     type: 'spark',
     name: 'Spark Wallet',
-    ...overrides,
-  });
-};
-
-export const createLiquidWallet = (overrides: Partial<TestWallet> = {}): TestWallet => {
-  return createTestWallet({
-    type: 'liquid',
-    name: 'Liquid Wallet',
     ...overrides,
   });
 };

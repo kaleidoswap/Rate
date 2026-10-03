@@ -18,7 +18,7 @@ jest.mock('../components/NostrContactsSelector', () => () => null);
 jest.mock('../components/Button', () => ({ Button: ({ title, onPress, disabled }: any) => {
   const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity disabled={disabled} onPress={onPress}><Text>{title}</Text></TouchableOpacity>;
 } }));
-jest.mock('../services/kaleidoPay/connect', () => ({ usePayAccounts: () => {}, prepareRgbRequest: jest.fn(), unavailableOffers: () => [] }));
+jest.mock('../services/kaleidoPay/connect', () => ({ usePayAccounts: () => {}, prepareRgbRequest: jest.fn() }));
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
 jest.mock('../services/kaleidoPay', () => ({
   PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,

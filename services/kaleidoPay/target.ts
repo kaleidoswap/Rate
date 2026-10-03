@@ -8,7 +8,7 @@ import { invoiceExpiry } from '../../components/payments/InvoiceExpiry';
  * What the user pasted or scanned, decoded into one payment target. Every kind of
  * request the wallet can pay is a target, so Send has one flow for all of them.
  */
-export type TargetKind = 'bolt11' | 'lnurl' | 'offer' | 'bitcoin' | 'spark' | 'ark' | 'liquid' | 'rgb';
+export type TargetKind = 'bolt11' | 'lnurl' | 'offer' | 'bitcoin' | 'spark' | 'ark' | 'rgb';
 
 /** Chains a code can be for. A test-network code can't tell signet, mutinynet and testnet apart. */
 export type ChainNetwork = 'mainnet' | 'signet' | 'mutinynet' | 'testnet' | 'regtest';
@@ -33,7 +33,6 @@ export interface PayTarget {
   offer?: string;
   sparkAddress?: string;
   arkAddress?: string;
-  liquidAddress?: string;
   rgbInvoice?: string;
   label?: string;
   message?: string;
@@ -69,11 +68,9 @@ function sparkNetworks(address: string): ChainNetwork[] {
   return TEST_NETWORKS;
 }
 
-function liquidNetworks(address: string): ChainNetwork[] | null {
-  if (/^(lq1|ex1)[a-z0-9]{20,}$/i.test(address) || /^[VGHQ][1-9A-HJ-NP-Za-km-z]{30,}$/.test(address)) return ['mainnet'];
-  if (/^(tlq1|tex1)[a-z0-9]{20,}$/i.test(address)) return TEST_NETWORKS;
-  if (/^(el1|ert1)[a-z0-9]{20,}$/i.test(address)) return ['regtest'];
-  return null;
+/** Liquid addresses, recognized only to say plainly that this wallet doesn't pay them. */
+function isLiquidAddress(address: string): boolean {
+  return /^(lq1|ex1|tlq1|tex1|el1|ert1)[a-z0-9]{20,}$/i.test(address) || /^[VGHQ][1-9A-HJ-NP-Za-km-z]{30,}$/.test(address);
 }
 
 const SPARK = /^(spark(t|rt|s|l)?|sp(t|rt|s|l)?)1[a-z0-9]{20,}$/i;
@@ -171,7 +168,7 @@ export function offerAmountSat(offer: string): number | undefined {
 
 /**
  * Decode anything the user can pay: BOLT11, Lightning address / LNURL, BOLT12, bitcoin
- * address or BIP21 (with lightning=/lno=/spark=/ark=), Spark, Ark, Liquid or RGB invoice.
+ * address or BIP21 (with lightning=/lno=/spark=/ark=), Spark, Ark or RGB invoice.
  * Throws a readable error for anything else.
  */
 export function decodeTarget(text: string): PayTarget {
@@ -201,8 +198,7 @@ export function decodeTarget(text: string): PayTarget {
   if (lower.startsWith('rgb:') || lower.startsWith('rgb1')) return { kind: 'rgb', raw, rgbInvoice: code };
   if (ARK.test(code)) return { kind: 'ark', raw, arkAddress: code, networks: lower.startsWith('tark') ? [...TEST_NETWORKS, 'regtest'] : ['mainnet'] };
   if (SPARK.test(code)) return { kind: 'spark', raw, sparkAddress: code, networks: sparkNetworks(code) };
-  const liquid = liquidNetworks(code);
-  if (liquid) return { kind: 'liquid', raw, liquidAddress: code, networks: liquid };
+  if (isLiquidAddress(code)) throw new Error("Liquid addresses aren't supported by this wallet.");
   const btc = bitcoinAddressNetworks(code);
   if (btc) return { kind: 'bitcoin', raw, address: code, networks: btc };
   throw new Error("This isn't something this wallet can pay.");

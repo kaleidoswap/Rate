@@ -65,7 +65,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
   // Network selection state — enable all protocols by default (matching extension)
   const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
     spark: true,
-    liquid: false,
     arkade: true,
     rln: true,
   });
@@ -134,10 +133,10 @@ export default function WalletSetupScreen({ navigation }: Props) {
       }
       dispatch(setDisclosureLevel('lite'));
       setMode('lite');
-      setNetworks({ spark: true, arkade: true, liquid: false, rln: rlnConnected });
+      setNetworks({ spark: true, arkade: true, rln: rlnConnected });
       handleCreate();
     } else if (step === 'networks') {
-      if (!networks.spark && !networks.arkade && !networks.liquid && !rlnConnected) {
+      if (!networks.spark && !networks.arkade && !rlnConnected) {
         Alert.alert('Choose a network', 'Enable at least one network to receive and send payments.');
         return;
       }
@@ -280,9 +279,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
 
       if (networks.spark) {
         selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
-      }
-      if (networks.liquid) {
-        selectedNetworks.push({ type: 'liquid', enabled: true, config: buildDefaultNetworkConfig('liquid') });
       }
       if (networks.arkade) {
         selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
@@ -458,30 +454,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
             onValueChange={(v) => setNetworks(prev => ({ ...prev, spark: v }))}
             trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
             thumbColor={networks.spark ? theme.colors.primary[500] : theme.colors.gray[100]}
-          />
-        </TouchableOpacity>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={styles.networkItem}
-          onPress={() => setNetworks(prev => ({ ...prev, liquid: !prev.liquid }))}
-          activeOpacity={0.7}
-        >
-          <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: theme.colors.networkChip.liquid }]}>
-              <Ionicons name="water" size={22} color={theme.colors.networks.liquid} />
-            </View>
-            <View style={styles.networkTextContainer}>
-              <Text style={styles.networkName}>Liquid</Text>
-              <Text style={styles.networkDesc}>Sidechain for faster settlements</Text>
-            </View>
-          </View>
-          <Switch
-            value={networks.liquid}
-            onValueChange={(v) => setNetworks(prev => ({ ...prev, liquid: v }))}
-            trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
-            thumbColor={networks.liquid ? theme.colors.primary[500] : theme.colors.gray[100]}
           />
         </TouchableOpacity>
 

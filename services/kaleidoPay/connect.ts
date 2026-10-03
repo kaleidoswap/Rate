@@ -7,16 +7,15 @@ import { useEffect } from 'react';
 import { protocolManager } from '../protocols';
 import { MobileSparkAdapter } from '../protocols/MobileSparkAdapter';
 import { registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
-import type { Network, PaymentOffer, Preview, RequestAsset } from './index';
+import type { Network, RequestAsset } from './index';
 import { connectSparkPayAccounts } from './sparkPay';
 import { connectRgbPayAccounts, rgbRequestAsset, registerRgbAssetPayment } from './rgbPay';
-import { connectLiquidPayAccounts, liquidLightningOption } from './liquidPay';
 import { connectArkadePayAccounts } from './arkadePay';
 import { getPayOptions } from './payOptions';
 export { setPayOptions } from './payOptions';
 
-type PayProtocol = 'SPARK' | 'RGB_LN' | 'LIQUID' | 'ARKADE';
-const PAY_PROTOCOLS: PayProtocol[] = ['SPARK', 'RGB_LN', 'LIQUID', 'ARKADE'];
+type PayProtocol = 'SPARK' | 'RGB_LN' | 'ARKADE';
+const PAY_PROTOCOLS: PayProtocol[] = ['SPARK', 'RGB_LN', 'ARKADE'];
 const registered = new Map<PayProtocol, { adapter: unknown; network: Network; off: () => void }>();
 
 /** The KaleidoSwap maker: configured with the RGB node, else an override, else the live signet maker on test chains. */
@@ -41,7 +40,6 @@ export function adapterChain(protocol: PayProtocol, adapter: any): Network | und
 function register(protocol: PayProtocol, adapter: any, network: Network): () => void {
   if (protocol === 'SPARK') return connectSparkPayAccounts(adapter, network);
   if (protocol === 'RGB_LN') return connectRgbPayAccounts(adapter, network);
-  if (protocol === 'LIQUID') return connectLiquidPayAccounts(adapter, network);
   return connectArkadePayAccounts(adapter, network, {
     makerUrl: kaleidoswapMakerUrl(network, getPayOptions().makerUrl),
     arkServerUrl: getPayOptions().arkServerUrl,
@@ -100,15 +98,4 @@ export async function prepareRgbRequest(invoice: string, amount?: number): Promi
   rgbAssetRegistration?.();
   rgbAssetRegistration = registerRgbAssetPayment({ id: asset.id, ticker: asset.ticker, precision: asset.precision });
   return asset.amount > 0 ? asset : { id: asset.id, ticker: asset.ticker, precision: asset.precision };
-}
-
-/** Ways to pay that exist but can't be used yet, shown so the user sees why (e.g. Liquid → Lightning). */
-export function unavailableOffers(preview: Preview): PaymentOffer[] {
-  const liquid = liquidLightningOption(preview);
-  if (!liquid) return [];
-  const network = preview.request.networks.find(n => n !== 'regtest') ?? preview.request.network;
-  return [{
-    id: liquid.id, provider: liquid.name, accountName: 'Liquid', executable: false, unavailable: liquid.unavailable,
-    route: { kind: 'swap', sourceId: 'liquid', from: `liquid:${network}`, to: `ln:${network}`, providerId: 'kaleidoswap' },
-  }];
 }

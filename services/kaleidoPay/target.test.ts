@@ -17,7 +17,7 @@ test('decodes every kind of request the wallet can pay', () => {
   expect(decodeTarget('tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx')).toMatchObject({ kind: 'bitcoin', networks: ['signet', 'mutinynet', 'testnet'] });
   expect(decodeTarget('sp1' + 'q'.repeat(40))).toMatchObject({ kind: 'spark', networks: ['mainnet'] });
   expect(decodeTarget('tark1' + 'q'.repeat(40))).toMatchObject({ kind: 'ark', arkAddress: 'tark1' + 'q'.repeat(40) });
-  expect(decodeTarget('lq1' + 'q'.repeat(40))).toMatchObject({ kind: 'liquid', networks: ['mainnet'] });
+  expect(() => decodeTarget('lq1' + 'q'.repeat(40))).toThrow("Liquid addresses aren't supported");
   expect(decodeTarget('rgb:abc/def')).toMatchObject({ kind: 'rgb', rgbInvoice: 'rgb:abc/def' });
   const offer = encodeOffer([{ type: 10n, value: new TextEncoder().encode('Shop') }]);
   expect(decodeTarget(offer)).toMatchObject({ kind: 'offer', offer, networks: ['mainnet'] });

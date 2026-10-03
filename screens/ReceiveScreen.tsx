@@ -21,7 +21,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager } from '../services/protocols';
-import { buildUnifiedReceiveURI, LITE_USD } from '@kaleidorg/wallet-engine';
+import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel, setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import {
@@ -142,8 +142,6 @@ function formatDepositLayer(layer?: DepositLayer): string {
       return 'Spark';
     case 'arkade':
       return 'Arkade';
-    case 'liquid':
-      return 'Liquid';
     default:
       return 'all layers';
   }
@@ -205,7 +203,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Per-address "show full" toggles in the unified address list (keyed by row).
   // Collapse/expand the full address inside the single-network receive card.
   // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
-  // embedding the USD-receiving methods (Liquid USDt, RGB USDT invoice, Spark).
+  // embedding the USD-receiving methods (RGB USDT invoice, Spark).
   const [unifiedAsset, setUnifiedAsset] = useState<'BTC' | 'USD'>('BTC');
   // Lite mode: a single private BIP321 QR (BTC/$ toggle) with the advanced
   // network picker hidden behind "Show all networks".
@@ -260,7 +258,6 @@ export default function ReceiveScreen({ navigation }: Props) {
       lightningInvoice?: string;
       sparkAddress?: string;
       arkadeAddress?: string;
-      liquidAddress?: string;
     };
     sparkDeposit: string | null;
     methods: ReceiveMethod[];
@@ -352,7 +349,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Determine available network types for the SELECTED asset. Only surface a
   // network where the asset actually lives:
   //  • RGB asset → RGB-L1 (on-chain) always; RGB-LN only if a usable channel for
-  //    THIS asset exists. (Spark/Liquid would appear only if the same asset also
+  //    THIS asset exists. (Spark would appear only if the same asset also
   //    existed there — it doesn't for an NWC-RLN asset.)
   //  • BTC / other families → resolved via account routing.
   const availableNetworkTypes = useMemo((): ProtocolNetworkType[] => {
@@ -951,24 +948,21 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // ──────────────────────────────────────────────────────────────────────
   // USD unified receive: a BIP321 QR (address-less) embedding the ways to receive
-  // USD (USDt) across protocols — Liquid USDt, an RGB USDT invoice (RGB-LN or
-  // RGB-L1), and the Spark address. Caller has already reset loading/error state.
+  // USD (USDt) across protocols — an RGB USDT invoice (RGB-LN or RGB-L1) and
+  // the Spark address. Caller has already reset loading/error state.
   const generateUsdUnifiedUri = async (generationId: number, allowRgb: boolean) => {
     const isCurrentGeneration = () => unifiedGenerationRef.current === generationId;
     const startedAt = nowMs();
     receiveLog('unified.usd.start', { generationId });
     const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
-    const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
     receiveLog('unified.usd.adapters', {
       generationId,
       rgb: !!rgb?.isConnected(),
       spark: !!spark?.isConnected(),
-      liquid: !!liquid?.isConnected(),
     });
 
     let sparkAddress: string | undefined;
-    let liquidAddress: string | undefined;
     let rgbInvoice: string | undefined;
 
     // The RGB USDT asset (from the loaded RGB assets), for an RGB invoice.
@@ -976,25 +970,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     try {
       await Promise.allSettled([
-        // 1) Liquid USDt — assets ride on the same confidential address.
-        (async () => {
-          const taskStartedAt = nowMs();
-          if (!liquid?.isConnected()) return;
-          try {
-            const addr = await runReceiveOperation(
-              'Create Liquid USD address',
-              () => liquid.getReceiveAddress(),
-            );
-            if (addr?.address) liquidAddress = addr.address;
-            receiveLog('unified.usd.liquid.done', {
-              generationId,
-              ok: !!addr?.address,
-              ms: Math.round(nowMs() - taskStartedAt),
-            });
-          } catch (e) { console.warn('USD: Liquid address failed', e); }
-        })(),
-
-        // 2) RGB USDT invoice (covers RGB-LN and RGB on-chain L1).
+        // 1) RGB USDT invoice (covers RGB-LN and RGB on-chain L1).
         (async () => {
           const taskStartedAt = nowMs();
           if (!allowRgb || !rgb?.isConnected() || !usdtRgb?.asset_id || !rgb.createRgbInvoice) return;
@@ -1018,7 +994,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           } catch (e) { console.warn('USD: RGB invoice failed', e); }
         })(),
 
-        // 3) Spark address (for a Spark USD token transfer).
+        // 2) Spark address (for a Spark USD token transfer).
         (async () => {
           const taskStartedAt = nowMs();
           if (!spark?.isConnected()) return;
@@ -1037,13 +1013,13 @@ export default function ReceiveScreen({ navigation }: Props) {
         })(),
       ]);
 
-      if (!sparkAddress && !liquidAddress && !rgbInvoice) {
+      if (!sparkAddress && !rgbInvoice) {
         if (isCurrentGeneration()) {
           receiveLog('unified.usd.empty', {
             generationId,
             ms: Math.round(nowMs() - startedAt),
           });
-          setUnifiedError('No USD receive method available. Connect Liquid, an RGB node, or Spark.');
+          setUnifiedError('No USD receive method available. Connect an RGB node or Spark.');
         }
         return;
       }
@@ -1054,22 +1030,11 @@ export default function ReceiveScreen({ navigation }: Props) {
       }
 
       const methods: string[] = [];
-      if (liquidAddress) methods.push('Liquid USDt');
       if (rgbInvoice) methods.push('RGB USDT');
       if (sparkAddress) methods.push('Spark');
 
       setReceiveMethods(
         [
-          liquidAddress && {
-            key: 'liquid',
-            label: 'Liquid USDt',
-            value: liquidAddress,
-            protocol: 'LIQUID',
-            kind: 'address',
-            layer: 'liquid',
-            monitor: 'balance',
-            assetId: LITE_USD.assetId,
-          },
           rgbInvoice && usdtRgb && {
             key: 'rgb',
             label: 'RGB USDT invoice',
@@ -1095,9 +1060,9 @@ export default function ReceiveScreen({ navigation }: Props) {
 
       const uri = buildUnifiedReceiveURI({
         sparkAddress,
-        liquidAddress,
         rgbInvoice,
-        assetId: LITE_USD.assetId, // Liquid USDt asset id
+        // Marks this as a token request, so no wallet pays it as plain bitcoin.
+        assetId: usdtRgb?.asset_id ?? 'USD',
         label: 'KaleidoSwap USD',
       });
       setUnifiedUri(uri);
@@ -1163,13 +1128,11 @@ export default function ReceiveScreen({ navigation }: Props) {
     const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
     const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
-    const liquid = protocolManager.getAdapterIfAvailable('LIQUID');
     receiveLog('unified.adapters', {
       generationId,
       rgb: !!rgb?.isConnected(),
       spark: !!spark?.isConnected(),
       arkade: !!arkade?.isConnected(),
-      liquid: !!liquid?.isConnected(),
     });
 
     // Optional amount (in sats) for the Lightning leg / BIP21 amount.
@@ -1183,7 +1146,6 @@ export default function ReceiveScreen({ navigation }: Props) {
       lightningInvoice?: string;
       sparkAddress?: string;
       arkadeAddress?: string;
-      liquidAddress?: string;
     } = reuseAddrs ? { ...cached!.collected, lightningInvoice: undefined } : {};
     // When reusing, carry the Spark deposit address forward.
     let nextSparkDepositAddress: string | null = reuseAddrs ? cached!.sparkDeposit : null;
@@ -1198,7 +1160,6 @@ export default function ReceiveScreen({ navigation }: Props) {
       lightningInvoice: collected.lightningInvoice,
       sparkAddress: collected.sparkAddress,
       arkadeAddress: collected.arkadeAddress,
-      liquidAddress: collected.liquidAddress,
       amountBtc: amountSats > 0 ? amountSats / 1e8 : undefined,
       label: 'KaleidoSwap',
     });
@@ -1348,36 +1309,6 @@ export default function ReceiveScreen({ navigation }: Props) {
           });
         } catch (e) { console.warn('Unified: Arkade address failed', e); }
       },
-
-      // 5) Liquid (L-BTC / USDt) address.
-      async () => {
-        const taskStartedAt = nowMs();
-        if (!liquid?.isConnected()) return;
-        try {
-          const addr = await runReceiveOperation(
-            'Create unified Liquid address',
-            () => liquid.getReceiveAddress(),
-          );
-          if (addr?.address) collected.liquidAddress = addr.address;
-          if (addr?.address) {
-            addMethod({
-              key: 'liquid',
-              label: 'Liquid',
-              value: addr.address,
-              protocol: 'LIQUID',
-              kind: 'address',
-              layer: 'liquid',
-              monitor: 'balance',
-              assetId: 'BTC',
-            });
-          }
-          receiveLog('unified.liquid.done', {
-            generationId,
-            ok: !!addr?.address,
-            ms: Math.round(nowMs() - taskStartedAt),
-          });
-        } catch (e) { console.warn('Unified: Liquid address failed', e); }
-      },
     ];
 
     // The Lightning invoice mint is the one leg that depends on `amount` and is
@@ -1448,7 +1379,6 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (collected.lightningInvoice) methods.push('Lightning');
     if (collected.sparkAddress) methods.push('Spark');
     if (collected.arkadeAddress) methods.push('Arkade');
-    if (collected.liquidAddress) methods.push('Liquid');
 
     if (methods.length === 0) {
       receiveLog('unified.empty', {
@@ -1458,7 +1388,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       setUnifiedError(
         rgb?.isConnected() && reason !== 'manual'
           ? 'RGB receive is available. Tap Try Again to generate it explicitly without blocking the screen in the background.'
-          : 'No receive method available. Connect a wallet (RGB, Spark, Arkade, or Liquid) to use unified receive.',
+          : 'No receive method available. Connect a wallet (RGB, Spark, or Arkade) to use unified receive.',
       );
       setUnifiedLoading(false);
       return;
@@ -1640,8 +1570,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       feedback.select();
       if (isUsd && networkType === 'unified') return;
       resetReceiveSurface();
-      // USD always routes through the unified USD aggregator (Liquid USDt + RGB
-      // USDT + Spark) — see generateUsdUnifiedUri, which finds the held RGB USDT
+      // USD always routes through the unified USD aggregator (RGB USDT + Spark) — see generateUsdUnifiedUri, which finds the held RGB USDT
       // itself. Use the synthetic 'USD' asset (not a specific RGB USDT) so the
       // behaviour is identical whether or not an RGB USDT is held, and force the
       // unified view so the aggregator actually runs.
@@ -1770,7 +1699,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             label: 'Combined QR',
             // USD is a different protocol set than BTC — reflect it in the hint.
             sub: /usd/i.test(selectedAsset.ticker)
-              ? 'Liquid · Spark · optional RGB'
+              ? 'Spark · optional RGB'
               : 'On-chain · Spark · Arkade · optional Lightning',
           }]
         : []),
