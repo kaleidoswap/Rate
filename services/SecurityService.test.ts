@@ -225,6 +225,14 @@ describe('SecurityService', () => {
   });
 
   describe('authenticateWithBiometric', () => {
+    it('never offers the phone passcode when the wallet PIN is the fallback', async () => {
+      (LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(true);
+      (LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(true);
+      (LocalAuthentication.authenticateAsync as jest.Mock).mockResolvedValue({ success: false, error: 'user_fallback' });
+      await expect(securityService.authenticateWithBiometric('Unlock', { allowDeviceFallback: false })).resolves.toBe(false);
+      expect(LocalAuthentication.authenticateAsync).toHaveBeenCalledWith(expect.objectContaining({ disableDeviceFallback: true, fallbackLabel: 'Use wallet PIN' }));
+    });
+
     it('should authenticate successfully', async () => {
       const mockHasHardware = LocalAuthentication.hasHardwareAsync as jest.Mock;
       const mockIsEnrolled = LocalAuthentication.isEnrolledAsync as jest.Mock;

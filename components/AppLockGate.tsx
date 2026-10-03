@@ -65,9 +65,13 @@ export function AppLockGate() {
   const backgroundedAt = useRef<number | null>(null);
   const verifying = useRef(false);
 
+  const methodsRef = useRef<LockMethods>({ pin: false, biometric: false });
   const promptBiometric = useCallback(async () => {
+    // With a wallet PIN set, a failed biometric falls back to that PIN, never to
+    // the phone's passcode; biometric-only wallets keep the passcode as recovery.
     const ok = await SecurityService.getInstance().authenticateWithBiometric(
       'Unlock your wallet',
+      { allowDeviceFallback: !methodsRef.current.pin },
     );
     if (ok) {
       await SecurityService.getInstance().resetPinFailures();
@@ -85,6 +89,7 @@ export function AppLockGate() {
     setMode((m) => (m === 'locked' ? m : 'checking'));
     try {
       const m = await resolveLockMethods();
+      methodsRef.current = m;
       setMethods(m);
       if (!m.pin && !m.biometric) {
         setMode('unlocked');

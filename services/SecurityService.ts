@@ -256,10 +256,16 @@ export class SecurityService {
   }
 
   /**
-   * Authenticate user with biometric
+   * Authenticate user with biometric.
+   *
+   * `allowDeviceFallback: false` keeps the OS from offering the phone's passcode
+   * when biometrics fail: the caller falls back to the wallet PIN instead, so
+   * knowing the phone passcode is not enough to open the wallet. Only allow the
+   * device fallback when there is no wallet PIN to fall back to.
    */
   async authenticateWithBiometric(
-    promptMessage: string = 'Authenticate to access your wallet'
+    promptMessage: string = 'Authenticate to access your wallet',
+    { allowDeviceFallback = true }: { allowDeviceFallback?: boolean } = {},
   ): Promise<boolean> {
     try {
       const compatible = await LocalAuthentication.hasHardwareAsync();
@@ -272,8 +278,10 @@ export class SecurityService {
 
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage,
-        fallbackLabel: 'Use PIN',
-        disableDeviceFallback: false,
+        // iOS shows this button only without the device fallback; it ends the prompt
+        // so the wallet's own PIN pad takes over.
+        fallbackLabel: allowDeviceFallback ? undefined : 'Use wallet PIN',
+        disableDeviceFallback: !allowDeviceFallback,
         cancelLabel: 'Cancel',
       });
 

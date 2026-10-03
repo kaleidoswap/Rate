@@ -69,7 +69,14 @@ it('unlocks through successful configured biometrics', async () => {
   security.authenticateWithBiometric.mockResolvedValue(true);
   const screen = render(<AppLockGate />);
   await waitFor(() => expect(screen.toJSON()).toBeNull());
-  expect(security.authenticateWithBiometric).toHaveBeenCalledWith('Unlock your wallet');
+  expect(security.authenticateWithBiometric).toHaveBeenCalledWith('Unlock your wallet', { allowDeviceFallback: true });
+});
+
+it('with a wallet PIN, biometrics fall back to that PIN instead of the phone passcode', async () => {
+  security.getSecuritySettings.mockResolvedValue({ pinEnabled: true, biometricEnabled: true, biometricType: 'face' });
+  const screen = render(<AppLockGate />);
+  await waitFor(() => expect(security.authenticateWithBiometric).toHaveBeenCalledWith('Unlock your wallet', { allowDeviceFallback: false }));
+  expect(screen.getByText('Enter your PIN to unlock')).toBeTruthy();
 });
 
 it('a stored wrong-PIN cooldown still applies after a restart', async () => {
