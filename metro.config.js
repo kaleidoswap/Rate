@@ -102,27 +102,46 @@ config.resolver.extraNodeModules = {
   '@utexo/rgb-lib-wasm': path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js'),
 };
 
-// @kaleidorg/wallet-engine's Arkade adapter (beta.70+) lazily loads the Arkade
-// Intents venue from the '@kaleidorg/swap-sdk/arkade' subpath. This app has no
-// swap-sdk dependency and never touches that venue — swap-sdk is a Rust->wasm
-// package, and wasm is exactly what the mobile build avoids. Metro still has to
-// resolve the subpath because it bundles a single file and doesn't tree-shake the
-// adapter barrel, so send it to the same empty stub as the unused @utexo adapters.
-// A subpath can't go through extraNodeModules (that maps a package root and then
-// appends the remainder), hence resolveRequest.
+// @kaleidorg/swap-sdk: the ROOT entry is a Rust->wasm package (Boltz swaps), and
+// wasm is exactly what the mobile build avoids, so it goes to the empty stub —
+// Metro bundles a single file and doesn't tree-shake wallet-engine's barrels, so
+// it still has to resolve. The '@kaleidorg/swap-sdk/arkade' subpath is pure JS
+// (the Arkade Intents venue over @arkade-os/swap) and is used by KaleidoPay's
+// Arkade -> Lightning swaps (services/kaleidoPay/arkadeIntents.ts), so it resolves
+// normally. A subpath can't go through extraNodeModules (that maps a package root
+// and then appends the remainder), hence resolveRequest.
 const swapSdkStub = path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js');
+// One @arkade-os/sdk. @arkade-os/swap hard-pins (and so nests) its own SDK copy
+// (0.4.71) while the app's wallet is built from the root copy (0.4.72); the venue
+// hands that wallet, and VHTLC/ArkAddress/Transaction objects, across the
+// boundary, so two copies would mean two class identities and two contract
+// registries. extraNodeModules can't fix that (it is only a fallback for imports
+// that fail to resolve), so every '@arkade-os/sdk' import — and its subpaths — is
+// resolved as if it came from the app root. Exception: @arkade-os/boltz-swap
+// (Arkade's Boltz Lightning path in wallet-engine) pins 0.4.35 and keeps its own
+// copy, as before, since its API predates the root SDK; so does @arkade-os/wdk
+// (it pins its own SDK too), so the app's existing Arkade wallet code is unchanged.
+const appOrigin = path.join(__dirname, 'package.json');
+const arkadeSdkRequest = /^@arkade-os\/sdk(\/.*)?$/;
+const keepsOwnArkadeSdk = /[\\/]node_modules[\\/]@arkade-os[\\/](boltz-swap|wdk)[\\/]/;
 const previousResolveRequest = config.resolver.resolveRequest;
+const resolveNext = (context, moduleName, platform) =>
+  previousResolveRequest
+    ? previousResolveRequest(context, moduleName, platform)
+    : context.resolveRequest(context, moduleName, platform);
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (moduleName === '@kaleidorg/swap-sdk' || moduleName.startsWith('@kaleidorg/swap-sdk/')) {
+  if (moduleName === '@kaleidorg/swap-sdk'
+    || (moduleName.startsWith('@kaleidorg/swap-sdk/') && moduleName !== '@kaleidorg/swap-sdk/arkade')) {
     return { type: 'sourceFile', filePath: swapSdkStub };
+  }
+  if (arkadeSdkRequest.test(moduleName) && !keepsOwnArkadeSdk.test(context.originModulePath)) {
+    return resolveNext({ ...context, originModulePath: appOrigin }, moduleName, platform);
   }
   const ub12 = /^@universal-bolt12\/(swap-market|universal-code)$/.exec(moduleName);
   if (ub12) {
     return { type: 'sourceFile', filePath: path.join(universalBolt12Root, 'packages', ub12[1], 'src/index.ts') };
   }
-  return previousResolveRequest
-    ? previousResolveRequest(context, moduleName, platform)
-    : context.resolveRequest(context, moduleName, platform);
+  return resolveNext(context, moduleName, platform);
 };
 
 // Add polyfill resolver

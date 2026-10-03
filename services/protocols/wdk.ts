@@ -38,6 +38,21 @@ import { buildArkadeStorage } from './arkadeStorage'
 import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
+import { setPayOptions } from '../kaleidoPay/payOptions'
+
+/** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
+export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): { makerUrl?: string; arkServerUrl?: string } {
+  const out: { makerUrl?: string; arkServerUrl?: string } = {}
+  for (const nc of networkConfigs) {
+    if (!nc.enabled) continue
+    let parsed: any = {}
+    try { parsed = nc.config ? JSON.parse(nc.config) : {} } catch { continue }
+    const protocol = networkTypeToProtocol(nc.type as any)
+    if (protocol === 'RGB_LN' && (parsed.makerUrl || parsed.baseUrl)) out.makerUrl = parsed.makerUrl || parsed.baseUrl
+    if (protocol === 'ARKADE') out.arkServerUrl = parsed.arkServerUrl || getDefaultArkadeServerUrl(parsed.network || 'signet')
+  }
+  return out
+}
 
 /**
  * Mobile rollout gates.
@@ -114,6 +129,8 @@ export async function initializeWdkProtocols(
 ): Promise<Map<ProtocolType, { success: boolean; error?: string }>> {
   const manager = getWdkProtocolManager()
   const results = new Map<ProtocolType, { success: boolean; error?: string }>()
+  // Send's ways to pay need the maker (configured with the RGB node) and Arkade's server.
+  setPayOptions(payOptionsFrom(networkConfigs))
 
   for (const nc of networkConfigs) {
     if (!nc.enabled) continue

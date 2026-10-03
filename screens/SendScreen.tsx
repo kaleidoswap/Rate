@@ -1,2037 +1,385 @@
-import { routeSpendable } from '../utils/payment-balance';
-import { paymentReceiptStatus } from '../utils/payment-receipt';
-import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
-import { createRequestGuard } from '../utils/request-guard';
-import { barkNetworkLabel, sendBarkPayment } from '../services/BarkService';
-import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
-import { KaleidoPayFlow } from '../components/payments/KaleidoPayFlow';
-import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Alert,
-  ActivityIndicator,
-  Clipboard,
-  Image,
-  Modal,
-} from 'react-native';
-import { AmountInput as WdkAmountInput, AssetSelector as WdkAssetSelector } from '@kaleidorg/kaleido-ui/native';
+//
+// The one way to pay. Whatever is entered (Lightning invoice or address, BOLT12
+// offer, bitcoin address, Spark, Ark, Liquid or RGB invoice) is decoded into a
+// payment request; every connected account then offers its ways to pay it, directly
+// or through a swap provider, priced the same way. The user reviews the total and
+// pays; the payment journal keeps an unresolved payment from being paid twice.
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, View, Text, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, Clipboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { KeyboardAvoidingView, Platform } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as Crypto from 'expo-crypto';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { Button } from '../components/Button';
+import { ProviderSheet } from '../components/payments/ProviderSheet';
+import { NetworkIcon } from '../components/NetworkIcon';
+import { AmountEditorModal } from '../components/AmountEditorModal';
+import NostrContactsSelector from '../components/NostrContactsSelector';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { PaymentNetworkLabel } from '../components/payments/PaymentNetworkLabel';
-import { paymentRequestLabel } from '../utils/payment-network';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { RootState } from '../store';
 import { loadBtcBalance } from '../store/slices/walletSlice';
-// RGBApiService removed — all operations via protocolManager
-import { NetworkIcon } from '../components/NetworkIcon';
-import { PressableScale } from '../components/PressableScale';
-import NostrContactsSelector from '../components/NostrContactsSelector';
-import { feedback } from '../utils/feedback';
-import { resolveLightningAddressToInvoice } from '../utils/lnurl';
-import { decodeBolt11 } from '../utils/decodeInvoice';
-import type { PaymentType } from './PaymentSuccessScreen';
-import { protocolManager } from '../services/protocols';
-import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
+import { useFiatRates } from '../hooks/useFiatRates';
+import { useForegroundClock } from '../hooks/useForegroundClock';
+import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 import {
-  classifyWithdrawDestination, resolveSendRoutes, resolveActiveSendRoute,
-  METHOD_META, type DestinationKind, type ResolvedSendRoute, type RouteOption,
-} from '../utils/account-routing';
-import { estimatePaymentFee, paymentTotal, type PaymentFeeAdapter } from '../services/paymentReview';
-import { theme } from '../theme';
-import { Card, Button, Input, ScreenHeader } from '../components';
-import { AssetIcon as TokenAssetIcon } from '../components/AssetIcon';
-import { useAssetIcon } from '../utils';
-import { formatBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
-import { resolvePrecision } from '../utils/assetAmount';
+  KALEIDOPAY_DEMO, decodeTarget, prepareKaleidoPay, railLabel, previewInput, quotePaymentOffers, quoteSpend, formatSpend,
+  bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError,
+} from '../services/kaleidoPay';
+import type { PayTarget, Preview, PaymentOffer, RequestAsset } from '../services/kaleidoPay';
+import { usePayAccounts, prepareRgbRequest, unavailableOffers } from '../services/kaleidoPay/connect';
+import type { RgbRequestAsset } from '../services/kaleidoPay/connect';
+import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
+import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
 
-interface Props {
-  navigation: any;
-  route: any;
+interface Props { navigation: any; route: any }
+
+const KIND_LABEL: Record<PayTarget['kind'], string> = {
+  bolt11: 'Lightning invoice', lnurl: 'Lightning address', offer: 'Lightning offer', bitcoin: 'Bitcoin address',
+  spark: 'Spark address', ark: 'Ark address', liquid: 'Liquid address', rgb: 'RGB invoice',
+};
+const NETWORK_LABEL: Record<string, string> = { mainnet: '', signet: 'Signet', mutinynet: 'Mutinynet', testnet: 'Testnet', regtest: 'Regtest' };
+
+function decodeQuietly(text: string): { target?: PayTarget; error?: string } {
+  if (!text.trim()) return {};
+  try { return { target: decodeTarget(text) }; } catch (e) { return { error: e instanceof Error ? e.message : 'Not payable' }; }
 }
 
-type AddressType = 'unknown' | 'bitcoin' | 'lightning' | 'lightning-address' | 'lnurl-pay' | 'rgb' | 'spark' | 'arkade' | 'invalid';
-
-interface RGBAsset {
-  asset_id: string;
-  ticker: string;
-  name: string;
-  balance: number;
-  precision: number;
-}
-
-interface Asset {
-  asset_id: string;
-  ticker: string;
-  name: string;
-  isRGB: boolean;
-  balance?: number;
-  precision?: number;
-}
-
-interface DecodedInvoice {
-  payment_hash: string;
-  amt_msat: number;
-  asset_id?: string;
-  asset_amount?: number;
-  description: string;
-  expiry_sec: number;
-  payee_pubkey: string;
-}
-
-// Define the enums needed for the RGB invoice response
-enum AssetSchema {
-  Nia = 'Nia',
-  Uda = 'Uda',
-  Cfa = 'Cfa',
-}
-
-enum BitcoinNetwork {
-  Mainnet = 'Mainnet',
-  Testnet = 'Testnet',
-  Signet = 'Signet',
-  Regtest = 'Regtest',
-}
-
-interface Assignment {
-  type: 'Fungible' | 'NonFungible' | 'InflationRight' | 'ReplaceRight' | 'Any';
-  value?: number;
-}
-
-// Define the base RGB invoice response type to match the service
-interface BaseRGBInvoiceResponse {
-  recipient_id: string;
-  asset_schema: AssetSchema;
-  asset_id: string;
-  assignment: Assignment;
-  network: BitcoinNetwork;
-  expiration_timestamp: number;
-  transport_endpoints: string[];
-}
-
-// Extend it with our additional fields
-interface DecodedRGBInvoice extends BaseRGBInvoiceResponse {
-  amount: number | null;
-}
-
-function SendScreen({ navigation, route }: Props) {
+export default function SendScreen({ navigation, route }: Props) {
+  const t = useAppTheme();
   const dispatch = useAppDispatch();
-  const theme = useAppTheme();
-  const styles = useMemo(() => createStyles(theme), [theme]);
-  const walletState = useAppSelector((state: RootState) => state.wallet);
-  const assetsState = useAppSelector((state: RootState) => state.assets);
-  const rgbAssets = (assetsState?.rgbAssets || []) as RGBAsset[];
-  const btcBalance = walletState?.btcBalance;
-  const isBalanceLoading = useAppSelector((state: RootState) => state.wallet.isBalanceLoading);
-  const bitcoinUnit = useAppSelector((state: RootState) => state.settings.bitcoinUnit);
-  const { formatSatoshisToUSD, bitcoinPrice } = useBitcoinConversion();
+  const bitcoinUnit = useAppSelector(s => s.settings.bitcoinUnit);
+  const walletId = useAppSelector(s => s.wallet.activeWallet?.id);
+  const rates = useFiatRates();
+  usePayAccounts(walletId);
 
-  // Refresh BTC balances when the screen opens — balances aren't persisted, so
-  // arriving here cold (e.g. straight from the QR scanner) would otherwise show
-  // a stale "0" until the next dashboard refresh.
+  const [input, setInput] = useState<string>(route.params?.prefilledAddress ?? route.params?.address ?? '');
+  const [contactName, setContactName] = useState<string | undefined>(route.params?.contactName);
+  const [amountSat, setAmountSat] = useState<number | undefined>(undefined);
+  const [assetAmount, setAssetAmount] = useState('');
+  const [rgbAsset, setRgbAsset] = useState<RgbRequestAsset | null>(null);
+  const [showAmountEditor, setShowAmountEditor] = useState(false);
+  const [showContacts, setShowContacts] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [offers, setOffers] = useState<PaymentOffer[]>([]);
+  const [selectedId, setSelectedId] = useState<string>();
+  const [showProviders, setShowProviders] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [reviewUpdated, setReviewUpdated] = useState(false);
+  const [previousTotal, setPreviousTotal] = useState('');
+  const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
+  const [journalReady, setJournalReady] = useState(false);
+  const [journalUnreadable, setJournalUnreadable] = useState(false);
+  const now = useForegroundClock(offers.some(o => !!o.quote) && !attempt);
+  const revision = useRef(0);
+  const paying = useRef(false);
+  const requestId = useRef(Crypto.randomUUID());
+
+  const { target, error: decodeError } = useMemo(() => decodeQuietly(input), [input]);
+  const fixedSat = target?.amountSat;
+  const formatSats = (sats: number) => `${formatBitcoinAmount(sats, bitcoinUnit)} ${bitcoinUnit}`;
+  const displaySpend: typeof formatSpend = (value, asset) => asset.id === 'BTC' && asset.ticker === 'sats' ? formatSats(value) : formatSpend(value, asset);
+  const usd = rates.usd;
+
+  // Prefilled from a scan, a contact, an asset page or chat.
   useEffect(() => {
-    dispatch(loadBtcBalance());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const [selectedAsset, setSelectedAsset] = useState<Asset>({
-    asset_id: 'BTC',
-    ticker: 'BTC',
-    name: 'Bitcoin',
-    isRGB: false,
-    balance: btcBalance?.vanilla?.spendable || 0,
-  });
-  const [address, setAddress] = useState('');
-  const [amount, setAmount] = useState('');
-  const [feeRate, setFeeRate] = useState('normal');
-  const [customFee, setCustomFee] = useState(1.0);
-  const [loading, setLoading] = useState(false);
-  const [isDecodingInvoice, setIsDecodingInvoice] = useState(false);
-  const [addressType, setAddressType] = useState<AddressType>('unknown');
-  const [decodedInvoice, setDecodedInvoice] = useState<DecodedInvoice | null>(null);
-  const [decodedRGBInvoice, setDecodedRGBInvoice] = useState<DecodedRGBInvoice | null>(null);
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [showAssetSelector, setShowAssetSelector] = useState(false);
-  const [showConfirmation, setShowConfirmation] = useState(false);
-  const [paymentStep, setPaymentStep] = useState<'input' | 'review' | 'sending'>('input');
-  // Codes KaleidoPay pays (offers, universal QRs, plain addresses) are reviewed and paid
-  // by its flow inside this screen; '' reopens an unresolved KaleidoPay payment.
-  const [kaleidoPayCode, setKaleidoPayCode] = useState<string | null>(route.params?.resumePayment ? '' : null);
-  const [sendRoutes, setSendRoutes] = useState<RouteOption[]>([]);
-  const [activeRoute, setActiveRoute] = useState<ResolvedSendRoute | null>(null);
-  // Amount entry mode for the WDK AmountInput. Fiat entry is only meaningful
-  // for BTC (RGB assets have no USD price), so it's gated on `canEnterFiat`.
-  const [amountMode, setAmountMode] = useState<'token' | 'fiat'>('token');
-  const [fiatInput, setFiatInput] = useState('');
-  const [showContactPicker, setShowContactPicker] = useState(false);
-  const [showAdvancedFees, setShowAdvancedFees] = useState(false);
-  const [feeEstimate, setFeeEstimate] = useState<number | null>(null);
-  const [estimatingFee, setEstimatingFee] = useState(false);
-  const sendingRef = useRef(false);
-  const feeRequestRef = useRef(0);
-  const decodeGuard = useRef(createRequestGuard()).current;
-  useEffect(() => () => decodeGuard.invalidate(), [decodeGuard]);
-
-  useEffect(() => navigation.addListener('beforeRemove', (event: any) => {
-    if (sendingRef.current) event.preventDefault();
-  }), [navigation]);
-  useEffect(() => { if (activeRoute?.account === 'BARK') setAmountMode('token'); }, [activeRoute?.account]);
-
-  // All operations via protocolManager
-  const getProtocolStatus = useRefreshableProtocolStatus();
-
-  // Fee rate options
-  const feeRates = [
-    { label: 'Low', value: 'slow', rate: 1, icon: 'time-outline' },
-    { label: 'Normal', value: 'normal', rate: 2, icon: 'flash-outline' },
-    { label: 'High', value: 'fast', rate: 3, icon: 'rocket-outline' },
-    { label: 'Custom', value: 'custom', rate: customFee, icon: 'settings-outline' },
-  ];
-
-  // Combine BTC with RGB assets
-  const allAssets: Asset[] = [
-    { 
-      asset_id: 'BTC', 
-      ticker: 'BTC', 
-      name: 'Bitcoin',
-      isRGB: false,
-      balance: btcBalance?.vanilla?.spendable || 0,
-    },
-    ...(Array.isArray(rgbAssets) ? rgbAssets.map((asset: RGBAsset) => ({
-      asset_id: asset.asset_id,
-      ticker: asset.ticker,
-      name: asset.name,
-      isRGB: true,
-      balance: asset.balance || 0,
-      precision: asset.precision,
-    })) : [])
-  ];
-
-  const [spendChannels, setSpendChannels] = useState<any[]>([]);
-  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
-  const rgbBalanceIsLightning = typeof (rgbAdapter as any)?.walletType === 'function';
-  useEffect(() => {
-    let active = true;
-    setSpendChannels([]);
-    if (rgbAdapter?.isConnected() && !rgbBalanceIsLightning && rgbAdapter.listChannels) {
-      void rgbAdapter.listChannels().then(channels => { if (active) setSpendChannels(channels as any[]); }).catch(() => {});
+    const p = route.params ?? {};
+    if (p.prefilledAddress || p.address) setInput(p.prefilledAddress || p.address);
+    if (p.contactName) setContactName(p.contactName);
+    if (p.prefilledAmount) {
+      const n = Number(p.prefilledAmount);
+      if (Number.isFinite(n) && n > 0) setAmountSat(bitcoinUnit === 'BTC' ? Math.round(n * 1e8) : Math.round(n));
     }
-    return () => { active = false; };
-  }, [rgbAdapter, rgbBalanceIsLightning, activeRoute?.account, activeRoute?.method]);
-  const availableForRoute = (account: string, method: string) => routeSpendable(
-    btcBalance?.byProtocol?.[account as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'], account, method, spendChannels, rgbBalanceIsLightning,
-  );
-  const btcSpendableSats = useCallback((): number => {
-    const account = activeRoute?.account ?? route.params?.preferredAccount;
-    if (!account) return 0;
-    return routeSpendable(btcBalance?.byProtocol?.[account as 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'], account, activeRoute?.method, spendChannels, rgbBalanceIsLightning);
-  }, [activeRoute?.account, activeRoute?.method, btcBalance, route.params?.preferredAccount, spendChannels, rgbBalanceIsLightning]);
-
-  // Keep the selected asset's balance/precision in sync with live wallet data.
-  // `selectedAsset` is seeded once from state at mount, so without this its
-  // balance stays frozen at the mount-time value (showing "0" when balances
-  // haven't loaded yet) even after the wallet/asset balances arrive.
-  useEffect(() => {
-    setSelectedAsset((prev) => {
-      if (prev.asset_id === 'BTC') {
-        const live = btcSpendableSats();
-        if (live === prev.balance) return prev;
-        return { ...prev, balance: live };
-      }
-      const live = allAssets.find((a) => a.asset_id === prev.asset_id);
-      if (!live) return prev;
-      if (live.balance === prev.balance && live.precision === prev.precision) return prev;
-      return { ...prev, balance: live.balance, precision: live.precision };
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [btcBalance, rgbAssets, btcSpendableSats]);
-
-  useEffect(() => {
-    let reviewTimer: ReturnType<typeof setTimeout> | undefined;
-    // Handle route parameters from QR scanner or other navigation
-    if (route.params?.selectedAsset) {
-      // If selectedAsset is provided directly, use it
-      setSelectedAsset(route.params.selectedAsset);
-    } else if (route.params?.assetId) {
-      // Legacy support for assetId parameter
-      const asset = allAssets.find(a => a.asset_id === route.params.assetId);
-      if (asset) {
-        setSelectedAsset(asset);
-      }
-    }
-
-    if (route.params?.prefilledAddress || route.params?.address) {
-      const addressToSet = route.params.prefilledAddress || route.params.address;
-      setAddress(addressToSet);
-      detectAddressType(addressToSet);
-    }
-
-    if (route.params?.resumePayment) setKaleidoPayCode('');
-
-    if (route.params?.prefilledAmount) {
-      setAmount(route.params.prefilledAmount);
-    }
-
-    // Handle pre-decoded invoices from QR scanner
-    if (route.params?.decodedInvoice) {
-      setDecodedInvoice(route.params.decodedInvoice);
-      setAddressType('lightning');
-    }
-
-    if (route.params?.decodedRGBInvoice) {
-      setDecodedRGBInvoice(route.params.decodedRGBInvoice);
-      setAddressType('rgb');
-    }
-
-    if (route.params?.isLightning) {
-      setAddressType('lightning');
-    }
-
-    // Auto-advance to review step if coming from QR scanner with complete data
-    if (route.params?.fromQRScanner) {
-      const hasCompleteData = route.params?.prefilledAmount && 
-        (route.params?.decodedInvoice?.amt_msat > 0 || route.params?.decodedRGBInvoice?.amount);
-      
-      if (hasCompleteData) {
-        // Small delay to allow state to settle, then show review
-        reviewTimer = setTimeout(() => {
-          setPaymentStep('review');
-        }, 300);
-      }
-    }
-    return () => { if (reviewTimer) clearTimeout(reviewTimer); };
   }, [route.params]);
 
-  const isLightningAddress = (input: string): boolean => {
-    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-    return emailRegex.test(input);
-  };
+  // Anything that changes the request discards the reviewed quotes.
+  useEffect(() => {
+    revision.current++;
+    setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setPreviousTotal('');
+  }, [input, amountSat, assetAmount]);
+  useEffect(() => { setRgbAsset(null); setAssetAmount(''); }, [input]);
 
-  const detectAddressType = useCallback(async (input: string) => {
-    const isCurrent = decodeGuard.begin();
-    setIsDecodingInvoice(false);
-    setDecodedInvoice(null);
-    setDecodedRGBInvoice(null);
-    setValidationError(null);
-    setSendRoutes([]);
-    setActiveRoute(null);
-    if (isKaleidoPayCode(input) || isSwappableAddress(input)) {
-      setAddressType('unknown');
-      setKaleidoPayCode(input.trim());
-      return;
-    }
-    if (!input) {
-      setAddressType('unknown');
-      return;
-    }
+  // The payment journal: an unresolved payment is shown before anything new can be paid.
+  useEffect(() => {
+    let active = true;
+    setJournalReady(false); setAttempt(null);
+    if (!walletId) { setJournalReady(true); return; }
+    loadPaymentAttempt(walletId)
+      .then(saved => { if (active) { if (unresolvedAttempt(saved)) setAttempt(saved); setJournalReady(true); } })
+      .catch(() => { if (active) { setJournalUnreadable(true); setError('Could not read your previous payment record. Check your wallet activity before paying again.'); } });
+    return () => { active = false; revision.current++; };
+  }, [walletId]);
+  useEffect(() => () => { revision.current++; }, []);
 
-    setIsDecodingInvoice(true);
-    setAddressType('unknown');
+  const selected = offers.find(o => o.id === selectedId);
+  const quote = selected?.quote;
+  const spend = quote ? quoteSpend(quote) : null;
+  const total = spend ? displaySpend(spend.total, spend.asset) : '';
+  const expired = !!quote && quote.expiresAt * 1000 <= now;
 
+  const getOffers = useCallback(async (refresh = false) => {
+    const current = ++revision.current;
+    setBusy(true); setError('');
+    if (refresh) setPreviousTotal(total);
     try {
-      // Unified destination classification + route resolution
-      const destKind = classifyWithdrawDestination(input);
-      const addrType: AddressType = destKind === 'lnurl-pay' ? 'lnurl-pay'
-        : destKind === 'unknown' ? 'unknown' : destKind as AddressType;
-      setAddressType(addrType);
-
-      // Resolve send routes
-      const accounts = getProtocolStatus();
-      const { routes } = resolveSendRoutes({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts });
-      setSendRoutes(routes);
-      const active = resolveActiveSendRoute({ destinationType: destKind, selectedAssetId: selectedAsset.asset_id, accounts, preferredAccount: route.params?.preferredAccount });
-      setActiveRoute(active || null);
-
-      if (destKind === 'lightning') {
-        try {
-          const trimmed = input.trim();
-          // Decode the BOLT11 locally first — this is node-independent, so a
-          // Lightning invoice is recognized on any wallet (e.g. Spark-only),
-          // not just when the RGB node is connected.
-          const local = decodeBolt11(trimmed);
-          const decoded: any = {
-            payment_hash: '',
-            amt_msat: local.amountSats ? local.amountSats * 1000 : 0,
-            asset_id: undefined,
-            asset_amount: undefined,
-            description: local.description || '',
-            expiry_sec: local.expirySec || 0,
-            payee_pubkey: '',
-          };
-
-          // Enrich with RGB-over-LN details (asset_id / asset_amount) only when
-          // the RGB node is available — best-effort, never blocks detection.
-          const rgbAdapter = protocolManager.getAdapterIfAvailable?.('RGB_LN');
-          if (rgbAdapter?.decodeInvoice) {
-            try {
-              const r: any = await rgbAdapter.decodeInvoice(trimmed);
-              decoded.payment_hash = r.paymentHash || r.payment_hash || decoded.payment_hash;
-              decoded.amt_msat = r.amountMsat || r.amount_msat || (r.amount ? r.amount * 1000 : decoded.amt_msat);
-              decoded.asset_id = r.asset_id ?? decoded.asset_id;
-              decoded.asset_amount = r.asset_amount ?? decoded.asset_amount;
-              decoded.description = r.description || decoded.description;
-              decoded.payee_pubkey = r.destination || r.payee_pubkey || decoded.payee_pubkey;
-            } catch { /* keep the local decode */ }
-          }
-
-          if (!isCurrent()) return;
-          setDecodedInvoice(decoded);
-          setAddressType('lightning');
-
-          // Auto-set asset and amount if specified in invoice
-          if (decoded.asset_id) {
-            const asset = allAssets.find(a => a.asset_id === decoded.asset_id);
-            if (asset) {
-              setSelectedAsset(asset);
-              if (decoded.asset_amount) {
-                setAmount(decoded.asset_amount.toString());
-              }
-            }
-          } else if (decoded.amt_msat > 0) {
-            // BTC Lightning invoice with amount — set it in the active entry
-            // unit so it displays correctly (sats vs BTC).
-            const sats = Math.round(decoded.amt_msat / 1000);
-            setAmount(bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8));
-            // Ensure BTC is selected for BTC invoices
-            const btcAsset = allAssets.find(a => a.asset_id === 'BTC');
-            if (btcAsset) {
-              setSelectedAsset(btcAsset);
-            }
-          }
-        } catch (error) {
-          if (!isCurrent()) return;
-          setAddressType('invalid');
-          setValidationError('Failed to decode Lightning invoice');
-        }
-      } else if (input.startsWith('rgb')) {
-        // RGB invoice
-        try {
-          const rgbAdapterRgb = protocolManager.getAdapterIfAvailable('RGB_LN');
-          // Decoding requires the RGB/NWC node — don't call it offline.
-          if (!rgbAdapterRgb?.isConnected()) {
-            setAddressType('invalid');
-            setValidationError('RGB node not connected. Please connect it in Settings.');
-            return;
-          }
-          const decoded = await rgbAdapterRgb.decodeRgbInvoice?.({ invoice: input }) as any;
-          if (!isCurrent()) return;
-          
-          // Extract amount from assignment if it's a fungible assignment
-          let invoiceAmount: number | null = null;
-          if (decoded.assignment && decoded.assignment.type === 'Fungible' && decoded.assignment.value) {
-            invoiceAmount = decoded.assignment.value;
-          }
-          
-          const decodedWithAmount: DecodedRGBInvoice = {
-            ...decoded,
-            amount: invoiceAmount,
-          };
-          setDecodedRGBInvoice(decodedWithAmount);
-          setAddressType('rgb');
-          
-          // Auto-set asset if specified
-          if (decoded.asset_id) {
-            const asset = allAssets.find(a => a.asset_id === decoded.asset_id);
-            if (asset) {
-              setSelectedAsset(asset);
-              // Set amount if specified in invoice
-              if (invoiceAmount) {
-                const precision = resolvePrecision(asset.precision);
-                const formattedAmount = invoiceAmount / Math.pow(10, precision);
-                setAmount(formattedAmount.toString());
-              }
-            } else {
-              setValidationError(`You don't have the requested asset: ${decoded.asset_id.substring(0, 8)}...`);
-            }
-          }
-        } catch (error) {
-          if (!isCurrent()) return;
-          setAddressType('invalid');
-          setValidationError('Failed to decode RGB invoice');
-        }
-      } else if (destKind === 'bitcoin' || destKind === 'lightning-address' || destKind === 'lnurl-pay' || destKind === 'spark' || destKind === 'arkade') {
-        const btcAsset = allAssets.find(a => a.asset_id === 'BTC');
-        if (btcAsset) setSelectedAsset(btcAsset);
-      } else if (destKind === 'invalid') {
-        setValidationError('Invalid address format. Please enter a valid Bitcoin, Lightning, Spark, Arkade, or RGB address.');
+      await prepareKaleidoPay();
+      if (current !== revision.current) return;
+      let asset: RequestAsset | undefined;
+      if (target?.kind === 'rgb') {
+        // The RGB node reads the invoice's asset (and amount, when it has one).
+        const decoded = rgbAsset ?? await prepareRgbRequest(target.rgbInvoice!);
+        if (current !== revision.current) return;
+        if (!rgbAsset) setRgbAsset(decoded);
+        const units = Number(assetAmount);
+        if (!decoded.amount && !(units > 0)) { setError(`Enter how much ${decoded.ticker} to send.`); return; }
+        asset = { id: decoded.id, ticker: decoded.ticker, precision: decoded.precision, amount: decoded.amount ?? Math.round(units * 10 ** decoded.precision) };
       }
-    } catch (error) {
-      if (!isCurrent()) return;
-      console.error('Failed to decode input:', error);
-      setAddressType('invalid');
-      setValidationError('Failed to decode input. Please check the address format.');
-    } finally {
-      if (isCurrent()) setIsDecodingInvoice(false);
-    }
-  }, [allAssets, bitcoinUnit, selectedAsset.asset_id, getProtocolStatus, navigation, decodeGuard]);
+      const fresh = await previewInput(input, fixedSat ?? amountSat, requestId.current, { asset });
+      if (current !== revision.current) return;
+      if (fresh.plan.status !== 'ready') { setPreview(fresh); setOffers(unavailableOffers(fresh)); setError(fresh.plan.reason); return; }
+      const result = await quotePaymentOffers(fresh);
+      if (current !== revision.current) return;
+      setPreview(fresh); setOffers([...result, ...unavailableOffers(fresh)]);
+      if (!refresh) setSelectedId((bestOffer(result.filter(o => o.executable)) ?? result.find(o => o.executable && o.quote && !o.unavailable) ?? bestOffer(result))?.id);
+      // Refresh never switches the chosen way to pay, even when its quote fails.
+      setReviewUpdated(refresh);
+    } catch (e) {
+      if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
+    } finally { if (current === revision.current) setBusy(false); }
+  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, target, total]);
 
-  const handlePasteFromClipboard = async () => {
+  function review() {
+    if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }
+    if (target.kind !== 'rgb' && fixedSat === undefined && !amountSat) { setShowAmountEditor(true); return; }
+    void getOffers();
+  }
+
+  async function pay() {
+    if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || quote.expiresAt * 1000 <= Date.now() || !selected.executable || unresolvedAttempt(attempt)) return;
+    paying.current = true; setBusy(true); setError('');
+    const recipient = preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat);
+    const next: PaymentAttempt = { id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
     try {
-      const text = await Clipboard.getString();
-      if (text) {
-        setAddress(text);
-        await detectAddressType(text);
-      }
-    } catch (error) {
-      console.error('Failed to read clipboard:', error);
-      Alert.alert('Error', 'Failed to read from clipboard');
-    }
-  };
-
-  const handleSelectContact = (contact: { name?: string; lightning_address?: string; node_pubkey?: string }) => {
-    const dest = contact.lightning_address || contact.node_pubkey;
-    if (!dest) {
-      Alert.alert('No payment method', 'This contact has no Lightning address or pubkey.');
-      return;
-    }
-    feedback.select();
-    setShowContactPicker(false);
-    setAddress(dest);
-    detectAddressType(dest);
-  };
-
-  const getMaxAmount = (): string => {
-    if (!selectedAsset) return '0';
-    
-    if (selectedAsset.asset_id === 'BTC') {
-      const availableBalance = selectedAsset.balance || 0; // sats
-      // Return in the active entry unit so it matches `amount` (and the
-      // clamp/compare logic) regardless of the sats/BTC setting.
-      return bitcoinUnit === 'sats'
-        ? String(Math.floor(availableBalance))
-        : (availableBalance / 100000000).toFixed(8);
-    } else {
-      const balance = selectedAsset.balance || 0;
-      const precision = resolvePrecision(selectedAsset.precision);
-      return (balance / Math.pow(10, precision)).toFixed(precision);
-    }
-  };
-
-  // Format available balance. getMaxAmount() returns a display string in the
-  // asset's own units (BTC for the BTC asset, precision-scaled for RGB assets).
-  // BTC balances are sats-native, so render them via the explicit sats formatter;
-  // other assets are already in display units and keep their ticker.
-  const maxAmount = getMaxAmount();
-  const isBtcAsset = selectedAsset?.asset_id === 'BTC';
-  const availableLabel = isBtcAsset
-    ? `${formatBitcoinAmount(selectedAsset?.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
-    : `${maxAmount} ${selectedAsset?.ticker || ''}`;
-
-  const validateInputs = (): boolean => {
-    if (!activeRoute) {
-      Alert.alert('Choose an account', 'Select the account to send from. Ark addresses do not identify whether the recipient uses Bark or Arkade.');
-      return false;
-    }
-    if (!address.trim()) {
-      Alert.alert('Missing Address', 'Please enter a recipient address or scan a QR code.');
-      return false;
-    }
-
-    if (addressType === 'invalid') {
-      Alert.alert('Invalid Address', 'Please enter a valid Bitcoin address, Lightning invoice, or RGB invoice.');
-      return false;
-    }
-
-    // For invoices with fixed amounts, don't require amount input
-    const hasFixedAmount = 
-      (addressType === 'lightning' && decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) ||
-      (addressType === 'rgb' && decodedRGBInvoice?.amount);
-
-    if (!hasFixedAmount && (!amount.trim() || parseFloat(amount) <= 0)) {
-      Alert.alert('Missing Amount', 'Please enter a valid amount to send.');
-      return false;
-    }
-
-    // Validate balance in the asset's SMALLEST unit. `selectedAsset.balance` is
-    // already raw (sats for BTC, base units for RGB) and `amount` is entered in
-    // the active bitcoinUnit — comparing a sats input against a whole-BTC balance
-    // (the old bug) produced false "Insufficient Balance" errors in sats mode.
-    // Only enforce the client-side balance check when we actually know a
-    // positive balance. If it's still 0 (balances load asynchronously and
-    // aren't persisted), skip it and let the protocol report a real shortfall —
-    // otherwise a slow balance load blocks an otherwise-valid payment.
-    if (selectedAsset && (selectedAsset.balance || 0) > 0) {
-      const isBtc = selectedAsset.asset_id === 'BTC';
-      const precision = resolvePrecision(selectedAsset.precision);
-      const availableRaw = selectedAsset.balance || 0;
-      const inputRaw = isBtc
-        ? (bitcoinUnit === 'BTC'
-            ? Math.round((parseFloat(amount || '0') || 0) * 1e8)
-            : Math.round(parseFloat(amount || '0') || 0))
-        : Math.round((parseFloat(amount || '0') || 0) * Math.pow(10, precision));
-
-      if (inputRaw > availableRaw) {
-        const availableDisplay = isBtc
-          ? `${formatBitcoinAmount(availableRaw, bitcoinUnit)} ${bitcoinUnit}`
-          : `${(availableRaw / Math.pow(10, precision)).toFixed(precision)} ${selectedAsset.ticker}`;
-        Alert.alert(
-          'Insufficient Balance',
-          `Available ${activeRoute ? `from ${activeRoute.account}` : 'to spend'}: ${availableDisplay}. Other accounts or pending funds may be included in your total balance. Lower the amount, choose another payment method, or add funds.`
-        );
-        return false;
-      }
-    }
-
-    return true;
-  };
-
-  const getEffectiveSats = () => decodedInvoice?.amt_msat
-    ? Math.ceil(decodedInvoice.amt_msat / 1000)
-    : amountSatsFromBtcUnits(amount);
-
-  const loadFeeEstimate = async () => {
-    const requestId = ++feeRequestRef.current;
-    setFeeEstimate(null);
-    setEstimatingFee(true);
-    try {
-      const adapter = activeRoute ? protocolManager.getAdapterIfAvailable(toEngineProtocol(activeRoute.protocol)) : null;
-      const fee = selectedAsset.asset_id === 'BTC' ? await estimatePaymentFee(adapter as PaymentFeeAdapter | null, {
-        method: activeRoute?.method ?? '', destination: address, amountSats: getEffectiveSats(),
-        amountless: !decodedInvoice?.amt_msat,
-      }) : null;
-      if (requestId === feeRequestRef.current) setFeeEstimate(fee);
+      await beginPaymentAttempt(walletId, next); // No send unless the recovery record is durable.
     } catch {
-      // An unavailable provider estimate is never presented as a free payment.
-    } finally {
-      if (requestId === feeRequestRef.current) setEstimatingFee(false);
+      setError('Could not start a new payment. Reopen Send to check your previous payment.');
+      setJournalReady(false); paying.current = false; setBusy(false); return;
     }
-  };
-
-  const handleSend = async () => {
-    if (sendingRef.current || estimatingFee || !validateInputs()) return;
-    const expiresAt = invoiceExpiry(address.replace(/^lightning:(\/\/)?/i, ''));
-    if (expiresAt !== null && expiresAt <= Date.now()) {
-      Alert.alert('Invoice expired', 'Ask the recipient for a new invoice before paying.');
-      return;
-    }
-    
-    if (paymentStep === 'input') {
-      setPaymentStep('review');
-      void loadFeeEstimate();
-      return;
-    }
-    
-    const totalSats = paymentTotal(getEffectiveSats(), feeEstimate);
-    if (selectedAsset.asset_id === 'BTC' && totalSats !== null && totalSats > btcSpendableSats()) {
-      Alert.alert('Amount and fee exceed available funds', 'Lower the amount, choose another available payment method, or add funds to this account.');
-      return;
-    }
-    sendingRef.current = true;
-    // We're in review step, proceed with sending
-    setPaymentStep('sending');
-    setLoading(true);
-
+    setAttempt(next);
     try {
-      const route = activeRoute;
-      const protocol = route?.protocol || 'RGB';
-      const method = route?.method || 'lightning';
-
-      // Captured per branch so we navigate to a single, consistent success
-      // screen instead of a bare Alert.
-      let successType: PaymentType = 'lightning';
-      let result: any = null;
-
-      if (protocol === 'BARK') {
-        let invoice = address;
-        const entered = amountSatsFromBtcUnits(amount);
-        if (addressType === 'lightning-address' || addressType === 'lnurl-pay') {
-          invoice = await resolveLightningAddressToInvoice(address, entered);
-        }
-        const fixed = addressType === 'lightning' && (decodedInvoice?.amt_msat ?? 0) > 0;
-        result = await sendBarkPayment({ invoice, ...(fixed ? {} : { amount: entered }) });
-        if (result.status === 'failed') throw new Error('Bark payment failed.');
-        successType = 'bark';
-      } else if (method === 'spark') {
-        // Spark transfer
-        const sparkAdapter = protocolManager.getAdapter('SPARK');
-        const amountSats = bitcoinUnit === 'BTC'
-          ? Math.round(parseFloat(amount) * 1e8)
-          : Math.round(parseFloat(amount));
-        result = await sparkAdapter.sendPayment({ invoice: address, amount: amountSats });
-        successType = 'spark';
-
-      } else if (method === 'arkade' || method === 'boarding') {
-        // Arkade transfer or offboard
-        const arkadeAdapter = protocolManager.getAdapter('ARKADE');
-        const amountSats = bitcoinUnit === 'BTC'
-          ? Math.round(parseFloat(amount) * 1e8)
-          : Math.round(parseFloat(amount));
-
-        const feeSats = await assertArkadeBalanceCovered(arkadeAdapter, amountSats);
-        result = method === 'boarding' && typeof arkadeAdapter.sendBtcOnchain === 'function'
-          ? await arkadeAdapter.sendBtcOnchain({ address, amount: amountSats })
-          : await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
-        ensureSuccessfulArkadeResult(result);
-        if (feeSats !== null && result.fee == null) {
-          result = { ...result, fee: feeSats };
-        }
-        successType = method === 'boarding' ? 'boarding' : 'arkade';
-
-      } else if (addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay') {
-        // Lightning payment — route to the correct protocol
-        const lnAdapter = protocolManager.getAdapter(toEngineProtocol(protocol));
-        const enteredSats = amountSatsFromBtcUnits(amount);
-
-        // A Lightning address / LNURL is not payable directly — resolve it to a
-        // concrete BOLT11 invoice for the entered amount first (protocols like
-        // Spark can only pay an invoice, not a user@domain string).
-        let invoiceToPay = address;
-        if (addressType === 'lightning-address' || addressType === 'lnurl-pay') {
-          if (enteredSats <= 0) throw new Error('Enter an amount to pay this Lightning address.');
-          invoiceToPay = await resolveLightningAddressToInvoice(address, enteredSats);
-        }
-
-        // Amountless (0-amount) BOLT11: the invoice carries no amount, so pass
-        // the entered amount explicitly — required by Spark, honored by RGB.
-        const isAmountlessInvoice =
-          addressType === 'lightning' &&
-          (!decodedInvoice || !decodedInvoice.amt_msat || decodedInvoice.amt_msat === 0) &&
-          !decodedInvoice?.asset_id;
-        if (isAmountlessInvoice && enteredSats <= 0) {
-          throw new Error('Enter an amount to pay this Lightning invoice.');
-        }
-
-        result = await lnAdapter.sendPayment(
-          isAmountlessInvoice
-            ? { invoice: invoiceToPay, amount: enteredSats }
-            : { invoice: invoiceToPay },
-        );
-        successType = 'lightning';
-
-      } else if (addressType === 'bitcoin') {
-        // On-chain BTC — route to correct protocol
-        const feeRateNum = feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate || 2;
-        const btcAdapter = protocolManager.getAdapter(toEngineProtocol(protocol));
-        // sendBtcOnchain expects sats; convert from the active unit (BTC mode
-        // previously sent e.g. 0.001 instead of 100000 sats).
-        const onchainSats = bitcoinUnit === 'BTC'
-          ? Math.round(parseFloat(amount) * 1e8)
-          : Math.round(parseFloat(amount));
-        if (typeof btcAdapter.sendBtcOnchain !== 'function') {
-          throw new Error(`${protocol} does not support Bitcoin on-chain withdrawals from this wallet version.`);
-        }
-        result = await btcAdapter.sendBtcOnchain({ address, amount: onchainSats, feeRate: feeRateNum });
-        ensureSuccessfulProtocolResult(result, `${protocol} on-chain withdrawal`);
-        successType = 'bitcoin';
-
-      } else if (addressType === 'rgb') {
-        const rgbSendAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
-        // Don't attempt an RGB send over a node that isn't connected.
-        if (!rgbSendAdapter?.isConnected()) {
-          throw new Error('RGB node not connected. Please connect it in Settings.');
-        }
-        // RGB amounts are base units (input is whole tokens) — scale by precision,
-        // otherwise "10" would send 10 base units (0.00001 of a precision-6 asset).
-        const rgbBaseUnits = Math.round((parseFloat(amount) || 0) * Math.pow(10, resolvePrecision(selectedAsset.precision)));
-        result = await rgbSendAdapter.sendAsset?.({ asset_id: selectedAsset.asset_id, recipientId: address, amount: rgbBaseUnits });
-        successType = 'rgb';
-      }
-
-      goToPaymentSuccess(successType, result);
-    } catch (error) {
-      if (activeRoute?.account === 'BARK' && (error as any)?.code === 'PAYMENT_OUTCOME_UNKNOWN') {
-        goToPaymentSuccess('bark', { status: 'unknown', feeKnown: false });
-        return;
-      }
-      console.error('Send error:', error);
-      feedback.error();
-      setPaymentStep('review');
-      Alert.alert(
-        'Payment failed',
-        error instanceof Error ? error.message : 'Failed to send payment'
-      );
+      const result = await executePaymentOffer(preview, selected, next.id);
+      const updated = { ...next, ...result };
+      setAttempt(updated);
+      try { await savePaymentAttempt(walletId, updated); }
+      catch { setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
+    } catch (e) {
+      const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown' };
+      setAttempt(updated);
+      setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.');
+      try { await savePaymentAttempt(walletId, updated); } catch { /* The durable pending record forces a status check on reopen. */ }
     } finally {
-      sendingRef.current = false;
-      setLoading(false);
+      paying.current = false; setBusy(false);
+      void dispatch(loadBtcBalance());
     }
-  };
+  }
 
-  const assertArkadeBalanceCovered = async (
-    arkadeAdapter: any,
-    amountSats: number,
-  ): Promise<number | null> => {
-    const feeSats = feeEstimate;
+  async function checkStatus() {
+    if (!attempt || !walletId || paying.current) return;
+    paying.current = true; setBusy(true); setError('');
+    try {
+      const result = await checkPaymentStatus(attempt.sourceId, attempt.id);
+      const updated = { ...attempt, ...result };
+      await savePaymentAttempt(walletId, updated); setAttempt(updated);
+      if (result.status === 'completed') void dispatch(loadBtcBalance());
+    } catch { setError('Could not update payment status. Check again before making another payment.'); }
+    finally { paying.current = false; setBusy(false); }
+  }
 
-    const balance = await arkadeAdapter.getBtcBalance?.();
-    const availableSats = Number(balance?.confirmed);
-    if (!Number.isFinite(availableSats)) {
-      throw new Error('Could not read your Arkade balance. Please try again.');
-    }
-    if (amountSats + (feeSats ?? 0) > availableSats) {
-      throw new Error(
-        `Insufficient Arkade balance. This payment needs ${amountSats.toLocaleString()} sats plus ${feeSats === null ? 'a network fee (estimate unavailable)' : `an estimated ${feeSats.toLocaleString()} sats fee`}.`
-      );
-    }
-
-    return feeSats;
-  };
-
-  const ensureSuccessfulArkadeResult = (result: any) => {
-    if (!result) {
-      throw new Error('Arkade did not return a payment result.');
-    }
-    if (result.status === 'failed' || result.error) {
-      throw new Error(result.error || 'Arkade payment failed.');
-    }
-    const reference = result.txid || result.txId || result.paymentHash || result.payment_hash || result.hash;
-    if (!reference || (typeof reference === 'string' && reference.trim() === '')) {
-      throw new Error('Arkade did not return a transaction ID. The payment was not confirmed.');
-    }
-  };
-
-  const ensureSuccessfulProtocolResult = (result: any, label: string) => {
-    if (!result) {
-      throw new Error(`${label} did not return a payment result.`);
-    }
-    if (result.status === 'failed' || result.error) {
-      throw new Error(result.error || `${label} failed.`);
-    }
-    const reference = result.txid || result.txId || result.paymentHash || result.payment_hash || result.hash;
-    if (!reference || (typeof reference === 'string' && reference.trim() === '')) {
-      throw new Error(`${label} did not return a transaction ID.`);
-    }
-  };
-
-  // Builds the display payload from current state and routes to the clean
-  // success screen (which owns the success haptic + chime). `result` is the
-  // adapter return value, mined for a txid / payment hash / preimage reference.
-  const goToPaymentSuccess = (paymentType: PaymentType, result: any) => {
-    const isBtc = selectedAsset.asset_id === 'BTC';
-    const unit = isBtc ? bitcoinUnit : selectedAsset.ticker;
-    const fiat = activeRoute?.account !== 'BARK' && isBtc && bitcoinPrice > 0 && amount
-      ? `≈ $${parseFloat(formatSatoshisToUSD(amountSatsFromBtcUnits(amount))).toLocaleString()}`
-      : undefined;
-
-    const reference =
-      result?.txid || result?.txId || result?.payment_hash ||
-      result?.paymentHash || result?.hash || result?.preimage || undefined;
-    const referenceLabel =
-      paymentType === 'lightning' ? 'Payment hash'
-      : paymentType === 'rgb' ? 'Transaction'
-      : 'Transaction ID';
-
-    // Surface the on-chain fee rate on the receipt for on-chain sends only
-    // (same rule as the fee selector).
-    const fee = result?.feeKnown === false ? 'Unavailable' : result?.fee != null && Number.isFinite(Number(result.fee))
-      ? `${formatBitcoinAmount(Number(result.fee), bitcoinUnit)} ${bitcoinUnit}`
-      : (addressType === 'bitcoin' || addressType === 'rgb')
-      ? `${feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB`
-      : undefined;
-
-    navigation.replace('PaymentSuccess', {
-      amount: isBtc ? formatBitcoinAmount(getEffectiveSats(), bitcoinUnit) : amount || '0',
-      unit,
-      fiat,
-      recipient: address,
-      paymentType,
-      status: paymentReceiptStatus(result, ['bitcoin', 'boarding', 'rgb'].includes(paymentType)),
-      networkLabel: activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : undefined,
-      fee,
-      reference: typeof reference === 'string' ? reference : undefined,
-      referenceLabel,
-    });
-  };
-
-  // Real asset iconography (CDN logos, e.g. the orange ₿ for BTC) with an RGB
-  // protocol badge — matching the WDK asset-selector rows shown in the modal,
-  // instead of generic Ionicons glyphs.
-  const AssetIcon = ({ asset }: { asset: Asset }) => {
-    if (!asset) return null;
-    return (
-      <View style={styles.assetIconContainer}>
-        <TokenAssetIcon
-          ticker={asset.ticker}
-          name={asset.name}
-          protocol={asset.isRGB ? 'RGB' : undefined}
-          showBadge={!!asset.isRGB}
-          size={36}
-        />
-      </View>
-    );
-  };
-
-  const renderHeader = () => (
-    <ScreenHeader
-      title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Paying…' : 'Pay'}
-      showBack={paymentStep !== 'sending'}
-      onBack={() => { if (paymentStep === 'review') { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); } else navigation.goBack(); }}
-      rightAction={
-        <TouchableOpacity
-          onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
-          style={styles.helpButton}
-        >
-          <Ionicons name="help-circle-outline" size={20} color={theme.colors.text.primary} />
-        </TouchableOpacity>
-      }
-    />
-  );
-
-  // Once a recipient is decoded we collapse the raw input into a compact
-  // summary — there's no value in showing a 400-char Lightning invoice in full.
-  const isLnDest = addressType === 'lightning' || addressType === 'lightning-address' || addressType === 'lnurl-pay';
-  const recipientLocked = !!address && addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice;
-  const recipientColor = isLnDest ? theme.colors.networks.lightning
-    : addressType === 'spark' ? theme.colors.networks.spark
-    : addressType === 'arkade' ? theme.colors.networks.arkade
-    : addressType === 'bitcoin' ? theme.colors.networks.onchain
-    : theme.colors.primary[500];
-  const recipientNetwork = isLnDest ? 'lightning'
-    : addressType === 'spark' ? 'spark'
-    : addressType === 'arkade' ? 'arkade'
-    : addressType === 'bitcoin' ? 'bitcoin'
-    : 'rgb';
-  const recipientLabel = addressType === 'lightning' ? 'Lightning Invoice'
-    : addressType === 'lightning-address' ? 'Lightning Address'
-    : addressType === 'lnurl-pay' ? 'LNURL Pay'
-    : addressType === 'spark' ? 'Spark Address'
-    : addressType === 'arkade' ? 'Ark address (Bark / Arkade)'
-    : addressType === 'bitcoin' ? 'Bitcoin Address'
-    : 'RGB Invoice';
-
-  const renderAddressInput = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Who are you paying?</Text>
-      {!recipientLocked && (
-        <Text style={styles.sectionDescription}>
-          Paste or scan an address/invoice, or pick a contact. We'll work out the rest.
-        </Text>
-      )}
-
-      {recipientLocked ? (
-        <View style={styles.recipientCard}>
-          <View style={[styles.recipientIcon, { backgroundColor: recipientColor }]}>
-            <NetworkIcon network={recipientNetwork} size={16} color="white" />
-          </View>
-          <View style={styles.recipientBody}>
-            <Text style={styles.recipientType}>{recipientLabel}</Text>
-            <Text style={styles.recipientAddress} numberOfLines={1} ellipsizeMode="middle">
-              {address}
-            </Text>
-          </View>
-          <TouchableOpacity
-            onPress={() => { feedback.select(); setAddress(''); detectAddressType(''); }}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Ionicons name="close-circle" size={24} color={theme.colors.text.muted} />
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <Input
-          placeholder="Address, invoice, or Lightning address…"
-          value={address}
-          onChangeText={(text) => {
-            setAddress(text);
-            detectAddressType(text);
-          }}
-          variant="outlined"
-          rightIcon={address ? (
-            <TouchableOpacity
-              onPress={() => { setAddress(''); detectAddressType(''); }}
-              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            >
-              <Ionicons name="close-circle" size={20} color={theme.colors.text.muted} />
-            </TouchableOpacity>
-          ) : undefined}
-        />
-      )}
-
-      {/* Empty-state entry methods — the primary way to start a payment.
-          Shown only before a recipient is entered; once `address` is set the
-          input + clear button take over and these collapse. */}
-      {!address && (
-        <View style={styles.entryMethods}>
-          <PressableScale
-            style={styles.entryPrimary}
-            onPress={() => { feedback.select(); navigation.navigate('QRScanner'); }}
-          >
-            <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.inverse} />
-            <Text style={styles.entryPrimaryText}>Scan QR code</Text>
-          </PressableScale>
-          <View style={styles.entrySecondaryRow}>
-            <PressableScale style={styles.entrySecondary} onPress={handlePasteFromClipboard}>
-              <Ionicons name="clipboard-outline" size={20} color={theme.colors.primary[500]} />
-              <Text style={styles.entrySecondaryText}>Paste</Text>
-            </PressableScale>
-            <PressableScale style={styles.entrySecondary} onPress={() => { feedback.select(); setShowContactPicker(true); }}>
-              <Ionicons name="people-outline" size={20} color={theme.colors.primary[500]} />
-              <Text style={styles.entrySecondaryText}>Contacts</Text>
-            </PressableScale>
-          </View>
-        </View>
-      )}
-
-      {/* Route selector — whenever more than one account can pay the
-          destination, always let the user choose which to spend from. The
-          auto-router still pre-selects the best route as the default. */}
-      {sendRoutes.length > 0 && addressType !== 'unknown' && addressType !== 'invalid' && (
-        <View style={{ marginTop: 14, gap: 8 }}>
-          <Text style={{ fontSize: 12, fontWeight: '600', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.4 }}>
-            Send via
-          </Text>
-          {sendRoutes.map((route) => {
-            const selected = activeRoute?.account === route.account && activeRoute?.method === route.method;
-            const disabled = !!route.disabled;
-            return (
-              <PressableScale
-                key={`${route.account}-${route.method}`}
-                onPress={() => { if (!disabled) { feedback.select(); feeRequestRef.current += 1; setFeeEstimate(null); setEstimatingFee(false); setPaymentStep('input'); setActiveRoute({ ...route, protocol: route.account }); } }}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderRadius: 14,
-                  backgroundColor: selected ? theme.colors.primary[50] : theme.colors.background.secondary,
-                  borderWidth: 1,
-                  borderColor: selected ? theme.colors.primary[500] : theme.colors.border.light,
-                  opacity: disabled ? 0.5 : 1,
-                }}
-              >
-                <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
-                  <NetworkIcon network={String(route.account).toLowerCase()} size={20} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.colors.text.primary }}>
-                      {route.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : `${route.account} · ${METHOD_META[route.method]?.label || route.method}`}
-                    </Text>
-                    {route.recommended && (
-                      <View style={{ backgroundColor: theme.colors.primary[500], borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1 }}>
-                        <Text style={{ fontSize: 9, fontWeight: '800', color: theme.colors.text.inverse, letterSpacing: 0.3 }}>BEST</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={{ fontSize: 11.5, color: disabled ? theme.colors.error[500] : theme.colors.text.tertiary, marginTop: 1 }}>
-                    {disabled ? (route.disabledReason || 'Unavailable') : `${route.summary}${selectedAsset.asset_id === 'BTC' ? ` · ${formatBitcoinAmount(availableForRoute(route.account, route.method), bitcoinUnit)} ${bitcoinUnit} available before fees` : ''}`}
-                  </Text>
-                </View>
-                <Ionicons
-                  name={selected ? 'radio-button-on' : 'radio-button-off'}
-                  size={20}
-                  color={selected ? theme.colors.primary[500] : theme.colors.text.tertiary}
-                />
-              </PressableScale>
-            );
-          })}
-        </View>
-      )}
-
-      {/* Decoding Indicator */}
-      {isDecodingInvoice && (
-        <View style={styles.decodingIndicator}>
-          <ActivityIndicator size="small" color={theme.colors.primary[500]} />
-          <Text style={styles.decodingText}>Analyzing input...</Text>
-        </View>
-      )}
-
-      {/* Validation Error */}
-      {validationError && (
-        <View style={styles.errorContainer}>
-          <Ionicons name="warning-outline" size={16} color={theme.colors.error[500]} />
-          <Text style={styles.errorText}>{validationError}</Text>
-        </View>
-      )}
-
-      {/* Decoded Invoice Info */}
-      {renderInvoiceDetails()}
-    </View>
-  );
-
-  const renderInvoiceDetails = () => {
-    if (decodedInvoice && addressType === 'lightning') {
-      return (
-        <View style={styles.invoiceDetails}>
-          <Text style={styles.invoiceDetailsTitle}>Lightning Invoice Details</Text>
-          {decodedInvoice.amt_msat > 0 && (
-            <View style={styles.invoiceDetailRow}>
-              <Text style={styles.invoiceDetailLabel}>Amount:</Text>
-              <Text style={styles.invoiceDetailValue}>
-                {(decodedInvoice.amt_msat / 1000).toLocaleString()} sats
-              </Text>
-            </View>
-          )}
-          {decodedInvoice.description && (
-            <View style={styles.invoiceDetailRow}>
-              <Text style={styles.invoiceDetailLabel}>Description:</Text>
-              <Text style={styles.invoiceDetailValue}>{decodedInvoice.description}</Text>
-            </View>
-          )}
-        </View>
-      );
-    }
-
-    if (decodedRGBInvoice && addressType === 'rgb') {
-      const asset = allAssets.find(a => a.asset_id === decodedRGBInvoice.asset_id);
-      
-      return (
-        <View style={styles.invoiceDetails}>
-          <Text style={styles.invoiceDetailsTitle}>RGB Invoice Details</Text>
-          <View style={styles.invoiceDetailRow}>
-            <Text style={styles.invoiceDetailLabel}>Asset:</Text>
-            <Text style={styles.invoiceDetailValue}>{asset?.ticker || 'Unknown'}</Text>
-          </View>
-          {decodedRGBInvoice.amount && (
-            <View style={styles.invoiceDetailRow}>
-              <Text style={styles.invoiceDetailLabel}>Amount:</Text>
-              <Text style={styles.invoiceDetailValue}>
-                {(decodedRGBInvoice.amount / Math.pow(10, resolvePrecision(asset?.precision))).toFixed(resolvePrecision(asset?.precision))} {asset?.ticker}
-              </Text>
-            </View>
-          )}
-        </View>
-      );
-    }
-
-    return null;
-  };
-
-  // ── WDK AssetSelector mapping ──────────────────────────────────────────
-  // CDN → DiceBear logo, matching components/AssetIcon's resolution order.
-  const assetLogoUri = (ticker: string): string => {
-    const norm = ticker.toUpperCase().trim();
-    if (/^[A-Z0-9-]{1,12}$/.test(norm)) {
-      return `https://raw.githubusercontent.com/kaleidoswap/coinmarketcap-icons-cryptos/refs/heads/main/icons/${norm.toLowerCase()}.png`;
-    }
-    return `https://api.dicebear.com/9.x/shapes/svg?seed=${encodeURIComponent(ticker)}&backgroundType=gradientLinear&radius=50`;
-  };
-  const ASSET_COLORS: Record<string, string> = {
-    BTC: '#F7931A', USDT: '#26A17B', USDC: '#2775CA', XAUT: '#D4AF37',
-  };
-
-  const assetToToken = (a: Asset) => {
-    const isBtc = a.asset_id === 'BTC';
-    const balanceStr = isBtc
-      ? `${formatBitcoinAmount(a.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
-      : `${((a.balance || 0) / Math.pow(10, resolvePrecision(a.precision))).toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(a.precision) })}`;
-    return {
-      id: a.asset_id,
-      symbol: a.ticker,
-      name: a.name,
-      balance: balanceStr,
-      balanceUSD: isBtc ? `$${formatSatoshisToUSD(a.balance || 0)}` : '',
-      icon: { uri: assetLogoUri(a.ticker) },
-      color: ASSET_COLORS[a.ticker.toUpperCase()] || '#64748B',
-      hasBalance: (a.balance || 0) > 0,
-    };
-  };
-
-  const renderAssetSelector = () => {
-    // Don't show asset selector if invoice specifies the asset
-    if ((addressType === 'lightning' && decodedInvoice?.asset_id) ||
-        (addressType === 'rgb' && decodedRGBInvoice?.asset_id)) {
-      return null;
-    }
-
-    // For bitcoin addresses, force BTC
-    if (addressType === 'bitcoin') {
-      return null;
-    }
-
-    return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Asset</Text>
-        <TouchableOpacity
-          style={styles.assetSelector}
-          onPress={() => { feedback.select(); setShowAssetSelector(true); }}
-        >
-          <AssetIcon asset={selectedAsset} />
-          <View style={styles.assetInfo}>
-            <Text style={styles.assetTicker}>{selectedAsset.ticker}</Text>
-            <Text style={styles.assetName}>{selectedAsset.name}</Text>
-            <Text style={styles.assetBalance}>
-              Balance: {selectedAsset.asset_id === 'BTC'
-                ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)} ${bitcoinUnit}`
-                : `${((selectedAsset.balance || 0) / Math.pow(10, resolvePrecision(selectedAsset.precision))).toFixed(resolvePrecision(selectedAsset.precision))} ${selectedAsset.ticker}`}
-            </Text>
-          </View>
-          <Ionicons name="chevron-down" size={20} color={theme.colors.text.secondary} />
-        </TouchableOpacity>
-
-        <Modal
-          visible={showAssetSelector}
-          transparent
-          animationType="slide"
-          onRequestClose={() => setShowAssetSelector(false)}
-        >
-          <View style={styles.assetSheetBackdrop}>
-            <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowAssetSelector(false)} />
-            <View style={styles.assetSheet}>
-              <View style={styles.assetSheetHandle} />
-              <View style={styles.assetSheetHeader}>
-                <Text style={styles.assetSheetTitle}>Select asset</Text>
-                <TouchableOpacity onPress={() => setShowAssetSelector(false)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <Ionicons name="close" size={24} color={theme.colors.text.secondary} />
-                </TouchableOpacity>
-              </View>
-              <WdkAssetSelector
-                tokens={allAssets.map(assetToToken)}
-                recentTokens={['BTC']}
-                onSelectToken={(token) => {
-                  const picked = allAssets.find((a) => a.asset_id === token.id);
-                  if (picked) {
-                    feedback.select();
-                    setSelectedAsset(picked);
-                    setAmountMode('token');
-                  }
-                  setShowAssetSelector(false);
-                }}
-              />
-            </View>
-          </View>
-        </Modal>
-      </View>
-    );
-  };
-
-  // Canonical amount (`amount`) is always in the asset's display units (BTC or
-  // sats for BTC per bitcoinUnit; precision-scaled units for RGB). The WDK
-  // AmountInput drives this via token or (BTC-only) fiat entry.
-  const setAmountClamped = (next: string) => {
-    const maxNum = parseFloat(getMaxAmount());
-    // Only clamp once we actually know a positive spendable balance. While
-    // balances are still loading (max is 0/unknown) clamping would silently
-    // force the entry back to 0 — that's what previously sent a 0-amount
-    // Lightning payment to Spark. validateInputs() still catches real overspends.
-    if (maxNum > 0 && parseFloat(next || '0') > maxNum) {
-      setAmount(getMaxAmount());
-      return;
-    }
-    setAmount(next);
-  };
-
-  const amountSatsFromBtcUnits = (v: string): number =>
-    bitcoinUnit === 'BTC' ? Math.round((parseFloat(v) || 0) * 1e8) : Math.round(parseFloat(v) || 0);
-
-  const handleAmountChange = (text: string) => {
-    const clean = text.replace(/[^0-9.]/g, '');
-    const parts = clean.split('.');
-    if (parts.length > 2) return; // single decimal point
-
-    if (amountMode === 'fiat') {
-      if (parts[1] && parts[1].length > 2) return; // cents
-      setFiatInput(clean);
-      const usd = parseFloat(clean) || 0;
-      const sats = bitcoinPrice > 0 ? Math.round((usd / bitcoinPrice) * 1e8) : 0;
-      setAmountClamped(bitcoinUnit === 'BTC' ? (sats / 1e8).toFixed(8) : String(sats));
-      return;
-    }
-
-    const maxDecimals = selectedAsset.asset_id === 'BTC'
-      ? (bitcoinUnit === 'BTC' ? 8 : 0)
-      : (resolvePrecision(selectedAsset.precision));
-    if (parts[1] && parts[1].length > maxDecimals) return;
-    const normalized = selectedAsset.asset_id === 'BTC' ? parseInputAmount(clean, bitcoinUnit) : clean;
-    setAmountClamped(normalized);
-  };
-
-  const renderAmountInput = () => {
-    // Don't show amount input if invoice specifies the amount
-    const invoiceHasAmount = (addressType === 'lightning' && decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) ||
-                          (addressType === 'rgb' && decodedRGBInvoice?.amount);
-
-    if (invoiceHasAmount) {
-      return null;
-    }
-
-    const isBtc = selectedAsset.asset_id === 'BTC';
-    const canEnterFiat = activeRoute?.account !== 'BARK' && isBtc && bitcoinPrice > 0;
-    const maxAmount = getMaxAmount();
-
-    const tokenSymbol = isBtc ? bitcoinUnit : selectedAsset.ticker;
-    const tokenBalance = isBtc
-      ? `${formatBitcoinAmount(selectedAsset.balance || 0, bitcoinUnit)}`
-      : `${((selectedAsset.balance || 0) / Math.pow(10, resolvePrecision(selectedAsset.precision))).toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(selectedAsset.precision) })}`;
-    const tokenBalanceUSD = activeRoute?.account !== 'BARK' && isBtc ? `$${formatSatoshisToUSD(selectedAsset.balance || 0)}` : '—';
-
-    // Secondary conversion line.
-    const secondary = (() => {
-      if (!amount) return '';
-      if (amountMode === 'token' && isBtc && activeRoute?.account !== 'BARK') {
-        return `≈ $${formatSatoshisToUSD(amountSatsFromBtcUnits(amount))} USD`;
-      }
-      if (amountMode === 'fiat') {
-        return `≈ ${formatBitcoinAmount(amountSatsFromBtcUnits(amount), bitcoinUnit)} ${bitcoinUnit}`;
-      }
-      return '';
-    })();
-
-    const onToggleMode = () => {
-      if (!canEnterFiat) return;
-      feedback.select();
-      setAmountMode((m) => {
-        const next = m === 'token' ? 'fiat' : 'token';
-        if (next === 'fiat') {
-          setFiatInput(amount ? formatSatoshisToUSD(amountSatsFromBtcUnits(amount)) : '');
-        }
-        return next;
-      });
-    };
-
-    const balanceLoading = isBtc && isBalanceLoading && (selectedAsset.balance || 0) === 0;
-
-    return (
-      <View style={styles.section}>
-        <WdkAmountInput
-          label={`Amount (${amountMode === 'fiat' ? 'USD' : tokenSymbol})`}
-          value={amountMode === 'fiat' ? fiatInput : amount}
-          onChangeText={handleAmountChange}
-          tokenSymbol={tokenSymbol}
-          tokenBalance={balanceLoading ? 'Loading…' : tokenBalance}
-          tokenBalanceUSD={balanceLoading ? '' : tokenBalanceUSD}
-          inputMode={amountMode}
-          onToggleInputMode={onToggleMode}
-          onUseMax={() => { feedback.select(); setAmountMode('token'); setAmount(maxAmount); }}
-          error={validationError || undefined}
-          editable={!loading}
-        />
-
-        {secondary ? <Text style={styles.amountSecondary}>{secondary}</Text> : null}
-      </View>
-    );
-  };
-
-  const renderFeeSelector = () => {
-    // Only the RLN on-chain send consumes this user-selected fee rate.
-    if (addressType !== 'bitcoin' || activeRoute?.protocol !== 'RGB') {
-      return null;
-    }
-
-    return (
-      <View style={styles.section}>
-        <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showAdvancedFees }}
-          style={styles.reviewRow} onPress={() => setShowAdvancedFees(value => !value)}>
-          <Text style={styles.sectionTitle}>Advanced · network fee rate</Text>
-          <Ionicons name={showAdvancedFees ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
-        </TouchableOpacity>
-        {showAdvancedFees && <>
-        <Text style={styles.sectionDescription}>Fee rates do not guarantee a confirmation time. The final cost depends on transaction size and network conditions.</Text>
-        <View style={styles.feeSelector}>
-          {feeRates.map((fee, index) => (
-            <TouchableOpacity
-              key={`fee-rate-${fee.value}-${index}`}
-              style={[
-                styles.feeButton,
-                feeRate === fee.value && styles.feeButtonActive
-              ]}
-              onPress={() => setFeeRate(fee.value)}
-            >
-              <Ionicons 
-                name={fee.icon as any} 
-                size={16} 
-                color={feeRate === fee.value ? theme.colors.text.inverse : theme.colors.text.secondary} 
-              />
-              <Text style={[
-                styles.feeButtonText,
-                feeRate === fee.value && styles.feeButtonTextActive
-              ]}>
-                {fee.label}
-              </Text>
-              <Text style={[
-                styles.feeButtonRate,
-                feeRate === fee.value && styles.feeButtonRateActive
-              ]}>
-                {fee.rate} sat/vB
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {feeRate === 'custom' && (
-          <View style={styles.customFeeContainer}>
-            <Input
-              label="Custom Fee Rate (sat/vB)"
-              placeholder="1.0"
-              value={customFee.toString()}
-              onChangeText={(text) => setCustomFee(parseFloat(text) || 1.0)}
-              keyboardType="decimal-pad"
-              variant="outlined"
-            />
-          </View>
-        )}
-        </>}
-      </View>
-    );
-  };
-
-  const renderSendButton = () => {
-    // Hide send button during review and sending steps
-    if (paymentStep === 'review' || paymentStep === 'sending') return null;
-
-    const hasAddress = address && addressType !== 'invalid' && addressType !== 'unknown';
-    const hasFixedAmount = (decodedInvoice?.amt_msat && decodedInvoice.amt_msat > 0) || decodedRGBInvoice?.amount;
-    const hasAmount = amount || hasFixedAmount;
-
-    // No recipient yet → the empty-state hero (Scan / Paste / Contacts) owns
-    // entry, so we don't show a dead sticky CTA here. Avoid the previous
-    // duplicate action rows and the non-actionable "Enter Address" button.
-    if (!hasAddress) return null;
-
-    const canSend = hasAmount;
-    const buttonTitle = hasAmount ? 'Review Payment' : 'Enter Amount';
-
-    return (
-      <View style={styles.sendButtonContainer}>
-        <Button
-          title={buttonTitle}
-          onPress={handleSend}
-          disabled={!canSend}
-          variant="primary"
-          fullWidth={true}
-          size="lg"
-          style={styles.sendButton}
-        />
-      </View>
-    );
-  };
-
-  const renderPaymentReview = () => {
-    if (paymentStep !== 'review' && paymentStep !== 'sending') return null;
-
-    const effectiveAmountSats = getEffectiveSats();
-    const effectiveAmount = selectedAsset.asset_id === 'BTC'
-      ? formatBitcoinAmount(effectiveAmountSats, bitcoinUnit)
-      : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
-    const totalSats = paymentTotal(effectiveAmountSats, feeEstimate);
-    const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
-    const formatCost = (sats: number) => `${formatBitcoinAmount(sats, bitcoinUnit)} ${bitcoinUnit}${activeRoute?.account !== 'BARK' && bitcoinPrice > 0 ? ` · ≈ $${formatSatoshisToUSD(sats)}` : ''}`;
-
-    return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Review Payment</Text>
-        
-        <View style={styles.reviewCard}>
-          <View style={styles.reviewHeader}>
-            <AssetIcon asset={selectedAsset} />
-            <View style={styles.reviewHeaderText}>
-              <Text style={styles.reviewAmount}>
-                {effectiveAmount} {selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}
-              </Text>
-              <Text style={styles.reviewAsset}>Recipient receives · {selectedAsset.name}</Text>
-            </View>
-          </View>
-
-          <View style={styles.reviewDetails}>
-            <PaymentNetworkLabel request={address} />
-            {selectedAsset.asset_id === 'BTC' && <>
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Available in this account</Text>
-                <Text style={styles.reviewValue}>{formatCost(btcSpendableSats())}</Text>
-              </View>
-              {totalSats !== null && totalSats <= btcSpendableSats() && <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>After payment and fee</Text>
-                <Text style={styles.reviewValue}>{formatCost(btcSpendableSats() - totalSats)}</Text>
-              </View>}
-              {(totalSats ?? effectiveAmountSats) > btcSpendableSats() && <Text accessibilityRole="alert" style={styles.sectionDescription}>Insufficient balance in this account. Tap Edit to choose another available account or lower the amount.</Text>}
-              {(totalSats ?? effectiveAmountSats) > btcSpendableSats() && sendRoutes.filter(option => !option.disabled && option.account !== activeRoute?.account && availableForRoute(option.account, option.method) >= effectiveAmountSats).map(option => <TouchableOpacity key={`${option.account}-${option.method}`} accessibilityRole="button" style={{ paddingVertical: theme.spacing[3] }} onPress={() => {
-                feeRequestRef.current += 1; setFeeEstimate(null); setEstimatingFee(false);
-                setActiveRoute({ ...option, protocol: option.account }); setPaymentStep('input');
-              }}><Text style={{ color: theme.colors.primary[500] }}>Review using {option.account} · fees recalculated</Text></TouchableOpacity>)}
-            </>}
-
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>From account</Text>
-              <Text style={styles.reviewValue}>{activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : activeRoute?.account || 'Choose an account'}</Text>
-            </View>
-            {activeRoute?.account === 'BARK' && <Text style={styles.reviewLabel}>Fee is determined by Bark. Settlement may remain pending; check Bark activity after sending.</Text>}
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>To</Text>
-              <Text style={styles.reviewValue} numberOfLines={2}>
-                {address.length > 40 ? `${address.slice(0, 20)}...${address.slice(-20)}` : address}
-              </Text>
-            </View>
-            
-            {addressType === 'lightning' && decodedInvoice?.description && (
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Description</Text>
-                <Text style={styles.reviewValue}>{decodedInvoice.description}</Text>
-              </View>
-            )}
-
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Request</Text>
-              <Text style={styles.reviewValue}>{paymentRequestLabel(address)}</Text>
-            </View>
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Estimated fee</Text>
-              <Text style={styles.reviewValue}>{estimatingFee ? 'Estimating…' : feeEstimate === null ? 'Unavailable for this payment method' : formatCost(feeEstimate)}</Text>
-            </View>
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Estimated total</Text>
-              <Text style={styles.reviewValue}>{selectedAsset.asset_id === 'BTC' && totalSats !== null ? formatCost(totalSats) : `${effectiveAmount} ${unit} + network fee`}</Text>
-            </View>
-            <View style={styles.reviewRow}>
-              <Text style={styles.reviewLabel}>Arrival</Text>
-              <Text style={styles.reviewValue}>{addressType === 'bitcoin' || addressType === 'rgb' ? 'After network confirmation; timing varies' : 'Usually seconds; routing can take longer'}</Text>
-            </View>
-            <Text style={styles.sectionDescription}>
-              {feeEstimate === null ? 'This wallet provider does not currently supply a fee estimate. The final fee will be shown on the receipt when available.' : 'Fees are estimates and may change before the payment is sent.'}
-            </Text>
-
-            {activeRoute?.account !== 'BARK' && selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>USD Value</Text>
-                <Text style={styles.reviewValue}>
-                  ≈ ${parseFloat(formatSatoshisToUSD(effectiveAmountSats)).toLocaleString()}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-      </View>
-    );
-  };
-
-  const renderReviewActions = () => {
-    if (paymentStep !== 'review') return null;
-    const effectiveAmount = selectedAsset.asset_id === 'BTC'
-      ? formatBitcoinAmount(getEffectiveSats(), bitcoinUnit)
-      : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
-    const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
-    return <View style={styles.sendButtonContainer}>
-      <View style={styles.reviewActions}>
-        <Button
-          title="Edit"
-          disabled={loading}
-          variant="secondary"
-          onPress={() => { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); }}
-          style={styles.reviewEditButton}
-        />
-        <Button
-          title={`Pay ${effectiveAmount} ${unit}`}
-          disabled={estimatingFee || loading || (selectedAsset.asset_id === 'BTC' && (paymentTotal(getEffectiveSats(), feeEstimate) ?? getEffectiveSats()) > btcSpendableSats())}
-          variant="primary"
-          onPress={handleSend}
-          loading={loading}
-          style={styles.reviewConfirmButton}
-        />
-      </View>
-    </View>;
-  };
-
-  if (kaleidoPayCode !== null) {
-    return (
-      <KaleidoPayFlow
-        code={kaleidoPayCode}
-        onExit={() => { setKaleidoPayCode(null); setAddress(''); detectAddressType(''); }}
-        onDone={() => navigation.goBack()}
-      />
+  function startNewPayment() {
+    if (!walletId || paying.current) return;
+    Alert.alert(
+      'Start a new payment?',
+      'Only continue if your wallet activity shows this payment did not go through. If it did, paying again pays twice. A swap that is already under way keeps being completed in the background.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Start a new payment', style: 'destructive', onPress: async () => {
+          try {
+            await dismissPaymentAttempt(walletId, journalUnreadable ? null : attempt);
+            setAttempt(null); setJournalUnreadable(false); setError(''); setJournalReady(true);
+          } catch { setError('Could not update the payment record. Try again.'); }
+        } },
+      ],
     );
   }
 
+  async function paste() {
+    try { const text = await Clipboard.getString(); if (text) { setInput(text.trim()); setContactName(undefined); } }
+    catch { setError('Could not read the clipboard.'); }
+  }
+
+  const resetToInput = () => { revision.current++; setBusy(false); setPreview(null); setOffers([]); };
+
+  // ---- presentation ---------------------------------------------------------
+  const text = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base };
+  const muted = { ...text, color: t.colors.text.secondary };
+  const card = { padding: t.spacing[5], borderRadius: t.borderRadius.xl, backgroundColor: t.colors.surface.primary, gap: t.spacing[3], marginBottom: t.spacing[4] };
+  const row = (label: string, value: string) => <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}><Text style={muted}>{label}</Text><Text style={{ ...text, textAlign: 'right', flexShrink: 1 }}>{value}</Text></View>;
+  const pill = (label: string, color: string) => (
+    <View key={label} style={{ paddingHorizontal: t.spacing[2], paddingVertical: 2, borderRadius: t.borderRadius.full, backgroundColor: color + '22' }}>
+      <Text style={{ color, fontSize: t.typography.fontSize.xs, fontWeight: '600' }}>{label}</Text>
+    </View>
+  );
+  const railIcon = (r: string) => ({ ln: 'lightning', btc: 'onchain', ark: 'arkade' } as Record<string, string>)[r.split(':')[0]] ?? r.split(':')[0];
+  const describe = (o: PaymentOffer) => {
+    const account = [o.accountName, NETWORK_LABEL[o.route.from.split(':')[1] ?? ''] ?? ''].filter(Boolean).join(' · ');
+    return o.route.kind === 'swap'
+      ? { icon: 'swap', group: 'Through a provider', subtitle: [`${account} via ${railLabel(o.route.to)}`, o.providerDetail].filter(Boolean).join(' · '), preferred: false }
+      : { icon: railIcon(o.route.to), group: 'Direct', subtitle: `${account} · direct`, preferred: !!preview && o.route.to.split(':')[0] === preview.request.acceptedRails[0]?.split(':')[0] };
+  };
+  const best = bestOffer(offers);
+  const feeText = (fee: number, asset: Parameters<typeof displaySpend>[1]) => fee === 0 ? 'No fee' : `${displaySpend(fee, asset)} fee`;
+  const options = offers.map(o => {
+    const s = o.quote ? quoteSpend(o.quote) : null;
+    return { id: o.id, name: o.provider, account: o.accountName, amount: s ? displaySpend(s.total, s.asset) : 'Unavailable', amountLabel: 'Total you pay', detail: s ? `Fees ${displaySpend(s.fee, s.asset)}` : '', unavailable: o.unavailable,
+      expiresAt: o.quote ? o.quote.expiresAt * 1000 : undefined, recommended: best?.id === o.id, fee: s ? feeText(s.fee, s.asset) : undefined, ...describe(o) };
+  });
+  const selectedView = selected ? describe(selected) : null;
+  const liveOptions = options.filter(o => !o.unavailable).length;
+  const shownSat = fixedSat ?? amountSat;
+  const usdOf = (sats: number) => usd ? ` · ≈ $${((sats / 1e8) * usd).toFixed(2)}` : '';
+
+  const headerTitle = attempt ? 'Payment' : preview ? 'Review Payment' : 'Send';
+  const onBack = () => {
+    if (paying.current) return;
+    if (preview && !attempt) { resetToInput(); return; }
+    navigation.goBack();
+  };
+
   return (
-    <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>
-      {renderHeader()}
+    <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }} edges={['left', 'right', 'bottom']}>
+      <ScreenHeader title={headerTitle} onBack={onBack} />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
+          {KALEIDOPAY_DEMO && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.warning[500] + '22', marginBottom: t.spacing[4] }}>
+            <Ionicons name="flask-outline" size={16} color={t.colors.warning[500]} />
+            <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: quotes are live, the payment step is simulated. No funds move.</Text>
+          </View>}
+          {!!error && <Text accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500], marginBottom: t.spacing[4] }}>{error}</Text>}
+          {journalUnreadable && !attempt && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} style={{ marginBottom: t.spacing[4] }} />}
 
-      {/* Keep the focused amount field above the keyboard. */}
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-      >
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
-        >
-          {paymentStep === 'input' && (
-            <>
-              {renderAddressInput()}
-              {/* Destination-first: only reveal the payment details once we've
-                  decoded a valid recipient, so the screen starts focused on
-                  paste / scan / pick-a-contact. */}
-              {address && addressType !== 'unknown' && addressType !== 'invalid' && !isDecodingInvoice && (
-                <>
-                  {renderAssetSelector()}
-                  {renderAmountInput()}
-                  {renderFeeSelector()}
-                </>
-              )}
-            </>
-          )}
-          {renderPaymentReview()}
+          {attempt ? <View style={card}>
+            <Ionicons name={attempt.status === 'completed' ? 'checkmark-circle-outline' : attempt.status === 'failed' ? 'close-circle-outline' : 'time-outline'} size={48} color={t.colors.primary[500]} />
+            <Text style={{ ...text, fontSize: t.typography.fontSize['2xl'], fontWeight: '600' }}>{attempt.status === 'completed' ? 'Payment completed' : attempt.status === 'failed' ? 'Payment failed' : busy ? 'Sending payment' : attempt.status === 'unknown' ? 'Payment needs checking' : 'Payment in progress'}</Text>
+            {KALEIDOPAY_DEMO && attempt.status === 'completed' && <Text style={{ ...muted, color: t.colors.warning[500] }}>Simulated in this demo build. No funds moved.</Text>}
+            {row('Recipient receives', attempt.recipient)}{row('Total', attempt.total)}{row('Paid with', attempt.provider)}
+            {!!attempt.reference && <Text selectable style={muted}>Reference: {attempt.reference}</Text>}
+            <Text style={muted}>{unresolvedAttempt(attempt) ? 'Your payment is still being checked. You can leave and come back to check its status. Do not send it again.' : attempt.status === 'failed' ? 'This payment was not sent, or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
+            {unresolvedAttempt(attempt) ? <>
+              <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} />
+              {attempt.status === 'unknown' && !busy && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} />}
+            </> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') navigation.goBack(); else { setAttempt(null); if (preview) void getOffers(true); } }} />}
+          </View> : !preview ? <>
+            <View style={card}>
+              <Text style={{ ...text, fontSize: t.typography.fontSize.xl, fontWeight: '600' }}>Who are you paying?</Text>
+              {!!contactName && <Text style={muted}>{contactName}</Text>}
+              <TextInput accessibilityLabel="Payment request" value={input} onChangeText={v => { setInput(v); setContactName(undefined); }} multiline autoCapitalize="none" autoCorrect={false}
+                placeholder="Address, invoice, Lightning address or offer" placeholderTextColor={t.colors.text.muted} style={{ ...text, minHeight: 72, paddingVertical: t.spacing[3] }} />
+              {target ? <Text style={muted}>{KIND_LABEL[target.kind]}{target.description ? ` · ${target.description}` : ''}</Text>
+                : input.trim() ? <Text style={{ ...muted, color: t.colors.warning[500] }}>{decodeError}</Text> : null}
+              <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
+                <Button title="Scan" onPress={() => navigation.navigate('QRScanner')} style={{ flex: 1 }} />
+                <Button title="Paste" variant="secondary" onPress={() => void paste()} style={{ flex: 1 }} />
+                <Button title="Contacts" variant="secondary" onPress={() => setShowContacts(true)} style={{ flex: 1 }} />
+              </View>
+            </View>
+            {target?.kind === 'rgb' ? (rgbAsset && !rgbAsset.amount ? <View style={card}>
+              <Text style={text}>Amount in {rgbAsset.ticker}</Text>
+              <TextInput accessibilityLabel={`Amount in ${rgbAsset.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount}
+                placeholder={`Amount in ${rgbAsset.ticker}`} placeholderTextColor={t.colors.text.muted} style={{ ...text, paddingVertical: t.spacing[3] }} />
+            </View> : null) : target ? <TouchableOpacity accessibilityRole="button" accessibilityLabel="Amount" disabled={fixedSat !== undefined}
+              onPress={() => setShowAmountEditor(true)} style={card}>
+              {row(fixedSat !== undefined ? 'Amount (set by recipient)' : 'Amount', shownSat ? formatSats(shownSat) + usdOf(shownSat) : 'Set amount')}
+            </TouchableOpacity> : null}
+          </> : <>
+            <View style={card}>
+              <Text style={muted}>{preview.code.label || contactName || 'Recipient'} receives</Text>
+              <Text style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '600' }}>
+                {preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat)}
+              </Text>
+              <Text numberOfLines={1} ellipsizeMode="middle" selectable style={muted}>{KIND_LABEL[preview.code.lnurl ? 'lnurl' : preview.code.kind]} · {preview.code.lnurl ?? preview.code.raw}</Text>
+              {!!(preview.code.message || preview.code.description) && <Text style={text}>{preview.code.message || preview.code.description}</Text>}
+            </View>
+            <View style={card}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={muted}>You pay with</Text>
+                {liveOptions > 1 && <TouchableOpacity accessibilityRole="button" onPress={() => setShowProviders(true)} hitSlop={8}><Text style={{ ...muted, color: t.colors.primary[500] }}>Compare {liveOptions} ways ›</Text></TouchableOpacity>}
+              </View>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose how to pay" onPress={() => setShowProviders(true)}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.background.primary }}>
+                <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surface.primary }}>
+                  {!selectedView || selectedView.icon === 'swap' ? <Ionicons name="swap-horizontal" size={20} color={t.colors.text.secondary} /> : <NetworkIcon network={selectedView.icon} size={22} />}
+                </View>
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text numberOfLines={1} style={{ ...text, fontWeight: '600' }}>{selected?.provider ?? 'Choose how to pay'}</Text>
+                  {!!selectedView && <Text numberOfLines={1} style={{ ...muted, fontSize: t.typography.fontSize.sm }}>{selectedView.subtitle}</Text>}
+                  {!!selected && (selectedView?.preferred || best?.id === selected.id) && <View style={{ flexDirection: 'row', gap: t.spacing[2], marginTop: 4 }}>
+                    {selectedView?.preferred && pill('Their choice', t.colors.primary[500])}
+                    {best?.id === selected.id && pill('Best price', t.colors.success[500])}
+                  </View>}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={t.colors.text.secondary} />
+              </TouchableOpacity>
+              {spend && <>
+                {row('They receive', displaySpend(spend.amount, spend.asset))}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}>
+                  <Text style={muted}>{selected?.route.kind === 'swap' ? 'Swap & fees' : 'Fees'}</Text>
+                  <Text style={{ ...text, color: spend.fee === 0 ? t.colors.success[500] : t.colors.text.primary }}>{spend.fee === 0 ? 'No fee' : displaySpend(spend.fee, spend.asset)}</Text>
+                </View>
+                <View style={{ height: 1, backgroundColor: t.colors.border.light }} />
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}>
+                  <Text style={{ ...text, fontWeight: '600' }}>You pay</Text>
+                  <Text style={{ ...text, fontWeight: '600', fontSize: t.typography.fontSize.lg }}>{total}</Text>
+                </View>
+              </>}
+              {quote && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Ionicons name="time-outline" size={14} color={expired ? t.colors.warning[500] : t.colors.text.secondary} />
+                <Text accessibilityLiveRegion="polite" style={{ ...muted, fontSize: t.typography.fontSize.sm, color: expired ? t.colors.warning[500] : t.colors.text.secondary }}>{expired ? 'Quote expired. Refresh before paying.' : `Quote valid for ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}</Text>
+              </View>}
+              {!!selected?.unavailable && <Text accessibilityRole="alert" style={{ ...muted, color: t.colors.warning[500] }}>{selected.unavailable}</Text>}
+              {!!previousTotal && reviewUpdated && <Text accessibilityRole="alert" style={muted}>Previous total: {previousTotal}. Review the updated quote before paying.</Text>}
+              {!busy && preview.plan.status === 'ready' && !offers.some(o => o.quote) && <Text style={muted}>No way to pay this right now. Check your balances and connected accounts, then refresh.</Text>}
+              {selected && !selected.executable && <Text style={muted}>This account can quote but cannot pay yet.</Text>}
+              {busy && <ActivityIndicator color={t.colors.primary[500]} />}
+            </View>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Payment details" accessibilityState={{ expanded: showDetails }}
+              onPress={() => setShowDetails(v => !v)} style={{ minHeight: 48, paddingVertical: t.spacing[3] }}>{row('Details', showDetails ? '⌃' : '⌄')}</TouchableOpacity>
+            {showDetails && <View style={card}>
+              {selected && row('Paid with', selected.provider)}
+              {selected && row('Route', selected.route.kind === 'swap' ? 'Conversion included' : 'Direct payment')}
+              {preview.request.acceptedRails.length > 1 && row('They accept', preview.request.acceptedRails.map(railLabel).join(', '))}
+              <Button title="Compare ways to pay" variant="secondary" onPress={() => setShowProviders(true)} />
+            </View>}
+          </>}
         </ScrollView>
-
-        {renderSendButton()}
-        {renderReviewActions()}
+        {!attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
+          {!preview
+            ? <Button title={busy ? 'Getting quotes…' : 'Review payment'} disabled={!target || busy || !journalReady} onPress={review} />
+            : !quote || quote.expiresAt * 1000 <= Date.now() || selected?.unavailable
+              ? <Button title={busy ? 'Getting quotes…' : 'Refresh quotes'} disabled={busy} onPress={() => void getOffers(true)} />
+              : reviewUpdated
+                ? <Button title="Review updated quote" disabled={busy} onPress={() => setReviewUpdated(false)} />
+                : <Button title={total ? `Pay ${total}` : 'Pay'} disabled={busy || !selected?.executable || !walletId || !journalReady} onPress={() => void pay()} />}
+          {preview && <Text style={{ ...muted, textAlign: 'center' }}>{!walletId ? 'Set up a wallet to pay.' : 'Review the total before confirming.'}</Text>}
+        </View>}
       </KeyboardAvoidingView>
-
-      <NostrContactsSelector
-        visible={showContactPicker}
-        onSelectContact={handleSelectContact}
-        onClose={() => setShowContactPicker(false)}
-      />
-
-      {/* Loading overlay when sending */}
-      {paymentStep === 'sending' && (
-        <View style={styles.sendingOverlay}>
-          <View style={styles.sendingContent}>
-            <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-            <Text style={styles.sendingText}>Processing Payment...</Text>
-            <Text style={styles.sendingSubtext}>This may take a few moments</Text>
-          </View>
-        </View>
-      )}
+      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); setReviewUpdated(false); setPreviousTotal(''); }}
+        onClose={() => setShowProviders(false)} now={now} title="Ways to pay" intro="Same payment, different routes. Totals include every fee." />
+      <AmountEditorModal visible={showAmountEditor} onClose={() => setShowAmountEditor(false)} initialSats={amountSat} rates={rates} bitcoinUnit={bitcoinUnit}
+        onConfirm={sats => { setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }} />
+      <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)}
+        onSelectContact={c => { setShowContacts(false); const dest = c.lightning_address || c.node_pubkey; if (dest) { setInput(dest); setContactName(c.name); } }} />
     </SafeAreaView>
   );
 }
-
-const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background.secondary,
-  },
-  
-  helpButton: {
-    // Mirrors MainHeader's `iconBtn` so the two header controls are one shape.
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: theme.colors.surface.secondary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  flex: {
-    flex: 1,
-  },
-
-  scrollView: {
-    flex: 1,
-  },
-
-  recipientCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    padding: theme.spacing[3] + 2,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.surface.primary,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-  },
-  recipientIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  recipientBody: {
-    flex: 1,
-  },
-  recipientType: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '700',
-    color: theme.colors.text.tertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 2,
-  },
-  recipientAddress: {
-    fontSize: theme.typography.fontSize.sm,
-    fontFamily: 'monospace',
-    color: theme.colors.text.primary,
-  },
-  
-  scrollContent: {
-    paddingHorizontal: theme.spacing[5],
-    paddingBottom: theme.spacing[6],
-  },
-  
-  section: {
-    marginBottom: theme.spacing[6],
-  },
-  
-  sectionTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
-  },
-  
-  sectionDescription: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[4],
-    lineHeight: 20,
-  },
-  
-  entryMethods: {
-    marginTop: theme.spacing[5],
-    gap: theme.spacing[3],
-  },
-
-  entryPrimary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.primary[500],
-    minHeight: 56,
-    ...theme.shadows.sm,
-  },
-
-  entryPrimaryText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-  },
-
-  entrySecondaryRow: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-
-  entrySecondary: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[3],
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.surface.primary,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    minHeight: 48,
-  },
-
-  entrySecondaryText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  decodingIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: theme.spacing[2],
-    gap: theme.spacing[2],
-  },
-  
-  decodingText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[500],
-  },
-  
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginTop: theme.spacing[2],
-    padding: theme.spacing[3],
-    backgroundColor: theme.colors.error[50],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.error[50], // Changed from 200 to 50
-    gap: theme.spacing[2],
-  },
-  
-  errorText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[600],
-    flex: 1,
-  },
-  
-  invoiceDetails: {
-    marginTop: theme.spacing[4],
-    padding: theme.spacing[4],
-    backgroundColor: theme.colors.primary[50],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100], // Changed from 200 to 100
-  },
-  
-  invoiceDetailsTitle: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.primary[700],
-    marginBottom: theme.spacing[3],
-  },
-  
-  invoiceDetailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[2],
-  },
-  
-  invoiceDetailLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.primary[600],
-  },
-  
-  invoiceDetailValue: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.primary[700], // Changed from 800 to 700
-    flex: 1,
-    textAlign: 'right',
-  },
-  
-  assetSelector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: theme.spacing[4],
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  assetSheetBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  assetSheet: {
-    maxHeight: '80%',
-    backgroundColor: theme.colors.background.secondary,
-    borderTopLeftRadius: theme.borderRadius['2xl'],
-    borderTopRightRadius: theme.borderRadius['2xl'],
-    paddingTop: theme.spacing[3],
-    paddingBottom: theme.spacing[6],
-  },
-  assetSheetHandle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: theme.colors.border.medium,
-    marginBottom: theme.spacing[3],
-  },
-  assetSheetHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing[5],
-    marginBottom: theme.spacing[3],
-  },
-  assetSheetTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-  amountSecondary: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.tertiary,
-    marginTop: -theme.spacing[2],
-    marginBottom: theme.spacing[2],
-    marginLeft: theme.spacing[1],
-  },
-
-  assetIconContainer: {
-    marginRight: theme.spacing[3],
-  },
-  
-  assetInfo: {
-    flex: 1,
-  },
-  
-  assetTicker: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[1],
-  },
-  
-  assetName: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[1],
-  },
-  
-  assetBalance: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.muted,
-  },
-  
-  feeSelector: {
-    flexDirection: 'row',
-    gap: theme.spacing[2],
-  },
-  
-  feeButton: {
-    flex: 1,
-    flexDirection: 'column',
-    alignItems: 'center',
-    padding: theme.spacing[3],
-    backgroundColor: theme.colors.gray[100],
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    gap: theme.spacing[1],
-  },
-  
-  feeButtonActive: {
-    backgroundColor: theme.colors.primary[500],
-    borderColor: theme.colors.primary[600],
-  },
-  
-  feeButtonText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '500',
-    color: theme.colors.text.secondary,
-  },
-  
-  feeButtonTextActive: {
-    color: theme.colors.text.inverse,
-  },
-  
-  feeButtonRate: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.muted,
-  },
-  
-  feeButtonRateActive: {
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  
-  customFeeContainer: {
-    marginTop: theme.spacing[4],
-  },
-  
-  sendButtonContainer: {
-    padding: theme.spacing[5],
-    backgroundColor: theme.colors.surface.primary,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border.light,
-  },
-  
-  sendButton: {
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 8,
-  },
-
-  reviewCard: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[5],
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-
-  reviewHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing[4],
-    paddingBottom: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-
-  reviewHeaderText: {
-    flex: 1,
-  },
-
-  reviewAmount: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-
-  reviewAsset: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginTop: theme.spacing[1],
-  },
-
-  reviewDetails: {
-    marginBottom: theme.spacing[5],
-  },
-
-  reviewRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingVertical: theme.spacing[3],
-    gap: theme.spacing[3],
-  },
-
-  reviewLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    fontWeight: '500',
-    minWidth: 80,
-  },
-
-  reviewValue: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    fontWeight: '600',
-    flex: 1,
-    textAlign: 'right',
-    lineHeight: 20,
-  },
-
-  reviewActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-
-  reviewEditButton: { minHeight: 48, flex: 1 },
-
-  reviewConfirmButton: { minHeight: 48, flex: 2 },
-
-  sendingOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
-
-  sendingContent: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[8],
-    alignItems: 'center',
-    minWidth: 200,
-  },
-
-  sendingText: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginTop: theme.spacing[4],
-    textAlign: 'center',
-  },
-
-  sendingSubtext: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginTop: theme.spacing[2],
-    textAlign: 'center',
-  },
-});
-
-export default SendScreen;
