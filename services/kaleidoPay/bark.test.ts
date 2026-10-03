@@ -65,6 +65,15 @@ test('pays a BOLT12 offer directly, leaving a fixed amount to the offer', async 
   await expect(account.execute!(preview(amountOffer), directRoute, quote, 'ui-3')).rejects.toThrow('fresh quote'); // a quote pays once
 });
 
+test('a fixed-amount offer quoted for another amount is refused before anything is sent', async () => {
+  const b = bark(20);
+  const account = createBarkPayAccount(b, 'signet');
+  await expect(account.quote(preview(amountOffer, 1000), directRoute)).rejects.toThrow('different amount');
+  const [option] = await account.quoteOptions!(preview(amountOffer, 1000), directRoute);
+  expect(option.quote).toBeUndefined();
+  expect(b.sendPayment).not.toHaveBeenCalled();
+});
+
 test('passes the amount for an amountless offer and follows a pending payment', async () => {
   const b = bark(15);
   b.sendPayment.mockResolvedValueOnce({ paymentHash: 'cd'.repeat(32), status: 'pending' });

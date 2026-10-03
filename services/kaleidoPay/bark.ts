@@ -1,9 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodeOffer } from '@universal-bolt12/universal-code';
 import type { Network, Route } from '@universal-bolt12/universal-code';
 import { validFeeSats } from '../paymentReview';
 import { createElectrumSwapAccount } from './electrumSwapAccount';
-import { registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
+import { offerAmountSat, registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
 import type { AccountQuoteOption, PayAccount, PaymentResult, Preview, Quote } from './index';
 import { lightningPayerFrom } from './lightningPayer';
 import type { LightningSender } from './lightningPayer';
@@ -65,11 +64,16 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
   async function offerQuote(preview: Preview): Promise<Quote> {
     const offer = preview.code.offer;
     if (!offer) throw new Error('Bark pays Lightning directly only for BOLT12 offers here.');
+    // Bark pays a fixed-amount offer its own amount, so the quote must be for exactly that.
+    const offerSat = offerAmountSat(offer);
+    if (offerSat !== undefined && offerSat !== preview.request.amountSat) {
+      throw new Error('The offer asks for a different amount than this payment. Review it again.');
+    }
     const fee = await barkFee(preview.request.amountSat);
     if (fee === null) throw new Error(FEE_UNAVAILABLE);
     const quote: Quote = { recipientSat: preview.request.amountSat, feeSat: fee, totalSat: preview.request.amountSat + fee,
       expiresAt: Math.floor(Date.now() / 1000) + QUOTE_TTL_S };
-    offerQuotes.set(quote, { offer, fixedAmount: decodeOffer(offer).some(f => f.type === 8n) });
+    offerQuotes.set(quote, { offer, fixedAmount: offerSat !== undefined });
     return quote;
   }
 
