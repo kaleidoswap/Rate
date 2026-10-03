@@ -10,7 +10,7 @@ jest.mock('./electrumSwapAccount', () => ({
 }));
 jest.mock('./recovery', () => ({ kaleidoPayStores: {} }));
 import { encodeOffer } from '@universal-bolt12/universal-code';
-import { barkRail, connectBarkToKaleidoPay, createBarkArkAccount, createBarkOnchainAccount, createBarkPayAccount, disconnectBarkFromKaleidoPay } from './bark';
+import { barkRail, connectBarkToKaleidoPay, createBarkArkAccount, createBarkArkAddressAccount, createBarkOnchainAccount, createBarkPayAccount, disconnectBarkFromKaleidoPay } from './bark';
 import { offerRails } from '@universal-bolt12/universal-code';
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -212,4 +212,134 @@ test('reviewing a payment syncs Bark and adds the Ark route when the key arrived
   expect(b.backend.sync).toHaveBeenCalled();
   expect(previewPayment(offer, 'mainnet', '2100', 'req').plan.route).toMatchObject({ sourceId: 'bark-ark', to: RAIL });
   disconnectBarkFromKaleidoPay();
+});
+
+// ---------------------------------------------------------------------------
+// BOLT11 invoices, plain Ark addresses and the balance check.
+// ---------------------------------------------------------------------------
+import { bech32 } from '@scure/base';
+
+/** A well-formed (unsigned) BOLT11 invoice: enough for the decoder Bark's quote uses. */
+function bolt11({ amount, timestamp = now(), expiry, hash = '11'.repeat(32) }: { amount?: string; timestamp?: number; expiry?: number; hash?: string }): string {
+  const toWords = (n: number, len: number) => Array.from({ length: len }, (_, i) => (n >> (5 * (len - 1 - i))) & 31);
+  const tag = (type: number, data: number[]) => [type, ...toWords(data.length, 2), ...data];
+  const words = [
+    ...toWords(timestamp, 7),
+    ...tag(1, bech32.toWords(Uint8Array.from(hash.match(/../g)!.map(h => parseInt(h, 16))))),
+    ...(expiry !== undefined ? tag(6, toWords(expiry, 2)) : []),
+    ...new Array(104).fill(0),
+  ];
+  return bech32.encode(`lntb${amount ?? ''}`, words, 2000);
+}
+const invoicePreview = (invoice: string, amountSat: number) =>
+  ({ code: { kind: 'bolt11', invoice }, request: { id: 'r', network: 'signet', networks: ['signet'], amountSat, acceptedRails: ['ln'] }, plan: {}, addresses: {} }) as any;
+
+test('pays a fixed-amount BOLT11 invoice directly without passing an amount', async () => {
+  const b = bark(7);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending' });
+  const invoice = bolt11({ amount: '50u', hash: '22'.repeat(32) }); // 5,000 sat
+  const account = createBarkPayAccount(b, 'signet');
+  const [option] = await account.quoteOptions!(invoicePreview(invoice, 5000), directRoute);
+  expect(option).toMatchObject({ id: 'bark-invoice', quote: { recipientSat: 5000, feeSat: 7, totalSat: 5007 } });
+  expect(b.backend.estimatePaymentFee).toHaveBeenCalledWith('lightning', 5000);
+  await expect(account.execute!(invoicePreview(invoice, 5000), directRoute, option.quote!, 'inv-1')).resolves.toMatchObject({ status: 'pending' });
+  expect(b.sendPayment).toHaveBeenCalledWith({ invoice, amount: undefined });
+  // Bark gave no hash, so the payment is followed by the invoice's own payment hash.
+  await expect(account.status!('inv-1')).resolves.toEqual({ status: 'completed', reference: '22'.repeat(32) });
+  expect(b.getPaymentStatus).toHaveBeenCalledWith('22'.repeat(32));
+  await expect(account.quote(invoicePreview(invoice, 4000), directRoute)).rejects.toThrow('different amount');
+});
+
+test('pays an amountless BOLT11 invoice the requested amount', async () => {
+  const b = bark(4);
+  const invoice = bolt11({});
+  const account = createBarkPayAccount(b, 'signet');
+  const quote = await account.quote(invoicePreview(invoice, 1234), directRoute);
+  expect(quote).toMatchObject({ recipientSat: 1234, totalSat: 1238 });
+  await expect(account.execute!(invoicePreview(invoice, 1234), directRoute, quote, 'inv-2')).resolves.toEqual({ status: 'completed', reference: 'ab'.repeat(32) });
+  expect(b.sendPayment).toHaveBeenCalledWith({ invoice, amount: 1234 });
+});
+
+test('an expired invoice is refused before anything is sent', async () => {
+  const { PaymentNotSentError } = require('./errors');
+  const b = bark(4);
+  const account = createBarkPayAccount(b, 'signet');
+  const expired = bolt11({ timestamp: now() - 7200 }); // default one-hour expiry
+  await expect(account.quote(invoicePreview(expired, 1000), directRoute)).rejects.toThrow('expired');
+  const [option] = await account.quoteOptions!(invoicePreview(expired, 1000), directRoute);
+  expect(option.unavailable).toContain('expired');
+  // A quote never outlives its invoice, and an invoice that lapses after quoting is not paid.
+  const soon = bolt11({ expiry: 2 });
+  const quote = await account.quote(invoicePreview(soon, 1000), directRoute);
+  expect(quote.expiresAt).toBeLessThanOrEqual(now() + 2);
+  jest.useFakeTimers({ now: Date.now() + 5000 });
+  await expect(account.execute!(invoicePreview(soon, 1000), directRoute, quote, 'inv-x')).rejects.toBeInstanceOf(PaymentNotSentError);
+  jest.useRealTimers();
+  expect(b.sendPayment).not.toHaveBeenCalled();
+});
+
+const plainArkRoute = { kind: 'direct', sourceId: 'bark-ark-address', from: 'ark:signet', to: 'ark:signet' } as any;
+const plainArkPreview = (arkAddress = 'tark1receiver') =>
+  ({ code: { kind: 'ark', arkAddress }, request: { id: 'r', network: 'signet', networks: ['signet'], amountSat: 3000, acceptedRails: ['ark'] }, plan: {}, addresses: { ark: arkAddress } }) as any;
+
+test('pays a plain Ark address that is on Bark’s server', async () => {
+  const b: any = bark(2);
+  b.backend.isBarkAddress = jest.fn(() => true);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending', amount: 3000 });
+  const account = createBarkArkAddressAccount(b, 'signet');
+  expect(account.source).toMatchObject({ rail: 'ark', network: 'signet' });
+  const [option] = await account.quoteOptions!(plainArkPreview(), plainArkRoute);
+  expect(option.quote).toMatchObject({ recipientSat: 3000, feeSat: 2, totalSat: 3002 });
+  expect(b.backend.isBarkAddress).toHaveBeenCalledWith('tark1receiver');
+  await expect(account.execute!(plainArkPreview(), plainArkRoute, option.quote!, 'pa-1')).resolves.toEqual({ status: 'completed' });
+  expect(b.sendPayment).toHaveBeenCalledWith({ invoice: 'tark1receiver', amount: 3000 });
+  await expect(account.status!('pa-1')).resolves.toEqual({ status: 'completed' });
+  await expect(account.execute!(plainArkPreview(), plainArkRoute, option.quote!, 'pa-2')).rejects.toThrow('fresh quote');
+});
+
+test('a plain Ark address Bark does not recognise as its own is unavailable', async () => {
+  const b: any = bark(2);
+  b.backend.isBarkAddress = () => false;
+  const account = createBarkArkAddressAccount(b, 'signet');
+  await expect(account.quote(plainArkPreview(), plainArkRoute)).rejects.toThrow("not on Bark's server");
+  const [option] = await account.quoteOptions!(plainArkPreview(), plainArkRoute);
+  expect(option.unavailable).toBe("This Ark address is not on Bark's server.");
+  await expect(createBarkArkAddressAccount(bark(2), 'signet').quote(plainArkPreview(), plainArkRoute)).rejects.toThrow("not on Bark's server");
+  expect(b.sendPayment).not.toHaveBeenCalled();
+});
+
+test('connecting Bark plans a plain Ark address to the Bark Ark account', () => {
+  const { previewTarget } = require('./index');
+  const b: any = { ...bark(2), backend: { ...bark(2).backend, isBarkAddress: () => true } };
+  jest.useFakeTimers(); // the Ark server-key retries must not outlive the test
+  connectBarkToKaleidoPay(b, 'signet');
+  const p = previewTarget({ kind: 'ark', raw: 'tark1receiver', arkAddress: 'tark1receiver', networks: ['signet'] }, 3000, 'req');
+  expect(p.plan.route).toMatchObject({ kind: 'direct', sourceId: 'bark-ark-address', to: 'ark:signet' });
+  disconnectBarkFromKaleidoPay();
+  jest.runOnlyPendingTimers();
+  jest.useRealTimers();
+});
+
+test('quotes above Bark’s spendable balance are refused', async () => {
+  const withBalance = (confirmed: number) => ({ ...bark(10), getBtcBalance: jest.fn(async () => ({ confirmed })) });
+  const lightning = createBarkPayAccount(withBalance(1009), 'signet');
+  await expect(lightning.quote(invoicePreview(bolt11({}), 1000), directRoute)).rejects.toThrow('Not enough in Bark');
+  await expect(createBarkPayAccount(withBalance(1010), 'signet').quote(invoicePreview(bolt11({}), 1000), directRoute)).resolves.toMatchObject({ totalSat: 1010 });
+  const ark: any = withBalance(100);
+  ark.backend.isBarkAddress = () => true;
+  const [arkOption] = await createBarkArkAddressAccount(ark, 'signet').quoteOptions!(plainArkPreview(), plainArkRoute);
+  expect(arkOption.unavailable).toContain('Not enough in Bark');
+  const onchainRoute = { kind: 'direct', sourceId: 'bark-onchain', from: 'btc:mainnet', to: 'btc:mainnet' } as any;
+  const p = { code: { address: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' }, request: { id: 'r', network: 'mainnet', networks: ['mainnet'], amountSat: 30000, acceptedRails: ['btc'] }, plan: {}, addresses: {} } as any;
+  await expect(createBarkOnchainAccount(withBalance(100), 'mainnet').quote(p, onchainRoute)).rejects.toThrow('Not enough in Bark');
+  mockQuoteOptions.mockResolvedValue([{ id: 'p', name: 'Provider', quote: { recipientSat: 500, totalSat: 504, feeSat: 4, expiresAt: now() + 60 } }]);
+  const [swapOption] = await createBarkPayAccount(withBalance(100), 'signet').quoteOptions!(preview(amountOffer), swapRoute);
+  expect(swapOption.unavailable).toContain('Not enough in Bark');
+});
+
+test('on-chain sends plan from the network-free btc rail', () => {
+  const { planRoutes } = require('./index');
+  const account = createBarkOnchainAccount(bark(1), 'mainnet');
+  const plan = planRoutes({ id: 'r', network: 'mainnet', networks: ['mainnet'], amountSat: 1000, acceptedRails: ['btc'] }, [account.source]);
+  expect(plan.route).toMatchObject({ kind: 'direct', sourceId: 'bark-onchain', from: 'btc:mainnet', to: 'btc:mainnet' });
 });

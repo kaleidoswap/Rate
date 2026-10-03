@@ -2,6 +2,7 @@ import { Address, NETWORK, TEST_NETWORK } from '@scure/btc-signer';
 import { bech32, bech32m } from '@scure/base';
 import { decodeOffer, offerRails, paymentCodeNetwork } from '@universal-bolt12/universal-code';
 import { decodeBolt11 } from '../../utils/decodeInvoice';
+import { invoiceExpiry } from '../../components/payments/InvoiceExpiry';
 
 /**
  * What the user pasted or scanned, decoded into one payment target. Every kind of
@@ -80,6 +81,8 @@ const ARK = /^(ark|tark)1[a-z0-9]{20,}$/i;
 const LN_ADDRESS = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
 
 function fromInvoice(invoice: string, raw: string): PayTarget {
+  const expiresAt = invoiceExpiry(invoice);
+  if (expiresAt !== null && expiresAt <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
   const decoded = decodeBolt11(invoice);
   if (decoded.amountSats === undefined && decoded.expirySec === undefined && !decoded.description && !/^ln/i.test(invoice)) {
     throw new Error('This Lightning invoice could not be read.');
@@ -103,6 +106,8 @@ function parseBip21(text: string): PayTarget {
     params.set(key, decodeURIComponent(eq < 0 ? '' : part.slice(eq + 1)));
   }
   for (const key of params.keys()) if (key.startsWith('req-')) throw new Error(`Unsupported required parameter: ${key}`);
+  // A token request must never be paid as plain bitcoin.
+  if (params.has('assetid') || params.has('assetamount')) throw new Error('This request asks for a token, which is not a recognized payment here.');
   const target: PayTarget = { kind: 'bitcoin', raw: text, label: params.get('label'), message: params.get('message') };
   const address = decodeURIComponent(addressPart);
   if (address) {

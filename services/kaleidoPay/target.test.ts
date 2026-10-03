@@ -1,4 +1,6 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
+const mockExpiry = jest.fn((_: string): number | null => null);
+jest.mock('../../components/payments/InvoiceExpiry', () => ({ invoiceExpiry: (i: string) => mockExpiry(i) }));
 import { encodeOffer } from '@universal-bolt12/universal-code';
 import { decodeTarget } from './target';
 import { planRoutes, previewTarget, previewInput, registerKaleidoPayAccount } from './index';
@@ -57,4 +59,10 @@ test('a Lightning address is resolved for the amount and must return exactly tha
     expect(spy).toHaveBeenCalledWith('satoshi@example.com', 1000);
     await expect(previewInput('satoshi@example.com', undefined, 'r4')).rejects.toThrow('Enter an amount');
   } finally { spy.mockRestore(); }
+});
+
+test('expired invoices and token requests are refused up front', () => {
+  mockExpiry.mockReturnValueOnce(Date.now() - 1000);
+  expect(() => decodeTarget(SPEC_INVOICE)).toThrow('expired');
+  expect(() => decodeTarget(`bitcoin:?spark=sp1${'q'.repeat(40)}&assetid=USD&assetamount=10`)).toThrow('token');
 });

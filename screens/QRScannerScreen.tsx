@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
-import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
+import { isPayable } from '../services/kaleidoPay';
 // screens/QRScannerScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -103,8 +103,8 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       if (captureMode === 'contact') {
         navigation.navigate(returnScreen, { scannedContact: data }); return;
       }
-      // Offers and plain addresses: Send opens its KaleidoPay review, which compares direct sends and swap providers.
-      if (isKaleidoPayCode(data) || isSwappableAddress(data)) {
+      // Anything payable opens Send as-is: it decodes the code and offers every way to pay it.
+      if (isPayable(data)) {
         navigation.navigate('Send', { prefilledAddress: data }); return;
       }
       const paymentData = await processScannedData(data);
