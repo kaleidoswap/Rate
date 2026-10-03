@@ -24,6 +24,8 @@ import { Button } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { feedback } from '../utils/feedback';
 import { haptic } from '../utils/haptics';
+import { usePaymentSettlement } from '../hooks/usePaymentSettlement';
+import type { AppProtocol } from '../utils/protocol-bridge';
 
 export type PaymentType = 'lightning' | 'bitcoin' | 'rgb' | 'spark' | 'arkade' | 'boarding' | 'bark';
 
@@ -45,6 +47,9 @@ export interface PaymentSuccessParams {
   /** Optional reference (txid / payment hash / preimage) with a copy affordance. */
   reference?: string;
   referenceLabel?: string;
+  /** With paymentHash, an unsettled receipt keeps checking until final (Bark). */
+  protocol?: AppProtocol;
+  paymentHash?: string;
 }
 
 interface Props {
@@ -71,15 +76,26 @@ const truncate = (s: string): string =>
   s.length > 24 ? `${s.slice(0, 10)}…${s.slice(-10)}` : s;
 
 export default function PaymentSuccessScreen({ navigation, route }: Props) {
-  const { amount, unit, fiat, recipient, paymentType, status = 'confirmed', fee, reference, referenceLabel, networkLabel } = route.params;
+  const { amount, unit, fiat, recipient, paymentType, status: initialStatus = 'confirmed', fee, reference, referenceLabel, networkLabel, protocol, paymentHash } = route.params;
+  // Follow an unsettled payment (Bark returns before Lightning settles) to its
+  // final state, with a time limit so the receipt never stays pending forever.
+  const settlement = usePaymentSettlement({ initialStatus, protocol, paymentHash });
+  const status = settlement.status;
   const baseMeta = { ...(TYPE_META[paymentType] ?? TYPE_META.lightning), ...(networkLabel ? { networkLabel } : {}) };
+  const isFailed = status === 'failed';
   const isUnknown = status === 'unknown';
   const isPending = status !== 'confirmed';
-  const meta = isPending
+  const meta = isFailed
+    ? { ...baseMeta, label: 'Payment failed', sub: 'The wallet reported this payment as failed' }
+    : isPending
     ? {
         ...baseMeta,
         label: isUnknown ? 'Payment status unavailable' : paymentType === 'boarding' ? 'Withdrawal Submitted' : 'Payment Submitted',
-        sub: isUnknown ? 'Check Activity before sending again' : paymentType === 'boarding' ? 'Awaiting on-chain settlement' : 'Awaiting network settlement',
+        sub: settlement.polling
+          ? 'Waiting for settlement…'
+          : isUnknown || (settlement.timedOut && !!paymentHash)
+            ? 'Still settling. Check Activity before sending again'
+            : paymentType === 'boarding' ? 'Awaiting on-chain settlement' : 'Awaiting network settlement',
       }
     : baseMeta;
 
@@ -177,7 +193,8 @@ export default function PaymentSuccessScreen({ navigation, route }: Props) {
             style={[styles.pulseRing, { opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]}
           />
           <View style={styles.glow} />
-          {isPending ? <Ionicons name={status === 'unknown' ? 'help-circle-outline' : 'time-outline'} size={80} color={theme.colors.warning[500]} /> : <LottieView
+          {isFailed ? <Ionicons name="close-circle-outline" size={80} color={theme.colors.error[500]} />
+            : isPending ? <Ionicons name={status === 'unknown' ? 'help-circle-outline' : 'time-outline'} size={80} color={theme.colors.warning[500]} /> : <LottieView
             ref={checkAnim}
             source={require('../assets/animations/success.json')}
             style={styles.lottie}

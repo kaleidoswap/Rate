@@ -2,7 +2,7 @@ import { routeSpendable } from '../utils/payment-balance';
 import { paymentReceiptStatus } from '../utils/payment-receipt';
 import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { createRequestGuard } from '../utils/request-guard';
-import { barkNetworkLabel, sendBarkPayment } from '../services/BarkService';
+import { barkNetworkLabel, sendBarkPaymentBounded } from '../services/BarkService';
 import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
 import { KaleidoPayFlow } from '../components/payments/KaleidoPayFlow';
 import { toEngineProtocol } from '../utils/protocol-bridge'
@@ -52,6 +52,10 @@ import { AssetIcon as TokenAssetIcon } from '../components/AssetIcon';
 import { useAssetIcon } from '../utils';
 import { formatBitcoinAmount, parseInputAmount, convertAmountToUnit, useBitcoinConversion } from '../utils/bitcoinUnits';
 import { resolvePrecision } from '../utils/assetAmount';
+import { bolt11PaymentHash } from '../utils/bolt11';
+
+/** How long Send waits on Bark before handing the payment to the receipt. */
+const BARK_SEND_TIMEOUT_MS = 45_000;
 
 interface Props {
   navigation: any;
@@ -646,8 +650,20 @@ function SendScreen({ navigation, route }: Props) {
           invoice = await resolveLightningAddressToInvoice(address, entered);
         }
         const fixed = addressType === 'lightning' && (decodedInvoice?.amt_msat ?? 0) > 0;
-        result = await sendBarkPayment({ invoice, ...(fixed ? {} : { amount: entered }) });
+        const invoiceHash = bolt11PaymentHash(invoice);
+        // Bounded: past the limit the receipt takes over and keeps following it.
+        result = await sendBarkPaymentBounded(
+          { invoice, ...(fixed ? {} : { amount: entered }) },
+          BARK_SEND_TIMEOUT_MS,
+          invoiceHash,
+        );
         if (result.status === 'failed') throw new Error('Bark payment failed.');
+        // An Ark transfer is complete once sendArkPayment returns; the adapter
+        // still labels it pending (no hash to follow), which left the receipt stuck.
+        if (addressType === 'arkade' && result.status === 'pending' && !result.paymentHash && !result.txid) {
+          result = { ...result, status: 'confirmed' };
+        }
+        if (!result.paymentHash && invoiceHash) result = { ...result, paymentHash: invoiceHash };
         successType = 'bark';
       } else if (method === 'spark') {
         // Spark transfer
@@ -738,7 +754,7 @@ function SendScreen({ navigation, route }: Props) {
       goToPaymentSuccess(successType, result);
     } catch (error) {
       if (activeRoute?.account === 'BARK' && (error as any)?.code === 'PAYMENT_OUTCOME_UNKNOWN') {
-        goToPaymentSuccess('bark', { status: 'unknown', feeKnown: false });
+        goToPaymentSuccess('bark', { status: 'unknown', feeKnown: false, paymentHash: bolt11PaymentHash(address) ?? undefined });
         return;
       }
       console.error('Send error:', error);
@@ -834,6 +850,10 @@ function SendScreen({ navigation, route }: Props) {
       paymentType,
       status: paymentReceiptStatus(result, ['bitcoin', 'boarding', 'rgb'].includes(paymentType)),
       networkLabel: activeRoute?.account === 'BARK' ? `Bark · ${barkNetworkLabel()}` : undefined,
+      // Lets the receipt follow an unsettled payment to its final state.
+      ...(paymentType === 'bark' && typeof result?.paymentHash === 'string' && /^[a-f0-9]{64}$/i.test(result.paymentHash)
+        ? { protocol: 'BARK' as const, paymentHash: result.paymentHash }
+        : {}),
       fee,
       reference: typeof reference === 'string' ? reference : undefined,
       referenceLabel,

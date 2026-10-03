@@ -11,7 +11,7 @@ jest.mock('../services/protocols', () => ({ protocolManager: {
   sendPayment: (...args: any[]) => mockManager.sendPayment(...args),
 } }))
 jest.mock('../services/protocols/bark', () => ({ resolveBarkHostConfig: () => ({ network: 'signet' }) }))
-import { readBarkAccount, createBarkReceive, sendBarkPayment, boardBarkFunds, barkNetworkLabel } from '../services/BarkService'
+import { readBarkAccount, createBarkReceive, sendBarkPayment, sendBarkPaymentBounded, boardBarkFunds, barkNetworkLabel } from '../services/BarkService'
 
 beforeEach(() => { jest.clearAllMocks(); mockAdapter.isConnected.mockReturnValue(true) })
 it('labels signet as test sats', () => expect(barkNetworkLabel()).toContain('test sats'))
@@ -57,4 +57,28 @@ it('boards only after an explicit valid request', async () => {
   expect(mockAdapter.boardAmount).not.toHaveBeenCalled()
   await boardBarkFunds(10000)
   expect(mockAdapter.boardAmount).toHaveBeenCalledWith(10000)
+})
+
+describe('sendBarkPaymentBounded', () => {
+  const HASH = 'b'.repeat(64)
+  afterEach(() => jest.useRealTimers())
+
+  it('returns the payment result when Bark answers in time', async () => {
+    mockManager.sendPayment.mockResolvedValue({ status: 'confirmed', paymentHash: HASH })
+    await expect(sendBarkPaymentBounded({ invoice: 'lnbc1x' } as any, 1000, HASH)).resolves.toEqual({ status: 'confirmed', paymentHash: HASH })
+  })
+
+  it('hands over as pending (never failed) when Bark keeps waiting', async () => {
+    jest.useFakeTimers()
+    mockManager.sendPayment.mockReturnValue(new Promise(() => {}))
+    const pending = sendBarkPaymentBounded({ invoice: 'lno1offer' } as any, 1000, HASH)
+    await Promise.resolve(); await Promise.resolve()
+    jest.advanceTimersByTime(1000)
+    await expect(pending).resolves.toEqual({ status: 'pending', paymentHash: HASH, timedOut: true })
+  })
+
+  it('still surfaces a failure that happens before the limit', async () => {
+    mockManager.sendPayment.mockRejectedValue(new Error('no route'))
+    await expect(sendBarkPaymentBounded({ invoice: 'lnbc1x' } as any, 1000, HASH)).rejects.toThrow('no route')
+  })
 })

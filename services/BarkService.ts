@@ -81,6 +81,31 @@ export async function readBarkRecovery(): Promise<string | null> {
   return info?.recovery ?? null
 }
 
+/**
+ * sendBarkPayment with a time limit. Bark can wait on Lightning settlement with
+ * no limit (BOLT12 offers), which froze Send. Past `timeoutMs` this resolves as
+ * `pending` (with the invoice's payment hash when known) so the receipt can keep
+ * following it. It never reports a failure on timeout: the payment may still be
+ * in flight, and "failed" invites a double payment.
+ */
+export async function sendBarkPaymentBounded(
+  request: PaymentRequest,
+  timeoutMs: number,
+  paymentHash?: string | null,
+): Promise<any> {
+  const sending = sendBarkPayment(request)
+  sending.catch(() => { /* an outcome after the timeout is followed by the receipt */ })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<any>((resolve) => {
+    timer = setTimeout(() => resolve({ status: 'pending', paymentHash: paymentHash ?? '', timedOut: true }), timeoutMs)
+  })
+  try {
+    return await Promise.race([sending, timedOut])
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
+}
+
 export async function getBarkBoardingTerms() {
   return getConnectedBark().boardingTerms()
 }

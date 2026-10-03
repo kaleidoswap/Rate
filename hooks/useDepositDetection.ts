@@ -13,8 +13,10 @@ import {
   type ReceiveMethod,
   type ReceiveProtocol,
 } from '../utils/receive-session';
-import { decode } from 'light-bolt11-decoder';
+import { bolt11PaymentHash } from '../utils/bolt11';
 import { syncBarkForUpdates } from '../services/BarkService';
+
+export { bolt11PaymentHash };
 
 export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark' | 'liquid';
 export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
@@ -90,16 +92,6 @@ async function readMethodBalance(
     );
     if (!balance) return null;
     return Number(balance.total ?? balance.future ?? balance.settled ?? balance.spendable ?? 0);
-  } catch {
-    return null;
-  }
-}
-
-/** Payment hash of a BOLT11 invoice, or null if it can't be decoded. */
-export function bolt11PaymentHash(invoice: string): string | null {
-  try {
-    const section = decode(invoice.trim()).sections.find((x: any) => x.name === 'payment_hash') as any;
-    return typeof section?.value === 'string' && /^[a-f0-9]{64}$/i.test(section.value) ? section.value : null;
   } catch {
     return null;
   }
