@@ -45,7 +45,7 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
-import { readBarkRecovery } from '../services/BarkService';
+import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
 
 const { width } = Dimensions.get('window');
 
@@ -315,7 +315,8 @@ export default function DashboardScreen({ navigation }: Props) {
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
           try {
-            if (proto === 'BARK') await adapter.refreshBalances();
+            // A failed sync (server unreachable) must not hide the last known Bark balance.
+            if (proto === 'BARK') await syncBarkForUpdates().catch((e) => console.warn('Bark sync failed:', e));
             return { proto, btc: await adapter.getBtcBalance() };
           } catch (e) {
             console.warn('Balance fetch error:', e);

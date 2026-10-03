@@ -58,7 +58,6 @@ import {
   type ReceiveMethod,
   type ReceiveProtocol,
 } from '../utils/receive-session';
-import { resolvePrecision } from '../utils/assetAmount';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 
 // Sentinel asset id for receiving an RGB asset the user doesn't hold yet
@@ -175,15 +174,6 @@ export default function ReceiveScreen({ navigation }: Props) {
   
 
   
-  // Get asset precision for validation (similar to desktop app)
-  const getAssetPrecision = (ticker: string): number => {
-    if (ticker === 'BTC') {
-      return bitcoinUnit === 'BTC' ? 8 : 0; // 8 decimals for BTC, 0 for sats
-    }
-    const rgbAsset = rgbAssets.find(asset => asset.ticker === ticker);
-    return resolvePrecision(rgbAsset?.precision); // Default to 8 if not found
-  };
-
   // Must call hooks first before any other code
   const getProtocolStatus = useRefreshableProtocolStatus();
 
@@ -798,7 +788,7 @@ export default function ReceiveScreen({ navigation }: Props) {
                 layer: 'BTC_LN',
                 amount: amountSats,
                 description: `Receive ${cleanAmount} ${bitcoinUnit}`,
-                expirySeconds,
+                // No expirySeconds: Bark sets its own invoice expiry and rejects a custom one.
               }));
             result = invoice.invoice;
             methodMeta = {
@@ -886,17 +876,9 @@ export default function ReceiveScreen({ navigation }: Props) {
             assetId: selectedAsset.asset_id,
           };
         } else {
-          // RGB-over-Lightning invoice. Open-amount: if the user did enter a
-          // number, scale it to BASE units (10^precision) for the node; otherwise
-          // mint an amount-less RGB-LN invoice the sender fills in.
-          const cleanAmount = amount.replace(/,/g, '');
-          const parsed = parseFloat(cleanAmount);
-          const precision = getAssetPrecision(selectedAsset.ticker);
-          const assetAmount =
-            !isNaN(parsed) && parsed > 0
-              ? Math.round(parsed * Math.pow(10, precision))
-              : undefined;
-
+          // RGB-over-Lightning invoice, always open-amount: the sender fills it in.
+          // `amount` is the BTC/sats request (the amount row is hidden for RGB
+          // assets), so it must never be read as asset units here.
           const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           if (!rgbAssetLnAdapter?.isConnected()) {
             throw new Error('RGB node required for RGB Lightning deposits. Please configure in Settings.');
@@ -907,10 +889,7 @@ export default function ReceiveScreen({ navigation }: Props) {
               'createInvoice',
               [{
                 asset: selectedAsset.asset_id,
-                ...(assetAmount ? { assetAmount } : {}),
-                description: assetAmount
-                  ? `Receive ${cleanAmount} ${selectedAsset.ticker}`
-                  : `Receive ${selectedAsset.ticker}`,
+                description: `Receive ${selectedAsset.ticker}`,
                 expirySeconds,
               }],
               signal,

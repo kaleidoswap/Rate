@@ -23,10 +23,8 @@ import { setAppUnlocked } from '../services/appLockState';
 import { useAppSelector } from '../store/hooks';
 
 const PIN_LENGTH = 6;
-// After this many wrong PINs in a row, input is frozen for a cooldown that
-// doubles with each further failure.
-const MAX_ATTEMPTS_BEFORE_COOLDOWN = 5;
-const BASE_COOLDOWN_MS = 30_000;
+// Wrong-PIN cooldowns are counted and enforced by SecurityService, which keeps
+// them in SecureStore; this gate only shows the countdown.
 
 type LockMode = 'checking' | 'locked' | 'unlocked' | 'error';
 
@@ -64,16 +62,19 @@ export function AppLockGate() {
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
 
-  const failedAttempts = useRef(0);
   const backgroundedAt = useRef<number | null>(null);
   const verifying = useRef(false);
 
+  const methodsRef = useRef<LockMethods>({ pin: false, biometric: false });
   const promptBiometric = useCallback(async () => {
+    // With a wallet PIN set, a failed biometric falls back to that PIN, never to
+    // the phone's passcode; biometric-only wallets keep the passcode as recovery.
     const ok = await SecurityService.getInstance().authenticateWithBiometric(
       'Unlock your wallet',
+      { allowDeviceFallback: !methodsRef.current.pin },
     );
     if (ok) {
-      failedAttempts.current = 0;
+      await SecurityService.getInstance().resetPinFailures();
       setPin('');
       setError(null);
       setMode('unlocked');
@@ -88,6 +89,7 @@ export function AppLockGate() {
     setMode((m) => (m === 'locked' ? m : 'checking'));
     try {
       const m = await resolveLockMethods();
+      methodsRef.current = m;
       setMethods(m);
       if (!m.pin && !m.biometric) {
         setMode('unlocked');
@@ -95,6 +97,11 @@ export function AppLockGate() {
       }
       setPin('');
       setError(null);
+      // A cooldown from before a restart still applies.
+      const lockedUntil = await SecurityService.getInstance().getPinLockedUntil();
+      setNow(Date.now());
+      setCooldownUntil(lockedUntil);
+      if (lockedUntil > Date.now()) setError('Too many attempts');
       setMode('locked');
       if (m.biometric) {
         promptBiometric();
@@ -147,14 +154,11 @@ export function AppLockGate() {
     try {
       const ok = await SecurityService.getInstance().verifyPin(candidate);
       if (ok) {
-        failedAttempts.current = 0;
         setError(null);
         setMode('unlocked');
       } else {
-        failedAttempts.current += 1;
-        const over = failedAttempts.current - MAX_ATTEMPTS_BEFORE_COOLDOWN;
-        if (over >= 0) {
-          const until = Date.now() + BASE_COOLDOWN_MS * 2 ** over;
+        const until = await SecurityService.getInstance().getPinLockedUntil();
+        if (until > Date.now()) {
           setNow(Date.now());
           setCooldownUntil(until);
           setError('Too many attempts');

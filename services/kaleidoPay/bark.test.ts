@@ -65,6 +65,15 @@ test('pays a BOLT12 offer directly, leaving a fixed amount to the offer', async 
   await expect(account.execute!(preview(amountOffer), directRoute, quote, 'ui-3')).rejects.toThrow('fresh quote'); // a quote pays once
 });
 
+test('a fixed-amount offer quoted for another amount is refused before anything is sent', async () => {
+  const b = bark(20);
+  const account = createBarkPayAccount(b, 'signet');
+  await expect(account.quote(preview(amountOffer, 1000), directRoute)).rejects.toThrow('different amount');
+  const [option] = await account.quoteOptions!(preview(amountOffer, 1000), directRoute);
+  expect(option.quote).toBeUndefined();
+  expect(b.sendPayment).not.toHaveBeenCalled();
+});
+
 test('passes the amount for an amountless offer and follows a pending payment', async () => {
   const b = bark(15);
   b.sendPayment.mockResolvedValueOnce({ paymentHash: 'cd'.repeat(32), status: 'pending' });
@@ -74,6 +83,35 @@ test('passes the amount for an amountless offer and follows a pending payment', 
   expect(b.sendPayment).toHaveBeenCalledWith({ invoice: openOffer, amount: 1200 });
   await expect(account.status!('ui-4')).resolves.toEqual({ status: 'completed', reference: 'cd'.repeat(32) });
   expect(b.getPaymentStatus).toHaveBeenCalledWith('cd'.repeat(32));
+});
+
+test('an offer payment Bark left in flight without a hash needs checking instead of staying pending', async () => {
+  const b = bark(15);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending' });
+  const account = createBarkPayAccount(b, 'signet');
+  const quote = await account.quote(preview(openOffer, 1200), directRoute);
+  await expect(account.execute!(preview(openOffer, 1200), directRoute, quote, 'ui-nohash')).resolves.toMatchObject({ status: 'pending' });
+  await expect(account.status!('ui-nohash')).resolves.toEqual({ status: 'unknown' });
+});
+
+test('a stale direct quote is refused as not sent', async () => {
+  const { PaymentNotSentError } = require('./errors');
+  const account = createBarkPayAccount(bark(15), 'signet');
+  const quote = await account.quote(preview(openOffer, 1200), directRoute);
+  await expect(account.execute!(preview(openOffer, 1200), directRoute, { ...quote }, 'ui-stale')).rejects.toBeInstanceOf(PaymentNotSentError);
+});
+
+test('a pending offer payment is re-checked only after Bark syncs', async () => {
+  const b: any = bark(15);
+  const order: string[] = [];
+  b.backend.sync = jest.fn(async () => { order.push('sync'); });
+  b.getPaymentStatus.mockImplementation(async () => { order.push('status'); return { status: 'confirmed' }; });
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: 'ef'.repeat(32), status: 'pending' });
+  const account = createBarkPayAccount(b, 'signet');
+  const quote = await account.quote(preview(openOffer, 1200), directRoute);
+  await account.execute!(preview(openOffer, 1200), directRoute, quote, 'ui-sync');
+  await expect(account.status!('ui-sync')).resolves.toMatchObject({ status: 'completed' });
+  expect(order).toEqual(['sync', 'status']);
 });
 
 test('swap attempts keep their status recovery', async () => {
@@ -96,7 +134,7 @@ test('barkRail takes a compressed or x-only server key', () => {
 
 test("pays the receiver's Bark address directly, with Bark's Ark fee in the quote", async () => {
   const b = bark(3);
-  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending' });
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending', amount: 2100 }); // the adapter's shape once cosigned
   const account = createBarkArkAccount(b, 'mainnet', RAIL);
   const [option] = await account.quoteOptions!(arkPreview(), arkRoute);
   expect(option.quote).toMatchObject({ recipientSat: 2100, feeSat: 3, totalSat: 2103 });
@@ -105,6 +143,15 @@ test("pays the receiver's Bark address directly, with Bark's Ark fee in the quot
   expect(b.sendPayment).toHaveBeenCalledWith({ invoice: 'ark1receiver', amount: 2100 });
   await expect(account.status!('ark-1')).resolves.toEqual({ status: 'completed' });
   await expect(account.execute!(arkPreview(), arkRoute, option.quote!, 'ark-2')).rejects.toThrow('fresh quote');
+});
+
+test('an Ark send that failed or moved another amount is not shown as paid', async () => {
+  const b = bark(3);
+  const account = createBarkArkAccount(b, 'mainnet', RAIL);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'failed', amount: 2100 });
+  await expect(account.execute!(arkPreview(), arkRoute, (await account.quote(arkPreview(), arkRoute)), 'ark-f')).resolves.toEqual({ status: 'failed' });
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending', amount: 999 });
+  await expect(account.execute!(arkPreview(), arkRoute, (await account.quote(arkPreview(), arkRoute)), 'ark-u')).resolves.toEqual({ status: 'unknown' });
 });
 
 test('no address on this server, a foreign address or no fee estimate means no Bark address quote', async () => {

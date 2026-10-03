@@ -27,4 +27,13 @@ describe('payment cost review', () => {
     expect(await estimate).toBeNull();
     jest.useRealTimers();
   });
+  it('uses Bark\'s own estimator for each kind of Send route', async () => {
+    const estimate = jest.fn(async () => ({ feeSats: 7 }));
+    const bark = { backend: { estimatePaymentFee: estimate } };
+    expect(await estimatePaymentFee(bark, { method: 'lightning', destination: 'lnbc1', amountSats: 1000 })).toBe(7);
+    expect(await estimatePaymentFee(bark, { method: 'arkade', destination: 'ark1x', amountSats: 1000 })).toBe(7);
+    expect(await estimatePaymentFee(bark, { method: 'bitcoin_l1', destination: 'bc1qx', amountSats: 1000 })).toBe(7);
+    expect(estimate.mock.calls).toEqual([['lightning', 1000, undefined], ['ark', 1000, undefined], ['onchain', 1000, 'bc1qx']]);
+    expect(await estimatePaymentFee(bark, { method: 'lightning', destination: 'lnbc1', amountSats: 0, amountless: true })).toBeNull();
+  });
 });

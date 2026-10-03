@@ -1,7 +1,7 @@
 import type { SwapAttempt } from '@universal-bolt12/swap-market';
 export type { SwapAttempt } from '@universal-bolt12/swap-market';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodePaymentCode, offerRails, paymentCodeNetwork, planPayment } from '@universal-bolt12/universal-code';
+import { decodeOffer, decodePaymentCode, offerRails, paymentCodeNetwork, planPayment } from '@universal-bolt12/universal-code';
 import type { Network, PaymentCode, PaymentRequest, Plan, Route, SwapCapability, WalletSource } from '@universal-bolt12/universal-code';
 export type { Network, Route } from '@universal-bolt12/universal-code';
 
@@ -36,8 +36,9 @@ export interface PaymentOffer {
   id: string; provider: string; providerDetail?: string; accountName: string; route: Route;
   quote?: Quote; unavailable?: string; executable: boolean;
 }
-/** Demo builds (EXPO_PUBLIC_KALEIDOPAY_DEMO=1) simulate only the final payment; quotes stay live and the screen says so. */
-export const KALEIDOPAY_DEMO = process.env.EXPO_PUBLIC_KALEIDOPAY_DEMO === '1';
+/** Development builds with EXPO_PUBLIC_KALEIDOPAY_DEMO=1 simulate only the final payment; quotes stay live and
+ *  the screen says so. Never in a release build: a simulated "completed" there would look like a real payment. */
+export const KALEIDOPAY_DEMO = typeof __DEV__ !== 'undefined' && __DEV__ && process.env.EXPO_PUBLIC_KALEIDOPAY_DEMO === '1';
 const accounts = new Map<string, PayAccount>();
 const owners = new WeakMap<PaymentOffer, { account: PayAccount; snapshot: string }>();
 const preparers = new Set<() => Promise<void>>();
@@ -54,18 +55,43 @@ export function registerKaleidoPayAccount(account: PayAccount): () => void {
   accounts.set(account.source.id, account);
   return () => { if (accounts.get(account.source.id) === account) accounts.delete(account.source.id); };
 }
+const BARE_ADDRESS = /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/;
+// BIP21 parameters KaleidoPay reads for a plain address; anything else (lightning=, spark=, …) is a
+// payment leg it would drop, so such codes stay on the regular Send flow.
+const ADDRESS_PARAMS = new Set(['amount', 'label', 'message']);
+/** Strips a `lightning:` prefix and gives a bare bitcoin address the `bitcoin:` scheme the decoder needs. */
 function normalizePaymentCode(text: string): string {
-  return text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
+  const code = text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
+  return BARE_ADDRESS.test(code) && !/^bcrt1/i.test(code) ? `bitcoin:${code}` : code;
 }
 export function isKaleidoPayCode(text: string): boolean {
   const code = normalizePaymentCode(text);
   return /^lno1/i.test(code) || /^bitcoin:/i.test(code) && /[?&]lno=/i.test(code);
 }
-/** A plain mainnet/test-network bitcoin address (not regtest): KaleidoPay can pay it through swap providers. */
+/** A valid (checksummed) mainnet/test-network bitcoin address, not regtest, with no other payment leg
+ *  (e.g. a `lightning=` invoice): KaleidoPay can pay it through swap providers. */
 export function isSwappableAddress(text: string): boolean {
   const code = normalizePaymentCode(text);
-  const body = /^bitcoin:/i.test(code) ? code.slice(8).split('?')[0] : code;
-  return !/[?&]lno=/i.test(code) && /^(bc1|tb1|[13mn2])[a-zA-HJ-NP-Z0-9]{20,90}$/.test(body) && !/^bcrt1/i.test(body);
+  if (!/^bitcoin:/i.test(code)) return false;
+  const [body, query = ''] = code.slice(8).split('?');
+  if (!BARE_ADDRESS.test(body) || /^bcrt1/i.test(body)) return false;
+  const keys = query.split('&').filter(Boolean).map(p => p.split('=')[0].toLowerCase());
+  if (keys.some(k => !ADDRESS_PARAMS.has(k))) return false;
+  // Checksum check: a half-typed address must not navigate away from Send.
+  return (['mainnet', 'signet'] as Network[]).some(network => {
+    try { decodePaymentCode(code, network); return true; } catch { return false; }
+  });
+}
+/** The amount a BOLT12 offer fixes, in whole sats; undefined for an open-amount offer. */
+export function offerAmountSat(offer: string): number | undefined {
+  const fields = decodeOffer(offer);
+  if (fields.some(f => f.type === 6n)) throw new Error('This offer is priced in another currency, which KaleidoPay cannot pay.');
+  const encoded = fields.find(f => f.type === 8n)?.value;
+  if (!encoded) return undefined;
+  if (encoded.length === 0 || encoded.length > 8 || encoded[0] === 0) throw new Error('This offer has an invalid amount.');
+  const msat = encoded.reduce((n, b) => (n << 8n) | BigInt(b), 0n);
+  if (msat === 0n || msat % 1000n !== 0n || msat / 1000n > 2100000000000000n) throw new Error('This offer asks for an amount KaleidoPay cannot pay in whole sats.');
+  return Number(msat / 1000n);
 }
 const RAIL_LABELS: Record<string, string> = { bark: 'Bark', arkade: 'Arkade', ln: 'Lightning', btc: 'On-chain', liquid: 'Liquid', 'rgb-ln': 'RGB Lightning' };
 export function railLabel(rail: string): string {
@@ -77,8 +103,14 @@ export function codeNetwork(text: string): Network | undefined {
 }
 export function previewPayment(text: string, network: Network, amount: string, requestId: string): Preview {
   const code = decodePaymentCode(normalizePaymentCode(text), network);
-  if (code.amountSat === undefined && !/^[1-9]\d*$/.test(amount)) throw new Error('Enter a whole number of sats.');
-  const amountSat = code.amountSat ?? Number(amount);
+  // A fixed-amount offer is paid exactly that amount, so it is what the review shows.
+  const offerSat = code.offer ? offerAmountSat(code.offer) : undefined;
+  if (offerSat !== undefined && code.amountSat !== undefined && offerSat !== code.amountSat) {
+    throw new Error('The payment code asks for two different amounts.');
+  }
+  const fixedSat = code.amountSat ?? offerSat;
+  if (fixedSat === undefined && !/^[1-9]\d*$/.test(amount)) throw new Error('Enter a whole number of sats.');
+  const amountSat = fixedSat ?? Number(amount);
   // The offer's rails are the receiver's order; an Ark rail is payable only with its address.
   const listed = code.offer ? offerRails(code.offer).filter(r => r.address || !/^(arkade|bark):/.test(r.rail)) : [];
   const rails = [...listed.map(r => r.rail), ...(code.address ? [`btc:${network}`] : [])];
@@ -169,7 +201,8 @@ export function bestOffer(offers: PaymentOffer[]): PaymentOffer | undefined {
 }
 const executions = new Map<string, Promise<PaymentResult>>();
 const normalizeResult = (value: PaymentResult): PaymentResult => value && ['completed', 'pending', 'unknown', 'failed'].includes(value.status) ? value : { status: 'unknown' };
-export class PaymentNotSentError extends Error {}
+import { PaymentNotSentError } from './errors';
+export { PaymentNotSentError };
 export async function executePaymentOffer(preview: Preview, offer: PaymentOffer, attemptId: string): Promise<PaymentResult> {
   try {
   const owner = owners.get(offer);
@@ -191,13 +224,18 @@ export async function executePaymentOffer(preview: Preview, offer: PaymentOffer,
     validateQuote(offer.quote!, preview, account);
     if (KALEIDOPAY_DEMO) { await new Promise(r => setTimeout(r, 2500)); return { status: 'completed', reference: 'simulated' }; }
     try { return normalizeResult(await account.execute!(preview, offer.route, offer.quote!, attemptId)); }
-    catch { return { status: 'unknown' }; }
+    catch (error) {
+      // An executor that refused before sending says so; anything else may have reached the provider.
+      if (error instanceof PaymentNotSentError) throw error;
+      return { status: 'unknown' };
+    }
   })();
   executions.set(key, execution);
   try { return await execution; } finally { executions.delete(key); }
   } catch (error) {
-    // Executor errors are normalized to unknown above. Anything reaching here
-    // failed before handing a payment to the provider.
+    // Executor errors are normalized to unknown above unless the executor refused
+    // before sending. Anything reaching here failed before handing a payment to the provider.
+    if (error instanceof PaymentNotSentError) throw error;
     throw new PaymentNotSentError(error instanceof Error ? error.message : 'Payment could not be started.');
   }
 }

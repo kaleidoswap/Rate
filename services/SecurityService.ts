@@ -10,6 +10,8 @@ const SECURITY_KEYS = {
   PIN_HASH: 'rate_wallet_pin_hash',
   BIOMETRIC_ENABLED: 'rate_wallet_biometric_enabled',
   SECURITY_ENABLED: 'rate_wallet_security_enabled',
+  // Wrong-PIN count and lockout end, kept here so restarting the app can't reset them.
+  PIN_FAILURES: 'rate_wallet_pin_failures',
   // Per-wallet seed phrase lives in the OS secure enclave, keyed by wallet id.
   MNEMONIC_PREFIX: 'rate_wallet_mnemonic_',
 };
@@ -33,6 +35,14 @@ async function derivePinHash(pin: string, salt: Uint8Array, iterations: number):
   const key = await pbkdf2Async(sha256, pin, salt, { c: iterations, dkLen: 32 });
   return bytesToHex(key);
 }
+
+// After this many wrong PINs in a row, PIN checks are refused for a cooldown
+// that doubles with each further failure (capped at ~8.5 hours).
+export const MAX_PIN_ATTEMPTS_BEFORE_COOLDOWN = 5;
+const BASE_PIN_COOLDOWN_MS = 30_000;
+const MAX_COOLDOWN_DOUBLINGS = 10;
+
+interface PinFailures { count: number; lockedUntil: number }
 
 function constantTimeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
@@ -101,8 +111,36 @@ export class SecurityService {
     }
   }
 
+  private async readPinFailures(): Promise<PinFailures> {
+    const raw = await SecureStore.getItemAsync(SECURITY_KEYS.PIN_FAILURES);
+    if (!raw) return { count: 0, lockedUntil: 0 };
+    const parsed = JSON.parse(raw) as Partial<PinFailures>;
+    const count = Number.isSafeInteger(parsed.count) && parsed.count! > 0 ? parsed.count! : 0;
+    const lockedUntil = Number.isFinite(parsed.lockedUntil) ? parsed.lockedUntil! : 0;
+    return { count, lockedUntil };
+  }
+
+  /** When PIN entry is allowed again (ms since epoch); 0 or a past time means now. */
+  async getPinLockedUntil(): Promise<number> {
+    try {
+      return (await this.readPinFailures()).lockedUntil;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Clears the wrong-PIN count, e.g. after the owner unlocked with biometrics. */
+  async resetPinFailures(): Promise<void> {
+    try {
+      await SecureStore.deleteItemAsync(SECURITY_KEYS.PIN_FAILURES);
+    } catch (e) {
+      console.warn('Failed to reset PIN attempts:', e);
+    }
+  }
+
   /**
-   * Verify PIN
+   * Verify PIN. Refused without checking while a wrong-PIN cooldown runs; the
+   * count is stored, so restarting the app does not give more attempts.
    */
   async verifyPin(pin: string): Promise<boolean> {
     try {
@@ -111,8 +149,18 @@ export class SecurityService {
         console.warn('No PIN found in secure storage');
         return false;
       }
+      const failures = await this.readPinFailures();
+      if (failures.lockedUntil > Date.now()) return false;
 
       const { ok, needsRehash } = await this.checkPinHash(pin, storedHash);
+      if (!ok) {
+        const count = failures.count + 1;
+        const over = count - MAX_PIN_ATTEMPTS_BEFORE_COOLDOWN;
+        const lockedUntil = over >= 0 ? Date.now() + BASE_PIN_COOLDOWN_MS * 2 ** Math.min(over, MAX_COOLDOWN_DOUBLINGS) : 0;
+        await SecureStore.setItemAsync(SECURITY_KEYS.PIN_FAILURES, JSON.stringify({ count, lockedUntil }));
+        return false;
+      }
+      if (failures.count > 0) await this.resetPinFailures();
       if (ok && needsRehash) {
         // Upgrade legacy / weaker hashes now that we know the PIN.
         try {
@@ -208,10 +256,16 @@ export class SecurityService {
   }
 
   /**
-   * Authenticate user with biometric
+   * Authenticate user with biometric.
+   *
+   * `allowDeviceFallback: false` keeps the OS from offering the phone's passcode
+   * when biometrics fail: the caller falls back to the wallet PIN instead, so
+   * knowing the phone passcode is not enough to open the wallet. Only allow the
+   * device fallback when there is no wallet PIN to fall back to.
    */
   async authenticateWithBiometric(
-    promptMessage: string = 'Authenticate to access your wallet'
+    promptMessage: string = 'Authenticate to access your wallet',
+    { allowDeviceFallback = true }: { allowDeviceFallback?: boolean } = {},
   ): Promise<boolean> {
     try {
       const compatible = await LocalAuthentication.hasHardwareAsync();
@@ -224,8 +278,10 @@ export class SecurityService {
 
       const result = await LocalAuthentication.authenticateAsync({
         promptMessage,
-        fallbackLabel: 'Use PIN',
-        disableDeviceFallback: false,
+        // iOS shows this button only without the device fallback; it ends the prompt
+        // so the wallet's own PIN pad takes over.
+        fallbackLabel: allowDeviceFallback ? undefined : 'Use wallet PIN',
+        disableDeviceFallback: !allowDeviceFallback,
         cancelLabel: 'Cancel',
       });
 
@@ -336,6 +392,7 @@ export class SecurityService {
       await SecureStore.deleteItemAsync(SECURITY_KEYS.PIN_HASH);
       await SecureStore.deleteItemAsync(SECURITY_KEYS.BIOMETRIC_ENABLED);
       await SecureStore.deleteItemAsync(SECURITY_KEYS.SECURITY_ENABLED);
+      await SecureStore.deleteItemAsync(SECURITY_KEYS.PIN_FAILURES);
       console.log('Security settings cleared');
       return true;
     } catch (error) {

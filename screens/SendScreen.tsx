@@ -4,6 +4,7 @@ import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { createRequestGuard } from '../utils/request-guard';
 import { barkNetworkLabel, sendBarkPayment } from '../services/BarkService';
 import { isKaleidoPayCode, isSwappableAddress } from '../services/kaleidoPay';
+import { KaleidoPayFlow } from '../components/payments/KaleidoPayFlow';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -161,6 +162,9 @@ function SendScreen({ navigation, route }: Props) {
   const [showAssetSelector, setShowAssetSelector] = useState(false);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [paymentStep, setPaymentStep] = useState<'input' | 'review' | 'sending'>('input');
+  // Codes KaleidoPay pays (offers, universal QRs, plain addresses) are reviewed and paid
+  // by its flow inside this screen; '' reopens an unresolved KaleidoPay payment.
+  const [kaleidoPayCode, setKaleidoPayCode] = useState<string | null>(route.params?.resumePayment ? '' : null);
   const [sendRoutes, setSendRoutes] = useState<RouteOption[]>([]);
   const [activeRoute, setActiveRoute] = useState<ResolvedSendRoute | null>(null);
   // Amount entry mode for the WDK AmountInput. Fiat entry is only meaningful
@@ -270,6 +274,8 @@ function SendScreen({ navigation, route }: Props) {
       detectAddressType(addressToSet);
     }
 
+    if (route.params?.resumePayment) setKaleidoPayCode('');
+
     if (route.params?.prefilledAmount) {
       setAmount(route.params.prefilledAmount);
     }
@@ -319,7 +325,7 @@ function SendScreen({ navigation, route }: Props) {
     setActiveRoute(null);
     if (isKaleidoPayCode(input) || isSwappableAddress(input)) {
       setAddressType('unknown');
-      navigation.navigate('KaleidoPay', { code: input.trim() });
+      setKaleidoPayCode(input.trim());
       return;
     }
     if (!input) {
@@ -1505,6 +1511,16 @@ function SendScreen({ navigation, route }: Props) {
       </View>
     </View>;
   };
+
+  if (kaleidoPayCode !== null) {
+    return (
+      <KaleidoPayFlow
+        code={kaleidoPayCode}
+        onExit={() => { setKaleidoPayCode(null); setAddress(''); detectAddressType(''); }}
+        onDone={() => navigation.goBack()}
+      />
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right', 'bottom']}>

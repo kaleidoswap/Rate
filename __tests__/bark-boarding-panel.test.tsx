@@ -5,9 +5,10 @@ import { fireEvent, render, waitFor } from '@testing-library/react-native'
 import { Alert } from 'react-native'
 
 const mockBoard = jest.fn(async () => ({}))
+const mockReadOnchain = jest.fn(async () => ({ confirmedSats: 20000, pendingSats: 500 }))
 jest.mock('../services/BarkService', () => ({
   barkNetworkLabel: () => 'Mainnet',
-  readBarkOnchain: async () => ({ confirmedSats: 20000, pendingSats: 500 }),
+  readBarkOnchain: () => mockReadOnchain(),
   getBarkBoardingTerms: async () => ({ minBoardAmountSats: 10000, requiredConfirmations: 3 }),
   boardBarkFunds: (...args: any[]) => mockBoard(...args),
 }))
@@ -42,4 +43,13 @@ it('refuses amounts below the server minimum', async () => {
   fireEvent.press(ui.getByText('Review boarding'))
   await waitFor(() => expect(Alert.alert).toHaveBeenCalledWith('Board funds', 'Minimum boarding amount: 10000 sats.'))
   expect(mockBoard).not.toHaveBeenCalled()
+})
+
+it('a failed balance read stops the spinner and can be refreshed', async () => {
+  mockReadOnchain.mockRejectedValueOnce(new Error('esplora down'))
+  const ui = render(<BarkBoardingPanel />)
+  await waitFor(() => expect(ui.getByText('Could not read the on-chain balance.')).toBeTruthy())
+  fireEvent.press(ui.getByLabelText('Refresh on-chain balance'))
+  await waitFor(() => expect(ui.getByText(/20,000 sats confirmed/)).toBeTruthy())
+  ui.unmount()
 })
