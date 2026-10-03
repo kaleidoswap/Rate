@@ -85,6 +85,22 @@ test('passes the amount for an amountless offer and follows a pending payment', 
   expect(b.getPaymentStatus).toHaveBeenCalledWith('cd'.repeat(32));
 });
 
+test('an offer payment Bark left in flight without a hash needs checking instead of staying pending', async () => {
+  const b = bark(15);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending' });
+  const account = createBarkPayAccount(b, 'signet');
+  const quote = await account.quote(preview(openOffer, 1200), directRoute);
+  await expect(account.execute!(preview(openOffer, 1200), directRoute, quote, 'ui-nohash')).resolves.toMatchObject({ status: 'pending' });
+  await expect(account.status!('ui-nohash')).resolves.toEqual({ status: 'unknown' });
+});
+
+test('a stale direct quote is refused as not sent', async () => {
+  const { PaymentNotSentError } = require('./errors');
+  const account = createBarkPayAccount(bark(15), 'signet');
+  const quote = await account.quote(preview(openOffer, 1200), directRoute);
+  await expect(account.execute!(preview(openOffer, 1200), directRoute, { ...quote }, 'ui-stale')).rejects.toBeInstanceOf(PaymentNotSentError);
+});
+
 test('swap attempts keep their status recovery', async () => {
   const account = createBarkPayAccount(bark(), 'signet');
   await expect(account.status!('existing-attempt')).resolves.toEqual({ status: 'pending' });
@@ -105,7 +121,7 @@ test('barkRail takes a compressed or x-only server key', () => {
 
 test("pays the receiver's Bark address directly, with Bark's Ark fee in the quote", async () => {
   const b = bark(3);
-  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending' });
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending', amount: 2100 }); // the adapter's shape once cosigned
   const account = createBarkArkAccount(b, 'mainnet', RAIL);
   const [option] = await account.quoteOptions!(arkPreview(), arkRoute);
   expect(option.quote).toMatchObject({ recipientSat: 2100, feeSat: 3, totalSat: 2103 });
@@ -114,6 +130,15 @@ test("pays the receiver's Bark address directly, with Bark's Ark fee in the quot
   expect(b.sendPayment).toHaveBeenCalledWith({ invoice: 'ark1receiver', amount: 2100 });
   await expect(account.status!('ark-1')).resolves.toEqual({ status: 'completed' });
   await expect(account.execute!(arkPreview(), arkRoute, option.quote!, 'ark-2')).rejects.toThrow('fresh quote');
+});
+
+test('an Ark send that failed or moved another amount is not shown as paid', async () => {
+  const b = bark(3);
+  const account = createBarkArkAccount(b, 'mainnet', RAIL);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'failed', amount: 2100 });
+  await expect(account.execute!(arkPreview(), arkRoute, (await account.quote(arkPreview(), arkRoute)), 'ark-f')).resolves.toEqual({ status: 'failed' });
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: '', status: 'pending', amount: 999 });
+  await expect(account.execute!(arkPreview(), arkRoute, (await account.quote(arkPreview(), arkRoute)), 'ark-u')).resolves.toEqual({ status: 'unknown' });
 });
 
 test('no address on this server, a foreign address or no fee estimate means no Bark address quote', async () => {

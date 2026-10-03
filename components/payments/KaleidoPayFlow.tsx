@@ -1,7 +1,7 @@
 import { formatBitcoinAmount } from '../../utils/bitcoinUnits';
 import { useForegroundClock } from '../../hooks/useForegroundClock';
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { Alert, View, Text, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
@@ -13,7 +13,7 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import { useAppSelector } from '../../store/hooks';
 import { KALEIDOPAY_DEMO, codeNetwork, prepareKaleidoPay, railLabel, previewPayment, quotePaymentOffers, quoteSpend, formatSpend, bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError, registerKaleidoPayAccount } from '../../services/kaleidoPay';
 import type { Network, Preview, PaymentOffer } from '../../services/kaleidoPay';
-import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt } from '../../services/kaleidoPay/attempts';
+import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../../services/kaleidoPay/attempts';
 import { protocolManager } from '../../services/protocols';
 import { MobileSparkAdapter } from '../../services/protocols/MobileSparkAdapter';
 import type { PaymentAttempt } from '../../services/kaleidoPay/attempts';
@@ -55,6 +55,7 @@ export function KaleidoPayFlow({ code, onExit, onDone }: Props) {
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const now = useForegroundClock(offers.some(offer => !!offer.quote) && !attempt);
   const [journalReady, setJournalReady] = useState(false);
+  const [journalUnreadable, setJournalUnreadable] = useState(false);
   const revision = useRef(0);
   const paying = useRef(false);
   const requestId = useRef(Crypto.randomUUID());
@@ -76,7 +77,7 @@ export function KaleidoPayFlow({ code, onExit, onDone }: Props) {
     setJournalReady(false); setAttempt(null);
     if (!walletId) { setJournalReady(true); return; }
     loadPaymentAttempt(walletId).then(saved => { if (active) { if (unresolvedAttempt(saved)) setAttempt(saved); setJournalReady(true); } })
-      .catch(() => { if (active) setError('Could not check your previous payment. Reopen this screen before paying.'); });
+      .catch(() => { if (active) { setJournalUnreadable(true); setError('Could not read your previous payment record. Check your wallet activity before paying again.'); } });
     return () => { active = false; revision.current++; };
   }, [walletId]);
   useEffect(() => () => { revision.current++; }, []);
@@ -152,6 +153,22 @@ export function KaleidoPayFlow({ code, onExit, onDone }: Props) {
     } catch { setError('Could not update payment status. Check again before making another payment.'); }
     finally { paying.current = false; setBusy(false); }
   }
+  function startNewPayment() {
+    if (!walletId || paying.current) return;
+    Alert.alert(
+      'Start a new payment?',
+      'Only continue if your wallet activity shows this payment did not go through. If it did, paying again pays twice. A swap that is already under way keeps being completed in the background.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Start a new payment', style: 'destructive', onPress: async () => {
+          try {
+            await dismissPaymentAttempt(walletId, journalUnreadable ? null : attempt);
+            setAttempt(null); setJournalUnreadable(false); setError(''); setJournalReady(true);
+          } catch { setError('Could not update the payment record. Try again.'); }
+        } },
+      ],
+    );
+  }
   useEffect(() => {
     // Scanning an amount-bound request opens its review directly; amountless
     // requests keep the editor visible. No payment is executed by this effect.
@@ -202,6 +219,7 @@ export function KaleidoPayFlow({ code, onExit, onDone }: Props) {
             <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: quotes are live, the payment step is simulated. No funds move.</Text>
           </View>}
           {!!error && <Text accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500], marginBottom: t.spacing[4] }}>{error}</Text>}
+          {journalUnreadable && !attempt && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} style={{ marginBottom: t.spacing[4] }} />}
           {attempt ? <View style={card}>
             <Ionicons name={attempt.status === 'completed' ? 'checkmark-circle-outline' : 'time-outline'} size={48} color={t.colors.primary[500]} />
             <Text style={{ ...text, fontSize: t.typography.fontSize['2xl'], fontWeight: '600' }}>{attempt.status === 'completed' ? 'Payment completed' : attempt.status === 'failed' ? 'Payment failed' : busy ? 'Sending payment' : attempt.status === 'unknown' ? 'Payment needs checking' : 'Payment in progress'}</Text>
@@ -209,7 +227,10 @@ export function KaleidoPayFlow({ code, onExit, onDone }: Props) {
             {row('Recipient receives', attempt.recipient)}{row('Total', attempt.total)}{row('Provider', attempt.provider)}
             {!!attempt.reference && <Text selectable style={muted}>Reference: {attempt.reference}</Text>}
             <Text style={muted}>{unresolvedAttempt(attempt) ? 'Your payment is still being checked. You can leave and return here to check its status. Do not send it again.' : attempt.status === 'failed' ? 'This payment was not sent or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
-            {unresolvedAttempt(attempt) ? <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} /> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') onDone(); else { setAttempt(null); if (preview) void getOffers(true); } }} />}
+            {unresolvedAttempt(attempt) ? <>
+              <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} />
+              {attempt.status === 'unknown' && !busy && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} />}
+            </> : <Button title={attempt.status === 'failed' ? 'Review a new quote' : 'Done'} onPress={() => { if (attempt.status === 'completed') onDone(); else { setAttempt(null); if (preview) void getOffers(true); } }} />}
           </View> : !preview ? <>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change recipient" onPress={onExit} style={card}>
               <Text style={muted}>Paying</Text>

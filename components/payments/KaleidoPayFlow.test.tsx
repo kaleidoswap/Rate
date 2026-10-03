@@ -11,7 +11,7 @@ jest.mock('../ScreenHeader', () => ({ ScreenHeader: 'ScreenHeader' }));
 jest.mock('../Button', () => ({ Button: ({ title, onPress, disabled }: any) => {
   const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity disabled={disabled} onPress={onPress}><Text>{title}</Text></TouchableOpacity>;
 } }));
-jest.mock('../../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), unresolvedAttempt: (a: any) => a?.status === 'pending' || a?.status === 'unknown' }));
+jest.mock('../../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
 jest.mock('../../services/kaleidoPay', () => ({
   PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, codeNetwork: () => undefined, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   previewPayment: () => mockPreview, quotePaymentOffers: jest.fn(), executePaymentOffer: jest.fn(), checkPaymentStatus: jest.fn(), registerKaleidoPayAccount: jest.fn(),
@@ -92,4 +92,19 @@ test('reopening with nothing unresolved returns to Send input', async () => {
   await act(async () => {});
   expect(onExit).toHaveBeenCalled();
   expect(quotePaymentOffers).not.toHaveBeenCalled();
+});
+test('a payment that needs checking can be moved past only after confirming the warning', async () => {
+  const { loadPaymentAttempt, dismissPaymentAttempt } = require('../../services/kaleidoPay/attempts');
+  const unknown = { id: 'u', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'unknown', createdAt: 1 };
+  loadPaymentAttempt.mockResolvedValueOnce(unknown);
+  const alert = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
+  const screen = render(<KaleidoPayFlow code="request" onExit={jest.fn()} onDone={jest.fn()} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByText('Start a new payment'));
+  expect(dismissPaymentAttempt).not.toHaveBeenCalled();
+  const buttons = alert.mock.calls[0][2] as any[];
+  await act(async () => { await buttons.find(b => b.style === 'destructive').onPress(); });
+  expect(dismissPaymentAttempt).toHaveBeenCalledWith(1, unknown);
+  expect(screen.queryByText('Check status')).toBeNull();
+  alert.mockRestore();
 });

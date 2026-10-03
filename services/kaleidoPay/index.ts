@@ -201,7 +201,8 @@ export function bestOffer(offers: PaymentOffer[]): PaymentOffer | undefined {
 }
 const executions = new Map<string, Promise<PaymentResult>>();
 const normalizeResult = (value: PaymentResult): PaymentResult => value && ['completed', 'pending', 'unknown', 'failed'].includes(value.status) ? value : { status: 'unknown' };
-export class PaymentNotSentError extends Error {}
+import { PaymentNotSentError } from './errors';
+export { PaymentNotSentError };
 export async function executePaymentOffer(preview: Preview, offer: PaymentOffer, attemptId: string): Promise<PaymentResult> {
   try {
   const owner = owners.get(offer);
@@ -223,13 +224,18 @@ export async function executePaymentOffer(preview: Preview, offer: PaymentOffer,
     validateQuote(offer.quote!, preview, account);
     if (KALEIDOPAY_DEMO) { await new Promise(r => setTimeout(r, 2500)); return { status: 'completed', reference: 'simulated' }; }
     try { return normalizeResult(await account.execute!(preview, offer.route, offer.quote!, attemptId)); }
-    catch { return { status: 'unknown' }; }
+    catch (error) {
+      // An executor that refused before sending says so; anything else may have reached the provider.
+      if (error instanceof PaymentNotSentError) throw error;
+      return { status: 'unknown' };
+    }
   })();
   executions.set(key, execution);
   try { return await execution; } finally { executions.delete(key); }
   } catch (error) {
-    // Executor errors are normalized to unknown above. Anything reaching here
-    // failed before handing a payment to the provider.
+    // Executor errors are normalized to unknown above unless the executor refused
+    // before sending. Anything reaching here failed before handing a payment to the provider.
+    if (error instanceof PaymentNotSentError) throw error;
     throw new PaymentNotSentError(error instanceof Error ? error.message : 'Payment could not be started.');
   }
 }

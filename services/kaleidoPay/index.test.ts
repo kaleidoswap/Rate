@@ -1,3 +1,4 @@
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 import { encodeOffer, encodePaymentCode } from '@universal-bolt12/universal-code';
 import { isSwappableAddress, offerAmountSat, codeNetwork, previewPayment, quotePayment, railLabel, registerKaleidoPayAccount, isKaleidoPayCode } from './index';
 const offer = encodeOffer([{ type: 10n, value: new TextEncoder().encode('Coffee') }]);
@@ -81,4 +82,19 @@ test('a fixed-amount offer is paid its own amount, whatever was typed', () => {
   expect(() => previewPayment(usd, 'signet', '1000', 'usd')).toThrow('another currency');
   const subSat = encodeOffer([{ type: 8n, value: new Uint8Array([0x03, 0xe9]) }, { type: 10n, value: new TextEncoder().encode('Shop') }]); // 1001 msat
   expect(() => offerAmountSat(subSat)).toThrow('whole sats');
+});
+
+test('an executor refusing before sending is reported as not sent, never as unknown', async () => {
+  const { executePaymentOffer, quotePaymentOffers, PaymentNotSentError } = require('./index');
+  const execute = jest.fn().mockRejectedValueOnce(new PaymentNotSentError('Review the payment again to get a fresh quote.'))
+    .mockRejectedValueOnce(new Error('socket closed'));
+  const quote = jest.fn().mockResolvedValue({ recipientSat: 50000, totalSat: 50100, feeSat: 100, expiresAt: Math.floor(Date.now() / 1000) + 60 });
+  const disconnect = registerKaleidoPayAccount({ source: { id: 'notsent', rail: 'ln', network: 'signet' }, swaps: [], quote, execute });
+  try {
+    const preview = previewPayment(code, 'signet', '', 'request');
+    const [offer] = await quotePaymentOffers(preview);
+    await expect(executePaymentOffer(preview, offer, 'attempt-1')).rejects.toThrow('fresh quote');
+    await expect(executePaymentOffer(preview, (await quotePaymentOffers(preview))[0], 'attempt-1b')).resolves.toEqual({ status: 'unknown' });
+    expect(execute).toHaveBeenCalledTimes(2);
+  } finally { disconnect(); }
 });

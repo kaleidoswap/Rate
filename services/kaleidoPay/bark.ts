@@ -4,6 +4,7 @@ import { validFeeSats } from '../paymentReview';
 import { createElectrumSwapAccount } from './electrumSwapAccount';
 import { offerAmountSat, registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
 import type { AccountQuoteOption, PayAccount, PaymentResult, Preview, Quote } from './index';
+import { PaymentNotSentError } from './errors';
 import { lightningPayerFrom } from './lightningPayer';
 import type { LightningSender } from './lightningPayer';
 import { kaleidoPayStores } from './recovery';
@@ -102,7 +103,7 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
       if (route.kind === 'direct') {
         const saved = offerQuotes.get(quote);
         if (!saved || saved.offer !== preview.code.offer || quote.expiresAt <= Math.floor(Date.now() / 1000)) {
-          throw new Error('Review the payment again to get a fresh quote.');
+          throw new PaymentNotSentError('Review the payment again to get a fresh quote.');
         }
         offerQuotes.delete(quote);
         const result = await bark.sendPayment({ invoice: saved.offer, amount: saved.fixedAmount ? undefined : quote.recipientSat });
@@ -110,7 +111,7 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
         return resultOf(result);
       }
       const inner = swapQuotes.get(quote);
-      if (!inner) throw new Error('Review the payment again to get a fresh quote.');
+      if (!inner) throw new PaymentNotSentError('Review the payment again to get a fresh quote.');
       swapQuotes.delete(quote);
       return swap.execute!(preview, route, inner, attemptId);
     },
@@ -119,7 +120,10 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
       const raw = await AsyncStorage.getItem(offerRef(attemptId));
       if (!raw) return swap.status!(attemptId);
       const saved = JSON.parse(raw) as { paymentHash: string; status: string };
-      if (saved.status !== 'pending' || !saved.paymentHash) return resultOf(saved);
+      if (saved.status !== 'pending') return resultOf(saved);
+      // Bark reported the offer payment in flight without a hash to follow it by: its outcome
+      // can only be read from Bark's activity, so it needs checking rather than staying pending.
+      if (!saved.paymentHash) return { status: 'unknown' };
       return resultOf({ paymentHash: saved.paymentHash, status: (await bark.getPaymentStatus(saved.paymentHash)).status });
     },
   };
@@ -163,12 +167,15 @@ export function createBarkArkAccount(bark: BarkPaySender, network: Network, rail
     async execute(preview, route, accepted, attemptId) {
       const address = quotes.get(accepted);
       if (!address || address !== preview.addresses?.[route.to] || accepted.expiresAt <= Math.floor(Date.now() / 1000)) {
-        throw new Error('Review the payment again to get a fresh quote.');
+        throw new PaymentNotSentError('Review the payment again to get a fresh quote.');
       }
       quotes.delete(accepted);
-      await bark.sendPayment({ invoice: address, amount: accepted.recipientSat });
-      // An out-of-round Ark payment is final once the server cosigns it, which is when the call returns.
-      const result: PaymentResult = { status: 'completed' };
+      const sent = await bark.sendPayment({ invoice: address, amount: accepted.recipientSat });
+      // An out-of-round Ark payment is final once the server cosigns it, which is when the call returns
+      // (the adapter reports it as 'pending' with no hash). Anything else is not shown as paid.
+      const result: PaymentResult = sent?.status === 'failed' ? { status: 'failed' }
+        : sent && (sent.status === 'pending' || sent.status === 'confirmed' || sent.status === 'completed') && sent.amount === accepted.recipientSat
+          ? { status: 'completed' } : { status: 'unknown' };
       await AsyncStorage.setItem(ref(attemptId), JSON.stringify(result));
       return result;
     },
@@ -209,7 +216,7 @@ export function createBarkOnchainAccount(bark: BarkPaySender, network: Network):
     async execute(preview, route, accepted, attemptId) {
       const address = quotes.get(accepted);
       if (!address || address !== preview.code.address || accepted.expiresAt <= Math.floor(Date.now() / 1000)) {
-        throw new Error('Review the payment again to get a fresh quote.');
+        throw new PaymentNotSentError('Review the payment again to get a fresh quote.');
       }
       quotes.delete(accepted);
       const sent = await bark.sendPayment({ invoice: address, amount: accepted.recipientSat });

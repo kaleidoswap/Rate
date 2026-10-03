@@ -6,6 +6,7 @@ import type {
 } from '@universal-bolt12/swap-market';
 import type { Route, WalletSource } from '@universal-bolt12/universal-code';
 import type { AccountQuoteOption, PayAccount, Preview, Quote } from './index';
+import { PaymentNotSentError } from './errors';
 
 const OFFER_TTL_MS = 60_000;
 /** Per-provider reply budget; providers are asked in parallel, so a quote takes at most this long. */
@@ -103,7 +104,9 @@ export function createElectrumSwapAccount(opts: {
     },
 
     async pay(preview, route, quote, onUpdate) {
-      const attempt = approved(preview, route, quote);
+      let attempt: ReturnType<typeof approved>;
+      try { attempt = approved(preview, route, quote); }
+      catch (error) { throw new PaymentNotSentError(error instanceof Error ? error.message : 'Review the payment again.'); }
       agreed.delete(quote);
       return payAttempt(attempt, opts.payer, { ...deps, onUpdate });
     },
@@ -111,7 +114,9 @@ export function createElectrumSwapAccount(opts: {
     async execute(preview, route, quote, attemptId) {
       const existing = running.get(attemptId);
       if (existing) return paymentResult(existing.latest);
-      const attempt = approved(preview, route, quote);
+      let attempt: ReturnType<typeof approved>;
+      try { attempt = approved(preview, route, quote); }
+      catch (error) { throw new PaymentNotSentError(error instanceof Error ? error.message : 'Review the payment again.'); }
       const recoveryId = `${opts.source.id}:${attemptId}`;
       const prior = (await opts.attempts.list()).find(a => a.requestId === recoveryId);
       if (prior) return paymentResult(prior); // Never fund an already journaled attempt again.

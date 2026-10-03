@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { validFeeSats } from '../paymentReview';
 import type { PayAccount, PaymentResult, Quote } from './index';
+import { PaymentNotSentError } from './errors';
 
 /** Minimal Spark SDK surface, injected so quote/execution invariants can be tested. */
 export interface SparkPayWallet {
@@ -36,9 +37,9 @@ export function createSparkPayAccount(walletId: number, wallet: SparkPayWallet, 
       return quote;
     },
     async execute(preview, _route, quote, attemptId) {
-      assertCurrent();
+      try { assertCurrent(); } catch (error) { throw new PaymentNotSentError(error instanceof Error ? error.message : 'Spark account changed.'); }
       const saved = quotes.get(quote);
-      if (!saved || saved.destination !== preview.code.address) throw new Error('Quote no longer available.');
+      if (!saved || saved.destination !== preview.code.address) throw new PaymentNotSentError('Quote no longer available.');
       // executePaymentOffer persists an at-most-once claim before reaching here.
       const request = await wallet.withdraw({ onchainAddress: saved.destination, amountSats: quote.recipientSat, exitSpeed: 'MEDIUM', feeQuoteId: saved.id, feeAmountSats: quote.feeSat!, deductFeeFromWithdrawalAmount: false });
       if (typeof request?.id === 'string') await AsyncStorage.setItem(referenceKey(attemptId), request.id);
