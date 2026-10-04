@@ -1,6 +1,7 @@
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
 import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
+import { RecentActivityWidget } from '../components/RecentActivityWidget';
 import { receiveAccountChain } from '../services/kaleidoPay/connect';
 import { chainLabel } from '../utils/receive-routes';
 import type { AccountId } from '../utils/account-routing';
@@ -14,16 +15,13 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Alert,
   Dimensions,
   StatusBar,
   Modal,
   DeviceEventEmitter,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { RootState } from '../store';
 import { initializeProtocolServices } from '../services/initializeServices';
@@ -99,9 +97,7 @@ interface Channel {
 
 /**
  * A time-of-day greeting with a little variety so it changes between opens.
- * `name` (the user's Nostr name, when connected) is used when present; when no
- * Nostr profile name is set we fall back to "anon" so the greeting still reads
- * personally (the wallet stays usable without Nostr).
+ * `name` (the user's Nostr name, when connected) is used when present.
  */
 function buildGreeting(name?: string): string {
   const hour = new Date().getHours();
@@ -112,8 +108,12 @@ function buildGreeting(name?: string): string {
     : hour < 21 ? ['Good evening', 'Evening', 'Welcome back']
     : ['Good night', 'Winding down', 'Hi'];
   const phrase = pool[Math.floor(Math.random() * pool.length)];
-  return `${phrase}, ${name || 'anon'}`;
+  return name ? `${phrase}, ${name}` : phrase;
 }
+
+const ACCOUNT_NAMES: Record<string, string> = {
+  RGB_LN: 'your RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark',
+};
 
 export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
@@ -153,6 +153,8 @@ export default function DashboardScreen({ navigation }: Props) {
   const [isConnecting, setIsConnecting] = useState(true);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  // Accounts that failed to connect (by name), so the banner can say which one.
+  const [offlineAccounts, setOfflineAccounts] = useState<string[]>([]);
   const [protocolsReady, setProtocolsReady] = useState(false);
   // Startup initializes protocols and then fetches balances in the same async
   // focus callback. React state does not update synchronously, so reading
@@ -205,6 +207,9 @@ export default function DashboardScreen({ navigation }: Props) {
       if (failed.length > 0) {
         console.warn('[Dashboard] Protocol failures:', failed.join(', '));
       }
+      setOfflineAccounts(Array.from(results.entries())
+        .filter(([, r]) => !r.success && !r.error?.startsWith('skipped:'))
+        .map(([p]) => ACCOUNT_NAMES[String(p)] ?? String(p)));
       if (skipped.length > 0) {
         console.log('[Dashboard] Protocols skipped:', skipped.join(', '));
       }
@@ -426,12 +431,8 @@ export default function DashboardScreen({ navigation }: Props) {
 
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
-      if (showLoadingIndicator) {
-        Alert.alert(
-          'Error',
-          error instanceof Error ? error.message : 'Failed to load dashboard data'
-        );
-      }
+      // Shown in the banner above the balance, not as a modal on top of it.
+      if (showLoadingIndicator) setBalanceWarning('Your balances could not be refreshed.');
     } finally {
       isUpdatingRef.current = false;
       setIsUpdating(false);
@@ -819,11 +820,21 @@ export default function DashboardScreen({ navigation }: Props) {
             onRestore={() => navigation.navigate('WalletRestore')}
           />
         ) : <>
+        {!connectionError && !balanceWarning && offlineAccounts.length > 0 && (
+          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
+            <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
+            <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
+              {offlineAccounts.join(', ')} {offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        )}
         {(connectionError || balanceWarning) && (
           <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
             <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
             <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
-              {connectionError ? 'Wallet connection unavailable. Tap to retry.' : `${balanceWarning} Tap to retry.`}
+              {connectionError
+                ? (offlineAccounts.length ? `Can't reach ${offlineAccounts.join(', ')}. Tap to retry.` : 'Wallet connection unavailable. Tap to retry.')
+                : `${balanceWarning} Tap to retry.`}
             </Text>
           </TouchableOpacity>
         )}
@@ -916,7 +927,9 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('Assets', { issue: true })}
         />
 
-        </>}
+        {/* The latest payments, so a receive shows up without switching tabs. */}
+        <RecentActivityWidget onViewAll={() => navigation.navigate('Activity')} />
+
         <TouchableOpacity
           accessibilityRole="button"
           onPress={() => navigation.navigate('Map')}
@@ -929,6 +942,7 @@ export default function DashboardScreen({ navigation }: Props) {
           </View>
           <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
         </TouchableOpacity>
+        </>}
 
         {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (
         <ChannelList

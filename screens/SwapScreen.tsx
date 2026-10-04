@@ -116,6 +116,8 @@ export default function SwapScreen({ navigation }: Props) {
   const policy = usePolicy();
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
+  // A venue whose prices failed to load, so an empty list says why.
+  const [pairsFailed, setPairsFailed] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
   // Set once a swap settles so the confirm modal shows a success screen instead
   // of silently closing (the Flashnet path had no confirmation at all).
@@ -231,6 +233,8 @@ export default function SwapScreen({ navigation }: Props) {
 
   const loadTradingPairs = async () => {
     setPairsLoading(true);
+    setPairsFailed(false);
+    let failed = false;
     try {
       let makerPairs: SwapPair[] = [];
       let flashnetPairs: SwapPair[] = [];
@@ -246,6 +250,7 @@ export default function SwapScreen({ navigation }: Props) {
         }
       } catch (err) {
         console.warn('[SwapScreen] Failed to load Kaleidoswap pairs:', err);
+        failed = true;
       }
 
       // Load Flashnet pools (via Spark → Flashnet)
@@ -281,12 +286,15 @@ export default function SwapScreen({ navigation }: Props) {
         }
       } catch (err) {
         console.warn('[SwapScreen] Failed to load Flashnet pools:', err);
+        failed = true;
       }
 
       setTradingPairs([...makerPairs, ...flashnetPairs]);
     } catch (error) {
       console.error('[SwapScreen] Failed to load trading pairs:', error);
+      failed = true;
     } finally {
+      setPairsFailed(failed);
       setPairsLoading(false);
     }
   };
@@ -729,8 +737,31 @@ export default function SwapScreen({ navigation }: Props) {
     );
   };
 
+  // Why there is nothing to swap: still loading, no swap account, or prices failed.
+  const renderPairsNotice = () => {
+    if (pairsLoading && tradingPairs.length === 0) {
+      return <View style={styles.makerInfoRow}>
+        <ActivityIndicator size="small" color={theme.colors.primary[500]} />
+        <Text style={styles.makerInfoLabel}>Loading swap prices…</Text>
+      </View>;
+    }
+    if (tradingPairs.length > 0) return null;
+    const noAccount = !rgbConnected && !sparkConnected;
+    const message = noAccount ? 'Swaps need Spark or your RGB Lightning node. Connect one to see prices.'
+      : pairsFailed ? 'Swap prices could not be loaded.'
+      : 'No swaps are available for your accounts right now.';
+    return <View style={[styles.makerInfoRow, { flexWrap: 'wrap' }]}>
+      <Ionicons name={noAccount ? 'link-outline' : 'cloud-offline-outline'} size={14} color={theme.colors.text.secondary} />
+      <Text style={[styles.makerInfoLabel, { flex: 1 }]}>{message}</Text>
+      <TouchableOpacity accessibilityRole="button" onPress={() => (noAccount ? navigation.navigate('Settings') : void loadTradingPairs())}>
+        <Text style={[styles.makerInfoLabel, { color: theme.colors.primary[500] }]}>{noAccount ? 'Settings' : 'Retry'}</Text>
+      </TouchableOpacity>
+    </View>;
+  };
+
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
+      {renderPairsNotice()}
       {/* Venue filter tabs (Advanced only: Lite picks the best price for you) */}
       {policy.showRouteSelector && renderVenueFilter()}
 

@@ -34,6 +34,8 @@ import { Card } from './Card';
 import { Button } from './Button';
 import { Input } from './Input';
 import { WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
+import ToastService from '../services/ToastService';
+import { copySensitive } from '../utils/sensitiveClipboard';
 
 interface Props {
   navigation?: any;
@@ -205,8 +207,8 @@ export default function NostrProfileManager({ navigation }: Props) {
         {
           text: 'Copy to Clipboard',
           onPress: () => {
-            Clipboard.setString(keyToBackup);
-            Alert.alert('Copied', 'Private key copied to clipboard. Store it safely!');
+            copySensitive(keyToBackup);
+            Alert.alert('Copied', 'Private key copied. The clipboard clears in a minute — store it safely now.');
           }
         },
         {
@@ -417,8 +419,8 @@ export default function NostrProfileManager({ navigation }: Props) {
       return;
     }
 
-    Clipboard.setString(stringToCopy);
-    Alert.alert('Copied', 'NWC connection string copied to clipboard');
+    copySensitive(stringToCopy);
+    ToastService.getInstance().copied('Connection string');
   };
 
   const handleShareNWCConnection = async () => {
@@ -615,7 +617,7 @@ export default function NostrProfileManager({ navigation }: Props) {
               onPress={() => {
                 if (npub) {
                   Clipboard.setString(npub);
-                  Alert.alert('Copied', 'Public key copied to clipboard');
+                  ToastService.getInstance().copied('Public key');
                 }
               }}
             >

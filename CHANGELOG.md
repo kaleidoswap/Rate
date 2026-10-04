@@ -11,6 +11,8 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Changed
+- Home shows recent activity with a link to the full Activity tab, and "Places to pay" only once the wallet is set up.
+- When some accounts can't refresh, Home names them in a banner instead of an alert; a full refresh failure is a banner too.
 - **Lite mode** now also applies to Swap (no venue tabs, maker address or
   account names: the best price is picked) and Activity (no network chips).
 - **One name each.** The RGB/RLN node is the "RGB Lightning node" (a plain NWC
@@ -30,6 +32,8 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   swap fee, and the wallet claims the payment while Receive is open.
 
 ### Fixed
+- Swap explains when trading pairs are loading, empty or failed to load, with Retry or a link to Settings.
+- The Nostr private key and NWC connection string are copied with the auto-clearing secure clipboard.
 - Cards no longer fall back to white / light-grey / purple colors, and their
   content is no longer remounted on every render (an input inside a card kept
   losing focus). Receive and the channel screens use the shared header; Send's
