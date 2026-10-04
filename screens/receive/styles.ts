@@ -7,41 +7,6 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     backgroundColor: theme.colors.background.primary,
   },
 
-  receiveHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[3],
-    paddingBottom: theme.spacing[3],
-    backgroundColor: theme.colors.background.primary,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.border.light,
-    zIndex: 30,
-    elevation: 30,
-  },
-
-  receiveBackButton: {
-    // Matches MainHeader's `iconBtn`; this screen predates the shared header.
-    width: 44,
-    height: 44,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.surface.secondary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  receiveHeaderTitle: {
-    // Matches MainHeader's `title`.
-    flex: 1,
-    fontSize: 21,
-    fontWeight: theme.typography.fontWeight.bold,
-    letterSpacing: -0.3,
-    color: theme.colors.text.primary,
-  },
-
   scrollView: {
     flex: 1,
     zIndex: 0,

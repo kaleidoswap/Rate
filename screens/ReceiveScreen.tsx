@@ -34,6 +34,7 @@ import { ReceiveQr } from '../components/receive/ReceiveQr';
 import { ReceiveStatus, type ReceiveStatusValue } from '../components/receive/ReceiveStatus';
 import { ReceiveRequestActions } from '../components/receive/ReceiveRequestActions';
 import { ReceiveRoutePicker } from '../components/receive/ReceiveRoutePicker';
+import { ScreenHeader } from '../components/ScreenHeader';
 import { ReceiveRequestDetails, requestKind } from '../components/receive/ReceiveRequestDetails';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
 import {
@@ -1676,21 +1677,14 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right', 'bottom']}>
-      <View style={styles.receiveHeader}>
-        <TouchableOpacity
-          accessibilityRole="button" accessibilityLabel="Back"
-          onPress={() => {
-            cancelReceiveWork();
-            navigation.goBack();
-          }}
-          style={styles.receiveBackButton}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="arrow-back" size={20} color={theme.colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.receiveHeaderTitle}>Receive</Text>
-      </View>
+      <ScreenHeader
+        title="Receive"
+        showBack
+        onBack={() => {
+          cancelReceiveWork();
+          navigation.goBack();
+        }}
+      />
 
       <ScrollView
         style={styles.scrollView}

@@ -30,6 +30,10 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   swap fee, and the wallet claims the payment while Receive is open.
 
 ### Fixed
+- Cards no longer fall back to white / light-grey / purple colors, and their
+  content is no longer remounted on every render (an input inside a card kept
+  losing focus). Receive and the channel screens use the shared header; Send's
+  amounts use tabular figures.
 - **Restore from the first screen.** A fresh install (or a removed wallet) can
   now restore from a recovery phrase ("I already have a wallet"). Restore no
   longer shows an unfinished network step: it brings back the same accounts a

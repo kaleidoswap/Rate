@@ -13,6 +13,7 @@ import * as Crypto from 'expo-crypto';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
+import { AmountText } from '../components/AmountText';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
@@ -226,7 +227,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const text = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base };
   const muted = { ...text, color: t.colors.text.secondary };
   const card = { padding: t.spacing[5], borderRadius: t.borderRadius.xl, backgroundColor: t.colors.surface.primary, gap: t.spacing[3], marginBottom: t.spacing[4] };
-  const row = (label: string, value: string) => <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}><Text style={muted}>{label}</Text><Text style={{ ...text, textAlign: 'right', flexShrink: 1 }}>{value}</Text></View>;
+  const row = (label: string, value: string) => <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}><Text style={muted}>{label}</Text><AmountText style={{ ...text, textAlign: 'right', flexShrink: 1 }}>{value}</AmountText></View>;
   const railIcon = (r: string) => ({ ln: 'lightning', btc: 'onchain', ark: 'arkade' } as Record<string, string>)[r.split(':')[0]] ?? r.split(':')[0];
   const describe = (o: PaymentOffer) => {
     const chain = o.route.from.split(':')[1];
@@ -302,9 +303,9 @@ export default function SendScreen({ navigation, route }: Props) {
           </> : <>
             <View style={card}>
               <Text style={muted}>{preview.code.label || contactName || 'Recipient'} receives</Text>
-              <Text style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '600' }}>
+              <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '600' }}>
                 {preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat)}
-              </Text>
+              </AmountText>
               <Text numberOfLines={1} ellipsizeMode="middle" selectable style={muted}>{KIND_LABEL[preview.code.lnurl ? 'lnurl' : preview.code.kind]} · {preview.code.lnurl ?? preview.code.raw}</Text>
               {!!(preview.code.message || preview.code.description) && <Text style={text}>{preview.code.message || preview.code.description}</Text>}
             </View>
@@ -332,12 +333,12 @@ export default function SendScreen({ navigation, route }: Props) {
                 {row('They receive', displaySpend(spend.amount, spend.asset))}
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}>
                   <Text style={muted}>{selected?.route.kind === 'swap' ? 'Swap & fees' : 'Fees'}</Text>
-                  <Text style={{ ...text, color: spend.fee === 0 ? t.colors.success[500] : t.colors.text.primary }}>{spend.fee === 0 ? 'No fee' : displaySpend(spend.fee, spend.asset)}</Text>
+                  <AmountText style={{ ...text, color: spend.fee === 0 ? t.colors.success[500] : t.colors.text.primary }}>{spend.fee === 0 ? 'No fee' : displaySpend(spend.fee, spend.asset)}</AmountText>
                 </View>
                 <View style={{ height: 1, backgroundColor: t.colors.border.light }} />
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}>
                   <Text style={{ ...text, fontWeight: '600' }}>You pay</Text>
-                  <Text style={{ ...text, fontWeight: '600', fontSize: t.typography.fontSize.lg }}>{total}</Text>
+                  <AmountText style={{ ...text, fontWeight: '600', fontSize: t.typography.fontSize.lg }}>{total}</AmountText>
                 </View>
               </>}
               {quote && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
