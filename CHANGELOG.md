@@ -21,6 +21,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   swap fee, and the wallet claims the payment while Receive is open.
 
 ### Fixed
+- **Restore from the first screen.** A fresh install (or a removed wallet) can
+  now restore from a recovery phrase ("I already have a wallet"). Restore no
+  longer shows an unfinished network step: it brings back the same accounts a
+  new wallet gets, accepts 12- or 24-word phrases, and offers PIN / biometrics
+  like setup does.
+- **Balance total counts real bitcoin only.** Accounts on a test network
+  (regtest, signet, mutinynet) are shown as "Test funds · no real value" and no
+  longer inflate the total or its fiat value; Bark on mainnet now counts.
+  Incoming pending funds show under the total instead of a collapsed section.
+- **Confirmations.** Removing a Lightning wallet connection asks first, and
+  removing the wallet asks for the device passcode or biometrics.
+- AI model sizes under 1 GB no longer show as "0 MB".
 - **Universal QR.** It mixed accounts on different networks (for example Spark
   on regtest with Arkade on mutinynet), so wallets read it as a request for the
   wrong network. Each code is now for one network, with a picker when your
@@ -29,6 +41,8 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   automatic one.
 
 ### Removed
+- The unreachable wallet-list screens (Wallet list, Add wallet, Wallet
+  settings), including a placeholder that generated a fixed, public seed.
 - **Liquid.** The Liquid wallet layer is gone: wallet setup, Receive (including
   Liquid USDt in the USD request) and Send no longer offer it, and pasting a
   Liquid address says it isn't supported. Its native library (`lwk-rn`) was the

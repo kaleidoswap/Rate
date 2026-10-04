@@ -1,6 +1,9 @@
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
 import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
+import { receiveAccountChain } from '../services/kaleidoPay/connect';
+import { chainLabel } from '../utils/receive-routes';
+import type { AccountId } from '../utils/account-routing';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -560,7 +563,16 @@ export default function DashboardScreen({ navigation }: Props) {
   const protocolBalances = (btcBalance as any).byProtocol as Record<string, { confirmed: number; unconfirmed: number; total: number }> | undefined;
   // NWC reports Lightning funds already; HTTP RLN reports on-chain funds.
   const rgbBalanceIsLightning = typeof (protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType === 'function';
-  const bitcoinSummary = summarizeBitcoinBalances(protocolBalances ?? {}, channels, rgbBalanceIsLightning);
+  // Accounts on a test network hold sats with no value: kept out of the total and its
+  // fiat figure, and shown on their own line.
+  const testNetworks: Partial<Record<AccountId, string>> = {};
+  for (const account of ['RGB', 'SPARK', 'ARKADE', 'BARK'] as AccountId[]) {
+    const chain = receiveAccountChain(account);
+    if (chain && chain !== 'mainnet') testNetworks[account] = chainLabel(chain);
+  }
+  const bitcoinSummary = summarizeBitcoinBalances(
+    protocolBalances ?? {}, channels, rgbBalanceIsLightning, new Set(Object.keys(testNetworks)),
+  );
   const availableBtc = bitcoinSummary.available;
   const pendingBtc = bitcoinSummary.unavailable;
   const totalBalance = bitcoinSummary.total + tokenValueSats;
@@ -827,6 +839,8 @@ export default function DashboardScreen({ navigation }: Props) {
           <BalanceCard
             totalBalance={totalBalance}
             pendingBtc={pendingBtc}
+            testBtc={bitcoinSummary.test}
+            testNetworks={testNetworks}
             includesTokenValue={tokenValueSats > 0}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}

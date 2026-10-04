@@ -15,12 +15,11 @@ import {
   TextInput,
 } from 'react-native';
 import { useDispatch } from 'react-redux';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
 import { theme } from '../theme';
-import { NetworkType, NetworkConfig } from '../services/DatabaseService';
+import { NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
@@ -30,7 +29,8 @@ interface Props {
   navigation: any;
 }
 
-type RestoreStep = 'input' | 'networks' | 'restoring' | 'success';
+type RestoreStep = 'input' | 'restoring' | 'success';
+const WORD_COUNTS = [12, 24] as const;
 
 export default function WalletRestoreScreen({ navigation }: Props) {
   // The recovery phrase is typed on this screen: keep it out of screenshots.
@@ -39,20 +39,10 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   const [step, setStep] = useState<RestoreStep>('input');
   const [name, setName] = useState('');
   const [mnemonic, setMnemonic] = useState('');
+  const [wordCount, setWordCount] = useState<12 | 24>(12);
   const [mnemonicWords, setMnemonicWords] = useState<string[]>(Array(12).fill(''));
   const [inputMode, setInputMode] = useState<'text' | 'grid'>('text');
   const [restoredWalletId, setRestoredWalletId] = useState<number | null>(null);
-
-  // Network selection state
-  const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
-    spark: true,
-    arkade: false,
-    rln: false,
-  });
-
-  // RLN Config
-  const [rlnType, setRlnType] = useState<'local' | 'remote'>('remote');
-  const [rlnRemoteUrl, setRlnRemoteUrl] = useState('');
 
   // Animation values
   const fadeAnim = useRef(new Animated.Value(1)).current;
@@ -119,7 +109,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
         : mnemonicWords.filter(w => w.trim()).join(' ').toLowerCase();
 
       if (!finalMnemonic) {
-        Alert.alert('Recovery Phrase Required', 'Please enter your 12-word recovery phrase.');
+        Alert.alert('Recovery Phrase Required', 'Please enter your 12- or 24-word recovery phrase.');
         return;
       }
 
@@ -133,45 +123,25 @@ export default function WalletRestoreScreen({ navigation }: Props) {
       }
 
       setMnemonic(finalMnemonic);
-      animateTransition('networks');
-    } else if (step === 'networks') {
-      handleRestore();
+      void handleRestore(finalMnemonic);
     }
   };
 
-  const handleBack = () => {
-    Keyboard.dismiss();
-    if (step === 'networks') {
-      animateTransition('input');
-    } else if (step === 'input') {
-      navigation.goBack();
-    }
-  };
-
-  const handleRestore = async () => {
+  const handleRestore = async (phrase: string) => {
     animateTransition('restoring');
 
     try {
-      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [];
-
-      if (networks.spark) {
-        selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
-      }
-      if (networks.arkade) {
-        selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
-      }
-      if (networks.rln) {
-        selectedNetworks.push({
-          type: 'rln',
-          enabled: true,
-          config: JSON.stringify({ type: rlnType, url: rlnRemoteUrl })
-        });
-      }
+      // The same accounts a new wallet gets, so funds on any of them show up. A
+      // Lightning wallet (NWC) is connected afterwards in Settings, as on setup.
+      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [
+        { type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') },
+        { type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') },
+      ];
 
       // @ts-ignore
       const resultAction = await dispatch(createNewWallet({
         name,
-        mnemonic,
+        mnemonic: phrase,
         networks: selectedNetworks
       }));
 
@@ -191,12 +161,21 @@ export default function WalletRestoreScreen({ navigation }: Props) {
       }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to restore wallet');
-      animateTransition('networks');
+      animateTransition('input');
     }
   };
 
+  // Same ending as a new wallet: offer a PIN / biometrics before opening the wallet.
+  const handleSetupSecurity = () => {
+    navigation.replace('SecuritySetup', { walletId: restoredWalletId ?? undefined, isInitialSetup: true });
+  };
   const handleFinish = () => {
     navigation.replace('Dashboard');
+  };
+
+  const chooseWordCount = (count: 12 | 24) => {
+    setWordCount(count);
+    setMnemonicWords((words) => Array.from({ length: count }, (_, i) => words[i] ?? ''));
   };
 
   const handleWordChange = (index: number, value: string) => {
@@ -220,7 +199,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
 
       <Text style={styles.stepTitle}>Restore Wallet</Text>
       <Text style={styles.stepDescription}>
-        Enter your wallet name and 12-word recovery phrase to restore your wallet.
+        Enter your wallet name and your 12- or 24-word recovery phrase.
       </Text>
 
       <View style={styles.inputWrapper}>
@@ -273,7 +252,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
             style={styles.mnemonicTextInput}
             value={mnemonic}
             onChangeText={setMnemonic}
-            placeholder="Enter your 12-word recovery phrase separated by spaces"
+            placeholder="Enter your recovery phrase, words separated by spaces"
             placeholderTextColor={theme.colors.text.tertiary}
             multiline
             numberOfLines={4}
@@ -288,7 +267,21 @@ export default function WalletRestoreScreen({ navigation }: Props) {
         </View>
       ) : (
         <View style={styles.inputWrapper}>
-          <Text style={styles.inputLabel}>Recovery Phrase</Text>
+          <View style={styles.wordCountRow}>
+            <Text style={[styles.inputLabel, { flex: 1 }]}>Recovery Phrase</Text>
+            {WORD_COUNTS.map((count) => (
+              <TouchableOpacity
+                key={count}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: wordCount === count }}
+                accessibilityLabel={`${count} words`}
+                onPress={() => chooseWordCount(count)}
+                style={[styles.wordCountButton, wordCount === count && styles.modeButtonActive]}
+              >
+                <Text style={[styles.modeButtonText, wordCount === count && styles.modeButtonTextActive]}>{count} words</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
           <Card style={styles.wordGridCard}>
             <View style={styles.wordGrid}>
               {mnemonicWords.map((word, index) => (
@@ -318,34 +311,6 @@ export default function WalletRestoreScreen({ navigation }: Props) {
           Your recovery phrase is never sent to our servers. It's used only on your device to restore your wallet.
         </Text>
       </AlertBanner>
-    </ScrollView>
-  );
-
-  const renderNetworksStep = () => (
-    <ScrollView
-      style={styles.stepContent}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="always"
-      contentContainerStyle={styles.scrollContent}
-    >
-      <View style={styles.iconHeader}>
-        <View style={[styles.iconContainer, { backgroundColor: theme.colors.secondary[50] }]}>
-          <Ionicons name="git-network" size={32} color={theme.colors.secondary[500]} />
-        </View>
-      </View>
-
-      <Text style={styles.stepTitle}>Choose Networks</Text>
-      <Text style={styles.stepDescription}>
-        Select which protocols to enable for your restored wallet.
-      </Text>
-
-      <Card style={styles.networkCard}>
-        {/* Network options - same as WalletSetupScreen */}
-        {/* Simplified for brevity - you can copy from WalletSetupScreen */}
-        <Text style={styles.networkPlaceholder}>
-          Network selection UI (same as setup screen)
-        </Text>
-      </Card>
     </ScrollView>
   );
 
@@ -382,26 +347,28 @@ export default function WalletRestoreScreen({ navigation }: Props) {
         Your wallet "{name}" has been successfully restored.
       </Text>
 
+      <Text style={styles.successDesc}>
+        Protect it with a PIN code or Face ID / fingerprint.
+      </Text>
       <Button
-        title="Go to Wallet"
-        onPress={handleFinish}
+        title="Set Up Security"
+        onPress={handleSetupSecurity}
         style={styles.finishButton}
       />
+      <TouchableOpacity accessibilityRole="button" onPress={handleFinish} style={styles.skipButton}>
+        <Text style={styles.skipButtonText}>Skip for now</Text>
+      </TouchableOpacity>
     </View>
   );
 
-  const getButtonTitle = () => {
-    if (step === 'input') return 'Continue';
-    if (step === 'networks') return 'Restore Wallet';
-    return '';
-  };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScreenHeader
         title={step === 'success' ? 'Success' : 'Restore Wallet'}
-        showBack={step !== 'restoring' && step !== 'success'}
+        showBack={step === 'input'}
+        onBack={() => { Keyboard.dismiss(); navigation.goBack(); }}
       />
 
       <KeyboardAvoidingView
@@ -420,16 +387,15 @@ export default function WalletRestoreScreen({ navigation }: Props) {
         >
           <View style={styles.animatedContent}>
             {step === 'input' && renderInputStep()}
-            {step === 'networks' && renderNetworksStep()}
             {step === 'restoring' && renderRestoringStep()}
             {step === 'success' && renderSuccessStep()}
           </View>
         </Animated.View>
 
-        {(step === 'input' || step === 'networks') && (
+        {step === 'input' && (
           <View style={styles.footer}>
             <Button
-              title={getButtonTitle()}
+              title="Restore Wallet"
               onPress={handleNext}
               style={styles.nextButton}
             />
@@ -624,14 +590,27 @@ const styles = StyleSheet.create({
     color: theme.colors.text.secondary,
     lineHeight: 20,
   },
-  networkCard: {
-    padding: theme.spacing[4],
+  wordCountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[2],
   },
-  networkPlaceholder: {
-    fontSize: theme.typography.fontSize.base,
+  wordCountButton: {
+    paddingVertical: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    borderRadius: theme.borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: theme.colors.border.medium,
+  },
+  skipButton: {
+    marginTop: theme.spacing[4],
+    padding: theme.spacing[3],
+  },
+  skipButtonText: {
+    fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
     textAlign: 'center',
-    padding: theme.spacing[8],
   },
   centerContent: {
     flex: 1,

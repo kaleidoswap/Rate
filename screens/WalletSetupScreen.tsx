@@ -412,6 +412,14 @@ export default function WalletSetupScreen({ navigation }: Props) {
       >
         <Text style={styles.skipButtonText}>Advanced setup · choose networks</Text>
       </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.skipButton}
+        accessibilityRole="button"
+        accessibilityLabel="Restore an existing wallet from its recovery phrase"
+        onPress={() => navigation.navigate('WalletRestore')}
+      >
+        <Text style={[styles.skipButtonText, { color: theme.colors.primary[500] }]}>I already have a wallet · Restore</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
 
@@ -738,7 +746,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
       <StatusBar barStyle="light-content" />
       <ScreenHeader
         title={step === 'success' ? 'Success' : 'New Wallet'}
-        showBack={step !== 'creating' && step !== 'success'}
+        // The first step is the app's entry point: there is nothing to go back to.
+        showBack={step === 'welcome' ? navigation.canGoBack() : step !== 'creating' && step !== 'success'}
         onBack={handleBack}
       />
       {(step !== 'creating' && step !== 'success') ? renderStepIndicator() : null}

@@ -451,8 +451,8 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const handleRemoveWallet = () => {
     Alert.alert(
-      'Remove Wallet',
-      'This will delete your wallet data from this device. Make sure you have backed up your mnemonic phrase before proceeding.\n\nThis action cannot be undone.',
+      'Remove wallet from this device?',
+      'Your wallet and its settings are deleted from this device. Your funds can only be recovered with your recovery phrase, so make sure it is written down.\n\nThis cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -460,6 +460,10 @@ export default function SettingsScreen({ navigation }: Props) {
           style: 'destructive',
           onPress: async () => {
             try {
+              // The device owner confirms it (biometrics or passcode) where the device can ask.
+              const security = SecurityService.getInstance();
+              if (await security.isDeviceAuthAvailable()
+                && !(await security.authenticateForReveal('Authenticate to remove this wallet'))) return;
               const { protocolManager } = require('../services/protocols');
               await protocolManager.disconnectAll();
               const DBService = require('../services/DatabaseService').default;
@@ -472,7 +476,6 @@ export default function SettingsScreen({ navigation }: Props) {
               ]);
               dispatch(clearNwcConnections());
               dispatch(setActiveWallet(null as any));
-              Alert.alert('Wallet Removed', 'You can now create or import a new wallet.');
               navigation.reset({ index: 0, routes: [{ name: 'InitialLoad' as any }] });
             } catch (err: any) {
               Alert.alert('Error', err.message || 'Failed to remove wallet');

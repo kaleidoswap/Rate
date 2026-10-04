@@ -38,9 +38,6 @@ import './theme/satoshiText';
 import InitialLoadScreen from './screens/InitialLoadScreen';
 import WalletSetupScreen from './screens/WalletSetupScreen';
 import WalletRestoreScreen from './screens/WalletRestoreScreen';
-import WalletListScreen from './screens/WalletListScreen';
-import AddWalletScreen from './screens/AddWalletScreen';
-import WalletSettingsScreen from './screens/WalletSettingsScreen';
 import DashboardScreen from './screens/DashboardScreen';
 import { asModalScreen } from './components/ModalPresentation';
 import SendScreen from './screens/SendScreen';
@@ -72,9 +69,6 @@ type RootStackParamList = {
   InitialLoad: undefined;
   WalletSetup: undefined;
   WalletRestore: undefined;
-  WalletList: undefined;
-  AddWallet: undefined;
-  WalletSettings: { walletId: number };
   SecuritySetup: { walletId?: number; isInitialSetup?: boolean };
   NostrSetup: { isInitialSetup?: boolean } | undefined;
   Dashboard: undefined;
@@ -230,9 +224,6 @@ function AppNavigator() {
         <Stack.Screen name="InitialLoad" component={InitialLoadScreen} />
         <Stack.Screen name="WalletSetup" component={WalletSetupScreen} />
         <Stack.Screen name="WalletRestore" component={WalletRestoreScreen} />
-        <Stack.Screen name="WalletList" component={WalletListScreen} />
-        <Stack.Screen name="AddWallet" component={AddWalletScreen} />
-        <Stack.Screen name="WalletSettings" component={WalletSettingsScreen} />
         <Stack.Screen name="SecuritySetup" component={SecuritySetupScreen} />
         <Stack.Screen name="NostrSetup" component={NostrSetupScreen} />
         <Stack.Screen name="Dashboard" component={DashboardTabs} />
