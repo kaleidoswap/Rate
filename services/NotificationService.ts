@@ -1,10 +1,11 @@
 // services/NotificationService.ts
 //
 // Local (on-device) OS notifications for incoming chat messages and payments.
-// These fire while the app is running or briefly backgrounded — true push
-// (app fully killed) would need a relay-watching server with APNs/FCM, which is
-// out of scope here. In-app toasts (ToastService) cover the foreground case;
-// this adds the system banner.
+// These fire while the app is running or briefly backgrounded. With the app
+// closed, payments to a kaleidoswap.me Lightning address arrive as real pushes:
+// the app registers its Expo push token with the registry (see
+// services/paymentNotifications.ts), which pushes on the `payments` channel.
+// In-app toasts (ToastService) cover the foreground case.
 //
 // IMPORTANT: `expo-notifications` is imported LAZILY (not at module top level).
 // Its `PushTokenManager` does `requireNativeModule('ExpoPushTokenManager')` at
@@ -42,6 +43,8 @@ function getNotifications(): NotificationsModule | null {
   }
   return cachedModule;
 }
+
+export const PAYMENTS_CHANNEL = 'payments';
 
 class NotificationService {
   private static instance: NotificationService;
@@ -83,6 +86,13 @@ class NotificationService {
           vibrationPattern: [0, 120, 80, 120],
           lightColor: '#2BEE79',
         });
+        // Remote pushes from kaleidoswap.me name this channel; local ones use it too.
+        await Notifications.setNotificationChannelAsync(PAYMENTS_CHANNEL, {
+          name: 'Payments received',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 120, 80, 120],
+          lightColor: '#2BEE79',
+        });
       }
 
       const settings = await Notifications.getPermissionsAsync();
@@ -96,8 +106,34 @@ class NotificationService {
     }
   }
 
+  /** Whether notifications are allowed (asks once when they aren't decided yet). */
+  async ensurePermission(): Promise<boolean> {
+    if (!this.initialized) await this.init();
+    return this.permissionGranted;
+  }
+
+  /**
+   * This device's Expo push token, for kaleidoswap.me payment pushes. Null on a
+   * simulator, without permission, or when the build has no push credentials.
+   */
+  async getPushToken(): Promise<string | null> {
+    try {
+      if (!(await this.ensurePermission())) return null;
+      const Notifications = getNotifications();
+      if (!Notifications) return null;
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const Constants = require('expo-constants').default;
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+      const { data } = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
+      return typeof data === 'string' ? data : null;
+    } catch (error) {
+      console.warn('NotificationService: no push token', error);
+      return null;
+    }
+  }
+
   /** Fire a local notification immediately. No-op without permission. */
-  private async notify(title: string, body: string, data?: Record<string, any>): Promise<void> {
+  private async notify(title: string, body: string, data?: Record<string, any>, channelId?: string): Promise<void> {
     try {
       if (!this.initialized) await this.init();
       if (!this.permissionGranted) return;
@@ -105,7 +141,8 @@ class NotificationService {
       if (!Notifications) return;
       await Notifications.scheduleNotificationAsync({
         content: { title, body, data: data ?? {}, sound: true },
-        trigger: null, // deliver now
+        // Android: deliver now on the given channel; iOS: deliver now.
+        trigger: channelId && Platform.OS === 'android' ? { channelId } as any : null,
       });
     } catch (error) {
       console.warn('NotificationService: notify failed', error);
@@ -116,6 +153,11 @@ class NotificationService {
   async notifyMessage(sender: string, preview: string, pubkey: string): Promise<void> {
     const body = preview.length > 140 ? `${preview.slice(0, 137)}…` : preview;
     await this.notify(sender || 'New message', body, { type: 'chat', pubkey });
+  }
+
+  /** Money arrived: "You received 21,000 sats in Spark". */
+  async notifyPaymentReceived(body: string, data?: Record<string, any>): Promise<void> {
+    await this.notify('Payment received', body, { type: 'payment-received', ...data }, PAYMENTS_CHANNEL);
   }
 
   /** A payment-related event in the chat (e.g. a payment you sent succeeded). */

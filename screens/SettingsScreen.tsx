@@ -21,6 +21,7 @@ import {
   selectDisclosureLevel,
   setDisclosureLevel,
   setSoundEnabled,
+  setTransactionNotifications,
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
@@ -32,6 +33,8 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import { protocolColor } from '../theme';
 import { PairingService, type DesktopPairing } from '../services/PairingService';
 import DatabaseService from '../services/DatabaseService';
+import { getStoredHandle } from '../services/kaleidoswapMe';
+import { syncPaymentPush } from '../services/paymentNotifications';
 import SecurityService from '../services/SecurityService';
 import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
 import { initializeProtocols, protocolManager } from '../services/protocols';
@@ -135,7 +138,7 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'assistant', terms: 'kaleidomind ai desktop model agent assistant personalize connection' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: 'security backup view recovery phrase' },
-    { page: 'preferences', terms: 'preferences display detail mode bitcoin balance unit sound sounds payment currency fiat' },
+    { page: 'preferences', terms: 'preferences display detail mode bitcoin balance unit sound sounds payment currency fiat notifications' },
     { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
     { page: 'security', terms: 'danger remove delete wallet' },
   ];
@@ -164,6 +167,16 @@ export default function SettingsScreen({ navigation }: Props) {
 
   // Per-protocol network (read from / written to the wallet's DB config).
   const activeWallet = useAppSelector((state: RootState) => state.wallet?.activeWallet);
+  // kaleidoswap.me handle, re-read whenever Settings comes back into view (it changes on its own screen).
+  const [lightningAddress, setLightningAddress] = useState<string | null>(null);
+  useFocusEffect(useCallback(() => {
+    if (activeWallet?.id == null) return;
+    void getStoredHandle(activeWallet.id).then(h => setLightningAddress(h?.lightningAddress ?? null));
+  }, [activeWallet?.id]));
+  const toggleTransactionNotifications = (on: boolean) => {
+    dispatch(setTransactionNotifications(on));
+    if (activeWallet?.id != null) void syncPaymentPush(activeWallet.id, on).catch(e => console.warn('[push] sync failed', e));
+  };
   const isWalletUnlocked = useAppSelector((state: RootState) => state.wallet?.isUnlocked);
   const [revealedMnemonic, setRevealedMnemonic] = useState<string | null>(null);
   const [showRevealModal, setShowRevealModal] = useState(false);
@@ -503,7 +516,10 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {atHome && <>
           <Group>
-            <Row first icon="options-outline" label="Preferences" description="Units, currency and sounds" onPress={() => openPage('preferences')} />
+            <Row first icon="flash-outline" iconColor={theme.colors.networks.lightning} label="Lightning address"
+              description={lightningAddress ?? 'Get a name@kaleidoswap.me anyone can pay'} value={lightningAddress ? undefined : 'Get one'}
+              onPress={() => navigation.navigate('LightningAddress')} />
+            <Row icon="options-outline" label="Preferences" description="Units, currency, sounds and notifications" onPress={() => openPage('preferences')} />
             <Row icon="shield-checkmark-outline" label="Security & backup" description="Recovery phrase and device data" onPress={() => openPage('security')} />
             <Row icon="link-outline" label="Connections" description="Lightning wallets and Nostr" onPress={() => openPage('connections')} />
           </Group>
@@ -676,7 +692,7 @@ export default function SettingsScreen({ navigation }: Props) {
         </>}
 
         {/* Preferences */}
-        {showSection('preferences display detail mode bitcoin balance unit sound sounds payment currency fiat') && <>
+        {showSection('preferences display detail mode bitcoin balance unit sound sounds payment currency fiat notifications') && <>
         <SectionLabel>Preferences</SectionLabel>
         <Group>
           <Row first icon="options-outline" label="Display detail" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
@@ -694,6 +710,20 @@ export default function SettingsScreen({ navigation }: Props) {
                 accessibilityLabel="Payment sounds"
                 value={soundOn}
                 onValueChange={handleSoundToggle}
+                trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+              />
+            }
+          />
+          <Row
+            icon="notifications-outline"
+            iconColor={theme.colors.primary[500]}
+            label="Payment notifications"
+            description="When a payment lands, even with the app closed"
+            right={
+              <Switch
+                accessibilityLabel="Payment notifications"
+                value={settings.transactionNotifications ?? true}
+                onValueChange={toggleTransactionNotifications}
                 trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
               />
             }

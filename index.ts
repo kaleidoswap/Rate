@@ -60,6 +60,11 @@ if (globalAny?.HermesInternal?.hasPromise?.() && globalAny.HermesInternal.enable
 }
 
 import { registerRootComponent } from 'expo';
+import { defineBackgroundPaymentCheck } from './services/paymentNotifications';
+
+// The OS can wake a closed app to check for payments; the task must be defined
+// before React mounts so it exists in that headless launch too.
+defineBackgroundPaymentCheck();
 
 import App from './App';
 
