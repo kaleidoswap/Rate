@@ -169,6 +169,39 @@ jobs:
           ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
         run: echo "$ASC_KEY_P8_BASE64" | base64 -d > "$RUNNER_TEMP/AuthKey.p8"
 
+      # Saved signing identities for every build. Without them, automatic signing
+      # on a fresh runner asks Apple for new certificates on each run until the
+      # account hits its certificate limit (the v0.3.1 failure). With them, Xcode
+      # reuses these certificates and only creates provisioning profiles.
+      # The .p12 should hold the "Apple Development" AND "Apple Distribution"
+      # identities (archive signs for development, export for the App Store).
+      # Optional: without the secrets the build falls back to the old behaviour.
+      - name: Import signing certificates
+        env:
+          IOS_SIGNING_P12_BASE64: ${{ secrets.IOS_SIGNING_P12_BASE64 }}
+          IOS_SIGNING_P12_PASSWORD: ${{ secrets.IOS_SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$IOS_SIGNING_P12_BASE64" ]; then
+            echo "::warning::IOS_SIGNING_P12_BASE64 is not set: signing will create new certificates with Apple on every build."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          P12="$RUNNER_TEMP/signing.p12"
+          echo "$IOS_SIGNING_P12_BASE64" | base64 -d > "$P12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$P12" -P "$IOS_SIGNING_P12_PASSWORD" -A -f pkcs12 -k "$KEYCHAIN"
+          rm -f "$P12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
+          # Search the signing keychain first, keep the login keychain for the rest.
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN")"
+          echo "$IDENTITIES" | sed -E 's/[0-9A-F]{40}/<sha1>/'
+          echo "$IDENTITIES" | grep -q "Apple Distribution" || echo "::warning::No Apple Distribution identity in the .p12: the App Store export will create one with Apple."
+          echo "$IDENTITIES" | grep -q "Apple Development" || echo "::warning::No Apple Development identity in the .p12: the archive will create one with Apple."
+
       - name: Set version + build number
         working-directory: ios
         env:
