@@ -11,6 +11,8 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Changed
+- **Send redesigned.** One field with Paste/Scan (and Clear) inside it, a card saying what was detected (kind, amount, note, expiry), and recent contacts. Open amounts are entered on a large amount you tap. Review shows **Pay from** account cards with each account's balance and what this payment costs from it (best price picked and marked; an account that can't pay says why), a route line (account → rail → recipient, with the swap provider when there is one), and **slide to pay**. "Ways to pay" is now the shared bottom sheet, grouped by account. The result screen has an animated check, View in Activity and Share receipt. Quotes, the payment journal and double-send protection are unchanged.
+- **Bark is an Advanced account.** In Lite it is not offered on Receive, and Send lists it only when it holds funds. It is still managed from Settings → Advanced.
 - Icons match the extension: the white Spark asterisk, the extension's RGB logo (transparent, no white square), and on-chain shown as the chain-link glyph instead of the Bitcoin coin wherever it is a way to pay.
 - Receive: the amount is a pill centred under the QR ("Add amount", or the amount you asked for).
 - Receive has two ways to set up a request: **By method** (how it arrives, then which account it lands in) and **By account** (pick Spark, Arkade, Bark or the RGB Lightning node by its balance, then Spark/Ark, Lightning or On-chain). The switch slides, remembers your choice, and only shows for BTC when more than one account can receive.

@@ -388,8 +388,9 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
   const rgbLabel = rgbAccountLabel(caps);
   const connectedNow = getProtocolStatus();
+  // Bark is an Advanced account: Lite never offers it as a place to receive.
   const receiveAccounts: ReceiveAccountInfo[] = (['RGB', 'SPARK', 'ARKADE', 'BARK'] as AccountId[])
-    .filter((account) => connectedNow[account])
+    .filter((account) => connectedNow[account] && (account !== 'BARK' || !isLite))
     .map((account) => ({ account, chain: receiveAccountChain(account) }));
   const isUsdAsset = /usd/i.test(selectedAsset.ticker);
   // The universal code is for BTC, or for USD (a BIP321 QR embedding the USD-receiving

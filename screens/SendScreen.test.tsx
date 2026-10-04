@@ -6,8 +6,10 @@ import { quotePaymentOffers, executePaymentOffer, previewInput } from '../servic
 const mockPreview = { code: { kind: 'bolt11', raw: 'lnbc1', invoice: 'lnbc1' }, request: { amountSat: 1000, acceptedRails: ['ln'], networks: ['mainnet'], network: 'mainnet' }, plan: { status: 'ready' } };
 jest.mock('expo-crypto', () => ({ randomUUID: () => 'test-uuid' }));
 const mockDispatch = jest.fn();
+let mockState: any;
+const baseState = () => ({ settings: { bitcoinUnit: 'sats' }, wallet: { activeWallet: { id: 1 } } });
 jest.mock('../store/hooks', () => ({
-  useAppSelector: (f: any) => f({ settings: { bitcoinUnit: 'sats' }, wallet: { activeWallet: { id: 1 } } }),
+  useAppSelector: (f: any) => f(mockState),
   useAppDispatch: () => mockDispatch,
 }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
@@ -32,10 +34,11 @@ const nav = () => ({ goBack: jest.fn(), navigate: jest.fn() });
 async function reviewed(navigation = nav()) {
   const screen = render(<SendScreen navigation={navigation} route={{ params: { prefilledAddress: 'lnbc1' } }} />);
   await act(async () => {});
-  await act(async () => { fireEvent.press(screen.getByText('Review payment')); });
+  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   return screen;
 }
-beforeEach(() => { (require('react-native') as any).KeyboardAvoidingView = 'KeyboardAvoidingView'; jest.clearAllMocks(); });
+const pay = (screen: any, label: string) => fireEvent(screen.getByLabelText(label), 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
+beforeEach(() => { mockState = baseState(); (require('react-native') as any).KeyboardAvoidingView = 'KeyboardAvoidingView'; jest.clearAllMocks(); });
 
 test('one flow: decode, compare ways to pay, and pay only the reviewed total', async () => {
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010), offer('Bark', 1020)]);
@@ -43,11 +46,12 @@ test('one flow: decode, compare ways to pay, and pay only the reviewed total', a
   const screen = await reviewed();
   expect(previewInput).toHaveBeenCalledWith('lnbc1', 1000, 'test-uuid', { asset: undefined });
   expect(executePaymentOffer).not.toHaveBeenCalled();
-  expect(screen.getByText('Pay 1010 sats')).toBeTruthy();
-  fireEvent.press(screen.getByLabelText('Payment details'));
-  fireEvent.press(screen.getAllByText('Compare ways to pay')[0]);
+  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  // Pay from: one card per account, the cheapest picked.
+  expect(screen.getByLabelText(/^Pay from Spark\. Total 1010 sats/).props.accessibilityState.checked).toBe(true);
+  fireEvent.press(screen.getByLabelText('Compare ways to pay'));
   fireEvent.press(screen.getByLabelText(/^Bark\. Total you pay/));
-  await act(async () => { fireEvent.press(screen.getByText('Pay 1020 sats')); });
+  await act(async () => { pay(screen, 'Pay 1020 sats'); });
   expect(executePaymentOffer).toHaveBeenCalledWith(mockPreview, expect.objectContaining({ id: 'Bark' }), expect.any(String));
   expect(screen.getByText('Check status')).toBeTruthy();
   expect(mockDispatch).toHaveBeenCalledWith({ type: 'loadBtcBalance' });
@@ -57,7 +61,8 @@ test('anything that is not payable cannot be reviewed', async () => {
   const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'hello' } }} />);
   await act(async () => {});
   expect(screen.getByText('not payable')).toBeTruthy();
-  await act(async () => { fireEvent.press(screen.getByText('Review payment')); });
+  expect(screen.getByText('Continue')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   expect(previewInput).not.toHaveBeenCalled();
 });
 
@@ -66,8 +71,9 @@ test('a completed payment can be closed and refreshes balances', async () => {
   (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'completed' });
   const navigation = nav();
   const screen = await reviewed(navigation);
-  await act(async () => { fireEvent.press(screen.getByText('Pay 1010 sats')); });
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
   expect(screen.getByText('Payment completed')).toBeTruthy();
+  expect(screen.getByText('View in Activity')).toBeTruthy();
   fireEvent.press(screen.getByText('Done'));
   expect(navigation.goBack).toHaveBeenCalled();
 });
@@ -85,8 +91,7 @@ test('rapid confirmation taps create only one payment', async () => {
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
   (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'pending' });
   const screen = await reviewed();
-  const button = screen.getByText('Pay 1010 sats');
-  await act(async () => { fireEvent.press(button); fireEvent.press(button); });
+  await act(async () => { pay(screen, 'Pay 1010 sats'); pay(screen, 'Pay 1010 sats'); });
   expect(executePaymentOffer).toHaveBeenCalledTimes(1);
 });
 
@@ -104,4 +109,25 @@ test('a payment that needs checking can be moved past only after confirming the 
   expect(dismissPaymentAttempt).toHaveBeenCalledWith(1, unknown);
   expect(screen.queryByText('Check status')).toBeNull();
   alert.mockRestore();
+});
+
+test('picking an account card pays from it', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010), offer('Bark', 1020)]);
+  (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'pending' });
+  const screen = await reviewed();
+  fireEvent.press(screen.getByLabelText(/^Pay from Bark\. Total 1020 sats/));
+  await act(async () => { pay(screen, 'Pay 1020 sats'); });
+  expect(executePaymentOffer).toHaveBeenCalledWith(mockPreview, expect.objectContaining({ id: 'Bark' }), expect.any(String));
+});
+
+test('Lite leaves Bark out unless it holds funds', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010), offer('Bark', 1005)]);
+  mockState = { ...baseState(), settings: { bitcoinUnit: 'sats', disclosureLevel: 'lite' } };
+  let screen = await reviewed();
+  expect(screen.queryByLabelText(/^Pay from Bark/)).toBeNull();
+  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  screen.unmount();
+  mockState = { ...mockState, wallet: { activeWallet: { id: 1 }, btcBalance: { byProtocol: { BARK: { total: 5000 } } } } };
+  screen = await reviewed();
+  expect(screen.getByLabelText(/^Pay from Bark, balance 5,000 sats/)).toBeTruthy();
 });
