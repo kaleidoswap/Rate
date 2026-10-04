@@ -420,3 +420,20 @@ describe('NetworkService', () => {
     });
   });
 });
+
+describe('probeInternet', () => {
+  const { probeInternet } = jest.requireActual('./NetworkService');
+  const realFetch = global.fetch;
+  afterEach(() => { global.fetch = realFetch; });
+
+  it('is reachable when any host answers', async () => {
+    global.fetch = jest.fn((url: string) =>
+      url.includes('b') ? Promise.resolve({ status: 204 }) : Promise.reject(new Error('blocked'))) as any;
+    await expect(probeInternet(['https://a', 'https://b'])).resolves.toBe(true);
+  });
+
+  it('is unreachable only when every host fails', async () => {
+    global.fetch = jest.fn(() => Promise.reject(new Error('down'))) as any;
+    await expect(probeInternet(['https://a', 'https://c'])).resolves.toBe(false);
+  });
+});

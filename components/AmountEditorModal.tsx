@@ -17,7 +17,11 @@ interface Props {
   onConfirm: (sats: number, options?: ReceiveRequestOptions) => void;
 }
 
-/** Edits stay local until Save; opening or dismissing never replaces the QR. */
+/**
+ * Edits stay local until Save; opening or dismissing never replaces the QR.
+ * With requestOptions it edits a Receive request (amount optional); without,
+ * it asks for the amount to send (required).
+ */
 export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoinUnit = 'sats', requestOptions, onConfirm }: Props) {
   const t = useAppTheme();
   const [value, setValue] = useState('');
@@ -25,6 +29,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
   const [expirySeconds, setExpirySeconds] = useState(3600);
   const [showCountdown, setShowCountdown] = useState(false);
   const rate = rates.usd;
+  const sending = !requestOptions;
   const tokenValue = (sats: number) => bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8);
   useEffect(() => {
     if (!visible) return;
@@ -36,7 +41,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
   const numeric = Number(value.replace(',', '.'));
   const sats = fiat ? Math.round(numeric / rate * 1e8) : receiveAmountSats(value.replace(',', '.'), bitcoinUnit);
   const empty = !value.trim();
-  const valid = empty || Number.isFinite(numeric) && numeric > 0 && Number.isSafeInteger(sats) && sats > 0;
+  const valid = (empty && !sending) || !empty && Number.isFinite(numeric) && numeric > 0 && Number.isSafeInteger(sats) && sats > 0;
   const close = () => { Keyboard.dismiss(); onClose(); };
   const save = () => {
     if (!valid) return;
@@ -48,10 +53,10 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
   const label = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base, fontWeight: '600' as const };
   return <Sheet visible={visible} onClose={close} title={requestOptions ? 'Edit request' : 'Enter amount'}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: t.spacing[4] }}>
-      <Text style={label}>Amount · optional</Text>
+      <Text style={label}>{sending ? 'Amount to send' : 'Amount · optional'}</Text>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], borderBottomWidth: 1, borderColor: t.colors.border.light }}>
         <TextInput accessibilityLabel="Requested amount" value={value} keyboardType={bitcoinUnit === 'sats' && !fiat ? 'number-pad' : 'decimal-pad'}
-          onChangeText={setValue} placeholder="Any amount" placeholderTextColor={t.colors.text.muted}
+          onChangeText={setValue} placeholder={sending ? '0' : 'Any amount'} autoFocus={sending} placeholderTextColor={t.colors.text.muted}
           style={{ flex: 1, minHeight: 56, fontSize: t.typography.fontSize['2xl'], color: t.colors.text.primary }} />
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change amount entry unit" disabled={!rate} onPress={() => {
           if (valid && !empty) setValue(fiat ? tokenValue(sats) : ((sats / 1e8) * rate).toFixed(2));
@@ -61,7 +66,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
           {!!rate && <Ionicons name="swap-vertical" size={18} color={t.colors.text.secondary} />}
         </TouchableOpacity>
       </View>
-      <Text style={muted}>{!valid ? 'Enter a valid amount of at least 1 sat.' : empty ? 'The sender chooses the amount.' : fiat ? `${tokenValue(sats)} ${bitcoinUnit}` : rate ? `≈ $${((sats / 1e8) * rate).toFixed(2)} USD` : `${sats.toLocaleString()} sats`}</Text>
+      <Text style={muted}>{empty ? (sending ? 'This request has no amount: you choose how much to send.' : 'The sender chooses the amount.') : !valid ? 'Enter a valid amount of at least 1 sat.' : fiat ? `${tokenValue(sats)} ${bitcoinUnit}` : rate ? `≈ $${((sats / 1e8) * rate).toFixed(2)} USD` : `${sats.toLocaleString()} sats`}</Text>
       {requestOptions && <>
         <Text style={label}>Invoice expiry</Text>
         <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
@@ -78,7 +83,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
         </View>
       </>}
       <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
-        <TouchableOpacity accessibilityRole="button" onPress={() => setValue('')} style={{ minHeight: 48, paddingHorizontal: t.spacing[4], justifyContent: 'center' }}><Text style={muted}>Clear amount</Text></TouchableOpacity>
+        {!sending && <TouchableOpacity accessibilityRole="button" onPress={() => setValue('')} style={{ minHeight: 48, paddingHorizontal: t.spacing[4], justifyContent: 'center' }}><Text style={muted}>Clear amount</Text></TouchableOpacity>}
         <TouchableOpacity accessibilityRole="button" disabled={!valid} onPress={save} style={{ flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: t.borderRadius.lg, backgroundColor: t.colors.primary[500], opacity: valid ? 1 : 0.5 }}>
           <Text style={{ ...label, color: t.colors.text.inverse }}>{requestOptions ? 'Save request' : 'Set amount'}</Text>
         </TouchableOpacity>

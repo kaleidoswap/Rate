@@ -4,9 +4,11 @@
 // bottom, and it follows the finger when dragged down by its handle or header:
 // a short fast flick or a drag past a third of its height dismisses it. It
 // animates out before calling onClose, so every sheet leaves the same way it
-// arrived. Respects the system "Reduce motion" setting.
+// arrived. Respects the system "Reduce motion" setting. It rides above the
+// keyboard: edge-to-edge Android doesn't resize a modal for it, and iOS
+// padding doesn't move an absolutely positioned sheet.
 import React, { useEffect, useState } from 'react';
-import { Modal, View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, StyleProp, ViewStyle } from 'react-native';
+import { Modal, View, Text, StyleSheet, TouchableOpacity, Keyboard, Platform, StyleProp, ViewStyle } from 'react-native';
 import Animated, { runOnJS, useAnimatedStyle, useReducedMotion, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -37,6 +39,7 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
   const y = useSharedValue(OFFSCREEN);
   const fade = useSharedValue(0);
   const height = useSharedValue(OFFSCREEN);
+  const keyboard = useKeyboardHeight(mounted);
 
   useEffect(() => {
     if (visible) {
@@ -70,14 +73,16 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
   return (
     <Modal visible transparent animationType="none" statusBarTranslucent onRequestClose={onClose}>
       <GestureHandlerRootView style={styles.fill}>
-        <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View style={styles.fill}>
           <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}>
             <TouchableOpacity style={styles.fill} activeOpacity={1} onPress={onClose}
               accessibilityRole="button" accessibilityLabel="Close" />
           </Animated.View>
           <Animated.View testID={testID}
             onLayout={e => { height.value = e.nativeEvent.layout.height; }}
-            style={[styles.sheet, tall && styles.tall, { paddingBottom: Math.max(insets.bottom, theme.spacing[4]) }, style, sheetStyle]}>
+            style={[styles.sheet, tall && styles.tall, keyboard > 0
+              ? { bottom: keyboard, maxHeight: '85%', paddingBottom: theme.spacing[4] }
+              : { paddingBottom: Math.max(insets.bottom, theme.spacing[4]) }, style, sheetStyle]}>
             <GestureDetector gesture={drag}>
               <View>
                 <View style={styles.handle} />
@@ -96,10 +101,25 @@ export function Sheet({ visible, onClose, title, subtitle, children, footer, tal
             <View style={tall ? styles.fill : styles.shrink}>{children}</View>
             {footer}
           </Animated.View>
-        </KeyboardAvoidingView>
+        </View>
       </GestureHandlerRootView>
     </Modal>
   );
+}
+
+/** The on-screen keyboard's height while it is shown (0 when hidden). */
+function useKeyboardHeight(active: boolean): number {
+  const [h, setH] = useState(0);
+  useEffect(() => {
+    if (!active) { setH(0); return; }
+    const ios = Platform.OS === 'ios';
+    const subs = [
+      Keyboard?.addListener?.(ios ? 'keyboardWillShow' : 'keyboardDidShow', e => setH(e.endCoordinates?.height ?? 0)),
+      Keyboard?.addListener?.(ios ? 'keyboardWillHide' : 'keyboardDidHide', () => setH(0)),
+    ];
+    return () => subs.forEach(sub => sub?.remove());
+  }, [active]);
+  return h;
 }
 
 const styles = StyleSheet.create({

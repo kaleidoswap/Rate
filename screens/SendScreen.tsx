@@ -176,9 +176,17 @@ export default function SendScreen({ navigation, route }: Props) {
     } finally { if (current === revision.current) setBusy(false); }
   }, [input, fixedSat, amountSat, assetAmount, rgbAsset, target, total, visibleOffers]);
 
+  // Continue on a request without an amount asks for one, then carries on.
+  // (The editor closes right after confirming, so the intent is latched on confirm.)
+  const continueAfterAmount = useRef(false);
+  const continueNow = useRef(false);
+  useEffect(() => {
+    if (continueNow.current && amountSat) { continueNow.current = false; void getOffers(); }
+  }, [amountSat, getOffers]);
+
   function review() {
     if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }
-    if (target.kind !== 'rgb' && fixedSat === undefined && !amountSat) { setShowAmountEditor(true); return; }
+    if (target.kind !== 'rgb' && fixedSat === undefined && !amountSat) { continueAfterAmount.current = true; setShowAmountEditor(true); return; }
     void getOffers();
   }
 
@@ -520,8 +528,8 @@ export default function SendScreen({ navigation, route }: Props) {
       </KeyboardAvoidingView>
       <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); setReviewUpdated(false); setPreviousTotal(''); }}
         onClose={() => setShowProviders(false)} now={now} title="Ways to pay" intro="Same payment, every account that can pay it. Totals include every fee." />
-      <AmountEditorModal visible={showAmountEditor} onClose={() => setShowAmountEditor(false)} initialSats={amountSat} rates={rates} bitcoinUnit={bitcoinUnit}
-        onConfirm={sats => { setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }} />
+      <AmountEditorModal visible={showAmountEditor} onClose={() => { continueAfterAmount.current = false; setShowAmountEditor(false); }} initialSats={amountSat} rates={rates} bitcoinUnit={bitcoinUnit}
+        onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }} />
       <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)}
         onSelectContact={c => { setShowContacts(false); const dest = c.lightning_address || c.node_pubkey; if (dest) { setInput(dest); setContactName(c.name); } }} />
     </SafeAreaView>
