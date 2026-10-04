@@ -235,8 +235,7 @@ export default function QVACSettingsSheet({
                     )}
                   </View>
                   <Text style={styles.modelMeta}>
-                    {m.params} · {(m.sizeMB / 1024).toFixed(m.sizeMB < 1024 ? 0 : 1)}
-                    {m.sizeMB < 1024 ? ` MB` : ` GB`} · {TIER_LABEL[m.tier]}
+                    {m.params} · {m.sizeMB < 1024 ? `${Math.round(m.sizeMB)} MB` : `${(m.sizeMB / 1024).toFixed(1)} GB`} · {TIER_LABEL[m.tier]}
                     {isDownloaded(m.id) ? ' · ✓ Downloaded' : ''}
                   </Text>
                 </View>

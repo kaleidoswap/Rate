@@ -530,8 +530,9 @@ export default function ChatScreen({ navigation, route }: Props) {
     <View style={styles.container}>
       {/* Header with avatar + encryption picker */}
       <View style={[styles.header, { paddingTop: insets.top + 6 }]}>
-        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="arrow-back" size={22} color={theme.colors.text.primary} />
+        <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityRole="button" accessibilityLabel="Back">
+          <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
         </TouchableOpacity>
         <View style={styles.headerAvatar}>
           {avatarUrl ? (
@@ -564,10 +565,10 @@ export default function ChatScreen({ navigation, route }: Props) {
           <Ionicons name="planet-outline" size={44} color={theme.colors.text.tertiary} />
           <Text style={styles.centerTitle}>Nostr not connected</Text>
           <Text style={styles.centerDesc}>
-            Connect Nostr in Settings to send and receive encrypted messages.
+            Connect Nostr to send and receive encrypted messages.
           </Text>
-          <TouchableOpacity style={styles.connectBtn} onPress={() => navigation.navigate('Settings')}>
-            <Text style={styles.connectBtnText}>Open Settings</Text>
+          <TouchableOpacity style={styles.connectBtn} onPress={() => navigation.navigate('NostrSettings')}>
+            <Text style={styles.connectBtnText}>Connect Nostr</Text>
           </TouchableOpacity>
         </View>
       ) : (

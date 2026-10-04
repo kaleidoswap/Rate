@@ -1,10 +1,10 @@
 import { useForegroundClock } from '../../hooks/useForegroundClock';
 import React from 'react';
-import { Modal, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { NetworkIcon } from '../NetworkIcon';
+import { Sheet } from '../Sheet';
 
 export interface ProviderOption {
   id: string;
@@ -67,9 +67,9 @@ export function ProviderSheet({ visible, options, selectedId, onSelect, onClose,
           if (option.expiresAt !== undefined && option.expiresAt <= (now ?? Date.now())) return;
           onSelect(option.id); onClose();
         }}
-        style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[4], borderRadius: t.borderRadius.xl, opacity: reason ? 0.55 : 1,
-          backgroundColor: selected ? t.colors.primary[500] + '14' : t.colors.surface.primary, borderWidth: selected ? 1.5 : 1, borderColor: selected ? t.colors.primary[500] : t.colors.border.light }}>
-        <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.background.primary }}>
+        style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, opacity: reason ? 0.55 : 1,
+          backgroundColor: selected ? t.colors.primary[50] : t.colors.background.secondary, borderWidth: selected ? 1.5 : 1, borderColor: selected ? t.colors.primary[500] : t.colors.border.light }}>
+        <View style={{ width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surface.secondary }}>
           {option.icon === 'swap' || !option.icon
             ? <Ionicons name="swap-horizontal" size={20} color={t.colors.text.secondary} />
             : <NetworkIcon network={option.icon} size={22} />}
@@ -92,25 +92,19 @@ export function ProviderSheet({ visible, options, selectedId, onSelect, onClose,
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }}>
-        <View style={{ paddingHorizontal: t.spacing[5], paddingTop: t.spacing[5], flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text accessibilityRole="header" style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.xl, fontWeight: '600' }}>{title}</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close providers" onPress={onClose} style={{ padding: t.spacing[3] }}><Ionicons name="close" size={24} color={t.colors.text.primary} /></TouchableOpacity>
-        </View>
-        <ScrollView contentContainerStyle={{ padding: t.spacing[5], paddingTop: t.spacing[2], gap: t.spacing[3] }}>
-          <Text style={muted}>
-            {intro}{Number.isFinite(soonest) ? ` Quotes valid for ${Math.max(0, Math.ceil((soonest - currentTime) / 1000))}s.` : ''}
-          </Text>
-          {!options.length && <Text style={{ color: t.colors.text.secondary }}>No offers yet. Request live quotes to compare providers.</Text>}
-          {groups.map(([heading, list]) => (
-            <View key={heading || 'options'} style={{ gap: t.spacing[3], marginTop: t.spacing[2] }}>
-              {!!heading && <Text style={{ ...muted, fontSize: t.typography.fontSize.xs, letterSpacing: 1.2, textTransform: 'uppercase' }}>{heading}</Text>}
-              {list.map(card)}
-            </View>
-          ))}
-        </ScrollView>
-      </SafeAreaView>
-    </Modal>
+    <Sheet visible={visible} onClose={onClose} title={title} tall>
+      <ScrollView contentContainerStyle={{ paddingBottom: t.spacing[4], gap: t.spacing[3] }} showsVerticalScrollIndicator={false}>
+        <Text style={muted}>
+          {intro}{Number.isFinite(soonest) ? ` Quotes valid for ${Math.max(0, Math.ceil((soonest - currentTime) / 1000))}s.` : ''}
+        </Text>
+        {!options.length && <Text style={{ color: t.colors.text.secondary }}>No offers yet. Request live quotes to compare providers.</Text>}
+        {groups.map(([heading, list]) => (
+          <View key={heading || 'options'} style={{ gap: t.spacing[2], marginTop: t.spacing[2] }}>
+            {!!heading && <Text style={{ ...muted, fontSize: t.typography.fontSize.xs, fontWeight: '600', letterSpacing: 0.8, textTransform: 'uppercase', color: t.colors.text.tertiary }}>{heading}</Text>}
+            {list.map(card)}
+          </View>
+        ))}
+      </ScrollView>
+    </Sheet>
   );
 }

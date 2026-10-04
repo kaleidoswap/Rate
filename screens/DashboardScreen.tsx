@@ -1,6 +1,10 @@
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
 import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
+import { RecentActivityWidget } from '../components/RecentActivityWidget';
+import { receiveAccountChain } from '../services/kaleidoPay/connect';
+import { chainLabel } from '../utils/receive-routes';
+import type { AccountId } from '../utils/account-routing';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -11,16 +15,12 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
-  Alert,
   Dimensions,
   StatusBar,
-  Modal,
   DeviceEventEmitter,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { RootState } from '../store';
 import { initializeProtocolServices } from '../services/initializeServices';
@@ -41,6 +41,7 @@ import {
   ChannelList,
   MainHeader
 } from '../components';
+import { Sheet } from '../components/Sheet';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
@@ -96,9 +97,7 @@ interface Channel {
 
 /**
  * A time-of-day greeting with a little variety so it changes between opens.
- * `name` (the user's Nostr name, when connected) is used when present; when no
- * Nostr profile name is set we fall back to "anon" so the greeting still reads
- * personally (the wallet stays usable without Nostr).
+ * `name` (the user's Nostr name, when connected) is used when present.
  */
 function buildGreeting(name?: string): string {
   const hour = new Date().getHours();
@@ -109,8 +108,12 @@ function buildGreeting(name?: string): string {
     : hour < 21 ? ['Good evening', 'Evening', 'Welcome back']
     : ['Good night', 'Winding down', 'Hi'];
   const phrase = pool[Math.floor(Math.random() * pool.length)];
-  return `${phrase}, ${name || 'anon'}`;
+  return name ? `${phrase}, ${name}` : phrase;
 }
+
+const ACCOUNT_NAMES: Record<string, string> = {
+  RGB_LN: 'your RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark',
+};
 
 export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
@@ -150,6 +153,8 @@ export default function DashboardScreen({ navigation }: Props) {
   const [isConnecting, setIsConnecting] = useState(true);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  // Accounts that failed to connect (by name), so the banner can say which one.
+  const [offlineAccounts, setOfflineAccounts] = useState<string[]>([]);
   const [protocolsReady, setProtocolsReady] = useState(false);
   // Startup initializes protocols and then fetches balances in the same async
   // focus callback. React state does not update synchronously, so reading
@@ -202,6 +207,9 @@ export default function DashboardScreen({ navigation }: Props) {
       if (failed.length > 0) {
         console.warn('[Dashboard] Protocol failures:', failed.join(', '));
       }
+      setOfflineAccounts(Array.from(results.entries())
+        .filter(([, r]) => !r.success && !r.error?.startsWith('skipped:'))
+        .map(([p]) => ACCOUNT_NAMES[String(p)] ?? String(p)));
       if (skipped.length > 0) {
         console.log('[Dashboard] Protocols skipped:', skipped.join(', '));
       }
@@ -423,12 +431,8 @@ export default function DashboardScreen({ navigation }: Props) {
 
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
-      if (showLoadingIndicator) {
-        Alert.alert(
-          'Error',
-          error instanceof Error ? error.message : 'Failed to load dashboard data'
-        );
-      }
+      // Shown in the banner above the balance, not as a modal on top of it.
+      if (showLoadingIndicator) setBalanceWarning('Your balances could not be refreshed.');
     } finally {
       isUpdatingRef.current = false;
       setIsUpdating(false);
@@ -560,7 +564,16 @@ export default function DashboardScreen({ navigation }: Props) {
   const protocolBalances = (btcBalance as any).byProtocol as Record<string, { confirmed: number; unconfirmed: number; total: number }> | undefined;
   // NWC reports Lightning funds already; HTTP RLN reports on-chain funds.
   const rgbBalanceIsLightning = typeof (protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType === 'function';
-  const bitcoinSummary = summarizeBitcoinBalances(protocolBalances ?? {}, channels, rgbBalanceIsLightning);
+  // Accounts on a test network hold sats with no value: kept out of the total and its
+  // fiat figure, and shown on their own line.
+  const testNetworks: Partial<Record<AccountId, string>> = {};
+  for (const account of ['RGB', 'SPARK', 'ARKADE', 'BARK'] as AccountId[]) {
+    const chain = receiveAccountChain(account);
+    if (chain && chain !== 'mainnet') testNetworks[account] = chainLabel(chain);
+  }
+  const bitcoinSummary = summarizeBitcoinBalances(
+    protocolBalances ?? {}, channels, rgbBalanceIsLightning, new Set(Object.keys(testNetworks)),
+  );
   const availableBtc = bitcoinSummary.available;
   const pendingBtc = bitcoinSummary.unavailable;
   const totalBalance = bitcoinSummary.total + tokenValueSats;
@@ -619,160 +632,145 @@ export default function DashboardScreen({ navigation }: Props) {
   } as any;
 
   const renderChannelModal = () => (
-    <Modal
+    <Sheet
       visible={channelModalVisible}
-      transparent={true}
-      animationType="slide"
-      onRequestClose={() => setChannelModalVisible(false)}
+      onClose={() => setChannelModalVisible(false)}
+      title="Channel Details"
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Channel Details</Text>
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={() => setChannelModalVisible(false)}
-            >
-              <Ionicons name="close" size={24} color={theme.colors.text.primary} />
-            </TouchableOpacity>
+      {selectedChannel && (
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Channel Status */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Status</Text>
+            <View style={styles.modalStatusRow}>
+              <View style={[
+                styles.modalStatusDot,
+                { backgroundColor: selectedChannel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
+              ]} />
+              <Text style={styles.modalStatusText}>
+                {selectedChannel.ready ? 'Channel Open' : 'Channel Pending'}
+              </Text>
+              {selectedChannel.public ? (
+                <View style={styles.modalPublicBadge}>
+                  <Ionicons name="globe-outline" size={12} color={theme.colors.primary[500]} />
+                  <Text style={styles.modalPublicText}>Public</Text>
+                </View>
+              ) : (
+                <View style={styles.modalPrivateBadge}>
+                  <Ionicons name="lock-closed-outline" size={12} color={theme.colors.gray[500]} />
+                  <Text style={styles.modalPrivateText}>Private</Text>
+                </View>
+              )}
+            </View>
           </View>
 
-          {selectedChannel && (
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              {/* Channel Status */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Status</Text>
-                <View style={styles.modalStatusRow}>
-                  <View style={[
-                    styles.modalStatusDot,
-                    { backgroundColor: selectedChannel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
-                  ]} />
-                  <Text style={styles.modalStatusText}>
-                    {selectedChannel.ready ? 'Channel Open' : 'Channel Pending'}
-                  </Text>
-                  {selectedChannel.public ? (
-                    <View style={styles.modalPublicBadge}>
-                      <Ionicons name="globe-outline" size={12} color={theme.colors.primary[500]} />
-                      <Text style={styles.modalPublicText}>Public</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.modalPrivateBadge}>
-                      <Ionicons name="lock-closed-outline" size={12} color={theme.colors.gray[500]} />
-                      <Text style={styles.modalPrivateText}>Private</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
+          {/* Peer Information */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Peer Information</Text>
+            <View style={styles.modalInfoRow}>
+              <Text style={styles.modalInfoLabel}>Alias</Text>
+              <Text style={styles.modalInfoValue}>
+                {selectedChannel.peer_alias || 'Unknown'}
+              </Text>
+            </View>
+            <View style={styles.modalInfoRow}>
+              <Text style={styles.modalInfoLabel}>Public Key</Text>
+              <Text style={styles.modalInfoValue} numberOfLines={1}>
+                {selectedChannel.peer_pubkey}
+              </Text>
+            </View>
+          </View>
 
-              {/* Peer Information */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Peer Information</Text>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalInfoLabel}>Alias</Text>
-                  <Text style={styles.modalInfoValue}>
-                    {selectedChannel.peer_alias || 'Unknown'}
-                  </Text>
-                </View>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalInfoLabel}>Public Key</Text>
-                  <Text style={styles.modalInfoValue} numberOfLines={1}>
-                    {selectedChannel.peer_pubkey}
-                  </Text>
-                </View>
-              </View>
+          {/* Channel Capacity */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Capacity</Text>
+            <Text style={styles.modalCapacityValue}>
+              {formatSatoshis(selectedChannel.capacity_sat)} {bitcoinUnit}
+            </Text>
+          </View>
 
-              {/* Channel Capacity */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Capacity</Text>
-                <Text style={styles.modalCapacityValue}>
-                  {formatSatoshis(selectedChannel.capacity_sat)} {bitcoinUnit}
-                </Text>
-              </View>
-
-              {/* Bitcoin Liquidity */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Bitcoin Liquidity</Text>
-                <View style={styles.modalLiquidityContainer}>
-                  <View style={styles.modalLiquidityRow}>
-                    <View style={styles.modalLiquidityItem}>
-                      <View style={styles.modalLiquidityIcon}>
-                        <Ionicons name="arrow-up" size={16} color={theme.colors.success[500]} />
-                      </View>
-                      <View>
-                        <Text style={styles.modalLiquidityLabel}>Outbound</Text>
-                        <Text style={styles.modalLiquidityValue}>
-                          {formatSatoshis(selectedChannel.outbound_balance_msat / 1000)} {bitcoinUnit}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.modalLiquidityItem}>
-                      <View style={styles.modalLiquidityIcon}>
-                        <Ionicons name="arrow-down" size={16} color={theme.colors.primary[500]} />
-                      </View>
-                      <View>
-                        <Text style={styles.modalLiquidityLabel}>Inbound</Text>
-                        <Text style={styles.modalLiquidityValue}>
-                          {formatSatoshis(selectedChannel.inbound_balance_msat / 1000)} {bitcoinUnit}
-                        </Text>
-                      </View>
-                    </View>
+          {/* Bitcoin Liquidity */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Bitcoin Liquidity</Text>
+            <View style={styles.modalLiquidityContainer}>
+              <View style={styles.modalLiquidityRow}>
+                <View style={styles.modalLiquidityItem}>
+                  <View style={styles.modalLiquidityIcon}>
+                    <Ionicons name="arrow-up" size={16} color={theme.colors.success[500]} />
                   </View>
-                  <View style={styles.modalLiquidityBar}>
-                    <View style={[
-                      styles.modalLiquidityBarFill,
-                      {
-                        width: `${(selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) > 0 ?
-                          (selectedChannel.outbound_balance_msat / (selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) * 100) : 0}%`,
-                        backgroundColor: theme.colors.success[500]
-                      }
-                    ]} />
+                  <View>
+                    <Text style={styles.modalLiquidityLabel}>Outbound</Text>
+                    <Text style={styles.modalLiquidityValue}>
+                      {formatSatoshis(selectedChannel.outbound_balance_msat / 1000)} {bitcoinUnit}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.modalLiquidityItem}>
+                  <View style={styles.modalLiquidityIcon}>
+                    <Ionicons name="arrow-down" size={16} color={theme.colors.primary[500]} />
+                  </View>
+                  <View>
+                    <Text style={styles.modalLiquidityLabel}>Inbound</Text>
+                    <Text style={styles.modalLiquidityValue}>
+                      {formatSatoshis(selectedChannel.inbound_balance_msat / 1000)} {bitcoinUnit}
+                    </Text>
                   </View>
                 </View>
               </View>
+              <View style={styles.modalLiquidityBar}>
+                <View style={[
+                  styles.modalLiquidityBarFill,
+                  {
+                    width: `${(selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) > 0 ?
+                      (selectedChannel.outbound_balance_msat / (selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) * 100) : 0}%`,
+                    backgroundColor: theme.colors.success[500]
+                  }
+                ]} />
+              </View>
+            </View>
+          </View>
 
-              {/* RGB Asset Liquidity (if applicable) */}
-              {selectedChannel.asset_id && (() => {
-                // Channel asset amounts are in base units; divide by the asset's
-                // real precision (USDT=6, XAUT=9, …), not a hardcoded 8.
-                const channelAssetPrecision =
-                  rgbAssets.find((a) => a.asset_id === selectedChannel.asset_id)?.precision ?? 8;
-                return (
-                <View style={styles.modalSection}>
-                  <Text style={styles.modalSectionTitle}>RGB Asset Liquidity</Text>
-                  <View style={styles.modalLiquidityContainer}>
-                    <View style={styles.modalLiquidityRow}>
-                      <View style={styles.modalLiquidityItem}>
-                        <View style={styles.modalLiquidityIcon}>
-                          <Ionicons name="arrow-up" size={16} color={theme.colors.secondary[500]} />
-                        </View>
-                        <View>
-                          <Text style={styles.modalLiquidityLabel}>Local</Text>
-                          <Text style={styles.modalLiquidityValue}>
-                            {formatAssetAmount(selectedChannel.asset_local_amount, channelAssetPrecision)}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.modalLiquidityItem}>
-                        <View style={styles.modalLiquidityIcon}>
-                          <Ionicons name="arrow-down" size={16} color={theme.colors.secondary[600]} />
-                        </View>
-                        <View>
-                          <Text style={styles.modalLiquidityLabel}>Remote</Text>
-                          <Text style={styles.modalLiquidityValue}>
-                            {formatAssetAmount(selectedChannel.asset_remote_amount, channelAssetPrecision)}
-                          </Text>
-                        </View>
-                      </View>
+          {/* RGB Asset Liquidity (if applicable) */}
+          {selectedChannel.asset_id && (() => {
+            // Channel asset amounts are in base units; divide by the asset's
+            // real precision (USDT=6, XAUT=9, …), not a hardcoded 8.
+            const channelAssetPrecision =
+              rgbAssets.find((a) => a.asset_id === selectedChannel.asset_id)?.precision ?? 8;
+            return (
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>RGB Asset Liquidity</Text>
+              <View style={styles.modalLiquidityContainer}>
+                <View style={styles.modalLiquidityRow}>
+                  <View style={styles.modalLiquidityItem}>
+                    <View style={styles.modalLiquidityIcon}>
+                      <Ionicons name="arrow-up" size={16} color={theme.colors.secondary[500]} />
+                    </View>
+                    <View>
+                      <Text style={styles.modalLiquidityLabel}>Local</Text>
+                      <Text style={styles.modalLiquidityValue}>
+                        {formatAssetAmount(selectedChannel.asset_local_amount, channelAssetPrecision)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.modalLiquidityItem}>
+                    <View style={styles.modalLiquidityIcon}>
+                      <Ionicons name="arrow-down" size={16} color={theme.colors.secondary[600]} />
+                    </View>
+                    <View>
+                      <Text style={styles.modalLiquidityLabel}>Remote</Text>
+                      <Text style={styles.modalLiquidityValue}>
+                        {formatAssetAmount(selectedChannel.asset_remote_amount, channelAssetPrecision)}
+                      </Text>
                     </View>
                   </View>
                 </View>
-                );
-              })()}
-            </ScrollView>
-          )}
-        </View>
-      </View>
-    </Modal>
+              </View>
+            </View>
+            );
+          })()}
+        </ScrollView>
+      )}
+    </Sheet>
   );
 
   return (
@@ -807,11 +805,21 @@ export default function DashboardScreen({ navigation }: Props) {
             onRestore={() => navigation.navigate('WalletRestore')}
           />
         ) : <>
+        {!connectionError && !balanceWarning && offlineAccounts.length > 0 && (
+          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
+            <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
+            <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
+              {offlineAccounts.join(', ')} {offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete. Tap to retry.
+            </Text>
+          </TouchableOpacity>
+        )}
         {(connectionError || balanceWarning) && (
           <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
             <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
             <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
-              {connectionError ? 'Wallet connection unavailable. Tap to retry.' : `${balanceWarning} Tap to retry.`}
+              {connectionError
+                ? (offlineAccounts.length ? `Can't reach ${offlineAccounts.join(', ')}. Tap to retry.` : 'Wallet connection unavailable. Tap to retry.')
+                : `${balanceWarning} Tap to retry.`}
             </Text>
           </TouchableOpacity>
         )}
@@ -827,6 +835,8 @@ export default function DashboardScreen({ navigation }: Props) {
           <BalanceCard
             totalBalance={totalBalance}
             pendingBtc={pendingBtc}
+            testBtc={bitcoinSummary.test}
+            testNetworks={testNetworks}
             includesTokenValue={tokenValueSats > 0}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}
@@ -899,10 +909,12 @@ export default function DashboardScreen({ navigation }: Props) {
               }
             });
           }}
-          onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
+          onIssueAsset={() => navigation.getParent()?.navigate('Assets', { issue: true })}
         />
 
-        </>}
+        {/* The latest payments, so a receive shows up without switching tabs. */}
+        <RecentActivityWidget onViewAll={() => navigation.navigate('Activity')} />
+
         <TouchableOpacity
           accessibilityRole="button"
           onPress={() => navigation.navigate('Map')}
@@ -915,21 +927,20 @@ export default function DashboardScreen({ navigation }: Props) {
           </View>
           <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
         </TouchableOpacity>
+        </>}
 
         {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
           formatSatoshis={formatSatoshis}
-          onViewAll={() => navigation.getParent()?.navigate('Channels')}
           onChannelPress={(channel) => {
             // ChannelList narrows Channel to a UI subset; the runtime object
             // carries the full shape, so widen back to DashboardScreen's Channel.
             setSelectedChannel(channel as unknown as Channel);
             setChannelModalVisible(true);
           }}
-          onOpenChannel={() => navigation.getParent()?.navigate('OpenChannel')}
-          onBuyChannel={() => navigation.getParent()?.navigate('LSP')}
+          onOpenChannel={() => navigation.getParent()?.navigate('LSP')}
         />
         )}
       </ScrollView>
@@ -1052,37 +1063,6 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.primary[600],
   },
   // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: theme.colors.background.backdrop,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: theme.colors.surface.primary,
-    borderTopLeftRadius: theme.borderRadius['2xl'],
-    borderTopRightRadius: theme.borderRadius['2xl'],
-    maxHeight: '80%',
-    paddingBottom: theme.spacing[8],
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-  modalTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-  modalCloseButton: {
-    padding: theme.spacing[2],
-  },
-  modalBody: {
-    padding: theme.spacing[4],
-  },
   modalSection: {
     marginBottom: theme.spacing[6],
   },

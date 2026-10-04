@@ -17,7 +17,6 @@ interface MainHeaderProps {
   showLogo?: boolean;
   /** Render the full horizontal KaleidoSwap logo (extension parity) instead of greeting/title. */
   brandLogo?: boolean;
-  showNotification?: boolean;
   showSettings?: boolean;
   rightAction?: React.ReactNode;
   icon?: keyof typeof Ionicons.glyphMap;
@@ -41,7 +40,6 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   greeting,
   showLogo,
   brandLogo,
-  showNotification,
   showSettings,
   rightAction,
   icon,
@@ -106,12 +104,6 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
 
             <View style={styles.actions}>
               {rightAction}
-              {showNotification && (
-                <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.navigate('Notifications')}>
-                  <Ionicons name="notifications-outline" size={18} color={theme.colors.text.secondary} />
-                  <View style={styles.dot} />
-                </TouchableOpacity>
-              )}
               {showSettings && (
                 <TouchableOpacity
                   style={styles.iconBtn}
@@ -215,17 +207,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 0,
-  },
-  dot: {
-    position: 'absolute',
-    top: 9,
-    right: 9,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: theme.colors.error[500],
-    borderWidth: 1.5,
-    borderColor: theme.colors.background.primary,
   },
   childrenArea: {
     marginTop: theme.spacing[4],

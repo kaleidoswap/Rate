@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
@@ -20,28 +20,32 @@ interface ChannelListProps {
     channels: Channel[];
     bitcoinUnit: string;
     formatSatoshis: (amount: number) => string;
-    onViewAll: () => void;
     onChannelPress: (channel: Channel) => void;
+    /** Opens a new channel (the LSP order flow). */
     onOpenChannel: () => void;
-    onBuyChannel: () => void;
 }
+
+const PREVIEW_COUNT = 3;
 
 export const ChannelList: React.FC<ChannelListProps> = ({
     channels,
     bitcoinUnit,
     formatSatoshis,
-    onViewAll,
     onChannelPress,
     onOpenChannel,
-    onBuyChannel,
 }) => {
+    // The full list expands in place: there is no separate channels screen.
+    const [expanded, setExpanded] = useState(false);
+    const shown = expanded ? channels : channels.slice(0, PREVIEW_COUNT);
     return (
         <View style={styles.section}>
             <View style={styles.sectionHeader}>
                 <Text style={styles.sectionTitle}>Lightning Channels</Text>
-                <TouchableOpacity onPress={onViewAll}>
-                    <Text style={styles.sectionAction}>View All</Text>
-                </TouchableOpacity>
+                {channels.length > 0 && (
+                    <TouchableOpacity accessibilityRole="button" onPress={onOpenChannel}>
+                        <Text style={styles.sectionAction}>Open channel</Text>
+                    </TouchableOpacity>
+                )}
             </View>
 
             {channels.length === 0 ? (
@@ -56,17 +60,10 @@ export const ChannelList: React.FC<ChannelListProps> = ({
                         </Text>
                         <View style={styles.emptyActions}>
                             <Button
-                                title="Open Channel"
-                                variant="secondary"
-                                size="sm"
-                                onPress={onOpenChannel}
-                                style={styles.emptyButton}
-                            />
-                            <Button
-                                title="Buy Channel"
+                                title="Open a channel"
                                 variant="primary"
                                 size="sm"
-                                onPress={onBuyChannel}
+                                onPress={onOpenChannel}
                                 style={styles.emptyButton}
                             />
                         </View>
@@ -74,7 +71,7 @@ export const ChannelList: React.FC<ChannelListProps> = ({
                 </Card>
             ) : (
                 <View style={styles.channelsVerticalContainer}>
-                    {channels.slice(0, 3).map((channel) => (
+                    {shown.map((channel) => (
                         <TouchableOpacity
                             key={channel.channel_id}
                             style={styles.channelVerticalCard}
@@ -139,13 +136,17 @@ export const ChannelList: React.FC<ChannelListProps> = ({
                             </View>
                         </TouchableOpacity>
                     ))}
-                    {channels.length > 3 && (
+                    {channels.length > PREVIEW_COUNT && (
                         <TouchableOpacity
                             style={styles.viewMoreButton}
-                            onPress={onViewAll}
+                            accessibilityRole="button"
+                            accessibilityState={{ expanded }}
+                            onPress={() => setExpanded(v => !v)}
                         >
-                            <Text style={styles.viewMoreText}>View {channels.length - 3} more channels</Text>
-                            <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
+                            <Text style={styles.viewMoreText}>
+                                {expanded ? 'Show fewer channels' : `View ${channels.length - PREVIEW_COUNT} more channels`}
+                            </Text>
+                            <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={theme.colors.primary[500]} />
                         </TouchableOpacity>
                     )}
                 </View>

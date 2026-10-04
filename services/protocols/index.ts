@@ -5,8 +5,7 @@ import { coalesceInFlight } from '../../utils/coalesce-in-flight'
  * Mobile uses the WDK-backed adapters EXCLUSIVELY (see ./wdk.ts). The legacy
  * native adapters + their SDK-factory wiring have been removed.
  *
- * Default enabled protocols: Spark + RLN (no WASM). Liquid/Arkade are opt-in via
- * EXPO_PUBLIC_WDK_LIQUID=1 / EXPO_PUBLIC_WDK_ARKADE=1 (see ./wdk.ts).
+ * Enabled protocols: Spark, RGB (NWC), Arkade and Bark (see ./wdk.ts for the flags).
  *
  * NOTE: the `*ClientManager` singletons re-exported below are still referenced by
  * the swap UI (screens/SwapScreen.tsx). They are NO LONGER initialized here (that

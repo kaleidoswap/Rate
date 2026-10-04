@@ -324,7 +324,7 @@ export async function payLightningInvoice(
  * is STABLE regardless of connection state — each handler checks its adapter at
  * call time and throws a friendly error if that layer isn't connected (so the
  * agent can be built once at mount, before wallets connect). Tools without a
- * handler yet (per-layer *_send, swaps, Liquid) are simply not exposed.
+ * handler yet (per-layer *_send, swaps) are simply not exposed.
  */
 export function buildWalletToolSource() {
   const tools: InProcessTool[] = Object.entries(HANDLERS).map(([name, handler]) => ({

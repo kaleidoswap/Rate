@@ -2,7 +2,7 @@
 //
 // @kaleidorg/wallet-engine's `adapters/wdk` barrel re-exports RgbLibWdkAdapter
 // and RgbLibWasmAdapter alongside the adapters this app actually registers
-// (Spark/Liquid/Rln/Arkade — see services/protocols/wdk.ts). Metro bundles a
+// (Spark/Rln/Arkade — see services/protocols/wdk.ts). Metro bundles a
 // single file and doesn't tree-shake unused named exports from a barrel, so
 // it still needs to resolve their dynamic `import('@utexo/...')` calls even
 // though this app never instantiates those two adapters (RGB is driven over

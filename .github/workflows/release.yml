@@ -93,16 +93,9 @@ jobs:
       - name: Install NDK 29.0.14206865
         run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;29.0.14206865" >/dev/null
 
-      # Runs postinstall (fetch-lwk-artifacts pulls the Android jniLibs).
+      # Runs postinstall (Bark native artifacts, QVAC addon linking).
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      # The app ships arm64-v8a only (ndk.abiFilters). lwk-rn bundles 606 MB of
-      # static libs across 4 ABIs — drop the unused 3 so the jniLib merge stays
-      # within the runner disk. The final APK is identical (other ABIs are
-      # filtered out anyway).
-      - name: Trim native libs to arm64-v8a
-        run: rm -rf node_modules/lwk-rn/android/src/main/jniLibs/x86 node_modules/lwk-rn/android/src/main/jniLibs/x86_64 node_modules/lwk-rn/android/src/main/jniLibs/armeabi-v7a
 
       - name: Decode release keystore
         env:

@@ -3,7 +3,7 @@
 **A non-custodial, multi-protocol Bitcoin wallet with an on-device AI assistant.**
 
 KaleidoSwap is a React Native (Expo) mobile wallet that brings Bitcoin, the Lightning
-Network, RGB assets, Liquid, and Bitcoin L2s (Spark, Arkade) together under one
+Network, RGB assets, and Bitcoin L2s (Spark, Arkade, Bark) together under one
 self-custodial roof — driven by a private, **on-device** AI assistant and Nostr social
 payments. Your keys, your assets, and your AI all stay on your phone.
 
@@ -17,7 +17,7 @@ payments. Your keys, your assets, and your AI all stay on your phone.
 ## Highlights
 
 - 🔑 **Non-custodial & multi-protocol** — one HD wallet (BIP39) across Bitcoin on-chain,
-  Lightning, RGB assets, Liquid, Spark, and Arkade.
+  Lightning, RGB assets, Spark, Arkade, and Bark.
 - 🤖 **On-device AI** — a private assistant (KaleidoMind) that runs the LLM and speech
   models locally; nothing is sent to a cloud LLM by default.
 - 🔁 **Atomic swaps** — trustless asset swaps via the KaleidoSwap maker network, plus
@@ -38,7 +38,6 @@ that routes operations to the active protocol adapter:
 | Protocol | What it covers | Backed by |
 |---|---|---|
 | **Bitcoin / Lightning + RGB** | On-chain BTC, Lightning payments, and RGB asset transfers via an RGB Lightning Node | `kaleido-sdk` (RLN) |
-| **Liquid** | Liquid Network assets (L-BTC, issued assets) | `lwk-rn` (native module) |
 | **Spark** | Spark L2 Bitcoin + tokens | `@buildonspark/spark-sdk` |
 | **Arkade** | Ark VTXOs | `@arkade-os/sdk` |
 | **Flashnet** | Spark AMM DEX pools | `@flashnet/sdk` |
@@ -48,7 +47,6 @@ against the KaleidoSwap maker API, with additional venues for breadth:
 
 - **KaleidoSwap** — maker-based atomic swaps (primary).
 - **Flashnet** — Spark AMM DEX pools.
-- **Boltz** — submarine swaps between Lightning and on-chain BTC / Liquid.
 
 ---
 
@@ -79,7 +77,7 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 - **State** — Redux Toolkit + Redux Persist (`store/`).
 - **Service layer** (`services/`) keeps screens free of direct SDK calls. At its center is
   **ProtocolManager** (`services/protocols/`), which routes every operation to the active
-  protocol adapter (Spark, Arkade, RGB/RLN, Liquid, Flashnet). Alongside it: the
+  protocol adapter (Spark, Arkade, RGB/RLN, Flashnet). Alongside it: the
   KaleidoMind agent (`mindAgent.ts` + `*Tools.ts`), on-device AI lifecycle
   (`QVACService.ts`), Nostr + NWC, and biometric auth + encrypted SQLite.
 - **Theming** — design tokens in `theme/`, shared UI primitives in `components/`.
@@ -95,7 +93,7 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 - **State** — Redux Toolkit, Redux Persist
 - **Storage** — `expo-sqlite` for wallet metadata; `expo-secure-store` for seeds and keys
 - **AI / voice** — `@qvac/sdk` (on-device LLM + Whisper), `@kaleidorg/mind`
-- **Wallet engine** — `@kaleidorg/wallet-engine` + protocol SDKs (Spark, Arkade, RGB, Liquid, Flashnet)
+- **Wallet engine** — `@kaleidorg/wallet-engine` + protocol SDKs (Spark, Arkade, RGB, Flashnet)
 - **Nostr** — `@nostr-dev-kit/ndk`, `nostr-tools`
 - **Maps** — `react-native-maps` + BTC Map API
 
@@ -110,37 +108,27 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 - **For iOS:** macOS with **Xcode 16+** (iOS 18 SDK) and **CocoaPods** (`brew install cocoapods`). A **UTF-8 locale** is required (CocoaPods on Ruby 3.4 crashes otherwise).
 - **For Android:** **Android Studio** + SDK (API 34+), a configured emulator or a connected device, and **JDK 17**.
 
-> The app uses the **New Architecture** (default on Expo SDK 54) — required by the native `lwk-rn` (Liquid) module.
+> The app uses the **New Architecture** (default on Expo SDK 54).
 
 ### Install dependencies
 
 ```bash
 git clone https://github.com/kaleidoswap/Rate.git
 cd Rate
-pnpm install        # also runs setup:native → fetches the lwk-rn native artifacts
+pnpm install        # postinstall prepares the Bark native module and QVAC addons
 ```
 
-`pnpm install` resolves the multi-protocol stack (Spark, RLN/RGB, Liquid, Arkade). Several
+`pnpm install` resolves the multi-protocol stack (Spark, RLN/RGB, Arkade, Bark). Several
 are local `file:` siblings (`../wallet-engine`, `../wdk-wallet-*`, `../arkade-wdk`), so keep
 those checked out next to this repo.
 
 > ⚠️ **Do not symlink `node_modules`** (e.g. `ln -s` into another checkout). A self-referencing link causes `ELOOP: too many symbolic links`. If you hit it: `rm node_modules && pnpm install`.
 
-### Native setup (Liquid and Bark)
+### Native setup (Bark)
 
-The Liquid protocol uses the `lwk-rn` native module, whose prebuilt native artifacts
-(iOS `LwkRnFramework.xcframework` + Android `jniLibs`) are **excluded** from its npm
-tarball and normally downloaded by its own `postinstall`. Because pnpm skips
-dependency postinstall scripts, a fresh `pnpm install` leaves these artifacts missing,
-and the iOS `pod install` / native build then fails on a missing
-`LwkRnFramework.xcframework`.
-
-This repo fetches them automatically via `scripts/fetch-lwk-artifacts.sh`, wired into
-its own `postinstall`. The step is idempotent (skips when the artifacts already exist)
-and non-fatal (warns and continues when offline).
-
-If the iOS build complains about a missing `LwkRnFramework.xcframework` (e.g. because
-your package manager skipped postinstall), fetch the artifacts manually:
+Bark's prebuilt native artifacts are fetched and prepared by this repo's own
+`postinstall` (pnpm skips dependency postinstall scripts). If a native build
+complains about missing Bark artifacts, run the step manually:
 
 ```bash
 pnpm run setup:native
@@ -160,9 +148,8 @@ npx expo run:ios --device "iPhone 16 Pro"
 ```
 
 Notes:
-- The **first build is slow** — it compiles the native modules, including `lwk-rn` (Liquid) and the Spark/RGB SDKs.
-- `lwk-rn` pins the pod `uniffi-bindgen-react-native` to `0.28.3-3` (already in `package.json`); don't bump it independently or `pod install` will fail with a version conflict.
-- Bark 0.25.0 uses UniFFI 0.31.0-5. `scripts/prepare-bark-native.js` runs during `postinstall` and `setup:native`: it copies Bark's exact header-only runtime into its native package, isolates C++ namespaces and FFI type names, and removes only Bark's shared CocoaPods runtime dependency. Liquid keeps its 0.28 runtime unchanged. Do not replace this with a global version override: their string/buffer APIs differ. Native artifacts are fetched by Bark's checksum-verifying installer when missing.
+- The **first build is slow** — it compiles the native modules, including Bark and the Spark/RGB SDKs.
+- Bark 0.25.0 uses UniFFI 0.31.0-5. `scripts/prepare-bark-native.js` runs during `postinstall` and `setup:native`: it copies Bark's exact header-only runtime into its native package, isolates C++ namespaces and FFI type names, and removes only Bark's shared CocoaPods runtime dependency, so another UniFFI-based module can't clash with it. Do not replace this with a global version override: UniFFI string/buffer APIs differ between versions. Native artifacts are fetched by Bark's checksum-verifying installer when missing.
 - When upgrading Bark or its UniFFI runtime, review the isolation script's version checks, run `pnpm run test:native-setup`, and rebuild the native app. A JavaScript reload cannot add the Bark native module to an old client.
 - If `pod install` crashes with a Ruby `Unicode Normalization … ASCII-8BIT` error, you forgot the `LANG=en_US.UTF-8` export above.
 - The **QVAC AI assistant requires a physical device** (no simulator support); the wallet itself runs fine on a simulator.
@@ -175,7 +162,6 @@ npx expo run:android
 ```
 
 Notes:
-- `lwk-rn` ships prebuilt Android `jniLibs` (arm64-v8a, etc.), fetched automatically during `pnpm install`.
 - First build compiles the native modules + Gradle — allow several minutes.
 
 ### Run the dev server (after a native build is installed)
@@ -240,7 +226,7 @@ Notes:
 
 ### Everyday operations
 
-- **Send / Receive** — across Bitcoin, Lightning, RGB, Liquid, Spark, and Arkade; scan
+- **Send / Receive** — across Bitcoin, Lightning, RGB, Spark, Arkade, and Bark; scan
   Bitcoin addresses, Lightning invoices, RGB invoices, and LNURL via the QR scanner.
 - **Swap** — quote and execute atomic swaps via the KaleidoSwap maker network (and
   Flashnet AMM where available).
@@ -314,8 +300,6 @@ rate/
 |---|---|
 | `ELOOP: too many symbolic links … node_modules` | A self-referencing `node_modules` symlink. `rm node_modules && pnpm install`. |
 | iOS `pod install` → `Unicode Normalization … ASCII-8BIT` | `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` before running. |
-| iOS build: missing `LwkRnFramework.xcframework` | `pnpm run setup:native` (re-fetches lwk-rn artifacts). |
-| `pod install`: `uniffi-bindgen-react-native` version conflict | Keep it pinned to `0.28.3-3` (lwk-rn's podspec requires that exact version). |
 | `npx expo` prompts to install a different Expo version | `node_modules` is broken — reinstall so the local `expo` is used. |
 | AI assistant unavailable | On-device inference needs a **physical device**, or pair a desktop KaleidoMind provider. |
 
@@ -353,7 +337,7 @@ The next chapters of KaleidoSwap, grouped by horizon. Items move up as they land
   contacts, Nostr identity, and app settings.
 - **Hardware-signer / external-key support** — sign with an external key device.
 - **Multi-language (i18n)** — localization for a broader audience.
-- **Per-protocol UX maturity** — Liquid asset issuance, Spark token discovery, and Arkade
+- **Per-protocol UX maturity** — Spark token discovery and Arkade
   onboarding surfaced consistently across the wallet.
 
 ---

@@ -210,7 +210,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         setBalanceSats(sats);
         setLoading(false); // probe done; finalize() manages its own loading
 
-        const typeName = isRln ? 'RGB Lightning Node' : 'Lightning wallet';
+        const typeName = isRln ? 'RGB Lightning node' : 'Lightning wallet';
         const capabilitySummary = isRln
           ? '• Send & receive Bitcoin (Lightning)\n• Send & receive RGB assets (USDT, XAUT…)'
           : '• Send & receive Bitcoin (Lightning)\n• RGB assets not supported on this wallet';
@@ -271,6 +271,19 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
     navigation.navigate('QRScanner');
   };
 
+  // Removing deletes the stored connection string: getting it back means pasting it again.
+  const confirmDisconnect = (connection?: SavedNwcConnection) => {
+    const name = connection?.alias || 'this Lightning wallet';
+    Alert.alert(
+      `Remove ${name}?`,
+      'Your funds stay in that wallet, but this app forgets the connection. To use it here again you will need its connection string.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => { void handleDisconnect(connection); } },
+      ],
+    );
+  };
+
   const handleDisconnect = async (connection?: SavedNwcConnection) => {
     const targetId = connection?.id ?? selectedConnectionId;
     if (!targetId) return;
@@ -298,10 +311,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         setConnectionError(friendlyNwcError(error));
       }
     }
-    if (!wasSelected) {
-      Alert.alert('Connection removed', 'The saved Lightning wallet was removed.');
-      return;
-    }
+    if (!wasSelected) return;
     const walletId = activeWallet?.id;
     if (walletId) {
       try {
@@ -320,7 +330,6 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
     setInfo(null);
     setWalletType(null);
     setBalanceSats(null);
-    Alert.alert('Disconnected', 'Lightning wallet removed');
   };
 
   const handleSelectConnection = async (connection: SavedNwcConnection) => {
@@ -435,7 +444,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                   activeOpacity={0.75}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active, disabled: loading }}
-                  accessibilityLabel={`${connection.alias || (rln ? 'RGB Lightning Node' : 'Lightning wallet')}, ${connection.network}${active ? ', active' : ''}`}
+                  accessibilityLabel={`${connection.alias || (rln ? 'RGB Lightning node' : 'Lightning wallet')}, ${connection.network}${active ? ', active' : ''}`}
                 >
                   <View style={styles.typeRow}>
                     <View style={styles.walletIdentity}>
@@ -444,7 +453,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.walletName} numberOfLines={1}>
-                          {connection.alias || (rln ? 'RGB Lightning Node' : 'Lightning wallet')}
+                          {connection.alias || (rln ? 'RGB Lightning node' : 'Lightning wallet')}
                         </Text>
                         <Text style={styles.walletMeta}>{connection.network} · NWC</Text>
                       </View>
@@ -489,7 +498,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                     style={styles.removeButton}
                     onPress={(event) => {
                       event.stopPropagation();
-                      handleDisconnect(connection);
+                      confirmDisconnect(connection);
                     }}
                     hitSlop={8}
                     accessibilityRole="button"

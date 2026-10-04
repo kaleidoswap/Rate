@@ -24,7 +24,10 @@ import { setDisclosureLevel } from '../store/slices/settingsSlice';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
-import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
+import { buildDefaultNetworkConfig, PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
+
+// New wallets start on the default networks; on a test build those hold test bitcoin.
+const TEST_BUILD = PROTOCOL_DEFAULT_NETWORK.spark !== 'mainnet' || PROTOCOL_DEFAULT_NETWORK.arkade !== 'mainnet';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
@@ -65,7 +68,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
   // Network selection state — enable all protocols by default (matching extension)
   const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
     spark: true,
-    liquid: false,
     arkade: true,
     rln: true,
   });
@@ -134,10 +136,10 @@ export default function WalletSetupScreen({ navigation }: Props) {
       }
       dispatch(setDisclosureLevel('lite'));
       setMode('lite');
-      setNetworks({ spark: true, arkade: true, liquid: false, rln: rlnConnected });
+      setNetworks({ spark: true, arkade: true, rln: rlnConnected });
       handleCreate();
     } else if (step === 'networks') {
-      if (!networks.spark && !networks.arkade && !networks.liquid && !rlnConnected) {
+      if (!networks.spark && !networks.arkade && !rlnConnected) {
         Alert.alert('Choose a network', 'Enable at least one network to receive and send payments.');
         return;
       }
@@ -281,9 +283,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
       if (networks.spark) {
         selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
       }
-      if (networks.liquid) {
-        selectedNetworks.push({ type: 'liquid', enabled: true, config: buildDefaultNetworkConfig('liquid') });
-      }
       if (networks.arkade) {
         selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
       }
@@ -399,7 +398,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
       </View>
 
       <Text style={styles.tipText}>
-        Spark and Arkade are enabled by default. You can manage networks and connect a Lightning wallet later in Settings.
+        Your wallet can send and receive bitcoin as soon as it’s created. You can connect a Lightning wallet later in Settings.
+        {TEST_BUILD ? '\n\nThis version uses test networks: anything you receive is test bitcoin with no real value.' : ''}
       </Text>
       <TouchableOpacity
         style={styles.skipButton}
@@ -415,6 +415,14 @@ export default function WalletSetupScreen({ navigation }: Props) {
         }}
       >
         <Text style={styles.skipButtonText}>Advanced setup · choose networks</Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.skipButton}
+        accessibilityRole="button"
+        accessibilityLabel="Restore an existing wallet from its recovery phrase"
+        onPress={() => navigation.navigate('WalletRestore')}
+      >
+        <Text style={[styles.skipButtonText, { color: theme.colors.primary[500] }]}>I already have a wallet · Restore</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -450,7 +458,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>Spark</Text>
-              <Text style={styles.networkDesc}>Fast Lightning payments</Text>
+              <Text style={styles.networkDesc}>Instant bitcoin and Lightning payments</Text>
             </View>
           </View>
           <Switch
@@ -458,30 +466,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
             onValueChange={(v) => setNetworks(prev => ({ ...prev, spark: v }))}
             trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
             thumbColor={networks.spark ? theme.colors.primary[500] : theme.colors.gray[100]}
-          />
-        </TouchableOpacity>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={styles.networkItem}
-          onPress={() => setNetworks(prev => ({ ...prev, liquid: !prev.liquid }))}
-          activeOpacity={0.7}
-        >
-          <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: theme.colors.networkChip.liquid }]}>
-              <Ionicons name="water" size={22} color={theme.colors.networks.liquid} />
-            </View>
-            <View style={styles.networkTextContainer}>
-              <Text style={styles.networkName}>Liquid</Text>
-              <Text style={styles.networkDesc}>Sidechain for faster settlements</Text>
-            </View>
-          </View>
-          <Switch
-            value={networks.liquid}
-            onValueChange={(v) => setNetworks(prev => ({ ...prev, liquid: v }))}
-            trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
-            thumbColor={networks.liquid ? theme.colors.primary[500] : theme.colors.gray[100]}
           />
         </TouchableOpacity>
 
@@ -498,7 +482,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>Arkade</Text>
-              <Text style={styles.networkDesc}>Virtual UTXOs on Bitcoin</Text>
+              <Text style={styles.networkDesc}>Low-fee bitcoin payments off-chain</Text>
             </View>
           </View>
           <Switch
@@ -766,7 +750,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
       <StatusBar barStyle="light-content" />
       <ScreenHeader
         title={step === 'success' ? 'Success' : 'New Wallet'}
-        showBack={step !== 'creating' && step !== 'success'}
+        // The first step is the app's entry point: there is nothing to go back to.
+        showBack={step === 'welcome' ? navigation.canGoBack() : step !== 'creating' && step !== 'success'}
         onBack={handleBack}
       />
       {(step !== 'creating' && step !== 'success') ? renderStepIndicator() : null}
@@ -814,7 +799,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         {step === 'rln' && (
           <View style={styles.footer}>
             <Button
-              title={rlnConnecting ? 'Connecting…' : 'Connect RLN'}
+              title={rlnConnecting ? 'Connecting…' : 'Connect'}
               onPress={handleConnectRln}
               disabled={rlnConnecting || !nwcUri.trim()}
               loading={rlnConnecting}

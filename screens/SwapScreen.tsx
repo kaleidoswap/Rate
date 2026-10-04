@@ -1,5 +1,6 @@
 // screens/SwapScreen.tsx
 import React, { useState, useEffect, useCallback } from 'react';
+import { usePolicy } from '../hooks/usePolicy';
 import {
   TextInput,
   useWindowDimensions,
@@ -41,7 +42,7 @@ import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
-  getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair,
+  getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair, getAssetNetwork,
   normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
@@ -49,10 +50,11 @@ import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer } from '../services/swapQuotes';
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
-import { theme } from '../theme';
+import Animated, { useAnimatedStyle, useSharedValue, withSpring, ZoomIn, FadeInDown } from 'react-native-reanimated';
+import { theme, motion } from '../theme';
 import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
-import { Card, Button, Input, MainHeader, AssetIcon } from '../components';
+import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText } from '../components';
 
 interface Props {
   navigation: any;
@@ -97,6 +99,9 @@ export default function SwapScreen({ navigation }: Props) {
   const unitLabelFor = (ticker: string) => (isBtcTicker(ticker) ? btcUnitLabel : ticker);
 
   const [showAssetPicker, setShowAssetPicker] = useState<'from' | 'to' | null>(null);
+  // The flip arrow turns half a revolution per tap.
+  const flipTurns = useSharedValue(0);
+  const flipIconStyle = useAnimatedStyle(() => ({ transform: [{ rotate: `${flipTurns.value * 180}deg` }] }));
   const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [reviewQuote, setReviewQuote] = useState<SwapQuote | null>(null);
@@ -111,8 +116,12 @@ export default function SwapScreen({ navigation }: Props) {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
   const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
+  // Lite hides venues, the maker and account names: the best price is picked for you.
+  const policy = usePolicy();
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
+  // A venue whose prices failed to load, so an empty list says why.
+  const [pairsFailed, setPairsFailed] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
   // Set once a swap settles so the confirm modal shows a success screen instead
   // of silently closing (the Flashnet path had no confirmation at all).
@@ -228,6 +237,8 @@ export default function SwapScreen({ navigation }: Props) {
 
   const loadTradingPairs = async () => {
     setPairsLoading(true);
+    setPairsFailed(false);
+    let failed = false;
     try {
       let makerPairs: SwapPair[] = [];
       let flashnetPairs: SwapPair[] = [];
@@ -243,6 +254,7 @@ export default function SwapScreen({ navigation }: Props) {
         }
       } catch (err) {
         console.warn('[SwapScreen] Failed to load Kaleidoswap pairs:', err);
+        failed = true;
       }
 
       // Load Flashnet pools (via Spark → Flashnet)
@@ -278,12 +290,15 @@ export default function SwapScreen({ navigation }: Props) {
         }
       } catch (err) {
         console.warn('[SwapScreen] Failed to load Flashnet pools:', err);
+        failed = true;
       }
 
       setTradingPairs([...makerPairs, ...flashnetPairs]);
     } catch (error) {
       console.error('[SwapScreen] Failed to load trading pairs:', error);
+      failed = true;
     } finally {
+      setPairsFailed(failed);
       setPairsLoading(false);
     }
   };
@@ -459,7 +474,7 @@ export default function SwapScreen({ navigation }: Props) {
       } else {
         // ── Kaleidoswap execution (3-step: init → taker → execute) ──
         if (!kaleidoClientManager.isInitialized()) {
-          throw new Error('KaleidoSwap requires an RGB node connection.');
+          throw new Error('KaleidoSwap needs your RGB Lightning node. Connect it in Settings.');
         }
         const client = kaleidoClientManager.getClient();
         const fromAsset = pair ? (pair.base.ticker === quote.from_asset ? pair.base : pair.quote) : null;
@@ -571,7 +586,7 @@ export default function SwapScreen({ navigation }: Props) {
           console.warn('[SwapScreen] RGB adapter not connected, stopping poll');
           stop(interval);
           setShowConfirmModal(false);
-          dispatch(setError('Lost connection to the RGB node. Check the swap in History.'));
+          dispatch(setError('Lost connection to your RGB Lightning node. Check the swap in Activity.'));
           return;
         }
 
@@ -637,8 +652,29 @@ export default function SwapScreen({ navigation }: Props) {
   };
 
   // Look up an available asset by ticker (swap state stores tickers, not ids).
-  const assetByTicker = (ticker: string) =>
-    availableAssets.find(a => a.ticker === ticker);
+  // A swap spends BTC from one account: Spark for Flashnet, the RGB node for
+  // KaleidoSwap. The wallet-wide total would let MAX ask for more than that account
+  // holds, so BTC shows the balance of the account the pair's venue uses (the larger
+  // one when both venues serve it).
+  const btcBalanceForSwap = (): number | undefined => {
+    const byProtocol = (walletState?.btcBalance as any)?.byProtocol as
+      Record<string, { confirmed: number; total: number }> | undefined;
+    if (!byProtocol) return undefined;
+    const tickers = [swapState.fromAsset, swapState.toAsset].filter(Boolean);
+    const venues = new Set(filteredPairs
+      .filter(p => tickers.every(t => p.base.ticker === t || p.quote.ticker === t))
+      .map(p => p.venue ?? 'kaleidoswap'));
+    const sats = [
+      ...(venues.size === 0 || venues.has('flashnet') ? [byProtocol.SPARK?.confirmed ?? 0] : []),
+      ...(venues.size === 0 || venues.has('kaleidoswap') ? [byProtocol.RGB?.total ?? 0] : []),
+    ];
+    return satsToBtcDisplay(Math.max(0, ...sats));
+  };
+  const assetByTicker = (ticker: string) => {
+    const asset = availableAssets.find(a => a.ticker === ticker);
+    const btc = asset && isBtcTicker(ticker) ? btcBalanceForSwap() : undefined;
+    return asset && btc !== undefined ? { ...asset, balance: btc } : asset;
+  };
 
 
 
@@ -705,14 +741,37 @@ export default function SwapScreen({ navigation }: Props) {
     );
   };
 
+  // Why there is nothing to swap: still loading, no swap account, or prices failed.
+  const renderPairsNotice = () => {
+    if (pairsLoading && tradingPairs.length === 0) {
+      return <View style={styles.makerInfoRow}>
+        <ActivityIndicator size="small" color={theme.colors.primary[500]} />
+        <Text style={styles.makerInfoLabel}>Loading swap prices…</Text>
+      </View>;
+    }
+    if (tradingPairs.length > 0) return null;
+    const noAccount = !rgbConnected && !sparkConnected;
+    const message = noAccount ? 'Swaps need Spark or your RGB Lightning node. Connect one to see prices.'
+      : pairsFailed ? 'Swap prices could not be loaded.'
+      : 'No swaps are available for your accounts right now.';
+    return <View style={[styles.makerInfoRow, { flexWrap: 'wrap' }]}>
+      <Ionicons name={noAccount ? 'link-outline' : 'cloud-offline-outline'} size={14} color={theme.colors.text.secondary} />
+      <Text style={[styles.makerInfoLabel, { flex: 1 }]}>{message}</Text>
+      <TouchableOpacity accessibilityRole="button" onPress={() => (noAccount ? navigation.navigate('Settings') : void loadTradingPairs())}>
+        <Text style={[styles.makerInfoLabel, { color: theme.colors.primary[500] }]}>{noAccount ? 'Settings' : 'Retry'}</Text>
+      </TouchableOpacity>
+    </View>;
+  };
+
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
-      {/* Venue filter tabs */}
-      {renderVenueFilter()}
+      {renderPairsNotice()}
+      {/* Venue filter tabs (Advanced only: Lite picks the best price for you) */}
+      {policy.showRouteSelector && renderVenueFilter()}
 
       {/* KaleidoSwap maker provider — shows which maker is serving pairs so an
           empty pair list (e.g. "No trading pair found for BTC/USD") is debuggable. */}
-      {rgbConnected && venueFilter !== 'flashnet' && (
+      {policy.showRouteSelector && rgbConnected && venueFilter !== 'flashnet' && (
         <View style={styles.makerInfoRow}>
           <Ionicons name="server-outline" size={13} color={theme.colors.text.tertiary} />
           <Text style={styles.makerInfoLabel}>Maker</Text>
@@ -764,36 +823,28 @@ export default function SwapScreen({ navigation }: Props) {
             keyboardType="decimal-pad"
             style={styles.amountInput}
           />
-          <TouchableOpacity
-            style={styles.assetSelectorToken}
-            onPress={() => setShowAssetPicker('from')}
-          >
-            {swapState.fromAsset ? (
-              <>
-                {getAssetIcon(swapState.fromAsset)}
-                <Text style={styles.assetSelectorTokenText}>
-                  {swapState.fromAsset}
-                </Text>
-              </>
-            ) : (
-              <Text style={styles.selectAssetTokenText}>Select</Text>
-            )}
-            <Ionicons name="chevron-down" size={16} color={theme.colors.text.primary} />
-          </TouchableOpacity>
+          {renderTokenButton('from')}
         </View>
       </View>
 
       {/* Direction flip — a card-colored circle sitting in the seam between the
           two cards (mirrors the extension's swap_vert button). */}
       <View style={styles.swapArrowContainer} pointerEvents="box-none">
-        <TouchableOpacity
+        <PressableScale
           style={styles.swapArrowButton}
-          onPress={() => dispatch(swapAssets())}
-          activeOpacity={0.8}
+          scaleTo={0.9}
+          onPress={() => {
+            feedback.tap();
+            flipTurns.value = withSpring(flipTurns.value + 1, motion.springSnappy);
+            dispatch(swapAssets());
+          }}
+          accessibilityRole="button"
           accessibilityLabel="Flip swap direction"
         >
-          <Ionicons name="swap-vertical" size={22} color={theme.colors.primary[500]} />
-        </TouchableOpacity>
+          <Animated.View style={flipIconStyle}>
+            <Ionicons name="swap-vertical" size={22} color={theme.colors.primary[500]} />
+          </Animated.View>
+        </PressableScale>
       </View>
 
       {/* To Section */}
@@ -814,22 +865,7 @@ export default function SwapScreen({ navigation }: Props) {
             </Text>
           )}
 
-          <TouchableOpacity
-            style={styles.assetSelectorToken}
-            onPress={() => setShowAssetPicker('to')}
-          >
-            {swapState.toAsset ? (
-              <>
-                {getAssetIcon(swapState.toAsset)}
-                <Text style={styles.assetSelectorTokenText}>
-                  {swapState.toAsset}
-                </Text>
-              </>
-            ) : (
-              <Text style={styles.selectAssetTokenText}>Select</Text>
-            )}
-            <Ionicons name="chevron-down" size={16} color={theme.colors.text.primary} />
-          </TouchableOpacity>
+          {renderTokenButton('to')}
         </View>
       </View>
 
@@ -840,7 +876,7 @@ export default function SwapScreen({ navigation }: Props) {
       </TouchableOpacity>}
       {/* Quote Info & Fees (Accordion Style) */}
       {swapState.currentQuote && (
-        <View style={styles.quoteInfoContainer}>
+        <Animated.View entering={FadeInDown.duration(motion.duration.base)} style={styles.quoteInfoContainer}>
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Rate</Text>
             <Text style={styles.quoteInfoValue}>
@@ -868,7 +904,7 @@ export default function SwapScreen({ navigation }: Props) {
               </View>
             </View>
           )}
-        </View>
+        </Animated.View>
       )}
 
       {/* Main Action Button */}
@@ -890,61 +926,73 @@ export default function SwapScreen({ navigation }: Props) {
     </View>
   );
 
-  const renderAssetPicker = () => {
-    if (!showAssetPicker) return null;
+  const networkLabelFor = (ticker: string) =>
+    ({ Spark: 'Spark', LN: 'Lightning', 'RGB-LN': 'RGB Lightning' } as const)[getAssetNetwork(filteredPairs, ticker)];
 
+  const renderTokenButton = (side: 'from' | 'to') => {
+    const ticker = side === 'from' ? swapState.fromAsset : swapState.toAsset;
+    return (
+      <PressableScale
+        style={[styles.assetSelectorToken, !ticker && styles.assetSelectorTokenEmpty]}
+        onPress={() => { feedback.tap(); setShowAssetPicker(side); }}
+        accessibilityRole="button"
+        accessibilityLabel={ticker ? `${side === 'from' ? 'Paying with' : 'Receiving'} ${ticker}. Change asset` : `Choose the asset you ${side === 'from' ? 'pay with' : 'receive'}`}
+      >
+        {ticker ? (
+          <>
+            {getAssetIcon(ticker)}
+            <View>
+              <Text style={styles.assetSelectorTokenText}>{ticker}</Text>
+              <Text style={styles.assetSelectorTokenNetwork}>{networkLabelFor(ticker)}</Text>
+            </View>
+          </>
+        ) : (
+          <Text style={styles.selectAssetTokenText}>Choose asset</Text>
+        )}
+        <Ionicons name="chevron-down" size={16} color={ticker ? theme.colors.text.secondary : theme.colors.text.inverse} />
+      </PressableScale>
+    );
+  };
+
+  const renderAssetPicker = () => {
+    const side = showAssetPicker;
     // Restrict choices to what's actually tradable: destinations must pair with
     // the current source; sources are any ticker present in a loaded pair. Falls
     // back to the full asset list before pairs have loaded.
-    const tickers = showAssetPicker === 'to'
+    const tickers = side === 'to'
       ? tradableTickers(filteredPairs, swapState.fromAsset)
       : allTickers(filteredPairs);
     const pickerAssets = tickers.length
       ? tickers.map(t => assetByTicker(t)).filter((a): a is Asset => !!a)
       : availableAssets;
+    const other = side === 'from' ? swapState.toAsset : swapState.fromAsset;
 
     return (
-      <View style={styles.modalOverlay}>
-        <View style={styles.assetPickerModal}>
-          <View style={styles.assetPickerHeader}>
-            <Text style={styles.assetPickerTitle}>
-              Select {showAssetPicker === 'from' ? 'Source' : 'Destination'} Asset
-            </Text>
-            <TouchableOpacity onPress={() => setShowAssetPicker(null)}>
-              <Ionicons name="close" size={24} color={theme.colors.text.primary} />
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView style={styles.assetPickerList}>
-            {pickerAssets.map((asset) => (
-              <TouchableOpacity
-                key={asset.asset_id}
-                style={styles.assetPickerItem}
-                onPress={() => {
-                  // Swap state identifies assets by TICKER (matches findPair /
-                  // the quote logic). Storing asset_id here previously broke both
-                  // the chip label and pair lookup.
-                  if (showAssetPicker === 'from') {
-                    dispatch(setFromAsset(asset.ticker));
-                  } else {
-                    dispatch(setToAsset(asset.ticker));
-                  }
-                  setShowAssetPicker(null);
-                }}
-              >
-                {getAssetIcon(asset.ticker)}
-                <View style={styles.assetPickerInfo}>
-                  <Text style={styles.assetPickerTicker}>{asset.ticker}</Text>
-                  <Text style={styles.assetPickerName}>{asset.name}</Text>
-                  <Text style={styles.assetPickerBalance}>
-                    Balance: {asset.balance.toFixed(resolvePrecision(asset.precision))}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      </View>
+      <AssetSelector
+        visible={!!side}
+        onClose={() => setShowAssetPicker(null)}
+        title={side === 'to' ? 'You receive' : 'You pay'}
+        subtitle={side === 'to' && swapState.fromAsset ? `Assets you can get for ${swapState.fromAsset}` : 'Assets with a market right now'}
+        quickPicks={['BTC', 'USDT']}
+        selectedAssetId={pickerAssets.find(a => a.ticker === (side === 'from' ? swapState.fromAsset : swapState.toAsset))?.asset_id}
+        assets={pickerAssets.map(asset => ({
+          asset_id: asset.asset_id,
+          ticker: asset.ticker,
+          name: asset.ticker === other ? `Selected as ${side === 'from' ? 'what you receive' : 'what you pay'} · tap to flip` : asset.name,
+          icon: asset.icon,
+          precision: asset.precision,
+          balance: asset.balance,
+          network: networkLabelFor(asset.ticker),
+          balanceLabel: `${formatDisplayAmount(asset.balance, asset.ticker)} ${unitLabelFor(asset.ticker)}`,
+        }))}
+        onSelect={asset => {
+          // Swap state identifies assets by TICKER (matches findPair / the quote logic).
+          // Picking the other side's asset flips the pair instead of making it X → X.
+          if (asset.ticker === other) dispatch(swapAssets());
+          else if (side === 'from') dispatch(setFromAsset(asset.ticker));
+          else dispatch(setToAsset(asset.ticker));
+        }}
+      />
     );
   };
 
@@ -956,7 +1004,7 @@ export default function SwapScreen({ navigation }: Props) {
       : [
           { key: 'init', label: 'Requesting swap' },
           { key: 'taker', label: 'Preparing channels' },
-          { key: 'execute', label: 'Atomic swap' },
+          { key: 'execute', label: 'Swapping' },
           { key: 'done', label: 'Completed' },
         ];
     const order = ['idle', 'init', 'taker', 'execute', 'done'];
@@ -992,46 +1040,41 @@ export default function SwapScreen({ navigation }: Props) {
     );
   };
 
-  const renderConfirmModal = () => {
+  const finishSwap = () => {
+    setSwapSuccess(null);
+    setShowConfirmModal(false);
+    setSwapProgress('idle');
+    dispatch(resetSwap());
+  };
+
+  const renderConfirmBody = () => {
     // Success screen — shown for both venues once a swap settles.
     if (swapSuccess) {
       return (
-        <View style={styles.modalOverlay}>
-          <View style={styles.confirmModal}>
-            <View style={{ alignItems: 'center', paddingVertical: 8 }}>
-              <View style={[styles.progressDot, styles.progressDotDone, { width: 56, height: 56, borderRadius: 28, marginBottom: 12 }]}>
-                <Ionicons name="checkmark" size={32} color={theme.colors.text.inverse} />
-              </View>
-              <Text style={styles.confirmTitle}>Swap Complete</Text>
-              <Text style={{ color: theme.colors.text.secondary, marginTop: 6, textAlign: 'center' }}>
-                {formatDisplayAmount(swapSuccess.fromAmount, swapSuccess.fromTicker)} {unitLabelFor(swapSuccess.fromTicker)}
-                {'  →  '}
-                {formatDisplayAmount(swapSuccess.toAmount, swapSuccess.toTicker)} {unitLabelFor(swapSuccess.toTicker)}
+        <View>
+          <View style={{ alignItems: 'center', paddingVertical: theme.spacing[2] }}>
+            <Animated.View entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
+              style={[styles.progressDot, styles.progressDotDone, styles.successDot]}>
+              <Ionicons name="checkmark" size={32} color={theme.colors.text.inverse} />
+            </Animated.View>
+            <Text style={styles.confirmTitle}>Swap complete</Text>
+            <Text style={{ color: theme.colors.text.secondary, marginTop: theme.spacing[1.5], textAlign: 'center' }}>
+              {formatDisplayAmount(swapSuccess.fromAmount, swapSuccess.fromTicker)} {unitLabelFor(swapSuccess.fromTicker)}
+              {'  →  '}
+              {formatDisplayAmount(swapSuccess.toAmount, swapSuccess.toTicker)} {unitLabelFor(swapSuccess.toTicker)}
+            </Text>
+            {!!swapSuccess.txid && (
+              <Text style={{ color: theme.colors.text.tertiary, marginTop: theme.spacing[2], fontSize: theme.typography.fontSize.xs }}>
+                {swapSuccess.txid.substring(0, 18)}…
               </Text>
-              {!!swapSuccess.txid && (
-                <Text style={{ color: theme.colors.text.tertiary, marginTop: 8, fontSize: 12 }}>
-                  {swapSuccess.txid.substring(0, 18)}…
-                </Text>
-              )}
-            </View>
-            <Button
-              title="Done"
-              variant="primary"
-              fullWidth
-              style={{ marginTop: 16 }}
-              onPress={() => {
-                setSwapSuccess(null);
-                setShowConfirmModal(false);
-                setSwapProgress('idle');
-                dispatch(resetSwap());
-              }}
-            />
+            )}
           </View>
+          <Button title="Done" variant="primary" fullWidth style={{ marginTop: theme.spacing[4] }} onPress={finishSwap} />
         </View>
       );
     }
 
-    if (!showConfirmModal || !reviewQuote) return null;
+    if (!reviewQuote) return null;
 
     // currentQuote stores tickers (see from_asset: fromTicker in loadQuote).
     const fromTicker = reviewQuote.from_asset;
@@ -1048,88 +1091,104 @@ export default function SwapScreen({ navigation }: Props) {
     const expired = quoteHasExpired(reviewQuote.expiry_timestamp);
 
     return (
-      <View style={styles.modalOverlay}>
-        <View style={styles.confirmModal}>
-          <Text style={styles.confirmTitle}>Confirm Swap</Text>
-          {swapState.error && <Text style={styles.quoteChangeNotice}>{swapState.error}</Text>}
+      <View>
+        {swapState.error && <Text style={styles.quoteChangeNotice}>{swapState.error}</Text>}
 
-          {swapState.isExecuting ? (
-            renderProgressSteps()
-          ) : (
-          <ScrollView style={{ maxHeight: Math.min(440, screenHeight * 0.5) }} contentContainerStyle={styles.confirmDetails}>
-            {previousReviewQuote && (previousReviewQuote.to_amount !== reviewQuote.to_amount || previousReviewQuote.fee_amount !== reviewQuote.fee_amount) && (
-              <Text style={styles.quoteChangeNotice} accessibilityLiveRegion="polite">
-                Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {previousReviewQuote.fee_amount} → {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}. Review these changes before confirming.
-              </Text>
-            )}
-            {pair && <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Provider</Text>
-              <Text style={styles.confirmValue}>{swapProviderName(pair)} · {isFlashnetPair(pair) ? 'Spark' : 'RGB Lightning'}</Text>
-            </View>}
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Minimum received</Text>
-              <Text style={styles.confirmValue}>{validOutput ? `${formatDisplayAmount(minDisplay, toTicker)} ${unitLabelFor(toTicker)}` : 'Unavailable'}</Text>
+        {/* What leaves and what arrives, the two numbers that matter, at the top. */}
+        <View style={styles.reviewHero}>
+          <View style={styles.reviewLeg}>
+            {getAssetIcon(fromTicker)}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.reviewLegLabel}>You pay</Text>
+              <AmountText style={styles.reviewLegAmount}>{formatDisplayAmount(reviewQuote.from_amount, fromTicker)} {unitLabelFor(fromTicker)}</AmountText>
             </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Slippage tolerance</Text>
-              <Text style={styles.confirmValue}>{isFlashnet ? `${DEFAULT_FLASHNET_SLIPPAGE_BPS / 100}%` : 'Fixed quote'}</Text>
+          </View>
+          <View style={styles.reviewArrow}><Ionicons name="arrow-down" size={16} color={theme.colors.text.secondary} /></View>
+          <View style={styles.reviewLeg}>
+            {getAssetIcon(toTicker)}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.reviewLegLabel}>You receive</Text>
+              <AmountText style={[styles.reviewLegAmount, { color: theme.colors.primary[500] }]}>{formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}</AmountText>
             </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Quote expires</Text>
-              <Text style={styles.confirmValue}>{expired ? 'Expired — refresh to continue' : `In ${quoteSecsLeft ?? Math.ceil((reviewQuote.expiry_timestamp - Date.now()) / 1000)}s`}</Text>
-            </View>
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>From:</Text>
-              <Text style={styles.confirmValue}>
-                {formatDisplayAmount(reviewQuote.from_amount, fromTicker)} {unitLabelFor(fromTicker)}
-              </Text>
-            </View>
-
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>To:</Text>
-              <Text style={styles.confirmValue}>
-                {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}
-              </Text>
-            </View>
-
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Fee:</Text>
-              <Text style={styles.confirmValue}>
-                {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}
-              </Text>
-            </View>
-
-            <View style={styles.confirmRow}>
-              <Text style={styles.confirmLabel}>Rate:</Text>
-              <Text style={styles.confirmValue}>
-                1 {unitLabelFor(fromTicker)} = {reviewQuote.exchange_rate.toFixed(8)} {unitLabelFor(toTicker)}
-              </Text>
-            </View>
-          </ScrollView>
-          )}
-
-          {!swapState.isExecuting && (
-            <View style={styles.confirmActions}>
-              <Button
-                title="Cancel"
-                variant="secondary"
-                onPress={() => setShowConfirmModal(false)}
-                style={styles.confirmActionButton}
-              />
-              <Button
-                title={expired ? 'Refresh quote' : 'Confirm swap'}
-                variant="primary"
-                onPress={expired ? refreshReviewQuote : executeSwap}
-                loading={swapState.isQuoteLoading}
-                disabled={swapState.isQuoteLoading || !validOutput}
-                style={styles.confirmActionButton}
-              />
-            </View>
-          )}
+          </View>
         </View>
+
+        {swapState.isExecuting ? (
+          renderProgressSteps()
+        ) : (
+        <ScrollView style={{ maxHeight: Math.min(360, screenHeight * 0.4) }} contentContainerStyle={styles.confirmDetails}>
+          {previousReviewQuote && (previousReviewQuote.to_amount !== reviewQuote.to_amount || previousReviewQuote.fee_amount !== reviewQuote.fee_amount) && (
+            <Text style={styles.quoteChangeNotice} accessibilityLiveRegion="polite">
+              Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {previousReviewQuote.fee_amount} → {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}. Review these changes before confirming.
+            </Text>
+          )}
+          {pair && <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>Provider</Text>
+            <Text style={styles.confirmValue}>{swapProviderName(pair)} · {isFlashnetPair(pair) ? 'Spark' : 'RGB Lightning node'}</Text>
+          </View>}
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>Rate</Text>
+            <Text style={styles.confirmValue}>
+              1 {unitLabelFor(fromTicker)} = {reviewQuote.exchange_rate.toFixed(8)} {unitLabelFor(toTicker)}
+            </Text>
+          </View>
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>Fee</Text>
+            <Text style={styles.confirmValue}>
+              {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}
+            </Text>
+          </View>
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>Minimum received</Text>
+            <Text style={styles.confirmValue}>{validOutput ? `${formatDisplayAmount(minDisplay, toTicker)} ${unitLabelFor(toTicker)}` : 'Unavailable'}</Text>
+          </View>
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>Slippage tolerance</Text>
+            <Text style={styles.confirmValue}>{isFlashnet ? `${DEFAULT_FLASHNET_SLIPPAGE_BPS / 100}%` : 'Fixed quote'}</Text>
+          </View>
+          <View style={styles.confirmRow}>
+            <Text style={styles.confirmLabel}>Quote expires</Text>
+            <Text style={[styles.confirmValue, expired && { color: theme.colors.warning[500] }]}>{expired ? 'Expired — refresh to continue' : `In ${quoteSecsLeft ?? Math.ceil((reviewQuote.expiry_timestamp - Date.now()) / 1000)}s`}</Text>
+          </View>
+        </ScrollView>
+        )}
+
+        {!swapState.isExecuting && (
+          <View style={styles.confirmActions}>
+            <Button
+              title="Cancel"
+              variant="secondary"
+              onPress={() => setShowConfirmModal(false)}
+              style={styles.confirmActionButton}
+            />
+            <Button
+              title={expired ? 'Refresh quote' : 'Confirm swap'}
+              variant="primary"
+              onPress={expired ? refreshReviewQuote : executeSwap}
+              loading={swapState.isQuoteLoading}
+              disabled={swapState.isQuoteLoading || !validOutput}
+              style={styles.confirmActionButton}
+            />
+          </View>
+        )}
       </View>
     );
   };
+
+  const renderConfirmModal = () => (
+    <Sheet
+      visible={!!swapSuccess || (showConfirmModal && !!reviewQuote)}
+      title={swapSuccess ? undefined : swapState.isExecuting ? 'Swapping…' : 'Review swap'}
+      onClose={() => {
+        // A running swap can't be walked away from mid-step; the sheet stays until it settles.
+        if (swapState.isExecuting) return;
+        if (swapSuccess) finishSwap();
+        else setShowConfirmModal(false);
+      }}
+    >
+      {renderConfirmBody()}
+    </Sheet>
+  );
 
   const renderExecutionStatus = () => {
     if (!swapState.currentExecution) return null;
@@ -1191,7 +1250,9 @@ export default function SwapScreen({ navigation }: Props) {
         rightAction={
           <TouchableOpacity
             style={styles.helpButton}
-            onPress={() => Alert.alert('Help', 'Swap Bitcoin and RGB assets using Lightning Network')}
+            accessibilityRole="button"
+            accessibilityLabel="How swaps work"
+            onPress={() => Alert.alert('Swaps', 'Exchange bitcoin for your other assets, or back. You see the price and every fee before you confirm, and the swap either completes in full or not at all.')}
           >
             <Ionicons name="help-circle-outline" size={20} color={theme.colors.text.primary} />
           </TouchableOpacity>
@@ -1222,7 +1283,7 @@ export default function SwapScreen({ navigation }: Props) {
       {renderAssetPicker()}
       {renderConfirmModal()}
       <ProviderSheet visible={showProviders} selectedId={selectedProvider.current} onClose={() => setShowProviders(false)}
-        options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: isFlashnetPair(o.pair) ? 'Spark account' : 'RGB Lightning account',
+        options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: policy.showNetworks ? (isFlashnetPair(o.pair) ? 'Spark' : 'RGB Lightning node') : undefined,
           amountLabel: 'You receive', amount: o.quote ? `${formatDisplayAmount(o.quote.to_amount, o.quote.to_asset)} ${unitLabelFor(o.quote.to_asset)}` : 'Unavailable',
           detail: o.quote ? `Fee ${formatDisplayAmount(o.quote.fee_amount, o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)} ${unitLabelFor(o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)}` : '',
           unavailable: o.unavailable, expiresAt: o.quote?.expiry_timestamp, recommended: bestSwapOffer(providerOffers)?.id === o.id }))}
@@ -1388,12 +1449,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.background.tertiary,
-    paddingVertical: theme.spacing[2],
-    paddingHorizontal: theme.spacing[3],
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    paddingVertical: theme.spacing[1.5],
+    paddingLeft: theme.spacing[1.5],
+    paddingRight: theme.spacing[3],
     borderRadius: theme.borderRadius.full,
     gap: theme.spacing[2],
-    minWidth: 100,
-    justifyContent: 'space-between',
+    minHeight: 44,
+  },
+
+  assetSelectorTokenEmpty: {
+    backgroundColor: theme.colors.primary[500],
+    borderColor: theme.colors.primary[500],
+    paddingLeft: theme.spacing[4],
+  },
+
+  assetSelectorTokenNetwork: {
+    fontSize: 10,
+    color: theme.colors.text.tertiary,
+    marginTop: -1,
   },
 
   assetSelectorTokenText: {
@@ -1405,7 +1480,7 @@ const styles = StyleSheet.create({
   selectAssetTokenText: {
     fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
-    color: theme.colors.text.primary,
+    color: theme.colors.text.inverse,
   },
 
   // In-flow, centered in the seam between the two cards (overlapping both via
@@ -1511,82 +1586,37 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing[2],
   },
 
-  // Modal styles
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1000,
-  },
 
-  assetPickerModal: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    margin: theme.spacing[5],
-    maxHeight: '80%',
-    width: '90%',
-  },
+  successDot: { width: 56, height: 56, borderRadius: theme.borderRadius.full, marginBottom: theme.spacing[3] },
 
-  assetPickerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing[5],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-
-  assetPickerTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-
-  assetPickerList: {
-    maxHeight: 400,
-  },
-
-  assetPickerItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  reviewHero: {
+    backgroundColor: theme.colors.background.secondary,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
     padding: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-    gap: theme.spacing[3],
+    marginBottom: theme.spacing[4],
   },
 
-  assetPickerInfo: {
-    flex: 1,
-  },
+  reviewLeg: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] },
 
-  assetPickerTicker: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
+  reviewLegLabel: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary },
 
-  assetPickerName: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
+  reviewLegAmount: { fontSize: theme.typography.fontSize.xl, fontWeight: '700', color: theme.colors.text.primary },
 
-  assetPickerBalance: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.tertiary,
-  },
-
-  confirmModal: {
+  reviewArrow: {
+    width: 28,
+    height: 28,
+    borderRadius: theme.borderRadius.full,
     backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[6],
-    margin: theme.spacing[5],
-    width: '90%',
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: theme.spacing[1.5],
+    marginLeft: 0,
   },
+
 
   confirmTitle: {
     fontSize: theme.typography.fontSize.xl,

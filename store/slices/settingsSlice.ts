@@ -109,7 +109,7 @@ const initialState: SettingsState = {
   pinEnabled: false,
   autoLockTimeout: 5,
   currency: 'USD',
-  network: 'regtest',
+  network: 'mainnet',
   needsApiConfigUpdate: false,
   disclosureLevel: 'lite',
   lastBtcReceiveRoute: null,

@@ -11,8 +11,9 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { useAppSelector } from '../store/hooks';
+import { usePolicy } from '../hooks/usePolicy';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { RootState } from '../store';
 import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
@@ -97,7 +98,7 @@ function typeLabel(item: ActivityItem): string {
     switch (item.type) {
         case 'receive': return 'Receive';
         case 'send': return 'Payment';
-        case 'swap': return 'Atomic Swap';
+        case 'swap': return 'Swap';
         case 'issuance': return item.kind === 'Inflation' ? 'Inflation' : 'Issuance';
         case 'channel_open': return 'Channel Open';
         case 'channel_close': return 'Channel Close';
@@ -129,7 +130,7 @@ function sectionTitle(ts?: number): string {
 
 export default function HistoryScreen() {
     const navigation = useNavigation<any>();
-    const route = useRoute();
+    const policy = usePolicy();
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
 
@@ -235,9 +236,12 @@ export default function HistoryScreen() {
                     </View>
                     <View style={styles.rowBottomLine}>
                         <View style={styles.metaRow}>
-                            <View style={[styles.layerChip, { backgroundColor: chip.bg }]}>
-                                <Text style={[styles.layerChipText, { color: chip.text }]}>{LAYER_LABEL[item.layer]}</Text>
-                            </View>
+                            {/* Which network a payment used is Advanced detail. */}
+                            {policy.showNetworks && (
+                                <View style={[styles.layerChip, { backgroundColor: chip.bg }]}>
+                                    <Text style={[styles.layerChipText, { color: chip.text }]}>{LAYER_LABEL[item.layer]}</Text>
+                                </View>
+                            )}
                             {item.timestamp != null && (
                                 <Text style={styles.timeText}>
                                     {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -257,7 +261,7 @@ export default function HistoryScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <MainHeader title="Activity" onBack={route.name === 'Activity' ? undefined : () => navigation.goBack()} />
+            <MainHeader title="Activity" />
 
             <UnresolvedPaymentCard onCheck={() => navigation.navigate('Send', { resumePayment: true })} />
             {/* Filter tabs */}

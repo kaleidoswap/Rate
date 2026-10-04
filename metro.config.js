@@ -53,7 +53,7 @@ const blockedLinkedModules = singleCopyNativeModules.map(
 );
 // @kaleidorg/wallet-engine's adapters/wdk barrel re-exports RgbLibWdkAdapter /
 // RgbLibWasmAdapter alongside the adapters this app actually registers
-// (Spark/Liquid/Rln/Arkade — RGB goes over NWC to a remote node instead, see
+// (Spark/Rln/Arkade — RGB goes over NWC to a remote node instead, see
 // services/nwc/NwcRgbAdapter.ts), so Metro still needs to resolve their
 // dynamic import()s even though this app never instantiates those two
 // adapters. pnpm's hoisted node-linker installs their optional peers
@@ -91,7 +91,7 @@ config.resolver.extraNodeModules = {
   '@scure/bip39': path.resolve(__dirname, 'node_modules/@scure/bip39'),
   '@scure/bip32': path.resolve(__dirname, 'node_modules/@scure/bip32'),
   // Unused optional peers of @kaleidorg/wallet-engine's adapters/wdk barrel —
-  // this app only registers Spark/Liquid/Rln/Arkade (RGB goes over NWC to a
+  // this app only registers Spark/Rln/Arkade (RGB goes over NWC to a
   // remote node instead — see services/nwc/NwcRgbAdapter.ts), but Metro
   // still needs to resolve every export the barrel re-exports, including
   // RgbLibWdkAdapter/RgbLibWasmAdapter's dynamic import()s. The real
@@ -100,29 +100,51 @@ config.resolver.extraNodeModules = {
   // invoked at runtime since this app never instantiates those adapters.
   '@utexo/wdk-wallet-rgb': path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js'),
   '@utexo/rgb-lib-wasm': path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js'),
+  // Liquid isn't part of the app (its native lwk library dominated the APK size), but
+  // the barrel's LiquidWdkAdapter still has a dynamic import() of its WDK module.
+  '@kaleidorg/wdk-wallet-liquid': path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js'),
 };
 
-// @kaleidorg/wallet-engine's Arkade adapter (beta.70+) lazily loads the Arkade
-// Intents venue from the '@kaleidorg/swap-sdk/arkade' subpath. This app has no
-// swap-sdk dependency and never touches that venue — swap-sdk is a Rust->wasm
-// package, and wasm is exactly what the mobile build avoids. Metro still has to
-// resolve the subpath because it bundles a single file and doesn't tree-shake the
-// adapter barrel, so send it to the same empty stub as the unused @utexo adapters.
-// A subpath can't go through extraNodeModules (that maps a package root and then
-// appends the remainder), hence resolveRequest.
+// @kaleidorg/swap-sdk: the ROOT entry is a Rust->wasm package (Boltz swaps), and
+// wasm is exactly what the mobile build avoids, so it goes to the empty stub —
+// Metro bundles a single file and doesn't tree-shake wallet-engine's barrels, so
+// it still has to resolve. The '@kaleidorg/swap-sdk/arkade' subpath is pure JS
+// (the Arkade Intents venue over @arkade-os/swap) and is used by KaleidoPay's
+// Arkade -> Lightning swaps (services/kaleidoPay/arkadeIntents.ts), so it resolves
+// normally. A subpath can't go through extraNodeModules (that maps a package root
+// and then appends the remainder), hence resolveRequest.
 const swapSdkStub = path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js');
+// One @arkade-os/sdk. @arkade-os/swap hard-pins (and so nests) its own SDK copy
+// (0.4.71) while the app's wallet is built from the root copy (0.4.72); the venue
+// hands that wallet, and VHTLC/ArkAddress/Transaction objects, across the
+// boundary, so two copies would mean two class identities and two contract
+// registries. extraNodeModules can't fix that (it is only a fallback for imports
+// that fail to resolve), so every '@arkade-os/sdk' import — and its subpaths — is
+// resolved as if it came from the app root. Exception: @arkade-os/boltz-swap
+// (Arkade's Boltz Lightning path in wallet-engine) pins 0.4.35 and keeps its own
+// copy, as before, since its API predates the root SDK; so does @arkade-os/wdk
+// (it pins its own SDK too), so the app's existing Arkade wallet code is unchanged.
+const appOrigin = path.join(__dirname, 'package.json');
+const arkadeSdkRequest = /^@arkade-os\/sdk(\/.*)?$/;
+const keepsOwnArkadeSdk = /[\\/]node_modules[\\/]@arkade-os[\\/](boltz-swap|wdk)[\\/]/;
 const previousResolveRequest = config.resolver.resolveRequest;
+const resolveNext = (context, moduleName, platform) =>
+  previousResolveRequest
+    ? previousResolveRequest(context, moduleName, platform)
+    : context.resolveRequest(context, moduleName, platform);
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  if (moduleName === '@kaleidorg/swap-sdk' || moduleName.startsWith('@kaleidorg/swap-sdk/')) {
+  if (moduleName === '@kaleidorg/swap-sdk'
+    || (moduleName.startsWith('@kaleidorg/swap-sdk/') && moduleName !== '@kaleidorg/swap-sdk/arkade')) {
     return { type: 'sourceFile', filePath: swapSdkStub };
+  }
+  if (arkadeSdkRequest.test(moduleName) && !keepsOwnArkadeSdk.test(context.originModulePath)) {
+    return resolveNext({ ...context, originModulePath: appOrigin }, moduleName, platform);
   }
   const ub12 = /^@universal-bolt12\/(swap-market|universal-code)$/.exec(moduleName);
   if (ub12) {
     return { type: 'sourceFile', filePath: path.join(universalBolt12Root, 'packages', ub12[1], 'src/index.ts') };
   }
-  return previousResolveRequest
-    ? previousResolveRequest(context, moduleName, platform)
-    : context.resolveRequest(context, moduleName, platform);
+  return resolveNext(context, moduleName, platform);
 };
 
 // Add polyfill resolver
@@ -148,9 +170,7 @@ config.resolver.extraNodeModules['@tetherto/wdk-wallet'] = path.resolve(
 );
 
 // Resolve the `react-native` export/imports condition deterministically. This is what
-// makes (a) @kaleidorg/wdk-wallet-liquid's `#lwk` map pick the native `lwk-rn` binding
-// (src/lwk-native.js) instead of the wasm `default`, and (b) @buildonspark/spark-sdk
-// resolve its React Native build.
+// makes @buildonspark/spark-sdk resolve its React Native build.
 //
 // IMPORTANT: do NOT include 'import' here. @babel/runtime's exports map has an `import`
 // condition that returns the ESM helper (`export default _inherits`); RN core require()s
@@ -159,8 +179,7 @@ config.resolver.extraNodeModules['@tetherto/wdk-wallet'] = path.resolve(
 // to 'default' (CJS function). ESM-only packages still resolve via their own 'default'.
 config.resolver.unstable_conditionNames = ['react-native', 'require'];
 
-// Liquid now uses the native `lwk-rn` (UniFFI→JSI) binding — no WASM. The .wasm assetExt
-// below is retained only for the browser/lwk_wasm path used by other targets; harmless on RN.
+// .wasm stays a known asset extension so a stray wasm import resolves instead of failing.
 if (!config.resolver.assetExts.includes('wasm')) {
   config.resolver.assetExts.push('wasm');
 }

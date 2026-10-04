@@ -99,7 +99,6 @@ interface Colors {
     lightning: string;
     spark: string;
     arkade: string;
-    liquid: string;
     rgb: string;
     unified: string;
   };
@@ -111,7 +110,6 @@ interface Colors {
     arkade: string;
     spark: string;
     lightning: string;
-    liquid: string;
   };
   networkText: {
     bitcoin: string;
@@ -119,7 +117,6 @@ interface Colors {
     arkade: string;
     spark: string;
     lightning: string;
-    liquid: string;
   };
   // Transaction-direction colors (shared with web) — used by the activity feed.
   tx: {
@@ -436,7 +433,6 @@ export const lightTheme: ThemeType = {
       lightning: k.network.lightning, // #F6C343
       spark: k.network.spark,         // #FF6D00
       arkade: k.network.arkade,       // #7C3AED
-      liquid: k.network.liquid,       // #22e1c9
       rgb: k.network.rgb,             // #DD352E
       unified: k.primary,             // #2BEE79 — all-networks brand green
     },
@@ -818,3 +814,16 @@ export function protocolTint(p?: string | null, alpha = 0.13): string {
 export function leading(fontSize: number, multiplier: number = theme.typography.lineHeight.normal): number {
   return Math.round(fontSize * multiplier);
 }
+/**
+ * Motion tokens — one feel across the app. Springs for things that move
+ * (sheets, toggles, presses), timings for things that fade. Durations in ms.
+ */
+export const motion = {
+  duration: { fast: 140, base: 220, slow: 320 },
+  /** Sheets and cards settling into place: quick, no bounce. */
+  spring: { damping: 26, stiffness: 300, mass: 0.9 },
+  /** Small elements reacting to a touch: a little life. */
+  springSnappy: { damping: 16, stiffness: 320, mass: 0.5 },
+  /** Delay between list rows entering, so a list reads top to bottom. */
+  stagger: 28,
+} as const;

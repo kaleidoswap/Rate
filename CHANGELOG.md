@@ -10,6 +10,78 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **Send redesigned.** One field with Paste/Scan (and Clear) inside it, a card saying what was detected (kind, amount, note, expiry), and recent contacts. Open amounts are entered on a large amount you tap. Review shows **Pay from** account cards with each account's balance and what this payment costs from it (best price picked and marked; an account that can't pay says why), a route line (account → rail → recipient, with the swap provider when there is one), and **slide to pay**. "Ways to pay" is now the shared bottom sheet, grouped by account. The result screen has an animated check, View in Activity and Share receipt. Quotes, the payment journal and double-send protection are unchanged.
+- **Bark is an Advanced account.** In Lite it is not offered on Receive, and Send lists it only when it holds funds. It is still managed from Settings → Advanced.
+- Icons match the extension: the white Spark asterisk, the extension's RGB logo (transparent, no white square), and on-chain shown as the chain-link glyph instead of the Bitcoin coin wherever it is a way to pay.
+- Receive: the amount is a pill centred under the QR ("Add amount", or the amount you asked for).
+- Receive has two ways to set up a request: **By method** (how it arrives, then which account it lands in) and **By account** (pick Spark, Arkade, Bark or the RGB Lightning node by its balance, then Spark/Ark, Lightning or On-chain). The switch slides, remembers your choice, and only shows for BTC when more than one account can receive.
+- New wallets connect Spark and Arkade on mainnet by default (Bark already did). Wallets saved before this keep the network they were on; the RGB node stays on test networks until it supports mainnet.
+- One animated bottom sheet for every picker and form sheet: the backdrop fades instead of sliding, the sheet springs up, can be dragged down to close, and respects Reduce Motion. Swap review, asset pickers, Receive choices, settings options, zaps, amounts, contacts, channel details and the chat payment card all use it.
+- Swap asset picker redesigned: BTC/USDT quick picks, search, assets you hold first (largest balance first), the network each asset moves on, balances in your unit, and picking the other side's asset flips the pair.
+- Swap review leads with what you pay and what you receive; the flip button turns and the quote details ease in; a finished swap shows an animated check.
+- Screens push with the same slide on iOS and Android and can be swiped back; root screens (setup, home) fade.
+- Home shows recent activity with a link to the full Activity tab, and "Places to pay" only once the wallet is set up.
+- When some accounts can't refresh, Home names them in a banner instead of an alert; a full refresh failure is a banner too.
+- **Lite mode** now also applies to Swap (no venue tabs, maker address or
+  account names: the best price is picked) and Activity (no network chips).
+- **One name each.** The RGB/RLN node is the "RGB Lightning node" (a plain NWC
+  wallet is a "Lightning wallet"), the assistant is "KaleidoMind", and account
+  networks show as Mainnet / Signet / Mutinynet / Regtest instead of raw values.
+- **Swap MAX** uses the balance of the account the swap spends from (Spark for
+  Flashnet, the RGB Lightning node for KaleidoSwap), not the wallet total.
+- **Channels** expand in place on the home screen, with one "Open a channel"
+  action; "Connect Nostr" prompts open Nostr settings directly.
+- **Receive.** Pick how you get paid (Any wallet, Lightning, On-chain, Spark, Ark)
+  and, where more than one account can take it, which account it lands in: a
+  Lightning payment can go to your RGB node, Spark, Bark or Arkade. The code is
+  shown with a readable breakdown: the universal code lists each way to pay it,
+  each with its own copy and QR, and a single address or invoice is shown in full.
+- **Lightning into Arkade** works again, through Arkade Intents swap providers
+  (KaleidoSwap first) instead of Boltz. It needs an amount; the sender pays the
+  swap fee, and the wallet claims the payment while Receive is open.
+
+### Fixed
+- Swap explains when trading pairs are loading, empty or failed to load, with Retry or a link to Settings.
+- The Nostr private key and NWC connection string are copied with the auto-clearing secure clipboard.
+- Cards no longer fall back to white / light-grey / purple colors, and their
+  content is no longer remounted on every render (an input inside a card kept
+  losing focus). Receive and the channel screens use the shared header; Send's
+  amounts use tabular figures.
+- **Restore from the first screen.** A fresh install (or a removed wallet) can
+  now restore from a recovery phrase ("I already have a wallet"). Restore no
+  longer shows an unfinished network step: it brings back the same accounts a
+  new wallet gets, accepts 12- or 24-word phrases, and offers PIN / biometrics
+  like setup does.
+- **Balance total counts real bitcoin only.** Accounts on a test network
+  (regtest, signet, mutinynet) are shown as "Test funds · no real value" and no
+  longer inflate the total or its fiat value; Bark on mainnet now counts.
+  Incoming pending funds show under the total instead of a collapsed section.
+- **Confirmations.** Removing a Lightning wallet connection asks first, and
+  removing the wallet asks for the device passcode or biometrics.
+- AI model sizes under 1 GB no longer show as "0 MB".
+- **Universal QR.** It mixed accounts on different networks (for example Spark
+  on regtest with Arkade on mutinynet), so wallets read it as a request for the
+  wrong network. Each code is now for one network, with a picker when your
+  accounts span several. Accounts are asked in parallel instead of one after
+  another, Bark is included, and a manual refresh is no longer replaced by an
+  automatic one.
+
+### Removed
+- Screens nothing opened (payment success, Nostr setup, duplicate History and
+  assistant routes) and eight unused components.
+- The pre-payment "confirmation" screen for channel orders: the order's
+  invoice now opens straight in Send.
+- Asset detail's "coming soon" buttons (more options, history, export, scan);
+  pull down to refresh instead. The header bell that pointed nowhere.
+- The unreachable wallet-list screens (Wallet list, Add wallet, Wallet
+  settings), including a placeholder that generated a fixed, public seed.
+- **Liquid.** The Liquid wallet layer is gone: wallet setup, Receive (including
+  Liquid USDt in the USD request) and Send no longer offer it, and pasting a
+  Liquid address says it isn't supported. Its native library (`lwk-rn`) was the
+  largest single part of the Android APK. Wallets that had Liquid enabled keep
+  working; the Liquid setting is ignored.
+
 ## [0.3.0] — 2026-10-03
 
 KaleidoPay and universal BOLT12 payments, Second's Bark as a regular wallet

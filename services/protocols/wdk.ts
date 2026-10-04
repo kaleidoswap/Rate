@@ -20,11 +20,9 @@ import { ProtocolManager, networkTypeToProtocol } from '@kaleidorg/wallet-engine
 // legacy client managers behind /adapters/native (protocol SDKs are now optional peers).
 import {
   registerWdkModule,
-  LiquidWdkAdapter,
   RlnWdkAdapter,
   ArkadeWdkAdapter,
   type SparkAdapterConfig,
-  type LiquidAdapterConfig,
   type RlnAdapterConfig,
   type ArkadeAdapterConfig,
 } from '@kaleidorg/wallet-engine/adapters/wdk'
@@ -38,23 +36,34 @@ import { buildArkadeStorage } from './arkadeStorage'
 import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
+import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
+
+/** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
+export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
+  const out: PayOptions = {}
+  for (const nc of networkConfigs) {
+    if (!nc.enabled) continue
+    let parsed: any = {}
+    try { parsed = nc.config ? JSON.parse(nc.config) : {} } catch { continue }
+    const protocol = networkTypeToProtocol(nc.type as any)
+    if (protocol === 'RGB_LN' && (parsed.makerUrl || parsed.baseUrl)) out.makerUrl = parsed.makerUrl || parsed.baseUrl
+    if (protocol === 'ARKADE') out.arkServerUrl = parsed.arkServerUrl || getDefaultArkadeServerUrl(parsed.network || 'signet')
+  }
+  return out
+}
 
 /**
  * Mobile rollout gates.
  * - Spark + RLN + the (pure-JS) swap module: no WASM, SDKs the app already ships — always on.
- * - Liquid: ON by default. Uses the native `lwk-rn` binding (UniFFI→JSI, no WASM) via the
- *   `react-native` condition of @kaleidorg/wdk-wallet-liquid's `#lwk` map. The adapter loads
- *   lazily (only when a Liquid network connects), and `lwk-rn` needs a native build
- *   (expo prebuild / pod-install). Disable with EXPO_PUBLIC_WDK_LIQUID=0.
  * - Arkade: ON by default. Uses @arkade-os/wdk over @arkade-os/sdk (RN-compatible; the
  *   manager defaults to in-memory VTXO repositories — no IndexedDB). Persistent VTXO
  *   state needs SQLite repos injected via arkadeConfig.storage (follow-up). Lightning
- *   (Boltz) needs swapProviderUrl. Disable with EXPO_PUBLIC_WDK_ARKADE=0.
+ *   goes through Arkade Intents swaps (services/kaleidoPay/arkadeIntents.ts).
+ *   Disable with EXPO_PUBLIC_WDK_ARKADE=0.
  * - Bark: ON by default. Second's Ark via the native `@secondts/bark-react-native`
  *   SDK (needs a dev build). Not a wallet NetworkType yet, so it connects from
  *   the saved wallet preference with ./bark.ts defaults. Disable with EXPO_PUBLIC_BARK=0.
  */
-const LIQUID_ENABLED = process.env.EXPO_PUBLIC_WDK_LIQUID !== '0'
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
 // On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
 // drives a remote node via an NWC connection string instead of a direct HTTP
@@ -73,9 +82,6 @@ function registerWdkModuleLoaders(): void {
   registerWdkModule('@kaleidorg/wdk-protocol-swap-kaleidoswap', () =>
     require('@kaleidorg/wdk-protocol-swap-kaleidoswap'),
   )
-  if (LIQUID_ENABLED) {
-    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => require('@kaleidorg/wdk-wallet-liquid'))
-  }
   if (ARKADE_ENABLED) {
     registerWdkModule('@arkade-os/wdk', () => require('@arkade-os/wdk'))
   }
@@ -96,8 +102,8 @@ export function getWdkProtocolManager(): ProtocolManager {
     } else {
       _wdkManager.registerAdapter(new RlnWdkAdapter())
     }
-    // Liquid / Arkade: opt-in (see flags above) so the default build stays WASM-free.
-    if (LIQUID_ENABLED) _wdkManager.registerAdapter(new LiquidWdkAdapter())
+    // Liquid is not part of the app: its native library alone was ~175 MB of the APK.
+    // Wallets saved with a Liquid network skip it (no LIQUID case below).
     if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())
     if (BARK_ENABLED) _wdkManager.registerAdapter(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
   }
@@ -114,6 +120,8 @@ export async function initializeWdkProtocols(
 ): Promise<Map<ProtocolType, { success: boolean; error?: string }>> {
   const manager = getWdkProtocolManager()
   const results = new Map<ProtocolType, { success: boolean; error?: string }>()
+  // Send's ways to pay need the maker (configured with the RGB node) and Arkade's server.
+  setPayOptions(payOptionsFrom(networkConfigs))
 
   for (const nc of networkConfigs) {
     if (!nc.enabled) continue
@@ -137,15 +145,6 @@ export async function initializeWdkProtocols(
             mnemonic,
             network: resolveSparkNetwork(parsed.network),
           } as SparkAdapterConfig
-          break
-
-        case 'LIQUID':
-          config = {
-            protocol: 'LIQUID',
-            mnemonic,
-            network: parsed.network || 'mainnet',
-            esploraUrl: parsed.esploraUrl,
-          } as LiquidAdapterConfig
           break
 
         case 'ARKADE': {

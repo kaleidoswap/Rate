@@ -4,7 +4,9 @@ import * as SecureStore from 'expo-secure-store';
 import CryptoJS from 'crypto-js';
 import { SecurityService } from './SecurityService';
 
-export type NetworkType = 'spark' | 'arkade' | 'rln' | 'liquid';
+/** Wallet layers the app supports. Rows of any other type (e.g. a removed layer) are ignored on read. */
+export const NETWORK_TYPES = ['spark', 'arkade', 'rln'] as const;
+export type NetworkType = typeof NETWORK_TYPES[number];
 export type RlnNodeType = 'local' | 'remote';
 
 export interface NetworkConfig {
@@ -118,7 +120,9 @@ export class DatabaseService {
         encrypted_mnemonic TEXT
       )`,
 
-      // Wallet Networks table
+      // Wallet Networks table. 'liquid' stays in the CHECK so existing databases keep the
+      // same schema; Liquid was removed from the app and its rows are ignored on read
+      // (getWalletNetworks keeps only NETWORK_TYPES).
       `CREATE TABLE IF NOT EXISTS wallet_networks (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         wallet_id INTEGER NOT NULL,
@@ -338,7 +342,7 @@ export class DatabaseService {
       [walletId]
     );
 
-    return results;
+    return results.filter((row) => (NETWORK_TYPES as readonly string[]).includes(row.type));
   }
 
   async updateNetworkConfig(walletId: number, type: NetworkType, config: Partial<NetworkConfig>): Promise<void> {

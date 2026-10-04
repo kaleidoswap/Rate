@@ -18,11 +18,22 @@ export const PROTOCOL_TO_NETWORK_TYPE: Record<'RGB' | 'SPARK' | 'ARKADE', Networ
   ARKADE: 'arkade',
 };
 
+/** What a new wallet connects to: real bitcoin. RGB has no mainnet node support yet. */
 export const PROTOCOL_DEFAULT_NETWORK: Record<NetworkType, ProtocolNetwork> = {
+  spark: 'mainnet',
+  arkade: 'mainnet',
+  rln: 'regtest',
+};
+
+/**
+ * What an older wallet record saved without a network was connected to. These
+ * were the defaults before mainnet; reading them as mainnet would silently move
+ * a test wallet to real funds.
+ */
+export const LEGACY_NETWORK: Record<NetworkType, ProtocolNetwork> = {
   spark: 'regtest',
   arkade: 'signet',
   rln: 'regtest',
-  liquid: 'testnet',
 };
 
 export const NETWORK_LABEL: Record<ProtocolNetwork, string> = {
@@ -53,10 +64,7 @@ export function buildNetworkConfig(
   network: ProtocolNetwork = PROTOCOL_DEFAULT_NETWORK[type],
   previous: Record<string, unknown> = {},
 ): string {
-  const config: Record<string, unknown> = {
-    ...previous,
-    network: PROTOCOL_DEFAULT_NETWORK[type],
-  };
+  const config: Record<string, unknown> = { ...previous };
   config.network = type === 'spark' ? resolveSparkNetwork(network) : network;
 
   if (type === 'arkade') {

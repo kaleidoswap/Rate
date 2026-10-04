@@ -327,29 +327,6 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
-  - lwk-rn (0.9.0-2.0.3):
-    - hermes-engine
-    - RCTRequired
-    - RCTTypeSafety
-    - React-Core
-    - React-Core-prebuilt
-    - React-debug
-    - React-Fabric
-    - React-featureflags
-    - React-graphics
-    - React-ImageManager
-    - React-jsi
-    - React-NativeModulesApple
-    - React-RCTFabric
-    - React-renderercss
-    - React-rendererdebug
-    - React-utils
-    - ReactCodegen
-    - ReactCommon/turbomodule/bridging
-    - ReactCommon/turbomodule/core
-    - ReactNativeDependencies
-    - uniffi-bindgen-react-native (= 0.28.3-3)
-    - Yoga
   - RCTDeprecation (0.81.6)
   - RCTRequired (0.81.6)
   - RCTTypeSafety (0.81.6):
@@ -2496,8 +2473,6 @@ PODS:
     - React
     - React-Core
   - UMAppLoader (6.0.8)
-  - uniffi-bindgen-react-native (0.28.3-3):
-    - React-Core
   - Yoga (0.0.0)
   - ZXingObjC/Core (3.6.9)
   - ZXingObjC/OneD (3.6.9):
@@ -2544,7 +2519,6 @@ DEPENDENCIES:
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - lottie-react-native (from `../node_modules/lottie-react-native`)
-  - lwk-rn (from `../node_modules/lwk-rn`)
   - RCTDeprecation (from `../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation`)
   - RCTRequired (from `../node_modules/react-native/Libraries/Required`)
   - RCTTypeSafety (from `../node_modules/react-native/Libraries/TypeSafety`)
@@ -2628,7 +2602,6 @@ DEPENDENCIES:
   - RNWorklets (from `../node_modules/react-native-worklets`)
   - "spark-sdk (from `../node_modules/@buildonspark/spark-sdk`)"
   - UMAppLoader (from `../node_modules/unimodules-app-loader/ios`)
-  - uniffi-bindgen-react-native (from `../node_modules/uniffi-bindgen-react-native`)
   - Yoga (from `../node_modules/react-native/ReactCommon/yoga`)
 
 SPEC REPOS:
@@ -2714,8 +2687,6 @@ EXTERNAL SOURCES:
     :tag: hermes-2025-07-07-RNv0.81.0-e0fc67142ec0763c6b6153ca2bf96df815539782
   lottie-react-native:
     :path: "../node_modules/lottie-react-native"
-  lwk-rn:
-    :path: "../node_modules/lwk-rn"
   RCTDeprecation:
     :path: "../node_modules/react-native/ReactApple/Libraries/RCTFoundation/RCTDeprecation"
   RCTRequired:
@@ -2880,8 +2851,6 @@ EXTERNAL SOURCES:
     :path: "../node_modules/@buildonspark/spark-sdk"
   UMAppLoader:
     :path: "../node_modules/unimodules-app-loader/ios"
-  uniffi-bindgen-react-native:
-    :path: "../node_modules/uniffi-bindgen-react-native"
   Yoga:
     :path: "../node_modules/react-native/ReactCommon/yoga"
 
@@ -2925,7 +2894,6 @@ SPEC CHECKSUMS:
   hermes-engine: 7219f6e751ad6ec7f3d7ec121830ee34dae40749
   lottie-ios: a881093fab623c467d3bce374367755c272bdd59
   lottie-react-native: cbe3d931a7c24f7891a8e8032c2bb9b2373c4b9c
-  lwk-rn: ebf394bfbd3140bfec17dda3729505a29b1b8f63
   RCTDeprecation: ff38238d8b6ddfe1fcfeb2718d1c14da9564c1c3
   RCTRequired: 5916f53ff05efcc2bf095b0de01a0e5b00112a55
   RCTTypeSafety: bfbd8d69504a7459a65040705fc6ce10806c383b
@@ -3008,7 +2976,6 @@ SPEC CHECKSUMS:
   RNWorklets: 43cd6af94c18f89cbca10ea83fee281b69d75da5
   spark-sdk: 9facb280507b5a30d3ec67f51946dc12c2b401ca
   UMAppLoader: 145337733539f9af9b3dd97eeaa7f3bd97cacb23
-  uniffi-bindgen-react-native: 195560110aa9ab6cd753ddfc1e28e17ddb718a82
   Yoga: 786fa7d9d2ff6060b4e688062243fa69c323d140
   ZXingObjC: 8898711ab495761b2dbbdec76d90164a6d7e14c5
 

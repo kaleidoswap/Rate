@@ -77,9 +77,6 @@ importers:
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
-      '@kaleidorg/wdk-wallet-liquid':
-        specifier: 1.0.0-beta.9
-        version: 1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))
       '@kaleidorg/wdk-wallet-rln':
         specifier: 1.0.0-beta.2
         version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
@@ -233,9 +230,6 @@ importers:
       lottie-react-native:
         specifier: 7.3.4
         version: 7.3.4(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
-      lwk-rn:
-        specifier: 0.9.0-2.0.3
-        version: 0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       metro:
         specifier: ^0.83.8
         version: 0.83.8
@@ -332,9 +326,6 @@ importers:
       supercluster:
         specifier: ^8.0.1
         version: 8.0.1
-      uniffi-bindgen-react-native:
-        specifier: 0.28.3-3
-        version: 0.28.3-3
       upng-js:
         specifier: ^2.1.0
         version: 2.1.0
@@ -1747,18 +1738,6 @@ packages:
     resolution: {integrity: sha512-rRU5OcBRp6jeY0kGffqT2jezFFVuAPX519Qc99jcHEo+qLJuNqM8sSHMfO5x8bx4zrF0AXhN3CEpsSHPHDHUaA==}
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
-
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.9':
-    resolution: {integrity: sha512-9MZI9+wgay1Yer4jCnNzkuMu9x1OHDDSUGFrH0ypxLM8oIdV39P50ukx6yYUxpELcw6C8GfS937iLrmjdyF+Fg==}
-    peerDependencies:
-      '@tetherto/wdk-wallet': ^1.0.0-beta.6
-      lwk-rn: ^0.9.0-2.0.3
-      lwk_wasm: ^0.19.0
-    peerDependenciesMeta:
-      lwk-rn:
-        optional: true
-      lwk_wasm:
-        optional: true
 
   '@kaleidorg/wdk-wallet-rln@1.0.0-beta.2':
     resolution: {integrity: sha512-falAKsvaMDUlhRv+PE5xqAL1IMwLo1DXWB9wWcoc3Kw5P+hLy0JXm19nwhVcsUM15MKl5GaByEE2+ov0cvVfmA==}
@@ -5135,15 +5114,6 @@ packages:
       react-native: '*'
       react-native-svg: ^12.0.0 || ^13.0.0 || ^14.0.0 || ^15.0.0
 
-  lwk-rn@0.9.0-2.0.3:
-    resolution: {integrity: sha512-xCV/GDhynr4Kq/GDw+J/dn/LBuo3JUn7RCnmk+sCgh9AVmsCyCyaNVQ6wTAvph0JeGt7Cq2s7PBF1/c+C3mzWg==}
-    peerDependencies:
-      react: '*'
-      react-native: '*'
-
-  lwk_node@0.19.0:
-    resolution: {integrity: sha512-OQAFt1GUPHeucoQOL7glhqInCVPJrTwq07oc4zMWkEXVtdnE6xW6rIcit3TwBR0p3h+iSK7g8eCinUayINWMVA==}
-
   make-dir@4.0.0:
     resolution: {integrity: sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw==}
     engines: {node: '>=10'}
@@ -6878,10 +6848,6 @@ packages:
   unicode-property-aliases-ecmascript@2.2.0:
     resolution: {integrity: sha512-hpbDzxUY9BFwX+UeBnxv3Sh1q7HFxj48DTmXchNgRa46lO8uj3/1iEn3MiNUYTg1g9ctIqXCCERn8gYZhHC5lQ==}
     engines: {node: '>=4'}
-
-  uniffi-bindgen-react-native@0.28.3-3:
-    resolution: {integrity: sha512-ia0VzmG0KIgd5MnW0Ls5iy/GDr56OAH5NULdLcoKFfwcftEIwmInUCxT9rAoEx7rUtSTHCu5eXwtOqnVO8lCfQ==}
-    hasBin: true
 
   uniffi-bindgen-react-native@0.31.0-5:
     resolution: {integrity: sha512-YtL3gTe+RVXAQx/2P2Iuypic/CunRZC65Cs47v//YRfwWNYU4Ufd1jT3rqxSrH5b5QFCYblP89Nf/9ssZRvNgg==}
@@ -9164,7 +9130,6 @@ snapshots:
       '@flashnet/sdk': 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)
       '@kaleidorg/swap-sdk': 0.7.2(97282afab3b61d4ec9bf2ebca2993c58)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
-      '@kaleidorg/wdk-wallet-liquid': 1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))
       '@kaleidorg/wdk-wallet-rln': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
       '@secondts/bark-react-native': 0.25.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@tetherto/wdk-wallet-spark': 1.0.0-beta.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))(bare-url@2.4.5)(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(sodium-javascript@0.8.0)(ws@8.21.0)
@@ -9178,13 +9143,6 @@ snapshots:
       kaleido-sdk: 0.1.18(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
-
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))':
-    dependencies:
-      '@tetherto/wdk-wallet': 1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))
-      lwk_node: 0.19.0
-    optionalDependencies:
-      lwk-rn: 0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
 
   '@kaleidorg/wdk-wallet-rln@1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)':
     dependencies:
@@ -13885,14 +13843,6 @@ snapshots:
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
       react-native-svg: 15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
 
-  lwk-rn@0.9.0-2.0.3(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
-    dependencies:
-      react: 19.1.4
-      react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
-      uniffi-bindgen-react-native: 0.28.3-3
-
-  lwk_node@0.19.0: {}
-
   make-dir@4.0.0:
     dependencies:
       semver: 7.8.4
@@ -16275,8 +16225,6 @@ snapshots:
   unicode-match-property-value-ecmascript@2.2.1: {}
 
   unicode-property-aliases-ecmascript@2.2.0: {}
-
-  uniffi-bindgen-react-native@0.28.3-3: {}
 
   uniffi-bindgen-react-native@0.31.0-5: {}
 

@@ -1,8 +1,7 @@
 // utils/lspOrder.ts
 //
-// Maps an LSPS1 channel order (kaleido-sdk `ChannelOrderResponse`) onto the
-// `paymentData` shape PaymentConfirmationScreen expects. LSPScreen used to
-// pass `{ order }`, which the screen read as `paymentData` → undefined → crash.
+// Reads the Lightning payment leg out of an LSPS1 channel order (kaleido-sdk
+// `ChannelOrderResponse`); LSPScreen pays its invoice through Send.
 
 export interface LspOrderLike {
   order_id?: string;
@@ -14,7 +13,7 @@ export interface LspOrderLike {
 export interface LspPaymentData {
   type: 'lightning';
   invoice: string;
-  /** Satoshis, as a string (PaymentConfirmationScreen formats amounts from sats). */
+  /** Satoshis, as a string. */
   amount?: string;
   label: string;
   selectedAsset: { asset_id: string; ticker: string; name: string; isRGB: boolean };

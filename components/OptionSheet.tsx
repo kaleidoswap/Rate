@@ -5,8 +5,8 @@
  * selection — mirroring rate-extension's settings selectors.
  */
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Platform } from 'react-native';
+import { Sheet } from './Sheet';
 import { theme } from '../theme';
 import { feedback } from '../utils/feedback';
 
@@ -39,17 +39,7 @@ export const OptionSheet: React.FC<OptionSheetProps> = ({
   onClose,
 }) => {
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>{title}</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="close" size={22} color={theme.colors.text.tertiary} />
-            </TouchableOpacity>
-          </View>
+    <Sheet visible={visible} onClose={onClose} title={title}>
 
           <ScrollView style={{ maxHeight: 420 }} showsVerticalScrollIndicator={false}>
             {options.map((o) => {
@@ -82,39 +72,13 @@ export const OptionSheet: React.FC<OptionSheetProps> = ({
               );
             })}
           </ScrollView>
-        </View>
-      </View>
-    </Modal>
+    </Sheet>
   );
 };
 
 const mono = Platform.OS === 'ios' ? 'Menlo' : 'monospace';
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: theme.colors.background.backdrop },
-  sheet: {
-    backgroundColor: theme.colors.surface.primary,
-    borderTopLeftRadius: theme.borderRadius.xl,
-    borderTopRightRadius: theme.borderRadius.xl,
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[2.5],
-    paddingBottom: theme.spacing[8],
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: theme.borderRadius.sm,
-    backgroundColor: theme.colors.border.medium,
-    marginBottom: theme.spacing[3.5],
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing[2],
-  },
-  title: { fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.bold, color: theme.colors.text.primary },
   option: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -16,6 +16,10 @@ interface BalanceCardProps {
     totalBalance: number;
     hideAmounts?: boolean;
     pendingBtc?: number;
+    /** Sats on test networks: no value, never part of the total. */
+    testBtc?: number;
+    /** Accounts on a test network, with the network's name. */
+    testNetworks?: Partial<Record<'RGB' | 'SPARK' | 'ARKADE' | 'BARK', string>>;
     includesTokenValue?: boolean;
     rgbBalanceIsLightning?: boolean;
     bitcoinUnit: string;
@@ -54,7 +58,7 @@ interface BalanceCardProps {
 const CONTROL_HIT_SLOP = { top: 5, bottom: 5, left: 5, right: 5 };
 
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
-    { key: 'RGB', label: 'RLN', color: protocolColor('RGB') },
+    { key: 'RGB', label: 'Lightning', color: protocolColor('RGB') },
     { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
     { key: 'ARKADE', label: 'Arkade', color: protocolColor('ARKADE') },
     { key: 'BARK', label: 'Bark', color: protocolColor('BARK') },
@@ -64,6 +68,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     totalBalance,
     hideAmounts = false,
     pendingBtc = 0,
+    testBtc = 0,
+    testNetworks = {},
     includesTokenValue = false,
     rgbBalanceIsLightning = false,
     bitcoinUnit,
@@ -87,6 +93,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         : [];
     // Per-network balances are collapsed behind a chevron (extension parity).
     const [showBreakdown, setShowBreakdown] = useState(false);
+    // The on-chain row belongs to the RGB node's wallet.
+    const testOf = (key: string) => testNetworks[(key === 'BITCOIN' ? 'RGB' : key) as keyof typeof testNetworks];
 
     // Show on-chain funds only when the adapter reports them; the protocol legs
     // (RLN / Spark / Arkade) appear only when that key exists in `byProtocol`,
@@ -112,8 +120,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     if (byProtocol && 'RGB' in byProtocol) {
         breakdownRows.push({
             key: 'RGB',
-            name: 'BTC on RLN',
-            subtitle: 'RLN balance',
+            name: 'BTC on Lightning',
+            subtitle: 'RGB Lightning node',
             accent: protocolColor('RGB'),
             // RLN = Lightning channel balance (extension's `btcLightning`).
             value: rgbBalanceIsLightning ? (byProtocol.RGB?.total ?? 0) : lightningBalance,
@@ -222,6 +230,17 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         </AmountText>
                     </>
                 )}
+                {/* Incoming funds and test sats are always visible, never folded into the total. */}
+                {!loading && pendingBtc > 0 && (
+                    <Text style={styles.subLine} accessibilityLabel={hideAmounts ? 'Incoming payment pending' : `Incoming ${formatSatoshis(pendingBtc)} ${bitcoinUnit}, pending`}>
+                        Incoming · {hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`} pending
+                    </Text>
+                )}
+                {!loading && testBtc > 0 && (
+                    <Text style={styles.subLine}>
+                        Test funds · {hideAmounts ? '••••' : `${formatSatoshis(testBtc)} ${bitcoinUnit}`} · no real value
+                    </Text>
+                )}
             </View>
 
             {/* Per-network breakdown — vertical row list, collapsed behind the
@@ -230,7 +249,6 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                 <View style={styles.breakdownSection}>
                     <View style={styles.breakdownHairline} />
                     <Text style={styles.breakdownEyebrow}>Bitcoin</Text>
-                    {pendingBtc > 0 && <Text style={styles.pendingBalance}>Pending: {hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</Text>}
                     <View style={styles.breakdownList}>
                         {breakdownRows.map((row) => (
                             <View
@@ -249,11 +267,13 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                                 </View>
                                 <View style={styles.networkTextBlock}>
                                     <Text style={styles.networkName}>{row.name}</Text>
-                                    <Text style={styles.networkSubtitle}>{row.subtitle}</Text>
+                                    <Text style={styles.networkSubtitle}>
+                                        {testOf(row.key) ? `${row.subtitle} · ${testOf(row.key)} test network` : row.subtitle}
+                                    </Text>
                                 </View>
                                 <View style={styles.networkValueBlock}>
                                     <AmountText style={styles.networkValueFiat}>
-                                        {hideAmounts ? '••••' : `$${formatUSD(row.value)}`}
+                                        {hideAmounts ? '••••' : testOf(row.key) ? 'Test' : `$${formatUSD(row.value)}`}
                                     </AmountText>
                                     <AmountText style={styles.networkValueSats}>
                                         {hideAmounts ? '••••' : `${formatSatoshis(row.value)} ${bitcoinUnit}`}
@@ -298,7 +318,11 @@ const styles = StyleSheet.create({
         flex: 1, fontSize: theme.typography.fontSize.xs,
         fontWeight: theme.typography.fontWeight.medium, color: theme.colors.text.secondary,
     },
-    pendingBalance: { color: theme.colors.text.secondary, marginBottom: theme.spacing[3] },
+    subLine: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.secondary,
+        marginTop: theme.spacing[1],
+    },
     balanceRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',

@@ -7,41 +7,6 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     backgroundColor: theme.colors.background.primary,
   },
 
-  receiveHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[3],
-    paddingBottom: theme.spacing[3],
-    backgroundColor: theme.colors.background.primary,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.border.light,
-    zIndex: 30,
-    elevation: 30,
-  },
-
-  receiveBackButton: {
-    // Matches MainHeader's `iconBtn`; this screen predates the shared header.
-    width: 44,
-    height: 44,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.surface.secondary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  receiveHeaderTitle: {
-    // Matches MainHeader's `title`.
-    flex: 1,
-    fontSize: 21,
-    fontWeight: theme.typography.fontWeight.bold,
-    letterSpacing: -0.3,
-    color: theme.colors.text.primary,
-  },
-
   scrollView: {
     flex: 1,
     zIndex: 0,
@@ -169,23 +134,6 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     fontWeight: '600',
     color: theme.colors.text.primary,
   },
-  addRgbBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 4,
-    paddingVertical: 11,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: theme.colors.border.medium,
-    borderStyle: 'dashed',
-  },
-  addRgbText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: theme.colors.primary[500],
-  },
   qrSection: {
     backgroundColor: 'transparent',
     paddingHorizontal: 0,
@@ -200,23 +148,7 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     marginBottom: theme.spacing[3],
   },
 
-  // Compact methods/label chip above the QR
-  qrMethodsChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.full,
-    marginBottom: theme.spacing[4],
-    maxWidth: '100%',
-  },
-  qrMethodsChipText: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '700',
-  },
-
-  // Top bar above the QR (chip on the left, small refresh on the right)
+  // Top bar above the QR (title on the left, small refresh on the right)
   qrTopBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -272,55 +204,6 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     backgroundColor: theme.colors.surface.primary,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  // Network selector + dropdown
-  netSelectorWrap: {
-    marginBottom: theme.spacing[4],
-    zIndex: 15,
-    elevation: 15,
-  },
-
-  netGlyph: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  netSelectorSub: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.tertiary,
-    marginTop: 1,
-  },
-
-  netDropdown: {
-    marginTop: theme.spacing[2],
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  netOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[3],
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.border.light,
-  },
-  netOptionLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
   },
 
   // Amount row with pencil edit

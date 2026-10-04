@@ -4,8 +4,8 @@
  */
 import React from 'react';
 import { Image, ImageSourcePropType, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { OnchainIcon } from './ProtocolIcons';
 
 interface NetworkIconProps {
   network: string;
@@ -25,7 +25,6 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
   btc: require('../assets/icons/protocols/btc.png'),
   BTC: require('../assets/icons/protocols/btc.png'),
   bitcoin: require('../assets/icons/protocols/btc.png'),
-  onchain: require('../assets/icons/protocols/btc.png'),
   lightning: require('../assets/icons/protocols/lightning.png'),
   // Second's mark (second.tech/docs); Bark is Second's Ark wallet.
   bark: require('../assets/icons/protocols/bark.png'),
@@ -35,9 +34,10 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
 };
 
 export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) => {
+  // On-chain is a way to pay, not the asset: the extension's chain-link glyph, not the BTC coin.
+  if (network.toLowerCase() === 'onchain') return <OnchainIcon size={size} />;
   const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()];
 
-  if (network.toLowerCase() === 'liquid') return <Ionicons name="water" size={size} color={theme.colors.text.primary} />;
   if (!source) {
     return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: theme.colors.gray[500] }} />;
   }

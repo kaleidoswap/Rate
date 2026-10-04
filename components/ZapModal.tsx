@@ -14,16 +14,14 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  Modal,
   Image,
   TextInput,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AmountInput } from '@kaleidorg/kaleido-ui/native';
 import { theme } from '../theme';
+import { Sheet } from './Sheet';
 import { useBitcoinConversion } from '../utils/bitcoinUnits';
 import { feedback } from '../utils/feedback';
 import NostrService from '../services/NostrService';
@@ -192,155 +190,114 @@ export default function ZapModal({
       : '';
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={styles.backdropTouch} activeOpacity={1} onPress={close} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.sheetWrap}
-        >
-          <View style={styles.sheet}>
-            <View style={styles.handle} />
-
-            {/* Recipient */}
-            <View style={styles.header}>
-              <View style={styles.avatar}>
-                <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
-                <View style={styles.zapBadge}>
-                  <Ionicons name="flash" size={12} color="#0B0B0B" />
-                </View>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {isZapCapable ? 'Zap' : 'Send to'} {recipient.name}
-                </Text>
-                {recipient.lightningAddress ? (
-                  <Text style={styles.subtitle} numberOfLines={1}>
-                    <Ionicons name="flash" size={11} color={theme.colors.warning[500]} />{' '}
-                    {recipient.lightningAddress}
-                  </Text>
-                ) : recipient.npub ? (
-                  <Text style={styles.subtitle} numberOfLines={1}>
-                    {recipient.npub.slice(0, 14)}…{recipient.npub.slice(-6)}
-                  </Text>
-                ) : null}
-              </View>
-              <TouchableOpacity onPress={close} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                <Ionicons name="close" size={24} color={theme.colors.text.secondary} />
-              </TouchableOpacity>
-            </View>
-
-            {/* Amount (WDK) */}
-            <AmountInput
-              label="Amount"
-              value={value}
-              onChangeText={(t) => {
-                setValue(t);
-                setError(null);
-              }}
-              tokenSymbol="sats"
-              tokenBalance={tokenBalance}
-              tokenBalanceUSD={tokenBalanceUSD}
-              inputMode={inputMode}
-              onToggleInputMode={toggleInputMode}
-              onUseMax={useMax}
-              error={error || undefined}
-              editable={!sending}
-            />
-
-            {secondary ? <Text style={styles.secondary}>≈ {secondary}</Text> : null}
-
-            {/* Presets */}
-            <View style={styles.presets}>
-              {PRESETS.map((p) => {
-                const active = inputMode === 'token' && parseInt(value, 10) === p;
-                return (
-                  <TouchableOpacity
-                    key={p}
-                    style={[styles.preset, active && styles.presetActive]}
-                    onPress={() => applyPreset(p)}
-                    disabled={sending}
-                    activeOpacity={0.8}
-                  >
-                    <Ionicons
-                      name="flash"
-                      size={11}
-                      color={active ? '#0B0B0B' : theme.colors.warning[500]}
-                    />
-                    <Text style={[styles.presetText, active && styles.presetTextActive]}>
-                      {p >= 1000 ? `${p / 1000}k` : p}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Comment */}
-            <TextInput
-              style={styles.comment}
-              value={comment}
-              onChangeText={setComment}
-              placeholder={isZapCapable ? 'Add a public zap message (optional)' : 'Note (optional)'}
-              placeholderTextColor={theme.colors.text.tertiary}
-              editable={!sending}
-              maxLength={255}
-            />
-
-            {/* CTA */}
-            <TouchableOpacity
-              style={[styles.cta, (sending || amountSats <= 0) && styles.ctaDisabled]}
-              onPress={handleZap}
-              disabled={sending || amountSats <= 0}
-              activeOpacity={0.85}
-            >
-              {sending ? (
-                <ActivityIndicator color="#0B0B0B" />
-              ) : (
-                <>
-                  <Ionicons name="flash" size={18} color="#0B0B0B" />
-                  <Text style={styles.ctaText}>
-                    {ctaLabel}
-                    {amountSats > 0 ? ` ${formatSats(amountSats)} sats` : ''}
-                  </Text>
-                </>
-              )}
-            </TouchableOpacity>
+    <Sheet
+      visible={visible}
+      onClose={close}
+      title={`${isZapCapable ? 'Zap' : 'Send to'} ${recipient.name}`}
+    >
+      {/* Recipient */}
+      <View style={styles.recipient}>
+        <View style={styles.avatar}>
+          <Image source={{ uri: avatarUri }} style={styles.avatarImg} />
+          <View style={styles.zapBadge}>
+            <Ionicons name="flash" size={12} color="#0B0B0B" />
           </View>
-        </KeyboardAvoidingView>
+        </View>
+        <View style={{ flex: 1 }}>
+          {recipient.lightningAddress ? (
+            <Text style={styles.subtitle} numberOfLines={1}>
+              <Ionicons name="flash" size={11} color={theme.colors.warning[500]} />{' '}
+              {recipient.lightningAddress}
+            </Text>
+          ) : recipient.npub ? (
+            <Text style={styles.subtitle} numberOfLines={1}>
+              {recipient.npub.slice(0, 14)}…{recipient.npub.slice(-6)}
+            </Text>
+          ) : null}
+        </View>
       </View>
-    </Modal>
+
+      {/* Amount (WDK) */}
+      <AmountInput
+        label="Amount"
+        value={value}
+        onChangeText={(t) => {
+          setValue(t);
+          setError(null);
+        }}
+        tokenSymbol="sats"
+        tokenBalance={tokenBalance}
+        tokenBalanceUSD={tokenBalanceUSD}
+        inputMode={inputMode}
+        onToggleInputMode={toggleInputMode}
+        onUseMax={useMax}
+        error={error || undefined}
+        editable={!sending}
+      />
+
+      {secondary ? <Text style={styles.secondary}>≈ {secondary}</Text> : null}
+
+      {/* Presets */}
+      <View style={styles.presets}>
+        {PRESETS.map((p) => {
+          const active = inputMode === 'token' && parseInt(value, 10) === p;
+          return (
+            <TouchableOpacity
+              key={p}
+              style={[styles.preset, active && styles.presetActive]}
+              onPress={() => applyPreset(p)}
+              disabled={sending}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="flash"
+                size={11}
+                color={active ? '#0B0B0B' : theme.colors.warning[500]}
+              />
+              <Text style={[styles.presetText, active && styles.presetTextActive]}>
+                {p >= 1000 ? `${p / 1000}k` : p}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {/* Comment */}
+      <TextInput
+        style={styles.comment}
+        value={comment}
+        onChangeText={setComment}
+        placeholder={isZapCapable ? 'Add a public zap message (optional)' : 'Note (optional)'}
+        placeholderTextColor={theme.colors.text.tertiary}
+        editable={!sending}
+        maxLength={255}
+      />
+
+      {/* CTA */}
+      <TouchableOpacity
+        style={[styles.cta, (sending || amountSats <= 0) && styles.ctaDisabled]}
+        onPress={handleZap}
+        disabled={sending || amountSats <= 0}
+        activeOpacity={0.85}
+      >
+        {sending ? (
+          <ActivityIndicator color="#0B0B0B" />
+        ) : (
+          <>
+            <Ionicons name="flash" size={18} color="#0B0B0B" />
+            <Text style={styles.ctaText}>
+              {ctaLabel}
+              {amountSats > 0 ? ` ${formatSats(amountSats)} sats` : ''}
+            </Text>
+          </>
+        )}
+      </TouchableOpacity>
+    </Sheet>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: theme.colors.background.backdrop,
-  },
-  backdropTouch: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  sheetWrap: {
-    width: '100%',
-  },
-  sheet: {
-    backgroundColor: theme.colors.background.secondary,
-    borderTopLeftRadius: theme.borderRadius['2xl'],
-    borderTopRightRadius: theme.borderRadius['2xl'],
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[3],
-    paddingBottom: theme.spacing[8],
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: theme.borderRadius.sm,
-    backgroundColor: theme.colors.border.medium,
-    marginBottom: theme.spacing[4],
-  },
-  header: {
+  recipient: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing[3],
@@ -369,17 +326,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: theme.colors.background.secondary,
-  },
-  title: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.text.primary,
+    borderColor: theme.colors.surface.primary,
   },
   subtitle: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
-    marginTop: 2,
   },
   secondary: {
     fontSize: theme.typography.fontSize.sm,

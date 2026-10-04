@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   Alert,
   TextInput,
   ActivityIndicator,
@@ -14,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSelector, useDispatch } from 'react-redux';
 import { theme } from '../theme';
-import { Card, Button } from '../components';
+import { Card, Button, ScreenHeader } from '../components';
 import { RootState } from '../store';
 import { protocolManager } from '../services/protocols';
 import { usePolicy } from '../hooks/usePolicy';
@@ -168,7 +167,8 @@ export default function LSPScreen({ navigation }: Props) {
         Alert.alert('Order created', 'The LSP did not return a Lightning invoice for this order.');
         return;
       }
-      navigation.navigate('PaymentConfirmation', { paymentData });
+      // Pay the order's invoice in Send, like any other payment.
+      navigation.navigate('Send', { prefilledAddress: paymentData.invoice });
     } catch (err) {
       Alert.alert('Error', 'Failed to create channel order');
     } finally {
@@ -260,13 +260,7 @@ export default function LSPScreen({ navigation }: Props) {
   if (!policy.showChannelManagement) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Buy Channel</Text>
-          <View style={{ width: 24 }} />
-        </View>
+        <ScreenHeader title="Open a channel" showBack />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
           <Ionicons name="lock-closed-outline" size={40} color={theme.colors.text.tertiary} />
           <Text style={[styles.loadingText, { textAlign: 'center' }]}>
@@ -280,19 +274,13 @@ export default function LSPScreen({ navigation }: Props) {
   if (!isChannelCapableNode) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Lightning Channels</Text>
-          <View style={{ width: 24 }} />
-        </View>
+        <ScreenHeader title="Open a channel" showBack />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
           <Ionicons name="flash-outline" size={40} color={theme.colors.text.tertiary} />
           <Text style={[styles.loadingText, { textAlign: 'center' }]}>
-            Connect an RGB Lightning node via NWC in Settings to view or open channels.
+            Connect your RGB Lightning node to view or open channels.
           </Text>
-          <Button title="Open Settings" onPress={() => navigation.navigate('Settings')} />
+          <Button title="Connect node" onPress={() => navigation.navigate('NWCConnect')} />
         </View>
       </SafeAreaView>
     );
@@ -300,13 +288,7 @@ export default function LSPScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={theme.colors.text.primary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Buy Channel</Text>
-        <View style={{ width: 24 }} />
-      </View>
+      <ScreenHeader title="Open a channel" showBack />
 
       <ScrollView style={styles.content}>
         {renderStepIndicator()}
@@ -322,19 +304,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.primary,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-  title: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
   },
   content: {
     flex: 1,

@@ -18,7 +18,6 @@ const LAYER_META: Record<string, { label: string; icon: string; net: string }> =
   spark: { label: 'Spark', icon: 'flash', net: 'spark' },
   rln: { label: 'Lightning / RGB', icon: 'flash-outline', net: 'lightning' },
   arkade: { label: 'Arkade', icon: 'cube', net: 'arkade' },
-  liquid: { label: 'Liquid', icon: 'water', net: 'liquid' },
 };
 const meta = (t: Theme, l: string) => {
   const m = LAYER_META[l] ?? { label: l, icon: 'wallet', net: 'unified' };

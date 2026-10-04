@@ -20,7 +20,7 @@ test('dismissing edits leaves the request unchanged and reopening restores its v
   const p = props(); const screen = render(<AmountEditorModal {...p} />);
   fireEvent.press(screen.getByLabelText('Expire after 10 min'));
   fireEvent.press(screen.getByText('Clear amount'));
-  fireEvent.press(screen.getByLabelText('Close request editor'));
+  fireEvent.press(screen.getAllByLabelText('Close')[0]);
   expect(p.onConfirm).not.toHaveBeenCalled();
   screen.rerender(<AmountEditorModal {...p} visible={false} />);
   screen.rerender(<AmountEditorModal {...p} />);
