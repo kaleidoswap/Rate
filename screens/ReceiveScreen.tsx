@@ -217,6 +217,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const nwcWalletType = useAppSelector((state: RootState) => state.nostr?.nwcWalletType);
   const nwcCapabilities = useAppSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
+  // The reusable QR is issued by a connected receiving node; without one it can't work.
+  const hasReceivingNode = useAppSelector((state: RootState) => (state.nostr?.nwcConnections?.length ?? 0) > 0);
   const lastBtcReceiveRoute = useAppSelector((state: RootState) => state.settings.lastBtcReceiveRoute);
   const walletId = useAppSelector((state: RootState) => state.wallet?.activeWallet?.id);
   const isLite = disclosureLevel === 'lite';
@@ -1819,7 +1821,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         {selectedAsset.asset_id === 'BTC' && receiveAccounts.some((a) => a.account === 'SPARK' && a.chain === 'mainnet') && (
           <LightningAddressCard walletId={walletId} onOpen={() => { cancelReceiveWork(); navigation.navigate('LightningAddress'); }} />
         )}
-        {selectedAsset.asset_id === 'BTC' && (
+        {selectedAsset.asset_id === 'BTC' && hasReceivingNode && (
           <TouchableOpacity
             accessibilityRole="button"
             accessibilityLabel="Create a reusable payment QR"
