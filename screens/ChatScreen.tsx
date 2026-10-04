@@ -564,10 +564,10 @@ export default function ChatScreen({ navigation, route }: Props) {
           <Ionicons name="planet-outline" size={44} color={theme.colors.text.tertiary} />
           <Text style={styles.centerTitle}>Nostr not connected</Text>
           <Text style={styles.centerDesc}>
-            Connect Nostr in Settings to send and receive encrypted messages.
+            Connect Nostr to send and receive encrypted messages.
           </Text>
-          <TouchableOpacity style={styles.connectBtn} onPress={() => navigation.navigate('Settings')}>
-            <Text style={styles.connectBtnText}>Open Settings</Text>
+          <TouchableOpacity style={styles.connectBtn} onPress={() => navigation.navigate('NostrSettings')}>
+            <Text style={styles.connectBtnText}>Connect Nostr</Text>
           </TouchableOpacity>
         </View>
       ) : (

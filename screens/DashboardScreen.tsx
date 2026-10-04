@@ -935,15 +935,13 @@ export default function DashboardScreen({ navigation }: Props) {
           channels={channels}
           bitcoinUnit={bitcoinUnit}
           formatSatoshis={formatSatoshis}
-          onViewAll={() => navigation.getParent()?.navigate('Channels')}
           onChannelPress={(channel) => {
             // ChannelList narrows Channel to a UI subset; the runtime object
             // carries the full shape, so widen back to DashboardScreen's Channel.
             setSelectedChannel(channel as unknown as Channel);
             setChannelModalVisible(true);
           }}
-          onOpenChannel={() => navigation.getParent()?.navigate('OpenChannel')}
-          onBuyChannel={() => navigation.getParent()?.navigate('LSP')}
+          onOpenChannel={() => navigation.getParent()?.navigate('LSP')}
         />
         )}
       </ScrollView>

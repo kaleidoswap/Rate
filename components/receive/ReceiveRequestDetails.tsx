@@ -11,7 +11,7 @@ import { InvoiceExpiry } from '../payments/InvoiceExpiry';
 import type { ReceiveMethod } from '../../utils/receive-session';
 
 /** Where each request lands, in words. */
-export function accountName(method: Pick<ReceiveMethod, 'protocol'>, rgbLabel = 'RGB node'): string {
+export function accountName(method: Pick<ReceiveMethod, 'protocol'>, rgbLabel = 'RGB Lightning node'): string {
   switch (method.protocol) {
     case 'SPARK': return 'Spark';
     case 'ARKADE': return 'Arkade';

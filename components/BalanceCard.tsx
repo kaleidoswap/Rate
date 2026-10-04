@@ -58,7 +58,7 @@ interface BalanceCardProps {
 const CONTROL_HIT_SLOP = { top: 5, bottom: 5, left: 5, right: 5 };
 
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
-    { key: 'RGB', label: 'RLN', color: protocolColor('RGB') },
+    { key: 'RGB', label: 'Lightning', color: protocolColor('RGB') },
     { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
     { key: 'ARKADE', label: 'Arkade', color: protocolColor('ARKADE') },
     { key: 'BARK', label: 'Bark', color: protocolColor('BARK') },
@@ -120,8 +120,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     if (byProtocol && 'RGB' in byProtocol) {
         breakdownRows.push({
             key: 'RGB',
-            name: 'BTC on RLN',
-            subtitle: 'RLN balance',
+            name: 'BTC on Lightning',
+            subtitle: 'RGB Lightning node',
             accent: protocolColor('RGB'),
             // RLN = Lightning channel balance (extension's `btcLightning`).
             value: rgbBalanceIsLightning ? (byProtocol.RGB?.total ?? 0) : lightningBalance,

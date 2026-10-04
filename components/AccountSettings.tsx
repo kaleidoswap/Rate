@@ -3,7 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-nativ
 import { useAppTheme } from '../theme/ThemeProvider';
 import DatabaseService from '../services/DatabaseService';
 import { currentBarkHost } from '../services/protocols/barkPreferences';
-import { getDefaultArkadeServerUrl, type ProtocolNetwork } from '../services/protocols/networkConfig';
+import { getDefaultArkadeServerUrl, NETWORK_LABEL, type ProtocolNetwork } from '../services/protocols/networkConfig';
 import { validateAccountEndpoint } from '../services/protocols/accountEndpoints';
 
 type Props = {
@@ -42,7 +42,8 @@ export function AccountSettings(props: Props) {
   return <>
     <View style={styles.card}>
       <Text style={styles.title}>{props.busy ? 'Connecting…' : props.connected ? 'Connected' : 'Offline'}</Text>
-      <Text style={styles.text}>Network: {props.network === 'signet' && props.account === 'ARKADE' ? 'Mutinynet' : props.network}</Text>
+      {/* Arkade's "signet" setting runs on Mutinynet; Bark's is plain Signet. */}
+      <Text style={styles.text}>Network: {props.account === 'BARK' && props.network === 'signet' ? 'Signet' : NETWORK_LABEL[props.network as ProtocolNetwork] ?? props.network}</Text>
       {!!props.error && <Text accessibilityRole="alert" style={styles.error}>{props.error}</Text>}
       {action('Change network', props.onNetwork)}
       <Text style={styles.text}>Each network has its own balance. Mainnet uses real bitcoin; test networks use test bitcoin.</Text>

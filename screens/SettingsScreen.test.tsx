@@ -29,7 +29,7 @@ test('home shows categories and keeps sensitive and technical actions in their s
   expect(screen.queryByText('Daily wallet')).toBeNull();
   expect(screen.queryByText('Your wallet')).toBeNull();
   expect(screen.queryByText('Sats')).toBeNull();
-  expect(screen.getByLabelText('Private Local AI Assistant')).toBeTruthy();
+  expect(screen.getByLabelText('KaleidoMind')).toBeTruthy();
   expect(screen.getByLabelText('Preferences')).toBeTruthy();
   expect(screen.queryByText('View recovery phrase')).toBeNull();
   expect(screen.queryByText('Remove Wallet')).toBeNull();
@@ -58,7 +58,7 @@ test('preferences remain actionable and connections retain their destinations', 
   expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ payload: false }));
   fireEvent.press(screen.getByLabelText('Back'));
   fireEvent.press(screen.getByLabelText('Connections'));
-  fireEvent.press(screen.getByLabelText('Lightning node'));
+  fireEvent.press(screen.getByLabelText('Lightning wallet'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });
 
@@ -106,7 +106,7 @@ test('account pages expose supported controls and back returns to the account li
   expect(screen.getByText('Use an HTTPS URL without credentials, query parameters or a fragment.')).toBeTruthy();
   expect(require('../services/protocols').protocolManager.disconnect).not.toHaveBeenCalled();
   fireEvent.press(screen.getByLabelText('Back'));
-  fireEvent.press(screen.getByLabelText('RGB Lightning account settings'));
+  fireEvent.press(screen.getByLabelText('RGB Lightning node account settings'));
   fireEvent.press(screen.getByText('Manage wallet connection'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });

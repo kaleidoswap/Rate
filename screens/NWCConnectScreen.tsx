@@ -210,7 +210,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         setBalanceSats(sats);
         setLoading(false); // probe done; finalize() manages its own loading
 
-        const typeName = isRln ? 'RGB Lightning Node' : 'Lightning wallet';
+        const typeName = isRln ? 'RGB Lightning node' : 'Lightning wallet';
         const capabilitySummary = isRln
           ? '• Send & receive Bitcoin (Lightning)\n• Send & receive RGB assets (USDT, XAUT…)'
           : '• Send & receive Bitcoin (Lightning)\n• RGB assets not supported on this wallet';
@@ -444,7 +444,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                   activeOpacity={0.75}
                   accessibilityRole="button"
                   accessibilityState={{ selected: active, disabled: loading }}
-                  accessibilityLabel={`${connection.alias || (rln ? 'RGB Lightning Node' : 'Lightning wallet')}, ${connection.network}${active ? ', active' : ''}`}
+                  accessibilityLabel={`${connection.alias || (rln ? 'RGB Lightning node' : 'Lightning wallet')}, ${connection.network}${active ? ', active' : ''}`}
                 >
                   <View style={styles.typeRow}>
                     <View style={styles.walletIdentity}>
@@ -453,7 +453,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.walletName} numberOfLines={1}>
-                          {connection.alias || (rln ? 'RGB Lightning Node' : 'Lightning wallet')}
+                          {connection.alias || (rln ? 'RGB Lightning node' : 'Lightning wallet')}
                         </Text>
                         <Text style={styles.walletMeta}>{connection.network} · NWC</Text>
                       </View>

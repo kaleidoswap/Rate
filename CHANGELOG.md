@@ -11,6 +11,15 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Changed
+- **Lite mode** now also applies to Swap (no venue tabs, maker address or
+  account names: the best price is picked) and Activity (no network chips).
+- **One name each.** The RGB/RLN node is the "RGB Lightning node" (a plain NWC
+  wallet is a "Lightning wallet"), the assistant is "KaleidoMind", and account
+  networks show as Mainnet / Signet / Mutinynet / Regtest instead of raw values.
+- **Swap MAX** uses the balance of the account the swap spends from (Spark for
+  Flashnet, the RGB Lightning node for KaleidoSwap), not the wallet total.
+- **Channels** expand in place on the home screen, with one "Open a channel"
+  action; "Connect Nostr" prompts open Nostr settings directly.
 - **Receive.** Pick how you get paid (Any wallet, Lightning, On-chain, Spark, Ark)
   and, where more than one account can take it, which account it lands in: a
   Lightning payment can go to your RGB node, Spark, Bark or Arkade. The code is

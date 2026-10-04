@@ -21,7 +21,7 @@ export default function NostrSettingsScreen({ navigation }: Props) {
   const nostrState = useSelector((state: RootState) => state.nostr);
   const connected = !!nostrState.connectedWallet;
   const typeLabel =
-    nostrState.nwcWalletType === 'rln' ? 'RGB Lightning Node' : connected ? 'Lightning wallet' : null;
+    nostrState.nwcWalletType === 'rln' ? 'RGB Lightning node' : connected ? 'Lightning wallet' : null;
 
   return (
     <View style={styles.container}>

@@ -291,9 +291,9 @@ export default function LSPScreen({ navigation }: Props) {
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
           <Ionicons name="flash-outline" size={40} color={theme.colors.text.tertiary} />
           <Text style={[styles.loadingText, { textAlign: 'center' }]}>
-            Connect an RGB Lightning node via NWC in Settings to view or open channels.
+            Connect your RGB Lightning node to view or open channels.
           </Text>
-          <Button title="Open Settings" onPress={() => navigation.navigate('Settings')} />
+          <Button title="Connect node" onPress={() => navigation.navigate('NWCConnect')} />
         </View>
       </SafeAreaView>
     );

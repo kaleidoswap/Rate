@@ -1,5 +1,6 @@
 // screens/SwapScreen.tsx
 import React, { useState, useEffect, useCallback } from 'react';
+import { usePolicy } from '../hooks/usePolicy';
 import {
   TextInput,
   useWindowDimensions,
@@ -111,6 +112,8 @@ export default function SwapScreen({ navigation }: Props) {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
   const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
+  // Lite hides venues, the maker and account names: the best price is picked for you.
+  const policy = usePolicy();
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
@@ -459,7 +462,7 @@ export default function SwapScreen({ navigation }: Props) {
       } else {
         // ── Kaleidoswap execution (3-step: init → taker → execute) ──
         if (!kaleidoClientManager.isInitialized()) {
-          throw new Error('KaleidoSwap requires an RGB node connection.');
+          throw new Error('KaleidoSwap needs your RGB Lightning node. Connect it in Settings.');
         }
         const client = kaleidoClientManager.getClient();
         const fromAsset = pair ? (pair.base.ticker === quote.from_asset ? pair.base : pair.quote) : null;
@@ -571,7 +574,7 @@ export default function SwapScreen({ navigation }: Props) {
           console.warn('[SwapScreen] RGB adapter not connected, stopping poll');
           stop(interval);
           setShowConfirmModal(false);
-          dispatch(setError('Lost connection to the RGB node. Check the swap in History.'));
+          dispatch(setError('Lost connection to your RGB Lightning node. Check the swap in Activity.'));
           return;
         }
 
@@ -637,8 +640,29 @@ export default function SwapScreen({ navigation }: Props) {
   };
 
   // Look up an available asset by ticker (swap state stores tickers, not ids).
-  const assetByTicker = (ticker: string) =>
-    availableAssets.find(a => a.ticker === ticker);
+  // A swap spends BTC from one account: Spark for Flashnet, the RGB node for
+  // KaleidoSwap. The wallet-wide total would let MAX ask for more than that account
+  // holds, so BTC shows the balance of the account the pair's venue uses (the larger
+  // one when both venues serve it).
+  const btcBalanceForSwap = (): number | undefined => {
+    const byProtocol = (walletState?.btcBalance as any)?.byProtocol as
+      Record<string, { confirmed: number; total: number }> | undefined;
+    if (!byProtocol) return undefined;
+    const tickers = [swapState.fromAsset, swapState.toAsset].filter(Boolean);
+    const venues = new Set(filteredPairs
+      .filter(p => tickers.every(t => p.base.ticker === t || p.quote.ticker === t))
+      .map(p => p.venue ?? 'kaleidoswap'));
+    const sats = [
+      ...(venues.size === 0 || venues.has('flashnet') ? [byProtocol.SPARK?.confirmed ?? 0] : []),
+      ...(venues.size === 0 || venues.has('kaleidoswap') ? [byProtocol.RGB?.total ?? 0] : []),
+    ];
+    return satsToBtcDisplay(Math.max(0, ...sats));
+  };
+  const assetByTicker = (ticker: string) => {
+    const asset = availableAssets.find(a => a.ticker === ticker);
+    const btc = asset && isBtcTicker(ticker) ? btcBalanceForSwap() : undefined;
+    return asset && btc !== undefined ? { ...asset, balance: btc } : asset;
+  };
 
 
 
@@ -707,12 +731,12 @@ export default function SwapScreen({ navigation }: Props) {
 
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
-      {/* Venue filter tabs */}
-      {renderVenueFilter()}
+      {/* Venue filter tabs (Advanced only: Lite picks the best price for you) */}
+      {policy.showRouteSelector && renderVenueFilter()}
 
       {/* KaleidoSwap maker provider — shows which maker is serving pairs so an
           empty pair list (e.g. "No trading pair found for BTC/USD") is debuggable. */}
-      {rgbConnected && venueFilter !== 'flashnet' && (
+      {policy.showRouteSelector && rgbConnected && venueFilter !== 'flashnet' && (
         <View style={styles.makerInfoRow}>
           <Ionicons name="server-outline" size={13} color={theme.colors.text.tertiary} />
           <Text style={styles.makerInfoLabel}>Maker</Text>
@@ -956,7 +980,7 @@ export default function SwapScreen({ navigation }: Props) {
       : [
           { key: 'init', label: 'Requesting swap' },
           { key: 'taker', label: 'Preparing channels' },
-          { key: 'execute', label: 'Atomic swap' },
+          { key: 'execute', label: 'Swapping' },
           { key: 'done', label: 'Completed' },
         ];
     const order = ['idle', 'init', 'taker', 'execute', 'done'];
@@ -1064,7 +1088,7 @@ export default function SwapScreen({ navigation }: Props) {
             )}
             {pair && <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Provider</Text>
-              <Text style={styles.confirmValue}>{swapProviderName(pair)} · {isFlashnetPair(pair) ? 'Spark' : 'RGB Lightning'}</Text>
+              <Text style={styles.confirmValue}>{swapProviderName(pair)} · {isFlashnetPair(pair) ? 'Spark' : 'RGB Lightning node'}</Text>
             </View>}
             <View style={styles.confirmRow}>
               <Text style={styles.confirmLabel}>Minimum received</Text>
@@ -1191,7 +1215,9 @@ export default function SwapScreen({ navigation }: Props) {
         rightAction={
           <TouchableOpacity
             style={styles.helpButton}
-            onPress={() => Alert.alert('Help', 'Swap Bitcoin and RGB assets using Lightning Network')}
+            accessibilityRole="button"
+            accessibilityLabel="How swaps work"
+            onPress={() => Alert.alert('Swaps', 'Exchange bitcoin for your other assets, or back. You see the price and every fee before you confirm, and the swap either completes in full or not at all.')}
           >
             <Ionicons name="help-circle-outline" size={20} color={theme.colors.text.primary} />
           </TouchableOpacity>
@@ -1222,7 +1248,7 @@ export default function SwapScreen({ navigation }: Props) {
       {renderAssetPicker()}
       {renderConfirmModal()}
       <ProviderSheet visible={showProviders} selectedId={selectedProvider.current} onClose={() => setShowProviders(false)}
-        options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: isFlashnetPair(o.pair) ? 'Spark account' : 'RGB Lightning account',
+        options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: policy.showNetworks ? (isFlashnetPair(o.pair) ? 'Spark' : 'RGB Lightning node') : undefined,
           amountLabel: 'You receive', amount: o.quote ? `${formatDisplayAmount(o.quote.to_amount, o.quote.to_asset)} ${unitLabelFor(o.quote.to_asset)}` : 'Unavailable',
           detail: o.quote ? `Fee ${formatDisplayAmount(o.quote.fee_amount, o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)} ${unitLabelFor(o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)}` : '',
           unavailable: o.unavailable, expiresAt: o.quote?.expiry_timestamp, recommended: bestSwapOffer(providerOffers)?.id === o.id }))}

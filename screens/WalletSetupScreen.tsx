@@ -795,7 +795,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         {step === 'rln' && (
           <View style={styles.footer}>
             <Button
-              title={rlnConnecting ? 'Connecting…' : 'Connect RLN'}
+              title={rlnConnecting ? 'Connecting…' : 'Connect'}
               onPress={handleConnectRln}
               disabled={rlnConnecting || !nwcUri.trim()}
               loading={rlnConnecting}

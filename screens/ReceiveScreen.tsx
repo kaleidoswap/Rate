@@ -574,7 +574,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     }
     if (account === 'RGB') {
       const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
-      if (!rgb?.isConnected()) throw new Error('Your Lightning node is not connected');
+      if (!rgb?.isConnected()) throw new Error('Your RGB Lightning node isn’t connected');
       const invoice = await runReceiveOperation<any>('Create RGB Lightning invoice', (signal) =>
         callAbortableAdapterMethod<any>(rgb, 'createInvoice', [{ layer: 'BTC_LN', ...amountPart, description, expirySeconds }], signal));
       return { invoice: invoice.invoice, protocol: 'RGB', monitor: 'invoice' };
@@ -805,7 +805,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         if (networkType === 'onchain') {
           const rgbAssetAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           if (!rgbAssetAdapter?.isConnected() || !rgbAssetAdapter.createRgbInvoice) {
-            throw new Error('RGB node required for on-chain RGB asset deposits. Please configure in Settings.');
+            throw new Error('Connect your RGB Lightning node in Settings to receive RGB assets.');
           }
           // 'RGB_NEW' = a blind invoice (no asset_id) that can receive any RGB
           // asset the user doesn't hold yet — the "New RGB asset" entry point.
@@ -836,7 +836,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           // assets), so it must never be read as asset units here.
           const rgbAssetLnAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           if (!rgbAssetLnAdapter?.isConnected()) {
-            throw new Error('RGB node required for RGB Lightning deposits. Please configure in Settings.');
+            throw new Error('Connect your RGB Lightning node in Settings to receive RGB assets.');
           }
           const assetInvoice = await runReceiveOperation('Create RGB Lightning asset invoice', (signal) =>
             callAbortableAdapterMethod<any>(
@@ -896,7 +896,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       });
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
       if (errorMessage.includes('No uncolored UTXOs')) {
-        setError('No uncolored UTXOs available. Please create UTXOs first or try a different network.');
+        setError('Your RGB Lightning node has no free bitcoin output to receive this asset into. Send a small amount of bitcoin to it on-chain first, or receive over Lightning.');
       } else {
         setError(errorMessage);
       }
@@ -979,7 +979,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             generationId,
             ms: Math.round(nowMs() - startedAt),
           });
-          setUnifiedError('No USD receive method available. Connect an RGB node or Spark.');
+          setUnifiedError('No way to receive USD yet. Connect Spark or an RGB Lightning node.');
         }
         return;
       }

@@ -127,7 +127,7 @@ export default function SettingsScreen({ navigation }: Props) {
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Private Local AI Assistant', advanced: 'Advanced' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'KaleidoMind', advanced: 'Advanced' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
@@ -285,11 +285,8 @@ export default function SettingsScreen({ navigation }: Props) {
         if (refreshedWallet) dispatch(setActiveWallet(refreshedWallet));
         setProtoNetworks((prev) => ({ ...prev, [type]: effectiveNetwork }));
         refreshProtocolStatus();
+        // The account page shows the new network and "Connected"; no extra alert.
         dispatch(loadBtcBalance() as any);
-        Alert.alert(
-          'Network connected',
-          `${proto} is now connected on ${NETWORK_LABEL[effectiveNetwork] ?? effectiveNetwork}.`,
-        );
       } catch (e: any) {
         refreshProtocolStatus();
         const effectiveNetwork = type === 'spark' ? resolveSparkNetwork(network) : network;
@@ -344,7 +341,7 @@ export default function SettingsScreen({ navigation }: Props) {
     const connected = protocolStatus[proto];
     const options = PROTOCOL_SUPPORTED_NETWORKS[proto];
     Alert.alert(
-      `${proto} network`,
+      `${({ RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' } as Record<string, string>)[proto] ?? proto} network`,
       `Currently ${NETWORK_LABEL[current] ?? current}. Choose a network:`,
       [
         ...options.map((n) => ({
@@ -488,7 +485,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <MainHeader title={account ? ({ RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : query ? 'Search settings' : page ? titles[page] : 'Settings'} onBack={goBack} />
+      <MainHeader title={account ? ({ RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : query ? 'Search settings' : page ? titles[page] : 'Settings'} onBack={goBack} />
       <ScrollView key={account ?? page ?? 'home'} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {!page && <Input
@@ -511,7 +508,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row first icon="sparkles-outline" label="Private Local AI Assistant" description="Models, privacy and desktop pairing" onPress={() => openPage('assistant')} />
+            <Row first icon="sparkles-outline" label="KaleidoMind" description="Private AI assistant · models, privacy and desktop pairing" onPress={() => openPage('assistant')} />
             <Row icon="code-slash-outline" label="Advanced" description="Accounts and network configuration" onPress={() => openPage('advanced')} />
           </Group>
         </>}
@@ -636,16 +633,16 @@ export default function SettingsScreen({ navigation }: Props) {
             first
             icon="flash-outline"
             iconColor={theme.colors.warning[500]}
-            label="Lightning node"
+            label="Lightning wallet"
             description={nostrState.connectedWallet
               ? nostrState.nwcWalletType === 'rln'
-                ? `${selectedNwcConnection?.alias || 'RGB node'} · RGB, Lightning and channels`
+                ? `${selectedNwcConnection?.alias || 'RGB Lightning node'} · RGB, Lightning and channels`
                 : `${selectedNwcConnection?.alias || 'NWC wallet'} · ${nostrState.nwcCapabilities?.includes('createInvoice') ? 'send and receive' : 'limited permissions'}`
               : 'Connect any NWC wallet or RGB Lightning node'}
             value={
               nostrState.connectedWallet
                 ? nostrState.nwcWalletType === 'rln'
-                  ? 'RGB node'
+                  ? 'RGB Lightning node'
                   : 'Connected'
                 : undefined
             }
@@ -724,7 +721,7 @@ export default function SettingsScreen({ navigation }: Props) {
               ARKADE: theme.colors.networks.arkade,
               BARK: protocolColor('BARK'),
             };
-            const labels: Record<string, string> = { RGB: 'RGB Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
+            const labels: Record<string, string> = { RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
             const descs: Record<string, string> = {
               RGB: 'On-chain, Lightning, RGB assets',
               SPARK: 'Spark L2 Bitcoin + tokens',

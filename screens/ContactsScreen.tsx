@@ -336,7 +336,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
       {/* Sync + Profile/Relays now live in the header (refresh + settings).
           Keep only the onboarding nudge when Nostr isn't connected. */}
       {!nostrState.isConnected && (
-        <TouchableOpacity style={styles.connectBanner} onPress={() => navigation.navigate('Settings')} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.connectBanner} onPress={() => navigation.navigate('NostrSettings')} activeOpacity={0.8}>
           <Ionicons name="planet-outline" size={16} color={theme.colors.text.secondary} />
           <Text style={styles.connectBannerText}>Connect Nostr to sync your social contacts</Text>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />

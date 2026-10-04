@@ -79,8 +79,6 @@ type RootStackParamList = {
   AssetDetail: { asset: any };
   Map: undefined;
   LSP: undefined;
-  OpenChannel: undefined;
-  Channels: undefined;
   PairDesktop: undefined;
   MindSettings: undefined;
   NWCConnect: { scanned?: string } | undefined;
@@ -269,8 +267,6 @@ function AppNavigator() {
           }}
         />
         <Stack.Screen name="LSP" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="OpenChannel" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="Channels" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

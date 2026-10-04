@@ -311,7 +311,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   const handleRGBInvoice = async (invoice: string) => {
     // Decoding an RGB invoice requires the RGB/NWC node — don't call it offline.
     if (!rgbAdapter?.isConnected()) {
-      throw new Error('RGB node not connected. Please connect it in Settings to scan RGB invoices.');
+      throw new Error('Your RGB Lightning node isn’t connected. Connect it in Settings to pay RGB invoices.');
     }
     // Decode RGB invoice (decodeRgbInvoice returns `unknown` in beta.55; narrow to what we read).
     const decodedInvoice = (await rgbAdapter.decodeRgbInvoice!({ invoice })) as {
