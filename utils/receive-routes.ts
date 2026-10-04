@@ -231,3 +231,45 @@ export function universalLightning(options: ReceiveDestination[], chosen: Accoun
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------
+// Receive by account: pick the account first, then how money reaches it. The same
+// (method, account) route as receiving by method, seen from the other side.
+// ---------------------------------------------------------------------------
+export type ReceiveAxis = 'method' | 'account';
+
+/** Each account's ways in, its own native one first. */
+const ACCOUNT_METHOD_ORDER: Record<AccountId, ReceiveMethodId[]> = {
+  SPARK: ['spark', 'lightning', 'onchain'],
+  ARKADE: ['ark', 'lightning', 'onchain'],
+  BARK: ['ark', 'lightning', 'onchain'],
+  RGB: ['lightning', 'onchain'],
+};
+
+export interface AccountMethod { method: ReceiveMethodId; destination: ReceiveDestination }
+
+/** The ways a payment can reach `account`, with each one's availability and detail. */
+export function accountMethods(
+  account: AccountId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily | 'USD' = 'BTC',
+): AccountMethod[] {
+  const out: AccountMethod[] = [];
+  for (const method of ACCOUNT_METHOD_ORDER[account]) {
+    const destination = destinationsFor(method, accounts, caps, family).find(d => d.account === account);
+    if (destination) out.push({ method, destination });
+  }
+  return out;
+}
+
+/** Accounts that can receive this asset at all, in the order Receive lists them. */
+export function receivableAccounts(accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily | 'USD' = 'BTC'): AccountId[] {
+  return (['SPARK', 'ARKADE', 'BARK', 'RGB'] as AccountId[])
+    .filter(account => accountMethods(account, accounts, caps, family).some(m => m.destination.available));
+}
+
+/** The method to show when an account is picked: the current one if it still works, else its first usable one. */
+export function accountDefaultMethod(options: AccountMethod[], current: ReceiveMethodId | null, amountSats = 0): ReceiveMethodId | null {
+  const kept = options.find(o => o.method === current && o.destination.available);
+  if (kept) return kept.method;
+  const usable = options.find(o => o.destination.available && (!o.destination.needsAmount || amountSats > 0));
+  return (usable ?? options.find(o => o.destination.available))?.method ?? null;
+}

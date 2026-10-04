@@ -4,6 +4,7 @@ export * from './Input';
 // Shared UI primitives — prefer these over hand-rolling pills/tabs/dividers.
 export * from './Badge';
 export * from './SegmentedTabs';
+export * from './SegmentedControl';
 export * from './CopyButton';
 export * from './SectionHeader';
 export * from './Divider';

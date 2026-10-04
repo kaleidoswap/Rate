@@ -61,8 +61,11 @@ import {
 import {
   accountsOnChain, chainLabel, defaultDestination, destinationsFor, legacyRoute, lightningDestinations,
   methodsFor, rgbAccountLabel, rgbCanReceiveOnchain, accountLabel, routeOf, universalChains, universalLightning,
-  type ReceiveAccountInfo, type ReceiveCaps, type ReceiveChain, type ReceiveMethodId,
+  accountMethods, accountDefaultMethod, receivableAccounts,
+  type ReceiveAccountInfo, type ReceiveCaps, type ReceiveChain, type ReceiveMethodId, type ReceiveAxis,
 } from '../utils/receive-routes';
+import { ReceiveAccountPicker } from '../components/receive/ReceiveAccountPicker';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
@@ -217,6 +220,8 @@ export default function ReceiveScreen({ navigation }: Props) {
   // The account the payment lands in, for methods more than one account can receive.
   const [selectedAccount, setSelectedAccount] = useState<AccountId | null>(null);
   const restoredBtcRoute = useRef(false);
+  // Receive by method (how it arrives, then where it lands) or by account (the reverse).
+  const [receiveMode, setReceiveMode] = useState<ReceiveAxis>(lastBtcReceiveRoute?.axis ?? 'method');
   const [amount, setAmount] = useState('');
   const [expirySeconds, setExpirySeconds] = useState(3600);
   const [showCountdown, setShowCountdown] = useState(false);
@@ -420,7 +425,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     })(),
   ];
 
-  const selectRoute = (method: ReceiveMethodId, account?: AccountId | null) => {
+  const selectRoute = (method: ReceiveMethodId, account?: AccountId | null, axis: ReceiveAxis = receiveMode) => {
     feedback.select();
     const dest = account ?? defaultDestination(
       destinationsOf(method),
@@ -435,12 +440,53 @@ export default function ReceiveScreen({ navigation }: Props) {
     setSelectedAccount(next.selectedAccount);
     if (selectedAsset.ticker === 'BTC' && next.arkadeSubMode === 'ark') {
       dispatch(setLastBtcReceiveRoute({
-        axis: next.selectedAccount ? 'account' : 'method',
+        axis,
         network: next.networkType,
         account: next.selectedAccount,
       }));
     }
   };
+
+  // ── Receive by account ──
+  const byAccountAccounts = assetFamily === 'BTC' ? receivableAccounts(receiveAccounts, caps, assetFamily) : [];
+  const canPickMode = byAccountAccounts.length > 1;
+  const accountMode = canPickMode && receiveMode === 'account';
+  const pickedAccount: AccountId | null = route.method !== 'universal' && routeDestination && byAccountAccounts.includes(routeDestination)
+    ? routeDestination
+    : null;
+  const pickedAccountMethods = pickedAccount ? accountMethods(pickedAccount, receiveAccounts, caps, assetFamily) : [];
+
+  const selectAccount = (account: AccountId, axis: ReceiveAxis = receiveMode) => {
+    const method = accountDefaultMethod(
+      accountMethods(account, receiveAccounts, caps, assetFamily),
+      route.method === 'universal' ? null : route.method,
+      requestedSats,
+    );
+    if (method) selectRoute(method, account, axis);
+  };
+
+  const changeReceiveMode = (mode: ReceiveAxis) => {
+    setReceiveMode(mode);
+    if (selectedAsset.ticker === 'BTC') {
+      const current = legacyRoute(route.method, routeDestination);
+      dispatch(setLastBtcReceiveRoute({ axis: mode, network: current.networkType, account: current.selectedAccount }));
+    }
+    if (mode === 'account' && !pickedAccount) {
+      // Start from the account the universal code would send Lightning to, else the first one.
+      // (Picking it saves the new route, after the line above.)
+      const remembered = lastBtcReceiveRoute?.account;
+      const start = [remembered, universalLnAccount, byAccountAccounts[0]]
+        .find((a): a is AccountId => !!a && byAccountAccounts.includes(a));
+      if (start) selectAccount(start, mode);
+    }
+  };
+
+  // By account always has an account picked: coming from the universal code (or a
+  // restored route), land on the remembered or first account.
+  useEffect(() => {
+    if (accountMode && !pickedAccount) changeReceiveMode('account');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountMode, pickedAccount]);
 
   // Channels decide whether the RGB node can take Lightning; read them once up front.
   useEffect(() => {
@@ -1695,7 +1741,37 @@ export default function ReceiveScreen({ navigation }: Props) {
       >
         <ReceiveConnectionNotice hasRequest={!!(unifiedUri || address)} />
         {renderAssetTabs()}
-        <ReceiveRoutePicker
+        {canPickMode && (
+          <SegmentedControl<ReceiveAxis>
+            accessibilityLabel="Choose how to receive"
+            options={[
+              { key: 'method', label: 'By method', icon: 'swap-horizontal-outline' },
+              { key: 'account', label: 'By account', icon: 'wallet-outline' },
+            ]}
+            value={receiveMode}
+            onChange={changeReceiveMode}
+            style={{ marginBottom: theme.spacing[4] }}
+          />
+        )}
+        {accountMode ? (
+          <View style={{ marginBottom: theme.spacing[4] }}>
+            <ReceiveAccountPicker
+              accounts={byAccountAccounts.map((account) => ({
+                account,
+                label: accountLabel(account, caps),
+                chain: receiveAccounts.find((a) => a.account === account)?.chain,
+                balanceSats: btcBalance?.byProtocol?.[account]?.total,
+              }))}
+              showChain={chainGroups.length > 1}
+              account={pickedAccount}
+              onAccount={(account) => selectAccount(account)}
+              methods={pickedAccountMethods}
+              method={pickedAccount ? route.method : null}
+              onMethod={(method) => pickedAccount && selectRoute(method, pickedAccount)}
+              amountSats={requestedSats}
+            />
+          </View>
+        ) : <ReceiveRoutePicker
           methods={receiveMethodIds}
           method={route.method}
           onMethod={(method) => selectRoute(method)}
@@ -1720,7 +1796,7 @@ export default function ReceiveScreen({ navigation }: Props) {
             resetReceiveSurface();
             setUniversalLn(account);
           }}
-        />
+        />}
         {renderContent()}
         {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
         <ReceiveStatus

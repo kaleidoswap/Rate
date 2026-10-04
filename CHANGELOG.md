@@ -11,6 +11,7 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Changed
+- Receive has two ways to set up a request: **By method** (how it arrives, then which account it lands in) and **By account** (pick Spark, Arkade, Bark or the RGB Lightning node by its balance, then Spark/Ark, Lightning or On-chain). The switch slides, remembers your choice, and only shows for BTC when more than one account can receive.
 - New wallets connect Spark and Arkade on mainnet by default (Bark already did). Wallets saved before this keep the network they were on; the RGB node stays on test networks until it supports mainnet.
 - One animated bottom sheet for every picker and form sheet: the backdrop fades instead of sliding, the sheet springs up, can be dragged down to close, and respects Reduce Motion. Swap review, asset pickers, Receive choices, settings options, zaps, amounts, contacts, channel details and the chat payment card all use it.
 - Swap asset picker redesigned: BTC/USDT quick picks, search, assets you hold first (largest balance first), the network each asset moves on, balances in your unit, and picking the other side's asset flips the pair.

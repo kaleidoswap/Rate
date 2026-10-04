@@ -84,3 +84,38 @@ describe('receive routes', () => {
     expect(accountLabel('ARKADE', {})).toBe('Arkade');
   });
 });
+
+describe('receive by account', () => {
+  const { accountMethods, receivableAccounts, accountDefaultMethod } = require('./receive-routes');
+  const all = [
+    { account: 'RGB', chain: 'mainnet' }, { account: 'SPARK', chain: 'mainnet' },
+    { account: 'ARKADE', chain: 'mainnet' }, { account: 'BARK', chain: 'mainnet' },
+  ];
+  const methodsOf = (account: string, caps = {}) => accountMethods(account, all, caps).map((m: any) => m.method);
+
+  it('lists each account’s own way in first', () => {
+    expect(methodsOf('SPARK')).toEqual(['spark', 'lightning', 'onchain']);
+    expect(methodsOf('ARKADE')).toEqual(['ark', 'lightning', 'onchain']);
+    expect(methodsOf('BARK')).toEqual(['ark', 'lightning', 'onchain']);
+    expect(methodsOf('RGB')).toEqual(['lightning', 'onchain']);
+  });
+
+  it('keeps a blocked way in the list, marked unavailable', () => {
+    const rgb = accountMethods('RGB', all, { rgbChannels: 'none' });
+    expect(rgb.find((m: any) => m.method === 'lightning').destination).toMatchObject({ available: false, reason: 'No open channel to receive into.' });
+    expect(accountDefaultMethod(rgb, 'lightning')).toBe('onchain');
+  });
+
+  it('keeps the current method when the new account has it, else the first that works without an amount', () => {
+    const bark = accountMethods('BARK', all, {});
+    expect(accountDefaultMethod(bark, 'onchain')).toBe('onchain');
+    expect(accountDefaultMethod(bark, null)).toBe('ark');
+    expect(accountDefaultMethod(accountMethods('SPARK', all, {}), 'ark')).toBe('spark');
+  });
+
+  it('lists only accounts that can take the asset, Spark first', () => {
+    expect(receivableAccounts(all, {})).toEqual(['SPARK', 'ARKADE', 'BARK', 'RGB']);
+    expect(receivableAccounts(all, {}, 'RGB')).toEqual(['RGB']);
+    expect(receivableAccounts([{ account: 'RGB', chain: 'mainnet' }], { nwcWalletType: 'ln', nwcCapabilities: [] })).toEqual([]);
+  });
+});
