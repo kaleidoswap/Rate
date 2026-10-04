@@ -67,7 +67,7 @@ export const RgbIcon: React.FC<IconProps> = ({ size = 24 }) => (
   <Image source={RGB_LOGO} style={{ width: size, height: size }} resizeMode="contain" />
 );
 
-/** On-chain (L1) — the extension's chain-link glyph (web-extension OnchainIcon). */
+/** On-chain (L1) — the chain-link glyph the Rate extension uses for on-chain. */
 export const OnchainIcon: React.FC<IconProps> = ({ size = 24, color = theme.colors.networks.bitcoin }) => (
   <Svg width={size} height={size} viewBox="0 0 47.5 47.5" fill={color}>
     <G transform="matrix(1.25 0 0 -1.25 0 47.5)">

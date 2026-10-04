@@ -66,6 +66,7 @@ import {
   type ReceiveAccountInfo, type ReceiveCaps, type ReceiveChain, type ReceiveMethodId, type ReceiveAxis,
 } from '../utils/receive-routes';
 import { ReceiveAccountPicker } from '../components/receive/ReceiveAccountPicker';
+import { LightningAddressCard } from '../components/receive/LightningAddressCard';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
@@ -217,6 +218,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const nwcWalletType = useAppSelector((state: RootState) => state.nostr?.nwcWalletType);
   const nwcCapabilities = useAppSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
   const lastBtcReceiveRoute = useAppSelector((state: RootState) => state.settings.lastBtcReceiveRoute);
+  const walletId = useAppSelector((state: RootState) => state.wallet?.activeWallet?.id);
   const isLite = disclosureLevel === 'lite';
   // The account the payment lands in, for methods more than one account can receive.
   const [selectedAccount, setSelectedAccount] = useState<AccountId | null>(null);
@@ -1814,6 +1816,9 @@ export default function ReceiveScreen({ navigation }: Props) {
           status={monitorStatus}
           message={depositMonitor.message}
         />
+        {selectedAsset.asset_id === 'BTC' && receiveAccounts.some((a) => a.account === 'SPARK' && a.chain === 'mainnet') && (
+          <LightningAddressCard walletId={walletId} onOpen={() => { cancelReceiveWork(); navigation.navigate('LightningAddress'); }} />
+        )}
         {selectedAsset.asset_id === 'BTC' && (
           <TouchableOpacity
             accessibilityRole="button"

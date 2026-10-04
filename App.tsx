@@ -22,6 +22,7 @@ import { AppLockGate } from './components/AppLockGate';
 import { KaleidoPayRecovery } from './components/KaleidoPayRecovery';
 import { NwcPaymentApprover } from './components/NwcPaymentApprover';
 import ChatNotifications from './components/ChatNotifications';
+import PaymentNotifications from './components/PaymentNotifications';
 import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
 
@@ -58,6 +59,7 @@ import AssetDetailScreen from './screens/AssetDetailScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
+import LightningAddressScreen from './screens/LightningAddressScreen';
 import PairDesktopScreen from './screens/PairDesktopScreen';
 import MindSettingsScreen from './screens/MindSettingsScreen';
 import NWCConnectScreen from './screens/NWCConnectScreen';
@@ -81,6 +83,7 @@ type RootStackParamList = {
   LSP: undefined;
   PairDesktop: undefined;
   MindSettings: undefined;
+  LightningAddress: undefined;
   NWCConnect: { scanned?: string } | undefined;
   Chat: { pubkey: string; name?: string; npub?: string; avatarUrl?: string };
 };
@@ -271,6 +274,7 @@ function AppNavigator() {
           }}
         />
         <Stack.Screen name="LSP" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="LightningAddress" component={asModalScreen(LightningAddressScreen)} options={{ presentation: 'modal', headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -333,6 +337,7 @@ export default function App() {
               <QVACEnabledSync />
               <KaleidoPayRecovery />
               <ChatNotifications />
+              <PaymentNotifications />
               <AppThemeProvider>
                 <KaleidoThemeProvider>
                   <ThemeProvider value={navigationTheme}>
