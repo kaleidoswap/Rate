@@ -8,7 +8,7 @@
 // settings table is fine).
 //
 // Payment pushes: the app registers its Expo push token against the handle, and
-// the registry's minter sends a push when an invoice for the handle is paid.
+// kaleidoswap.me sends a push when a payment to the handle is received.
 import { sha256 } from '@noble/hashes/sha2';
 import { bytesToHex } from '@noble/hashes/utils';
 import DatabaseService from './DatabaseService';
