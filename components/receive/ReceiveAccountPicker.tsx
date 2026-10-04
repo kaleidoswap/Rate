@@ -6,6 +6,7 @@ import { theme, motion, protocolTint } from '../../theme';
 import { NetworkIcon } from '../NetworkIcon';
 import { PressableScale } from '../PressableScale';
 import { AmountText } from '../AmountText';
+import { OnchainIcon } from '../ProtocolIcons';
 import type { AccountId } from '../../utils/account-routing';
 import { chainLabel, type AccountMethod, type ReceiveChain, type ReceiveMethodId } from '../../utils/receive-routes';
 
@@ -104,7 +105,9 @@ export function ReceiveAccountPicker({ accounts, account, onAccount, methods, me
                   accessibilityLabel={[METHOD_LABEL[m], blocked ? destination.reason : destination.needsAmount ? 'needs an amount' : undefined].filter(Boolean).join(', ')}
                   style={[styles.method, active && styles.methodActive, blocked && styles.methodBlocked]}
                 >
-                  <Ionicons name={METHOD_ICON[m]} size={16} color={active ? theme.colors.text.inverse : theme.colors.text.secondary} />
+                  {m === 'onchain'
+                    ? <OnchainIcon size={16} color={active ? theme.colors.text.inverse : theme.colors.text.secondary} />
+                    : <Ionicons name={METHOD_ICON[m]} size={16} color={active ? theme.colors.text.inverse : theme.colors.text.secondary} />}
                   <Text style={[styles.methodText, active && styles.methodTextActive]} numberOfLines={1}>{METHOD_LABEL[m]}</Text>
                 </PressableScale>
               );

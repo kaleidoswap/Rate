@@ -115,6 +115,18 @@ jest.mock('react-native-reanimated', () => {
   };
 });
 
+// SVG: shapes render as plain host elements (tests assert on text and labels, not paths).
+jest.mock('react-native-svg', () => {
+  const host = (name) => name;
+  return {
+    __esModule: true,
+    default: host('Svg'),
+    Svg: host('Svg'), G: host('G'), Path: host('Path'), Rect: host('Rect'), Circle: host('Circle'),
+    Polygon: host('Polygon'), Text: host('SvgText'), Defs: host('Defs'), LinearGradient: host('LinearGradient'),
+    RadialGradient: host('RadialGradient'), Stop: host('Stop'), ClipPath: host('ClipPath'), Line: host('Line'),
+  };
+});
+
 // Gesture handler: gestures are chainable no-ops and the detector renders its child.
 jest.mock('react-native-gesture-handler', () => {
   const chain = new Proxy({}, { get: () => () => chain });

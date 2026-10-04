@@ -35,6 +35,7 @@ import { ReceiveStatus, type ReceiveStatusValue } from '../components/receive/Re
 import { ReceiveRequestActions } from '../components/receive/ReceiveRequestActions';
 import { ReceiveRoutePicker } from '../components/receive/ReceiveRoutePicker';
 import { ScreenHeader } from '../components/ScreenHeader';
+import { AmountText } from '../components/AmountText';
 import { ReceiveRequestDetails, requestKind } from '../components/receive/ReceiveRequestDetails';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
 import {
@@ -1522,21 +1523,29 @@ export default function ReceiveScreen({ navigation }: Props) {
     // would suggest the payer is asked for it when they aren't.
     if (networkType === 'arkade' || networkType === 'bark' || networkType === 'onchain') return null;
     const summary = amountSummary();
+    // A pill centred under the QR: the code first, then what it asks for.
     return (
       <TouchableOpacity
         accessibilityRole="button" accessibilityLabel={summary ? `Edit requested amount, ${summary}` : 'Add requested amount'}
-        style={[styles.amountRow, { paddingVertical: theme.spacing[2], borderWidth: 0, backgroundColor: 'transparent' }]}
+        style={{
+          alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2],
+          minHeight: 40, paddingHorizontal: theme.spacing[4], marginTop: theme.spacing[3], marginBottom: theme.spacing[1],
+          borderRadius: theme.borderRadius.full, borderWidth: 1,
+          borderColor: summary ? theme.colors.primary[500] : awaitingAmount ? theme.colors.warning[500] : theme.colors.border.light,
+          backgroundColor: summary ? theme.colors.primary[50] : theme.colors.surface.primary,
+        }}
         onPress={() => {
           receiveLog('tap.amountRow', { amount, networkType, asset: selectedAsset.ticker });
           setShowAmountEditor(true);
         }}
         activeOpacity={0.7}
       >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.amountRowLabel}>{summary ? 'Requested amount' : awaitingAmount ? 'Amount required' : 'Add amount · optional'}</Text>
-          {!!summary && <Text style={styles.amountRowValue}>{summary}</Text>}
-        </View>
-        <Ionicons name={summary ? 'pencil-outline' : 'add-circle-outline'} size={22} color={theme.colors.primary[500]} />
+        <Ionicons name={summary ? 'pencil-outline' : 'add-circle-outline'} size={18} color={theme.colors.primary[500]} />
+        {summary
+          ? <AmountText style={[styles.amountRowValue, { marginTop: 0 }]}>{summary}</AmountText>
+          : <Text style={[styles.amountRowLabel, { color: theme.colors.text.primary, fontWeight: '600' }]}>
+              {awaitingAmount ? 'Add amount · required' : 'Add amount'}
+            </Text>}
       </TouchableOpacity>
     );
   };

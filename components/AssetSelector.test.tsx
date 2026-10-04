@@ -1,4 +1,3 @@
-jest.mock('./AssetIcon', () => ({ AssetIcon: () => null }));
 import { groupAssets, type SelectableAsset } from './AssetSelector';
 
 const asset = (ticker: string, balance?: number, extra: Partial<SelectableAsset> = {}): SelectableAsset =>

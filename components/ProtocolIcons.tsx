@@ -2,7 +2,11 @@
  * Protocol SVG icons — exact SVGs from rate-extension.
  */
 import React from 'react';
-import Svg, { Path, Rect, Polygon, Circle, Text as SvgText } from 'react-native-svg';
+import { Image } from 'react-native';
+import Svg, { G, Path, Rect, Polygon, Circle, Text as SvgText } from 'react-native-svg';
+import { theme } from '../theme';
+
+const RGB_LOGO = require('../assets/icons/protocols/rgb.png');
 
 interface IconProps {
   size?: number;
@@ -58,20 +62,18 @@ export const BitcoinIcon: React.FC<IconProps> = ({ size = 24, color = '#F7931A' 
   </Svg>
 );
 
-/** RGB — simplified triangle logo (full SVG too complex for RN) */
-export const RgbIcon: React.FC<IconProps> = ({ size = 24, color = '#2BEE79' }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M12 2L2 20H22L12 2Z" fill={color} opacity={0.15} />
-    <Path d="M12 2L2 20H22L12 2Z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
-    <Path d="M12 8V14M12 16V17" stroke={color} strokeWidth="2" strokeLinecap="round" />
-  </Svg>
+/** RGB — the logo the extension uses (kaleido-ui protocolIcons). It's full colour, so `color` is ignored. */
+export const RgbIcon: React.FC<IconProps> = ({ size = 24 }) => (
+  <Image source={RGB_LOGO} style={{ width: size, height: size }} resizeMode="contain" />
 );
 
-/** On-chain link icon */
-export const OnchainIcon: React.FC<IconProps> = ({ size = 24, color = '#F7931A' }) => (
-  <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-    <Path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    <Path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+/** On-chain (L1) — the extension's chain-link glyph (web-extension OnchainIcon). */
+export const OnchainIcon: React.FC<IconProps> = ({ size = 24, color = theme.colors.networks.bitcoin }) => (
+  <Svg width={size} height={size} viewBox="0 0 47.5 47.5" fill={color}>
+    <G transform="matrix(1.25 0 0 -1.25 0 47.5)">
+      <Path d="m16 28 6 6s6 6 12 0 0-12 0-12l-8-8s-6-6-12 0c-1.125 1.125-1.822 2.62-1.822 2.62l3.353 3.348S15.396 18.604 17 17c0 0 3-3 6 0l8 8s3 3 0 6-6 0-6 0l-3.729-3.729s-1.854 1.521-5.646.354L16 28Z" />
+      <Path d="m21.845 10-6-6s-6-6-12 0 0 12 0 12l8 8s6 6 12 0c1.125-1.125 1.822-2.62 1.822-2.62l-3.353-3.349s.135 1.365-1.469 2.969c0 0-3 3-6 0l-8-8s-3-3 0-6 6 0 6 0l3.729 3.729s1.854-1.52 5.646-.354L21.845 10Z" />
+    </G>
   </Svg>
 );
 

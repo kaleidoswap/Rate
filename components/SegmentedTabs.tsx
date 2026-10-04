@@ -15,6 +15,8 @@ export interface SegmentOption<T extends string = string> {
   key: T;
   label: string;
   icon?: keyof typeof Ionicons.glyphMap;
+  /** A custom icon (e.g. a brand glyph), drawn in the given colour; wins over `icon`. */
+  renderIcon?: (color: string, size: number) => React.ReactNode;
 }
 
 interface SegmentedTabsProps<T extends string = string> {
@@ -58,7 +60,11 @@ export function SegmentedTabs<T extends string = string>({
             accessibilityState={{ selected: active }}
             accessibilityLabel={opt.label}
           >
-            {opt.icon && (
+            {opt.renderIcon ? (
+              <View style={styles.tabIcon}>
+                {opt.renderIcon(active ? theme.colors.text.inverse : theme.colors.text.secondary, 14)}
+              </View>
+            ) : opt.icon && (
               <Ionicons
                 name={opt.icon}
                 size={14}

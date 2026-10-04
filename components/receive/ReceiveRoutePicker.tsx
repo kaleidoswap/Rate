@@ -5,6 +5,7 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import { SegmentedTabs } from '../SegmentedTabs';
 import { NetworkIcon } from '../NetworkIcon';
 import { Sheet } from '../Sheet';
+import { OnchainIcon } from '../ProtocolIcons';
 import { feedback } from '../../utils/feedback';
 import type { AccountId } from '../../utils/account-routing';
 import {
@@ -122,7 +123,10 @@ export function ReceiveRoutePicker({
   const accountTitle = (d?: ReceiveDestination) => (d ? `${d.label}${showChain ? ` · ${chainLabel(d.chain)}` : ''}` : 'Choose an account');
   return <View style={{ gap: t.spacing[3], marginBottom: t.spacing[4] }}>
     {methods.length > 1 && <SegmentedTabs<ReceiveMethodId>
-      options={methods.map(m => ({ key: m, label: METHOD_LABELS[m], icon: METHOD_ICONS[m] }))}
+      options={methods.map(m => ({
+        key: m, label: METHOD_LABELS[m], icon: METHOD_ICONS[m],
+        renderIcon: m === 'onchain' ? (color, size) => <OnchainIcon color={color} size={size} /> : undefined,
+      }))}
       value={method} onChange={onMethod} />}
     {method === 'universal' && !!chains && chains.length > 1 && onChain && <ChoiceRow<ReceiveChain>
       label="Network" sheetTitle="Which network is this code for?"
