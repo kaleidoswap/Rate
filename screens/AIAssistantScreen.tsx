@@ -52,6 +52,7 @@ import * as Haptics from 'expo-haptics';
 
 interface Props {
   navigation: any;
+  route?: { params?: { openSettings?: boolean } };
 }
 
 interface PaymentDetails {
@@ -88,7 +89,7 @@ const skillRouteHint = (skill: Skill): string =>
     ? skill.triggers.slice(0, 5).join(' ')
     : skill.name.replace(/-/g, ' '));
 
-export default function AIAssistantScreen({ navigation }: Props) {
+export default function AIAssistantScreen({ navigation, route }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
@@ -188,8 +189,14 @@ export default function AIAssistantScreen({ navigation }: Props) {
   // requestId of the in-flight completion, used to cancel via the stop button
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
 
-  // AI settings sheet (model selection + P2P delegation)
+  // AI settings sheet (model selection + P2P delegation). Settings → KaleidoMind
+  // → "Models & privacy" opens this tab with the sheet up.
   const [showSettings, setShowSettings] = useState(false);
+  useEffect(() => {
+    if (!route?.params?.openSettings) return;
+    setShowSettings(true);
+    navigation.setParams?.({ openSettings: undefined });
+  }, [route?.params?.openSettings, navigation]);
   // Conversation history panel (desktop-parity: current conversation + new/clear).
   const [showHistory, setShowHistory] = useState(false);
   // Latest turn's real inference stats (tok/s + backend) for the header chip.

@@ -606,6 +606,13 @@ export default function SettingsScreen({ navigation }: Props) {
         <Group>
           <Row
             first
+            icon="hardware-chip-outline"
+            iconColor={theme.colors.accent[500]}
+            label="Models & privacy"
+            description="On-device models, voice and when the assistant runs"
+            onPress={() => navigation.navigate('Dashboard', { screen: 'Mind', params: { openSettings: true } })}
+          />
+          <Row
             icon="sparkles-outline"
             iconColor={theme.colors.accent[500]}
             label="Desktop connection"
@@ -724,8 +731,8 @@ export default function SettingsScreen({ navigation }: Props) {
             const labels: Record<string, string> = { RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
             const descs: Record<string, string> = {
               RGB: 'On-chain, Lightning, RGB assets',
-              SPARK: 'Spark L2 Bitcoin + tokens',
-              ARKADE: 'Off-chain Bitcoin (VTXOs)',
+              SPARK: 'Bitcoin, Lightning and tokens',
+              ARKADE: 'Low-fee off-chain bitcoin',
               BARK: 'Bitcoin via Second’s Ark network',
             };
             return (

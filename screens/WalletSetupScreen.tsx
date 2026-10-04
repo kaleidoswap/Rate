@@ -24,7 +24,10 @@ import { setDisclosureLevel } from '../store/slices/settingsSlice';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import { theme } from '../theme';
 import { NetworkType, NetworkConfig } from '../services/DatabaseService';
-import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
+import { buildDefaultNetworkConfig, PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
+
+// New wallets start on the default networks; on a test build those hold test bitcoin.
+const TEST_BUILD = PROTOCOL_DEFAULT_NETWORK.spark !== 'mainnet' || PROTOCOL_DEFAULT_NETWORK.arkade !== 'mainnet';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
@@ -395,7 +398,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
       </View>
 
       <Text style={styles.tipText}>
-        Spark and Arkade are enabled by default. You can manage networks and connect a Lightning wallet later in Settings.
+        Your wallet can send and receive bitcoin as soon as it’s created. You can connect a Lightning wallet later in Settings.
+        {TEST_BUILD ? '\n\nThis version uses test networks: anything you receive is test bitcoin with no real value.' : ''}
       </Text>
       <TouchableOpacity
         style={styles.skipButton}
@@ -454,7 +458,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>Spark</Text>
-              <Text style={styles.networkDesc}>Fast Lightning payments</Text>
+              <Text style={styles.networkDesc}>Instant bitcoin and Lightning payments</Text>
             </View>
           </View>
           <Switch
@@ -478,7 +482,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
             </View>
             <View style={styles.networkTextContainer}>
               <Text style={styles.networkName}>Arkade</Text>
-              <Text style={styles.networkDesc}>Virtual UTXOs on Bitcoin</Text>
+              <Text style={styles.networkDesc}>Low-fee bitcoin payments off-chain</Text>
             </View>
           </View>
           <Switch
