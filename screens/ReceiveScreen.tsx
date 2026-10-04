@@ -2,7 +2,6 @@ import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnection
 import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
 import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
-import { barkNetworkLabel } from '../services/BarkService';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -34,7 +33,8 @@ import { createReceiveStyles } from './receive/styles';
 import { ReceiveQr } from '../components/receive/ReceiveQr';
 import { ReceiveStatus, type ReceiveStatusValue } from '../components/receive/ReceiveStatus';
 import { ReceiveRequestActions } from '../components/receive/ReceiveRequestActions';
-import { ReceiveMethodsSheet } from '../components/receive/ReceiveMethodsSheet';
+import { ReceiveRoutePicker } from '../components/receive/ReceiveRoutePicker';
+import { ReceiveRequestDetails, accountName } from '../components/receive/ReceiveRequestDetails';
 import DepositSuccessOverlay from '../components/DepositSuccessOverlay';
 import {
   useDepositDetection,
@@ -44,20 +44,26 @@ import {
 import { useSparkAutoClaim } from '../hooks/useSparkAutoClaim';
 import { AssetIcon } from '../components/AssetIcon';
 import { AssetSelector } from '../components/AssetSelector';
-import { NetworkIcon } from '../components/NetworkIcon';
 import { UsdCoinIcon } from '../components/ProtocolIcons';
 import { AmountEditorModal } from '../components/AmountEditorModal';
 import { NewAssetSheet, type NewAssetKind } from '../components/NewAssetSheet';
 import { useFiatRates } from '../hooks/useFiatRates';
-import { ReceiveRouteSelector } from '../components/receive/ReceiveRouteSelector';
 import { feedback } from '../utils/feedback';
 import {
   callAbortableAdapterMethod,
   runReceiveOperation as runTimedReceiveOperation,
   upsertReceiveMethod,
   type ReceiveMethod,
+  type ReceiveMonitorKind,
   type ReceiveProtocol,
 } from '../utils/receive-session';
+import {
+  accountsOnChain, chainLabel, defaultDestination, destinationsFor, legacyRoute, lightningDestinations,
+  methodsFor, rgbAccountLabel, routeOf, universalChains, universalLightning,
+  type ReceiveAccountInfo, type ReceiveCaps, type ReceiveChain, type ReceiveMethodId,
+} from '../utils/receive-routes';
+import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
+import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 
 // Sentinel asset id for receiving an RGB asset the user doesn't hold yet
@@ -194,14 +200,13 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Single source of truth for every leg encoded in the visible QR. Generation,
   // address disclosure, deposit monitoring, and Spark claiming all consume this.
   const [receiveMethods, setReceiveMethods] = useState<ReceiveMethod[]>([]);
-  const unifiedMethods = receiveMethods.map((method) => method.label);
   const unifiedAddresses = receiveMethods;
-  // The raw address breakdown is hidden behind a collapsed section by default —
-  // the QR (and its single "Copy" affordance) is the primary way to receive, so
-  // the list of individual addresses only appears when the user expands it.
-  const [showPaymentOptions, setShowPaymentOptions] = useState(false);
-  // Per-address "show full" toggles in the unified address list (keyed by row).
-  // Collapse/expand the full address inside the single-network receive card.
+  // Universal code: the network it is for (null = the one most accounts are on) and
+  // where its Lightning leg lands (null = automatic).
+  const [universalChain, setUniversalChain] = useState<ReceiveChain | null>(null);
+  const [universalLn, setUniversalLn] = useState<AccountId | null>(null);
+  // A Lightning receive into Arkade through a swap provider, while it is on screen.
+  const [arkadeReceive, setArkadeReceive] = useState<ArkadeLightningReceive | null>(null);
   // Unified-receive asset selector: BTC (default) or USD. USD builds a BIP321 QR
   // embedding the USD-receiving methods (RGB USDT invoice, Spark).
   const [unifiedAsset, setUnifiedAsset] = useState<'BTC' | 'USD'>('BTC');
@@ -212,9 +217,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const nwcCapabilities = useAppSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
   const lastBtcReceiveRoute = useAppSelector((state: RootState) => state.settings.lastBtcReceiveRoute);
   const isLite = disclosureLevel === 'lite';
-  // Advanced receive mirrors the extension's two ways into the same route
-  // matrix: choose how the sender will pay, or choose which account to top up.
-  const [routeAxis, setRouteAxis] = useState<'method' | 'account'>('method');
+  // The account the payment lands in, for methods more than one account can receive.
   const [selectedAccount, setSelectedAccount] = useState<AccountId | null>(null);
   const restoredBtcRoute = useRef(false);
   const [amount, setAmount] = useState('');
@@ -228,6 +231,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
+  const [channelsLoaded, setChannelsLoaded] = useState(false);
   const [, setMaxDepositAmount] = useState<number>(0);
   const [arkadeSubMode, setArkadeSubMode] = useState<'ark' | 'boarding'>('ark');
   // Multi-currency amount editor (BTC / sats / USD / other fiat).
@@ -274,8 +278,8 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   const resetReceiveSurface = React.useCallback(() => {
     cancelReceiveWork();
-    setShowPaymentOptions(false);
     setError(null);
+    setArkadeReceive(null);
     setUnifiedError(null);
     setAddress('');
     setUnifiedUri('');
@@ -339,6 +343,29 @@ export default function ReceiveScreen({ navigation }: Props) {
     onClaimed: handleDepositDetected,
     onStatus: handleDepositStatus,
   });
+  // A Lightning receive into Arkade settles only when the wallet claims the provider's
+  // lockup, so poll a claim pass while the request is on screen. Restarts finish an
+  // interrupted claim through the Arkade account's recovery pass.
+  useEffect(() => {
+    if (!arkadeReceive || !isFocused || !isAppActive || showDepositSuccess) return;
+    const options = arkadeReceiveOptions();
+    if (!options) return;
+    let cancelled = false;
+    let running = false;
+    const tick = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const phase = await claimArkadeLightningReceive(options.wallet, options.arkServerUrl, arkadeReceive.rfqId);
+        if (cancelled) return;
+        if (phase === 'settled') handleDepositDetected({ layer: 'lightning', status: 'confirmed', protocol: 'ARKADE' });
+        else if (phase === 'funded') handleDepositStatus({ layer: 'lightning', status: 'pending', protocol: 'ARKADE', message: 'Payment received by the swap provider · claiming into Arkade' });
+        else if (phase === 'cancelled' || phase === 'refunded' || phase === 'failed') handleDepositStatus({ layer: 'lightning', status: 'failed', protocol: 'ARKADE', message: 'The swap did not complete. No funds left your wallet.' });
+      } catch { /* the next pass retries */ } finally { running = false; }
+    };
+    const timer = setInterval(() => { void tick(); }, 5_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [arkadeReceive, isFocused, isAppActive, showDepositSuccess, handleDepositDetected, handleDepositStatus]);
   const fiatRates = useFiatRates();
 
   // Channel helpers — drive which RGB networks are actually receivable.
@@ -399,6 +426,86 @@ export default function ReceiveScreen({ navigation }: Props) {
     return Array.from(networks);
   }, [selectedAsset, getProtocolStatus, channels, nwcWalletType, nwcCapabilities]);
 
+  // ── Route model: how the payment arrives (method) and which account it lands in ──
+  const requestedSats = receiveAmountSats(amount, bitcoinUnit);
+  const caps: ReceiveCaps = {
+    nwcWalletType,
+    nwcCapabilities,
+    rgbChannels: !channelsLoaded ? 'unknown' : channels.some((c) => c.is_usable) ? 'some' : 'none',
+  };
+  const rgbLabel = rgbAccountLabel(caps);
+  const connectedNow = getProtocolStatus();
+  const receiveAccounts: ReceiveAccountInfo[] = (['RGB', 'SPARK', 'ARKADE', 'BARK'] as AccountId[])
+    .filter((account) => connectedNow[account])
+    .map((account) => ({ account, chain: receiveAccountChain(account) }));
+  const isUsdAsset = /usd/i.test(selectedAsset.ticker);
+  const assetFamily = isUsdAsset ? 'USD' as const : getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
+  const isRgbFamily = assetFamily === 'RGB';
+  const receiveMethodIds: ReceiveMethodId[] = methodsFor(assetFamily, receiveAccounts, caps);
+  const route = routeOf({ networkType, arkadeSubMode, selectedAccount });
+  const destinationsOf = (method: ReceiveMethodId) => (isRgbFamily
+    ? receiveAccounts.filter((a) => a.account === 'RGB').map((a) => ({
+        account: 'RGB' as const, label: rgbLabel, chain: a.chain, needsAmount: false, available: true,
+        detail: method === 'lightning' ? 'Your RGB channels' : 'Your RGB wallet',
+      }))
+    : destinationsFor(method, receiveAccounts, caps));
+  const routeDestinations = destinationsOf(route.method);
+  const routeDestination = route.account ?? defaultDestination(routeDestinations, null, requestedSats);
+  const routeTarget = routeDestinations.find((d) => d.account === routeDestination);
+  // A fixed-amount destination (Bark, Arkade Lightning) waits for an amount instead of failing.
+  const awaitingAmount = networkType === 'lightning' && !!routeTarget?.needsAmount && requestedSats <= 0;
+
+  // Universal code: one network, every account on it.
+  const chainGroups = universalChains(receiveAccounts);
+  const activeChain: ReceiveChain | null = chainGroups.some((g) => g.chain === universalChain)
+    ? universalChain
+    : chainGroups[0]?.chain ?? null;
+  const universalAccounts = accountsOnChain(receiveAccounts, activeChain);
+  const universalLnOptions = lightningDestinations(universalAccounts, caps);
+  const universalLnAccount = universalLightning(universalLnOptions, universalLn, requestedSats);
+  const nameOf = (account: AccountId) => (account === 'RGB' ? rgbLabel : accountName({ protocol: account }));
+  const universalNotes = [
+    ...receiveAccounts
+      .filter((a) => activeChain && a.chain !== activeChain)
+      .map((a) => `${nameOf(a.account)} isn't included: it's on ${chainLabel(a.chain)}.`),
+    ...(() => {
+      const chosen = universalLnOptions.find((d) => d.account === universalLn);
+      if (chosen?.needsAmount && requestedSats <= 0) return [`Add an amount to include Lightning into ${chosen.label}.`];
+      if (!universalLnAccount && universalLnOptions.some((d) => d.available)) return ['Add an amount to include Lightning: the accounts on this network need one.'];
+      return [];
+    })(),
+  ];
+
+  const selectRoute = (method: ReceiveMethodId, account?: AccountId | null) => {
+    feedback.select();
+    const dest = account ?? defaultDestination(
+      destinationsOf(method),
+      method === route.method ? routeDestination : selectedAccount,
+      requestedSats,
+    );
+    const next = isRgbFamily
+      ? { networkType: (method === 'lightning' ? 'lightning' : 'onchain') as ReceiveMode, arkadeSubMode: 'ark' as const, selectedAccount: 'RGB' as AccountId }
+      : legacyRoute(method, dest);
+    if (next.networkType === networkType && next.arkadeSubMode === arkadeSubMode && next.selectedAccount === selectedAccount) return;
+    resetReceiveSurface();
+    setNetworkType(next.networkType);
+    setArkadeSubMode(next.arkadeSubMode);
+    setSelectedAccount(next.selectedAccount);
+    if (selectedAsset.ticker === 'BTC' && next.arkadeSubMode === 'ark') {
+      dispatch(setLastBtcReceiveRoute({
+        axis: next.selectedAccount ? 'account' : 'method',
+        network: next.networkType,
+        account: next.selectedAccount,
+      }));
+    }
+  };
+
+  // Channels decide whether the RGB node can take Lightning; read them once up front.
+  useEffect(() => {
+    if (getProtocolStatus().RGB && nwcWalletType !== 'ln') void loadChannels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (
       restoredBtcRoute.current
@@ -410,7 +517,6 @@ export default function ReceiveScreen({ navigation }: Props) {
       || availableNetworkTypes.includes(lastBtcReceiveRoute.network);
     if (!routeAvailable) return;
     restoredBtcRoute.current = true;
-    setRouteAxis(lastBtcReceiveRoute.axis);
     setSelectedAccount(lastBtcReceiveRoute.account);
     setNetworkType(lastBtcReceiveRoute.network);
   }, [availableNetworkTypes, isLite, lastBtcReceiveRoute, selectedAsset.ticker]);
@@ -432,6 +538,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         : { channels: [] };
       const channelsList = Array.isArray(channelsResponse) ? channelsResponse : channelsResponse.channels || [];
       setChannels(channelsList);
+      setChannelsLoaded(true);
     } catch (error) {
       console.error('Failed to load channels:', error);
     } finally {
@@ -551,6 +658,50 @@ export default function ReceiveScreen({ navigation }: Props) {
     
     const numAmount = parseFloat(amount);
     return !isNaN(numAmount) && numAmount > 0;
+  };
+
+  // A Lightning invoice that pays into `account`. `layer: 'BTC_LN'` matters for Spark:
+  // without it the adapter mints a native Spark invoice, not a BOLT11.
+  const createLightningInvoice = async (
+    account: AccountId,
+    amountSats: number,
+    description: string,
+  ): Promise<{ invoice: string; protocol: ReceiveProtocol; monitor: ReceiveMonitorKind; arkade?: ArkadeLightningReceive }> => {
+    const amountPart = amountSats > 0 ? { amount: amountSats } : {};
+    if (account === 'ARKADE') {
+      if (amountSats <= 0) throw new Error('Set an amount: Lightning into Arkade needs one.');
+      const options = arkadeReceiveOptions();
+      if (!options) throw new Error('Arkade is not connected');
+      // A real swap request to a provider (RFQ), which can take a while over Nostr.
+      const receive = await runReceiveOperation(
+        'Create Arkade Lightning invoice',
+        () => createArkadeLightningReceive(options, amountSats),
+        30_000,
+      );
+      // The swap lands as an Arkade balance once claimed; the claim loop watches it.
+      return { invoice: receive.invoice, protocol: 'ARKADE', monitor: 'balance', arkade: receive };
+    }
+    if (account === 'BARK') {
+      const bark = protocolManager.getAdapterIfAvailable('BARK');
+      if (!bark?.isConnected()) throw new Error('Bark is not connected');
+      if (amountSats <= 0) throw new Error('Set an amount: Bark Lightning invoices need one.');
+      // No expirySeconds: Bark sets its own invoice expiry and rejects a custom one.
+      const invoice = await runReceiveOperation('Create Bark Lightning invoice', () =>
+        bark.createInvoice({ layer: 'BTC_LN', amount: amountSats, description }));
+      return { invoice: invoice.invoice, protocol: 'BARK', monitor: 'invoice' };
+    }
+    if (account === 'RGB') {
+      const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
+      if (!rgb?.isConnected()) throw new Error('Your Lightning node is not connected');
+      const invoice = await runReceiveOperation<any>('Create RGB Lightning invoice', (signal) =>
+        callAbortableAdapterMethod<any>(rgb, 'createInvoice', [{ layer: 'BTC_LN', ...amountPart, description, expirySeconds }], signal));
+      return { invoice: invoice.invoice, protocol: 'RGB', monitor: 'invoice' };
+    }
+    const spark = protocolManager.getAdapterIfAvailable('SPARK');
+    if (!spark?.isConnected()) throw new Error('Spark is not connected');
+    const invoice = await runReceiveOperation('Create Spark Lightning invoice', () =>
+      spark.createInvoice({ layer: 'BTC_LN', ...amountPart, description, expirySeconds }));
+    return { invoice: invoice.invoice, protocol: 'SPARK', monitor: 'invoice' };
   };
 
   const generateAddress = async () => {
@@ -713,7 +864,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           // existing RGB → Spark priority remains the default.
           const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
           const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
-          const preferSpark = selectedAccount === 'SPARK';
+          const preferSpark = routeDestination === 'SPARK';
           const rgbCanReceiveOnchain = rgbAdapter?.isConnected()
             && nwcWalletType !== 'ln'
             && (nwcWalletType == null || nwcCapabilities.includes('onchain'));
@@ -758,89 +909,22 @@ export default function ReceiveScreen({ navigation }: Props) {
             throw new Error('No wallet connected for on-chain deposit');
           }
         } else {
-          // BTC Lightning invoice. Open-amount: if the user typed a number we bind
-          // it (in sats); otherwise we mint an amount-less BOLT11 the sender fills in.
-          const cleanAmount = amount.replace(/,/g, '');
-          const amountSats = receiveAmountSats(amount, bitcoinUnit) || undefined;
-
-          // Honour an explicit account choice; otherwise prefer the connected
-          // NWC/RGB Lightning wallet and fall back to Spark.
-          // `layer: 'BTC_LN'` is REQUIRED for Spark — without it the Spark adapter
-          // mints a native Spark sats invoice (a `spark…` string), not a BOLT11.
-          const rgbLn = protocolManager.getAdapterIfAvailable('RGB_LN');
-          const sparkLn = protocolManager.getAdapterIfAvailable('SPARK');
-          const barkLn = protocolManager.getAdapterIfAvailable('BARK');
-          const preferSpark = selectedAccount === 'SPARK';
-          const rgbCanCreateInvoice = rgbLn?.isConnected()
-            && (nwcWalletType == null || nwcCapabilities.includes('createInvoice'));
-          const useBarkLn = selectedAccount === 'BARK'
-            || (!rgbCanCreateInvoice && !sparkLn?.isConnected() && !!barkLn?.isConnected());
-          if (useBarkLn) {
-            // Bark when chosen explicitly, or as the last resort when it is the only
-            // Lightning-capable wallet; otherwise the RGB → Spark default is unchanged.
-            if (!barkLn?.isConnected()) throw new Error('Bark is not connected');
-            if (!amountSats) throw new Error('Set an amount: Bark Lightning invoices need one.');
-            const invoice = await runReceiveOperation('Create Bark Lightning invoice', () =>
-              barkLn.createInvoice({
-                layer: 'BTC_LN',
-                amount: amountSats,
-                description: `Receive ${cleanAmount} ${bitcoinUnit}`,
-                // No expirySeconds: Bark sets its own invoice expiry and rejects a custom one.
-              }));
-            result = invoice.invoice;
-            methodMeta = {
-              key: 'lightning-bark',
-              label: 'Lightning invoice',
-              protocol: 'BARK',
-              kind: 'invoice',
-              layer: 'lightning',
-              monitor: 'invoice',
-              assetId: 'BTC',
-            };
-          } else if (!preferSpark && rgbCanCreateInvoice) {
-            const invoice = await runReceiveOperation('Create RGB Lightning invoice', (signal) =>
-              callAbortableAdapterMethod<any>(
-                rgbLn,
-                'createInvoice',
-                [{
-                  layer: 'BTC_LN',
-                  ...(amountSats ? { amount: amountSats } : {}),
-                  description: amountSats ? `Receive ${cleanAmount} ${bitcoinUnit}` : 'Receive Bitcoin',
-                  expirySeconds,
-                }],
-                signal,
-              ));
-            result = invoice.invoice;
-            methodMeta = {
-              key: 'lightning-rgb',
-              label: 'Lightning invoice',
-              protocol: 'RGB',
-              kind: 'invoice',
-              layer: 'lightning',
-              monitor: 'invoice',
-              assetId: 'BTC',
-            };
-          } else if (sparkLn?.isConnected()) {
-            const invoice = await runReceiveOperation('Create Spark Lightning invoice', () =>
-              sparkLn.createInvoice({
-                layer: 'BTC_LN',
-                ...(amountSats ? { amount: amountSats } : {}),
-                description: amountSats ? `Receive ${cleanAmount} ${bitcoinUnit}` : 'Receive Bitcoin',
-                expirySeconds,
-              }));
-            result = invoice.invoice;
-            methodMeta = {
-              key: 'lightning-spark',
-              label: 'Lightning invoice',
-              protocol: 'SPARK',
-              kind: 'invoice',
-              layer: 'lightning',
-              monitor: 'invoice',
-              assetId: 'BTC',
-            };
-          } else {
-            throw new Error('No wallet connected for Lightning invoice');
-          }
+          // BTC Lightning invoice into the chosen account. Open-amount where the account
+          // allows it; Bark and Arkade need the amount up front.
+          const account = routeDestination;
+          if (!account) throw new Error('No wallet connected for Lightning invoice');
+          const created = await createLightningInvoice(account, requestedSats, 'Receive Bitcoin');
+          result = created.invoice;
+          if (created.arkade && isCurrentGeneration()) setArkadeReceive(created.arkade);
+          methodMeta = {
+            key: `lightning-${account.toLowerCase()}`,
+            label: 'Lightning invoice',
+            protocol: created.protocol,
+            kind: 'invoice',
+            layer: 'lightning',
+            monitor: created.monitor,
+            assetId: 'BTC',
+          };
         }
       } else {
         // RGB assets (require RGB adapter)
@@ -1114,7 +1198,9 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     setUnifiedError(null);
     setUnifiedLoading(true);
-    if (!preserveExisting) {
+    // A manual refresh keeps the current code on screen until the new one is ready:
+    // clearing it re-armed the automatic generation, which then replaced the refresh.
+    if (!preserveExisting && reason !== 'manual') {
       setUnifiedUri('');
       setReceiveMethods([]);
       unifiedCollectedRef.current = null;
@@ -1125,18 +1211,24 @@ export default function ReceiveScreen({ navigation }: Props) {
       return;
     }
 
-    const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
-    const spark = protocolManager.getAdapterIfAvailable('SPARK');
-    const arkade = protocolManager.getAdapterIfAvailable('ARKADE');
+    // One code carries one network: only accounts on the chosen chain take part
+    // (a test setup can have Spark on regtest and Arkade on mutinynet).
+    const on = (account: AccountId) => universalAccounts.some((a) => a.account === account);
+    const rgb = on('RGB') ? protocolManager.getAdapterIfAvailable('RGB_LN') : undefined;
+    const spark = on('SPARK') ? protocolManager.getAdapterIfAvailable('SPARK') : undefined;
+    const arkade = on('ARKADE') ? protocolManager.getAdapterIfAvailable('ARKADE') : undefined;
+    const bark = on('BARK') ? protocolManager.getAdapterIfAvailable('BARK') : undefined;
     receiveLog('unified.adapters', {
       generationId,
+      chain: activeChain,
       rgb: !!rgb?.isConnected(),
       spark: !!spark?.isConnected(),
       arkade: !!arkade?.isConnected(),
+      bark: !!bark?.isConnected(),
     });
 
     // Optional amount (in sats) for the Lightning leg / BIP21 amount.
-    const amountSats = receiveAmountSats(amount, bitcoinUnit);
+    const amountSats = requestedSats;
 
     // Reuse native addresses only when the user explicitly refreshes Lightning.
     const cached = unifiedCollectedRef.current;
@@ -1155,6 +1247,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     const addMethod = (method: ReceiveMethod) => {
       nextMethods = upsertReceiveMethod(nextMethods, method);
     };
+    let nextArkadeReceive: ArkadeLightningReceive | null = null;
     const buildCurrentUnifiedUri = () => buildUnifiedReceiveURI({
       btcAddress: collected.btcAddress,
       lightningInvoice: collected.lightningInvoice,
@@ -1165,210 +1258,115 @@ export default function ReceiveScreen({ navigation }: Props) {
     });
 
     const addressTasks: Array<() => Promise<void>> = reuseAddrs ? [] : [
-      // 1) BTC on-chain — prefer RGB, then Spark static deposit, then Arkade boarding.
+      // 1) Bitcoin on-chain: the RGB node, else Spark's deposit address, else Arkade boarding.
       async () => {
         const taskStartedAt = nowMs();
         try {
-          // Automatic unified generation must stay on local/lightweight adapters.
-          // RGB/NWC on-chain generation remains available through manual refresh
-          // and the explicit On-chain network.
+          // The RGB/NWC address is a remote round trip; automatic generation uses it only
+          // when no local account on this chain can give an address.
           const rgbCanCreateOnchainAddress = rgb?.isConnected()
             && nwcWalletType !== 'ln'
             && (nwcWalletType == null || nwcCapabilities.includes('onchain'));
-          if (reason === 'manual' && rgbCanCreateOnchainAddress) {
+          if (rgbCanCreateOnchainAddress && (reason === 'manual' || (!spark?.isConnected() && !arkade?.isConnected()))) {
             const addr = await runReceiveOperation<any>(
               'Create unified RGB Bitcoin address',
-              (signal) => callAbortableAdapterMethod<any>(
-                rgb,
-                'getReceiveAddress',
-                [],
-                signal,
-              ),
-            );
-            if (addr?.address) collected.btcAddress = addr.address;
+              (signal) => callAbortableAdapterMethod<any>(rgb, 'getReceiveAddress', [], signal),
+            ).catch(() => null);
             if (addr?.address) {
+              collected.btcAddress = addr.address;
               addMethod({
-                key: 'onchain',
-                label: 'Bitcoin on-chain',
-                value: addr.address,
-                protocol: 'RGB',
-                kind: 'address',
-                layer: 'onchain',
-                monitor: 'balance',
-                assetId: 'BTC',
+                key: 'onchain', label: 'Bitcoin on-chain', value: addr.address,
+                protocol: 'RGB', kind: 'address', layer: 'onchain', monitor: 'balance', assetId: 'BTC',
               });
             }
           }
           if (!collected.btcAddress && spark?.isConnected()) {
-            const addr = await runReceiveOperation(
-              'Create unified Spark Bitcoin address',
-              () => spark.getReceiveAddress('BTC'),
-            ).catch((error) => {
-              console.warn('Spark deposit address unavailable; trying Arkade:', error);
-              return null;
-            });
+            const addr = await runReceiveOperation('Create unified Spark Bitcoin address', () => spark.getReceiveAddress('BTC'))
+              .catch(() => null);
             if (addr?.address) {
               collected.btcAddress = addr.address;
               // Spark on-chain deposit → needs claim/sweep (useSparkAutoClaim).
               nextSparkDepositAddress = addr.address;
               addMethod({
-                key: 'onchain',
-                label: 'Bitcoin on-chain',
-                value: addr.address,
-                protocol: 'SPARK',
-                kind: 'address',
-                layer: 'spark',
-                monitor: 'spark-claim',
-                assetId: 'BTC',
+                key: 'onchain', label: 'Bitcoin on-chain', value: addr.address,
+                protocol: 'SPARK', kind: 'address', layer: 'spark', monitor: 'spark-claim', assetId: 'BTC',
               });
             }
           }
           if (!collected.btcAddress && arkade?.isConnected()) {
-            const addr = await runReceiveOperation<any>(
-              'Create unified Arkade boarding address',
-              () => (arkade as any).getBoardingAddress(),
-            );
-            if (addr?.address) collected.btcAddress = addr.address;
+            const addr = await runReceiveOperation<any>('Create unified Arkade boarding address', () => (arkade as any).getBoardingAddress())
+              .catch(() => null);
             if (addr?.address) {
+              collected.btcAddress = addr.address;
               addMethod({
-                key: 'onchain',
-                label: 'Bitcoin on-chain',
-                value: addr.address,
-                protocol: 'ARKADE',
-                kind: 'address',
-                layer: 'onchain',
-                monitor: 'balance',
-                assetId: 'BTC',
+                key: 'onchain', label: 'Bitcoin on-chain', value: addr.address,
+                protocol: 'ARKADE', kind: 'address', layer: 'onchain', monitor: 'balance', assetId: 'BTC',
               });
             }
           }
-          receiveLog('unified.onchain.done', {
-            generationId,
-            ok: !!collected.btcAddress,
-            ms: Math.round(nowMs() - taskStartedAt),
-          });
+          receiveLog('unified.onchain.done', { generationId, ok: !!collected.btcAddress, ms: Math.round(nowMs() - taskStartedAt) });
         } catch (e) { console.warn('Unified: on-chain address failed', e); }
       },
 
       // 2) Spark native address.
       async () => {
-        const taskStartedAt = nowMs();
         if (!spark?.isConnected()) return;
         try {
-          const addr = await runReceiveOperation(
-            'Create unified Spark address',
-            () => spark.getReceiveAddress('SPARK'),
-          );
-          if (addr?.address) collected.sparkAddress = addr.address;
+          const addr = await runReceiveOperation('Create unified Spark address', () => spark.getReceiveAddress('SPARK'));
           if (addr?.address) {
+            collected.sparkAddress = addr.address;
             addMethod({
-              key: 'spark',
-              label: 'Spark',
-              value: addr.address,
-              protocol: 'SPARK',
-              kind: 'address',
-              layer: 'spark',
-              monitor: 'balance',
-              assetId: 'BTC',
+              key: 'spark', label: 'Spark', value: addr.address,
+              protocol: 'SPARK', kind: 'address', layer: 'spark', monitor: 'balance', assetId: 'BTC',
             });
           }
-          receiveLog('unified.spark.done', {
-            generationId,
-            ok: !!addr?.address,
-            ms: Math.round(nowMs() - taskStartedAt),
-          });
         } catch (e) { console.warn('Unified: Spark address failed', e); }
       },
 
-      // 4) Arkade native (ark) address.
+      // 3) Ark address: Arkade, else Bark (a code holds one Ark address).
       async () => {
-        const taskStartedAt = nowMs();
-        if (!arkade?.isConnected()) return;
+        const ark = arkade?.isConnected() ? arkade : bark?.isConnected() ? bark : undefined;
+        if (!ark) return;
+        const protocol: ReceiveProtocol = ark === arkade ? 'ARKADE' : 'BARK';
         try {
-          const addr = await runReceiveOperation(
-            'Create unified Arkade address',
-            () => arkade.getReceiveAddress(),
-          );
-          if (addr?.address) collected.arkadeAddress = addr.address;
+          const addr = await runReceiveOperation(`Create unified ${protocol === 'ARKADE' ? 'Arkade' : 'Bark'} address`, () => ark.getReceiveAddress());
           if (addr?.address) {
+            collected.arkadeAddress = addr.address;
             addMethod({
-              key: 'arkade',
-              label: 'Arkade',
-              value: addr.address,
-              protocol: 'ARKADE',
-              kind: 'address',
-              layer: 'arkade',
-              monitor: 'balance',
-              assetId: 'BTC',
+              key: 'ark', label: protocol === 'ARKADE' ? 'Arkade' : 'Bark', value: addr.address,
+              protocol, kind: 'address', layer: protocol === 'ARKADE' ? 'arkade' : 'bark', monitor: 'balance', assetId: 'BTC',
             });
           }
-          receiveLog('unified.arkade.done', {
-            generationId,
-            ok: !!addr?.address,
-            ms: Math.round(nowMs() - taskStartedAt),
-          });
-        } catch (e) { console.warn('Unified: Arkade address failed', e); }
+        } catch (e) { console.warn('Unified: Ark address failed', e); }
       },
     ];
 
-    // The Lightning invoice mint is the one leg that depends on `amount` and is
-    // the slowest call, so it always runs when requested — even on the reuse pass
-    // (which skips every address derivation above).
-    const lightningTasks: Array<() => Promise<void>> = includeLightning
+    // The Lightning leg lands in the chosen account (automatic: Spark, the RGB node,
+    // then Bark with an amount). It always runs when requested, even on the reuse pass.
+    const lightningTasks: Array<() => Promise<void>> = includeLightning && universalLnAccount
       ? [
           async () => {
             const taskStartedAt = nowMs();
-            // Automatic enrichment uses Spark only. An explicit user action may
-            // add RGB Lightning; that request is abortable through the NWC client.
-            const rgbCanCreateInvoice = rgb?.isConnected()
-              && (nwcWalletType == null || nwcCapabilities.includes('createInvoice'));
-            const lnAdapter = reason === 'manual'
-              ? rgbCanCreateInvoice ? rgb : spark?.isConnected() ? spark : undefined
-              : spark?.isConnected() ? spark : undefined;
-            if (!lnAdapter) return;
             try {
-              const invoice = await runReceiveOperation('Create unified Lightning invoice', (signal) =>
-                callAbortableAdapterMethod<any>(
-                  lnAdapter,
-                  'createInvoice',
-                  [{
-                    layer: 'BTC_LN', // force a BOLT11 (Spark would otherwise mint a native Spark invoice)
-                    amount: amountSats > 0 ? amountSats : undefined,
-                    description: 'Unified receive',
-                    expirySeconds,
-                  }],
-                  signal,
-                ));
-              if (invoice?.invoice) {
-                collected.lightningInvoice = invoice.invoice;
-                const protocol: ReceiveProtocol = lnAdapter === spark ? 'SPARK' : 'RGB';
+              const created = await createLightningInvoice(universalLnAccount, amountSats, 'Receive Bitcoin');
+              if (created.invoice) {
+                collected.lightningInvoice = created.invoice;
+                if (created.arkade) nextArkadeReceive = created.arkade;
                 addMethod({
-                  key: 'lightning',
-                  label: 'Lightning invoice',
-                  value: invoice.invoice,
-                  protocol,
-                  kind: 'invoice',
-                  layer: 'lightning',
-                  monitor: 'invoice',
-                  assetId: 'BTC',
+                  key: 'lightning', label: 'Lightning invoice', value: created.invoice,
+                  protocol: created.protocol, kind: 'invoice', layer: 'lightning', monitor: created.monitor, assetId: 'BTC',
                 });
               }
-              receiveLog('unified.lightning.done', {
-                generationId,
-                ok: !!invoice?.invoice,
-                ms: Math.round(nowMs() - taskStartedAt),
-              });
+              receiveLog('unified.lightning.done', { generationId, ok: !!created.invoice, ms: Math.round(nowMs() - taskStartedAt) });
             } catch (e) { console.warn('Unified: Lightning invoice failed', e); }
           },
         ]
       : [];
 
-    // Collect all methods before publishing. A visible request must never be
-    // silently replaced by a partial/final version or an automatic upgrade.
-    for (const task of [...addressTasks, ...lightningTasks]) {
-      if (!isCurrentGeneration()) return;
-      await task();
-    }
+    // Every leg is fetched at once (each is bounded by its own timeout), and the
+    // code is published only when all have answered: a visible request is never
+    // silently replaced by a partial version.
+    await Promise.all([...addressTasks, ...lightningTasks].map((task) => task()));
     if (!isCurrentGeneration()) {
       receiveLog('unified.stale', { generationId, activeGenerationId: unifiedGenerationRef.current });
       return;
@@ -1378,7 +1376,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (collected.btcAddress) methods.push('On-chain');
     if (collected.lightningInvoice) methods.push('Lightning');
     if (collected.sparkAddress) methods.push('Spark');
-    if (collected.arkadeAddress) methods.push('Arkade');
+    if (collected.arkadeAddress) methods.push('Ark');
 
     if (methods.length === 0) {
       receiveLog('unified.empty', {
@@ -1388,7 +1386,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       setUnifiedError(
         rgb?.isConnected() && reason !== 'manual'
           ? 'RGB receive is available. Tap Try Again to generate it explicitly without blocking the screen in the background.'
-          : 'No receive method available. Connect a wallet (RGB, Spark, or Arkade) to use unified receive.',
+          : 'None of your accounts could create a payment code. Check that they are connected, then try again.',
       );
       setUnifiedLoading(false);
       return;
@@ -1405,6 +1403,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       };
 
       setReceiveMethods(nextMethods);
+      setArkadeReceive(nextArkadeReceive);
       setUnifiedUri(uri);
       receiveLog('unified.complete', {
         generationId,
@@ -1420,7 +1419,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   const cancelScheduledUnified = useReceiveGeneration(
-    networkType === 'unified' ? JSON.stringify([unifiedAsset, amount, expirySeconds]) : null,
+    networkType === 'unified' ? JSON.stringify([unifiedAsset, amount, expirySeconds, activeChain, universalLnAccount]) : null,
     () => setUnifiedLoading(true),
     () => { void generateUnifiedUri({ includeLightning: true, reason: 'auto' }); },
     () => { unifiedGenerationRef.current += 1; },
@@ -1482,7 +1481,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // A single request identity prevents overlapping amount/network regeneration.
   const cancelScheduledAddress = useReceiveGeneration(
-    networkType !== 'unified' ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, selectedAccount, amount, expirySeconds]) : null,
+    networkType !== 'unified' && !awaitingAmount ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, routeDestination, amount, expirySeconds]) : null,
     () => { setAddress(''); setError(null); setLoading(true); },
     () => { void generateAddress(); },
     () => { addressGenerationRef.current += 1; },
@@ -1562,8 +1561,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
         balance: btcBalance?.vanilla?.spendable || 0,
       });
-      setRouteAxis('method');
       setSelectedAccount(null);
+      setArkadeSubMode('ark');
       setNetworkType('unified');
     };
     const selectUsd = () => {
@@ -1576,8 +1575,8 @@ export default function ReceiveScreen({ navigation }: Props) {
       // unified view so the aggregator actually runs.
       setUnifiedAsset('USD');
       setSelectedAsset({ asset_id: 'USD', ticker: 'USD', name: 'US Dollar', isRGB: false });
-      setRouteAxis('method');
       setSelectedAccount(null);
+      setArkadeSubMode('ark');
       setNetworkType('unified');
     };
 
@@ -1630,148 +1629,6 @@ export default function ReceiveScreen({ navigation }: Props) {
     );
   };
 
-  const renderRouteAxisSelector = () => {
-    if (isLite) return null;
-
-    const status = getProtocolStatus();
-    const family = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
-    const accounts = resolveReceiveAccounts({ assetFamily: family, accounts: status });
-    const effectiveAccount =
-      (selectedAccount && accounts.includes(selectedAccount) ? selectedAccount : null)
-      ?? accounts[0]
-      ?? null;
-    const chooseAccount = (account: AccountId) => {
-      feedback.select();
-      resetReceiveSurface();
-      setSelectedAccount(account);
-      let nextNetwork: ReceiveMode;
-      if (account === 'SPARK') {
-        nextNetwork = 'spark';
-      } else if (account === 'ARKADE') {
-        nextNetwork = 'arkade';
-      } else if (account === 'BARK') {
-        nextNetwork = 'bark';
-      } else {
-        nextNetwork = nwcWalletType === 'ln' && family === 'BTC' ? 'lightning' : 'onchain';
-      }
-      setNetworkType(nextNetwork);
-      if (selectedAsset.ticker === 'BTC') {
-        dispatch(setLastBtcReceiveRoute({ axis: 'account', network: nextNetwork, account }));
-      }
-    };
-
-    return (
-      <ReceiveRouteSelector
-        axis={routeAxis}
-        accounts={accounts}
-        selectedAccount={effectiveAccount}
-        nwcWalletType={nwcWalletType}
-        onAccountChange={chooseAccount}
-        onAxisChange={(axis) => {
-          if (routeAxis === axis) return;
-          feedback.select();
-          resetReceiveSurface();
-          setRouteAxis(axis);
-          if (axis === 'method') {
-            setSelectedAccount(null);
-            setNetworkType('unified');
-            if (selectedAsset.ticker === 'BTC') {
-              dispatch(setLastBtcReceiveRoute({ axis: 'method', network: 'unified', account: null }));
-            }
-          } else if (effectiveAccount) {
-            chooseAccount(effectiveAccount);
-          }
-          setShowPaymentOptions(true);
-        }}
-      />
-    );
-  };
-
-  // Advanced route choices; the main list opens individual payment codes.
-  const renderNetworkChoices = () => {
-    const canUseAll = selectedAsset.ticker === 'BTC' || /usd/i.test(selectedAsset.ticker);
-    const isRgbAsset = getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker) === 'RGB';
-    const selectableNetworks = availableNetworkTypes;
-    const options: Array<{ id: ReceiveMode; label: string; sub: string }> = [
-      ...(canUseAll && networkType !== 'unified'
-        ? [{
-            id: 'unified' as ReceiveMode,
-            label: 'Combined QR',
-            // USD is a different protocol set than BTC — reflect it in the hint.
-            sub: /usd/i.test(selectedAsset.ticker)
-              ? 'Spark · optional RGB'
-              : 'On-chain · Spark · Arkade · optional Lightning',
-          }]
-        : []),
-      ...(selectableNetworks.includes('onchain')
-        ? [{ id: 'onchain' as ReceiveMode, label: isRgbAsset ? 'RGB on-chain' : 'On-chain', sub: isRgbAsset ? 'RGB account · network fee · slower' : 'Bitcoin wallet · network fee · slower' }] : []),
-      ...(selectableNetworks.includes('lightning')
-        ? [{ id: 'lightning' as ReceiveMode, label: isRgbAsset ? 'RGB Lightning' : 'Lightning', sub: isRgbAsset ? 'Instant · in-channel (RGB-LN)' : 'Instant · low fee' }] : []),
-      ...(selectableNetworks.includes('spark')
-        ? [{ id: 'spark' as ReceiveMode, label: 'Spark', sub: 'Spark balance · instant · low fee' }] : []),
-      ...(selectableNetworks.includes('arkade')
-        ? [{ id: 'arkade' as ReceiveMode, label: 'Arkade', sub: 'Arkade balance · off-chain' }] : []),
-      ...(selectableNetworks.includes('bark')
-        ? [{ id: 'bark' as ReceiveMode, label: 'Bark', sub: `Bark balance · off-chain · ${barkNetworkLabel()}` }] : []),
-    ];
-    const current = options.find((o) => o.id === networkType) || options[0];
-    if (!current) return null;
-
-    const glyph = (id: ReceiveMode, c: string) =>
-      id === 'unified'
-        ? <Ionicons name="apps" size={18} color={c} />
-        : <NetworkIcon network={id as ProtocolNetworkType} size={18} color={c} />;
-
-    return (
-      <View>
-        <View>
-          {options.filter(o => o.id === 'unified' || !receiveMethods.some(method => method.layer === o.id || method.key === o.id || (o.id === 'arkade' && method.protocol === 'ARKADE' && method.layer !== 'lightning'))).map((o) => {
-            const active = o.id === networkType;
-            const c = NETWORK_COLORS[o.id] || theme.colors.primary[500];
-            return (
-              <TouchableOpacity
-                key={o.id}
-                accessibilityRole="button" accessibilityLabel={`Receive with ${o.label}`}
-                style={{ minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], borderBottomWidth: 1, borderBottomColor: theme.colors.border.light }}
-                onPress={() => {
-                  receiveLog('tap.networkOption', { from: networkType, to: o.id });
-                  feedback.select();
-                  if (active) {
-                    void generateAddress();
-                    setShowPaymentOptions(false);
-                    return;
-                  }
-                  resetReceiveSurface();
-                  setRouteAxis('method');
-                  setSelectedAccount(null);
-                  setNetworkType(o.id);
-                  if (selectedAsset.ticker === 'BTC') {
-                    dispatch(setLastBtcReceiveRoute({
-                      axis: 'method',
-                      network: o.id,
-                      account: null,
-                    }));
-                  }
-                  setShowPaymentOptions(false);
-                }}
-                activeOpacity={0.7}
-              >
-                <View style={{ width: 40, height: 40, borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
-                  {glyph(o.id, c)}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.netOptionLabel, active && { color: c }]}>{o.label}</Text>
-
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      </View>
-    );
-  };
-
   // ── Amount row with pencil edit (opens the multi-currency editor) ─────────
   const renderAmountRow = () => {
     // The amount editor works in BTC/sats/fiat — it can't express an RGB asset
@@ -1793,7 +1650,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         activeOpacity={0.7}
       >
         <View style={{ flex: 1 }}>
-          <Text style={styles.amountRowLabel}>{summary ? 'Requested amount' : required ? 'Amount required' : 'Add amount · optional'}</Text>
+          <Text style={styles.amountRowLabel}>{summary ? 'Requested amount' : required || awaitingAmount ? 'Amount required' : 'Add amount · optional'}</Text>
           {!!summary && <Text style={styles.amountRowValue}>{summary}</Text>}
         </View>
         <Ionicons name={summary ? 'pencil-outline' : 'add-circle-outline'} size={22} color={theme.colors.primary[500]} />
@@ -1848,7 +1705,9 @@ export default function ReceiveScreen({ navigation }: Props) {
         {/* Explain the universal request in plain language. This gives the user
             confidence that one QR intentionally covers several Bitcoin rails. */}
         <View style={styles.qrTopBar}>
-          <Text style={[styles.universalRequestTitle, { flex: 1 }]}>Scan to pay</Text>
+          <Text style={[styles.universalRequestTitle, { flex: 1 }]}>
+            Scan with any wallet{unifiedAsset === 'BTC' && activeChain && activeChain !== 'mainnet' ? ` · ${chainLabel(activeChain)}` : ''}
+          </Text>
           <TouchableOpacity
             onPress={() => generateUnifiedUri()}
             style={styles.qrRefreshBtn}
@@ -1876,6 +1735,14 @@ export default function ReceiveScreen({ navigation }: Props) {
 
         {unifiedAddresses.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry showCountdown={showCountdown} key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
         <ReceiveRequestActions value={unifiedUri} />
+        <ReceiveRequestDetails
+          methods={receiveMethods}
+          universal
+          notes={unifiedAsset === 'BTC' ? universalNotes : []}
+          qrSize={qrSize}
+          rgbLabel={rgbLabel}
+          onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }}
+        />
       </View>
     );
   };
@@ -1883,6 +1750,20 @@ export default function ReceiveScreen({ navigation }: Props) {
   const renderContent = () => {
     if (networkType === 'unified') {
       return renderUnifiedContent();
+    }
+
+    if (awaitingAmount && routeTarget) {
+      return (
+        <View style={styles.promptContainer}>
+          <Ionicons name="calculator-outline" size={48} color={theme.colors.primary[500]} />
+          <Text style={styles.promptText}>
+            Lightning into {routeTarget.label} needs a fixed amount. Add how much you want to receive.
+          </Text>
+          <TouchableOpacity style={styles.generateButton} onPress={() => setShowAmountEditor(true)} activeOpacity={0.7}>
+            <Text style={styles.generateButtonText}>Add amount</Text>
+          </TouchableOpacity>
+        </View>
+      );
     }
 
     if (loading) {
@@ -1935,30 +1816,19 @@ export default function ReceiveScreen({ navigation }: Props) {
       );
     }
 
-    // Render QR code with network-aware title
-    const qrTitle = networkType === 'spark' ? 'Spark Address'
-      : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
-      : networkType === 'bark' ? (arkadeSubMode === 'boarding' ? 'Bark Deposit Address' : 'Bark Address')
-      : networkType === 'lightning' ? 'Lightning Invoice'
-      : selectedAsset.isRGB ? 'RGB Invoice'
-      : 'On-chain Address';
-
-    const netColor = NETWORK_COLORS[networkType] || theme.colors.primary[500];
-    const addrLabel = networkType === 'lightning' ? 'Lightning Invoice'
-      : networkType === 'spark' ? 'Spark Address'
-      : networkType === 'arkade' ? (arkadeSubMode === 'boarding' ? 'Boarding Address' : 'Arkade Address')
-      : networkType === 'bark' ? (arkadeSubMode === 'boarding' ? 'Bark Deposit Address' : 'Bark Address')
-      : 'Deposit Address';
+    const method = receiveMethods[0];
+    const title = networkType === 'lightning' ? (selectedAsset.isRGB ? 'RGB Lightning invoice' : 'Lightning invoice')
+      : networkType === 'spark' ? (method?.kind === 'invoice' ? 'Spark invoice' : 'Spark address')
+      : (networkType === 'arkade' || networkType === 'bark') && arkadeSubMode === 'ark' ? 'Ark address'
+      : selectedAsset.isRGB ? 'RGB invoice'
+      : 'Bitcoin address';
+    const swapNote = arkadeReceive && method?.protocol === 'ARKADE' && method.layer === 'lightning'
+      ? `The sender pays ${arkadeReceive.payAmountSats.toLocaleString()} sats; ${(arkadeReceive.payAmountSats - arkadeReceive.amountSats).toLocaleString()} sats go to ${arkadeReceive.provider} for the swap.`
+      : undefined;
     return (
       <View style={styles.qrSection}>
-        {/* Type/amount chip on the left, small refresh tucked top-right. */}
         <View style={styles.qrTopBar}>
-          <View style={[styles.qrMethodsChip, { backgroundColor: netColor + '18' }]}>
-            <NetworkIcon network={networkType as ProtocolNetworkType} size={14} color={netColor} />
-            <Text style={[styles.qrMethodsChipText, { color: netColor, marginLeft: 6 }]} numberOfLines={1}>
-              {qrTitle}{amount && selectedAsset.ticker ? `  ·  ${amount} ${selectedAsset.ticker === 'BTC' ? bitcoinUnit : selectedAsset.ticker}` : ''}
-            </Text>
-          </View>
+          <Text style={[styles.universalRequestTitle, { flex: 1 }]}>{title}</Text>
           <TouchableOpacity
             onPress={generateAddress}
             style={styles.qrRefreshBtn}
@@ -1976,7 +1846,14 @@ export default function ReceiveScreen({ navigation }: Props) {
         {renderAmountRow()}
 
         <InvoiceExpiry showCountdown={showCountdown} invoice={address} onRefresh={() => { void generateAddress(); }} />
-        <ReceiveRequestActions value={address} label={addrLabel} showValue />
+        <ReceiveRequestActions value={address} label={title} />
+        <ReceiveRequestDetails
+          methods={method ? [method] : []}
+          universal={false}
+          qrSize={qrSize}
+          rgbLabel={rgbLabel}
+          extra={swapNote}
+        />
       </View>
     );
   };
@@ -2008,11 +1885,31 @@ export default function ReceiveScreen({ navigation }: Props) {
       >
         <ReceiveConnectionNotice hasRequest={!!(unifiedUri || address)} />
         {renderAssetTabs()}
-        {selectedAsset.asset_id === 'BTC' && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Create a reusable payment QR" onPress={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
-          style={{ padding: theme.spacing[4], marginBottom: theme.spacing[3] }}>
-          <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Reusable payment QR →</Text>
-          <Text style={{ color: theme.colors.text.secondary }}>Receive multiple payments with one BOLT12 offer</Text>
-        </TouchableOpacity>}
+        <ReceiveRoutePicker
+          methods={receiveMethodIds}
+          method={route.method}
+          onMethod={(method) => selectRoute(method)}
+          destinations={routeDestinations}
+          destination={routeDestination}
+          onDestination={(account) => selectRoute(route.method, account)}
+          amountSats={requestedSats}
+          chains={unifiedAsset === 'BTC' ? chainGroups : undefined}
+          chain={activeChain}
+          onChain={(chain) => {
+            if (chain === activeChain) return;
+            feedback.select();
+            resetReceiveSurface();
+            setUniversalChain(chain);
+            setUniversalLn(null);
+          }}
+          lightningDestinations={unifiedAsset === 'BTC' ? universalLnOptions : undefined}
+          lightningDestination={universalLnAccount}
+          onLightningDestination={(account) => {
+            feedback.select();
+            resetReceiveSurface();
+            setUniversalLn(account);
+          }}
+        />
         {renderContent()}
         {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
         <ReceiveStatus
@@ -2020,56 +1917,23 @@ export default function ReceiveScreen({ navigation }: Props) {
           status={monitorStatus}
           message={depositMonitor.message}
         />
-        <TouchableOpacity style={styles.addrListHeader} accessibilityRole="button"
-          accessibilityLabel="Payment methods" onPress={() => setShowPaymentOptions(true)}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.addrLabel, { marginBottom: 4 }]}>Payment methods</Text>
-            <Text style={styles.universalRequestSubtitle}>{networkType === 'unified' ? unifiedMethods.join(' · ') : 'Choose how to receive'}</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={theme.colors.text.secondary} />
-        </TouchableOpacity>
-      </ScrollView>
-
-      <ReceiveMethodsSheet visible={showPaymentOptions}
-        onAdvancedOpen={() => { if (!channelsLoading && getProtocolStatus().RGB) void loadChannels(); }}
-        additionalMethods={renderNetworkChoices()}
-        methods={receiveMethods} qrSize={qrSize} showCountdown={showCountdown}
-        onClose={() => setShowPaymentOptions(false)}
-        onRefresh={() => {
-          if (networkType === 'unified') void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' });
-          else void generateAddress();
-        }}>
-        {networkType === 'unified' && !unifiedLoading
-          && getProtocolStatus().RGB
-          && !receiveMethods.some((method) => method.protocol === 'RGB') && (
+        {selectedAsset.asset_id === 'BTC' && (
           <TouchableOpacity
-            style={styles.addRgbBtn}
-            onPress={() => generateUnifiedUri({
-              includeLightning: true,
-              preserveExisting: true,
-              reason: 'manual',
-            })}
+            accessibilityRole="button"
+            accessibilityLabel="Create a reusable payment QR"
+            onPress={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
+            style={styles.addrListHeader}
             activeOpacity={0.7}
           >
-            <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
-            <Text style={styles.addRgbText}>
-              {unifiedAsset === 'USD' ? 'Add RGB USDT method' : 'Add RGB / Lightning method'}
-            </Text>
+            <Ionicons name="repeat-outline" size={20} color={theme.colors.primary[500]} />
+            <View style={{ flex: 1, marginLeft: theme.spacing[3] }}>
+              <Text style={[styles.addrLabel, { marginBottom: 2 }]}>Reusable payment QR</Text>
+              <Text style={styles.universalRequestSubtitle}>One BOLT12 code for many payments</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={theme.colors.text.secondary} />
           </TouchableOpacity>
         )}
-
-        {(networkType === 'arkade' || networkType === 'bark') && <View>
-          {(['ark', 'boarding'] as const).map(mode => <TouchableOpacity key={mode}
-            accessibilityRole="radio" accessibilityState={{ checked: arkadeSubMode === mode }}
-            onPress={() => { resetReceiveSurface(); setArkadeSubMode(mode); }}
-            style={{ minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] }}>
-            <Ionicons name={arkadeSubMode === mode ? 'radio-button-on' : 'radio-button-off'} size={20} color={theme.colors.primary[500]} />
-            <Text style={{ color: theme.colors.text.primary }}>
-              {mode === 'ark' ? `Receive on ${networkType === 'bark' ? 'Bark' : 'Arkade'}` : 'Deposit from Bitcoin'}
-            </Text>
-          </TouchableOpacity>)}
-        </View>}
-      </ReceiveMethodsSheet>
+      </ScrollView>
 
       {/* Asset picker (opened by the "+" tab) */}
       <AssetSelector

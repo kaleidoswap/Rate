@@ -12,6 +12,8 @@ import { connectSparkPayAccounts } from './sparkPay';
 import { connectRgbPayAccounts, rgbRequestAsset, registerRgbAssetPayment } from './rgbPay';
 import { connectArkadePayAccounts } from './arkadePay';
 import { getPayOptions } from './payOptions';
+import { currentBarkHost } from '../protocols/barkPreferences';
+import type { ArkadeLightningReceiveOptions } from './arkadeIntents';
 export { setPayOptions } from './payOptions';
 
 type PayProtocol = 'SPARK' | 'RGB_LN' | 'ARKADE';
@@ -98,4 +100,33 @@ export async function prepareRgbRequest(invoice: string, amount?: number): Promi
   rgbAssetRegistration?.();
   rgbAssetRegistration = registerRgbAssetPayment({ id: asset.id, ticker: asset.ticker, precision: asset.precision });
   return asset.amount > 0 ? asset : { id: asset.id, ticker: asset.ticker, precision: asset.precision };
+}
+
+type ReceiveAccount = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK';
+const RECEIVE_PROTOCOL: Record<ReceiveAccount, string> = { RGB: 'RGB_LN', SPARK: 'SPARK', ARKADE: 'ARKADE', BARK: 'BARK' };
+
+/** The chain a connected receive account is on, or undefined when it is not connected or can't tell. */
+export function receiveAccountChain(account: ReceiveAccount): Network | undefined {
+  let adapter: any;
+  try { adapter = protocolManager.getAdapterIfAvailable(RECEIVE_PROTOCOL[account] as any); } catch { return undefined; }
+  if (!adapter?.isConnected?.()) return undefined;
+  if (account === 'BARK') {
+    const network = String(currentBarkHost()?.network ?? '').toLowerCase();
+    return network === 'bitcoin' ? 'mainnet' : (CHAINS.includes(network as Network) ? network as Network : undefined);
+  }
+  return adapterChain(account === 'RGB' ? 'RGB_LN' : account, adapter);
+}
+
+/** What a Lightning receive into the connected Arkade wallet needs, or null when Arkade is not connected. */
+export function arkadeReceiveOptions(): ArkadeLightningReceiveOptions | null {
+  const adapter = protocolManager.getAdapterIfAvailable('ARKADE') as any;
+  if (!adapter?.isConnected?.()) return null;
+  const wallet = adapter.rawWallet;
+  const arkServerUrl = getPayOptions().arkServerUrl ?? wallet?.arkProvider?.serverUrl;
+  const network = adapterChain('ARKADE', adapter);
+  if (!wallet || !arkServerUrl || !network) return null;
+  return {
+    network, wallet, arkServerUrl, arkNetwork: adapter.arkInfo?.network,
+    makerUrl: kaleidoswapMakerUrl(network, getPayOptions().makerUrl),
+  };
 }

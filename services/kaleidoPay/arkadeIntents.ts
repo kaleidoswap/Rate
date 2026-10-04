@@ -136,6 +136,31 @@ export function estimateLightningSend(m: IntentsMarket, amountSat: number): { fe
   return { feeSat };
 }
 
+/** A market whose solver can be paid over Lightning and pay out on Arkade. */
+export function isLightningReceiveMarket(m: IntentsMarket): boolean {
+  const sides = lightningSendSides(m);
+  return !!sides && (bound(m, sides.ark, 'max') ?? 0) > 0 && Number.isFinite(m.fee_bps) && m.fee_bps >= 0 && m.fee_bps < 10_000;
+}
+
+/**
+ * What the sender pays over Lightning for `amountSat` to land on Arkade, by the provider's
+ * card: the spread on the Lightning side plus the flat fee. An estimate; the RFQ binds.
+ */
+export function estimateLightningReceive(m: IntentsMarket, amountSat: number): { payAmountSat: number } | { unavailable: string } {
+  const sides = lightningSendSides(m);
+  if (!sides || !isLightningReceiveMarket(m)) return { unavailable: 'This provider does not pay out on Arkade.' };
+  const flat = m.fee_flat === undefined ? 0 : Number(m.fee_flat);
+  if (!Number.isSafeInteger(flat) || flat < 0) return { unavailable: 'This provider publishes no usable fee.' };
+  const arkMin = bound(m, sides.ark, 'min'), arkMax = bound(m, sides.ark, 'max');
+  if (arkMin === null || arkMax === null) return { unavailable: 'This provider publishes no usable limits.' };
+  if (amountSat < arkMin) return { unavailable: `Below this provider's minimum of ${arkMin.toLocaleString()} sats.` };
+  if (amountSat > arkMax) return { unavailable: `Above this provider's maximum of ${arkMax.toLocaleString()} sats.` };
+  const payAmountSat = Math.ceil(amountSat * 10_000 / (10_000 - m.fee_bps)) + flat;
+  const lnMax = bound(m, sides.ln, 'max');
+  if (lnMax !== null && lnMax > 0 && payAmountSat > lnMax) return { unavailable: `Above this provider's maximum of ${lnMax.toLocaleString()} sats.` };
+  return { payAmountSat };
+}
+
 /** The KaleidoSwap maker's corridor root: its /v2 base without the /v2 (RN's URL has no settable pathname). */
 export function makerCorridorRoot(makerUrl: string | null | undefined): string | null {
   const url = makerUrl?.trim().replace(/\/+$/, '');
@@ -175,6 +200,77 @@ export function invoiceFacts(invoice: string): InvoiceFacts {
   if (msat % 1000 !== 0) throw new Error('The invoice amount is not a whole number of sats.');
   if (!/^[0-9a-f]{64}$/.test(paymentHash) || !Number.isSafeInteger(timestamp)) throw new Error('The Lightning invoice could not be read.');
   return { raw, paymentHash, amountSats: msat / 1000, expiresAt: timestamp + (Number.isSafeInteger(expiry) ? expiry : 3600) };
+}
+
+// ---------------------------------------------------------------------------
+// Provider discovery, shared by Lightning sends and receives: the KaleidoSwap maker
+// (over HTTP) first, then the solvers the registry lists (over Nostr).
+// ---------------------------------------------------------------------------
+interface ProviderSourceOptions {
+  network: Network;
+  arkNetwork: () => string | undefined;
+  makerUrl?: string | null;
+  registryUrl?: string;
+  /** Already timed. */
+  fetchImpl: typeof fetch;
+}
+type Listed = IntentsProvider | { id: string; name: string; unavailable: string };
+
+function createProviderSource(opts: ProviderSourceOptions, accept: (m: IntentsMarket) => boolean, makerUnavailable: string) {
+  const { network, fetchImpl } = opts;
+  const makerRoot = makerCorridorRoot(opts.makerUrl);
+  let cached: { at: number; key: string; list: IntentsProvider[] } | null = null;
+
+  async function makerProvider(): Promise<Listed | null> {
+    if (!makerRoot) return null;
+    const name = 'KaleidoSwap';
+    try {
+      const res = await fetchImpl(`${makerRoot}/v1/card`, { method: 'GET' });
+      const card = await res.json();
+      const market = (Array.isArray(card?.markets) ? card.markets as IntentsMarket[] : []).find(accept);
+      if (!res.ok || !market) return { id: KALEIDOSWAP_PROVIDER, name, unavailable: makerUnavailable };
+      const discovery = typeof card.discovery_pubkey === 'string' ? card.discovery_pubkey : undefined;
+      return {
+        id: KALEIDOSWAP_PROVIDER, name, detail: 'KaleidoSwap maker',
+        market: { ...market, discovery_pubkey: discovery },
+        transport: () => load().swap.httpTransport(makerRoot, { fetchImpl }),
+      };
+    } catch {
+      return { id: KALEIDOSWAP_PROVIDER, name, unavailable: 'KaleidoSwap did not publish its fees, so no estimate is available.' };
+    }
+  }
+
+  async function registryProviders(): Promise<IntentsProvider[]> {
+    const { swap, nostr } = load();
+    const markets = await swap.discoverMarkets({
+      network: registryNetwork(opts.arkNetwork(), network) as any,
+      registryUrl: `${opts.registryUrl ?? ARKADE_SOLVER_REGISTRY}/${registryNetwork(opts.arkNetwork(), network)}.json`,
+      fetchImpl,
+    }) as unknown as IntentsMarket[];
+    const out: IntentsProvider[] = [];
+    for (const market of markets) {
+      const key = market.discovery_pubkey?.toLowerCase();
+      const relays = market.transports?.nostr?.relays?.filter(r => /^wss:\/\//i.test(r)) ?? [];
+      if (!key || !/^[0-9a-f]{64}$/.test(key) || !relays.length || !accept(market)) continue;
+      if (out.some(p => p.id === `solver:${key}`)) continue; // markets come ranked; keep the best per solver
+      out.push({
+        id: `solver:${key}`, name: market.solver ? `${market.solver}` : 'Arkade solver', detail: `Arkade Intents solver ${short(key)}`,
+        market, transport: () => nostr.nostrRfqTransport({ relays, solverPubkey: key }),
+      });
+    }
+    return out;
+  }
+
+  return async function providers(): Promise<Listed[]> {
+    const key = `${registryNetwork(opts.arkNetwork(), network)}|${makerRoot}`;
+    if (cached && cached.key === key && Date.now() - cached.at < MARKETS_TTL_MS) return cached.list;
+    const [maker, solvers] = await Promise.all([makerProvider(), registryProviders().catch(() => [] as IntentsProvider[])]);
+    // The maker is reached over HTTP; drop its own registry listing so it isn't offered twice.
+    const makerKey = maker && 'market' in maker ? maker.market.discovery_pubkey?.toLowerCase() : undefined;
+    const list: Listed[] = [...(maker ? [maker] : []), ...solvers.filter(s => !makerKey || s.id !== `solver:${makerKey}`)];
+    if (list.every(p => 'market' in p)) cached = { at: Date.now(), key, list: list as IntentsProvider[] };
+    return list;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -218,62 +314,12 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
   const to = `ln:${network}`;
   const store = opts.store ?? arkadeIntentsStore;
   const fetchImpl = timedFetch(opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args)));
-  const makerRoot = makerCorridorRoot(opts.makerUrl);
-  let cached: { at: number; key: string; list: IntentsProvider[] } | null = null;
+  const providers = createProviderSource(
+    { network, arkNetwork: opts.arkNetwork, makerUrl: opts.makerUrl, registryUrl: opts.registryUrl, fetchImpl },
+    isLightningSendMarket, 'KaleidoSwap does not offer Arkade → Lightning right now.',
+  );
   const approved = new WeakMap<Quote, Approval>();
   const attemptKey = (attemptId: string) => `kaleidopay-arkade-ln-${opts.sourceId}-${attemptId}`;
-
-  async function makerProvider(): Promise<IntentsProvider | { id: string; name: string; unavailable: string } | null> {
-    if (!makerRoot) return null;
-    const name = 'KaleidoSwap';
-    try {
-      const res = await fetchImpl(`${makerRoot}/v1/card`, { method: 'GET' });
-      const card = await res.json();
-      const market = (Array.isArray(card?.markets) ? card.markets as IntentsMarket[] : []).find(isLightningSendMarket);
-      if (!res.ok || !market) return { id: KALEIDOSWAP_PROVIDER, name, unavailable: 'KaleidoSwap does not offer Arkade → Lightning right now.' };
-      const discovery = typeof card.discovery_pubkey === 'string' ? card.discovery_pubkey : undefined;
-      return {
-        id: KALEIDOSWAP_PROVIDER, name, detail: 'KaleidoSwap maker',
-        market: { ...market, discovery_pubkey: discovery },
-        transport: () => load().swap.httpTransport(makerRoot, { fetchImpl }),
-      };
-    } catch {
-      return { id: KALEIDOSWAP_PROVIDER, name, unavailable: 'KaleidoSwap did not publish its fees, so no estimate is available.' };
-    }
-  }
-
-  async function registryProviders(): Promise<IntentsProvider[]> {
-    const { swap, nostr } = load();
-    const markets = await swap.discoverMarkets({
-      network: registryNetwork(opts.arkNetwork(), network) as any,
-      registryUrl: `${opts.registryUrl ?? ARKADE_SOLVER_REGISTRY}/${registryNetwork(opts.arkNetwork(), network)}.json`,
-      fetchImpl,
-    }) as unknown as IntentsMarket[];
-    const out: IntentsProvider[] = [];
-    for (const market of markets) {
-      const key = market.discovery_pubkey?.toLowerCase();
-      const relays = market.transports?.nostr?.relays?.filter(r => /^wss:\/\//i.test(r)) ?? [];
-      if (!key || !/^[0-9a-f]{64}$/.test(key) || !relays.length || !isLightningSendMarket(market)) continue;
-      if (out.some(p => p.id === `solver:${key}`)) continue; // markets come ranked; keep the best per solver
-      out.push({
-        id: `solver:${key}`, name: market.solver ? `${market.solver}` : 'Arkade solver', detail: `Arkade Intents solver ${short(key)}`,
-        market, transport: () => nostr.nostrRfqTransport({ relays, solverPubkey: key }),
-      });
-    }
-    return out;
-  }
-
-  type Listed = IntentsProvider | { id: string; name: string; unavailable: string };
-  async function providers(): Promise<Listed[]> {
-    const key = `${registryNetwork(opts.arkNetwork(), network)}|${makerRoot}`;
-    if (cached && cached.key === key && Date.now() - cached.at < MARKETS_TTL_MS) return cached.list;
-    const [maker, solvers] = await Promise.all([makerProvider(), registryProviders().catch(() => [] as IntentsProvider[])]);
-    // The maker is reached over HTTP; drop its own registry listing so it isn't offered twice.
-    const makerKey = maker && 'market' in maker ? maker.market.discovery_pubkey?.toLowerCase() : undefined;
-    const list: Listed[] = [...(maker ? [maker] : []), ...solvers.filter(s => !makerKey || s.id !== `solver:${makerKey}`)];
-    if (list.every(p => 'market' in p)) cached = { at: Date.now(), key, list: list as IntentsProvider[] };
-    return list;
-  }
 
   function check(preview: Preview, route: Route): InvoiceFacts {
     if (route.kind !== 'swap' || route.to !== to || route.sourceId !== opts.sourceId || route.providerId !== ARKADE_INTENTS_SWAP_ID) {
@@ -433,4 +479,104 @@ export async function recoverArkadeIntentSwaps(wallet: any, arkServerUrl: string
   if (!(await store.listPending()).length) return null;
   const venue = new (load().venue.ArkadeIntentsVenue)({ wallet, arkServerUrl, store, transport: idleTransport });
   return venue.reconcile();
+}
+
+// ---------------------------------------------------------------------------
+// Lightning -> Arkade: receive a Lightning payment into Arkade. A provider's hold
+// invoice is shown to the sender; once it is paid the provider locks the sats on
+// Arkade and the wallet claims them (revealing the preimage settles the invoice).
+// ---------------------------------------------------------------------------
+export interface ArkadeLightningReceiveOptions {
+  network: Network;
+  /** The connected Arkade SDK wallet (`ArkadeWdkAdapter.rawWallet`). */
+  wallet: any;
+  arkServerUrl: string;
+  /** The Ark server's network name (getInfo().network), for the solver registry. */
+  arkNetwork?: string;
+  makerUrl?: string | null;
+  registryUrl?: string;
+  store?: ArkadeSwapStore;
+  fetchImpl?: typeof fetch;
+}
+
+export interface ArkadeLightningReceive {
+  rfqId: string;
+  /** The invoice the sender pays. */
+  invoice: string;
+  /** What lands on Arkade, sats. */
+  amountSats: number;
+  /** What the sender pays, sats (amount plus the provider's fee). */
+  payAmountSats: number;
+  provider: string;
+  /** Invoice expiry, unix seconds. */
+  expiresAt: number;
+}
+
+/** Headroom over the card estimate a binding quote may use before it is refused. */
+const receiveFeeCap = (estimate: number, amountSats: number) => estimate + Math.ceil(amountSats * 0.005) + 10;
+
+/**
+ * Ask the providers in order (KaleidoSwap first) for a Lightning invoice that pays
+ * `amountSats` into this Arkade wallet. Each attempt is a real RFQ; the first provider
+ * that quotes within its published fee wins. Nothing is spent by the wallet.
+ */
+export async function createArkadeLightningReceive(opts: ArkadeLightningReceiveOptions, amountSats: number): Promise<ArkadeLightningReceive> {
+  if (!Number.isSafeInteger(amountSats) || amountSats <= 0) throw new Error('Set an amount: Lightning into Arkade needs one.');
+  if (!opts.wallet || !opts.arkServerUrl) throw new Error('Arkade is not connected.');
+  const fetchImpl = timedFetch(opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args)));
+  const providers = createProviderSource(
+    { network: opts.network, arkNetwork: () => opts.arkNetwork, makerUrl: opts.makerUrl, registryUrl: opts.registryUrl, fetchImpl },
+    isLightningReceiveMarket, 'KaleidoSwap does not offer Lightning → Arkade right now.',
+  );
+  const list = await providers();
+  const reasons: string[] = [];
+  for (const provider of list) {
+    if (!('market' in provider)) { reasons.push(`${provider.name}: ${provider.unavailable}`); continue; }
+    const estimate = estimateLightningReceive(provider.market, amountSats);
+    if ('unavailable' in estimate) { reasons.push(`${provider.name}: ${estimate.unavailable}`); continue; }
+    const transport = provider.transport();
+    try {
+      const venue = new (load().venue.ArkadeIntentsVenue)({
+        wallet: opts.wallet, arkServerUrl: opts.arkServerUrl, store: opts.store ?? arkadeIntentsStore, transport,
+      });
+      const prepared = await venue.prepareLightningReceive({
+        amountSats,
+        decodeInvoice: invoiceFacts,
+        maxPayAmountSats: receiveFeeCap(estimate.payAmountSat, amountSats),
+      });
+      if (prepared.summary.toAmountSats !== amountSats) {
+        reasons.push(`${provider.name}: quoted a different amount`);
+        continue;
+      }
+      return {
+        rfqId: prepared.record.id, invoice: prepared.invoice, amountSats,
+        payAmountSats: prepared.payAmountSats, provider: provider.name, expiresAt: prepared.invoiceExpiresAt,
+      };
+    } catch (error) {
+      reasons.push(`${provider.name}: ${error instanceof Error ? error.message : 'no answer'}`);
+    } finally {
+      void transport.close().catch(() => undefined);
+    }
+  }
+  throw new Error(list.length
+    ? `No swap provider could give a Lightning invoice into Arkade. ${reasons.join(' · ')}`
+    : 'No swap provider receives Lightning into Arkade on this network right now.');
+}
+
+const claimVenues = new WeakMap<object, ArkadeIntentsVenue>();
+/**
+ * One claim pass for a Lightning receive: claims the provider's Arkade lockup once it
+ * is funded. Safe to call repeatedly; never pays. Returns the swap's phase.
+ */
+export async function claimArkadeLightningReceive(
+  wallet: any, arkServerUrl: string, rfqId: string, store: ArkadeSwapStore = arkadeIntentsStore,
+): Promise<ArkadeSwapPhase | undefined> {
+  if (!wallet || !arkServerUrl) return undefined;
+  let venue = claimVenues.get(wallet);
+  if (!venue) {
+    venue = new (load().venue.ArkadeIntentsVenue)({ wallet, arkServerUrl, store, transport: idleTransport });
+    claimVenues.set(wallet, venue);
+  }
+  const record = await venue.claimReceive(rfqId, { waitSeconds: 0 });
+  return record?.phase;
 }

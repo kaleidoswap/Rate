@@ -23,6 +23,8 @@ const mockVenue = {
   binding: { from: 10_100 },
   prepare: jest.fn(),
   reconcile: jest.fn(),
+  receive: jest.fn(),
+  claim: jest.fn(),
 };
 jest.mock('@kaleidorg/swap-sdk/arkade', () => ({
   ArkadeIntentsVenue: class {
@@ -42,6 +44,15 @@ jest.mock('@kaleidorg/swap-sdk/arkade', () => ({
       return r;
     }
     async reconcile() { return mockVenue.reconcile(this.opts.store); }
+    async prepareLightningReceive(params: any) {
+      const fee = mockVenue.receive(params, this.opts.transport);
+      const id = `rfq-recv-${mockVenue.instances.length}`;
+      const record = { id, route: 'lightning:BTC->arkade:BTC', phase: 'prepared' };
+      await this.opts.store.put(record);
+      return { record, invoice: 'lntbs1hold', payAmountSats: params.amountSats + fee, invoiceExpiresAt: 2_000_000_000,
+        summary: { fromAmountSats: params.amountSats + fee, toAmountSats: params.amountSats } };
+    }
+    async claimReceive(id: string, options: any) { mockVenue.claim(id, options); return { id, phase: 'settled' }; }
   },
 }));
 const mockHttpTransport = jest.fn((root: string) => ({ kind: 'http', root, close: jest.fn(async () => {}) }));
@@ -54,6 +65,7 @@ const mockNostrTransport = jest.fn((o: any) => ({ kind: 'nostr', ...o, close: je
 jest.mock('@arkade-os/swap/nostr', () => ({ nostrRfqTransport: (o: any) => mockNostrTransport(o) }));
 
 import {
+  claimArkadeLightningReceive, createArkadeLightningReceive, estimateLightningReceive,
   createArkadeIntentsSwap, createAsyncStorageArkadeSwapStore, estimateLightningSend, makerCorridorRoot,
   recoverArkadeIntentSwaps, registryNetwork, resultOfPhase,
 } from './arkadeIntents';
@@ -196,4 +208,45 @@ test('the AsyncStorage store lists only pending records; recovery reconciles the
   mockVenue.reconcile.mockClear();
   expect(await recoverArkadeIntentSwaps(wallet, 'https://a', store)).toBeNull();
   expect(mockVenue.reconcile).not.toHaveBeenCalled();
+});
+
+describe('Lightning into Arkade', () => {
+  const base = { network: 'mutinynet' as const, wallet, arkServerUrl: 'https://mutinynet.arkade.sh', arkNetwork: 'mutinynet', makerUrl: 'https://maker.signet.kaleidoswap.com', fetchImpl };
+
+  test('estimates what the sender pays', () => {
+    expect(estimateLightningReceive(lnMarket({ fee_bps: 100 }), 10_000)).toEqual({ payAmountSat: 10_102 });
+    expect(estimateLightningReceive(lnMarket(), 100)).toEqual({ unavailable: "Below this provider's minimum of 1,000 sats." });
+    expect(estimateLightningReceive({ ...lnMarket(), quote_asset: { id: 'usdt' } }, 10_000)).toEqual({ unavailable: 'This provider does not pay out on Arkade.' });
+  });
+
+  test('gets the invoice from KaleidoSwap first, capped near its published fee', async () => {
+    mockVenue.receive.mockReset().mockReturnValue(101);
+    const receive = await createArkadeLightningReceive(base, 10_000);
+    expect(receive).toMatchObject({ invoice: 'lntbs1hold', amountSats: 10_000, payAmountSats: 10_101, provider: 'KaleidoSwap' });
+    expect(mockVenue.receive).toHaveBeenCalledTimes(1);
+    const [params, transport] = mockVenue.receive.mock.calls[0];
+    expect(transport.kind).toBe('http');
+    expect(params.maxPayAmountSats).toBe(10_102 + 50 + 10);
+  });
+
+  test('falls back to a registry solver when KaleidoSwap cannot quote', async () => {
+    mockMarkets.splice(0, mockMarkets.length, { ...lnMarket(), solver: 'Solver A', discovery_pubkey: SOLVER, transports: { nostr: { relays: ['wss://relay.example'] } } });
+    mockVenue.receive.mockReset().mockImplementationOnce(() => { throw new Error('no liquidity'); }).mockReturnValue(31);
+    const receive = await createArkadeLightningReceive(base, 10_000);
+    expect(receive.provider).toBe('Solver A');
+    expect(mockVenue.receive.mock.calls[1][1].kind).toBe('nostr');
+    mockMarkets.splice(0, mockMarkets.length);
+  });
+
+  test('refuses without an amount and explains when nobody can quote', async () => {
+    await expect(createArkadeLightningReceive(base, 0)).rejects.toThrow('needs one');
+    mockVenue.receive.mockReset().mockImplementation(() => { throw new Error('no liquidity'); });
+    await expect(createArkadeLightningReceive(base, 10_000)).rejects.toThrow('KaleidoSwap: no liquidity');
+  });
+
+  test('claims a receive without waiting', async () => {
+    mockVenue.claim.mockReset();
+    await expect(claimArkadeLightningReceive(wallet, base.arkServerUrl, 'rfq-recv-1')).resolves.toBe('settled');
+    expect(mockVenue.claim).toHaveBeenCalledWith('rfq-recv-1', { waitSeconds: 0 });
+  });
 });

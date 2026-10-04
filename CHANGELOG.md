@@ -10,6 +10,24 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **Receive.** Pick how you get paid (Any wallet, Lightning, On-chain, Spark, Ark)
+  and, where more than one account can take it, which account it lands in: a
+  Lightning payment can go to your RGB node, Spark, Bark or Arkade. The code is
+  shown with a readable breakdown: the universal code lists each way to pay it,
+  each with its own copy and QR, and a single address or invoice is shown in full.
+- **Lightning into Arkade** works again, through Arkade Intents swap providers
+  (KaleidoSwap first) instead of Boltz. It needs an amount; the sender pays the
+  swap fee, and the wallet claims the payment while Receive is open.
+
+### Fixed
+- **Universal QR.** It mixed accounts on different networks (for example Spark
+  on regtest with Arkade on mutinynet), so wallets read it as a request for the
+  wrong network. Each code is now for one network, with a picker when your
+  accounts span several. Accounts are asked in parallel instead of one after
+  another, Bark is included, and a manual refresh is no longer replaced by an
+  automatic one.
+
 ### Removed
 - **Liquid.** The Liquid wallet layer is gone: wallet setup, Receive (including
   Liquid USDt in the USD request) and Send no longer offer it, and pasting a
