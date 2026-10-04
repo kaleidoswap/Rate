@@ -1,7 +1,7 @@
 /**
- * Registers each connected wallet as Send's ways to pay. Called by the protocol
- * wiring (services/protocols/wdk.ts) when a wallet connects, with that connection's
- * own network, so every account offers only what it can actually pay.
+ * Registers each connected wallet as Send's ways to pay, on that connection's own
+ * network, so every account offers only what it can actually pay. Synced before every
+ * review (see syncPayAccounts). Also tells Receive which chain each account is on.
  */
 import { useEffect } from 'react';
 import { protocolManager } from '../protocols';
@@ -14,7 +14,6 @@ import { connectArkadePayAccounts } from './arkadePay';
 import { getPayOptions } from './payOptions';
 import { currentBarkHost } from '../protocols/barkPreferences';
 import type { ArkadeLightningReceiveOptions } from './arkadeIntents';
-export { setPayOptions } from './payOptions';
 
 type PayProtocol = 'SPARK' | 'RGB_LN' | 'ARKADE';
 const PAY_PROTOCOLS: PayProtocol[] = ['SPARK', 'RGB_LN', 'ARKADE'];
@@ -29,14 +28,22 @@ export function kaleidoswapMakerUrl(network: Network, configured?: string): stri
 }
 
 const CHAINS: Network[] = ['mainnet', 'signet', 'mutinynet', 'testnet', 'regtest'];
+/** A network name as SDKs report it ('bitcoin' is mainnet), or undefined when unknown. */
+export function normalizeChain(raw: unknown): Network | undefined {
+  const name = String(raw ?? '').toLowerCase();
+  if (name === 'bitcoin') return 'mainnet';
+  return CHAINS.includes(name as Network) ? name as Network : undefined;
+}
+
 /** The chain a connected wallet is on (an Arkade "signet" setting runs on the mutinynet server). */
-export function adapterChain(protocol: PayProtocol, adapter: any): Network | undefined {
-  const declared = String(adapter?.network ?? '').toLowerCase();
-  const server = String(adapter?.arkInfo?.network ?? '').toLowerCase();
-  if (protocol === 'ARKADE' && CHAINS.includes(server as Network)) return server as Network;
-  if (protocol === 'ARKADE' && /mutinynet/i.test(getPayOptions().arkServerUrl ?? '')) return 'mutinynet';
-  if (declared === 'bitcoin') return 'mainnet';
-  return CHAINS.includes(declared as Network) ? declared as Network : undefined;
+export function adapterChain(protocol: PayProtocol | 'BARK', adapter: any): Network | undefined {
+  if (protocol === 'BARK') return normalizeChain(currentBarkHost()?.network);
+  if (protocol === 'ARKADE') {
+    const server = String(adapter?.arkInfo?.network ?? '').toLowerCase();
+    if (CHAINS.includes(server as Network)) return server as Network;
+    if (/mutinynet/i.test(getPayOptions().arkServerUrl ?? '')) return 'mutinynet';
+  }
+  return normalizeChain(adapter?.network);
 }
 
 function register(protocol: PayProtocol, adapter: any, network: Network): () => void {
@@ -102,19 +109,12 @@ export async function prepareRgbRequest(invoice: string, amount?: number): Promi
   return asset.amount > 0 ? asset : { id: asset.id, ticker: asset.ticker, precision: asset.precision };
 }
 
-type ReceiveAccount = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK';
-const RECEIVE_PROTOCOL: Record<ReceiveAccount, string> = { RGB: 'RGB_LN', SPARK: 'SPARK', ARKADE: 'ARKADE', BARK: 'BARK' };
-
 /** The chain a connected receive account is on, or undefined when it is not connected or can't tell. */
-export function receiveAccountChain(account: ReceiveAccount): Network | undefined {
+export function receiveAccountChain(account: 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'): Network | undefined {
+  const protocol = account === 'RGB' ? 'RGB_LN' : account;
   let adapter: any;
-  try { adapter = protocolManager.getAdapterIfAvailable(RECEIVE_PROTOCOL[account] as any); } catch { return undefined; }
-  if (!adapter?.isConnected?.()) return undefined;
-  if (account === 'BARK') {
-    const network = String(currentBarkHost()?.network ?? '').toLowerCase();
-    return network === 'bitcoin' ? 'mainnet' : (CHAINS.includes(network as Network) ? network as Network : undefined);
-  }
-  return adapterChain(account === 'RGB' ? 'RGB_LN' : account, adapter);
+  try { adapter = protocolManager.getAdapterIfAvailable(protocol); } catch { return undefined; }
+  return adapter?.isConnected?.() ? adapterChain(protocol, adapter) : undefined;
 }
 
 /** What a Lightning receive into the connected Arkade wallet needs, or null when Arkade is not connected. */

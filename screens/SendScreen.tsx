@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Crypto from 'expo-crypto';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Button } from '../components/Button';
+import { Badge } from '../components/Badge';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
@@ -21,7 +22,8 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { loadBtcBalance } from '../store/slices/walletSlice';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { useForegroundClock } from '../hooks/useForegroundClock';
-import { formatBitcoinAmount } from '../utils/bitcoinUnits';
+import { formatBitcoinAmount, formatSatoshisToUSD } from '../utils/bitcoinUnits';
+import { chainLabel, type ReceiveChain } from '../utils/receive-routes';
 import {
   KALEIDOPAY_DEMO, decodeTarget, prepareKaleidoPay, railLabel, previewInput, quotePaymentOffers, quoteSpend, formatSpend,
   bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError,
@@ -38,7 +40,6 @@ const KIND_LABEL: Record<PayTarget['kind'], string> = {
   bolt11: 'Lightning invoice', lnurl: 'Lightning address', offer: 'Lightning offer', bitcoin: 'Bitcoin address',
   spark: 'Spark address', ark: 'Ark address', rgb: 'RGB invoice',
 };
-const NETWORK_LABEL: Record<string, string> = { mainnet: '', signet: 'Signet', mutinynet: 'Mutinynet', testnet: 'Testnet', regtest: 'Regtest' };
 
 function decodeQuietly(text: string): { target?: PayTarget; error?: string } {
   if (!text.trim()) return {};
@@ -226,14 +227,10 @@ export default function SendScreen({ navigation, route }: Props) {
   const muted = { ...text, color: t.colors.text.secondary };
   const card = { padding: t.spacing[5], borderRadius: t.borderRadius.xl, backgroundColor: t.colors.surface.primary, gap: t.spacing[3], marginBottom: t.spacing[4] };
   const row = (label: string, value: string) => <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}><Text style={muted}>{label}</Text><Text style={{ ...text, textAlign: 'right', flexShrink: 1 }}>{value}</Text></View>;
-  const pill = (label: string, color: string) => (
-    <View key={label} style={{ paddingHorizontal: t.spacing[2], paddingVertical: 2, borderRadius: t.borderRadius.full, backgroundColor: color + '22' }}>
-      <Text style={{ color, fontSize: t.typography.fontSize.xs, fontWeight: '600' }}>{label}</Text>
-    </View>
-  );
   const railIcon = (r: string) => ({ ln: 'lightning', btc: 'onchain', ark: 'arkade' } as Record<string, string>)[r.split(':')[0]] ?? r.split(':')[0];
   const describe = (o: PaymentOffer) => {
-    const account = [o.accountName, NETWORK_LABEL[o.route.from.split(':')[1] ?? ''] ?? ''].filter(Boolean).join(' · ');
+    const chain = o.route.from.split(':')[1];
+    const account = [o.accountName, chain && chain !== 'mainnet' ? chainLabel(chain as ReceiveChain) : ''].filter(Boolean).join(' · ');
     return o.route.kind === 'swap'
       ? { icon: 'swap', group: 'Through a provider', subtitle: [`${account} via ${railLabel(o.route.to)}`, o.providerDetail].filter(Boolean).join(' · '), preferred: false }
       : { icon: railIcon(o.route.to), group: 'Direct', subtitle: `${account} · direct`, preferred: !!preview && o.route.to.split(':')[0] === preview.request.acceptedRails[0]?.split(':')[0] };
@@ -248,7 +245,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const selectedView = selected ? describe(selected) : null;
   const liveOptions = options.filter(o => !o.unavailable).length;
   const shownSat = fixedSat ?? amountSat;
-  const usdOf = (sats: number) => usd ? ` · ≈ $${((sats / 1e8) * usd).toFixed(2)}` : '';
+  const usdOf = (sats: number) => usd ? ` · ≈ $${formatSatoshisToUSD(sats, usd)}` : '';
 
   const headerTitle = attempt ? 'Payment' : preview ? 'Review Payment' : 'Send';
   const onBack = () => {
@@ -325,8 +322,8 @@ export default function SendScreen({ navigation, route }: Props) {
                   <Text numberOfLines={1} style={{ ...text, fontWeight: '600' }}>{selected?.provider ?? 'Choose how to pay'}</Text>
                   {!!selectedView && <Text numberOfLines={1} style={{ ...muted, fontSize: t.typography.fontSize.sm }}>{selectedView.subtitle}</Text>}
                   {!!selected && (selectedView?.preferred || best?.id === selected.id) && <View style={{ flexDirection: 'row', gap: t.spacing[2], marginTop: 4 }}>
-                    {selectedView?.preferred && pill('Their choice', t.colors.primary[500])}
-                    {best?.id === selected.id && pill('Best price', t.colors.success[500])}
+                    {selectedView?.preferred && <Badge label="Their choice" tone="primary" size="md" />}
+                    {best?.id === selected.id && <Badge label="Best price" tone="success" size="md" />}
                   </View>}
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={t.colors.text.secondary} />

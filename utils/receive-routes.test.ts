@@ -1,5 +1,5 @@
 import {
-  accountsOnChain, arkDestinations, defaultDestination, legacyRoute, lightningDestinations,
+  accountLabel, accountsOnChain, arkDestinations, defaultDestination, destinationsFor, legacyRoute, lightningDestinations,
   methodsFor, onchainDestinations, routeOf, universalChains, universalLightning, type ReceiveAccountInfo, type ReceiveMethodId,
 } from './receive-routes';
 
@@ -75,5 +75,12 @@ describe('receive routes', () => {
     expect(universalLightning(arkOnly, null, 1000)).toBeNull();
     expect(universalLightning(lightningDestinations([{ account: 'BARK' }], {}), null, 0)).toBeNull();
     expect(universalLightning(lightningDestinations([{ account: 'BARK' }], {}), null, 500)).toBe('BARK');
+  });
+
+  it('lands an RGB asset only in the RGB node, and names accounts one way', () => {
+    expect(destinationsFor('lightning', all, {}, 'RGB')).toEqual([expect.objectContaining({ account: 'RGB', detail: 'Your RGB channels' })]);
+    expect(destinationsFor('onchain', [{ account: 'SPARK' }], {}, 'RGB')).toEqual([]);
+    expect(accountLabel('RGB', { nwcWalletType: 'ln' })).toBe('Lightning wallet');
+    expect(accountLabel('ARKADE', {})).toBe('Arkade');
   });
 });

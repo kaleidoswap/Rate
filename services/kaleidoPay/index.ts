@@ -3,7 +3,7 @@ export type { SwapAttempt } from '@universal-bolt12/swap-market';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decodeBolt11 } from '../../utils/decodeInvoice';
 import { resolveLightningAddressToInvoice } from '../../utils/lnurl';
-import { decodeTarget, targetOfferRails, TEST_NETWORKS, bitcoinAddressNetworks } from './target';
+import { decodeTarget, targetOfferRails, TEST_NETWORKS } from './target';
 import type { ChainNetwork, PayTarget } from './target';
 export { decodeTarget, offerAmountSat } from './target';
 export type { ChainNetwork, PayTarget, TargetKind } from './target';
@@ -73,7 +73,9 @@ export function registerKaleidoPayPreparer(prepare: () => Promise<void>): () => 
 }
 /** Run before previewing a payment; never throws, waits at most 8 s. */
 export async function prepareKaleidoPay(): Promise<void> {
-  await Promise.race([Promise.allSettled([...preparers].map(p => p())), new Promise(r => setTimeout(r, 8000))]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([Promise.allSettled([...preparers].map(p => p())), new Promise(r => { timer = setTimeout(r, 8000); })]);
+  clearTimeout(timer);
 }
 export function registerKaleidoPayAccount(account: PayAccount): () => void {
   accounts.set(account.source.id, account);
@@ -187,35 +189,10 @@ export async function previewInput(text: string, amountSat: number | undefined, 
   return previewTarget(target, amountSat, requestId, opts);
 }
 
-/** Networks a code says it is for (undefined when it doesn't say); never throws on a half-typed code. */
-export function codeNetworks(text: string): Network[] | undefined {
-  try { return decodeTarget(text).networks; } catch { return undefined; }
-}
-/** The single network a code is for, when it names exactly one. */
-export function codeNetwork(text: string): Network | undefined {
-  const networks = codeNetworks(text);
-  return networks?.length === 1 ? networks[0] : undefined;
-}
+
 /** Anything Send can pay (used to decide when typed text is complete enough to review). */
 export function isPayable(text: string): boolean {
   try { decodeTarget(text); return true; } catch { return false; }
-}
-
-// Kept for callers that still route only universal codes here.
-export function isKaleidoPayCode(text: string): boolean {
-  const code = text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
-  return /^lno1/i.test(code) || /^bitcoin:/i.test(code) && /[?&]lno=/i.test(code);
-}
-/** A valid (checksummed) non-regtest bitcoin address, or a BIP21 with only amount/label/message. */
-export function isSwappableAddress(text: string): boolean {
-  const code = text.trim().replace(/^lightning:(\/\/)?/i, '').trim();
-  const query = /^bitcoin:/i.test(code) ? code.split('?')[1] ?? '' : '';
-  if (query.split('&').filter(Boolean).some(p => !['amount', 'label', 'message'].includes(p.split('=')[0].toLowerCase()))) return false;
-  try {
-    const t = decodeTarget(code);
-    const networks = t.kind === 'bitcoin' && t.address ? bitcoinAddressNetworks(t.address) : null;
-    return !!networks && !networks.includes('regtest');
-  } catch { return false; }
 }
 
 /** Legacy entry point: decode a universal code for one known network. */

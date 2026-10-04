@@ -1,14 +1,10 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 import { encodeOffer, encodePaymentCode } from '@universal-bolt12/universal-code';
-import { isSwappableAddress, offerAmountSat, codeNetwork, previewPayment, quotePayment, railLabel, registerKaleidoPayAccount, isKaleidoPayCode } from './index';
+import { offerAmountSat, previewPayment, quotePayment, railLabel, registerKaleidoPayAccount } from './index';
+import { decodeTarget } from './target';
 const offer = encodeOffer([{ type: 10n, value: new TextEncoder().encode('Coffee') }]);
 const code = encodePaymentCode({ offer, amountSat: 50000 }, 'signet');
 
-test('recognizes offer scans and keeps legacy invoices outside this flow', () => {
-  expect(isKaleidoPayCode(code)).toBe(true);
-  expect(isKaleidoPayCode(offer.toUpperCase())).toBe(true);
-  expect(isKaleidoPayCode('lnbc1000')).toBe(false);
-});
 test('fixed amount wins and missing executor stays unsupported', () => {
   const result = previewPayment(code, 'signet', '12', 'request');
   expect(result.request.amountSat).toBe(50000);
@@ -33,8 +29,6 @@ test('network isolation, quote totals and unregister', async () => {
 });
 
 test('normalizes a Lightning URI wrapper for both routing and preview', () => {
-  expect(isKaleidoPayCode(`LIGHTNING:${offer}`)).toBe(true);
-  expect(isKaleidoPayCode('lightning:lnbc1000')).toBe(false);
   expect(previewPayment(`lightning://${offer}`, 'signet', '1000', 'wrapped').request.amountSat).toBe(1000);
 });
 
@@ -47,29 +41,15 @@ test('the offer sets the receiver order; Ark rails without an address are skippe
   expect(p.request.acceptedRails).toEqual([arkade, 'ln', 'btc']);
   expect(p.addresses).toEqual({ [arkade]: 'ark1shop' });
   expect(p.request.acceptedRails.map(railLabel)).toEqual(['Arkade', 'Lightning', 'On-chain']);
-  expect(codeNetwork(`lightning:${offer}`)).toBe('mainnet');
-  expect(codeNetwork('lno1notanoffer')).toBeUndefined();
-});
-
-test('plain mainnet and signet addresses can go to KaleidoPay; regtest and offers cannot', () => {
-  expect(isSwappableAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq')).toBe(true);
-  expect(isSwappableAddress('bitcoin:tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx?amount=0.001')).toBe(true);
-  expect(isSwappableAddress('bcrt1pssfktumhecj6fehwfwsd3vt3w0000000000000000000000000000')).toBe(false);
-  expect(isSwappableAddress('lno1qqqq')).toBe(false);
+  expect(decodeTarget(`lightning:${offer}`).networks).toEqual(['mainnet']);
+  expect(() => decodeTarget('lno1notanoffer')).toThrow();
 });
 
 test('a bare address is previewed as a bitcoin: URI on its own network', () => {
   const p = previewPayment('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', 'mainnet', '1500', 'bare');
   expect(p.code.address).toBe('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq');
   expect(p.request).toMatchObject({ amountSat: 1500, acceptedRails: ['btc'] });
-  expect(codeNetwork('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq')).toBe('mainnet');
-});
-
-test('codes with another payment leg, and half-typed addresses, stay on Send', () => {
-  expect(isSwappableAddress('bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?amount=0.001&lightning=lnbc10u1xyz')).toBe(false);
-  expect(isSwappableAddress('bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?spark=sp1xyz')).toBe(false);
-  expect(isSwappableAddress('bc1qar0srrr7xfkvy5l643lydnw9re59gtzz')).toBe(false); // bad checksum
-  expect(isSwappableAddress('bitcoin:bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq?label=Shop&message=hi')).toBe(true);
+  expect(decodeTarget('bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq').networks).toEqual(['mainnet']);
 });
 
 test('a fixed-amount offer is paid its own amount, whatever was typed', () => {

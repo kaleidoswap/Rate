@@ -336,9 +336,8 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
   async function quoteOptions(preview: Preview, route: Route): Promise<AccountQuoteOption[]> {
     const facts = check(preview, route);
     const fundingFee = opts.fundingFee();
-    const list = await providers();
+    const [list, balance] = await Promise.all([providers(), opts.balance().catch(() => null)]);
     if (!list.length) throw new Error('No Arkade swap provider pays Lightning on this network right now.');
-    const balance = await opts.balance().catch(() => null);
     const expiresAt = Math.min(Math.floor(Date.now() / 1000) + QUOTE_TTL_S, facts.expiresAt - INVOICE_MARGIN_S);
     return list.map(p => {
       const option: AccountQuoteOption = { id: p.id, name: p.name, detail: 'detail' in p ? p.detail : undefined };
@@ -470,17 +469,6 @@ const idleTransport: RfqTransport = {
   close: async () => undefined,
 };
 
-/**
- * Finishes Arkade Intents swaps a restart interrupted: one reconcile pass over the
- * persistent store. Never funds anything; safe to call on every start.
- */
-export async function recoverArkadeIntentSwaps(wallet: any, arkServerUrl: string, store: ArkadeSwapStore = arkadeIntentsStore): Promise<ReconcileReport | null> {
-  if (!wallet || !arkServerUrl) return null;
-  if (!(await store.listPending()).length) return null;
-  const venue = new (load().venue.ArkadeIntentsVenue)({ wallet, arkServerUrl, store, transport: idleTransport });
-  return venue.reconcile();
-}
-
 // ---------------------------------------------------------------------------
 // Lightning -> Arkade: receive a Lightning payment into Arkade. A provider's hold
 // invoice is shown to the sender; once it is paid the provider locks the sats on
@@ -512,6 +500,24 @@ export interface ArkadeLightningReceive {
   expiresAt: number;
 }
 
+// One provider source per network and maker, so its market cache survives between
+// receives (each amount change asks for a new invoice).
+const receiveSources = new Map<string, ReturnType<typeof createProviderSource>>();
+function receiveProviders(opts: ArkadeLightningReceiveOptions) {
+  const key = [opts.network, opts.arkNetwork, opts.makerUrl, opts.registryUrl].join('|');
+  // An injected fetch (tests) gets a source of its own.
+  let source = opts.fetchImpl ? undefined : receiveSources.get(key);
+  if (!source) {
+    const fetchImpl = timedFetch(opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args)));
+    source = createProviderSource(
+      { network: opts.network, arkNetwork: () => opts.arkNetwork, makerUrl: opts.makerUrl, registryUrl: opts.registryUrl, fetchImpl },
+      isLightningReceiveMarket, 'KaleidoSwap does not offer Lightning → Arkade right now.',
+    );
+    if (!opts.fetchImpl) receiveSources.set(key, source);
+  }
+  return source;
+}
+
 /** Headroom over the card estimate a binding quote may use before it is refused. */
 const receiveFeeCap = (estimate: number, amountSats: number) => estimate + Math.ceil(amountSats * 0.005) + 10;
 
@@ -523,12 +529,7 @@ const receiveFeeCap = (estimate: number, amountSats: number) => estimate + Math.
 export async function createArkadeLightningReceive(opts: ArkadeLightningReceiveOptions, amountSats: number): Promise<ArkadeLightningReceive> {
   if (!Number.isSafeInteger(amountSats) || amountSats <= 0) throw new Error('Set an amount: Lightning into Arkade needs one.');
   if (!opts.wallet || !opts.arkServerUrl) throw new Error('Arkade is not connected.');
-  const fetchImpl = timedFetch(opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args)));
-  const providers = createProviderSource(
-    { network: opts.network, arkNetwork: () => opts.arkNetwork, makerUrl: opts.makerUrl, registryUrl: opts.registryUrl, fetchImpl },
-    isLightningReceiveMarket, 'KaleidoSwap does not offer Lightning → Arkade right now.',
-  );
-  const list = await providers();
+  const list = await receiveProviders(opts)();
   const reasons: string[] = [];
   for (const provider of list) {
     if (!('market' in provider)) { reasons.push(`${provider.name}: ${provider.unavailable}`); continue; }

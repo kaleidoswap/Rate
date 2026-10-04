@@ -75,6 +75,12 @@ export function getAssetFamily(assetId: string, ticker?: string | null): AssetFa
 // Destination classification
 // ========================================================================
 
+/** Ark address (Arkade and Bark): ark1/tark1 + bech32m chars. */
+export const ARK_ADDRESS = /^(ark|tark)1[a-z0-9]{20,}$/i
+/** Spark address: spark1/sparkt1/sp1/spt1 etc + bech32m chars. */
+export const SPARK_ADDRESS = /^(spark(t|rt|s|l)?|sp(t|rt|s|l)?)1[a-z0-9]{20,}$/i
+export const LIGHTNING_ADDRESS = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i
+
 export function classifyWithdrawDestination(input: string): DestinationKind {
   if (!input.trim()) return 'unknown'
   const trimmed = input.trim()
@@ -84,11 +90,11 @@ export function classifyWithdrawDestination(input: string): DestinationKind {
   if (lower.startsWith('ln')) return 'lightning'
   if (lower.startsWith('rgb:') || lower.startsWith('rgb1')) return 'rgb'
   // Arkade: ark1/tark1 + bech32m chars (at least 20 chars total)
-  if (/^(ark|tark)1[a-z0-9]{20,}$/i.test(trimmed)) return 'arkade'
+  if (ARK_ADDRESS.test(trimmed)) return 'arkade'
   // Spark: spark1/sparkt1/sp1/spt1 etc + bech32m chars (at least 20 chars total)
-  if (/^(spark(t|rt|s|l)?|sp(t|rt|s|l)?)1[a-z0-9]{20,}$/i.test(trimmed)) return 'spark'
+  if (SPARK_ADDRESS.test(trimmed)) return 'spark'
   if (lower.startsWith('bc1') || lower.startsWith('tb1') || lower.startsWith('bcrt1')) return 'bitcoin'
-  if (/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(trimmed)) return 'lightning-address'
+  if (LIGHTNING_ADDRESS.test(trimmed)) return 'lightning-address'
 
   return 'invalid'
 }

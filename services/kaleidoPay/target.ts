@@ -3,6 +3,7 @@ import { bech32, bech32m } from '@scure/base';
 import { decodeOffer, offerRails, paymentCodeNetwork } from '@universal-bolt12/universal-code';
 import { decodeBolt11 } from '../../utils/decodeInvoice';
 import { invoiceExpiry } from '../../components/payments/InvoiceExpiry';
+import { ARK_ADDRESS, LIGHTNING_ADDRESS, SPARK_ADDRESS } from '../../utils/account-routing';
 
 /**
  * What the user pasted or scanned, decoded into one payment target. Every kind of
@@ -73,9 +74,6 @@ function isLiquidAddress(address: string): boolean {
   return /^(lq1|ex1|tlq1|tex1|el1|ert1)[a-z0-9]{20,}$/i.test(address) || /^[VGHQ][1-9A-HJ-NP-Za-km-z]{30,}$/.test(address);
 }
 
-const SPARK = /^(spark(t|rt|s|l)?|sp(t|rt|s|l)?)1[a-z0-9]{20,}$/i;
-const ARK = /^(ark|tark)1[a-z0-9]{20,}$/i;
-const LN_ADDRESS = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i;
 
 function fromInvoice(invoice: string, raw: string): PayTarget {
   const expiresAt = invoiceExpiry(invoice);
@@ -137,8 +135,8 @@ function parseBip21(text: string): PayTarget {
     }
   }
   if (params.get('lno')) target.offer = params.get('lno');
-  if (params.get('spark') && SPARK.test(params.get('spark')!)) target.sparkAddress = params.get('spark');
-  if (params.get('ark') && ARK.test(params.get('ark')!)) target.arkAddress = params.get('ark');
+  if (params.get('spark') && SPARK_ADDRESS.test(params.get('spark')!)) target.sparkAddress = params.get('spark');
+  if (params.get('ark') && ARK_ADDRESS.test(params.get('ark')!)) target.arkAddress = params.get('ark');
   if (target.offer) target.kind = 'offer';
   if (!target.address && !target.invoice && !target.offer && !target.sparkAddress && !target.arkAddress) {
     throw new Error('This payment code has nothing to pay.');
@@ -193,11 +191,11 @@ export function decodeTarget(text: string): PayTarget {
     decodeOffer(code);
     return { kind: 'offer', raw, offer: code, amountSat: offerAmountSat(code), networks: offerNetworks(code) };
   }
-  if (lower.startsWith('lnurl1') || LN_ADDRESS.test(code)) return { kind: 'lnurl', raw, lnurl: code };
+  if (lower.startsWith('lnurl1') || LIGHTNING_ADDRESS.test(code)) return { kind: 'lnurl', raw, lnurl: code };
   if (lower.startsWith('ln')) return fromInvoice(code, raw);
   if (lower.startsWith('rgb:') || lower.startsWith('rgb1')) return { kind: 'rgb', raw, rgbInvoice: code };
-  if (ARK.test(code)) return { kind: 'ark', raw, arkAddress: code, networks: lower.startsWith('tark') ? [...TEST_NETWORKS, 'regtest'] : ['mainnet'] };
-  if (SPARK.test(code)) return { kind: 'spark', raw, sparkAddress: code, networks: sparkNetworks(code) };
+  if (ARK_ADDRESS.test(code)) return { kind: 'ark', raw, arkAddress: code, networks: lower.startsWith('tark') ? [...TEST_NETWORKS, 'regtest'] : ['mainnet'] };
+  if (SPARK_ADDRESS.test(code)) return { kind: 'spark', raw, sparkAddress: code, networks: sparkNetworks(code) };
   if (isLiquidAddress(code)) throw new Error("Liquid addresses aren't supported by this wallet.");
   const btc = bitcoinAddressNetworks(code);
   if (btc) return { kind: 'bitcoin', raw, address: code, networks: btc };

@@ -45,11 +45,16 @@ const has = (accounts: ReceiveAccountInfo[], account: AccountId) => accounts.fin
 function rgbCanInvoice(caps: ReceiveCaps): boolean {
   return caps.nwcWalletType == null || !!caps.nwcCapabilities?.includes('createInvoice');
 }
-function rgbCanReceiveOnchain(caps: ReceiveCaps): boolean {
+/** Whether the RGB slot can give a bitcoin address (a plain NWC Lightning wallet can't). */
+export function rgbCanReceiveOnchain(caps: ReceiveCaps): boolean {
   return caps.nwcWalletType !== 'ln' && (caps.nwcWalletType == null || !!caps.nwcCapabilities?.includes('onchain'));
 }
 export function rgbAccountLabel(caps: ReceiveCaps): string {
   return caps.nwcWalletType === 'ln' ? 'Lightning wallet' : 'RGB Lightning node';
+}
+/** An account's name as Receive shows it. */
+export function accountLabel(account: AccountId, caps: ReceiveCaps): string {
+  return account === 'RGB' ? rgbAccountLabel(caps) : account === 'SPARK' ? 'Spark' : account === 'ARKADE' ? 'Arkade' : 'Bark';
 }
 
 /** Accounts a Lightning payment can land in, best first. */
@@ -106,7 +111,17 @@ export function arkDestinations(accounts: ReceiveAccountInfo[]): ReceiveDestinat
   return out;
 }
 
-export function destinationsFor(method: ReceiveMethodId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps): ReceiveDestination[] {
+export function destinationsFor(
+  method: ReceiveMethodId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily | 'USD' = 'BTC',
+): ReceiveDestination[] {
+  // An RGB asset only ever lands in the RGB node, on-chain or over its channels.
+  if (family === 'RGB') {
+    const rgb = has(accounts, 'RGB');
+    return rgb ? [{
+      account: 'RGB', label: rgbAccountLabel(caps), chain: rgb.chain, needsAmount: false, available: true,
+      detail: method === 'lightning' ? 'Your RGB channels' : 'Your RGB wallet',
+    }] : [];
+  }
   if (method === 'lightning') return lightningDestinations(accounts, caps);
   if (method === 'onchain') return onchainDestinations(accounts, caps);
   if (method === 'ark') return arkDestinations(accounts);

@@ -36,11 +36,11 @@ import { buildArkadeStorage } from './arkadeStorage'
 import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
-import { setPayOptions } from '../kaleidoPay/payOptions'
+import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
 
 /** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
-export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): { makerUrl?: string; arkServerUrl?: string } {
-  const out: { makerUrl?: string; arkServerUrl?: string } = {}
+export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
+  const out: PayOptions = {}
   for (const nc of networkConfigs) {
     if (!nc.enabled) continue
     let parsed: any = {}

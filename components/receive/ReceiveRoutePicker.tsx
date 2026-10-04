@@ -18,7 +18,6 @@ const METHOD_ICONS: Record<ReceiveMethodId, 'qr-code-outline' | 'flash-outline' 
   universal: 'qr-code-outline', lightning: 'flash-outline', onchain: 'logo-bitcoin', spark: 'sparkles-outline', ark: 'planet-outline',
 };
 const ACCOUNT_ICON: Record<AccountId, string> = { RGB: 'lightning', SPARK: 'spark', ARKADE: 'arkade', BARK: 'bark' };
-export const methodLabel = (method: ReceiveMethodId) => METHOD_LABELS[method];
 
 interface Choice<K extends string> {
   key: K;
@@ -101,7 +100,7 @@ function destinationChoices(destinations: ReceiveDestination[], amountSats: numb
  */
 export function ReceiveRoutePicker({
   methods, method, onMethod, destinations, destination, onDestination, amountSats,
-  chains, chain, onChain, lightningDestinations, lightningDestination, onLightningDestination,
+  chains, chain, onChain, accountLabel = (account) => account, lightningDestinations, lightningDestination, onLightningDestination,
 }: {
   methods: ReceiveMethodId[];
   method: ReceiveMethodId;
@@ -110,6 +109,8 @@ export function ReceiveRoutePicker({
   destination: AccountId | null;
   onDestination: (account: AccountId) => void;
   amountSats: number;
+  /** An account's display name, for listing what each network includes. */
+  accountLabel?: (account: AccountId) => string;
   /** Universal code only. */
   chains?: ChainGroup[];
   chain?: ReceiveChain | null;
@@ -132,7 +133,7 @@ export function ReceiveRoutePicker({
       title={`${chainLabel(chain ?? chains[0].chain)} · ${(chains.find(g => g.chain === chain) ?? chains[0]).accounts.length} accounts`}
       selected={chain ?? chains[0].chain} onSelect={onChain}
       footnote="One code can only ask for payment on one network. Accounts on other networks are left out."
-      choices={chains.map(g => ({ key: g.chain, title: chainLabel(g.chain), detail: g.accounts.map(a => (a === 'RGB' ? 'RGB node' : a[0] + a.slice(1).toLowerCase())).join(', ') }))} />}
+      choices={chains.map(g => ({ key: g.chain, title: chainLabel(g.chain), detail: g.accounts.map(accountLabel).join(', ') }))} />}
     {method === 'universal' && !!lightningDestinations?.length && onLightningDestination && <ChoiceRow<AccountId>
       label="Lightning to" sheetTitle="Where should Lightning payments land?"
       title={accountTitle(currentLn)} icon={currentLn ? ACCOUNT_ICON[currentLn.account] : undefined}

@@ -185,9 +185,12 @@ export function createSparkLightningAccount(spark: SparkPayAdapter, network: Net
     async prepare(preview) {
       const { invoice, amountless, expiresAt } = lightningInvoiceFor(preview);
       const amount = preview.request.amountSat;
-      const quoted = await estimatePaymentFee(spark, { method: 'lightning', destination: invoice, amountSats: amount, amountless }).catch(() => null);
+      const [quoted, spendable] = await Promise.all([
+        estimatePaymentFee(spark, { method: 'lightning', destination: invoice, amountSats: amount, amountless }).catch(() => null),
+        sparkSpendable(spark),
+      ]);
       const feeSat = quoted ?? fallbackLightningFee(amount);
-      if (amount + feeSat > await sparkSpendable(spark)) throw notEnough('Spark');
+      if (amount + feeSat > spendable) throw notEnough('Spark');
       return { feeSat, terms: { invoice, amountless }, expiresAt,
         ...(quoted === null ? { detail: 'Spark could not quote this fee; it is a maximum' } : {}) };
     },
@@ -216,10 +219,13 @@ export function createSparkTransferAccount(spark: SparkPayAdapter, network: Netw
       const address = preview.code.sparkAddress;
       if (!address) throw new Error('The request has no Spark address.');
       const amount = preview.request.amountSat;
-      const quoted = await estimatePaymentFee(spark, { method: 'spark', destination: address, amountSats: amount }).catch(() => null);
+      const [quoted, spendable] = await Promise.all([
+        estimatePaymentFee(spark, { method: 'spark', destination: address, amountSats: amount }).catch(() => null),
+        sparkSpendable(spark),
+      ]);
       // Spark-to-Spark transfers carry no fee by protocol; the adapter sends them at zero fee.
       const feeSat = quoted ?? 0;
-      if (amount + feeSat > await sparkSpendable(spark)) throw notEnough('Spark');
+      if (amount + feeSat > spendable) throw notEnough('Spark');
       return { feeSat, terms: { address } };
     },
     matches: (preview, terms) => preview.code.sparkAddress === terms.address,

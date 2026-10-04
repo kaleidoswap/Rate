@@ -67,7 +67,7 @@ jest.mock('@arkade-os/swap/nostr', () => ({ nostrRfqTransport: (o: any) => mockN
 import {
   claimArkadeLightningReceive, createArkadeLightningReceive, estimateLightningReceive,
   createArkadeIntentsSwap, createAsyncStorageArkadeSwapStore, estimateLightningSend, makerCorridorRoot,
-  recoverArkadeIntentSwaps, registryNetwork, resultOfPhase,
+  registryNetwork, resultOfPhase,
 } from './arkadeIntents';
 import { createArkadeAccount } from './arkadePay';
 import { executePaymentOffer, previewTarget, quotePaymentOffers, registerKaleidoPayAccount, checkPaymentStatus, PaymentNotSentError } from './index';
@@ -196,18 +196,12 @@ test('an unknown Ark transaction fee makes every provider unavailable instead of
   expect(options.every(o => !o.quote && o.unavailable)).toBe(true);
 });
 
-test('the AsyncStorage store lists only pending records; recovery reconciles them', async () => {
+test('the AsyncStorage store lists only pending records', async () => {
   const store = createAsyncStorageArkadeSwapStore('t-');
   await store.put({ id: 'a', phase: 'funded' } as any);
   await store.put({ id: 'b', phase: 'settled' } as any);
   expect((await store.listPending()).map(r => r.id)).toEqual(['a']);
   expect(await store.get('b')).toMatchObject({ phase: 'settled' });
-  mockVenue.reconcile.mockResolvedValue({ settled: ['a'] });
-  expect(await recoverArkadeIntentSwaps(wallet, 'https://a', store)).toEqual({ settled: ['a'] });
-  await store.put({ id: 'a', phase: 'settled' } as any);
-  mockVenue.reconcile.mockClear();
-  expect(await recoverArkadeIntentSwaps(wallet, 'https://a', store)).toBeNull();
-  expect(mockVenue.reconcile).not.toHaveBeenCalled();
 });
 
 describe('Lightning into Arkade', () => {
