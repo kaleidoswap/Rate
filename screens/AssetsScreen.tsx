@@ -29,9 +29,10 @@ import { usePolicy } from '../hooks/usePolicy';
 
 interface Props {
   navigation: any;
+  route?: { params?: { issue?: boolean } };
 }
 
-export default function AssetsScreen({ navigation }: Props) {
+export default function AssetsScreen({ navigation, route }: Props) {
   const dispatch = useDispatch<AppDispatch>();
   const { activeWallet, btcBalance } = useSelector((state: RootState) => state.wallet);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
@@ -41,7 +42,8 @@ export default function AssetsScreen({ navigation }: Props) {
   const btcSats = (btcBalance?.vanilla?.spendable ?? 0) + (btcBalance?.colored?.spendable ?? 0);
   const showBtc = btcBalance != null;
   const [refreshing, setRefreshing] = useState(false);
-  const [showIssueModal, setShowIssueModal] = useState(false);
+  // "Issue asset" elsewhere in the app opens this screen with the issue form up.
+  const [showIssueModal, setShowIssueModal] = useState(!!route?.params?.issue);
   // Issuing RGB assets is an advanced/experimental surface — hidden in Lite mode.
   const policy = usePolicy();
   const canIssue = policy.showExperimental;

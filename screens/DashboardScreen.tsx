@@ -913,7 +913,7 @@ export default function DashboardScreen({ navigation }: Props) {
               }
             });
           }}
-          onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
+          onIssueAsset={() => navigation.getParent()?.navigate('Assets', { issue: true })}
         />
 
         </>}

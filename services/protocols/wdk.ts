@@ -58,7 +58,8 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
  * - Arkade: ON by default. Uses @arkade-os/wdk over @arkade-os/sdk (RN-compatible; the
  *   manager defaults to in-memory VTXO repositories — no IndexedDB). Persistent VTXO
  *   state needs SQLite repos injected via arkadeConfig.storage (follow-up). Lightning
- *   (Boltz) needs swapProviderUrl. Disable with EXPO_PUBLIC_WDK_ARKADE=0.
+ *   goes through Arkade Intents swaps (services/kaleidoPay/arkadeIntents.ts).
+ *   Disable with EXPO_PUBLIC_WDK_ARKADE=0.
  * - Bark: ON by default. Second's Ark via the native `@secondts/bark-react-native`
  *   SDK (needs a dev build). Not a wallet NetworkType yet, so it connects from
  *   the saved wallet preference with ./bark.ts defaults. Disable with EXPO_PUBLIC_BARK=0.

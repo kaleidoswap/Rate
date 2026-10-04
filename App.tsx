@@ -55,10 +55,7 @@ import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
-import PaymentConfirmationScreen from './screens/PaymentConfirmationScreen';
-import PaymentSuccessScreen, { PaymentSuccessParams } from './screens/PaymentSuccessScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
-import NostrSetupScreen from './screens/NostrSetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
 import PairDesktopScreen from './screens/PairDesktopScreen';
@@ -70,25 +67,19 @@ type RootStackParamList = {
   WalletSetup: undefined;
   WalletRestore: undefined;
   SecuritySetup: { walletId?: number; isInitialSetup?: boolean };
-  NostrSetup: { isInitialSetup?: boolean } | undefined;
   Dashboard: undefined;
   Settings: undefined;
   Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; resumePayment?: boolean } | undefined;
   MerchantOffer: undefined;
   Receive: { selectedAsset?: any } | undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
-  PaymentConfirmation: { paymentData: any };
-  PaymentSuccess: PaymentSuccessParams;
-  AIAssistant: undefined;
-  Assets: undefined;
+  Assets: { issue?: boolean } | undefined;
   Swap: undefined;
   NostrSettings: undefined;
   AssetDetail: { asset: any };
-  History: undefined;
   Map: undefined;
   LSP: undefined;
   OpenChannel: undefined;
-  IssueAsset: undefined;
   Channels: undefined;
   PairDesktop: undefined;
   MindSettings: undefined;
@@ -225,7 +216,6 @@ function AppNavigator() {
         <Stack.Screen name="WalletSetup" component={WalletSetupScreen} />
         <Stack.Screen name="WalletRestore" component={WalletRestoreScreen} />
         <Stack.Screen name="SecuritySetup" component={SecuritySetupScreen} />
-        <Stack.Screen name="NostrSetup" component={NostrSetupScreen} />
         <Stack.Screen name="Dashboard" component={DashboardTabs} />
         <Stack.Screen
           name="Settings"
@@ -260,14 +250,7 @@ function AppNavigator() {
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
-        <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
-        <Stack.Screen
-          name="PaymentSuccess"
-          component={PaymentSuccessScreen}
-          options={{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false }}
-        />
         <Stack.Screen name="Map" component={MapScreen} />
-        <Stack.Screen name="AIAssistant" component={AIAssistantScreen} />
         <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
           name="Swap"
@@ -285,18 +268,9 @@ function AppNavigator() {
             headerShown: false,
           }}
         />
-        <Stack.Screen
-          name="History"
-          component={HistoryScreen}
-          options={{
-            presentation: 'card',
-            headerShown: false,
-          }}
-        />
         <Stack.Screen name="LSP" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="OpenChannel" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Channels" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="IssueAsset" component={asModalScreen(AssetsScreen)} options={{ presentation: 'modal', headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

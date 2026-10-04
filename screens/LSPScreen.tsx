@@ -168,7 +168,8 @@ export default function LSPScreen({ navigation }: Props) {
         Alert.alert('Order created', 'The LSP did not return a Lightning invoice for this order.');
         return;
       }
-      navigation.navigate('PaymentConfirmation', { paymentData });
+      // Pay the order's invoice in Send, like any other payment.
+      navigation.navigate('Send', { prefilledAddress: paymentData.invoice });
     } catch (err) {
       Alert.alert('Error', 'Failed to create channel order');
     } finally {

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useAppSelector } from '../store/hooks';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { RootState } from '../store';
 import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
@@ -129,7 +129,6 @@ function sectionTitle(ts?: number): string {
 
 export default function HistoryScreen() {
     const navigation = useNavigation<any>();
-    const route = useRoute();
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
 
@@ -257,7 +256,7 @@ export default function HistoryScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <MainHeader title="Activity" onBack={route.name === 'Activity' ? undefined : () => navigation.goBack()} />
+            <MainHeader title="Activity" />
 
             <UnresolvedPaymentCard onCheck={() => navigation.navigate('Send', { resumePayment: true })} />
             {/* Filter tabs */}

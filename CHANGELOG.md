@@ -41,6 +41,12 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   automatic one.
 
 ### Removed
+- Screens nothing opened (payment success, Nostr setup, duplicate History and
+  assistant routes) and eight unused components.
+- The pre-payment "confirmation" screen for channel orders: the order's
+  invoice now opens straight in Send.
+- Asset detail's "coming soon" buttons (more options, history, export, scan);
+  pull down to refresh instead. The header bell that pointed nowhere.
 - The unreachable wallet-list screens (Wallet list, Add wallet, Wallet
   settings), including a placeholder that generated a fixed, public seed.
 - **Liquid.** The Liquid wallet layer is gone: wallet setup, Receive (including

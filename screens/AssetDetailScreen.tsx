@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSelector } from 'react-redux';
@@ -180,14 +181,6 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
         <ScreenHeader
           title="Asset Details"
           showBack={true}
-          rightAction={
-            <TouchableOpacity
-              style={styles.moreButton}
-              onPress={() => Alert.alert('More Options', 'Additional asset options coming soon')}
-            >
-              <Ionicons name="ellipsis-horizontal" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
-          }
         >
           <View style={styles.assetInfo}>
             <AssetIcon />
@@ -293,53 +286,6 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     );
   };
 
-  const renderQuickActions = () => (
-    <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Quick Actions</Text>
-      <View style={styles.quickActionsGrid}>
-        <TouchableOpacity 
-          style={styles.quickActionCard}
-          onPress={() => navigation.navigate('QRScanner')}
-        >
-          <View style={styles.quickActionIcon}>
-            <Ionicons name="qr-code-outline" size={24} color={theme.colors.primary[500]} />
-          </View>
-          <Text style={styles.quickActionText}>Scan QR</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.quickActionCard}
-          onPress={handleRefresh}
-        >
-          <View style={styles.quickActionIcon}>
-            <Ionicons name="refresh-outline" size={24} color={theme.colors.secondary[500]} />
-          </View>
-          <Text style={styles.quickActionText}>Refresh</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.quickActionCard}
-          onPress={() => Alert.alert('History', 'Transaction history coming soon')}
-        >
-          <View style={styles.quickActionIcon}>
-            <Ionicons name="time-outline" size={24} color={theme.colors.warning[500]} />
-          </View>
-          <Text style={styles.quickActionText}>History</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.quickActionCard}
-          onPress={() => Alert.alert('Export', 'Export options coming soon')}
-        >
-          <View style={styles.quickActionIcon}>
-            <Ionicons name="share-outline" size={24} color={theme.colors.secondary[500]} />
-          </View>
-          <Text style={styles.quickActionText}>Export</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -360,12 +306,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          refreshing ? undefined : undefined // We can add RefreshControl here if needed
-        }
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.primary[500]} />}
       >
         {renderAssetDetails()}
-        {renderQuickActions()}
         
         <View style={styles.bottomPadding} />
       </ScrollView>
@@ -414,14 +357,6 @@ const styles = StyleSheet.create({
     color: theme.colors.text.inverse,
   },
   
-  moreButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   
   assetInfo: {
     flexDirection: 'row',
@@ -601,45 +536,9 @@ const styles = StyleSheet.create({
     padding: theme.spacing[1],
   },
   
-  quickActionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-  },
   
-  quickActionCard: {
-    width: (width - theme.spacing[5] * 2 - theme.spacing[3]) / 2,
-    backgroundColor: theme.colors.surface.primary,
-    padding: theme.spacing[4],
-    borderRadius: theme.borderRadius.xl,
-    alignItems: 'center',
-    marginBottom: theme.spacing[3],
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
   
-  quickActionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.gray[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[3],
-  },
   
-  quickActionText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    textAlign: 'center',
-  },
   
   loadingContainer: {
     flex: 1,
