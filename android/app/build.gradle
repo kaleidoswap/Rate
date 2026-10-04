@@ -145,6 +145,10 @@ android {
             useLegacyPackaging enableLegacyPackaging.toBoolean()
                     excludes += "/lib/**/libOpenCL.so"
         }
+        // Compress dex too (stored uncompressed by default since minSdk 28).
+        dex {
+            useLegacyPackaging true
+        }
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
