@@ -11,6 +11,11 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Changed
+- New wallets connect Spark and Arkade on mainnet by default (Bark already did). Wallets saved before this keep the network they were on; the RGB node stays on test networks until it supports mainnet.
+- One animated bottom sheet for every picker and form sheet: the backdrop fades instead of sliding, the sheet springs up, can be dragged down to close, and respects Reduce Motion. Swap review, asset pickers, Receive choices, settings options, zaps, amounts, contacts, channel details and the chat payment card all use it.
+- Swap asset picker redesigned: BTC/USDT quick picks, search, assets you hold first (largest balance first), the network each asset moves on, balances in your unit, and picking the other side's asset flips the pair.
+- Swap review leads with what you pay and what you receive; the flip button turns and the quote details ease in; a finished swap shows an animated check.
+- Screens push with the same slide on iOS and Android and can be swiped back; root screens (setup, home) fade.
 - Home shows recent activity with a link to the full Activity tab, and "Places to pay" only once the wallet is set up.
 - When some accounts can't refresh, Home names them in a banner instead of an alert; a full refresh failure is a banner too.
 - **Lite mode** now also applies to Swap (no venue tabs, maker address or

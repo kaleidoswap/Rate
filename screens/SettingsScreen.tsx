@@ -40,6 +40,7 @@ import { clearNwcConnections } from '../store/slices/nostrSlice';
 import {
   NETWORK_LABEL,
   PROTOCOL_DEFAULT_NETWORK,
+  LEGACY_NETWORK,
   PROTOCOL_SUPPORTED_NETWORKS,
   PROTOCOL_TO_NETWORK_TYPE,
   buildDefaultNetworkConfig,
@@ -229,7 +230,7 @@ export default function SettingsScreen({ navigation }: Props) {
         const nets = await DatabaseService.getInstance().getWalletNetworks(id);
         const map: Record<string, string> = {};
         for (const n of nets) {
-          let net = PROTOCOL_DEFAULT_NETWORK[n.type] ?? 'regtest';
+          let net = LEGACY_NETWORK[n.type] ?? 'regtest';
           try {
             if (n.config) net = JSON.parse(n.config).network || net;
           } catch { /* keep default */ }

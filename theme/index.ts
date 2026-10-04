@@ -814,3 +814,16 @@ export function protocolTint(p?: string | null, alpha = 0.13): string {
 export function leading(fontSize: number, multiplier: number = theme.typography.lineHeight.normal): number {
   return Math.round(fontSize * multiplier);
 }
+/**
+ * Motion tokens — one feel across the app. Springs for things that move
+ * (sheets, toggles, presses), timings for things that fade. Durations in ms.
+ */
+export const motion = {
+  duration: { fast: 140, base: 220, slow: 320 },
+  /** Sheets and cards settling into place: quick, no bounce. */
+  spring: { damping: 26, stiffness: 300, mass: 0.9 },
+  /** Small elements reacting to a touch: a little life. */
+  springSnappy: { damping: 16, stiffness: 320, mass: 0.5 },
+  /** Delay between list rows entering, so a list reads top to bottom. */
+  stagger: 28,
+} as const;

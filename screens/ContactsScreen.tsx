@@ -9,9 +9,6 @@ import {
   TextInput,
   SectionList,
   Image,
-  Modal,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
@@ -27,7 +24,7 @@ import {
 } from '../store/slices/contactsSlice';
 import { loadContactList, followUser, unfollowUser } from '../store/slices/nostrSlice';
 import { theme } from '../theme';
-import { Button, MainHeader, ZapModal, ZapRecipient } from '../components';
+import { Button, MainHeader, Sheet, ZapModal, ZapRecipient } from '../components';
 import NostrService, { NostrContact } from '../services/NostrService';
 import { nip19 } from 'nostr-tools';
 
@@ -345,7 +342,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
     </View>
   );
 
-  // Add-contact form rendered inside a Modal. Hosting it outside the SectionList
+  // Add-contact form rendered inside a Sheet. Hosting it outside the SectionList
   // (instead of in ListHeaderComponent) keeps the TextInputs mounted across
   // re-renders, so the name field no longer loses focus on every keystroke.
   const renderAddModal = () => {
@@ -359,96 +356,73 @@ export default function ContactsScreen({ navigation, route }: Props) {
     const d = detected[kind];
 
     return (
-      <Modal
+      <Sheet
         visible={showAddForm}
-        transparent
-        animationType="slide"
-        onRequestClose={() => !isAdding && resetAddForm()}
+        onClose={() => { if (!isAdding) resetAddForm(); }}
+        title="Add Contact"
       >
-        <View style={styles.modalBackdrop}>
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => !isAdding && resetAddForm()}
-          />
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.modalSheetWrap}
-          >
-            <View style={styles.modalSheet}>
-              <View style={styles.modalHandle} />
-              <View style={styles.modalHeader}>
-                <Text style={styles.formTitle}>Add Contact</Text>
-                <TouchableOpacity onPress={resetAddForm} disabled={isAdding} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                  <Ionicons name="close" size={24} color={theme.colors.text.secondary} />
-                </TouchableOpacity>
-              </View>
+        <TouchableOpacity
+          style={styles.scanCta}
+          onPress={() => { setShowAddForm(false); openContactScanner(); }}
+          disabled={isAdding}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.inverse} />
+          <Text style={styles.scanCtaText}>Scan QR code</Text>
+        </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.scanCta}
-                onPress={() => { setShowAddForm(false); openContactScanner(); }}
-                disabled={isAdding}
-                activeOpacity={0.85}
-              >
-                <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.inverse} />
-                <Text style={styles.scanCtaText}>Scan QR code</Text>
-              </TouchableOpacity>
-
-              <View style={styles.orDivider}>
-                <View style={styles.orLine} />
-                <Text style={styles.orText}>or enter manually</Text>
-                <View style={styles.orLine} />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>Name (optional)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={addName}
-                  onChangeText={setAddName}
-                  placeholder="Display name"
-                  placeholderTextColor={theme.colors.text.tertiary}
-                  autoCapitalize="words"
-                  returnKeyType="next"
-                />
-              </View>
-
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>npub, NIP-05, Lightning address, or node pubkey</Text>
-                <TextInput
-                  style={styles.input}
-                  value={addInput}
-                  onChangeText={setAddInput}
-                  placeholder="npub1… · name@domain · 66-char pubkey"
-                  placeholderTextColor={theme.colors.text.tertiary}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="done"
-                  onSubmitEditing={handleSmartAdd}
-                />
-                {addInput.trim().length > 0 && kind !== 'unknown' && (
-                  <View style={styles.detectRow}>
-                    <Ionicons name={d.icon} size={13} color={d.color} />
-                    <Text style={[styles.detectText, { color: d.color }]}>Detected: {d.label}</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.formActions}>
-                <Button title="Cancel" variant="secondary" onPress={resetAddForm} style={{ flex: 1 }} disabled={isAdding} />
-                <Button
-                  title={isAdding ? 'Adding…' : 'Add'}
-                  variant="primary"
-                  onPress={handleSmartAdd}
-                  style={{ flex: 1 }}
-                  loading={isAdding}
-                  disabled={isAdding}
-                />
-              </View>
-            </View>
-          </KeyboardAvoidingView>
+        <View style={styles.orDivider}>
+          <View style={styles.orLine} />
+          <Text style={styles.orText}>or enter manually</Text>
+          <View style={styles.orLine} />
         </View>
-      </Modal>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Name (optional)</Text>
+          <TextInput
+            style={styles.input}
+            value={addName}
+            onChangeText={setAddName}
+            placeholder="Display name"
+            placeholderTextColor={theme.colors.text.tertiary}
+            autoCapitalize="words"
+            returnKeyType="next"
+          />
+        </View>
+
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>npub, NIP-05, Lightning address, or node pubkey</Text>
+          <TextInput
+            style={styles.input}
+            value={addInput}
+            onChangeText={setAddInput}
+            placeholder="npub1… · name@domain · 66-char pubkey"
+            placeholderTextColor={theme.colors.text.tertiary}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="done"
+            onSubmitEditing={handleSmartAdd}
+          />
+          {addInput.trim().length > 0 && kind !== 'unknown' && (
+            <View style={styles.detectRow}>
+              <Ionicons name={d.icon} size={13} color={d.color} />
+              <Text style={[styles.detectText, { color: d.color }]}>Detected: {d.label}</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.formActions}>
+          <Button title="Cancel" variant="secondary" onPress={resetAddForm} style={{ flex: 1 }} disabled={isAdding} />
+          <Button
+            title={isAdding ? 'Adding…' : 'Add'}
+            variant="primary"
+            onPress={handleSmartAdd}
+            style={{ flex: 1 }}
+            loading={isAdding}
+            disabled={isAdding}
+          />
+        </View>
+      </Sheet>
     );
   };
 
@@ -879,41 +853,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
     color: theme.colors.text.inverse,
-  },
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: theme.colors.background.backdrop,
-  },
-  modalSheetWrap: {
-    width: '100%',
-  },
-  modalSheet: {
-    backgroundColor: theme.colors.background.secondary,
-    borderTopLeftRadius: theme.borderRadius['2xl'],
-    borderTopRightRadius: theme.borderRadius['2xl'],
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[3],
-    paddingBottom: theme.spacing[8],
-  },
-  modalHandle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: theme.colors.border.medium,
-    marginBottom: theme.spacing[4],
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing[4],
-  },
-  formTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
   },
   inputGroup: {
     marginBottom: theme.spacing[3],

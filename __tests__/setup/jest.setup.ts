@@ -73,7 +73,10 @@ jest.mock('react-native/Libraries/EventEmitter/NativeEventEmitter', () => {
 // enough since these tests only assert on rendering/interaction, not motion.
 jest.mock('react-native-reanimated', () => {
   const identity = (t) => t;
-  const withHelper = (toValue) => toValue;
+  // Animations finish at once: the completion callback fires synchronously.
+  const withHelper = (toValue, _config, callback) => { callback?.(true); return toValue; };
+  // Layout animations (FadeIn.delay(…).springify()…) are chainable no-ops.
+  const layoutAnimation = new Proxy({}, { get: () => () => layoutAnimation });
   return {
     __esModule: true,
     default: {
@@ -92,6 +95,13 @@ jest.mock('react-native-reanimated', () => {
     interpolate: (_value, _input, output) => output[0],
     cancelAnimation: () => {},
     runOnJS: (fn) => fn,
+    useReducedMotion: () => false,
+    FadeIn: layoutAnimation,
+    FadeOut: layoutAnimation,
+    FadeInDown: layoutAnimation,
+    FadeInUp: layoutAnimation,
+    ZoomIn: layoutAnimation,
+    LinearTransition: layoutAnimation,
     Easing: {
       linear: identity,
       ease: identity,
@@ -102,6 +112,17 @@ jest.mock('react-native-reanimated', () => {
       out: identity,
       inOut: identity,
     },
+  };
+});
+
+// Gesture handler: gestures are chainable no-ops and the detector renders its child.
+jest.mock('react-native-gesture-handler', () => {
+  const chain = new Proxy({}, { get: () => () => chain });
+  return {
+    __esModule: true,
+    Gesture: { Pan: () => chain, Tap: () => chain },
+    GestureDetector: ({ children }) => children,
+    GestureHandlerRootView: 'GestureHandlerRootView',
   };
 });
 

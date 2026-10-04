@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
-import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { SegmentedTabs } from '../SegmentedTabs';
 import { NetworkIcon } from '../NetworkIcon';
+import { Sheet } from '../Sheet';
 import { feedback } from '../../utils/feedback';
 import type { AccountId } from '../../utils/account-routing';
 import {
@@ -49,11 +49,8 @@ function ChoiceRow<K extends string>({ label, title, choices, selected, onSelect
       </View>
       {many && <Ionicons name="chevron-down" size={18} color={t.colors.text.secondary} />}
     </TouchableOpacity>
-    <Modal visible={open} transparent animationType="slide" onRequestClose={() => setOpen(false)}>
-      <Pressable accessibilityLabel="Close" style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} onPress={() => setOpen(false)} />
-      <SafeAreaView edges={['bottom']} style={{ backgroundColor: t.colors.background.primary, borderTopLeftRadius: t.borderRadius.xl, borderTopRightRadius: t.borderRadius.xl }}>
-        <Text accessibilityRole="header" style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.lg, fontWeight: '700', padding: t.spacing[5], paddingBottom: t.spacing[2] }}>{sheetTitle}</Text>
-        <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingHorizontal: t.spacing[4], paddingBottom: t.spacing[4], gap: t.spacing[2] }}>
+    <Sheet visible={open} onClose={() => setOpen(false)} title={sheetTitle}>
+        <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingBottom: t.spacing[2], gap: t.spacing[2] }}>
           {choices.map(choice => {
             const active = choice.key === selected;
             return <TouchableOpacity key={choice.key}
@@ -78,8 +75,7 @@ function ChoiceRow<K extends string>({ label, title, choices, selected, onSelect
           })}
           {!!footnote && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, paddingTop: t.spacing[2] }}>{footnote}</Text>}
         </ScrollView>
-      </SafeAreaView>
-    </Modal>
+    </Sheet>
   </>;
 }
 

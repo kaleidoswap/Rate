@@ -6,7 +6,8 @@
  * existing-asset picker.
  */
 import React from 'react';
-import { Modal, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Sheet } from './Sheet';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
@@ -76,17 +77,7 @@ export const NewAssetSheet: React.FC<NewAssetSheetProps> = ({
   const visibleOptions = options.filter((o) => o.show);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={onClose} />
-        <View style={styles.sheet}>
-          <View style={styles.handle} />
-          <View style={styles.headerRow}>
-            <Text style={styles.title}>Receive new asset</Text>
-            <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="close" size={22} color={theme.colors.text.tertiary} />
-            </TouchableOpacity>
-          </View>
+    <Sheet visible={visible} onClose={onClose} title="Receive new asset">
 
           {visibleOptions.length === 0 ? (
             <Text style={styles.empty}>
@@ -118,37 +109,11 @@ export const NewAssetSheet: React.FC<NewAssetSheetProps> = ({
             <Ionicons name="albums-outline" size={18} color={theme.colors.text.secondary} />
             <Text style={styles.existingText}>Choose an existing asset</Text>
           </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
+    </Sheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: theme.colors.background.backdrop },
-  sheet: {
-    backgroundColor: theme.colors.surface.primary,
-    borderTopLeftRadius: theme.borderRadius.xl,
-    borderTopRightRadius: theme.borderRadius.xl,
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[2.5],
-    paddingBottom: theme.spacing[8],
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: theme.colors.border.medium,
-    marginBottom: theme.spacing[3.5],
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing[4],
-  },
-  title: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
   empty: {
     fontSize: theme.typography.fontSize.sm,
     lineHeight: 19,

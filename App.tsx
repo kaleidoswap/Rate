@@ -206,15 +206,19 @@ function AppNavigator() {
         initialRouteName="InitialLoad"
         screenOptions={{
           headerShown: false,
-          gestureEnabled: false,
+          // One push transition on both platforms, and swipe back from anywhere on iOS.
+          animation: 'slide_from_right',
+          gestureEnabled: true,
+          fullScreenGestureEnabled: true,
           contentStyle: { backgroundColor: theme.colors.background.primary },
         }}
       >
-        <Stack.Screen name="InitialLoad" component={InitialLoadScreen} />
-        <Stack.Screen name="WalletSetup" component={WalletSetupScreen} />
+        {/* Root screens replace each other: they fade, and there is nothing to swipe back to. */}
+        <Stack.Screen name="InitialLoad" component={InitialLoadScreen} options={{ animation: 'fade', gestureEnabled: false }} />
+        <Stack.Screen name="WalletSetup" component={WalletSetupScreen} options={{ animation: 'fade', gestureEnabled: false }} />
         <Stack.Screen name="WalletRestore" component={WalletRestoreScreen} />
-        <Stack.Screen name="SecuritySetup" component={SecuritySetupScreen} />
-        <Stack.Screen name="Dashboard" component={DashboardTabs} />
+        <Stack.Screen name="SecuritySetup" component={SecuritySetupScreen} options={{ gestureEnabled: false }} />
+        <Stack.Screen name="Dashboard" component={DashboardTabs} options={{ animation: 'fade', gestureEnabled: false }} />
         <Stack.Screen
           name="Settings"
           component={asModalScreen(SettingsScreen)}

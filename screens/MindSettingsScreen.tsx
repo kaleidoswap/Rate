@@ -2,7 +2,8 @@
 // Chat settings — design the on-device KaleidoMind agent: personality,
 // connectors (skills + MCP), context, memory and the RAG knowledge base.
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Switch, Pressable, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, Switch, Pressable, Alert } from 'react-native';
+import { Sheet } from '../components/Sheet';
 import { useSelector, useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { skillsFromBundle } from '@kaleidorg/mind';
@@ -136,20 +137,13 @@ const AddMcpModal: React.FC<{ visible: boolean; onClose: () => void; onAdd: (nam
   const [url, setUrl] = useState('');
   const valid = name.trim().length > 0 && /^https?:\/\//i.test(url.trim());
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={() => {}}>
-          <View style={styles.handle} />
-          <Text style={styles.sheetTitle}>Add MCP server</Text>
-          <Text style={styles.sheetHint}>Connect an external tool server (Streamable HTTP / SSE).</Text>
+    <Sheet visible={visible} onClose={onClose} title="Add MCP server" subtitle="Connect an external tool server (Streamable HTTP / SSE).">
           <TextInput style={styles.modalInput} value={name} onChangeText={setName} placeholder="Name (e.g. Bitrefill)" placeholderTextColor={theme.colors.text.tertiary} autoCapitalize="none" />
           <TextInput style={styles.modalInput} value={url} onChangeText={setUrl} placeholder="https://server.example.com/mcp" placeholderTextColor={theme.colors.text.tertiary} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
           <Pressable style={[styles.addBtn, !valid && { opacity: 0.5 }]} disabled={!valid} onPress={() => { onAdd(name.trim(), url.trim()); setName(''); setUrl(''); }}>
             <Text style={styles.addBtnText}>Add connector</Text>
           </Pressable>
-        </Pressable>
-      </Pressable>
-    </Modal>
+    </Sheet>
   );
 };
 
@@ -217,12 +211,7 @@ const styles = StyleSheet.create({
   resetBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: theme.spacing[1.5], paddingVertical: theme.spacing[3] },
   resetText: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
   // modal
-  backdrop: { flex: 1, backgroundColor: theme.colors.background.backdrop, justifyContent: 'flex-end' },
-  sheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: theme.borderRadius.xl, borderTopRightRadius: theme.borderRadius.xl, padding: theme.spacing[5], paddingBottom: theme.spacing[9] },
-  handle: { width: 40, height: 4, borderRadius: theme.borderRadius.sm, backgroundColor: theme.colors.border.dark, alignSelf: 'center', marginBottom: theme.spacing[3.5] },
-  sheetTitle: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.bold },
-  sheetHint: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: theme.spacing[1], marginBottom: theme.spacing[3.5] },
-  modalInput: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, backgroundColor: theme.colors.surface.primary, borderRadius: theme.borderRadius.base, padding: theme.spacing[3], marginBottom: theme.spacing[2.5], borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light },
+  modalInput: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, backgroundColor: theme.colors.background.secondary, borderRadius: theme.borderRadius.base, padding: theme.spacing[3], marginBottom: theme.spacing[2.5], borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light },
   addBtn: { backgroundColor: theme.colors.primary[500], borderRadius: theme.borderRadius.md, paddingVertical: theme.spacing[3.5], alignItems: 'center', marginTop: theme.spacing[1.5] },
   addBtnText: { color: '#fff', fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.bold }, // literal white on green primary fill
 });

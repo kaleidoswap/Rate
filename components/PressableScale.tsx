@@ -11,6 +11,7 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { motion } from '../theme';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -21,7 +22,7 @@ interface PressableScaleProps extends PressableProps {
   scaleTo?: number;
 }
 
-const SPRING = { damping: 16, stiffness: 320, mass: 0.5 };
+const SPRING = motion.springSnappy;
 
 export const PressableScale: React.FC<PressableScaleProps> = ({
   children,

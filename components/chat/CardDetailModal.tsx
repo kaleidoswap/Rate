@@ -1,5 +1,6 @@
 import React from 'react';
-import { Modal, View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
+import { Sheet } from '../Sheet';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -25,15 +26,8 @@ export const CardDetailModal: React.FC<{
       : sharePayable(raw, KIND_LABEL[kind]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={s.backdrop} onPress={onClose}>
-        <Pressable style={s.sheet} onPress={() => {}}>
-          <View style={s.handle} />
-          <Pressable style={s.close} onPress={onClose} hitSlop={10}>
-            <Ionicons name="close" size={22} color={tx(theme, 'secondary')} />
-          </Pressable>
-
-          <Text style={s.title}>{KIND_LABEL[kind]}</Text>
+    <Sheet visible={visible} onClose={onClose} title={KIND_LABEL[kind]}>
+        <View style={s.body}>
           {amountSats != null && <Text style={s.amount}>{amountSats.toLocaleString()} sats</Text>}
           {!!description && <Text style={s.desc}>{description}</Text>}
 
@@ -65,9 +59,8 @@ export const CardDetailModal: React.FC<{
               </LinearGradient>
             </Pressable>
           </View>
-        </Pressable>
-      </Pressable>
-    </Modal>
+        </View>
+    </Sheet>
   );
 };
 
@@ -78,15 +71,7 @@ const gradient = (t: Theme): [string, string] => (t as any)?.colors?.primary?.gr
 const makeStyles = (t: Theme) => {
   const c = (t as any)?.colors ?? {};
   return StyleSheet.create({
-    backdrop: { flex: 1, backgroundColor: c?.background?.backdrop ?? 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-    sheet: {
-      backgroundColor: c?.background?.primary ?? c?.surface?.elevated ?? '#15161a',
-      borderTopLeftRadius: t.borderRadius.xl, borderTopRightRadius: t.borderRadius.xl,
-      paddingHorizontal: t.spacing[5], paddingTop: t.spacing[3], paddingBottom: t.spacing[8], alignItems: 'center',
-    },
-    handle: { width: 40, height: 4, borderRadius: t.borderRadius.sm, backgroundColor: c?.border?.dark ?? 'rgba(255,255,255,0.2)', marginBottom: t.spacing[3.5] },
-    close: { position: 'absolute', top: t.spacing[3.5], right: t.spacing[4], padding: t.spacing[1] },
-    title: { color: tx(t, 'primary'), fontSize: t.typography.fontSize.base, fontWeight: t.typography.fontWeight.bold, marginBottom: 2 },
+    body: { alignItems: 'center' },
     amount: { color: accent(t), fontSize: t.typography.fontSize['2xl'], fontWeight: t.typography.fontWeight.extrabold, marginTop: 2 },
     desc: { color: tx(t, 'secondary'), fontSize: t.typography.fontSize.sm, marginTop: t.spacing[1.5], textAlign: 'center' },
     // QR must stay black-on-white for reliable scanning — these literals are intentional, not theme-able.

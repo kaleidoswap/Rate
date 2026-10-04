@@ -17,7 +17,6 @@ import {
   RefreshControl,
   Dimensions,
   StatusBar,
-  Modal,
   DeviceEventEmitter,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
@@ -42,6 +41,7 @@ import {
   ChannelList,
   MainHeader
 } from '../components';
+import { Sheet } from '../components/Sheet';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
@@ -632,160 +632,145 @@ export default function DashboardScreen({ navigation }: Props) {
   } as any;
 
   const renderChannelModal = () => (
-    <Modal
+    <Sheet
       visible={channelModalVisible}
-      transparent={true}
-      animationType="slide"
-      onRequestClose={() => setChannelModalVisible(false)}
+      onClose={() => setChannelModalVisible(false)}
+      title="Channel Details"
     >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Channel Details</Text>
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={() => setChannelModalVisible(false)}
-            >
-              <Ionicons name="close" size={24} color={theme.colors.text.primary} />
-            </TouchableOpacity>
+      {selectedChannel && (
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Channel Status */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Status</Text>
+            <View style={styles.modalStatusRow}>
+              <View style={[
+                styles.modalStatusDot,
+                { backgroundColor: selectedChannel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
+              ]} />
+              <Text style={styles.modalStatusText}>
+                {selectedChannel.ready ? 'Channel Open' : 'Channel Pending'}
+              </Text>
+              {selectedChannel.public ? (
+                <View style={styles.modalPublicBadge}>
+                  <Ionicons name="globe-outline" size={12} color={theme.colors.primary[500]} />
+                  <Text style={styles.modalPublicText}>Public</Text>
+                </View>
+              ) : (
+                <View style={styles.modalPrivateBadge}>
+                  <Ionicons name="lock-closed-outline" size={12} color={theme.colors.gray[500]} />
+                  <Text style={styles.modalPrivateText}>Private</Text>
+                </View>
+              )}
+            </View>
           </View>
 
-          {selectedChannel && (
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              {/* Channel Status */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Status</Text>
-                <View style={styles.modalStatusRow}>
-                  <View style={[
-                    styles.modalStatusDot,
-                    { backgroundColor: selectedChannel.is_usable ? theme.colors.success[500] : theme.colors.error[500] }
-                  ]} />
-                  <Text style={styles.modalStatusText}>
-                    {selectedChannel.ready ? 'Channel Open' : 'Channel Pending'}
-                  </Text>
-                  {selectedChannel.public ? (
-                    <View style={styles.modalPublicBadge}>
-                      <Ionicons name="globe-outline" size={12} color={theme.colors.primary[500]} />
-                      <Text style={styles.modalPublicText}>Public</Text>
-                    </View>
-                  ) : (
-                    <View style={styles.modalPrivateBadge}>
-                      <Ionicons name="lock-closed-outline" size={12} color={theme.colors.gray[500]} />
-                      <Text style={styles.modalPrivateText}>Private</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
+          {/* Peer Information */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Peer Information</Text>
+            <View style={styles.modalInfoRow}>
+              <Text style={styles.modalInfoLabel}>Alias</Text>
+              <Text style={styles.modalInfoValue}>
+                {selectedChannel.peer_alias || 'Unknown'}
+              </Text>
+            </View>
+            <View style={styles.modalInfoRow}>
+              <Text style={styles.modalInfoLabel}>Public Key</Text>
+              <Text style={styles.modalInfoValue} numberOfLines={1}>
+                {selectedChannel.peer_pubkey}
+              </Text>
+            </View>
+          </View>
 
-              {/* Peer Information */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Peer Information</Text>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalInfoLabel}>Alias</Text>
-                  <Text style={styles.modalInfoValue}>
-                    {selectedChannel.peer_alias || 'Unknown'}
-                  </Text>
-                </View>
-                <View style={styles.modalInfoRow}>
-                  <Text style={styles.modalInfoLabel}>Public Key</Text>
-                  <Text style={styles.modalInfoValue} numberOfLines={1}>
-                    {selectedChannel.peer_pubkey}
-                  </Text>
-                </View>
-              </View>
+          {/* Channel Capacity */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Capacity</Text>
+            <Text style={styles.modalCapacityValue}>
+              {formatSatoshis(selectedChannel.capacity_sat)} {bitcoinUnit}
+            </Text>
+          </View>
 
-              {/* Channel Capacity */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Capacity</Text>
-                <Text style={styles.modalCapacityValue}>
-                  {formatSatoshis(selectedChannel.capacity_sat)} {bitcoinUnit}
-                </Text>
-              </View>
-
-              {/* Bitcoin Liquidity */}
-              <View style={styles.modalSection}>
-                <Text style={styles.modalSectionTitle}>Bitcoin Liquidity</Text>
-                <View style={styles.modalLiquidityContainer}>
-                  <View style={styles.modalLiquidityRow}>
-                    <View style={styles.modalLiquidityItem}>
-                      <View style={styles.modalLiquidityIcon}>
-                        <Ionicons name="arrow-up" size={16} color={theme.colors.success[500]} />
-                      </View>
-                      <View>
-                        <Text style={styles.modalLiquidityLabel}>Outbound</Text>
-                        <Text style={styles.modalLiquidityValue}>
-                          {formatSatoshis(selectedChannel.outbound_balance_msat / 1000)} {bitcoinUnit}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.modalLiquidityItem}>
-                      <View style={styles.modalLiquidityIcon}>
-                        <Ionicons name="arrow-down" size={16} color={theme.colors.primary[500]} />
-                      </View>
-                      <View>
-                        <Text style={styles.modalLiquidityLabel}>Inbound</Text>
-                        <Text style={styles.modalLiquidityValue}>
-                          {formatSatoshis(selectedChannel.inbound_balance_msat / 1000)} {bitcoinUnit}
-                        </Text>
-                      </View>
-                    </View>
+          {/* Bitcoin Liquidity */}
+          <View style={styles.modalSection}>
+            <Text style={styles.modalSectionTitle}>Bitcoin Liquidity</Text>
+            <View style={styles.modalLiquidityContainer}>
+              <View style={styles.modalLiquidityRow}>
+                <View style={styles.modalLiquidityItem}>
+                  <View style={styles.modalLiquidityIcon}>
+                    <Ionicons name="arrow-up" size={16} color={theme.colors.success[500]} />
                   </View>
-                  <View style={styles.modalLiquidityBar}>
-                    <View style={[
-                      styles.modalLiquidityBarFill,
-                      {
-                        width: `${(selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) > 0 ?
-                          (selectedChannel.outbound_balance_msat / (selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) * 100) : 0}%`,
-                        backgroundColor: theme.colors.success[500]
-                      }
-                    ]} />
+                  <View>
+                    <Text style={styles.modalLiquidityLabel}>Outbound</Text>
+                    <Text style={styles.modalLiquidityValue}>
+                      {formatSatoshis(selectedChannel.outbound_balance_msat / 1000)} {bitcoinUnit}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.modalLiquidityItem}>
+                  <View style={styles.modalLiquidityIcon}>
+                    <Ionicons name="arrow-down" size={16} color={theme.colors.primary[500]} />
+                  </View>
+                  <View>
+                    <Text style={styles.modalLiquidityLabel}>Inbound</Text>
+                    <Text style={styles.modalLiquidityValue}>
+                      {formatSatoshis(selectedChannel.inbound_balance_msat / 1000)} {bitcoinUnit}
+                    </Text>
                   </View>
                 </View>
               </View>
+              <View style={styles.modalLiquidityBar}>
+                <View style={[
+                  styles.modalLiquidityBarFill,
+                  {
+                    width: `${(selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) > 0 ?
+                      (selectedChannel.outbound_balance_msat / (selectedChannel.outbound_balance_msat + selectedChannel.inbound_balance_msat) * 100) : 0}%`,
+                    backgroundColor: theme.colors.success[500]
+                  }
+                ]} />
+              </View>
+            </View>
+          </View>
 
-              {/* RGB Asset Liquidity (if applicable) */}
-              {selectedChannel.asset_id && (() => {
-                // Channel asset amounts are in base units; divide by the asset's
-                // real precision (USDT=6, XAUT=9, …), not a hardcoded 8.
-                const channelAssetPrecision =
-                  rgbAssets.find((a) => a.asset_id === selectedChannel.asset_id)?.precision ?? 8;
-                return (
-                <View style={styles.modalSection}>
-                  <Text style={styles.modalSectionTitle}>RGB Asset Liquidity</Text>
-                  <View style={styles.modalLiquidityContainer}>
-                    <View style={styles.modalLiquidityRow}>
-                      <View style={styles.modalLiquidityItem}>
-                        <View style={styles.modalLiquidityIcon}>
-                          <Ionicons name="arrow-up" size={16} color={theme.colors.secondary[500]} />
-                        </View>
-                        <View>
-                          <Text style={styles.modalLiquidityLabel}>Local</Text>
-                          <Text style={styles.modalLiquidityValue}>
-                            {formatAssetAmount(selectedChannel.asset_local_amount, channelAssetPrecision)}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.modalLiquidityItem}>
-                        <View style={styles.modalLiquidityIcon}>
-                          <Ionicons name="arrow-down" size={16} color={theme.colors.secondary[600]} />
-                        </View>
-                        <View>
-                          <Text style={styles.modalLiquidityLabel}>Remote</Text>
-                          <Text style={styles.modalLiquidityValue}>
-                            {formatAssetAmount(selectedChannel.asset_remote_amount, channelAssetPrecision)}
-                          </Text>
-                        </View>
-                      </View>
+          {/* RGB Asset Liquidity (if applicable) */}
+          {selectedChannel.asset_id && (() => {
+            // Channel asset amounts are in base units; divide by the asset's
+            // real precision (USDT=6, XAUT=9, …), not a hardcoded 8.
+            const channelAssetPrecision =
+              rgbAssets.find((a) => a.asset_id === selectedChannel.asset_id)?.precision ?? 8;
+            return (
+            <View style={styles.modalSection}>
+              <Text style={styles.modalSectionTitle}>RGB Asset Liquidity</Text>
+              <View style={styles.modalLiquidityContainer}>
+                <View style={styles.modalLiquidityRow}>
+                  <View style={styles.modalLiquidityItem}>
+                    <View style={styles.modalLiquidityIcon}>
+                      <Ionicons name="arrow-up" size={16} color={theme.colors.secondary[500]} />
+                    </View>
+                    <View>
+                      <Text style={styles.modalLiquidityLabel}>Local</Text>
+                      <Text style={styles.modalLiquidityValue}>
+                        {formatAssetAmount(selectedChannel.asset_local_amount, channelAssetPrecision)}
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.modalLiquidityItem}>
+                    <View style={styles.modalLiquidityIcon}>
+                      <Ionicons name="arrow-down" size={16} color={theme.colors.secondary[600]} />
+                    </View>
+                    <View>
+                      <Text style={styles.modalLiquidityLabel}>Remote</Text>
+                      <Text style={styles.modalLiquidityValue}>
+                        {formatAssetAmount(selectedChannel.asset_remote_amount, channelAssetPrecision)}
+                      </Text>
                     </View>
                   </View>
                 </View>
-                );
-              })()}
-            </ScrollView>
-          )}
-        </View>
-      </View>
-    </Modal>
+              </View>
+            </View>
+            );
+          })()}
+        </ScrollView>
+      )}
+    </Sheet>
   );
 
   return (
@@ -1078,37 +1063,6 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.primary[600],
   },
   // Modal Styles
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: theme.colors.background.backdrop,
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    backgroundColor: theme.colors.surface.primary,
-    borderTopLeftRadius: theme.borderRadius['2xl'],
-    borderTopRightRadius: theme.borderRadius['2xl'],
-    maxHeight: '80%',
-    paddingBottom: theme.spacing[8],
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: theme.spacing[4],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-  modalTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-  },
-  modalCloseButton: {
-    padding: theme.spacing[2],
-  },
-  modalBody: {
-    padding: theme.spacing[4],
-  },
   modalSection: {
     marginBottom: theme.spacing[6],
   },

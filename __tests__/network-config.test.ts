@@ -6,8 +6,10 @@ import {
 } from '../services/protocols/networkConfig';
 
 describe('protocol network config', () => {
-  it('uses Spark regtest as the single app-supported test environment', () => {
-    expect(PROTOCOL_DEFAULT_NETWORK.spark).toBe('regtest');
+  it('defaults new wallets to mainnet; Spark regtest is the single test environment', () => {
+    expect(PROTOCOL_DEFAULT_NETWORK.spark).toBe('mainnet');
+    expect(PROTOCOL_DEFAULT_NETWORK.arkade).toBe('mainnet');
+    expect(JSON.parse(buildNetworkConfig('arkade')).arkServerUrl).toBe('https://arkade.computer');
     expect(PROTOCOL_SUPPORTED_NETWORKS.SPARK).toEqual(['mainnet', 'regtest']);
   });
 
