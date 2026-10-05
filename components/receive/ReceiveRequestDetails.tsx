@@ -93,7 +93,8 @@ export function ReceiveRequestDetails({ methods, universal, notes = [], qrSize, 
   const [shown, setShown] = useState<ReceiveMethod | null>(null);
   const [expanded, setExpanded] = useState(false);
   if (!methods.length) return null;
-  const card = { borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: t.colors.border.light };
+  // Stretch: the parent centres the QR, which would otherwise shrink this card to its content.
+  const card = { alignSelf: 'stretch' as const, borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: t.colors.border.light };
 
   if (!universal) {
     const method = methods[0];

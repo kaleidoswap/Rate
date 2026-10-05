@@ -70,18 +70,18 @@ export function ReceiveAccountPicker({ accounts, account, onAccount, methods, me
               accessibilityLabel={`${card.label}${card.balanceSats !== undefined ? `, ${card.balanceSats.toLocaleString('en-US')} sats` : ''}${showChain && card.chain ? `, ${chainLabel(card.chain)}` : ''}`}
               style={[styles.card, accounts.length === 1 && styles.cardSolo, active && styles.cardActive]}
             >
-              <View style={styles.cardTop}>
-                <View style={[styles.iconWrap, { backgroundColor: tint }]}>
-                  <NetworkIcon network={ACCOUNT_ICON[card.account]} size={22} />
-                </View>
-                {active
-                  ? <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary[500]} />
-                  : showChain && card.chain && card.chain !== 'mainnet' && <Text style={styles.chain}>{chainLabel(card.chain)}</Text>}
+              <View style={[styles.iconWrap, { backgroundColor: tint }]}>
+                <NetworkIcon network={ACCOUNT_ICON[card.account]} size={18} />
               </View>
-              <Text style={styles.cardName} numberOfLines={1}>{card.label}</Text>
-              {card.balanceSats !== undefined
-                ? <AmountText style={styles.cardSub} numberOfLines={1}>{card.balanceSats.toLocaleString('en-US')} sats</AmountText>
-                : <Text style={styles.cardSub} numberOfLines={1}>{ACCOUNT_TAGLINE[card.account]}</Text>}
+              <View style={styles.cardText}>
+                <Text style={styles.cardName} numberOfLines={1}>{card.label}</Text>
+                {card.balanceSats !== undefined
+                  ? <AmountText style={styles.cardSub} numberOfLines={1}>{card.balanceSats.toLocaleString('en-US')} sats</AmountText>
+                  : <Text style={styles.cardSub} numberOfLines={1}>{ACCOUNT_TAGLINE[card.account]}</Text>}
+              </View>
+              {active
+                ? <Ionicons name="checkmark-circle" size={18} color={theme.colors.primary[500]} />
+                : showChain && card.chain && card.chain !== 'mainnet' && <Text style={styles.chain}>{chainLabel(card.chain)}</Text>}
             </PressableScale>
           );
         })}
@@ -129,23 +129,27 @@ export function ReceiveAccountPicker({ accounts, account, onAccount, methods, me
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: theme.spacing[4] },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing[2.5] },
+  wrap: { gap: theme.spacing[3] },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing[2] },
+  // Compact: icon, name and balance on one line, two cards per row.
   card: {
     flexGrow: 1,
     flexBasis: '46%',
-    minHeight: 96,
-    padding: theme.spacing[3],
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    paddingHorizontal: theme.spacing[2.5],
+    paddingVertical: theme.spacing[2],
     borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface.primary,
     borderWidth: 1.5,
     borderColor: theme.colors.border.light,
-    gap: 2,
   },
   cardSolo: { flexBasis: '100%' },
   cardActive: { borderColor: theme.colors.primary[500], backgroundColor: theme.colors.primary[50] },
-  cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: theme.spacing[2] },
-  iconWrap: { width: 36, height: 36, borderRadius: theme.borderRadius.full, alignItems: 'center', justifyContent: 'center' },
+  cardText: { flex: 1, minWidth: 0 },
+  iconWrap: { width: 30, height: 30, borderRadius: theme.borderRadius.full, alignItems: 'center', justifyContent: 'center' },
   chain: {
     fontSize: 10,
     fontWeight: theme.typography.fontWeight.semibold,
@@ -157,7 +161,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     overflow: 'hidden',
   },
-  cardName: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.primary },
+  cardName: { fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.primary },
   cardSub: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary },
   methods: { gap: theme.spacing[2] },
   caption: {

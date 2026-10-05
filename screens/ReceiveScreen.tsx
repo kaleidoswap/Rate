@@ -1560,6 +1560,13 @@ export default function ReceiveScreen({ navigation }: Props) {
     <View style={styles.qrSection}><ReceiveQr value="" size={qrSize} /></View>
   );
 
+  const qrOnScreen = networkType === 'unified'
+    ? !!unifiedUri
+    : !(awaitingAmount && routeTarget) && !loading && !error && !!address;
+  const renderStatus = () => (
+    <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message} />
+  );
+
   const renderUnifiedBody = () => {
     const accent = theme.colors.networks.unified;
     // Show the loader until the complete request is ready to be published.
@@ -1624,6 +1631,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         <View style={styles.qrContainer}>
           <ReceiveQr value={unifiedUri} size={qrSize} />
         </View>
+        {renderStatus()}
         {renderAmountRow()}
 
         {receiveMethods.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry showCountdown={showCountdown} key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
@@ -1720,6 +1728,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         <View style={styles.qrContainer}>
           <ReceiveQr value={address} size={qrSize} />
         </View>
+        {renderStatus()}
         {renderAmountRow()}
 
         <InvoiceExpiry showCountdown={showCountdown} invoice={address} onRefresh={() => { void generateAddress(); }} />
@@ -1813,11 +1822,8 @@ export default function ReceiveScreen({ navigation }: Props) {
         />}
         {renderContent()}
         {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
-        <ReceiveStatus
-          visible={monitorVisible}
-          status={monitorStatus}
-          message={depositMonitor.message}
-        />
+        {/* With a QR on screen the status sits right under it; otherwise here. */}
+        {!qrOnScreen && renderStatus()}
         {selectedAsset.asset_id === 'BTC' && receiveAccounts.some((a) => a.account === 'SPARK' && a.chain === 'mainnet') && (
           <LightningAddressCard walletId={walletId} onOpen={() => { cancelReceiveWork(); navigation.navigate('LightningAddress'); }} />
         )}
