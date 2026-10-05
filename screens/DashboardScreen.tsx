@@ -46,6 +46,10 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
+
+// Stablecoins valued at $1 in the asset list.
+const LITE_USD_ID = 'lite-usd';
+const USD_TICKERS = new Set(['USDT', 'USDC', USDB_TICKER.toUpperCase()]);
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
 
 const { width } = Dimensions.get('window');
@@ -629,7 +633,14 @@ export default function DashboardScreen({ navigation }: Props) {
     name: 'Bitcoin',
     precision: bitcoinUnit === 'BTC' ? 8 : 0,
     balance: { spendable: availableBtc },
+    unit: bitcoinUnit,
+    fiatValue: btcPriceUSD ? (availableBtc / 100_000_000) * btcPriceUSD : undefined,
   } as any;
+  // Dollar stablecoins are worth their face value.
+  const usdValueOf = (asset: any): number | undefined =>
+    USD_TICKERS.has(String(asset?.ticker ?? '').toUpperCase())
+      ? getAssetBaseUnitBalance(asset.balance) / Math.pow(10, asset.precision || 0)
+      : undefined;
 
   const renderChannelModal = () => (
     <Sheet
@@ -868,25 +879,18 @@ export default function DashboardScreen({ navigation }: Props) {
 
 
 
-        {isLite && liteUsdDisplay > 0 && (
-          <View style={styles.liteUsdCard}>
-            <View style={styles.liteUsdLeft}>
-              <View style={styles.liteUsdIcon}>
-                <Ionicons name="cash-outline" size={20} color={theme.colors.success[600]} />
-              </View>
-              <Text style={styles.liteUsdLabel}>USD</Text>
-            </View>
-            <Text style={styles.liteUsdValue}>${liteUsdDisplay.toFixed(2)}</Text>
-          </View>
-        )}
-
         <AssetList
           // BTC always leads the list; in lite mode hide USDt (it's folded into the
           // USD figure above) and strip the per-asset protocol badge (a network detail).
           assets={[
             btcListEntry,
+            // Lite folds every dollar stablecoin into one USD line.
+            ...(isLite && liteUsdDisplay > 0 ? [{
+              asset_id: LITE_USD_ID, ticker: 'USD', name: 'US Dollar', precision: 2,
+              balance: { spendable: Math.round(liteUsdDisplay * 100) },
+            }] : []),
             ...(isLite
-              ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined }))
+              ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined, fiatValue: usdValueOf(a) }))
               // The list mixes protocols (RGB, Spark tokens, Arkade), so tag each
               // asset with its real family for the badge instead of leaving it bare.
               : rgbAssets.map((a) => ({
@@ -894,10 +898,12 @@ export default function DashboardScreen({ navigation }: Props) {
                   // rgbAssets never contains BTC (filtered upstream), so the family
                   // is always one of the badge-able protocols.
                   protocol: getAssetFamily(a.asset_id, a.ticker) as 'RGB' | 'SPARK' | 'ARKADE',
+                  fiatValue: usdValueOf(a),
                 }))),
           ]}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
           onAssetPress={(asset) => {
+            if (asset.asset_id === LITE_USD_ID) { navigation.getParent()?.navigate('Assets'); return; }
             const family = getAssetFamily(asset.asset_id, asset.ticker);
             navigation.getParent()?.navigate('AssetDetail', {
               asset: {
@@ -968,41 +974,6 @@ const styles = StyleSheet.create({
     marginHorizontal: theme.spacing[4],
     marginTop: theme.spacing[4],
     marginBottom: theme.spacing[4],
-  },
-  liteUsdCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing[6],
-    marginHorizontal: theme.spacing[4],
-    padding: theme.spacing[4],
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-  },
-  liteUsdLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-  },
-  liteUsdIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: theme.colors.success[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  liteUsdLabel: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  liteUsdValue: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
   },
   headerContainer: {
     marginBottom: theme.spacing[4],

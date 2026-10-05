@@ -34,6 +34,7 @@ const ASSET_COLORS: Record<string, string> = {
   USDT: '#26A17B',
   USDC: '#2775CA',
   USDB: theme.colors.accent[500],
+  USD: theme.colors.success[600],
   DEFAULT: theme.colors.gray[500],
 };
 
@@ -149,7 +150,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#fff',
+    // Ring in the card colour, so the badge reads as cut out of the icon.
+    borderColor: theme.colors.surface.primary,
   },
 });
 

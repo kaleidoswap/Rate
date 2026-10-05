@@ -1,14 +1,14 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { theme, protocolColor } from '../theme';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { theme, motion } from '../theme';
 import { Card } from './Card';
-import { AssetIcon, assetIconColor, resolveAssetIconUri } from './AssetIcon';
-import { useAverageIconColor } from '../utils/iconAverageColor';
-import { Badge } from './Badge';
+import { AssetIcon } from './AssetIcon';
 import { SectionHeader } from './SectionHeader';
 import { AmountText } from './AmountText';
+import { PressableScale } from './PressableScale';
+import { feedback } from '../utils/feedback';
 import { formatAssetAmount, getAssetBaseUnitBalance, type AssetBalanceLike } from '../utils/assetAmount';
 
 interface NiaAsset {
@@ -19,6 +19,10 @@ interface NiaAsset {
     balance: AssetBalanceLike;
     protocol?: 'RGB' | 'SPARK' | 'ARKADE';
     icon?: string;
+    /** Unit shown after the amount (e.g. "sats" for BTC). Defaults to the ticker. */
+    unit?: string;
+    /** USD value of the balance, when the asset has a known price. */
+    fiatValue?: number;
 }
 
 interface AssetListProps {
@@ -28,60 +32,55 @@ interface AssetListProps {
     onIssueAsset: () => void;
 }
 
-// AssetIcon imported from ./AssetIcon
+const VISIBLE = 4;
 
-/**
- * Single asset card. Its own component so it can derive the gradient accent
- * from the *average color of the asset's icon* (sampled dynamically), falling
- * back to the per-ticker brand color until/unless that resolves.
- */
-const AssetRow: React.FC<{ asset: NiaAsset; onPress: () => void }> = ({ asset, onPress }) => {
-    const iconUri = resolveAssetIconUri(asset.ticker, asset.icon);
-    const accent = useAverageIconColor(iconUri, assetIconColor(asset.ticker));
+const PROTOCOL_LABEL: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade' };
+
+/** "21000" → "21,000", "1234.5678" → "1,234.5678": the integer part gets separators. */
+function groupThousands(amount: string): string {
+    const [int, frac] = amount.split('.');
+    return int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (frac !== undefined ? `.${frac}` : '');
+}
+
+export function formatUsd(value: number): string {
+    const abs = Math.abs(value);
+    const digits = abs > 0 && abs < 0.01 ? 4 : 2;
+    return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: digits })}`;
+}
+
+/** One asset: what it is on the left, how much (and what it's worth) on the right. */
+const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPress: () => void }> = ({ asset, index, last, onPress }) => {
+    const baseUnits = getAssetBaseUnitBalance(asset.balance);
+    const amount = groupThousands(formatAssetAmount(baseUnits, asset.precision));
+    const unit = asset.unit ?? asset.ticker;
+    const empty = baseUnits <= 0;
+    const subtitle = [asset.ticker !== asset.name ? asset.ticker : null, asset.protocol ? PROTOCOL_LABEL[asset.protocol] : null]
+        .filter(Boolean).join(' · ');
+    const fiat = asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
+
     return (
-        <TouchableOpacity style={styles.assetCardWrapper} onPress={onPress}>
-            <LinearGradient
-                // A tint on the trailing edge only, so the asset's colour reads as an
-                // accent rather than a stain. The previous ramp started at 55% and
-                // peaked at 14% alpha, which over the navy card turned a warm icon
-                // (BTC orange) into a muddy band across half the row that looked
-                // like a rendering fault. Start late, stay faint.
-                colors={[
-                    theme.colors.surface.primary,
-                    theme.colors.surface.primary,
-                    `${accent}0D`,
-                    `${accent}1A`,
-                ]}
-                locations={[0, 0.74, 0.93, 1]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0.5 }}
-                style={styles.assetVerticalCard}
+        <Animated.View entering={FadeInDown.delay(index * motion.stagger).duration(motion.duration.base)}>
+            <PressableScale
+                scaleTo={0.98}
+                onPress={() => { feedback.select(); onPress(); }}
+                accessibilityRole="button"
+                accessibilityLabel={`${asset.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}`}
+                style={[styles.row, !last && styles.rowDivider]}
             >
-                <View style={styles.assetVerticalContent}>
-                    <View style={styles.assetVerticalLeft}>
-                        <View style={[styles.assetIconHalo, { backgroundColor: `${accent}18` }]}>
-                            <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={40} />
-                        </View>
-                        <View style={styles.assetVerticalInfo}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] }}>
-                                <Text style={styles.assetVerticalTicker}>{asset.ticker}</Text>
-                                {asset.protocol && (
-                                    <Badge label={asset.protocol} color={protocolColor(asset.protocol)} />
-                                )}
-                            </View>
-                            <Text style={styles.assetVerticalName}>{asset.name}</Text>
-                        </View>
-                    </View>
-                    <View style={styles.assetVerticalRight}>
-                        <Text style={styles.assetBalanceLabel}>Balance</Text>
-                        <AmountText style={styles.assetVerticalBalance}>
-                            {formatAssetAmount(getAssetBaseUnitBalance(asset.balance), asset.precision)}
-                        </AmountText>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={theme.colors.gray[400]} />
+                <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={40} />
+                <View style={styles.info}>
+                    <Text style={styles.name} numberOfLines={1}>{asset.name}</Text>
+                    {!!subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
                 </View>
-            </LinearGradient>
-        </TouchableOpacity>
+                <View style={styles.amounts}>
+                    <AmountText style={[styles.amount, empty && styles.amountEmpty]} numberOfLines={1}>
+                        {amount} <Text style={styles.unit}>{unit}</Text>
+                    </AmountText>
+                    {fiat && <AmountText style={styles.fiat} numberOfLines={1}>≈ {fiat}</AmountText>}
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
+            </PressableScale>
+        </Animated.View>
     );
 };
 
@@ -89,8 +88,9 @@ export const AssetList: React.FC<AssetListProps> = ({
     assets,
     onViewAll,
     onAssetPress,
-    onIssueAsset,
 }) => {
+    const shown = assets.slice(0, VISIBLE);
+    const more = assets.length - shown.length;
     return (
         <View style={styles.section}>
             <SectionHeader title="Assets" eyebrow actionLabel="View All" onAction={onViewAll} />
@@ -99,7 +99,7 @@ export const AssetList: React.FC<AssetListProps> = ({
                 <Card style={styles.emptyCard}>
                     <View style={styles.emptyState}>
                         <View style={styles.emptyIcon}>
-                            <Ionicons name="layers-outline" size={28} color={theme.colors.gray[400]} />
+                            <Ionicons name="layers-outline" size={28} color={theme.colors.text.tertiary} />
                         </View>
                         <Text style={styles.emptyTitle}>No assets yet</Text>
                         <Text style={styles.emptyDescription}>
@@ -108,21 +108,18 @@ export const AssetList: React.FC<AssetListProps> = ({
                     </View>
                 </Card>
             ) : (
-                <View style={styles.assetsListWrapper}>
-                <View style={styles.assetsVerticalContainer}>
-                    {assets.slice(0, 4).map((asset) => (
-                      <AssetRow key={asset.asset_id} asset={asset} onPress={() => onAssetPress(asset)} />
+                <View style={styles.group}>
+                    {shown.map((asset, i) => (
+                        <AssetRow key={asset.asset_id} asset={asset} index={i} last={i === shown.length - 1 && more <= 0}
+                            onPress={() => onAssetPress(asset)} />
                     ))}
-                    {assets.length > 4 && (
-                        <TouchableOpacity
-                            style={styles.viewMoreButton}
-                            onPress={onViewAll}
-                        >
-                            <Text style={styles.viewMoreText}>View {assets.length - 4} more assets</Text>
+                    {more > 0 && (
+                        <PressableScale scaleTo={0.98} onPress={onViewAll} accessibilityRole="button"
+                            accessibilityLabel={`View ${more} more ${more === 1 ? 'asset' : 'assets'}`} style={styles.moreRow}>
+                            <Text style={styles.moreText}>View {more} more {more === 1 ? 'asset' : 'assets'}</Text>
                             <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
-                        </TouchableOpacity>
+                        </PressableScale>
                     )}
-                </View>
                 </View>
             )}
         </View>
@@ -133,6 +130,76 @@ const styles = StyleSheet.create({
     section: {
         marginTop: theme.spacing[6],
         paddingHorizontal: theme.spacing[4],
+    },
+    // All assets in one surface: rows separated by hairlines read as a single list.
+    group: {
+        borderRadius: theme.borderRadius.xl,
+        backgroundColor: theme.colors.surface.primary,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border.light,
+        overflow: 'hidden',
+    },
+    row: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[3],
+        minHeight: 64,
+        paddingVertical: theme.spacing[3],
+        paddingHorizontal: theme.spacing[4],
+    },
+    rowDivider: {
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.colors.border.light,
+    },
+    info: {
+        flex: 1,
+        minWidth: 0,
+        gap: 2,
+    },
+    name: {
+        fontSize: theme.typography.fontSize.base,
+        fontWeight: '600',
+        color: theme.colors.text.primary,
+    },
+    subtitle: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.secondary,
+    },
+    amounts: {
+        alignItems: 'flex-end',
+        gap: 2,
+        maxWidth: '48%',
+    },
+    amount: {
+        fontSize: theme.typography.fontSize.base,
+        fontWeight: '600',
+        color: theme.colors.text.primary,
+    },
+    amountEmpty: {
+        color: theme.colors.text.tertiary,
+    },
+    unit: {
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: '500',
+        color: theme.colors.text.secondary,
+    },
+    fiat: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.secondary,
+    },
+    moreRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: theme.spacing[1],
+        minHeight: 48,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.border.light,
+    },
+    moreText: {
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.primary[500],
+        fontWeight: '600',
     },
     emptyCard: {
         padding: theme.spacing[6],
@@ -149,7 +216,7 @@ const styles = StyleSheet.create({
         width: 48,
         height: 48,
         borderRadius: 24,
-        backgroundColor: theme.colors.gray[100],
+        backgroundColor: theme.colors.background.secondary,
         justifyContent: 'center',
         alignItems: 'center',
         marginBottom: theme.spacing[3],
@@ -164,109 +231,5 @@ const styles = StyleSheet.create({
         fontSize: theme.typography.fontSize.sm,
         color: theme.colors.text.secondary,
         textAlign: 'center',
-        marginBottom: theme.spacing[4],
-    },
-    emptyButton: {
-        minWidth: 120,
-    },
-    assetsListWrapper: {
-        position: 'relative',
-    },
-    assetsVerticalContainer: {
-        gap: theme.spacing[3],
-    },
-    fadeOverlay: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        height: 130,
-    },
-    fadeGradient: {
-        flex: 1,
-    },
-    assetCardWrapper: {
-        // Clip the gradient to the rounded card shape. A hairline border gives the
-        // card clean, modern definition against the dark background.
-        borderRadius: theme.borderRadius.xl,
-        overflow: 'hidden',
-        borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.border.light,
-    },
-    assetVerticalCard: {
-        padding: theme.spacing[3],
-    },
-    assetVerticalContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    assetVerticalLeft: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: theme.spacing[3],
-        flex: 1,
-        minWidth: 0,
-    },
-    assetIconHalo: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    assetIconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: theme.colors.primary[50],
-        justifyContent: 'center',
-        alignItems: 'center',
-        marginRight: theme.spacing[3],
-    },
-    assetIconImage: {
-        width: 24,
-        height: 24,
-    },
-    assetVerticalInfo: {
-        justifyContent: 'center',
-    },
-    assetVerticalTicker: {
-        fontSize: theme.typography.fontSize.base,
-        fontWeight: '600',
-        color: theme.colors.text.primary,
-    },
-    assetVerticalName: {
-        fontSize: theme.typography.fontSize.xs,
-        color: theme.colors.text.secondary,
-    },
-    assetVerticalRight: {
-        alignItems: 'flex-end',
-        marginHorizontal: theme.spacing[2],
-    },
-    assetBalanceLabel: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: theme.colors.text.tertiary,
-        textTransform: 'uppercase',
-        letterSpacing: 0.45,
-        marginBottom: 2,
-    },
-    assetVerticalBalance: {
-        fontSize: theme.typography.fontSize.base,
-        fontWeight: '600',
-        color: theme.colors.text.primary,
-    },
-    viewMoreButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: theme.spacing[2],
-    },
-    viewMoreText: {
-        fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.primary[600],
-        fontWeight: '500',
-        marginRight: theme.spacing[1],
     },
 });
