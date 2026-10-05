@@ -150,8 +150,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    // Ring in the card colour, so the badge reads as cut out of the icon.
-    borderColor: theme.colors.surface.primary,
+    borderColor: '#fff',
   },
 });
 
