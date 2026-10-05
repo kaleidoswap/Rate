@@ -37,3 +37,14 @@ test('BTC entry preserves satoshi precision and invalid input cannot be saved', 
   fireEvent.press(screen.getByText('Save request'));
   expect(p.onConfirm).not.toHaveBeenCalled();
 });
+test('sending: an amount is required and there is no "any amount"', () => {
+  const p = { ...props(), initialSats: undefined, requestOptions: undefined };
+  const screen = render(<AmountEditorModal {...p} />);
+  expect(screen.getByText('Amount to send')).toBeTruthy();
+  expect(screen.queryByText('Clear amount')).toBeNull();
+  fireEvent.press(screen.getByText('Set amount'));
+  expect(p.onConfirm).not.toHaveBeenCalled();
+  fireEvent.changeText(screen.getByLabelText('Requested amount'), '2100');
+  fireEvent.press(screen.getByText('Set amount'));
+  expect(p.onConfirm).toHaveBeenCalledWith(2100, undefined);
+});

@@ -11,6 +11,29 @@ export interface NetworkStatus {
 
 type NetworkListener = (status: NetworkStatus) => void;
 
+const PROBE_URLS = [
+  'https://clients3.google.com/generate_204',
+  'https://cloudflare.com/cdn-cgi/trace',
+  'https://mempool.space/api/blocks/tip/height',
+];
+const PROBE_TIMEOUT_MS = 5000;
+
+/** True when any probe host answers at all (any HTTP status counts). */
+export function probeInternet(urls: string[] = PROBE_URLS): Promise<boolean> {
+  return new Promise((resolve) => {
+    let pending = urls.length;
+    if (!pending) return resolve(false);
+    for (const url of urls) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS);
+      fetch(url, { method: 'HEAD', cache: 'no-store', signal: controller.signal })
+        .then(() => resolve(true))
+        .catch(() => { if (--pending === 0) resolve(false); })
+        .finally(() => clearTimeout(timer));
+    }
+  });
+}
+
 export class NetworkService {
   private static instance: NetworkService;
   private listeners: Set<NetworkListener> = new Set();
@@ -86,8 +109,28 @@ export class NetworkService {
       console.log('Network: Online');
     }
 
-    // Check internet reachability
+    // Check internet reachability. NetInfo's own verdict is unreliable (a
+    // blocked or slow probe host, Android's network validation, a VPN), so
+    // only warn once our own probes fail too.
     if (status.isConnected && status.isInternetReachable === false) {
+      void this.confirmNoInternet();
+    }
+  }
+
+  /**
+   * Re-check reachability against several hosts before telling the user there
+   * is no internet. If any answers, the NetInfo verdict was wrong: correct it.
+   */
+  private async confirmNoInternet(): Promise<void> {
+    if (await probeInternet()) {
+      if (this.currentStatus?.isConnected && this.currentStatus.isInternetReachable === false) {
+        this.currentStatus = { ...this.currentStatus, isInternetReachable: true };
+        this.notifyListeners(this.currentStatus);
+      }
+      return;
+    }
+    // Still offline-ish, and NetInfo hasn't changed its mind meanwhile.
+    if (this.currentStatus?.isConnected && this.currentStatus.isInternetReachable === false) {
       this.toastService.warning('Connected but no internet access', 4000);
       console.log('Network: Connected but no internet');
     }
