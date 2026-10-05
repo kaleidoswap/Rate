@@ -22,7 +22,7 @@ beforeEach(() => { mockAssets = []; });
 test('shows the balance in the asset unit, its breakdown and details', () => {
   const { screen } = open(usdt);
   expect(screen.getByLabelText('Balance 40.5 USDT')).toBeTruthy();
-  expect(screen.getByText('+10 USDT')).toBeTruthy();            // incoming = future − settled
+  expect(screen.getByText('+10 USDT incoming')).toBeTruthy();   // incoming = future − settled, once (in the hero)
   expect(screen.getByText('2 USDT')).toBeTruthy();              // in Lightning channels
   expect(screen.getByText('1,000,000 USDT')).toBeTruthy();      // issued supply, formatted
   expect(screen.getByText('rgb:usdt-i…efghijkl')).toBeTruthy();   // asset id, middle-truncated
@@ -51,4 +51,10 @@ test('a live balance from the store replaces the one it was opened with', () => 
 test('missing asset data goes back', () => {
   const { navigation } = open(undefined);
   expect(navigation.goBack).toHaveBeenCalled();
+});
+
+test('says each thing once: no ticker, network or balance rows repeating the hero', () => {
+  const { screen } = open(usdt);
+  for (const repeated of ['Ticker', 'Network', 'Available to send', 'Incoming', 'Settled']) expect(screen.queryByText(repeated)).toBeNull();
+  expect(screen.queryAllByText('Tether USD').length).toBe(0); // the header (mocked) carries the name
 });

@@ -104,7 +104,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const fmt = (baseUnits: number) => grouped(formatAssetAmount(baseUnits, precision));
   const bal = readBalance(asset.balance);
   const fiat = asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
-  const subtitle = isBTC ? 'BTC · across your accounts' : `${asset.ticker} · ${NETWORK_LABEL[protocol]}`;
+  const subtitle = isBTC ? 'Spark, Arkade, Lightning & on-chain' : `${NETWORK_LABEL[protocol]} asset`;
 
   const selectedAsset = { asset_id: asset.asset_id, ticker: asset.ticker, name: asset.name, isRGB };
   const actions: Array<{ key: string; label: string; icon: keyof typeof Ionicons.glyphMap; tint: string; onPress: () => void }> = [
@@ -113,18 +113,11 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     { key: 'swap', label: 'Swap', icon: 'swap-horizontal', tint: theme.colors.brand.violet, onPress: () => navigation.navigate('Swap') },
   ];
 
-  const balanceRows: Array<[string, string, boolean?]> = [
-    ['Available to send', `${fmt(bal.available)} ${unit}`, true],
-    ...(bal.incoming > 0 ? [['Incoming', `+${fmt(bal.incoming)} ${unit}`] as [string, string]] : []),
-    ...(bal.inChannels > 0 ? [['In Lightning channels', `${fmt(bal.inChannels)} ${unit}`] as [string, string]] : []),
-    ...(!isBTC && bal.settled !== bal.available ? [['Settled', `${fmt(bal.settled)} ${unit}`] as [string, string]] : []),
-  ];
-
+  // Only what the hero doesn't already say: no repeated name, ticker, network or balance.
   const detailRows: Array<{ label: string; value: string; copy?: string }> = [
-    { label: 'Network', value: isBTC ? 'Spark, Arkade, Lightning & on-chain' : NETWORK_LABEL[protocol] },
-    { label: 'Ticker', value: asset.ticker },
-    ...(!isBTC ? [{ label: 'Decimals', value: String(precision) }] : []),
+    ...(bal.inChannels > 0 ? [{ label: 'In Lightning channels', value: `${fmt(bal.inChannels)} ${unit}` }] : []),
     ...(!isBTC && asset.issued_supply ? [{ label: 'Issued supply', value: `${fmt(asset.issued_supply)} ${asset.ticker}` }] : []),
+    ...(!isBTC ? [{ label: 'Decimals', value: String(precision) }] : []),
     ...(!isBTC ? [{ label: 'Asset ID', value: shortId(asset.asset_id), copy: asset.asset_id }] : []),
   ];
 
@@ -137,8 +130,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary[500]} />}
       >
         <Animated.View entering={FadeInDown.duration(motion.duration.base)} style={styles.hero}>
-          <AssetIcon ticker={asset.ticker} protocol={isBTC ? undefined : (protocol as 'RGB' | 'SPARK' | 'ARKADE')} logoUri={asset.icon} size={64} />
-          <Text style={styles.heroName}>{asset.name}</Text>
+          <AssetIcon ticker={asset.ticker} protocol={isBTC ? undefined : (protocol as 'RGB' | 'SPARK' | 'ARKADE')} logoUri={asset.icon} size={48} />
           <Text style={styles.heroSub}>{subtitle}</Text>
           <AmountText style={styles.heroAmount} accessibilityLabel={`Balance ${fmt(bal.available)} ${unit}${fiat ? `, about ${fiat}` : ''}`}>
             {fmt(bal.available)} <Text style={styles.heroUnit}>{unit}</Text>
@@ -164,20 +156,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
           ))}
         </Animated.View>
 
-        <Animated.View entering={FadeInDown.delay(motion.stagger * 2).duration(motion.duration.base)}>
-          <Text style={styles.caption}>Balance</Text>
-          <View style={styles.group}>
-            {balanceRows.map(([label, value, strong], i) => (
-              <View key={label} style={[styles.row, i < balanceRows.length - 1 && styles.rowDivider]}>
-                <Text style={styles.rowLabel}>{label}</Text>
-                <AmountText style={[styles.rowValue, strong && styles.rowValueStrong]} numberOfLines={1}>{value}</AmountText>
-              </View>
-            ))}
-          </View>
-        </Animated.View>
-
-        <Animated.View entering={FadeInDown.delay(motion.stagger * 3).duration(motion.duration.base)}>
-          <Text style={styles.caption}>Details</Text>
+        {detailRows.length > 0 && <Animated.View entering={FadeInDown.delay(motion.stagger * 2).duration(motion.duration.base)}>
           <View style={styles.group}>
             {detailRows.map((d, i) => (
               <View key={d.label} style={[styles.row, i < detailRows.length - 1 && styles.rowDivider]}>
@@ -189,7 +168,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
               </View>
             ))}
           </View>
-        </Animated.View>
+        </Animated.View>}
       </ScrollView>
     </SafeAreaView>
   );
@@ -197,11 +176,10 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background.primary },
-  content: { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[10], gap: theme.spacing[5] },
-  hero: { alignItems: 'center', paddingTop: theme.spacing[4], gap: 2 },
-  heroName: { marginTop: theme.spacing[3], fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
-  heroSub: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
-  heroAmount: { marginTop: theme.spacing[4], fontSize: theme.typography.fontSize['4xl'], fontWeight: '700', color: theme.colors.text.primary },
+  content: { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[8], gap: theme.spacing[4] },
+  hero: { alignItems: 'center', paddingTop: theme.spacing[2], gap: 2 },
+  heroSub: { marginTop: theme.spacing[2], fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
+  heroAmount: { marginTop: theme.spacing[1], fontSize: theme.typography.fontSize['4xl'], fontWeight: '700', color: theme.colors.text.primary },
   heroUnit: { fontSize: theme.typography.fontSize.lg, fontWeight: '500', color: theme.colors.text.secondary },
   heroFiat: { fontSize: theme.typography.fontSize.base, color: theme.colors.text.secondary },
   pendingPill: {
@@ -211,23 +189,18 @@ const styles = StyleSheet.create({
   },
   pendingText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.warning[500], fontWeight: '600' },
   actions: { flexDirection: 'row', justifyContent: 'center', gap: theme.spacing[6] },
-  action: { alignItems: 'center', gap: theme.spacing[2], minWidth: 64 },
-  actionIcon: { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  action: { alignItems: 'center', gap: theme.spacing[1], minWidth: 64 },
+  actionIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   actionLabel: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
-  caption: {
-    fontSize: theme.typography.fontSize.xs, fontWeight: '700', letterSpacing: 0.8, textTransform: 'uppercase',
-    color: theme.colors.text.tertiary, marginBottom: theme.spacing[2], marginLeft: theme.spacing[1],
-  },
   // Same grouped surface as the Dashboard asset list.
   group: {
     borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary,
     borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, overflow: 'hidden',
   },
-  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing[3], minHeight: 52, paddingHorizontal: theme.spacing[4], paddingVertical: theme.spacing[3] },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing[3], minHeight: 44, paddingHorizontal: theme.spacing[4], paddingVertical: theme.spacing[2.5] },
   rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border.light },
   rowLabel: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
   rowRight: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], flexShrink: 1 },
   rowValue: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, fontWeight: '500', flexShrink: 1, textAlign: 'right' },
-  rowValueStrong: { fontSize: theme.typography.fontSize.base, fontWeight: '700' },
   mono: { fontFamily: theme.typography.fontFamily.mono },
 });
