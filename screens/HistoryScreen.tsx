@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { RootState } from '../store';
 import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
@@ -27,10 +27,11 @@ import {
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 
-type FilterTab = 'all' | 'receive' | 'send' | 'swap';
+type FilterTab = 'pending' | 'all' | 'receive' | 'send' | 'swap';
 
 const FILTERS: { key: FilterTab; label: string }[] = [
     { key: 'all', label: 'All' },
+    { key: 'pending', label: 'Pending' },
     { key: 'receive', label: 'Received' },
     { key: 'send', label: 'Sent' },
     { key: 'swap', label: 'Swaps' },
@@ -125,6 +126,7 @@ function sectionTitle(ts?: number): string {
 
 export default function HistoryScreen() {
     const navigation = useNavigation<any>();
+    const route = useRoute();
     const swapHistory = useSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useSelector((state: RootState) => state.assets.rgbAssets);
 
@@ -168,10 +170,13 @@ export default function HistoryScreen() {
         }
     }, [rgbAssets, swapHistory]);
 
-    useEffect(() => {
+    useFocusEffect(useCallback(() => {
+        let active = true;
         setLoading(true);
-        fetchActivity().finally(() => setLoading(false));
-    }, [fetchActivity]);
+        fetchActivity().finally(() => { if (active) setLoading(false); });
+        const timer = setInterval(fetchActivity, 15000);
+        return () => { active = false; clearInterval(timer); };
+    }, [fetchActivity]));
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -180,6 +185,7 @@ export default function HistoryScreen() {
     }, [fetchActivity]);
 
     const filtered = items.filter((it) => {
+        if (filter === 'pending') return it.status === 'pending';
         if (filter === 'all') return true;
         if (filter === 'swap') return it.type === 'swap';
         return it.type === filter;
@@ -189,11 +195,11 @@ export default function HistoryScreen() {
     const sections = (() => {
         const map = new Map<string, ActivityItem[]>();
         for (const it of filtered) {
-            const key = sectionTitle(it.timestamp);
+            const key = it.status === 'pending' ? 'Pending' : sectionTitle(it.timestamp);
             if (!map.has(key)) map.set(key, []);
             map.get(key)!.push(it);
         }
-        return Array.from(map.entries()).map(([title, data]) => ({ title, data }));
+        return Array.from(map.entries()).sort(([a], [b]) => a === 'Pending' ? -1 : b === 'Pending' ? 1 : 0).map(([title, data]) => ({ title, data }));
     })();
 
     const renderItem = ({ item }: { item: ActivityItem }) => {
@@ -246,14 +252,14 @@ export default function HistoryScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <MainHeader title="Activity" onBack={() => navigation.goBack()} />
+            <MainHeader title="Activity" onBack={route.name === 'Activity' ? undefined : () => navigation.goBack()} />
 
             {/* Filter tabs */}
             <SegmentedTabs
                 options={FILTERS}
                 value={filter}
                 onChange={(key) => setFilter(key)}
-                scrollable={false}
+                scrollable
                 style={styles.filterBar}
             />
 
@@ -285,8 +291,8 @@ export default function HistoryScreen() {
                     ListEmptyComponent={
                         <EmptyState
                             icon="receipt-outline"
-                            title="No activity yet"
-                            message="Your payments, transfers and swaps will appear here once you send or receive."
+                            title={filter === 'pending' ? 'No pending payments' : 'No activity yet'}
+                            message={filter === 'pending' ? 'Payments waiting to complete will appear here.' : 'Your payments, transfers and swaps will appear here once you send or receive.'}
                         />
                     }
                 />

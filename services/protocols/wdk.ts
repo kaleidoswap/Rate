@@ -13,12 +13,12 @@
  * This is the sole wallet engine on mobile (native adapters removed from ./index.ts).
  */
 
+import { MobileSparkAdapter } from './MobileSparkAdapter'
 import { ProtocolManager, networkTypeToProtocol } from '@kaleidorg/wallet-engine'
 // beta.55: adapters + WDK helpers moved behind the /adapters/wdk subpath, and the
 // legacy client managers behind /adapters/native (protocol SDKs are now optional peers).
 import {
   registerWdkModule,
-  SparkWdkAdapter,
   LiquidWdkAdapter,
   RlnWdkAdapter,
   ArkadeWdkAdapter,
@@ -80,7 +80,7 @@ export function getWdkProtocolManager(): ProtocolManager {
     registerWdkModuleLoaders()
     _wdkManager = new ProtocolManager()
     // Spark + RLN: no WASM, SDKs already shipped — always on.
-    _wdkManager.registerAdapter(new SparkWdkAdapter())
+    _wdkManager.registerAdapter(new MobileSparkAdapter())
     // RGB: NWC-backed (remote node over relays) by default on mobile; HTTP WDK
     // adapter when EXPO_PUBLIC_RGB_VIA_NWC=0.
     if (RGB_VIA_NWC) {

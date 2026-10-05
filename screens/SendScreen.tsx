@@ -1,6 +1,6 @@
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SendScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -35,6 +35,7 @@ import {
   classifyWithdrawDestination, resolveSendRoutes, resolveActiveSendRoute,
   METHOD_META, type DestinationKind, type ResolvedSendRoute, type RouteOption,
 } from '../utils/account-routing';
+import { estimatePaymentFee, paymentTotal, type PaymentFeeAdapter } from '../services/paymentReview';
 import { theme } from '../theme';
 import { Card, Button, Input, ScreenHeader } from '../components';
 import { AssetIcon as TokenAssetIcon } from '../components/AssetIcon';
@@ -155,15 +156,24 @@ function SendScreen({ navigation, route }: Props) {
   const [amountMode, setAmountMode] = useState<'token' | 'fiat'>('token');
   const [fiatInput, setFiatInput] = useState('');
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const [showAdvancedFees, setShowAdvancedFees] = useState(false);
+  const [feeEstimate, setFeeEstimate] = useState<number | null>(null);
+  const [estimatingFee, setEstimatingFee] = useState(false);
+  const sendingRef = useRef(false);
+  const feeRequestRef = useRef(0);
+
+  useEffect(() => navigation.addListener('beforeRemove', (event: any) => {
+    if (sendingRef.current) event.preventDefault();
+  }), [navigation]);
 
   // All operations via protocolManager
   const getProtocolStatus = useRefreshableProtocolStatus();
 
   // Fee rate options
   const feeRates = [
-    { label: 'Slow', value: 'slow', rate: 1, icon: 'time-outline' },
+    { label: 'Low', value: 'slow', rate: 1, icon: 'time-outline' },
     { label: 'Normal', value: 'normal', rate: 2, icon: 'flash-outline' },
-    { label: 'Fast', value: 'fast', rate: 3, icon: 'rocket-outline' },
+    { label: 'High', value: 'fast', rate: 3, icon: 'rocket-outline' },
     { label: 'Custom', value: 'custom', rate: customFee, icon: 'settings-outline' },
   ];
 
@@ -192,7 +202,7 @@ function SendScreen({ navigation, route }: Props) {
   // the amount screen show a real balance instead of "0".
   const btcSpendableSats = useCallback((): number => {
     const acct = activeRoute?.account as 'RGB' | 'SPARK' | 'ARKADE' | undefined;
-    const perAccount = acct ? btcBalance?.byProtocol?.[acct]?.total : undefined;
+    const perAccount = acct ? (acct === 'RGB' ? btcBalance?.byProtocol?.[acct]?.total : btcBalance?.byProtocol?.[acct]?.confirmed) : undefined;
     if (typeof perAccount === 'number') return perAccount;
     return btcBalance?.vanilla?.spendable || 0;
   }, [activeRoute?.account, btcBalance]);
@@ -473,6 +483,10 @@ function SendScreen({ navigation, route }: Props) {
     : `${maxAmount} ${selectedAsset?.ticker || ''}`;
 
   const validateInputs = (): boolean => {
+    if (!activeRoute) {
+      Alert.alert('No payment method available', 'Connect a compatible account in Settings or use a different address.');
+      return false;
+    }
     if (!address.trim()) {
       Alert.alert('Missing Address', 'Please enter a recipient address or scan a QR code.');
       return false;
@@ -517,7 +531,7 @@ function SendScreen({ navigation, route }: Props) {
           : `${(availableRaw / Math.pow(10, precision)).toFixed(precision)} ${selectedAsset.ticker}`;
         Alert.alert(
           'Insufficient Balance',
-          `You don't have enough ${selectedAsset.ticker}. Available: ${availableDisplay}`
+          `Available ${activeRoute ? `from ${activeRoute.account}` : 'to spend'}: ${availableDisplay}. Other accounts or pending funds may be included in your total balance. Lower the amount, choose another payment method, or add funds.`
         );
         return false;
       }
@@ -526,14 +540,43 @@ function SendScreen({ navigation, route }: Props) {
     return true;
   };
 
+  const getEffectiveSats = () => decodedInvoice?.amt_msat
+    ? Math.ceil(decodedInvoice.amt_msat / 1000)
+    : amountSatsFromBtcUnits(amount);
+
+  const loadFeeEstimate = async () => {
+    const requestId = ++feeRequestRef.current;
+    setFeeEstimate(null);
+    setEstimatingFee(true);
+    try {
+      const adapter = activeRoute ? protocolManager.getAdapterIfAvailable(toEngineProtocol(activeRoute.protocol)) : null;
+      const fee = selectedAsset.asset_id === 'BTC' ? await estimatePaymentFee(adapter as PaymentFeeAdapter | null, {
+        method: activeRoute?.method ?? '', destination: address, amountSats: getEffectiveSats(),
+        amountless: !decodedInvoice?.amt_msat,
+      }) : null;
+      if (requestId === feeRequestRef.current) setFeeEstimate(fee);
+    } catch {
+      // An unavailable provider estimate is never presented as a free payment.
+    } finally {
+      if (requestId === feeRequestRef.current) setEstimatingFee(false);
+    }
+  };
+
   const handleSend = async () => {
-    if (!validateInputs()) return;
+    if (sendingRef.current || estimatingFee || !validateInputs()) return;
     
     if (paymentStep === 'input') {
       setPaymentStep('review');
+      void loadFeeEstimate();
       return;
     }
     
+    const totalSats = paymentTotal(getEffectiveSats(), feeEstimate);
+    if (selectedAsset.asset_id === 'BTC' && totalSats !== null && totalSats > btcSpendableSats()) {
+      Alert.alert('Amount and fee exceed available funds', 'Lower the amount, choose another available payment method, or add funds to this account.');
+      return;
+    }
+    sendingRef.current = true;
     // We're in review step, proceed with sending
     setPaymentStep('sending');
     setLoading(true);
@@ -564,12 +607,12 @@ function SendScreen({ navigation, route }: Props) {
           ? Math.round(parseFloat(amount) * 1e8)
           : Math.round(parseFloat(amount));
 
-        const feeSats = await assertArkadeFeeCovered(arkadeAdapter, address, amountSats);
+        const feeSats = await assertArkadeBalanceCovered(arkadeAdapter, amountSats);
         result = method === 'boarding' && typeof arkadeAdapter.sendBtcOnchain === 'function'
           ? await arkadeAdapter.sendBtcOnchain({ address, amount: amountSats })
           : await arkadeAdapter.sendPayment({ invoice: address, amount: amountSats });
         ensureSuccessfulArkadeResult(result);
-        if (result.fee == null || Number(result.fee) === 0) {
+        if (feeSats !== null && result.fee == null) {
           result = { ...result, fee: feeSats };
         }
         successType = method === 'boarding' ? 'boarding' : 'arkade';
@@ -644,32 +687,25 @@ function SendScreen({ navigation, route }: Props) {
         error instanceof Error ? error.message : 'Failed to send payment'
       );
     } finally {
+      sendingRef.current = false;
       setLoading(false);
     }
   };
 
-  const assertArkadeFeeCovered = async (
+  const assertArkadeBalanceCovered = async (
     arkadeAdapter: any,
-    destination: string,
     amountSats: number,
-  ): Promise<number> => {
-    const quote = await arkadeAdapter.executeProtocolOperation?.('quoteSendTransaction', {
-      to: destination,
-      value: amountSats,
-    });
-    const feeSats = Number(quote?.fee);
-    if (!Number.isFinite(feeSats)) {
-      throw new Error('Could not estimate the Arkade network fee. Please try again.');
-    }
+  ): Promise<number | null> => {
+    const feeSats = feeEstimate;
 
     const balance = await arkadeAdapter.getBtcBalance?.();
-    const availableSats = Number(balance?.total ?? balance?.confirmed ?? 0);
+    const availableSats = Number(balance?.confirmed);
     if (!Number.isFinite(availableSats)) {
       throw new Error('Could not read your Arkade balance. Please try again.');
     }
-    if (amountSats + feeSats > availableSats) {
+    if (amountSats + (feeSats ?? 0) > availableSats) {
       throw new Error(
-        `Insufficient Arkade balance. This payment needs ${amountSats.toLocaleString()} sats plus a ${feeSats.toLocaleString()} sats network fee.`
+        `Insufficient Arkade balance. This payment needs ${amountSats.toLocaleString()} sats plus ${feeSats === null ? 'a network fee (estimate unavailable)' : `an estimated ${feeSats.toLocaleString()} sats fee`}.`
       );
     }
 
@@ -762,7 +798,8 @@ function SendScreen({ navigation, route }: Props) {
   const renderHeader = () => (
     <ScreenHeader
       title={paymentStep === 'review' ? 'Review Payment' : paymentStep === 'sending' ? 'Sending...' : 'Send'}
-      showBack={true}
+      showBack={paymentStep !== 'sending'}
+      onBack={() => { if (paymentStep === 'review') { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); } else navigation.goBack(); }}
       rightAction={
         <TouchableOpacity
           onPress={() => Alert.alert('Help', 'Send Bitcoin, Lightning payments, or RGB assets')}
@@ -1195,16 +1232,20 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderFeeSelector = () => {
-    // Match rate-extension: the sat/vB fee rate applies to on-chain operations
-    // only — a plain Bitcoin send and an RGB transfer (which anchors a UTXO on
-    // L1). Lightning, Spark and Arkade transfers carry no on-chain fee rate.
-    if (addressType !== 'bitcoin' && addressType !== 'rgb') {
+    // Only the RLN on-chain send consumes this user-selected fee rate.
+    if (addressType !== 'bitcoin' || activeRoute?.protocol !== 'RGB') {
       return null;
     }
 
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Network Fee</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showAdvancedFees }}
+          style={styles.reviewRow} onPress={() => setShowAdvancedFees(value => !value)}>
+          <Text style={styles.sectionTitle}>Advanced · network fee rate</Text>
+          <Ionicons name={showAdvancedFees ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+        {showAdvancedFees && <>
+        <Text style={styles.sectionDescription}>Fee rates do not guarantee a confirmation time. The final cost depends on transaction size and network conditions.</Text>
         <View style={styles.feeSelector}>
           {feeRates.map((fee, index) => (
             <TouchableOpacity
@@ -1248,6 +1289,7 @@ function SendScreen({ navigation, route }: Props) {
             />
           </View>
         )}
+        </>}
       </View>
     );
   };
@@ -1284,20 +1326,15 @@ function SendScreen({ navigation, route }: Props) {
   };
 
   const renderPaymentReview = () => {
-    if (paymentStep !== 'review') return null;
+    if (paymentStep !== 'review' && paymentStep !== 'sending') return null;
 
-    const effectiveAmount = amount ||
-      (decodedInvoice?.amt_msat ? (decodedInvoice.amt_msat / 100000000000).toFixed(8) : '0') ||
-      (decodedRGBInvoice?.amount ? (decodedRGBInvoice.amount / Math.pow(10, selectedAsset.precision || 8)).toFixed(selectedAsset.precision || 8) : '0');
-
-    // USD conversion needs SATS, not the display string. `amount` is in the
-    // active unit (BTC or sats) so route it through amountSatsFromBtcUnits;
-    // an amountless typed send falls back to the invoice's msat value.
-    const effectiveAmountSats = amount
-      ? amountSatsFromBtcUnits(amount)
-      : decodedInvoice?.amt_msat
-        ? Math.round(decodedInvoice.amt_msat / 1000)
-        : 0;
+    const effectiveAmountSats = getEffectiveSats();
+    const effectiveAmount = selectedAsset.asset_id === 'BTC'
+      ? formatBitcoinAmount(effectiveAmountSats, bitcoinUnit)
+      : amount || String((decodedRGBInvoice?.amount ?? 0) / 10 ** (selectedAsset.precision ?? 8));
+    const totalSats = paymentTotal(effectiveAmountSats, feeEstimate);
+    const unit = selectedAsset.asset_id === 'BTC' ? bitcoinUnit : selectedAsset.ticker;
+    const formatCost = (sats: number) => `${sats.toLocaleString()} sats${bitcoinPrice > 0 ? ` · ≈ $${formatSatoshisToUSD(sats)}` : ''}`;
 
     return (
       <View style={styles.section}>
@@ -1329,14 +1366,25 @@ function SendScreen({ navigation, route }: Props) {
               </View>
             )}
 
-            {(addressType === 'bitcoin' || addressType === 'rgb') && (
-              <View style={styles.reviewRow}>
-                <Text style={styles.reviewLabel}>Network Fee</Text>
-                <Text style={styles.reviewValue}>
-                  {feeRate === 'custom' ? customFee : feeRates.find(f => f.value === feeRate)?.rate} sat/vB
-                </Text>
-              </View>
-            )}
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Pays from</Text>
+              <Text style={styles.reviewValue}>{activeRoute?.account ?? 'Wallet'}</Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Estimated fee</Text>
+              <Text style={styles.reviewValue}>{estimatingFee ? 'Estimating…' : feeEstimate === null ? 'Unavailable for this payment method' : formatCost(feeEstimate)}</Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Estimated total</Text>
+              <Text style={styles.reviewValue}>{selectedAsset.asset_id === 'BTC' && totalSats !== null ? formatCost(totalSats) : `${effectiveAmount} ${unit} + network fee`}</Text>
+            </View>
+            <View style={styles.reviewRow}>
+              <Text style={styles.reviewLabel}>Arrival</Text>
+              <Text style={styles.reviewValue}>{addressType === 'bitcoin' || addressType === 'rgb' ? 'After network confirmation; timing varies' : 'Usually seconds; routing can take longer'}</Text>
+            </View>
+            <Text style={styles.sectionDescription}>
+              {feeEstimate === null ? 'This wallet provider does not currently supply a fee estimate. The final fee will be shown on the receipt when available.' : 'Fees are estimates and may change before the payment is sent.'}
+            </Text>
 
             {selectedAsset.ticker === 'BTC' && effectiveAmountSats > 0 && (
               <View style={styles.reviewRow}>
@@ -1351,16 +1399,14 @@ function SendScreen({ navigation, route }: Props) {
           <View style={styles.reviewActions}>
             <Button
               title="Edit"
+              disabled={loading}
               variant="secondary"
-              onPress={() => setPaymentStep('input')}
+              onPress={() => { feeRequestRef.current += 1; setEstimatingFee(false); setPaymentStep('input'); }}
               style={styles.reviewEditButton}
             />
             <Button
-              title={
-                addressType === 'lightning' ? 'Pay Invoice' :
-                addressType === 'rgb' ? 'Send RGB Asset' :
-                'Send Bitcoin'
-              }
+              title={`Send ${effectiveAmount} ${unit}`}
+              disabled={estimatingFee || loading}
               variant="primary"
               onPress={handleSend}
               loading={loading}
@@ -2126,17 +2172,13 @@ const styles = StyleSheet.create({
   },
 
   reviewActions: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: theme.spacing[3],
   },
 
-  reviewEditButton: {
-    flex: 1,
-  },
+  reviewEditButton: { minHeight: 48 },
 
-  reviewConfirmButton: {
-    flex: 2,
-  },
+  reviewConfirmButton: { minHeight: 48 },
 
   sendingOverlay: {
     position: 'absolute',

@@ -25,9 +25,7 @@ const ACTION_ITEMS: Array<{
     { key: 'send', label: 'Send', icon: 'arrow-up', tone: 'send', action: 'onSend' },
 ];
 
-// Restores the previous colored circular tiles: Receive = solid brand green
-// (white glyph), Send = tinted-green surface (green glyph) to read as distinct
-// from Receive's solid fill, Swap = violet secondary accent (white glyph).
+// Keep the primary receive action prominent; secondary actions stay quiet.
 function tileStyle(tone: Tone): { backgroundColor: string; glyph: string; border?: string } {
     switch (tone) {
         case 'receive':
@@ -36,7 +34,7 @@ function tileStyle(tone: Tone): { backgroundColor: string; glyph: string; border
             return { backgroundColor: theme.colors.primary[50]!, glyph: theme.colors.primary[500], border: theme.colors.primary[100]! };
         case 'swap':
         default:
-            return { backgroundColor: theme.colors.brand.violet, glyph: '#FFFFFF' };
+            return { backgroundColor: theme.colors.surface.tertiary, glyph: theme.colors.text.primary };
     }
 }
 
