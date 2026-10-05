@@ -119,21 +119,6 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     color: theme.colors.text.secondary,
     flexShrink: 1,
   },
-  addrListHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing[3],
-    paddingVertical: theme.spacing[4],
-    minHeight: 64,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: theme.colors.border.light,
-  },
-  addrLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
   qrSection: {
     backgroundColor: 'transparent',
     paddingHorizontal: 0,
@@ -187,11 +172,6 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
     fontWeight: '700',
     color: theme.colors.text.primary,
   },
-  universalRequestSubtitle: {
-    fontSize: 11,
-    color: theme.colors.text.secondary,
-    marginTop: 2,
-  },
 
   // Asset "+" tab (square add button)
   assetAddTab: {
@@ -207,26 +187,65 @@ export const createReceiveStyles = (theme: ThemeType) => StyleSheet.create({
   },
 
   // Amount row with pencil edit
-  amountRow: {
-    width: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    marginBottom: theme.spacing[4],
-    padding: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.surface.primary,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-  },
   amountRowLabel: {
     fontSize: theme.typography.fontSize.sm,
     fontWeight: '500',
     color: theme.colors.text.secondary,
   },
-  amountRowValue: {
-    fontSize: theme.typography.fontSize.xl,
+  // Options pill above the QR, and the sheet it opens.
+  optionsPill: {
+    alignSelf: 'center',
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[1.5],
+    minHeight: 40,
+    paddingHorizontal: theme.spacing[4],
+    marginBottom: theme.spacing[2],
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+  },
+  optionsPillAsset: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '700',
     color: theme.colors.text.primary,
-    marginTop: 2,
+  },
+  optionsPillSummary: {
+    flexShrink: 1,
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+  },
+  optionsCaption: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: '700',
+    color: theme.colors.text.tertiary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: theme.spacing[2],
+    marginTop: theme.spacing[2],
+  },
+  optionsDone: {
+    minHeight: 48,
+    marginTop: theme.spacing[4],
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.primary[500],
+  },
+  optionsDoneText: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '700',
+    color: theme.colors.text.inverse,
+  },
+  amountHeadline: {
+    fontSize: theme.typography.fontSize['3xl'],
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  amountHeadlineUnit: {
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.secondary,
   },
 });

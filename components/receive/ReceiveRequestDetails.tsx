@@ -92,6 +92,7 @@ export function ReceiveRequestDetails({ methods, universal, notes = [], qrSize, 
   const t = useAppTheme();
   const [shown, setShown] = useState<ReceiveMethod | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [showFormats, setShowFormats] = useState(false);
   if (!methods.length) return null;
   // Stretch: the parent centres the QR, which would otherwise shrink this card to its content.
   const card = { alignSelf: 'stretch' as const, borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: t.colors.border.light };
@@ -119,13 +120,24 @@ export function ReceiveRequestDetails({ methods, universal, notes = [], qrSize, 
     </View>;
   }
 
+  // The combined code works for most wallets, so the codes inside it stay folded
+  // away for the few senders whose wallet can only read one format.
+  const kinds = Array.from(new Set(methods.map(m => requestKind(m)))).join(', ');
   return <View style={[card, { marginTop: t.spacing[3], overflow: 'hidden' }]}>
-    <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm, padding: t.spacing[4], paddingBottom: t.spacing[2] }}>
-      Any of these can pay this code
-    </Text>
-    {methods.map((method, i) => <View key={method.key}
+    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showFormats }}
+      accessibilityLabel={`${showFormats ? 'Hide' : 'Show'} the codes inside this one: ${kinds}`}
+      onPress={() => setShowFormats(v => !v)} activeOpacity={0.7}
+      style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[4] }}>
+      <Ionicons name="layers-outline" size={18} color={t.colors.primary[500]} />
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>Other formats</Text>
+        <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }} numberOfLines={1}>{kinds}</Text>
+      </View>
+      <Ionicons name={showFormats ? 'chevron-up' : 'chevron-down'} size={18} color={t.colors.text.secondary} />
+    </TouchableOpacity>
+    {showFormats && methods.map((method, i) => <View key={method.key}
       style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], paddingHorizontal: t.spacing[4], paddingVertical: t.spacing[3],
-        borderTopWidth: i ? 1 : 0, borderTopColor: t.colors.border.light }}>
+        borderTopWidth: 1, borderTopColor: t.colors.border.light }}>
       <NetworkIcon network={iconFor(method)} size={22} />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>{requestKind(method)}</Text>

@@ -25,10 +25,14 @@ test('names each code and where it lands', () => {
   expect(middleEllipsis(invoice)).toMatch(/^lntb1x{9}….{10}$/);
 });
 
-test('the universal code lists every way to pay it, each on its own QR', () => {
+test('the universal code folds its formats away, then lists each on its own QR', () => {
   const screen = render(<ReceiveRequestDetails methods={methods} universal qrSize={200}
     notes={["Bark isn't included: it's on Signet."]} />);
-  expect(screen.getByText('Any of these can pay this code')).toBeTruthy();
+  // Folded: the summary names the formats; the notes stay visible.
+  expect(screen.getByText('Other formats')).toBeTruthy();
+  expect(screen.queryByText(/^Bark · lntb1/)).toBeNull();
+  expect(screen.getByText("Bark isn't included: it's on Signet.")).toBeTruthy();
+  fireEvent.press(screen.getByLabelText(/^Show the codes inside this one/));
   expect(screen.getByText('Lightning invoice')).toBeTruthy();
   expect(screen.getByText(/^Bark · lntb1/)).toBeTruthy();
   expect(screen.getByText("Bark isn't included: it's on Signet.")).toBeTruthy();
