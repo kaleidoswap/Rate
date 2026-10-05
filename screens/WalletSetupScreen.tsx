@@ -44,13 +44,13 @@ interface Props {
   navigation: any;
 }
 
-type SetupStep = 'welcome' | 'mode' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
+type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
 
 export default function WalletSetupScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const dispatch = useDispatch();
   const [step, setStep] = useState<SetupStep>('welcome');
-  const [name, setName] = useState('');
+  const [name, setName] = useState('My wallet');
   const [createdWalletId, setCreatedWalletId] = useState<number | null>(null);
   const [generatedMnemonic, setGeneratedMnemonic] = useState<string>('');
   const [backupConfirmed, setBackupConfirmed] = useState(false);
@@ -129,24 +129,15 @@ export default function WalletSetupScreen({ navigation }: Props) {
         Alert.alert('Wallet Name Required', 'Please give your wallet a name to continue.');
         return;
       }
-      animateTransition('mode');
-    } else if (step === 'mode') {
-      // Persist the chosen disclosure level; reversible later in Settings.
-      dispatch(setDisclosureLevel(mode));
-      if (mode === 'lite') {
-        // Lite hides network management, but Spark and Arkade are both WDK-backed
-        // and should be available on Android. Liquid remains disabled by default
-        // because it requires the native lwk-rn binding.
-        setNetworks((prev) => ({
-          ...prev,
-          spark: true,
-          arkade: true,
-          liquid: Platform.OS !== 'android',
-        }));
-      }
-      // Both modes go through the RLN-over-NWC step (skippable).
-      animateTransition('rln');
+      dispatch(setDisclosureLevel('lite'));
+      setMode('lite');
+      setNetworks({ spark: true, arkade: true, liquid: false, rln: rlnConnected });
+      handleCreate();
     } else if (step === 'networks') {
+      if (!networks.spark && !networks.arkade && !networks.liquid && !rlnConnected) {
+        Alert.alert('Choose a network', 'Enable at least one network to receive and send payments.');
+        return;
+      }
       handleCreate();
     }
   };
@@ -239,22 +230,25 @@ export default function WalletSetupScreen({ navigation }: Props) {
     if (step === 'networks') {
       animateTransition('rln');
     } else if (step === 'rln') {
-      animateTransition('mode');
-    } else if (step === 'mode') {
       animateTransition('welcome');
+    } else if (step === 'backup') {
+      animateTransition(mode === 'advanced' ? 'networks' : 'welcome');
+    } else if (step === 'confirmBackup') {
+      animateTransition('backup');
     } else if (step === 'welcome') {
       navigation.goBack();
     }
   };
 
   const handleCreate = async () => {
+    if (generatedMnemonic) { animateTransition('backup'); return; }
+    setBackupConfirmed(false);
     try {
       // Generate mnemonic
       const bip39 = require('bip39');
       const mnemonic = bip39.generateMnemonic(); // 12 words default
       
       setGeneratedMnemonic(mnemonic);
-      console.log('Generated Mnemonic:', mnemonic);
       
       // Show backup screen first
       animateTransition('backup');
@@ -332,13 +326,13 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const handleSkipSecurity = () => {
-    navigation.replace('NostrSetup', { isInitialSetup: true });
+    navigation.replace('Dashboard');
   };
 
   const renderStepIndicator = () => {
     const steps: SetupStep[] = mode === 'advanced'
-      ? ['welcome', 'mode', 'rln', 'networks']
-      : ['welcome', 'mode', 'rln'];
+      ? ['welcome', 'rln', 'networks', 'backup', 'confirmBackup']
+      : ['welcome', 'backup', 'confirmBackup'];
     const currentIdx = steps.indexOf(step);
 
     if (step === 'creating' || step === 'success') return null;
@@ -383,7 +377,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
 
       <Text style={styles.stepTitle}>Create Your Wallet</Text>
       <Text style={styles.stepDescription}>
-        Give your wallet a name. You can always change it later in settings.
+        Name your wallet, save your recovery phrase, and you’re ready to receive bitcoin.
       </Text>
 
       <View style={styles.inputWrapper}>
@@ -401,89 +395,26 @@ export default function WalletSetupScreen({ navigation }: Props) {
         />
       </View>
 
-      <View style={styles.tipContainer}>
-        <View style={styles.tipIcon}>
-          <Ionicons name="bulb-outline" size={18} color={theme.colors.warning[500]} />
-        </View>
-        <Text style={styles.tipText}>
-          Tip: Choose a name that helps you identify this wallet if you create multiple ones.
-        </Text>
-      </View>
+      <Text style={styles.tipText}>
+        Spark and Arkade are enabled by default. You can manage networks and connect a Lightning wallet later in Settings.
+      </Text>
+      <TouchableOpacity
+        style={styles.skipButton}
+        accessibilityRole="button"
+        onPress={() => {
+          if (!name.trim()) {
+            Alert.alert('Wallet name required', 'Give your wallet a name before continuing.');
+            return;
+          }
+          setMode('advanced');
+          dispatch(setDisclosureLevel('advanced'));
+          animateTransition('rln');
+        }}
+      >
+        <Text style={styles.skipButtonText}>Advanced setup · choose networks</Text>
+      </TouchableOpacity>
     </ScrollView>
   );
-
-  const renderModeStep = () => {
-    const options: Array<{
-      value: DisclosureLevel;
-      title: string;
-      recommended?: boolean;
-      icon: keyof typeof Ionicons.glyphMap;
-      desc: string;
-    }> = [
-      {
-        value: 'lite',
-        title: 'Lite',
-        recommended: true,
-        icon: 'sparkles-outline',
-        desc: 'Simple view — just BTC, USD and your assets. No networks or channels to manage.',
-      },
-      {
-        value: 'advanced',
-        title: 'Advanced',
-        icon: 'options-outline',
-        desc: 'Full control — see every network, pick send routes and manage Lightning channels.',
-      },
-    ];
-
-    return (
-      <ScrollView
-        style={styles.stepContent}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
-      >
-        <View style={styles.iconHeader}>
-          <View style={[styles.welcomeIconContainer, { backgroundColor: theme.colors.primary[50] }]}>
-            <Ionicons name="contrast-outline" size={32} color={theme.colors.primary[500]} />
-          </View>
-        </View>
-
-        <Text style={styles.stepTitle}>Choose Your Experience</Text>
-        <Text style={styles.stepDescription}>
-          Pick how much detail you want to see. You can change this anytime in Settings.
-        </Text>
-
-        {options.map((option) => {
-          const selected = mode === option.value;
-          return (
-            <TouchableOpacity
-              key={option.value}
-              style={[styles.modeOption, selected && styles.modeOptionActive]}
-              onPress={() => setMode(option.value)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.iconContainer, { backgroundColor: theme.colors.primary[50] }]}>
-                <Ionicons name={option.icon} size={22} color={theme.colors.primary[500]} />
-              </View>
-              <View style={styles.modeTextContainer}>
-                <View style={styles.modeTitleRow}>
-                  <Text style={styles.networkName}>{option.title}</Text>
-                  {option.recommended && (
-                    <View style={styles.recommendedBadge}>
-                      <Text style={styles.recommendedText}>Recommended</Text>
-                    </View>
-                  )}
-                </View>
-                <Text style={styles.networkDesc}>{option.desc}</Text>
-              </View>
-              <View style={[styles.modeRadio, selected && styles.modeRadioActive]}>
-                {selected && <Ionicons name="checkmark" size={14} color="white" />}
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
-    );
-  };
 
   const renderNetworksStep = () => (
     <ScrollView
@@ -821,7 +752,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
 
   const getButtonTitle = () => {
     if (step === 'welcome') return 'Continue';
-    if (step === 'mode') return 'Continue';
     if (step === 'networks') return 'Generate Wallet';
     if (step === 'backup') return 'I\'ve Backed It Up';
     if (step === 'confirmBackup') return 'Create Wallet';
@@ -834,6 +764,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
       <ScreenHeader
         title={step === 'success' ? 'Success' : 'New Wallet'}
         showBack={step !== 'creating' && step !== 'success'}
+        onBack={handleBack}
       />
       {(step !== 'creating' && step !== 'success') ? renderStepIndicator() : null}
 
@@ -853,7 +784,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
         >
           <View style={styles.animatedContent}>
             {step === 'welcome' && renderWelcomeStep()}
-            {step === 'mode' && renderModeStep()}
             {step === 'rln' && renderRlnStep()}
             {step === 'networks' && renderNetworksStep()}
             {step === 'backup' && renderBackupStep()}
@@ -863,7 +793,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           </View>
         </Animated.View>
 
-        {(step === 'welcome' || step === 'mode' || step === 'networks' || step === 'backup' || step === 'confirmBackup') && (
+        {(step === 'welcome' || step === 'networks' || step === 'backup' || step === 'confirmBackup') && (
           <View style={styles.footer}>
             <Button
               title={getButtonTitle()}

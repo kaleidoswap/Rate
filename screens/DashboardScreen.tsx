@@ -1,3 +1,4 @@
+import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -27,17 +28,10 @@ import { setRgbAssets } from '../store/slices/assetsSlice';
 import { loadNostrProfile } from '../store/slices/nostrSlice';
 import {
   selectDisclosureLevel,
-  selectAiEnabled,
-  selectAiOnboarded,
-  setAiMode,
-  setAiOnboarded,
 } from '../store/slices/settingsSlice';
-import QVACService from '../services/QVACService';
-import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
 import { policyFor, aggregateForLite } from '@kaleidorg/wallet-engine';
 
 import { theme } from '../theme';
-import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
 import {
   BalanceCard,
   ActionButtons,
@@ -146,19 +140,11 @@ export default function DashboardScreen({ navigation }: Props) {
     }
   }, [nostrConnected, nostrProfileLoaded, dispatch]);
   const disclosureLevel = useSelector(selectDisclosureLevel);
-  // On-device AI is opt-in; only surface the voice agent FAB once it's enabled
-  // so the QVAC Bare worklet can't be started (and crash) before a native rebuild.
-  const aiEnabled = useSelector(selectAiEnabled);
-  const aiOnboarded = useSelector(selectAiOnboarded);
   const policy = policyFor(disclosureLevel);
   const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
-  const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
-  const [voiceAutoListen, setVoiceAutoListen] = useState(false);
-  // One-time KaleidoMind onboarding (lets the user pick local / delegate / off).
-  const [mindOnboardingOpen, setMindOnboardingOpen] = useState(false);
-  const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
+  const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [protocolsReady, setProtocolsReady] = useState(false);
   // Startup initializes protocols and then fetches balances in the same async
@@ -187,75 +173,6 @@ export default function DashboardScreen({ navigation }: Props) {
   // Modal state for channel details
   const [channelModalVisible, setChannelModalVisible] = useState(false);
   const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
-
-  // Open the KaleidoMind voice agent. `autoListen` is set when triggered via a
-  // press-and-hold on the FAB, so the assistant starts listening immediately.
-  const openVoiceAgent = useCallback((autoListen: boolean) => {
-    if (aiEnabled) {
-      setVoiceAutoListen(autoListen);
-      setVoiceAgentOpen(true);
-      return;
-    }
-    // AI is opt-in (off by default). Re-open the one-time setup so the user
-    // can pick how KaleidoMind runs — nothing starts the worklet unprompted.
-    QVACService.getInstance()
-      .getAvailability()
-      .then((a) => setMindAvailability(a))
-      .catch(() => {})
-      .finally(() => setMindOnboardingOpen(true));
-  }, [aiEnabled]);
-
-  // The bottom-nav island's green mic button (in App.tsx, global across tabs)
-  // emits this event; it focuses the Wallet tab first so this screen is active.
-  useEffect(() => {
-    const sub = DeviceEventEmitter.addListener('rate.openVoice', () => openVoiceAgent(true));
-    return () => sub.remove();
-  }, [openVoiceAgent]);
-
-  // First run: probe whether KaleidoMind can run here, then show the one-time
-  // setup so the user decides once (local / delegate / off). Never boots the
-  // worklet — getAvailability() only reads device capability.
-  useEffect(() => {
-    if (aiOnboarded) return;
-    let active = true;
-    QVACService.getInstance()
-      .getAvailability()
-      .then((a) => {
-        if (active) {
-          setMindAvailability(a);
-          setMindOnboardingOpen(true);
-        }
-      })
-      .catch(() => {
-        if (active) setMindOnboardingOpen(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [aiOnboarded]);
-
-  const finishMindOnboarding = useCallback(() => {
-    dispatch(setAiOnboarded(true));
-    setMindOnboardingOpen(false);
-  }, [dispatch]);
-
-  const handleMindLocal = useCallback(() => {
-    dispatch(setAiMode('local'));
-    finishMindOnboarding();
-  }, [dispatch, finishMindOnboarding]);
-
-  const handleMindDelegate = useCallback(() => {
-    // Don't commit to 'delegate' until pairing actually succeeds — otherwise
-    // backing out of the scanner would strand the user in a desktop mode with no
-    // connection. PairDesktopScreen sets aiMode='delegate' on a successful pair.
-    finishMindOnboarding();
-    navigation.getParent()?.navigate('PairDesktop');
-  }, [finishMindOnboarding, navigation]);
-
-  const handleMindSkip = useCallback(() => {
-    dispatch(setAiMode('off'));
-    finishMindOnboarding();
-  }, [dispatch, finishMindOnboarding]);
 
   // Initialize protocol services (only once)
   const initializeApi = useCallback(async () => {
@@ -399,6 +316,9 @@ export default function DashboardScreen({ navigation }: Props) {
           }
         })
       );
+      const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
+      setBalanceWarning(balanceResults.filter(Boolean).length < connectedCount
+        ? 'Some balances are unavailable. Your total may be incomplete.' : null);
       for (const r of balanceResults) {
         if (!r) continue;
         totalConfirmed += r.btc.confirmed;
@@ -606,7 +526,13 @@ export default function DashboardScreen({ navigation }: Props) {
     return sats;
   })();
 
-  const totalBalance = offChainBalance + getTotalBtcBalance() + tokenValueSats;
+  const protocolBalances = (btcBalance as any).byProtocol as Record<string, { confirmed: number; unconfirmed: number; total: number }> | undefined;
+  // NWC reports Lightning funds already; HTTP RLN reports on-chain funds.
+  const rgbBalanceIsLightning = typeof (protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType === 'function';
+  const bitcoinSummary = summarizeBitcoinBalances(protocolBalances ?? {}, channels, rgbBalanceIsLightning);
+  const availableBtc = bitcoinSummary.available;
+  const pendingBtc = bitcoinSummary.unavailable;
+  const totalBalance = bitcoinSummary.total + tokenValueSats;
   const denominatedTotal = formatDisplayAmount(totalBalance);
 
   // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
@@ -658,7 +584,7 @@ export default function DashboardScreen({ navigation }: Props) {
     ticker: 'BTC',
     name: 'Bitcoin',
     precision: bitcoinUnit === 'BTC' ? 8 : 0,
-    balance: { spendable: getTotalBtcBalance() },
+    balance: { spendable: availableBtc },
   } as any;
 
   const renderChannelModal = () => (
@@ -843,15 +769,28 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         }
       >
+        {(connectionError || balanceWarning) && (
+          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
+            <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
+            <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
+              {connectionError ? 'Wallet connection unavailable. Tap to retry.' : `${balanceWarning} Tap to retry.`}
+            </Text>
+          </TouchableOpacity>
+        )}
         {/* Unified wallet card: balance + per-network breakdown + action buttons. */}
         <View style={styles.walletCard}>
           <BalanceCard
             totalBalance={totalBalance}
+            availableBtc={availableBtc}
+            pendingBtc={pendingBtc}
+            includesTokenValue={tokenValueSats > 0}
+            rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}
             onRefresh={onRefresh}
             refreshing={refreshing}
             formatSatoshis={formatSatoshis}
             formatUSD={formatUSD}
+            hideAmounts={denominatedTotal.hidden}
             primaryText={denominatedTotal.primary}
             primaryUnitLabel={denominatedTotal.unitLabel}
             secondaryText={denominatedTotal.secondary}
@@ -873,6 +812,10 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         </View>
 
+
+        <RecentActivityWidget
+          onViewAll={() => navigation.navigate('Activity')}
+        />
 
         {isLite && liteUsdDisplay > 0 && (
           <View style={styles.liteUsdCard}>
@@ -918,9 +861,18 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('IssueAsset')}
         />
 
-        <RecentActivityWidget
-          onViewAll={() => navigation.getParent()?.navigate('History')}
-        />
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('Map')}
+          style={styles.placesLink}
+        >
+          <Ionicons name="map-outline" size={22} color={theme.colors.text.secondary} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base }}>Places to pay</Text>
+            <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm }}>Find nearby businesses accepting bitcoin</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
 
         {policy.showChannelManagement && hasChannelCapableNode && (
         <ChannelList
@@ -940,22 +892,6 @@ export default function DashboardScreen({ navigation }: Props) {
         )}
       </ScrollView>
 
-      {/* Voice is triggered from the green mic button in the bottom nav island,
-          which emits 'rate.openVoice' (see the listener effect above). */}
-      <VoiceAgentOverlay
-        visible={voiceAgentOpen}
-        autoListen={voiceAutoListen}
-        onClose={() => setVoiceAgentOpen(false)}
-      />
-
-      <KaleidoMindOnboarding
-        visible={mindOnboardingOpen}
-        availability={mindAvailability}
-        onSelectLocal={handleMindLocal}
-        onSelectDelegate={handleMindDelegate}
-        onSkip={handleMindSkip}
-      />
-
       {renderChannelModal()}
     </View>
   );
@@ -967,9 +903,12 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.background.primary,
   },
   scrollContent: {
-    // Clear the floating (absolutely-positioned) nav island so the last rows
-    // stay reachable above it.
-    paddingBottom: theme.spacing[32],
+    paddingBottom: theme.spacing[6],
+  },
+  placesLink: {
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3],
+    margin: theme.spacing[4], padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.surface.primary,
   },
   walletCard: {
     // The unified balance + actions card sits just below the sticky header.
