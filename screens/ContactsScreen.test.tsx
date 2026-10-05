@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { Alert } from 'react-native';
 import ContactsScreen from './ContactsScreen';
 
 const mockDispatch = jest.fn((a: any) => a);
@@ -12,6 +13,8 @@ jest.mock('../store/slices/nostrSlice', () => ({
 }));
 jest.mock('../services/NostrService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
 jest.mock('nostr-tools', () => ({ nip19: { npubEncode: (hex: string) => `npub1${hex}` } }));
+const mockToast = { success: jest.fn(), error: jest.fn(), info: jest.fn(), warning: jest.fn() };
+jest.mock('../services/ToastService', () => ({ __esModule: true, default: { getInstance: () => mockToast } }));
 jest.mock('../utils/feedback', () => ({ feedback: { select: jest.fn() } }));
 jest.mock('../components', () => {
   const React = require('react');
@@ -20,7 +23,9 @@ jest.mock('../components', () => {
     MainHeader: ({ title, subtitle, rightAction }: any) => <View><Text>{title}</Text>{subtitle ? <Text>{subtitle}</Text> : null}{rightAction}</View>,
     Button: ({ title, onPress, disabled }: any) => <TouchableOpacity accessibilityRole="button" onPress={onPress} disabled={disabled}><Text>{title}</Text></TouchableOpacity>,
     Sheet: ({ visible, children, title, footer }: any) => (visible ? <View>{title ? <Text>{title}</Text> : null}{children}{footer}</View> : null),
-    ZapModal: ({ visible, recipient }: any) => (visible ? <Text>{`Zap ${recipient?.name}`}</Text> : null),
+    ZapModal: ({ visible, recipient, onSuccess }: any) => (visible ? (
+      <TouchableOpacity onPress={() => onSuccess({ amountSats: 2100, isZap: true })}><Text>{`Zap ${recipient?.name}`}</Text></TouchableOpacity>
+    ) : null),
     SegmentedTabs: ({ options, onChange }: any) => <View>{options.map((o: any) => <TouchableOpacity key={o.key} onPress={() => onChange(o.key)}><Text>{o.label}</Text></TouchableOpacity>)}</View>,
     Input: ({ label, rightIcon, ...props }: any) => <View><TextInput accessibilityLabel={label} {...props} />{rightIcon}</View>,
     CopyButton: ({ value }: any) => <Text>{`copy ${value}`}</Text>,
@@ -114,7 +119,70 @@ test('Nostr contacts get filters, a message button and an unfollow action', () =
   fireEvent.press(screen.getByLabelText(/^carol, npub1/));
   expect(screen.getByText('Message · 3')).toBeTruthy();
   expect(screen.getByText('Unfollow on Nostr')).toBeTruthy();
-  expect(screen.queryByText('Add to favorites')).toBeNull();
+  expect(screen.queryByText('Delete saved contact')).toBeNull();
+  // Follows can be favourited too: stored by pubkey, not on the contact.
+  fireEvent.press(screen.getByText('Add to favorites'));
+  expect(mockDispatch).toHaveBeenCalledWith({ type: 'contacts/toggleNostrFavorite', payload: pubkey });
+});
+
+test('a favourite Nostr pubkey lists the follow under Favorites', () => {
+  const pubkey = 'e'.repeat(64);
+  mockState = state({
+    contacts: { contacts: [], searchQuery: '', favoriteNostrPubkeys: [pubkey] },
+    nostr: { isConnected: true, contacts: [{ pubkey, profile: { name: 'erin' } }] },
+  });
+  const screen = render(<ContactsScreen navigation={navigation} />);
+  expect(screen.getByText('Favorites')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText(/^erin, npub1/));
+  fireEvent.press(screen.getByText('Remove from favorites'));
+  expect(mockDispatch).toHaveBeenCalledWith({ type: 'contacts/toggleNostrFavorite', payload: pubkey });
+});
+
+test('a saved contact that is also a follow shows once, with both remove options', () => {
+  const pubkey = 'd'.repeat(64);
+  const saved = { id: 'c3', name: 'Dave saved', lightning_address: 'DAVE@walletofsatoshi.com', created_at: 1, updated_at: 1, is_favorite: true };
+  mockState = state({
+    contacts: { contacts: [alice, saved], searchQuery: '' },
+    nostr: { isConnected: true, contacts: [{ pubkey, profile: { name: 'dave', lud16: 'dave@walletofsatoshi.com' } }] },
+  });
+  const screen = render(<ContactsScreen navigation={navigation} />);
+  // All = merged count; the per-source tabs stay unmerged.
+  expect(screen.getByText('All · 2')).toBeTruthy();
+  expect(screen.getByText('Saved · 2')).toBeTruthy();
+  expect(screen.getByText('Nostr · 1')).toBeTruthy();
+  // The Nostr entry wins, carrying the saved contact's favourite.
+  expect(screen.queryByText('Dave saved')).toBeNull();
+  expect(screen.getByText('dave')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('dave, dave@walletofsatoshi.com'));
+  expect(screen.getByText('Remove from favorites')).toBeTruthy();
+  expect(screen.getByText('Unfollow on Nostr')).toBeTruthy();
+  fireEvent.press(screen.getByText('Delete saved contact'));
+  const buttons = (Alert.alert as jest.Mock).mock.calls[0][2];
+  buttons.find((b: any) => b.style === 'destructive').onPress();
+  expect(mockDispatch).toHaveBeenCalledWith({ type: 'contacts/deleteContact', payload: 'c3' });
+
+  // Un-starring a merged row clears the saved side's favourite as well.
+  fireEvent.press(screen.getByText('Remove from favorites'));
+  expect(mockDispatch).toHaveBeenCalledWith({ type: 'contacts/toggleFavorite', payload: 'c3' });
+
+  // The Saved filter shows the saved copy on its own.
+  fireEvent.press(screen.getByText('Saved · 2'));
+  expect(screen.getByText('Dave saved')).toBeTruthy();
+});
+
+test('notifications use toasts instead of alerts', async () => {
+  const screen = render(<ContactsScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Add contact'));
+  fireEvent.changeText(screen.getByLabelText('Address or key'), 'dave@walletofsatoshi.com');
+  const adds = screen.getAllByText('Add contact'); // sheet title + footer button
+  await act(async () => { fireEvent.press(adds[adds.length - 1]); });
+  expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'contacts/addContact' }));
+  expect(mockToast.success).toHaveBeenCalledWith('Contact saved');
+
+  fireEvent.press(screen.getByLabelText('Pay Alice'));
+  fireEvent.press(screen.getByText('Zap Alice'));
+  expect(mockToast.success).toHaveBeenCalledWith(expect.stringContaining('2,100 sats to Alice'));
+  expect(Alert.alert).not.toHaveBeenCalled();
 });
 
 test('add sheet detects the identifier and keeps Add disabled until it is recognised', () => {
@@ -126,4 +194,12 @@ test('add sheet detects the identifier and keeps Add disabled until it is recogn
   expect(screen.getByText('Lightning address or NIP-05')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Scan QR code'));
   expect(navigation.navigate).toHaveBeenCalledWith('QRScanner', { mode: 'contact', returnScreen: 'Contacts' });
+});
+
+test('toggleNostrFavorite works on pre-v6 persisted state without the field', () => {
+  const { default: reducer, toggleNostrFavorite } = jest.requireActual('../store/slices/contactsSlice');
+  const legacy = { contacts: [], isLoading: false, searchQuery: '', selectedContact: null, error: null, sortBy: 'name', sortOrder: 'asc' };
+  const on = reducer(legacy, toggleNostrFavorite('ABC'));
+  expect(on.favoriteNostrPubkeys).toEqual(['abc']);
+  expect(reducer(on, toggleNostrFavorite('abc')).favoriteNostrPubkeys).toEqual([]);
 });

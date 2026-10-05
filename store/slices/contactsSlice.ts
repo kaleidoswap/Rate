@@ -23,6 +23,9 @@ interface ContactsState {
   error: string | null;
   sortBy: 'name' | 'created_at' | 'updated_at';
   sortOrder: 'asc' | 'desc';
+  // Nostr follows are rebuilt from the relay contact list on every sync, so
+  // their favourite flag lives here (by hex pubkey) rather than on a Contact.
+  favoriteNostrPubkeys: string[];
 }
 
 const initialState: ContactsState = {
@@ -33,6 +36,7 @@ const initialState: ContactsState = {
   error: null,
   sortBy: 'name',
   sortOrder: 'asc',
+  favoriteNostrPubkeys: [],
 };
 
 const contactsSlice = createSlice({
@@ -60,6 +64,12 @@ const contactsSlice = createSlice({
         contact.is_favorite = !contact.is_favorite;
         contact.updated_at = Date.now();
       }
+    },
+    toggleNostrFavorite: (state, action: PayloadAction<string>) => {
+      // Older persisted state predates this field (rehydrate replaces the slice wholesale).
+      const list = state.favoriteNostrPubkeys ?? [];
+      const pubkey = action.payload.toLowerCase();
+      state.favoriteNostrPubkeys = list.includes(pubkey) ? list.filter(p => p !== pubkey) : [...list, pubkey];
     },
     setSelectedContact: (state, action: PayloadAction<Contact | null>) => {
       state.selectedContact = action.payload;
@@ -93,6 +103,7 @@ export const {
   updateContact,
   deleteContact,
   toggleFavorite,
+  toggleNostrFavorite,
   setSelectedContact,
   setSearchQuery,
   setSorting,

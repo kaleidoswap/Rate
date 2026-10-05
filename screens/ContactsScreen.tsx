@@ -19,6 +19,7 @@ import {
   addContact,
   deleteContact,
   toggleFavorite,
+  toggleNostrFavorite,
   setSearchQuery,
   setSelectedContact,
 } from '../store/slices/contactsSlice';
@@ -27,6 +28,7 @@ import { theme } from '../theme';
 import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input, CopyButton, PressableScale } from '../components';
 import { feedback } from '../utils/feedback';
 import NostrService, { NostrContact } from '../services/NostrService';
+import ToastService from '../services/ToastService';
 import { nip19 } from 'nostr-tools';
 
 interface Props {
@@ -34,24 +36,30 @@ interface Props {
   route?: any;
 }
 
-// Brand-consistent tinted avatar palette (readable on the dark surface).
-const AVATAR_PALETTE: { bg: string; fg: string }[] = [
-  { bg: 'rgba(43,238,121,0.16)', fg: '#2BEE79' },
-  { bg: 'rgba(66,144,255,0.16)', fg: '#60A5FA' },
-  { bg: 'rgba(168,85,247,0.16)', fg: '#C084FC' },
-  { bg: 'rgba(245,158,11,0.16)', fg: '#FBBF24' },
-  { bg: 'rgba(236,72,153,0.16)', fg: '#F472B6' },
-  { bg: 'rgba(20,184,166,0.16)', fg: '#2DD4BF' },
-];
+// A row in the list. `localId` is set when a saved contact was folded into a
+// Nostr follow (same person), so the sheet can still delete the saved copy.
+type ContactRow = Contact & { localId?: string };
+
+const toast = () => ToastService.getInstance();
 
 function avatarColors(name: string) {
+  const palette = theme.colors.avatar;
   const code = name?.charCodeAt(0) || 0;
-  return AVATAR_PALETTE[code % AVATAR_PALETTE.length];
+  return palette[code % palette.length];
+}
+
+// Same person: a shared Lightning address (case-insensitive) or Nostr key.
+function isSamePerson(local: Contact, follow: Contact): boolean {
+  const ln = (c: Contact) => c.lightning_address?.trim().toLowerCase();
+  if (ln(local) && ln(local) === ln(follow)) return true;
+  if (local.npub && local.npub === follow.npub) return true;
+  return !!local.node_pubkey && local.node_pubkey.toLowerCase() === follow.node_pubkey?.toLowerCase();
 }
 
 export default function ContactsScreen({ navigation, route }: Props) {
   const dispatch = useDispatch();
-  const { contacts, searchQuery } = useSelector((state: RootState) => state.contacts);
+  const { contacts, searchQuery, favoriteNostrPubkeys } = useSelector((state: RootState) => state.contacts);
+  const nostrFavorites = favoriteNostrPubkeys ?? []; // undefined in pre-v6 persisted state
   const nostrState = useSelector((state: RootState) => state.nostr);
   const unreadByPubkey = useSelector((state: RootState) => state.chat.unreadByPubkey) || {};
   const [showAddForm, setShowAddForm] = useState(false);
@@ -78,15 +86,28 @@ export default function ContactsScreen({ navigation, route }: Props) {
       avatar_url: nostrContact.profile?.picture,
       created_at: Date.now(),
       updated_at: Date.now(),
-      is_favorite: false,
+      is_favorite: nostrFavorites.includes(nostrContact.pubkey.toLowerCase()),
       isNostrContact: true,
       npub: nip19.npubEncode(nostrContact.pubkey),
     };
   };
 
   const nostrContacts = nostrState.isConnected ? nostrState.contacts.map(convertNostrContact) : [];
-  const allContacts =
-    contactSource === 'local' ? contacts : contactSource === 'nostr' ? nostrContacts : [...contacts, ...nostrContacts];
+
+  // "All" folds a saved contact into the matching follow: the Nostr entry wins
+  // (it can message), favourite if either side is, and keeps the saved id.
+  const merged: ContactRow[] = (() => {
+    const folded = new Set<string>();
+    const follows = nostrContacts.map((n): ContactRow => {
+      const dup = contacts.find((l) => !folded.has(l.id) && isSamePerson(l, n));
+      if (!dup) return n;
+      folded.add(dup.id);
+      return { ...n, is_favorite: n.is_favorite || dup.is_favorite, localId: dup.id };
+    });
+    return [...contacts.filter((l) => !folded.has(l.id)), ...follows];
+  })();
+  const allContacts: ContactRow[] =
+    contactSource === 'local' ? contacts : contactSource === 'nostr' ? nostrContacts : merged;
 
   const filteredContacts = allContacts.filter((contact: Contact) =>
     contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -103,7 +124,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
     ...(favorites.length ? [{ title: 'Favorites', data: favorites }] : []),
     ...(others.length ? [{ title: favorites.length ? 'Contacts' : '', data: others }] : []),
   ];
-  const openContact = openContactId ? allContacts.find((c) => c.id === openContactId) ?? null : null;
+  const openContact: ContactRow | null = openContactId ? allContacts.find((c) => c.id === openContactId) ?? null : null;
 
   // A QR scanned in contact mode comes back as a navigation param: open the
   // add form prefilled with the scanned identifier, then clear the param so it
@@ -123,14 +144,14 @@ export default function ContactsScreen({ navigation, route }: Props) {
 
   const handleRefresh = async () => {
     if (!nostrState.isConnected) {
-      Alert.alert('Not Connected', 'Connect Nostr in Settings to sync your social contacts.');
+      toast().info('Connect Nostr in Settings to sync your social contacts.');
       return;
     }
     setIsRefreshing(true);
     try {
       await dispatch(loadContactList() as any);
     } catch (error) {
-      Alert.alert('Error', 'Failed to refresh contacts.');
+      toast().error('Failed to refresh contacts.');
     } finally {
       setIsRefreshing(false);
     }
@@ -174,13 +195,13 @@ export default function ContactsScreen({ navigation, route }: Props) {
     const identifier = addInput.trim();
     const name = addName.trim();
     if (!identifier) {
-      Alert.alert('Error', 'Enter an npub, NIP-05, Lightning address, or node pubkey.');
+      toast().error('Enter an npub, NIP-05, Lightning address, or node pubkey.');
       return;
     }
 
     const kind = detectKind(identifier);
     if (kind === 'unknown') {
-      Alert.alert('Unrecognised', 'Use an npub1…, name@domain, a Lightning address, or a 66-char node pubkey.');
+      toast().error('Unrecognised. Use an npub1…, name@domain, a Lightning address, or a 66-char node pubkey.');
       return;
     }
 
@@ -190,7 +211,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
       if (kind === 'node') {
         addLocalContact({ name: name || 'Node', node_pubkey: identifier.toLowerCase() });
         resetAddForm();
-        Alert.alert('Added', 'Contact saved.');
+        toast().success('Contact saved');
         return;
       }
 
@@ -202,7 +223,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
           const resolved = await NostrService.getInstance().resolveToPubkey(identifier);
           if ('pubkey' in resolved) {
             if (nostrState.contacts.some((c) => c.pubkey === resolved.pubkey)) {
-              Alert.alert('Already following', 'This account is already in your Nostr contacts.');
+              toast().info('Already in your Nostr contacts');
               return;
             }
             await dispatch(
@@ -210,60 +231,80 @@ export default function ContactsScreen({ navigation, route }: Props) {
             ).unwrap();
             await dispatch(loadContactList() as any);
             resetAddForm();
-            Alert.alert('Following', 'Account added to your Nostr contacts.');
+            toast().success('Following on Nostr');
             return;
           }
           // Could not resolve as a Nostr identity.
           if (kind === 'nostr') {
-            Alert.alert('Not found', resolved.error || 'Could not resolve that Nostr identity.');
+            toast().error(resolved.error || 'Could not resolve that Nostr identity.');
             return;
           }
         } else if (kind === 'nostr') {
-          Alert.alert('Connect Nostr', 'Connect Nostr in Settings to follow accounts.');
+          toast().info('Connect Nostr in Settings to follow accounts.');
           return;
         }
 
         // Lightning address (or unresolved NIP-05) → local contact.
         addLocalContact({ name: name || identifier.split('@')[0], lightning_address: identifier });
         resetAddForm();
-        Alert.alert('Added', 'Contact saved.');
+        toast().success('Contact saved');
       }
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to add contact.');
+      toast().error(e?.message || 'Failed to add contact.');
     } finally {
       setIsAdding(false);
     }
   };
 
-  const handleDeleteContact = (contact: Contact) => {
-    const isNostr = contact.isNostrContact && contact.node_pubkey;
-    Alert.alert(
-      isNostr ? 'Unfollow' : 'Delete Contact',
-      isNostr
-        ? `Unfollow ${contact.name} on Nostr?`
-        : `Are you sure you want to delete ${contact.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: isNostr ? 'Unfollow' : 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            if (isNostr) {
-              try {
-                await dispatch(unfollowUser(contact.node_pubkey!) as any).unwrap();
-                await dispatch(loadContactList() as any);
-              } catch (e: any) {
-                Alert.alert('Error', e?.message || 'Failed to unfollow.');
-                return;
-              }
-            }
-            // Remove any local mirror as well.
-            dispatch(deleteContact(contact.id));
-            setOpenContactId(null);
-          },
+  const handleUnfollow = (contact: ContactRow) => {
+    Alert.alert('Unfollow', `Unfollow ${contact.name} on Nostr?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Unfollow',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await dispatch(unfollowUser(contact.node_pubkey!) as any).unwrap();
+            await dispatch(loadContactList() as any);
+          } catch (e: any) {
+            toast().error(e?.message || 'Failed to unfollow.');
+            return;
+          }
+          // Remove any local mirror under the Nostr id. A merged saved contact is
+          // kept on purpose: it has its own "Delete saved contact" action.
+          dispatch(deleteContact(contact.id));
+          setOpenContactId(null);
         },
-      ],
-    );
+      },
+    ]);
+  };
+
+  const handleDeleteSaved = (localId: string, name: string) => {
+    Alert.alert('Delete Contact', `Are you sure you want to delete ${name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          dispatch(deleteContact(localId));
+          setOpenContactId(null);
+        },
+      },
+    ]);
+  };
+
+  // Follows keep their favourite by pubkey; saved contacts on the Contact. A
+  // merged row shows either side's star, so un-starring clears both.
+  const handleToggleFavorite = (c: ContactRow) => {
+    feedback.select();
+    if (!c.isNostrContact || !c.node_pubkey) {
+      dispatch(toggleFavorite(c.id));
+      return;
+    }
+    const pubkey = c.node_pubkey.toLowerCase();
+    const local = c.localId ? contacts.find((l) => l.id === c.localId) : undefined;
+    if (!c.is_favorite || nostrFavorites.includes(pubkey)) dispatch(toggleNostrFavorite(pubkey));
+    if (c.is_favorite && local?.is_favorite) dispatch(toggleFavorite(local.id));
   };
 
   // Pay: zap a Nostr account or any Lightning address; otherwise fall back to
@@ -331,7 +372,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
     );
   };
 
-  const counts = { all: contacts.length + nostrContacts.length, local: contacts.length, nostr: nostrContacts.length };
+  const counts = { all: merged.length, local: contacts.length, nostr: nostrContacts.length };
 
   const renderHeader = () => (
     <View style={styles.listHeader}>
@@ -505,18 +546,27 @@ export default function ContactsScreen({ navigation, route }: Props) {
             )}
 
             <View style={[styles.group, styles.groupGap]}>
-              {!c.isNostrContact && (
-                <TouchableOpacity style={[styles.menuRow, styles.rowDivider]} onPress={() => { feedback.select(); dispatch(toggleFavorite(c.id)); }}
+              <TouchableOpacity style={[styles.menuRow, styles.rowDivider]} onPress={() => handleToggleFavorite(c)}
+                accessibilityRole="button">
+                <Ionicons name={c.is_favorite ? 'star' : 'star-outline'} size={18}
+                  color={c.is_favorite ? theme.colors.warning[500] : theme.colors.text.secondary} />
+                <Text style={styles.menuText}>{c.is_favorite ? 'Remove from favorites' : 'Add to favorites'}</Text>
+              </TouchableOpacity>
+              {c.isNostrContact && c.node_pubkey && (
+                <TouchableOpacity style={[styles.menuRow, !!c.localId && styles.rowDivider]} onPress={() => handleUnfollow(c)}
                   accessibilityRole="button">
-                  <Ionicons name={c.is_favorite ? 'star' : 'star-outline'} size={18}
-                    color={c.is_favorite ? theme.colors.warning[500] : theme.colors.text.secondary} />
-                  <Text style={styles.menuText}>{c.is_favorite ? 'Remove from favorites' : 'Add to favorites'}</Text>
+                  <Ionicons name="person-remove-outline" size={18} color={theme.colors.error[500]} />
+                  <Text style={[styles.menuText, styles.danger]}>Unfollow on Nostr</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity style={styles.menuRow} onPress={() => handleDeleteContact(c)} accessibilityRole="button">
-                <Ionicons name={c.isNostrContact ? 'person-remove-outline' : 'trash-outline'} size={18} color={theme.colors.error[500]} />
-                <Text style={[styles.menuText, styles.danger]}>{c.isNostrContact ? 'Unfollow on Nostr' : 'Delete contact'}</Text>
-              </TouchableOpacity>
+              {/* A plain saved contact, or the saved copy folded into this follow. */}
+              {(!c.isNostrContact || c.localId) && (
+                <TouchableOpacity style={styles.menuRow} onPress={() => handleDeleteSaved(c.localId ?? c.id, c.name)}
+                  accessibilityRole="button">
+                  <Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} />
+                  <Text style={[styles.menuText, styles.danger]}>{c.localId ? 'Delete saved contact' : 'Delete contact'}</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         )}
@@ -665,10 +715,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         recipient={zapRecipient}
         onClose={() => setZapRecipient(null)}
         onSuccess={({ amountSats, isZap }) =>
-          Alert.alert(
-            isZap ? 'Zap sent ⚡' : 'Payment sent',
-            `${amountSats.toLocaleString()} sats sent to ${zapRecipient?.name ?? 'contact'}.`,
-          )
+          toast().success(`${isZap ? 'Zap sent' : 'Payment sent'} · ${amountSats.toLocaleString()} sats to ${zapRecipient?.name ?? 'contact'}`)
         }
       />
     </View>

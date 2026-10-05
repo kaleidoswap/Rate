@@ -119,6 +119,9 @@ interface Colors {
     spark: string;
     lightning: string;
   };
+  // Tinted initials-avatar palette (contact lists): a translucent fill + a
+  // readable foreground, picked deterministically per name.
+  avatar: { bg: string; fg: string }[];
   // Transaction-direction colors (shared with web) — used by the activity feed.
   tx: {
     sent: string;
@@ -439,6 +442,16 @@ const legacyLightTheme: ThemeType = {
     },
     networkChip: { ...k.networkChip },
     networkText: { ...k.networkText },
+    // Brand-consistent avatar tints (16% fill + light foreground). App-local:
+    // kaleido-ui has no avatar ramp, so only the green fg reuses a shared token.
+    avatar: [
+      { bg: 'rgba(43,238,121,0.16)', fg: k.primary },  // green  #2BEE79
+      { bg: 'rgba(66,144,255,0.16)', fg: '#60A5FA' },  // blue   (info 400)
+      { bg: 'rgba(168,85,247,0.16)', fg: '#C084FC' },  // purple
+      { bg: 'rgba(245,158,11,0.16)', fg: '#FBBF24' },  // amber
+      { bg: 'rgba(236,72,153,0.16)', fg: '#F472B6' },  // pink
+      { bg: 'rgba(20,184,166,0.16)', fg: '#2DD4BF' },  // teal
+    ],
     tx: { ...k.tx },
   },
 

@@ -28,6 +28,7 @@ import {
   setNWCConnectionString,
 } from '../store/slices/nostrSlice';
 import NostrService from '../services/NostrService';
+import SecurityService from '../services/SecurityService';
 import { theme, leading } from '../theme';
 import { Button } from './Button';
 import { Input } from './Input';
@@ -36,6 +37,8 @@ import { CopyButton } from './CopyButton';
 import { WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 import ToastService from '../services/ToastService';
 import { copySensitive } from '../utils/sensitiveClipboard';
+
+const toast = () => ToastService.getInstance();
 
 interface Props {
   navigation?: any;
@@ -59,6 +62,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   const [relayInput, setRelayInput] = useState('');
   const [isAddingRelay, setIsAddingRelay] = useState(false);
   const [isRemovingRelay, setIsRemovingRelay] = useState(false);
+  const [relayStatus, setRelayStatus] = useState<{ url: string; connected: boolean }[]>([]);
 
   const {
     isConnected,
@@ -87,6 +91,19 @@ export default function NostrProfileManager({ navigation }: Props) {
       });
     }
   }, [profile]);
+
+  // NostrService exposes no relay connect/disconnect event, so poll the pool
+  // while connected; a one-shot read per render went stale between renders.
+  useEffect(() => {
+    if (!isConnected) {
+      setRelayStatus([]);
+      return;
+    }
+    const read = () => setRelayStatus(NostrService.getInstance().getRelayStatus());
+    read();
+    const id = setInterval(read, 3000);
+    return () => clearInterval(id);
+  }, [isConnected, relays]);
 
   useEffect(() => {
     if (!walletConnectEnabled || nwcConnectionString) return;
@@ -139,7 +156,7 @@ export default function NostrProfileManager({ navigation }: Props) {
                 ]
               );
             } catch (error) {
-              Alert.alert('Error', 'Failed to generate keys');
+              toast().error('Failed to generate keys');
             }
           }
         }
@@ -149,7 +166,7 @@ export default function NostrProfileManager({ navigation }: Props) {
 
   const handleImportKeys = async () => {
     if (!keyInput.trim()) {
-      Alert.alert('Error', 'Please enter your private key (nsec, npriv, or hex)');
+      toast().error('Please enter your private key (nsec, npriv, or hex)');
       return;
     }
 
@@ -159,7 +176,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       const keys = nostrService.importPrivateKey(keyInput.trim());
 
       if (!keys) {
-        Alert.alert('Error', 'Invalid private key format. Use nsec1…, npriv1…, or 64-character hex.');
+        toast().error('Invalid private key format. Use nsec1…, npriv1…, or 64-character hex.');
         return;
       }
 
@@ -183,65 +200,48 @@ export default function NostrProfileManager({ navigation }: Props) {
       setShowKeyImport(false);
       setKeyInput('');
 
-      Alert.alert('Success', 'Keys imported and saved securely! Your account will be restored automatically next time you open the app.');
+      toast().success('Keys imported and saved securely');
 
       // Load profile
       await dispatch(loadNostrProfile() as any);
     } catch (error) {
-      Alert.alert('Error', 'Failed to import keys');
+      toast().error('Failed to import keys');
     } finally {
       setIsImporting(false);
     }
   };
 
+  // The nsec is the whole identity: gate it behind the device owner (biometrics
+  // or passcode, as for the recovery phrase) and only ever copy it to the
+  // auto-clearing clipboard — no share sheet, which can hand it to any app.
   const handleBackupKeys = async (nsecKey?: string) => {
     const keyToBackup = nsecKey || nsec;
     if (!keyToBackup) {
-      Alert.alert('Error', 'No private key to backup');
+      toast().error('No private key to back up');
       return;
     }
-
-    Alert.alert(
-      'Backup Options',
-      'Choose how you want to backup your private key',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Copy to Clipboard',
-          onPress: () => {
-            copySensitive(keyToBackup);
-            Alert.alert('Copied', 'Private key copied. The clipboard clears in a minute — store it safely now.');
-          }
-        },
-        {
-          text: 'Share',
-          onPress: async () => {
-            try {
-              await Share.share({
-                message: `My Nostr private key: ${keyToBackup}\n\nKeep this safe and never share it publicly!`,
-                title: 'Nostr Private Key Backup',
-              });
-            } catch (error) {
-              console.error('Failed to share key:', error);
-            }
-          }
-        }
-      ]
-    );
+    const security = SecurityService.getInstance();
+    if (!(await security.isDeviceAuthAvailable())) {
+      toast().error('Set a device passcode or biometric lock before backing up your key.');
+      return;
+    }
+    if (!(await security.authenticateForReveal('Authenticate to copy your Nostr private key'))) return;
+    copySensitive(keyToBackup);
+    toast().success('Private key copied. The clipboard clears in a minute — store it safely now.', 5000);
   };
 
   const handleUpdateProfile = async () => {
     if (!isConnected) {
-      Alert.alert('Error', 'Not connected to Nostr');
+      toast().error('Not connected to Nostr');
       return;
     }
 
     try {
       await dispatch(updateNostrProfile(profileForm) as any);
       setShowProfileEdit(false);
-      Alert.alert('Success', 'Profile updated successfully');
+      toast().success('Profile updated');
     } catch (error) {
-      Alert.alert('Error', 'Failed to update profile');
+      toast().error('Failed to update profile');
     }
   };
 
@@ -258,7 +258,7 @@ export default function NostrProfileManager({ navigation }: Props) {
               const nostrService = NostrService.getInstance();
               await nostrService.disconnect();
               dispatch(setConnected(false));
-              Alert.alert('Disconnected', 'You have been disconnected from Nostr. Your keys are still stored and you will be reconnected automatically next time.');
+              toast().info('Disconnected from Nostr. Your keys stay stored for next time.');
             } catch (error) {
               console.error('Failed to disconnect:', error);
             }
@@ -279,7 +279,7 @@ export default function NostrProfileManager({ navigation }: Props) {
               dispatch(clearKeys());
               dispatch(setConnected(false));
 
-              Alert.alert('Keys Removed', 'You have been disconnected and your stored keys have been removed.');
+              toast().success('Disconnected and stored keys removed');
             } catch (error) {
               console.error('Failed to disconnect:', error);
             }
@@ -291,7 +291,7 @@ export default function NostrProfileManager({ navigation }: Props) {
 
   const handleAddRelay = async () => {
     if (!relayInput.trim()) {
-      Alert.alert('Error', 'Please enter a relay URL');
+      toast().error('Please enter a relay URL');
       return;
     }
 
@@ -308,12 +308,12 @@ export default function NostrProfileManager({ navigation }: Props) {
           relays: await nostrService.getRelays()
         };
         await dispatch(initializeNostr(settings) as any);
-        Alert.alert('Success', 'Relay added successfully');
+        toast().success('Relay added');
       } else {
-        Alert.alert('Error', 'Failed to add relay');
+        toast().error('Failed to add relay');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to add relay');
+      toast().error('Failed to add relay');
     } finally {
       setIsAddingRelay(false);
     }
@@ -341,12 +341,12 @@ export default function NostrProfileManager({ navigation }: Props) {
                   relays: await nostrService.getRelays()
                 };
                 await dispatch(initializeNostr(settings) as any);
-                Alert.alert('Success', 'Relay removed successfully');
+                toast().success('Relay removed');
               } else {
-                Alert.alert('Error', 'Failed to remove relay');
+                toast().error('Failed to remove relay');
               }
             } catch (error) {
-              Alert.alert('Error', 'Failed to remove relay');
+              toast().error('Failed to remove relay');
             } finally {
               setIsRemovingRelay(false);
             }
@@ -356,7 +356,6 @@ export default function NostrProfileManager({ navigation }: Props) {
     );
   };
 
-  const relayStatus = isConnected ? NostrService.getInstance().getRelayStatus() : [];
   const relayUp = (url: string) => relayStatus.find(r => r.url === url)?.connected ?? false;
   const relaysUp = relays.filter(relayUp).length;
   const shortNpub = npub ? `${npub.slice(0, 14)}…${npub.slice(-8)}` : '';
@@ -519,7 +518,7 @@ export default function NostrProfileManager({ navigation }: Props) {
           <Text style={styles.sectionLabel}>Keys</Text>
           <View style={styles.card}>
             <Row icon="shield-checkmark-outline" tint={theme.colors.primary[500]} label="Back up private key"
-              detail="Copy or share your nsec to restore elsewhere" onPress={() => handleBackupKeys()} />
+              detail="Copy your nsec to restore elsewhere" onPress={() => handleBackupKeys()} />
             <Row icon="log-out-outline" label="Disconnect" danger onPress={handleDisconnect} last />
           </View>
         </>
