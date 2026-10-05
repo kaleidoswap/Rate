@@ -20,7 +20,7 @@ import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
 import { AssetRecord } from '../services/DatabaseService';
 import { formatAssetAmount } from '../utils/assetAmount';
 import { useAssetIcon } from '../utils';
-import { AssetIcon as SharedAssetIcon } from '../components/AssetIcon';
+import { AssetChip } from '../components/AssetList';
 import { getAssetFamily } from '../utils/account-routing';
 import { theme, protocolColor, protocolTint } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
@@ -48,8 +48,8 @@ export default function AssetsScreen({ navigation, route }: Props) {
   const policy = usePolicy();
   const canIssue = policy.showExperimental;
 
-  // Asset Icon — uses the shared icon (logoUri → CDN → fallback) so Arkade/Spark
-  // token icons (and the asset's own icon metadata) render here too.
+  // Asset Icon — the same chip as the Dashboard asset list (logoUri → CDN → fallback),
+  // so Arkade/Spark token icons (and the asset's own icon metadata) render here too.
   const AssetIcon = ({
     ticker,
     logoUri,
@@ -60,7 +60,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
     protocol?: 'RGB' | 'SPARK' | 'ARKADE';
   }) => (
     <View style={styles.assetIconContainer}>
-      <SharedAssetIcon ticker={ticker} logoUri={logoUri} protocol={protocol} size={40} />
+      <AssetChip asset={{ ticker, icon: logoUri, protocol }} size={40} />
     </View>
   );
 
@@ -449,8 +449,6 @@ const styles = StyleSheet.create({
   assetIconContainer: {
     width: 48,
     height: 48,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.gray[100],
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: theme.spacing[3],

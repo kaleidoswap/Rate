@@ -4,7 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { theme, motion } from '../theme';
 import { Card } from './Card';
-import { AssetIcon } from './AssetIcon';
+import { AssetIcon, assetIconColor } from './AssetIcon';
+import { NetworkIcon } from './NetworkIcon';
+import { protocolTint } from '../theme';
 import { SectionHeader } from './SectionHeader';
 import { AmountText } from './AmountText';
 import { PressableScale } from './PressableScale';
@@ -33,6 +35,35 @@ interface AssetListProps {
 }
 
 const VISIBLE = 4;
+
+const USD_LIKE = new Set(['USD', 'USDT', 'USDC', 'USDB']);
+
+/**
+ * The asset mark in the same style as the account chips in Send and Receive:
+ * a softly tinted circle with the asset's glyph, and the network it lives on
+ * as a small corner badge using the shared protocol icons.
+ */
+export const AssetChip: React.FC<{ asset: Pick<NiaAsset, 'ticker' | 'icon' | 'protocol'>; size?: number }> = ({ asset, size = 40 }) => {
+    const ticker = asset.ticker.toUpperCase();
+    const isBtc = ticker === 'BTC';
+    const isUsd = !asset.icon && USD_LIKE.has(ticker);
+    const tint = isBtc ? theme.colors.networks.bitcoin : isUsd ? theme.colors.success[500] : assetIconColor(ticker);
+    const badge = Math.round(size * 0.44);
+    return (
+        <View style={{ width: size, height: size }}>
+            <View style={[styles.chip, { width: size, height: size, borderRadius: size / 2, backgroundColor: `${tint}26` }]}>
+                {isBtc ? <Ionicons name="logo-bitcoin" size={Math.round(size * 0.55)} color={tint} />
+                    : isUsd ? <Ionicons name="logo-usd" size={Math.round(size * 0.5)} color={tint} />
+                    : <AssetIcon ticker={asset.ticker} logoUri={asset.icon} size={Math.round(size * 0.7)} showBadge={false} />}
+            </View>
+            {asset.protocol && (
+                <View style={[styles.chipBadge, { width: badge, height: badge, borderRadius: badge / 2, backgroundColor: protocolTint(asset.protocol, 1) }]}>
+                    <NetworkIcon network={asset.protocol} size={Math.round(badge * 0.62)} />
+                </View>
+            )}
+        </View>
+    );
+};
 
 const PROTOCOL_LABEL: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade' };
 
@@ -67,7 +98,7 @@ const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPres
                 accessibilityLabel={`${asset.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}`}
                 style={[styles.row, !last && styles.rowDivider]}
             >
-                <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={40} />
+                <AssetChip asset={asset} />
                 <View style={styles.info}>
                     <Text style={styles.name} numberOfLines={1}>{asset.name}</Text>
                     {!!subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
@@ -150,6 +181,19 @@ const styles = StyleSheet.create({
     rowDivider: {
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: theme.colors.border.light,
+    },
+    chip: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    chipBadge: {
+        position: 'absolute',
+        right: -3,
+        bottom: -3,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: theme.colors.surface.primary,
     },
     info: {
         flex: 1,
