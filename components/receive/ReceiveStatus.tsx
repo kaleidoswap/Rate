@@ -5,8 +5,10 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import type { DepositDetectionStatus } from '../../hooks/useDepositDetection';
 
 export type ReceiveStatusValue = 'idle' | 'generating' | DepositDetectionStatus;
-export function ReceiveStatus({ visible, status, message }: {
+export function ReceiveStatus({ visible, status, message, hint }: {
   visible: boolean; status: ReceiveStatusValue; message?: string;
+  /** What the user must do while waiting, e.g. keep the app open. */
+  hint?: string;
 }) {
   const t = useAppTheme();
   if (!visible) return null;
@@ -22,6 +24,7 @@ export function ReceiveStatus({ visible, status, message }: {
       {busy ? <ActivityIndicator size="small" color={color} /> : <Ionicons name={received ? 'checkmark-circle' : problem ? 'alert-circle-outline' : 'time-outline'} size={18} color={color} />}
       <Text style={{ color, fontSize: t.typography.fontSize.sm }}>{title}</Text>
     </View>
+    {!!hint && !received && !problem && <Text style={{ color: t.colors.warning[500], textAlign: 'center', fontSize: t.typography.fontSize.xs }}>{hint}</Text>}
     {!!message && (problem || busy) && <Text style={{ color: t.colors.text.secondary, textAlign: 'center', fontSize: t.typography.fontSize.sm }}>{message}</Text>}
   </View>;
 }

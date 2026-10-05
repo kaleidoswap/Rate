@@ -1563,8 +1563,12 @@ export default function ReceiveScreen({ navigation }: Props) {
   const qrOnScreen = networkType === 'unified'
     ? !!unifiedUri
     : !(awaitingAmount && routeTarget) && !loading && !error && !!address;
+  // Arkade and Bark complete a Lightning receive from this device (a swap the
+  // app claims), so the payer's money only lands while the app stays open.
+  const claimsOnDevice = receiveMethods.some((m) => m.layer === 'lightning' && (m.protocol === 'ARKADE' || m.protocol === 'BARK'));
   const renderStatus = () => (
-    <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message} />
+    <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message}
+      hint={claimsOnDevice ? 'Keep the app open until it arrives' : undefined} />
   );
 
   const renderUnifiedBody = () => {
@@ -1783,7 +1787,6 @@ export default function ReceiveScreen({ navigation }: Props) {
                 account,
                 label: accountLabel(account, caps),
                 chain: receiveAccounts.find((a) => a.account === account)?.chain,
-                balanceSats: btcBalance?.byProtocol?.[account]?.total,
               }))}
               showChain={chainGroups.length > 1}
               account={pickedAccount}

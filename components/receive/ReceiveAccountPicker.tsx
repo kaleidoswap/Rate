@@ -5,7 +5,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme, motion, protocolTint } from '../../theme';
 import { NetworkIcon } from '../NetworkIcon';
 import { PressableScale } from '../PressableScale';
-import { AmountText } from '../AmountText';
 import { OnchainIcon } from '../ProtocolIcons';
 import type { AccountId } from '../../utils/account-routing';
 import { chainLabel, type AccountMethod, type ReceiveChain, type ReceiveMethodId } from '../../utils/receive-routes';
@@ -28,8 +27,6 @@ export interface ReceiveAccountCard {
   account: AccountId;
   label: string;
   chain?: ReceiveChain;
-  /** Spendable sats, when known. */
-  balanceSats?: number;
 }
 
 /**
@@ -67,7 +64,7 @@ export function ReceiveAccountPicker({ accounts, account, onAccount, methods, me
               onPress={() => { if (!active) onAccount(card.account); }}
               accessibilityRole="radio"
               accessibilityState={{ checked: active }}
-              accessibilityLabel={`${card.label}${card.balanceSats !== undefined ? `, ${card.balanceSats.toLocaleString('en-US')} sats` : ''}${showChain && card.chain ? `, ${chainLabel(card.chain)}` : ''}`}
+              accessibilityLabel={`${card.label}, ${ACCOUNT_TAGLINE[card.account]}${showChain && card.chain ? `, ${chainLabel(card.chain)}` : ''}`}
               style={[styles.card, accounts.length === 1 && styles.cardSolo, active && styles.cardActive]}
             >
               <View style={[styles.iconWrap, { backgroundColor: tint }]}>
@@ -75,9 +72,8 @@ export function ReceiveAccountPicker({ accounts, account, onAccount, methods, me
               </View>
               <View style={styles.cardText}>
                 <Text style={styles.cardName} numberOfLines={1}>{card.label}</Text>
-                {card.balanceSats !== undefined
-                  ? <AmountText style={styles.cardSub} numberOfLines={1}>{card.balanceSats.toLocaleString('en-US')} sats</AmountText>
-                  : <Text style={styles.cardSub} numberOfLines={1}>{ACCOUNT_TAGLINE[card.account]}</Text>}
+                {/* What the account is like, never its balance: a request is shown to the payer. */}
+                <Text style={styles.cardSub} numberOfLines={1}>{ACCOUNT_TAGLINE[card.account]}</Text>
               </View>
               {active
                 ? <Ionicons name="checkmark-circle" size={18} color={theme.colors.primary[500]} />
