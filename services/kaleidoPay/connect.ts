@@ -8,7 +8,7 @@ import { protocolManager } from '../protocols';
 import { MobileSparkAdapter } from '../protocols/MobileSparkAdapter';
 import { registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
 import type { Network, RequestAsset } from './index';
-import { connectSparkPayAccounts } from './sparkPay';
+import { connectSparkPayAccounts, connectedSparkTokens, registerSparkTokenPayment, type SparkToken } from './sparkPay';
 import { connectRgbPayAccounts, rgbRequestAsset, registerRgbAssetPayment } from './rgbPay';
 import { connectArkadePayAccounts } from './arkadePay';
 import { getPayOptions } from './payOptions';
@@ -107,6 +107,23 @@ export async function prepareRgbRequest(invoice: string, amount?: number): Promi
   rgbAssetRegistration?.();
   rgbAssetRegistration = registerRgbAssetPayment({ id: asset.id, ticker: asset.ticker, precision: asset.precision });
   return asset.amount > 0 ? asset : { id: asset.id, ticker: asset.ticker, precision: asset.precision };
+}
+
+let sparkTokenRegistration: (() => void) | null = null;
+
+/** The Spark tokens Send can pay a Spark address with (empty when Spark is not connected). */
+export async function sendableSparkTokens(): Promise<SparkToken[]> {
+  syncPayAccounts();
+  return connectedSparkTokens().catch(() => []);
+}
+
+/**
+ * Registers the per-payment Spark token account, so a Spark-address request can be quoted
+ * in that token. `null` drops it again, so a bitcoin payment never lists a token option.
+ */
+export function prepareSparkTokenRequest(token: Pick<SparkToken, 'id' | 'ticker' | 'precision'> | null): void {
+  sparkTokenRegistration?.();
+  sparkTokenRegistration = token ? registerSparkTokenPayment({ id: token.id, ticker: token.ticker, precision: token.precision }) : null;
 }
 
 /** The chain a connected receive account is on, or undefined when it is not connected or can't tell. */

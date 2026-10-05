@@ -71,10 +71,17 @@ export function registerKaleidoPayPreparer(prepare: () => Promise<void>): () => 
   preparers.add(prepare);
   return () => { preparers.delete(prepare); };
 }
-/** Run before previewing a payment; never throws, waits at most 8 s. */
-export async function prepareKaleidoPay(): Promise<void> {
+let preparing: Promise<unknown> | null = null;
+/**
+ * Run before previewing a payment; never throws. Concurrent calls share one run, and the
+ * caller waits at most `maxWaitMs`: a slow preparer (e.g. a wallet syncing) keeps going in
+ * the background, and its account joins the next review instead of holding this one up.
+ * Send also calls it on open, so the work is usually done by the time Continue is tapped.
+ */
+export async function prepareKaleidoPay(maxWaitMs = 3000): Promise<void> {
+  preparing ??= Promise.allSettled([...preparers].map(p => p())).finally(() => { preparing = null; });
   let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([Promise.allSettled([...preparers].map(p => p())), new Promise(r => { timer = setTimeout(r, 8000); })]);
+  await Promise.race([preparing, new Promise(r => { timer = setTimeout(r, maxWaitMs); })]);
   clearTimeout(timer);
 }
 export function registerKaleidoPayAccount(account: PayAccount): () => void {
@@ -140,8 +147,10 @@ const ALL_NETWORKS: Network[] = ['mainnet', ...TEST_NETWORKS, 'regtest'];
 export function previewTarget(target: PayTarget, amountSat: number | undefined, requestId: string, opts: PreviewOptions = {}): Preview {
   if (target.kind === 'lnurl') throw new Error('Enter an amount to pay this Lightning address.');
   if (!requestId || requestId.length > 128) throw new Error('Invalid request.');
-  const asset = target.kind === 'rgb' ? opts.asset : undefined;
-  if (target.kind === 'rgb' && (!asset || !Number.isSafeInteger(asset.amount) || asset.amount <= 0)) {
+  // An asset payment: an RGB invoice, or a Spark token sent to a Spark address.
+  const sparkToken = target.kind !== 'rgb' && !!target.sparkAddress && !!opts.asset;
+  const asset = target.kind === 'rgb' || sparkToken ? opts.asset : undefined;
+  if ((target.kind === 'rgb' || sparkToken) && (!asset || !Number.isSafeInteger(asset.amount) || asset.amount <= 0)) {
     throw new Error('Enter the asset amount to send.');
   }
   const fixed = target.amountSat;
@@ -151,7 +160,7 @@ export function previewTarget(target: PayTarget, amountSat: number | undefined, 
   }
   // The receiver's order: an offer's listed rails first, then what the code itself carries.
   const listed = targetOfferRails(target);
-  const rails = [
+  const rails = sparkToken ? ['spark'] : [
     ...listed.map(r => r.rail),
     ...(target.invoice ? ['ln'] : []),
     ...(target.address ? ['btc'] : []),
@@ -168,7 +177,8 @@ export function previewTarget(target: PayTarget, amountSat: number | undefined, 
     acceptedRails: [...new Set(rails)], ...(asset ? { asset } : {}),
   };
   if (!request.acceptedRails.length) throw new Error('This request has nothing to pay.');
-  const available = [...accounts.values()];
+  // An asset request is only paid by accounts that spend that asset.
+  const available = [...accounts.values()].filter(a => !asset || a.spendAsset?.id === asset.id);
   const plan = planRoutes(request, available.map(a => a.source), available.flatMap(a => a.swaps));
   return { code: target, request, plan, addresses };
 }
@@ -246,37 +256,50 @@ export async function quotePayment(preview: Preview, selectedRoute?: Route): Pro
     return quote;
   } finally { if (timer) clearTimeout(timer); }
 }
-export async function quotePaymentOffers(preview: Preview): Promise<PaymentOffer[]> {
+/**
+ * Quotes every route. With `onProgress`, the offers so far are reported as each route
+ * answers (in route order), so the screen can show the first quotes without waiting
+ * for the slowest provider.
+ */
+export async function quotePaymentOffers(preview: Preview, onProgress?: (offers: PaymentOffer[]) => void): Promise<PaymentOffer[]> {
   if (preview.plan.status !== 'ready') return [];
   const routes = [preview.plan.route, ...preview.plan.alternatives];
-  const groups = await Promise.all(routes.map(async route => {
-    const account = accounts.get(route.sourceId);
-    const base = {
-      id: JSON.stringify(route), route,
-      provider: route.providerId ? account?.providerNames?.[route.providerId] ?? route.providerId : 'Direct payment',
-      accountName: account?.name ?? route.sourceId, executable: !!account?.execute,
-    };
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      getAccount(preview, route);
-      const choices: AccountQuoteOption[] = account?.quoteOptions
-        ? await Promise.race([account.quoteOptions(preview, route), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond. Try refreshing quotes.')), 15000); })])
-        : [{ id: '', name: base.provider, quote: await quotePayment(preview, route) }];
-      if (!account || accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Refresh quotes.');
-      return choices.map(choice => {
-        const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, providerDetail: choice.detail, quote: choice.quote, unavailable: choice.unavailable };
-        try {
-          if (offer.quote && !offer.unavailable) {
-            validateQuote(offer.quote, preview, account);
-            owners.set(offer, { account, snapshot: JSON.stringify({ preview, route, quote: offer.quote }) });
-          } else offer.unavailable ||= 'Quote unavailable';
-        } catch (error) { offer.quote = undefined; offer.unavailable = error instanceof Error ? error.message : 'Quote unavailable'; }
-        return offer;
-      });
-    } catch (error) { return [{ ...base, unavailable: error instanceof Error ? error.message : 'Quote unavailable' }]; }
-    finally { if (timer) clearTimeout(timer); }
-  }));
+  const settled: (PaymentOffer[] | undefined)[] = routes.map(() => undefined);
+  const report = () => onProgress?.(settled.flatMap(g => g ?? []));
+  const groups = await Promise.all(routes.map((route, index) => quoteRoute(preview, route).then(group => {
+    settled[index] = group;
+    report();
+    return group;
+  })));
   return groups.flat();
+}
+
+async function quoteRoute(preview: Preview, route: Route): Promise<PaymentOffer[]> {
+  const account = accounts.get(route.sourceId);
+  const base = {
+    id: JSON.stringify(route), route,
+    provider: route.providerId ? account?.providerNames?.[route.providerId] ?? route.providerId : 'Direct payment',
+    accountName: account?.name ?? route.sourceId, executable: !!account?.execute,
+  };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    getAccount(preview, route);
+    const choices: AccountQuoteOption[] = account?.quoteOptions
+      ? await Promise.race([account.quoteOptions(preview, route), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond. Try refreshing quotes.')), 15000); })])
+      : [{ id: '', name: base.provider, quote: await quotePayment(preview, route) }];
+    if (!account || accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Refresh quotes.');
+    return choices.map(choice => {
+      const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, providerDetail: choice.detail, quote: choice.quote, unavailable: choice.unavailable };
+      try {
+        if (offer.quote && !offer.unavailable) {
+          validateQuote(offer.quote, preview, account);
+          owners.set(offer, { account, snapshot: JSON.stringify({ preview, route, quote: offer.quote }) });
+        } else offer.unavailable ||= 'Quote unavailable';
+      } catch (error) { offer.quote = undefined; offer.unavailable = error instanceof Error ? error.message : 'Quote unavailable'; }
+      return offer;
+    });
+  } catch (error) { return [{ ...base, unavailable: error instanceof Error ? error.message : 'Quote unavailable' }]; }
+  finally { if (timer) clearTimeout(timer); }
 }
 /** Rank only offers using the same spend asset. Selection is explicit in the UI. */
 export function bestOffer(offers: PaymentOffer[]): PaymentOffer | undefined {

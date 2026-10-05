@@ -20,11 +20,19 @@ jest.mock('../components/NostrContactsSelector', () => () => null);
 jest.mock('../components/Button', () => ({ Button: ({ title, onPress, disabled }: any) => {
   const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity disabled={disabled} onPress={onPress}><Text>{title}</Text></TouchableOpacity>;
 } }));
-jest.mock('../services/kaleidoPay/connect', () => ({ usePayAccounts: () => {}, prepareRgbRequest: jest.fn() }));
+const mockUsdb = { id: 'btkn1usdb', ticker: 'USDB', name: 'USDB', precision: 6, available: 5_000_000 };
+jest.mock('../services/kaleidoPay/connect', () => ({
+  usePayAccounts: () => {}, prepareRgbRequest: jest.fn(),
+  prepareSparkTokenRequest: jest.fn(), sendableSparkTokens: jest.fn(async () => [mockUsdb]),
+}));
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
 jest.mock('../services/kaleidoPay', () => ({
   PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
-  decodeTarget: (text: string) => { if (!text.startsWith('ln')) throw new Error('not payable'); return { kind: 'bolt11', raw: text, invoice: text, amountSat: 1000 }; },
+  decodeTarget: (text: string) => {
+    if (text.startsWith('spark1')) return { kind: 'spark', raw: text, sparkAddress: text };
+    if (!text.startsWith('ln')) throw new Error('not payable');
+    return { kind: 'bolt11', raw: text, invoice: text, amountSat: 1000 };
+  },
   previewInput: jest.fn(async () => mockPreview), quotePaymentOffers: jest.fn(), executePaymentOffer: jest.fn(), checkPaymentStatus: jest.fn(),
   quoteSpend: (q: any) => ({ asset: { ticker: 'sats' }, amount: q.recipientSat, fee: q.feeSat, total: q.totalSat }),
   formatSpend: (v: number) => `${v} sats`, bestOffer: (offers: any[]) => offers.filter(o => o.quote).sort((a, b) => a.quote.totalSat - b.quote.totalSat)[0],
@@ -130,4 +138,27 @@ test('Lite leaves Bark out unless it holds funds', async () => {
   mockState = { ...mockState, wallet: { activeWallet: { id: 1 }, btcBalance: { byProtocol: { BARK: { total: 5000 } } } } };
   screen = await reviewed();
   expect(screen.getByLabelText(/^Pay from Bark, balance 5,000 sats/)).toBeTruthy();
+});
+
+test('a Spark address can be paid in a Spark token the wallet holds', async () => {
+  const { prepareSparkTokenRequest } = require('../services/kaleidoPay/connect');
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('spark-token', 1000)]);
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'spark1recipient' } }} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText(/^Pay in USDB/));
+  fireEvent.changeText(screen.getByLabelText('Amount in USDB'), '2.5');
+  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  expect(prepareSparkTokenRequest).toHaveBeenLastCalledWith(mockUsdb);
+  expect(previewInput).toHaveBeenCalledWith('spark1recipient', undefined, 'test-uuid',
+    { asset: { id: 'btkn1usdb', ticker: 'USDB', precision: 6, amount: 2_500_000 } });
+});
+
+test('quotes show as they arrive; the first payable one is picked and kept', async () => {
+  (quotePaymentOffers as jest.Mock).mockImplementation(async (_p: any, onProgress: any) => {
+    onProgress([offer('Bark', 1020)]);
+    return [offer('Bark', 1020), offer('Spark', 1010)];
+  });
+  const screen = await reviewed();
+  expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(true);
+  expect(screen.getByLabelText(/^Pay from Spark/)).toBeTruthy();
 });
