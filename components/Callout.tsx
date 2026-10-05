@@ -7,7 +7,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 
 export type CalloutTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -20,13 +20,6 @@ interface CalloutProps {
   style?: ViewStyle;
 }
 
-const TONE: Record<CalloutTone, { accent: string; icon: keyof typeof Ionicons.glyphMap }> = {
-  info: { accent: theme.colors.info[500], icon: 'information-circle-outline' },
-  success: { accent: theme.colors.success[500], icon: 'checkmark-circle-outline' },
-  warning: { accent: theme.colors.warning[500], icon: 'warning-outline' },
-  error: { accent: theme.colors.error[500], icon: 'alert-circle-outline' },
-};
-
 export const Callout: React.FC<CalloutProps> = ({
   tone = 'info',
   title,
@@ -35,19 +28,43 @@ export const Callout: React.FC<CalloutProps> = ({
   children,
   style,
 }) => {
+  const theme = useAppTheme();
+  const styles = createStyles(theme);
+  const TONE: Record<
+    CalloutTone,
+    { accent: string; icon: keyof typeof Ionicons.glyphMap }
+  > = {
+    info: {
+      accent: theme.colors.info[500],
+      icon: 'information-circle-outline',
+    },
+    success: {
+      accent: theme.colors.success[500],
+      icon: 'checkmark-circle-outline',
+    },
+    warning: { accent: theme.colors.warning[500], icon: 'warning-outline' },
+    error: { accent: theme.colors.error[500], icon: 'alert-circle-outline' },
+  };
   const t = TONE[tone];
   return (
     <View
       style={[
         styles.container,
-        { backgroundColor: t.accent + '14', borderColor: t.accent + '33' },
+        { backgroundColor: t.accent + '26', borderColor: t.accent + '33' },
         style,
       ]}
       accessibilityRole="alert"
     >
-      <Ionicons name={icon ?? t.icon} size={18} color={t.accent} style={styles.icon} />
+      <Ionicons
+        name={icon ?? t.icon}
+        size={18}
+        color={t.accent}
+        style={styles.icon}
+      />
       <View style={styles.body}>
-        {!!title && <Text style={[styles.title, { color: t.accent }]}>{title}</Text>}
+        {!!title && (
+          <Text style={[styles.title, { color: t.accent }]}>{title}</Text>
+        )}
         {!!message && <Text style={styles.message}>{message}</Text>}
         {children}
       </View>
@@ -55,31 +72,32 @@ export const Callout: React.FC<CalloutProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    padding: theme.spacing[3],
-    borderRadius: theme.borderRadius.md,
-    borderWidth: 1,
-    gap: theme.spacing[2],
-  },
-  icon: {
-    marginTop: 1,
-  },
-  body: {
-    flex: 1,
-    gap: theme.spacing[0.5],
-  },
-  title: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.bold,
-  },
-  message: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    lineHeight: 19,
-  },
-});
+const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    container: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      padding: theme.spacing[3],
+      borderRadius: theme.borderRadius.md,
+      borderWidth: 1,
+      gap: theme.spacing[2],
+    },
+    icon: {
+      marginTop: 1,
+    },
+    body: {
+      flex: 1,
+      gap: theme.spacing[0.5],
+    },
+    title: {
+      fontSize: theme.typography.fontSize.sm,
+      fontWeight: theme.typography.fontWeight.bold,
+    },
+    message: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.secondary,
+      lineHeight: 19,
+    },
+  });
 
 export default Callout;

@@ -20,8 +20,8 @@ describe('SegmentedTabs', () => {
     const { getByLabelText } = render(
       <SegmentedTabs options={OPTIONS as any} value="all" onChange={jest.fn()} />
     );
-    expect(getByLabelText('All').props.accessibilityState).toEqual({ selected: true });
-    expect(getByLabelText('Sent').props.accessibilityState).toEqual({ selected: false });
+    expect(getByLabelText('All').props.accessibilityState).toEqual({ selected: true, disabled: false });
+    expect(getByLabelText('Sent').props.accessibilityState).toEqual({ selected: false, disabled: false });
   });
 
   it('fires onChange with the tapped option key', () => {

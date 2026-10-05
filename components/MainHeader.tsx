@@ -1,10 +1,16 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  StatusBar,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 import { BrandMark } from './BrandMark';
 import { BrandLogo } from './brand/BrandLogo';
 import { useIsModalPresentation } from './ModalPresentation';
@@ -49,6 +55,8 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   children,
   elevated,
 }) => {
+  const theme = useAppTheme();
+  const styles = createStyles(theme);
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const withLogo = showLogo ?? !!greeting;
@@ -61,17 +69,29 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
 
   return (
     <View style={[styles.container, elevated && styles.containerElevated]}>
-      <StatusBar barStyle="light-content" />
-      <View style={[styles.bar, elevated && styles.barElevated, { paddingTop: topInset + 4 }]}>
+      <StatusBar barStyle={theme.dark ? 'light-content' : 'dark-content'} />
+      <View
+        style={[
+          styles.bar,
+          elevated && styles.barElevated,
+          { paddingTop: topInset + 4 },
+        ]}
+      >
         <View style={styles.content}>
           <View style={styles.row}>
             {onBack && (
               <TouchableOpacity
                 onPress={onBack}
                 style={styles.iconBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Back"
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
-                <Ionicons name="arrow-back" size={20} color={theme.colors.text.primary} />
+                <Ionicons
+                  name="arrow-back"
+                  size={20}
+                  color={theme.colors.text.primary}
+                />
               </TouchableOpacity>
             )}
 
@@ -86,8 +106,14 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
                     {iconNode && !withLogo ? (
                       <View style={{ marginRight: 8 }}>{iconNode}</View>
                     ) : (
-                      icon && !withLogo && (
-                        <Ionicons name={icon} size={20} color={theme.colors.text.primary} style={{ marginRight: 8, opacity: 0.9 }} />
+                      icon &&
+                      !withLogo && (
+                        <Ionicons
+                          name={icon}
+                          size={20}
+                          color={theme.colors.text.primary}
+                          style={{ marginRight: 8, opacity: 0.9 }}
+                        />
                       )
                     )}
                     {title && (
@@ -95,7 +121,9 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
                         {title}
                       </Text>
                     )}
-                    {titleBadge && <View style={{ marginLeft: 8 }}>{titleBadge}</View>}
+                    {titleBadge && (
+                      <View style={{ marginLeft: 8 }}>{titleBadge}</View>
+                    )}
                   </View>
                   {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
                 </>
@@ -111,7 +139,11 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
                   accessibilityLabel="Settings"
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Ionicons name="settings-outline" size={19} color={theme.colors.text.primary} />
+                  <Ionicons
+                    name="settings-outline"
+                    size={19}
+                    color={theme.colors.text.primary}
+                  />
                 </TouchableOpacity>
               )}
             </View>
@@ -133,91 +165,92 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    backgroundColor: theme.colors.background.primary,
-  },
-  containerElevated: {
-    // Downward shadow so scroll content appears to pass beneath a sticky header.
-    // Tuned to mirror the extension header's `box-shadow: 0 10px 24px rgba(0,0,0,0.22)`.
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 12,
-    zIndex: 10,
-  },
-  bar: {
-    paddingBottom: theme.spacing[3],
-    backgroundColor: theme.colors.background.primary,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: theme.colors.border.light,
-  },
-  barElevated: {
-    // The shadow alone conveys depth — drop the hairline so it doesn't double up.
-    borderBottomWidth: 0,
-  },
-  content: {
-    paddingHorizontal: theme.spacing[4],
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 44,
-    gap: theme.spacing[3],
-  },
-  titleArea: {
-    flex: 1,
-  },
-  greeting: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: 3,
-    fontWeight: theme.typography.fontWeight.medium,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  title: {
-    fontSize: 21,
-    fontWeight: theme.typography.fontWeight.bold,
-    letterSpacing: -0.3,
-    color: theme.colors.text.primary,
-  },
-  subtitle: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
-    marginTop: 3,
-    fontWeight: theme.typography.fontWeight.medium,
-  },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-  },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: theme.colors.surface.secondary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 0,
-  },
-  childrenArea: {
-    marginTop: theme.spacing[4],
-  },
-  shadowStrip: {
-    // Cross-platform gradient "shadow" spilling below the header, since RN
-    // native box-shadows are unreliable on Android.
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '100%',
-    height: 16,
-  },
-});
+const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
+  StyleSheet.create({
+    container: {
+      backgroundColor: theme.colors.background.primary,
+    },
+    containerElevated: {
+      // Downward shadow so scroll content appears to pass beneath a sticky header.
+      // Tuned to mirror the extension header's `box-shadow: 0 10px 24px rgba(0,0,0,0.22)`.
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.22,
+      shadowRadius: 12,
+      elevation: 12,
+      zIndex: 10,
+    },
+    bar: {
+      paddingBottom: theme.spacing[3],
+      backgroundColor: theme.colors.background.primary,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.colors.border.light,
+    },
+    barElevated: {
+      // The shadow alone conveys depth — drop the hairline so it doesn't double up.
+      borderBottomWidth: 0,
+    },
+    content: {
+      paddingHorizontal: theme.spacing[4],
+    },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 44,
+      gap: theme.spacing[3],
+    },
+    titleArea: {
+      flex: 1,
+    },
+    greeting: {
+      fontSize: theme.typography.fontSize.sm,
+      color: theme.colors.text.secondary,
+      marginBottom: 3,
+      fontWeight: theme.typography.fontWeight.medium,
+    },
+    titleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+    },
+    title: {
+      fontSize: theme.typography.fontSize.xl,
+      fontWeight: theme.typography.fontWeight.bold,
+      letterSpacing: -0.3,
+      color: theme.colors.text.primary,
+    },
+    subtitle: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+      marginTop: 3,
+      fontWeight: theme.typography.fontWeight.medium,
+    },
+    actions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[2],
+    },
+    iconBtn: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: theme.colors.surface.secondary,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border.light,
+      justifyContent: 'center',
+      alignItems: 'center',
+      marginRight: 0,
+    },
+    childrenArea: {
+      marginTop: theme.spacing[4],
+    },
+    shadowStrip: {
+      // Cross-platform gradient "shadow" spilling below the header, since RN
+      // native box-shadows are unreliable on Android.
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: '100%',
+      height: 16,
+    },
+  });

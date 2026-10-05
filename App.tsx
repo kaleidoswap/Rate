@@ -46,6 +46,7 @@ import ReceiveScreen from './screens/ReceiveScreen';
 import MerchantOfferScreen from './screens/MerchantOfferScreen';
 import {useAppSelector} from './store/hooks';
 import {isReceiverLink,canOpenReceiver} from './utils/receiver-link';
+import DesignSystemScreen from './screens/DesignSystemScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import AssetsScreen from './screens/AssetsScreen';
 import SettingsScreen from './screens/SettingsScreen';
@@ -76,6 +77,7 @@ type RootStackParamList = {
   Receive: { selectedAsset?: any } | undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   Assets: { issue?: boolean } | undefined;
+  DesignSystem: undefined;
   Swap: undefined;
   NostrSettings: undefined;
   AssetDetail: { asset: any };
@@ -232,6 +234,7 @@ function AppNavigator() {
         />
         <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="NostrSettings" component={asModalScreen(NostrSettingsScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        {__DEV__ && <Stack.Screen name="DesignSystem" component={asModalScreen(DesignSystemScreen)} options={{ presentation: 'modal', headerShown: false }} />}
         <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen
