@@ -88,3 +88,18 @@ describe('restore from the cloud', () => {
     await expect(restoreRgbFromCloud({ mnemonic: 'seed', network: 'mainnet', restore: bad })).rejects.toThrow(/password/);
   });
 });
+
+describe('restore from a file', () => {
+  const { restoreRgbFromFile } = require('./rgbBackup');
+  test('hands the file to rgb-lib with the seed-derived password', async () => {
+    const restore = jest.fn(async () => undefined);
+    await restoreRgbFromFile({ mnemonic: 'seed', path: '/docs/kaleidoswap-rgb.rgbbackup', restore });
+    expect(restore).toHaveBeenCalledWith('/docs/kaleidoswap-rgb.rgbbackup', expect.stringMatching(/^[0-9a-f]{64}$/));
+  });
+  test('explains the usual failures', async () => {
+    const exists = jest.fn(async () => { throw Object.assign(new Error('x'), { code: 'WalletDirAlreadyExists' }); });
+    await expect(restoreRgbFromFile({ mnemonic: 'seed', path: '/f', restore: exists })).rejects.toThrow(/already has RGB data/);
+    const wrong = jest.fn(async () => { throw new Error('Invalid password'); });
+    await expect(restoreRgbFromFile({ mnemonic: 'seed', path: '/f', restore: wrong })).rejects.toThrow(/isn’t for this wallet/);
+  });
+});

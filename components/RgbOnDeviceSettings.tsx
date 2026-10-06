@@ -12,17 +12,18 @@ import { ActivityIndicator, Alert, StyleSheet, Switch, Text, TextInput, Touchabl
 import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 import { theme, protocolColor } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { initializeProtocols, protocolManager } from '../services/protocols';
 import {
   loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable, loadRgbL1Host, rgbL1Host, saveRgbL1Endpoints,
-  pinnedRgbL1Network, RGB_L1_DEFAULT_NETWORK, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL, type RgbL1Network,
+  pinnedRgbL1Network, markRgbL1Ready, RGB_L1_DEFAULT_NETWORK, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL, type RgbL1Network,
 } from '../services/protocols/rgbL1';
 import { SegmentedTabs } from './SegmentedTabs';
 import { toFilesystemPath } from '../services/protocols/bark';
 import ToastService from '../services/ToastService';
-import { onRgbBackupStatus, rgbBackupStatus, runRgbBackup, type RgbBackupStatus } from '../services/protocols/rgbBackup';
+import { onRgbBackupStatus, restoreRgbFromFile, rgbBackupStatus, runRgbBackup, type RgbBackupStatus } from '../services/protocols/rgbBackup';
 
 /** The rgb-lib account behind the RGB_L1 adapter, when connected. */
 function rgbL1Account(): any {
@@ -138,6 +139,38 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     await refresh();
   };
 
+  /** Bring RGB data back from an exported file (when the cloud copy isn't there). */
+  const restoreFile = async () => {
+    if (busy) return;
+    const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: '*/*' }).catch(() => null);
+    const uri = picked && !picked.canceled ? picked.assets?.[0]?.uri : null;
+    if (!uri) return;
+    Alert.alert(
+      'Restore RGB data?',
+      `RGB on this phone starts from this file, on ${network === 'mainnet' ? 'Mainnet' : 'Mutinynet'}. It must be a backup of this wallet.`,
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Restore', onPress: async () => {
+        setBusy(true);
+        setError(null);
+        try {
+          const mnemonic = await activeMnemonic(walletId);
+          await restoreRgbFromFile({ mnemonic, path: toFilesystemPath(uri), restore: (path, password) => require('react-native-rgb').restoreBackup(path, password) });
+          await markRgbL1Ready(mnemonic, network); // the data is here now: no cloud restore on start
+          await saveRgbL1Network(mnemonic, network);
+          setEnabled(true);
+          const result = (await initializeProtocols(mnemonic, [])).get('RGB_L1');
+          if (result && !result.success) throw new Error(result.error || 'RGB could not start.');
+          ToastService.getInstance().success('RGB data restored.');
+        } catch (e: any) {
+          setError(e?.message ?? 'Could not restore the RGB backup.');
+        } finally {
+          await refresh();
+          setBusy(false);
+          onChanged?.();
+        }
+      } }],
+    );
+  };
+
   const exportFile = async () => {
     const account = rgbL1Account();
     if (!account || backingUp) return;
@@ -228,6 +261,18 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
             <Text style={styles.description} numberOfLines={2}>Encrypted with your recovery phrase · save it anywhere</Text>
           </View>
           {backingUp ? <ActivityIndicator color={theme.colors.primary[500]} /> : <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
+        </TouchableOpacity>
+      )}
+      {native && !connected && (
+        <TouchableOpacity accessibilityRole="button" onPress={restoreFile} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
+          <View style={[styles.icon, { backgroundColor: theme.colors.text.secondary + '1A' }]}>
+            <Ionicons name="document-attach-outline" size={18} color={theme.colors.text.secondary} />
+          </View>
+          <View style={styles.text}>
+            <Text style={styles.label}>Restore from a backup file</Text>
+            <Text style={styles.description} numberOfLines={2}>Use a file you exported before, if the cloud backup isn’t there</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
         </TouchableOpacity>
       )}
       {enabled && (
