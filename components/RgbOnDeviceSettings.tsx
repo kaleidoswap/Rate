@@ -1,6 +1,7 @@
 // components/RgbOnDeviceSettings.tsx
 //
-// Settings › RGB account: RGB on this phone (rgb-lib, on-chain, Mutinynet for now).
+// Settings › RGB account: RGB on this phone (rgb-lib, on-chain, mainnet or Mutinynet).
+// The network is picked before the first start and then fixed for the wallet.
 // Turning it on makes the RGB account a local wallet when no RGB node is paired.
 // RGB state can't be rebuilt from the seed, so rgb-lib's encrypted backup is
 // uploaded to the cloud after every change (services/protocols/rgbBackup.ts);
@@ -14,12 +15,14 @@ import * as Sharing from 'expo-sharing';
 import { theme, protocolColor } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { initializeProtocols, protocolManager } from '../services/protocols';
-import { loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable, loadRgbL1Host, rgbL1Host, saveRgbL1Endpoints } from '../services/protocols/rgbL1';
+import {
+  loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable, loadRgbL1Host, rgbL1Host, saveRgbL1Endpoints,
+  pinnedRgbL1Network, RGB_L1_DEFAULT_NETWORK, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL, type RgbL1Network,
+} from '../services/protocols/rgbL1';
+import { SegmentedTabs } from './SegmentedTabs';
 import { toFilesystemPath } from '../services/protocols/bark';
 import ToastService from '../services/ToastService';
 import { onRgbBackupStatus, rgbBackupStatus, runRgbBackup, type RgbBackupStatus } from '../services/protocols/rgbBackup';
-
-const NETWORK = 'mutinynet' as const;
 
 /** The rgb-lib account behind the RGB_L1 adapter, when connected. */
 function rgbL1Account(): any {
@@ -35,6 +38,9 @@ async function activeMnemonic(walletId: number): Promise<string> {
 
 export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number; onChanged?: () => void }) {
   const [enabled, setEnabled] = useState(false);
+  const [network, setNetwork] = useState<RgbL1Network>(RGB_L1_DEFAULT_NETWORK);
+  /** Set once this seed's RGB data exists on the phone: the network can't change after that. */
+  const [pinned, setPinned] = useState(false);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
@@ -51,14 +57,18 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     try {
       const mnemonic = await activeMnemonic(walletId);
       setEnabled(!!(await loadRgbL1Network(mnemonic)));
-      const host = await loadRgbL1Host(mnemonic, NETWORK);
+      const fixed = await pinnedRgbL1Network(mnemonic);
+      setPinned(!!fixed);
+      const net = fixed ?? network;
+      if (fixed) setNetwork(fixed);
+      const host = await loadRgbL1Host(mnemonic, net);
       setIndexer(host.indexerUrl);
       setProxy(host.transportEndpoint);
     } catch { setEnabled(false); }
     const account = rgbL1Account();
     setConnected(!!account);
     setBackupNeeded(account ? await account.backupRequired().catch(() => false) : false);
-  }, [walletId]);
+  }, [walletId, network]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -67,7 +77,7 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     setError(null);
     try {
       const mnemonic = await activeMnemonic(walletId);
-      await saveRgbL1Network(mnemonic, on ? NETWORK : null);
+      await saveRgbL1Network(mnemonic, on ? network : null);
       setEnabled(on);
       if (on) {
         const result = (await initializeProtocols(mnemonic, [])).get('RGB_L1');
@@ -90,7 +100,7 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     setEndpointError(null);
     try {
       const mnemonic = await activeMnemonic(walletId);
-      await saveRgbL1Endpoints(mnemonic, endpoints);
+      await saveRgbL1Endpoints(mnemonic, network, endpoints);
       if (protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected()) await protocolManager.disconnect('RGB_L1');
       const result = (await initializeProtocols(mnemonic, [])).get('RGB_L1');
       if (result && !result.success && !result.error?.startsWith('skipped')) throw new Error(result.error || 'RGB could not reconnect.');
@@ -114,7 +124,11 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     }
     Alert.alert(
       'RGB on this phone (beta)',
-      'Holds RGB assets on-chain on Mutinynet, a test network. Your recovery phrase alone can’t restore RGB assets: back up your RGB data after each receive.',
+      (network === 'mainnet'
+        ? 'Holds RGB assets on-chain on Bitcoin mainnet, with real funds. '
+        : 'Holds RGB assets on-chain on Mutinynet, a test network. ')
+      + (pinned ? '' : `This wallet keeps its RGB data on ${RGB_L1_NETWORK_LABEL[network]} from now on. `)
+      + 'Your recovery phrase alone can’t restore RGB assets: they are backed up to the cloud after every send and receive, and you can export a backup file.',
       [{ text: 'Cancel', style: 'cancel' }, { text: 'Turn on', onPress: () => void apply(true) }],
     );
   };
@@ -153,7 +167,7 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     : cloud.lastBackupAt ? `Backed up automatically · ${new Date(cloud.lastBackupAt).toLocaleString()}`
     : 'Backs up automatically after every send and receive';
   const native = isRgbLibNativeAvailable();
-  const status = busy ? 'Starting…' : !enabled ? 'Off' : nodePaired ? 'Your RGB node is used while it’s connected' : connected ? 'On · Mutinynet' : 'Not connected';
+  const status = busy ? 'Starting…' : !enabled ? 'Off' : nodePaired ? 'Your RGB node is used while it’s connected' : connected ? `On · ${RGB_L1_NETWORK_LABEL[network]}` : 'Not connected';
 
   return (
     <View>
@@ -173,6 +187,17 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
           : <Switch accessibilityLabel="RGB on this phone" value={enabled} disabled={!native} onValueChange={toggle}
               trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }} />}
       </View>
+      {!enabled && !pinned && native && (
+        <View style={[styles.endpoints, styles.divider]}>
+          <Text style={styles.fieldLabel}>Network</Text>
+          <SegmentedTabs
+            options={RGB_L1_NETWORKS.map((n) => ({ key: n, label: RGB_L1_NETWORK_LABEL[n] }))}
+            value={network} onChange={setNetwork} fill />
+          <Text style={styles.description}>
+            {network === 'mainnet' ? 'Real bitcoin and RGB assets.' : 'Test bitcoin, no value.'} Fixed for this wallet once turned on.
+          </Text>
+        </View>
+      )}
       {enabled && connected && (
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back up RGB data now" onPress={backupNow}
           disabled={cloud.state === 'backing-up'} activeOpacity={0.7} style={[styles.row, styles.divider]}>
@@ -205,7 +230,7 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
       {enabled && (
         <View style={[styles.endpoints, styles.divider]}>
           <Text style={styles.label}>Network and servers</Text>
-          <Text style={styles.description}>Network: Mutinynet (test bitcoin). Saving reconnects RGB on this phone.</Text>
+          <Text style={styles.description}>Network: {network === 'mainnet' ? 'Mainnet (real bitcoin)' : 'Mutinynet (test bitcoin)'}, fixed for this wallet. Saving reconnects RGB on this phone.</Text>
           <Text style={styles.fieldLabel}>Indexer (Esplora)</Text>
           <TextInput accessibilityLabel="RGB indexer URL" style={styles.input} value={indexer} onChangeText={setIndexer} editable={!busy}
             autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholderTextColor={theme.colors.text.tertiary} />
@@ -214,7 +239,7 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
             autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholderTextColor={theme.colors.text.tertiary} />
           {!!endpointError && <Text accessibilityRole="alert" style={[styles.description, { color: theme.colors.error[500] }]}>{endpointError}</Text>}
           <View style={styles.endpointActions}>
-            <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => { const d = rgbL1Host(NETWORK); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); void saveEndpoints(null); }}>
+            <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => { const d = rgbL1Host(network); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); void saveEndpoints(null); }}>
               <Text style={styles.secondaryAction}>Use defaults</Text>
             </TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => void saveEndpoints({ indexerUrl: indexer, transportEndpoint: proxy })}>

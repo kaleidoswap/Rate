@@ -66,7 +66,7 @@ The app uses `@kaleidorg/wallet-engine` (at `../wallet-engine/`) for multi-proto
 - **SparkAdapter** – `@buildonspark/spark-sdk` (Spark L2 Bitcoin)
 - **ArkadeAdapter** – `@arkade-os/sdk` with Expo providers (Arkade VTXOs)
 - **RgbAdapter** – `kaleido-sdk` for RGB Lightning node + KaleidoSwap maker API
-- **RgbLibWdkAdapter** (`RGB_L1`) – RGB on this phone: native rgb-lib via `react-native-rgb`, bridged in `services/protocols/rgbLibRn.ts` (opt-in per wallet in Settings › Advanced, Mutinynet only for now; config in `services/protocols/rgbL1.ts`). The app's single `'RGB'` account is the paired node when connected, else this wallet — resolve it with `rgbAccountAdapter()` / `toEngineProtocol('RGB')`, never by hard-coding `'RGB_LN'` (keep that for node-only features: Lightning, channels, maker swaps)
+- **RgbLibWdkAdapter** (`RGB_L1`) – RGB on this phone: native rgb-lib via `react-native-rgb`, bridged in `services/protocols/rgbLibRn.ts` (on by default in Lite, a choice in Advanced setup and Settings; mainnet or Mutinynet, fixed per wallet once started because rgb-lib keeps one data folder per seed; config in `services/protocols/rgbL1.ts`). The app's single `'RGB'` account is the paired node when connected, else this wallet — resolve it with `rgbAccountAdapter()` / `toEngineProtocol('RGB')`, never by hard-coding `'RGB_LN'` (keep that for node-only features: Lightning, channels, maker swaps)
 - **FlashnetClientManager** – `@flashnet/sdk` for Spark DEX swaps (piggybacks on SparkWallet)
 - **ProtocolManager** – central orchestrator, routes operations to active adapter
 

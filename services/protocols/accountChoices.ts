@@ -12,7 +12,7 @@ import type { NetworkConfig } from '../DatabaseService';
 import { buildDefaultNetworkConfig } from './networkConfig';
 import { BARK_ENABLED } from './bark';
 import { saveBarkNetwork, setBarkOff } from './barkPreferences';
-import { RGB_L1_ENABLED, saveRgbL1Network } from './rgbL1';
+import { RGB_L1_DEFAULT_NETWORK, RGB_L1_ENABLED, pinnedRgbL1Network, saveRgbL1Network } from './rgbL1';
 
 export interface AccountChoice {
   spark: boolean;
@@ -44,7 +44,11 @@ export async function saveAccountPreferences(mnemonic: string, choice: AccountCh
     if (choice.bark) await saveBarkNetwork(mnemonic, 'mainnet');
     else await setBarkOff(mnemonic);
   }
-  if (RGB_L1_ENABLED) await saveRgbL1Network(mnemonic, choice.rgbOnDevice ? 'mutinynet' : null);
+  if (RGB_L1_ENABLED) {
+    // Mainnet like the other accounts, unless this phone already holds this seed's RGB data on another network.
+    const network = choice.rgbOnDevice ? (await pinnedRgbL1Network(mnemonic)) ?? RGB_L1_DEFAULT_NETWORK : null;
+    await saveRgbL1Network(mnemonic, network);
+  }
 }
 
 export function hasAnyAccount(choice: AccountChoice, rgbNodeConnected = false): boolean {

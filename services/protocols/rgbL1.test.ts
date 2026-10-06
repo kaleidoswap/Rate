@@ -12,12 +12,32 @@ beforeEach(() => { for (const k of Object.keys(settings)) delete settings[k]; })
 
 test('off until the wallet turns it on, then remembered per seed', async () => {
   expect(await loadRgbL1Network('seed a')).toBeNull();
-  await saveRgbL1Network('seed a', 'mutinynet');
-  expect(await loadRgbL1Network('seed a')).toBe('mutinynet');
+  await saveRgbL1Network('seed a', 'mainnet');
+  expect(await loadRgbL1Network('seed a')).toBe('mainnet');
   expect(await loadRgbL1Network('seed b')).toBeNull();
   await saveRgbL1Network('seed a', null);
   expect(await loadRgbL1Network('seed a')).toBeNull();
-  await expect(saveRgbL1Network('seed a', 'mainnet' as any)).rejects.toThrow(/Unsupported/);
+  await expect(saveRgbL1Network('seed a', 'liquid' as any)).rejects.toThrow(/Unsupported/);
+});
+
+test('the first network a seed uses on this phone stays its RGB network', async () => {
+  const { pinnedRgbL1Network } = require('./rgbL1');
+  await saveRgbL1Network('seed a', 'mutinynet');
+  await saveRgbL1Network('seed a', null);
+  expect(await pinnedRgbL1Network('seed a')).toBe('mutinynet');
+  // rgb-lib keeps one folder per seed: switching would open Mutinynet data as mainnet.
+  await expect(saveRgbL1Network('seed a', 'mainnet')).rejects.toThrow(/already runs on Mutinynet/);
+  await saveRgbL1Network('seed a', 'mutinynet');
+  expect(await loadRgbL1Network('seed a')).toBe('mutinynet');
+  // Turned on before pinning existed: read as its saved network.
+  settings[`rgb-l1-network-v1-${rgbL1WalletKey('seed c')}`] = 'mutinynet';
+  expect(await pinnedRgbL1Network('seed c')).toBe('mutinynet');
+});
+
+test('mainnet uses a public Esplora and the RGB proxy', () => {
+  expect(buildRgbL1Config('seed a', rgbL1Host('mainnet'))).toEqual(expect.objectContaining({
+    network: 'mainnet', indexerUrl: 'https://blockstream.info/api', transportEndpoint: 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+  }));
 });
 
 test('the adapter config carries the network endpoints; keys and backup password never leak the seed', () => {
@@ -34,10 +54,11 @@ test('the adapter config carries the network endpoints; keys and backup password
 
 test('a wallet can use its own indexer and proxy; bad URLs are refused', async () => {
   const { loadRgbL1Host, saveRgbL1Endpoints, validateRgbEndpoint } = require('./rgbL1');
-  await saveRgbL1Endpoints('seed a', { indexerUrl: 'https://my-esplora.example/', transportEndpoint: 'rpcs://my-proxy.example/0.2/json-rpc' });
+  await saveRgbL1Endpoints('seed a', 'mutinynet', { indexerUrl: 'https://my-esplora.example/', transportEndpoint: 'rpcs://my-proxy.example/0.2/json-rpc' });
   expect(await loadRgbL1Host('seed a', 'mutinynet')).toEqual(expect.objectContaining({ indexerUrl: 'https://my-esplora.example', transportEndpoint: 'rpcs://my-proxy.example/0.2/json-rpc' }));
   expect((await loadRgbL1Host('seed b', 'mutinynet')).indexerUrl).toBe('https://esplora.signet.kaleidoswap.com');
-  await saveRgbL1Endpoints('seed a', null);
+  expect((await loadRgbL1Host('seed a', 'mainnet')).indexerUrl).toBe('https://blockstream.info/api'); // per network
+  await saveRgbL1Endpoints('seed a', 'mutinynet', null);
   expect((await loadRgbL1Host('seed a', 'mutinynet')).indexerUrl).toBe('https://esplora.signet.kaleidoswap.com');
   expect(() => validateRgbEndpoint('indexer', 'rpcs://not-an-indexer')).toThrow(/https/);
   expect(() => validateRgbEndpoint('proxy', 'nonsense')).toThrow(/valid/);

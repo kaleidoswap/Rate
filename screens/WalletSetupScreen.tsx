@@ -54,7 +54,7 @@ interface Props {
 /** The layers Advanced setup offers (the RGB node is its own step, over NWC). */
 const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; icon: string }[] = [
   { key: 'spark', name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' },
-  ...(RGB_L1_ENABLED ? [{ key: 'rgbOnDevice' as const, name: 'RGB on this phone', desc: 'RGB assets on-chain, no node needed · beta, Mutinynet', icon: 'rgb' }] : []),
+  ...(RGB_L1_ENABLED ? [{ key: 'rgbOnDevice' as const, name: 'RGB on this phone', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
   { key: 'arkade', name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' },
   ...(BARK_ENABLED ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
 ];
