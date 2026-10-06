@@ -162,3 +162,25 @@ export async function uploadBackupFile(client: VssClient, prefix: string, data: 
   await client.put([{ key: `${prefix}/manifest`, value: utf8ToBytes(JSON.stringify(manifest)) }]);
   return manifest;
 }
+
+/**
+ * The last uploaded file, checked against its manifest; undefined when this
+ * store has none. Network and server errors throw: "no backup" must never be
+ * guessed, or a fresh wallet would start and back up over the real one.
+ */
+export async function downloadBackupFile(client: VssClient, prefix: string): Promise<{ data: Uint8Array; manifest: BackupManifest } | undefined> {
+  const raw = await client.get(`${prefix}/manifest`);
+  if (!raw) return undefined;
+  const manifest = JSON.parse(new TextDecoder().decode(raw)) as BackupManifest;
+  if (manifest.version !== 1 || !Number.isInteger(manifest.chunks) || manifest.chunks < 1) throw new Error('Unsupported RGB backup.');
+  const data = new Uint8Array(manifest.size);
+  let at = 0;
+  for (let i = 0; i < manifest.chunks; i++) {
+    const chunk = await client.get(`${prefix}/chunk/${i}`);
+    if (!chunk || at + chunk.length > manifest.size) throw new Error('The RGB backup is incomplete.');
+    data.set(chunk, at);
+    at += chunk.length;
+  }
+  if (at !== manifest.size || bytesToHex(sha256(data)) !== manifest.sha256) throw new Error('The RGB backup is damaged.');
+  return { data, manifest };
+}

@@ -9,11 +9,15 @@
  *
  * Best-effort and never throws into the caller: a failure is kept for Settings
  * to show and retried on the next change.
+ *
+ * `restoreRgbFromCloud()` is the way back: on a phone without this wallet's RGB
+ * data it downloads the last upload and hands it to rgb-lib before the wallet
+ * first opens.
  */
 import { File, Paths } from 'expo-file-system';
 import { rgbBackupPassword, rgbL1WalletKey, type RgbL1Network } from './rgbL1';
 import { toFilesystemPath } from './bark';
-import { createVssClient, uploadBackupFile, vssSigningKey } from './rgbVss';
+import { createVssClient, downloadBackupFile, uploadBackupFile, vssSigningKey } from './rgbVss';
 
 export const RGB_VSS_SERVER_URL = process.env.EXPO_PUBLIC_VSS_SERVER_URL || 'https://vss.kaleidoswap.com/vss';
 const DEBOUNCE_MS = 4000;
@@ -91,4 +95,35 @@ export async function runRgbBackup(force = false): Promise<void> {
     }
   })();
   return running;
+}
+
+export type RgbRestoreResult = 'restored' | 'no-backup' | 'already-on-phone';
+
+/**
+ * Restores this seed's RGB data from the cloud backup, when there is one and
+ * the phone doesn't hold the wallet yet (rgb-lib refuses to restore over it).
+ * Throws when the backup can't be checked or read: the caller must not start
+ * a fresh wallet then, or its first backup would replace the real one.
+ */
+export async function restoreRgbFromCloud(opts: {
+  mnemonic: string
+  network: RgbL1Network
+  /** react-native-rgb's `restoreBackup(path, password)`. */
+  restore: (path: string, password: string) => Promise<void>
+}): Promise<RgbRestoreResult> {
+  const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(opts.mnemonic, opts.network), vssSigningKey(opts.mnemonic));
+  const backup = await downloadBackupFile(client, PREFIX);
+  if (!backup) return 'no-backup';
+  const file = new File(Paths.cache, `rgb-restore-${Date.now()}.rgbbackup`);
+  try {
+    file.write(backup.data);
+    await opts.restore(toFilesystemPath(file.uri), rgbBackupPassword(opts.mnemonic));
+  } catch (e: any) {
+    if (/WalletDirAlreadyExists|already exists/i.test(`${e?.code ?? ''} ${e?.message ?? ''}`)) return 'already-on-phone';
+    throw e;
+  } finally {
+    try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
+  }
+  setStatus({ state: 'done', lastBackupAt: backup.manifest.createdAt });
+  return 'restored';
 }

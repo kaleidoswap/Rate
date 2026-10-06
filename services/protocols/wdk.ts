@@ -38,9 +38,9 @@ import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
 import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
-import { RGB_L1_ENABLED, buildRgbL1Config, isRgbLibNativeAvailable, loadRgbL1Network, loadRgbL1Host } from './rgbL1'
+import { RGB_L1_ENABLED, buildRgbL1Config, isRgbLibNativeAvailable, isRgbL1Ready, loadRgbL1Network, loadRgbL1Host, markRgbL1Ready } from './rgbL1'
 import { createRgbLibRnModule } from './rgbLibRn'
-import { runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
+import { restoreRgbFromCloud, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
 
 /** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
 export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
@@ -314,7 +314,20 @@ async function connectRgbL1(
       results.set('RGB_L1', { success: false, error: 'This app build does not include RGB. Install a newer build.' })
       return
     }
+    if (!(await isRgbL1Ready(mnemonic, network))) {
+      // First start on this phone: bring the RGB data back from the cloud backup first.
+      // If that can't be checked, don't start an empty wallet that would back up over it.
+      try {
+        const restored = await restoreRgbFromCloud({ mnemonic, network, restore: (path, password) => require('react-native-rgb').restoreBackup(path, password) })
+        console.log(`[initializeWdkProtocols] RGB_L1 cloud restore: ${restored}`)
+      } catch (e: unknown) {
+        const why = e instanceof Error ? e.message : String(e)
+        results.set('RGB_L1', { success: false, error: `Couldn't restore your RGB backup (${why}). Check your connection and try again.` })
+        return
+      }
+    }
     await manager.connect('RGB_L1', buildRgbL1Config(mnemonic, await loadRgbL1Host(mnemonic, network)) as any)
+    await markRgbL1Ready(mnemonic, network)
     setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
     void runRgbBackup() // catch up on anything that changed since the last upload
     results.set('RGB_L1', { success: true })

@@ -136,6 +136,20 @@ export async function saveRgbL1Network(mnemonic: string, network: RgbL1Network |
   await db.setSetting(settingKey(mnemonic), network ?? '')
 }
 
+const readyKey = (mnemonic: string, network: RgbL1Network) => `rgb-l1-ready-v1-${network}-${rgbL1WalletKey(mnemonic)}`
+
+/**
+ * Whether RGB on this phone has opened for this seed and network here before.
+ * Until it has, the first start looks for a cloud backup to restore.
+ */
+export async function isRgbL1Ready(mnemonic: string, network: RgbL1Network): Promise<boolean> {
+  return (await DatabaseService.getInstance().getSetting(readyKey(mnemonic, network))) === '1'
+}
+
+export async function markRgbL1Ready(mnemonic: string, network: RgbL1Network): Promise<void> {
+  await DatabaseService.getInstance().setSetting(readyKey(mnemonic, network), '1')
+}
+
 /**
  * Password for rgb-lib's encrypted backup, derived from the seed: the file is
  * useless without the seed anyway, and the user has no extra secret to lose.

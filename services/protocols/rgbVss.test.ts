@@ -1,7 +1,7 @@
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { VSS_CHUNK_SIZE, createVssClient, decodeGetObject, encodePutObjects, uploadBackupFile, vssAuthToken, vssSigningKey } from './rgbVss';
+import { VSS_CHUNK_SIZE, createVssClient, decodeGetObject, downloadBackupFile, encodePutObjects, uploadBackupFile, vssAuthToken, vssSigningKey, type VssClient } from './rgbVss';
 
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
 
@@ -50,4 +50,23 @@ test('a missing key reads as undefined; a server error throws', async () => {
   expect(await createVssClient('https://v', 's', vssSigningKey(MNEMONIC), notFound).get('k')).toBeUndefined();
   const broken: any = async () => ({ ok: false, status: 500 });
   await expect(createVssClient('https://v', 's', vssSigningKey(MNEMONIC), broken).put([])).rejects.toThrow(/500/);
+});
+
+test('a download is the uploaded file, checked against its manifest', async () => {
+  const store = new Map<string, Uint8Array>();
+  const client: VssClient = {
+    async put(items) { for (const i of items) store.set(i.key, i.value); },
+    async get(key) { return store.get(key); },
+  };
+  expect(await downloadBackupFile(client, 'rgb-backup-file')).toBeUndefined();
+  const data = new Uint8Array(VSS_CHUNK_SIZE * 2 + 3).map((_, i) => i % 251);
+  await uploadBackupFile(client, 'rgb-backup-file', data, 42);
+  const got = await downloadBackupFile(client, 'rgb-backup-file');
+  expect(got?.manifest.createdAt).toBe(42);
+  expect(Buffer.from(got!.data).equals(Buffer.from(data))).toBe(true);
+  // A changed or missing chunk is refused, not restored.
+  store.set('rgb-backup-file/chunk/1', new Uint8Array(VSS_CHUNK_SIZE));
+  await expect(downloadBackupFile(client, 'rgb-backup-file')).rejects.toThrow(/damaged/);
+  store.delete('rgb-backup-file/chunk/2');
+  await expect(downloadBackupFile(client, 'rgb-backup-file')).rejects.toThrow(/incomplete/);
 });

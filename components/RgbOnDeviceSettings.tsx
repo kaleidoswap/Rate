@@ -128,7 +128,7 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
         ? 'Holds RGB assets on-chain on Bitcoin mainnet, with real funds. '
         : 'Holds RGB assets on-chain on Mutinynet, a test network. ')
       + (pinned ? '' : `This wallet keeps its RGB data on ${RGB_L1_NETWORK_LABEL[network]} from now on. `)
-      + 'Your recovery phrase alone can’t restore RGB assets: they are backed up to the cloud after every send and receive, and you can export a backup file.',
+      + 'RGB assets need more than your recovery phrase: they are backed up to the cloud after every send and receive and restored when you recover this wallet. You can also export a backup file.',
       [{ text: 'Cancel', style: 'cancel' }, { text: 'Turn on', onPress: () => void apply(true) }],
     );
   };
