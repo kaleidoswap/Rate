@@ -29,6 +29,7 @@ import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input
 import { feedback } from '../utils/feedback';
 import NostrService, { NostrContact } from '../services/NostrService';
 import ToastService from '../services/ToastService';
+import { contactEvents, type ContactEvent } from '../services/contactHistory';
 import { nip19 } from 'nostr-tools';
 
 interface Props {
@@ -125,6 +126,18 @@ export default function ContactsScreen({ navigation, route }: Props) {
     ...(others.length ? [{ title: favorites.length ? 'Contacts' : '', data: others }] : []),
   ];
   const openContact: ContactRow | null = openContactId ? allContacts.find((c) => c.id === openContactId) ?? null : null;
+  // Payments with the open contact (what this app sent or asked for).
+  const walletId = useSelector((state: RootState) => state.wallet.activeWallet?.id);
+  const [history, setHistory] = useState<ContactEvent[]>([]);
+  useEffect(() => {
+    setHistory([]);
+    if (!openContact || walletId == null) return;
+    let active = true;
+    void contactEvents(walletId, [openContact.lightning_address, openContact.npub, openContact.node_pubkey])
+      .then((list) => { if (active) setHistory(list); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openContactId, walletId]);
 
   // A QR scanned in contact mode comes back as a navigation param: open the
   // add form prefilled with the scanned identifier, then clear the param so it
@@ -545,6 +558,26 @@ export default function ContactsScreen({ navigation, route }: Props) {
               </View>
             )}
 
+            {history.length > 0 && (
+              <View style={[styles.group, styles.groupGap]}>
+                <Text style={styles.historyTitle}>Payments</Text>
+                {history.slice(0, 20).map((e, i, list) => (
+                  <View key={e.id} style={[styles.idRow, i < list.length - 1 && styles.rowDivider]}>
+                    <Ionicons name={e.direction === 'sent' ? 'arrow-up' : 'arrow-down'} size={16}
+                      color={e.direction === 'sent' ? theme.colors.text.secondary : theme.colors.tx.receive} />
+                    <View style={styles.flex}>
+                      <Text style={styles.idValue} numberOfLines={1}>
+                        {e.direction === 'sent' ? 'Sent' : 'Requested'}{e.amount ? ` ${e.amount}` : ''}{e.note ? ` · ${e.note}` : ''}
+                      </Text>
+                      <Text style={styles.idLabel}>
+                        {new Date(e.createdAt).toLocaleDateString()}{e.status === 'completed' || e.status === 'open' ? '' : ` · ${({ pending: 'In progress', unknown: 'Needs checking', failed: 'Failed' } as Record<string, string>)[e.status] ?? ''}`}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            )}
+
             <View style={[styles.group, styles.groupGap]}>
               <TouchableOpacity style={[styles.menuRow, styles.rowDivider]} onPress={() => handleToggleFavorite(c)}
                 accessibilityRole="button">
@@ -821,6 +854,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, overflow: 'hidden',
   },
   groupGap: { marginTop: theme.spacing[3] },
+  historyTitle: { fontSize: theme.typography.fontSize.xs, fontWeight: '700', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.6, paddingHorizontal: theme.spacing[4], paddingTop: theme.spacing[3] },
   idRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingLeft: theme.spacing[4], paddingRight: theme.spacing[1], minHeight: 56 },
   idLabel: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
   idValue: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, fontWeight: '500', marginTop: 1 },
