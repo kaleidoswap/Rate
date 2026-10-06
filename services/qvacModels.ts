@@ -12,8 +12,6 @@ import {
   QWEN3_5_0_8B_MULTIMODAL_Q4_K_M,
   QWEN3_5_2B_MULTIMODAL_Q4_K_M,
   QWEN3_5_4B_MULTIMODAL_Q4_K_M,
-  QWEN3_600M_INST_Q4,
-  QWEN3_1_7B_INST_Q4,
 } from '@qvac/sdk';
 
 /** Minimum device class recommended to run a model LOCALLY (on-device). */
@@ -68,15 +66,12 @@ function entry(
 // Qwen3.5 is the default family: same sizes as Qwen3, better at following
 // instructions and calling the wallet tools. Its GGUFs run as text-only here
 // (the "multimodal" descriptors only need an extra projector for images).
-// Qwen3 stays as the previous generation for anyone who already downloaded it.
-// Llama 3.2 1B, Qwen3 8B and GPT-OSS 20B are gone: older or too big for a
-// phone, and desktop delegation is paused.
+// A saved model that's no longer listed (Qwen3, Llama, GPT-OSS) is replaced by
+// the one recommended for the device when the config loads (QVACService).
 export const QVAC_MODELS: QVACModel[] = [
   entry(QWEN3_5_0_8B_MULTIMODAL_Q4_K_M, 'Qwen3.5 0.8B', 'phone'),
   entry(QWEN3_5_2B_MULTIMODAL_Q4_K_M, 'Qwen3.5 2B', 'phone'),
   entry(QWEN3_5_4B_MULTIMODAL_Q4_K_M, 'Qwen3.5 4B', 'pro'),
-  entry(QWEN3_600M_INST_Q4, 'Qwen3 0.6B (previous)', 'phone'),
-  entry(QWEN3_1_7B_INST_Q4, 'Qwen3 1.7B (previous)', 'phone'),
 ];
 
 // Default chat model: Qwen3.5 2B (~1.3 GB) — fits modern iPhones and loads on
