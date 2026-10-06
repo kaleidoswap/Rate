@@ -118,7 +118,7 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
             subtitle={
               runtimeAvailable
                 ? localCapable
-                  ? 'Fully private — the model runs locally. Downloads ~400 MB on first use.'
+                  ? 'Fully private — the model runs locally. Downloads 0.5–1.3 GB once, depending on your phone.'
                   : `This device has ~${availability?.deviceMemGb ?? '?'} GB RAM; a small model will run but may be slow.`
                 : 'Not available on this device.'
             }

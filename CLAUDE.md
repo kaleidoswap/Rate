@@ -95,7 +95,7 @@ Shared UI primitives live in `components/` and are exported from `components/ind
 - Multi-protocol wallet via `protocolManager` (Spark, Arkade, RGB); screens use `protocolManager.getAdapter('PROTOCOL')` with legacy `RGBApiService` fallback
 - RGB Lightning node accessed via kaleido-sdk through the shared `@kaleidorg/wallet-engine` library
 - Swaps support two venues: KaleidoSwap (maker-based atomic swaps) and Flashnet (Spark AMM pools)
-- AI assistant uses QVAC SDK for on-device LLM (QWEN3 600M) and Whisper transcription, driven through the shared `@kaleidorg/mind` engine — see `services/mindAgent.ts` (single runner for chat + voice), `services/QVACService.ts` (model lifecycle), and `services/walletTools.ts` (wallet tool contract binding, unit-tested in `walletTools.test.ts`)
+- AI assistant uses QVAC SDK for on-device LLM (Qwen3.5 0.8B / 2B by device RAM, catalog in `services/qvacModels.ts`) and Whisper transcription, driven through the shared `@kaleidorg/mind` engine — see `services/mindAgent.ts` (single runner for chat + voice), `services/QVACService.ts` (model lifecycle), and `services/walletTools.ts` (wallet tool contract binding, unit-tested in `walletTools.test.ts`)
 - Voice input uses `components/VoiceInput.tsx` (QVAC Whisper) instead of WebView-based speech recognition
-- QVAC models require physical devices (no emulator support); first launch downloads models (~400MB LLM + ~40MB Whisper)
+- QVAC models require physical devices (no emulator support); first launch downloads models (~0.5–1.3 GB LLM + ~80 MB Whisper)
 - Sensitive keys use `expo-secure-store`; environment variables via `react-native-dotenv` from `.env`
