@@ -19,7 +19,6 @@ import { NativeModules, Platform } from 'react-native';
 import { File, Directory, Paths } from 'expo-file-system';
 import { createDownloadResumable } from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { z } from 'zod';
 import DeviceInfo from 'react-native-device-info';
 import {
   QVAC_MODELS,
@@ -40,7 +39,6 @@ import {
   createQvacProvider,
   createQvacVoice,
   buildDelegateConfig,
-  cleanAssistantVisibleText,
   sanitizeForSupertonic,
 } from '@kaleidorg/mind/qvac';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
@@ -131,8 +129,8 @@ function isPhoneRuntime(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
-// `sanitizeForSupertonic` + `cleanAssistantVisibleText` now live in
-// @kaleidorg/mind/qvac (imported above) — one implementation, shared with desktop.
+// `sanitizeForSupertonic` lives in @kaleidorg/mind/qvac (imported above) — one
+// implementation, shared with desktop.
 
 const CONFIG_KEY = 'qvac.config.v1';
 
@@ -167,27 +165,6 @@ export interface QVACState {
   llmDownloadProgress: number;
   whisperDownloadProgress: number;
   error: string | null;
-}
-
-export interface QVACTool {
-  name: string;
-  description: string;
-  parameters: z.ZodObject<any>;
-  handler: (args: Record<string, unknown>) => Promise<unknown>;
-  /**
-   * When true the tool is NOT auto-executed by `chat()`. Instead it is returned
-   * with `pending: true` so the UI can ask the user to confirm (e.g. payments)
-   * before invoking the handler explicitly.
-   */
-  requiresConfirmation?: boolean;
-}
-
-export interface QVACToolCall {
-  name: string;
-  arguments: Record<string, unknown>;
-  result?: unknown;
-  /** True when the tool needs user confirmation before its handler runs. */
-  pending?: boolean;
 }
 
 type StateListener = (state: QVACState) => void;
@@ -923,90 +900,6 @@ class QVACService {
       console.error('QVAC Whisper init failed:', msg);
       this.setState({ whisperStatus: 'error', error: `Whisper: ${msg}` });
     }
-  }
-
-  // --- Chat completion with tool calling ---
-
-  async chat(params: {
-    messages: Array<{ role: string; content: string }>;
-    tools?: QVACTool[];
-    /** Called for every visible content token as it streams in. */
-    onToken?: (token: string) => void;
-    /**
-     * Called synchronously with the run's requestId the moment generation
-     * starts, so the UI can cancel it mid-stream via `cancelRequest()`.
-     */
-    onStart?: (requestId: string) => void;
-  }): Promise<{ text: string; toolCalls: QVACToolCall[]; requestId: string }> {
-    if (!this.llmModelId) {
-      throw new Error('LLM model not loaded');
-    }
-
-    const tools = params.tools ?? [];
-    const toolsByName = new Map(tools.map(t => [t.name, t]));
-    const toolDefs = tools.map(t => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-      handler: t.handler,
-    }));
-
-    // Canonical completion API (QVAC v0.12): a typed `events` stream plus an
-    // aggregated `final` promise. `requestId` is available synchronously.
-    const run = completion({
-      modelId: this.llmModelId,
-      history: params.messages,
-      stream: true,
-      tools: toolDefs.length ? toolDefs : undefined,
-    });
-
-    params.onStart?.(run.requestId);
-
-    // Stream visible content tokens. `contentDelta` excludes <think> reasoning
-    // (use `thinkingDelta` if you ever want to surface the model's reasoning).
-    let streamed = '';
-    for await (const event of run.events) {
-      if (event.type === 'contentDelta') {
-        streamed += event.text;
-        params.onToken?.(event.text);
-      }
-    }
-
-    const final = await run.final;
-    const text = cleanAssistantVisibleText(final.contentText || streamed);
-
-    // Resolve tool calls. Financial tools (requiresConfirmation) are returned
-    // as `pending` instead of being auto-invoked, so the UI can confirm first.
-    const executedCalls: QVACToolCall[] = [];
-
-    for (const call of final.toolCalls) {
-      const def = toolsByName.get(call.name);
-
-      if (def?.requiresConfirmation) {
-        executedCalls.push({
-          name: call.name,
-          arguments: call.arguments,
-          pending: true,
-        });
-        continue;
-      }
-
-      let callResult: unknown;
-      if (call.invoke) {
-        try {
-          callResult = await call.invoke();
-        } catch (err) {
-          callResult = { error: err instanceof Error ? err.message : String(err) };
-        }
-      }
-      executedCalls.push({
-        name: call.name,
-        arguments: call.arguments,
-        result: callResult,
-      });
-    }
-
-    return { text, toolCalls: executedCalls, requestId: run.requestId };
   }
 
   /**

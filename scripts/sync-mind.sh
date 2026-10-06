@@ -38,6 +38,17 @@ if [ ! -d "$DEST" ]; then
   exit 0
 fi
 
+# A sibling at a different version than the pin is not the code this branch
+# ships — overlaying it would silently swap the published package for another
+# release. Bump the pin (or check out the matching sibling) instead; set
+# SYNC_MIND_FORCE=1 to overlay anyway.
+LOCAL_VER=$(node -p "require('./$SRC/package.json').version" 2>/dev/null || echo "?")
+PINNED_VER=$(node -p "require('./node_modules/@kaleidorg/mind/package.json').version" 2>/dev/null || echo "?")
+if [ "$LOCAL_VER" != "$PINNED_VER" ] && [ "${SYNC_MIND_FORCE:-}" != "1" ]; then
+  echo "sync-mind: local core is $LOCAL_VER but installed @kaleidorg/mind is $PINNED_VER — skipping overlay (SYNC_MIND_FORCE=1 to override)." >&2
+  exit 0
+fi
+
 rsync -a --delete "$SRC/dist/" "$DEST/"
 # Also overlay package.json so its `exports` map matches the working tree — e.g.
 # the `./qvac` subpath (the QVAC adapter, which ships inside core's dist) won't
