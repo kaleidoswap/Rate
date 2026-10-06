@@ -613,7 +613,9 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         onStats: (s) => {
           const st: ChatMsgStats = {
             tokensPerSecond: s.tokensPerSecond,
-            totalTokens: s.totalTokens,
+            totalTokens:
+              s.totalTokens ??
+              (s.generatedTokens != null && s.promptTokens != null ? s.promptTokens + s.generatedTokens : undefined),
             promptTokens: s.promptTokens,
             device: s.backendDevice,
           };
@@ -657,12 +659,15 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         updateMessage(assistantId, () => ({ text: res.text, streaming: false }));
       } else {
         const lastCall = res.toolCalls?.[res.toolCalls.length - 1];
+        const stopped = res.inference?.some((i) => i.status === 'cancelled');
 
         // If an invoice was just generated, remember it (so "share" can act on
         // it) and offer to share it if the model didn't already mention it.
         let finalText =
           res.text?.trim() ||
-          (lastCall
+          (stopped
+            ? 'Stopped.'
+            : lastCall
             ? 'Done.'
             : "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.");
         const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
