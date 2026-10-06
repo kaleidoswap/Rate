@@ -127,7 +127,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
   ];
   const openContact: ContactRow | null = openContactId ? allContacts.find((c) => c.id === openContactId) ?? null : null;
   // Payments with the open contact (what this app sent or asked for).
-  const walletId = useSelector((state: RootState) => state.wallet.activeWallet?.id);
+  const walletId = useSelector((state: RootState) => state.wallet?.activeWallet?.id);
   const [history, setHistory] = useState<ContactEvent[]>([]);
   useEffect(() => {
     setHistory([]);

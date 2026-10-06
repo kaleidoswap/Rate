@@ -12,7 +12,6 @@ import { ActivityIndicator, Alert, StyleSheet, Switch, Text, TextInput, Touchabl
 import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import * as DocumentPicker from 'expo-document-picker';
 import { theme, protocolColor } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { initializeProtocols, protocolManager } from '../services/protocols';
@@ -142,7 +141,11 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
   /** Bring RGB data back from an exported file (when the cloud copy isn't there). */
   const restoreFile = async () => {
     if (busy) return;
-    const picked = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: '*/*' }).catch(() => null);
+    // Loaded on use: an OTA update can run on a build without the file picker.
+    let picker: any = null;
+    try { picker = require('expo-document-picker'); } catch { /* older build */ }
+    if (!picker?.getDocumentAsync) { setError('Restoring from a file needs a newer app build.'); return; }
+    const picked = await picker.getDocumentAsync({ copyToCacheDirectory: true, multiple: false, type: '*/*' }).catch(() => null);
     const uri = picked && !picked.canceled ? picked.assets?.[0]?.uri : null;
     if (!uri) return;
     Alert.alert(
