@@ -3,7 +3,7 @@ import { toEngineProtocol } from '../../utils/protocol-bridge'
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { WalletRecord, NetworkConfig, NetworkType } from '../../services/DatabaseService';
 import DatabaseService from '../../services/DatabaseService';
-import { protocolManager } from '../../services/protocols';
+import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
 import type { ProtocolType } from '../../services/protocols';
 
 export interface ProtocolBalance {
@@ -329,9 +329,11 @@ export const syncWallet = createAsyncThunk(
   'wallet/sync',
   async (_, { rejectWithValue }) => {
     try {
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
+      const rgbAdapter = rgbAccountAdapter();
       if (rgbAdapter?.isConnected() && rgbAdapter.executeProtocolOperation) {
         await rgbAdapter.executeProtocolOperation('sync', {});
+      } else if (rgbAdapter?.isConnected()) {
+        await rgbAdapter.refreshBalances?.(); // RGB on this phone
       }
       return Date.now();
     } catch (error: any) {

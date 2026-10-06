@@ -3,7 +3,7 @@ import { AppState, Text } from 'react-native';
 import { protocolManager } from '../../services/protocols';
 import { useAppTheme } from '../../theme/ThemeProvider';
 
-const connected = () => ['RGB_LN', 'SPARK', 'ARKADE', 'BARK'].some(p => protocolManager.getAdapterIfAvailable(p as 'RGB_LN' | 'SPARK' | 'ARKADE' | 'BARK')?.isConnected());
+const connected = () => ['RGB_LN', 'RGB_L1', 'SPARK', 'ARKADE', 'BARK'].some(p => protocolManager.getAdapterIfAvailable(p as 'RGB_LN' | 'RGB_L1' | 'SPARK' | 'ARKADE' | 'BARK')?.isConnected());
 /** Connection changes only update this notice, never the request identity. */
 export function ReceiveConnectionNotice({ hasRequest }: { hasRequest: boolean }) {
   const t = useAppTheme();

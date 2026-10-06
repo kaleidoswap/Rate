@@ -183,6 +183,12 @@ jest.mock('expo-audio', () => ({
 // @expo/vector-icons above. services/sounds.ts wraps all File/Directory use
 // in try/catch (audio is a nice-to-have), so a minimal non-throwing shape
 // is enough.
+// expo-sharing's native module isn't available under Jest.
+jest.mock('expo-sharing', () => ({
+  isAvailableAsync: jest.fn(async () => false),
+  shareAsync: jest.fn(async () => undefined),
+}));
+
 jest.mock('expo-file-system', () => ({
   File: class {
     exists = true;

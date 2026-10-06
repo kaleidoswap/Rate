@@ -24,7 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { RootState } from '../store';
 import { initializeProtocolServices } from '../services/initializeServices';
-import { protocolManager } from '../services/protocols';
+import { protocolManager, rgbAccountAdapter } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setRgbAssets } from '../store/slices/assetsSlice';
 import { loadNostrProfile } from '../store/slices/nostrSlice';
@@ -308,7 +308,7 @@ export default function DashboardScreen({ navigation }: Props) {
       console.log('Loading dashboard data...');
 
       // Load via protocolManager (multi-protocol)
-      const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
+      const rgbAdapter = rgbAccountAdapter(); // the node, or RGB on this phone
       const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
       const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
       const barkAdapter = protocolManager.getAdapterIfAvailable('BARK');
@@ -567,7 +567,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
   const protocolBalances = (btcBalance as any).byProtocol as Record<string, { confirmed: number; unconfirmed: number; total: number }> | undefined;
   // NWC reports Lightning funds already; HTTP RLN reports on-chain funds.
-  const rgbBalanceIsLightning = typeof (protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType === 'function';
+  const rgbBalanceIsLightning = typeof (rgbAccountAdapter() as any)?.walletType === 'function';
   // Accounts on a test network hold sats with no value: kept out of the total and its
   // fiat figure, and shown on their own line.
   const testNetworks: Partial<Record<AccountId, string>> = {};

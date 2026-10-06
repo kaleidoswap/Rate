@@ -13,7 +13,7 @@ jest.mock('@react-navigation/native', () => ({
   useFocusEffect: (fn: any) => require('react').useEffect(fn, [fn]),
 }));
 jest.mock('../services/initializeServices', () => ({ initializeProtocolServices: jest.fn() }));
-jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: jest.fn() } }));
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: jest.fn() }, rgbAccountAdapter: jest.fn(), rgbAccountProtocol: () => 'RGB_LN' }));
 jest.mock('../store/slices/walletSlice', () => ({ setBtcBalance: (payload: any) => ({ type: 'balance', payload }) }));
 jest.mock('../store/slices/assetsSlice', () => ({ setRgbAssets: (payload: any) => ({ type: 'assets', payload }) }));
 jest.mock('../store/slices/nostrSlice', () => ({ loadNostrProfile: jest.fn() }));

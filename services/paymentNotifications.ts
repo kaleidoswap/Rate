@@ -15,7 +15,7 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NotificationService from './NotificationService';
 import DatabaseService from './DatabaseService';
-import { protocolManager, initializeProtocols } from './protocols';
+import { protocolManager, initializeProtocols, rgbAccountProtocol } from './protocols';
 import { getStoredHandle, registerPushDevice, removePushDevice, type StoredHandle } from './kaleidoswapMe';
 import { describeIncoming, incomingPayments, mergeBalances, type Balances, type WatchedAccount } from '../utils/paymentWatch';
 
@@ -102,13 +102,14 @@ export async function recordBalances(walletId: number, balances: Balances, notif
 
 // ---- 3. background check ----------------------------------------------------
 
-const ADAPTERS: Array<[WatchedAccount, string]> = [['SPARK', 'SPARK'], ['ARKADE', 'ARKADE'], ['BARK', 'BARK'], ['RGB', 'RGB_LN']];
+// The RGB account is the node or RGB on this phone, whichever backs it right now.
+const ADAPTERS: Array<[WatchedAccount, () => string]> = [['SPARK', () => 'SPARK'], ['ARKADE', () => 'ARKADE'], ['BARK', () => 'BARK'], ['RGB', rgbAccountProtocol]];
 
 async function connectedBalances(): Promise<Balances> {
   const out: Balances = {};
   for (const [account, protocol] of ADAPTERS) {
     let adapter: any;
-    try { adapter = protocolManager.getAdapterIfAvailable(protocol as any); } catch { adapter = undefined; }
+    try { adapter = protocolManager.getAdapterIfAvailable(protocol() as any); } catch { adapter = undefined; }
     if (!adapter?.isConnected?.()) continue;
     try { out[account] = (await adapter.getBtcBalance()).total; } catch { /* skip this account */ }
   }

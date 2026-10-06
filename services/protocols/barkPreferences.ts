@@ -11,9 +11,22 @@ export const recordBarkConnection = (mnemonic: string, host: BarkHostConfig) => 
 export const clearBarkConnection = () => { connected = null; };
 
 /** Non-secret preference scoped to the same wallet identity as Bark's data directory. */
+/** 'off' turns Bark off for this wallet (chosen at setup or in Settings). */
+const OFF = 'off';
+
+/** True when this wallet turned Bark off. Wallets with no choice keep the default (on). */
+export async function isBarkOff(mnemonic: string): Promise<boolean> {
+  return (await DatabaseService.getInstance().getSetting(key(mnemonic))) === OFF;
+}
+
+export async function setBarkOff(mnemonic: string): Promise<void> {
+  await DatabaseService.getInstance().setSetting(key(mnemonic), OFF);
+}
+
 export async function loadBarkHost(mnemonic: string): Promise<BarkHostConfig | null> {
   const saved = await DatabaseService.getInstance().getSetting(key(mnemonic));
   if (!saved) return resolveBarkHostConfig();
+  if (saved === OFF) return null;
   if (saved !== 'mainnet' && saved !== 'signet') throw new Error('Bark network setting is invalid. Choose a network in Settings.');
   // Explicit user choices use the public server for that network, never an env
   // endpoint belonging to a different chain.

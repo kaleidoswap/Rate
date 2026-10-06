@@ -1,4 +1,4 @@
-import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection } from './barkPreferences'
+import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection, isBarkOff } from './barkPreferences'
 /**
  * WDK Protocol Wiring — KaleidoSwap App
  * -------------------------------------
@@ -22,6 +22,7 @@ import {
   registerWdkModule,
   RlnWdkAdapter,
   ArkadeWdkAdapter,
+  RgbLibWdkAdapter,
   type SparkAdapterConfig,
   type RlnAdapterConfig,
   type ArkadeAdapterConfig,
@@ -37,6 +38,9 @@ import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
 import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
+import { RGB_L1_ENABLED, buildRgbL1Config, isRgbLibNativeAvailable, isRgbL1Ready, loadRgbL1Network, loadRgbL1Host, markRgbL1Ready } from './rgbL1'
+import { createRgbLibRnModule } from './rgbLibRn'
+import { restoreRgbFromCloud, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
 
 /** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
 export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
@@ -63,6 +67,9 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
  * - Bark: ON by default. Second's Ark via the native `@secondts/bark-react-native`
  *   SDK (needs a dev build). Not a wallet NetworkType yet, so it connects from
  *   the saved wallet preference with ./bark.ts defaults. Disable with EXPO_PUBLIC_BARK=0.
+ * - RGB on this phone (RGB_L1): native rgb-lib through `react-native-rgb`, opt-in per
+ *   wallet (./rgbL1.ts). Connects only when no RGB node is connected: the node is the
+ *   RGB account when paired. Disable with EXPO_PUBLIC_RGB_L1=0.
  */
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
 // On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
@@ -85,6 +92,12 @@ function registerWdkModuleLoaders(): void {
   if (ARKADE_ENABLED) {
     registerWdkModule('@arkade-os/wdk', () => require('@arkade-os/wdk'))
   }
+  // The engine's RGB_L1 adapter loads the WDK rgb module; on the phone that is native
+  // rgb-lib behind the same surface (./rgbLibRn.ts), required only on connect.
+  if (RGB_L1_ENABLED) {
+    // Every change (send, receive, settle) schedules the automatic cloud backup.
+    registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => require('react-native-rgb'), { onChange: scheduleRgbBackup }))
+  }
 }
 
 let _wdkManager: ProtocolManager | null = null
@@ -106,6 +119,7 @@ export function getWdkProtocolManager(): ProtocolManager {
     // Wallets saved with a Liquid network skip it (no LIQUID case below).
     if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())
     if (BARK_ENABLED) _wdkManager.registerAdapter(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
+    if (RGB_L1_ENABLED) _wdkManager.registerAdapter(new RgbLibWdkAdapter())
   }
   return _wdkManager
 }
@@ -268,8 +282,61 @@ export async function initializeWdkProtocols(
   }
 
   if (BARK_ENABLED) await connectBark(manager, mnemonic, results)
+  if (RGB_L1_ENABLED) await connectRgbL1(manager, mnemonic, results)
 
   return results
+}
+
+/**
+ * RGB on this phone, when the wallet turned it on and no RGB node is connected.
+ * Same per-protocol contract as the loop above: record the outcome, never throw.
+ */
+async function connectRgbL1(
+  manager: ProtocolManager,
+  mnemonic: string,
+  results: Map<ProtocolType, { success: boolean; error?: string }>,
+): Promise<void> {
+  try {
+    const existing = manager.getAdapterIfAvailable('RGB_L1')
+    const network = await loadRgbL1Network(mnemonic)
+    if (!network || manager.getAdapterIfAvailable('RGB_LN')?.isConnected()) {
+      // Turned off, or the node is the RGB account: release the local wallet.
+      setRgbBackupContext(null)
+      if (existing?.isConnected()) await manager.disconnect('RGB_L1')
+      return
+    }
+    if (existing?.isConnected()) {
+      setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
+      results.set('RGB_L1', { success: true })
+      return
+    }
+    if (!isRgbLibNativeAvailable()) {
+      results.set('RGB_L1', { success: false, error: 'This app build does not include RGB. Install a newer build.' })
+      return
+    }
+    if (!(await isRgbL1Ready(mnemonic, network))) {
+      // First start on this phone: bring the RGB data back from the cloud backup first.
+      // If that can't be checked, don't start an empty wallet that would back up over it.
+      try {
+        const restored = await restoreRgbFromCloud({ mnemonic, network, restore: (path, password) => require('react-native-rgb').restoreBackup(path, password) })
+        console.log(`[initializeWdkProtocols] RGB_L1 cloud restore: ${restored}`)
+      } catch (e: unknown) {
+        const why = e instanceof Error ? e.message : String(e)
+        results.set('RGB_L1', { success: false, error: `Couldn't restore your RGB backup (${why}). Check your connection and try again.` })
+        return
+      }
+    }
+    await manager.connect('RGB_L1', buildRgbL1Config(mnemonic, await loadRgbL1Host(mnemonic, network)) as any)
+    await markRgbL1Ready(mnemonic, network)
+    setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
+    void runRgbBackup() // catch up on anything that changed since the last upload
+    results.set('RGB_L1', { success: true })
+    console.log(`[initializeWdkProtocols] RGB_L1 connected (${network})`)
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : String(error)
+    console.error('[initializeWdkProtocols] RGB_L1 failed:', msg)
+    results.set('RGB_L1', { success: false, error: msg })
+  }
 }
 
 /**
@@ -298,9 +365,17 @@ async function connectBarkOnce(
   results: Map<ProtocolType, { success: boolean; error?: string }>,
 ): Promise<void> {
   try {
+    const existing = manager.getAdapterIfAvailable('BARK')
+    if (await isBarkOff(mnemonic)) {
+      // Turned off for this wallet: release it if it was running.
+      disconnectBarkFromKaleidoPay()
+      if (existing?.isConnected()) await manager.disconnect('BARK')
+      clearBarkConnection()
+      results.set('BARK', { success: false, error: 'skipped: Bark is off for this wallet' })
+      return
+    }
     const host = await loadBarkHost(mnemonic)
     if (!host) throw new Error('Bark network is not configured.')
-    const existing = manager.getAdapterIfAvailable('BARK')
     if (existing?.isConnected() && barkConnectionMatches(mnemonic, host)) {
       connectBarkToKaleidoPay(existing, host.network)
       results.set('BARK', { success: true })

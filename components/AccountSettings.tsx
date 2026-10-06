@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Switch } from 'react-native';
 import { useAppTheme } from '../theme/ThemeProvider';
 import DatabaseService from '../services/DatabaseService';
 import { currentBarkHost } from '../services/protocols/barkPreferences';
@@ -11,6 +11,17 @@ type Props = {
   connected: boolean; busy: boolean; error?: string; onNetwork: () => void;
   onReconnect: () => void; onConnection?: () => void;
   onSave: (config: Record<string, unknown>) => void;
+  /** Whether this wallet uses the account; with onEnabled, a switch turns it on or off. */
+  enabled?: boolean;
+  onEnabled?: (on: boolean) => void;
+  /** Account-specific sections after the common ones (e.g. RGB on this phone). */
+  children?: React.ReactNode;
+};
+const USE_TEXT: Record<Props['account'], string> = {
+  RGB: 'Your RGB Lightning node, over Nostr Wallet Connect.',
+  SPARK: 'Bitcoin, Lightning and tokens. Turning it off hides its balance until you turn it on again.',
+  ARKADE: 'Low-fee off-chain bitcoin. Turning it off hides its balance until you turn it on again.',
+  BARK: 'Bitcoin on Second’s Ark network. Turning it off hides its balance until you turn it on again.',
 };
 export function AccountSettings(props: Props) {
   const theme = useAppTheme();
@@ -36,12 +47,24 @@ export function AccountSettings(props: Props) {
     link: { color: theme.colors.primary[500], fontSize: 16 },
     input: { color: theme.colors.text.primary, borderColor: theme.colors.text.tertiary, borderWidth: 1, borderRadius: 10, padding: 12, minHeight: 48 },
     error: { color: theme.colors.error[500], fontSize: 14 },
+    switchRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], minHeight: 48 },
   });
   const action = (label: string, onPress: () => void, disabled = props.busy) => <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} style={[styles.action, disabled && { opacity: 0.5 }]} onPress={onPress}><Text style={styles.link}>{label}</Text></TouchableOpacity>;
   const host = props.account === 'BARK' ? currentBarkHost() : null;
+  const off = props.onEnabled && props.enabled === false;
   return <>
-    <View style={styles.card}>
-      <Text style={styles.title}>{props.busy ? 'Connecting…' : props.connected ? 'Connected' : 'Offline'}</Text>
+    {props.onEnabled && <View style={styles.card}>
+      <View style={styles.switchRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Use this account</Text>
+          <Text style={styles.text}>{USE_TEXT[props.account]}</Text>
+        </View>
+        <Switch accessibilityLabel="Use this account" value={!!props.enabled} disabled={props.busy} onValueChange={props.onEnabled}
+          trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }} />
+      </View>
+    </View>}
+    {!off && <View style={styles.card}>
+      <Text style={styles.title}>{props.busy ? 'Connecting…' : props.connected ? 'Connected' : props.account === 'RGB' ? 'RGB node not connected' : 'Offline'}</Text>
       {/* Arkade's "signet" setting runs on Mutinynet; Bark's is plain Signet. */}
       <Text style={styles.text}>Network: {props.account === 'BARK' && props.network === 'signet' ? 'Signet' : NETWORK_LABEL[props.network as ProtocolNetwork] ?? props.network}</Text>
       {!!props.error && <Text accessibilityRole="alert" style={styles.error}>{props.error}</Text>}
@@ -49,11 +72,11 @@ export function AccountSettings(props: Props) {
       <Text style={styles.text}>Each network has its own balance. Mainnet uses real bitcoin; test networks use test bitcoin.</Text>
       {action('Reconnect account', props.onReconnect)}
       <Text style={styles.text}>Reconnect using the saved configuration if this account is offline or out of sync.</Text>
-    </View>
-    {props.account === 'RGB' && props.onConnection && <View style={styles.card}><Text style={styles.title}>Wallet connection</Text><Text style={styles.text}>Manage your Lightning wallet connection and review the permissions granted to this app.</Text>{action('Manage wallet connection', props.onConnection)}</View>}
-    {props.account === 'SPARK' && <View style={styles.card}><Text style={styles.title}>Spark connection</Text><Text style={styles.text}>Spark selects its service endpoints automatically for the chosen network. Custom servers are not supported by this connection.</Text></View>}
-    {props.account === 'BARK' && <View style={styles.card}><Text style={styles.title}>Connection details</Text><Text style={styles.text}>Current connection: {host?.network ?? 'Not configured'}</Text><Text style={styles.text}>Ark server</Text><Text selectable style={styles.text}>{host?.arkServerUrl || 'Not configured'}</Text><Text style={styles.text}>Bitcoin explorer</Text><Text selectable style={styles.text}>{host?.esploraUrl || 'Not configured'}</Text><Text style={styles.text}>These endpoints are managed by the Bark wallet. Reconnect retries the saved connection.</Text></View>}
-    {props.account === 'ARKADE' && <View style={styles.card}>
+    </View>}
+    {props.account === 'RGB' && props.onConnection && <View style={styles.card}><Text style={styles.title}>RGB node connection</Text><Text style={styles.text}>Pair or manage your RGB Lightning node (or any Lightning wallet) over Nostr Wallet Connect, and review the permissions granted to this app. While it’s connected it is your RGB account; otherwise RGB on this phone is used.</Text>{action('Manage node connection', props.onConnection)}</View>}
+    {!off && props.account === 'SPARK' && <View style={styles.card}><Text style={styles.title}>Spark connection</Text><Text style={styles.text}>Spark selects its service endpoints automatically for the chosen network. Custom servers are not supported by this connection.</Text></View>}
+    {!off && props.account === 'BARK' && <View style={styles.card}><Text style={styles.title}>Connection details</Text><Text style={styles.text}>Current connection: {host?.network ?? 'Not configured'}</Text><Text style={styles.text}>Ark server</Text><Text selectable style={styles.text}>{host?.arkServerUrl || 'Not configured'}</Text><Text style={styles.text}>Bitcoin explorer</Text><Text selectable style={styles.text}>{host?.esploraUrl || 'Not configured'}</Text><Text style={styles.text}>These endpoints are managed by the Bark wallet. Reconnect retries the saved connection.</Text></View>}
+    {!off && props.account === 'ARKADE' && <View style={styles.card}>
       <Text style={styles.title}>Server settings</Text><Text style={styles.text}>Use endpoints for the selected network. Saving reconnects this account.</Text>
       <Text style={styles.text}>Ark server</Text><TextInput accessibilityLabel="Ark server URL" style={styles.input} value={server} onChangeText={setServer} editable={ready && !props.busy} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
       <Text style={styles.text}>Bitcoin explorer (optional)</Text><TextInput accessibilityLabel="Bitcoin explorer URL" style={styles.input} value={explorer} onChangeText={setExplorer} editable={ready && !props.busy} placeholder="Default explorer" placeholderTextColor={theme.colors.text.tertiary} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
@@ -61,5 +84,6 @@ export function AccountSettings(props: Props) {
       {action('Use network defaults', () => { setServer(getDefaultArkadeServerUrl(props.network as ProtocolNetwork)); setExplorer(''); setError(''); }, !ready || props.busy)}
       {action('Save and reconnect', () => { try { const arkServerUrl = validateAccountEndpoint(server); const esploraUrl = explorer.trim() ? validateAccountEndpoint(explorer) : undefined; setError(''); props.onSave({ arkServerUrl, esploraUrl }); } catch (e) { setError((e as Error).message); } }, !ready || props.busy)}
     </View>}
+    {props.children}
   </>;
 }

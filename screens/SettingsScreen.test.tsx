@@ -7,7 +7,7 @@ jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f(mockState), u
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: (f: any) => require('react').useEffect(f, [f]) }));
 jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
 jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
-jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
 jest.mock('../services/PairingService', () => ({ PairingService: { getActive: async () => null } }));
 jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => [], getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
@@ -97,6 +97,7 @@ test('account pages expose supported controls and back returns to the account li
   fireEvent.press(screen.getByLabelText('Advanced'));
   fireEvent.press(screen.getByLabelText('Spark account settings'));
   expect(screen.getByText('Reconnect account')).toBeTruthy();
+  expect(screen.getByLabelText('Use this account')).toBeTruthy();
   expect(screen.queryByLabelText('Ark server URL')).toBeNull();
   fireEvent.press(screen.getByLabelText('Back'));
   fireEvent.press(screen.getByLabelText('Arkade account settings'));
@@ -106,7 +107,9 @@ test('account pages expose supported controls and back returns to the account li
   expect(screen.getByText('Use an HTTPS URL without credentials, query parameters or a fragment.')).toBeTruthy();
   expect(require('../services/protocols').protocolManager.disconnect).not.toHaveBeenCalled();
   fireEvent.press(screen.getByLabelText('Back'));
-  fireEvent.press(screen.getByLabelText('RGB Lightning node account settings'));
-  fireEvent.press(screen.getByText('Manage wallet connection'));
+  fireEvent.press(screen.getByLabelText('RGB account settings'));
+  // RGB: the node is managed over NWC (its own on/off); no "use this account" switch here.
+  expect(screen.queryByLabelText('Use this account')).toBeNull();
+  fireEvent.press(screen.getByText('Manage node connection'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });

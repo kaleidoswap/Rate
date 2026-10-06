@@ -24,6 +24,14 @@ describe('receive routes', () => {
     expect(lightningDestinations(all, { nwcWalletType: 'ln', nwcCapabilities: ['createInvoice'], rgbChannels: 'none' })[0].available).toBe(true);
   });
 
+  it('RGB on this phone is on-chain only: no Lightning, its own name, assets on-chain', () => {
+    const caps = { rgbOnDevice: true };
+    expect(lightningDestinations(all, caps).map(d => d.account)).toEqual(['SPARK', 'BARK', 'ARKADE']);
+    expect(onchainDestinations(all, caps)[0]).toMatchObject({ account: 'RGB', label: 'RGB wallet', detail: 'Your RGB wallet on this phone' });
+    expect(methodsFor('RGB', all, caps)).toEqual(['onchain']);
+    expect(accountLabel('RGB', caps)).toBe('RGB wallet');
+  });
+
   it('lists on-chain and Ark destinations per account', () => {
     expect(onchainDestinations(all, {}).map(d => d.account)).toEqual(['RGB', 'SPARK', 'ARKADE', 'BARK']);
     expect(onchainDestinations(all, { nwcWalletType: 'ln' }).map(d => d.account)).toEqual(['SPARK', 'ARKADE', 'BARK']);

@@ -15,7 +15,7 @@
 //
 // Every source is fetched defensively: a failure in one never blocks the rest.
 
-import { protocolManager } from './protocols';
+import { protocolManager, rgbAccountAdapter } from './protocols';
 
 export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Bark' | 'Bark Signet' | 'Swap';
 
@@ -196,7 +196,7 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
   const assetMap: Record<string, AssetMeta> = {};
   for (const a of assets) assetMap[a.asset_id] = a;
 
-  const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
+  const rgb = rgbAccountAdapter(); // the node, or RGB on this phone
   const rgbConnected = !!rgb?.isConnected();
 
   // 1. Lightning payments (BTC LN + RGB LN)
