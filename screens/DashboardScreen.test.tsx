@@ -24,7 +24,6 @@ jest.mock('../utils/bitcoinUnits', () => ({
   useBitcoinConversion: () => ({ formatSatoshisToUSD: String }),
   useDisplayAmount: () => ({ format: () => ({ primary: '0', secondary: '$0', unitLabel: 'sats' }), cycle: jest.fn() }),
 }));
-jest.mock('../components/RecentActivityWidget', () => ({ RecentActivityWidget: () => null }));
 jest.mock('../components', () => ({
   BalanceCard: ({ loading }: any) => require('react').createElement(require('react-native').Text, {}, loading ? 'Loading balance' : 'Balance ready'),
   ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: () => null,

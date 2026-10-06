@@ -9,6 +9,7 @@ jest.mock('../store/hooks', () => ({
 }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: 'ScreenHeader' }));
+jest.mock('../components/RecentActivityWidget', () => ({ RecentActivityWidget: 'RecentActivityWidget' }));
 
 const usdt = {
   asset_id: 'rgb:usdt-id-0123456789abcdefghijkl', ticker: 'USDT', name: 'Tether USD', precision: 6, issued_supply: 1_000_000_000_000,
@@ -26,6 +27,8 @@ test('shows the balance in the asset unit, its breakdown and details', () => {
   expect(screen.getByText('2 USDT')).toBeTruthy();              // in Lightning channels
   expect(screen.getByText('1,000,000 USDT')).toBeTruthy();      // issued supply, formatted
   expect(screen.getByText('rgb:usdt-i…efghijkl')).toBeTruthy();   // asset id, middle-truncated
+  // The asset's own history sits under the actions.
+  expect(screen.UNSAFE_getByType('RecentActivityWidget' as any).props).toEqual(expect.objectContaining({ assetId: usdt.asset_id, assetTicker: 'USDT', title: 'History' }));
 });
 
 test('actions open Receive and Send for this asset', () => {

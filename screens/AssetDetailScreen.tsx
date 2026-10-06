@@ -14,6 +14,7 @@ import { CopyButton } from '../components/CopyButton';
 import { AmountText } from '../components/AmountText';
 import { AssetIcon } from '../components/AssetIcon';
 import { PressableScale } from '../components/PressableScale';
+import { RecentActivityWidget } from '../components/RecentActivityWidget';
 import { formatUsd } from '../components/AssetList';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { loadBtcBalance } from '../store/slices/walletSlice';
@@ -169,6 +170,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
             ))}
           </View>
         </Animated.View>}
+
+        {/* This asset's payments, after its details. */}
+        <RecentActivityWidget assetId={isBTC ? 'BTC' : asset.asset_id} assetTicker={asset.ticker} title="History" style={styles.history} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -189,6 +193,7 @@ const styles = StyleSheet.create({
   },
   pendingText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.warning[500], fontWeight: '600' },
   actions: { flexDirection: 'row', justifyContent: 'center', gap: theme.spacing[6] },
+  history: { marginTop: 0, paddingHorizontal: 0 },
   action: { alignItems: 'center', gap: theme.spacing[1], minWidth: 64 },
   actionIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
   actionLabel: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },

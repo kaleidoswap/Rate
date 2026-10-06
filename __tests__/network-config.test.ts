@@ -25,3 +25,12 @@ describe('protocol network config', () => {
     expect(JSON.parse(buildNetworkConfig('spark', 'testnet')).network).toBe('regtest');
   });
 });
+
+test('changing an Arkade account’s network starts from that network’s servers', () => {
+  const custom = { network: 'signet', arkServerUrl: 'https://my-ark.example', esploraUrl: 'https://my-explorer.example' };
+  const sameNetwork = JSON.parse(buildNetworkConfig('arkade', 'signet', custom));
+  expect(sameNetwork).toEqual(expect.objectContaining({ arkServerUrl: 'https://my-ark.example', esploraUrl: 'https://my-explorer.example' }));
+  const moved = JSON.parse(buildNetworkConfig('arkade', 'mainnet', custom));
+  expect(moved.arkServerUrl).toBe('https://arkade.computer');
+  expect(moved.esploraUrl).toBeUndefined();
+});

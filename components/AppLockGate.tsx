@@ -280,15 +280,16 @@ export function AppLockGate() {
 }
 
 const styles = StyleSheet.create({
+  // Centred on both axes, so the lock sits in the middle of any screen height.
   container: {
     flex: 1,
     backgroundColor: theme.colors.background.primary,
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: theme.spacing[6],
   },
   header: {
     alignItems: 'center',
-    marginTop: theme.spacing[16],
     marginBottom: theme.spacing[10],
   },
   iconWrap: {

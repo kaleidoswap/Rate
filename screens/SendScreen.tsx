@@ -138,6 +138,15 @@ export default function SendScreen({ navigation, route }: Props) {
     return () => { active = false; revision.current++; };
   }, [walletId]);
   useEffect(() => () => { revision.current++; }, []);
+  // An unresolved payment is re-checked as soon as Send can reach its account, so
+  // one that went through stops blocking new payments without a manual check.
+  useEffect(() => {
+    if (!attempt || !journalReady) return;
+    let active = true;
+    void prepareKaleidoPay().then(() => { if (active) void checkStatus(); });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attempt?.id, journalReady]);
 
   const selected = offers.find(o => o.id === selectedId);
   const quote = selected?.quote;

@@ -12,7 +12,6 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { NetworkIcon } from '../components/NetworkIcon';
-import { NetworkBadge } from '../components/NetworkBadge';
 import { RootState } from '../store';
 import {
   setCurrency,
@@ -25,6 +24,7 @@ import {
   setSoundEnabled,
   setTransactionNotifications,
   type DisplayDenomination,
+  MIND_DESKTOP_ENABLED,
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
@@ -687,15 +687,15 @@ export default function SettingsScreen({ navigation }: Props) {
             description="On-device models, voice and when the assistant runs"
             onPress={() => navigation.navigate('Dashboard', { screen: 'Mind', params: { openSettings: true } })}
           />
-          <Row
+          {MIND_DESKTOP_ENABLED && <Row
             icon="sparkles-outline"
             iconColor={theme.colors.accent[500]}
             label="Desktop connection"
             description={activePairing ? 'Paired' : 'Run AI on your desktop'}
             value={activePairing ? activePairing.name : 'Connect'}
             onPress={() => navigation.navigate('PairDesktop')}
-          />
-          {activePairing && (
+          />}
+          {MIND_DESKTOP_ENABLED && activePairing && (
             <Row icon="cube-outline" iconColor={theme.colors.accent[500]} label="Active model" value={activePairing.model} />
           )}
           <Row
@@ -833,33 +833,33 @@ export default function SettingsScreen({ navigation }: Props) {
               ARKADE: 'Low-fee off-chain bitcoin',
               BARK: 'Bitcoin via Second’s Ark network',
             };
+            const network = proto === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]];
+            const networkLabel = network ? (proto === 'BARK' && network === 'signet' ? 'Signet' : NETWORK_LABEL[network as ProtocolNetwork] ?? network) : null;
+            const status = connecting ? 'Connecting...' : connected ? 'Connected' : accountEnabled[proto] === false ? 'Off' : error && !error.startsWith('skipped') ? 'Error' : 'Offline';
+            // The whole row opens the account page; its network is changed there.
             return (
-              <View key={proto} style={[styles.row, idx > 0 && styles.rowDivider]}>
+              <TouchableOpacity key={proto} activeOpacity={0.7} accessibilityRole="button"
+                accessibilityLabel={`${labels[proto]} account settings`} accessibilityHint={`${status}${networkLabel ? ` · ${networkLabel}` : ''}`}
+                onPress={() => { setSettingsQuery(''); setPage('advanced'); setAccount(proto); }}
+                style={[styles.row, idx > 0 && styles.rowDivider]}>
                 <View style={[styles.rowIcon, { backgroundColor: colors[proto] + '1A', opacity: connected ? 1 : 0.5 }]}>
                   <NetworkIcon network={proto} size={18} color={colors[proto]} />
                 </View>
-                <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${labels[proto]} account settings`} onPress={() => { setSettingsQuery(''); setPage('advanced'); setAccount(proto); }} style={[styles.rowText, { minHeight: 48, justifyContent: 'center' }]}>
+                <View style={[styles.rowText, { minHeight: 48, justifyContent: 'center' }]}>
                   <Text style={styles.rowLabel}>{labels[proto]}</Text>
-                  <Text style={styles.rowDescription} numberOfLines={1}>Account settings · {descs[proto]}</Text>
+                  <Text style={styles.rowDescription} numberOfLines={1}>{descs[proto]}</Text>
                   {!!error && !connecting && (
                     <Text style={[styles.rowDescription, { color: theme.colors.error[500] }]} numberOfLines={1}>
                       {error}
                     </Text>
                   )}
-                </TouchableOpacity>
-                <View style={{ alignItems: 'flex-end', gap: theme.spacing[1] }}>
-                  <NetworkBadge
-                    network={proto === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network ?? 'unknown' : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]]}
-                    label={proto === 'BARK' && (protoNetworks.bark ?? currentBarkHost()?.network) === 'signet' ? 'Signet' : undefined}
-                    interactive
-                    onPress={() => { if (!connecting) proto === 'BARK' ? pickBarkNetwork() : pickProtocolNetwork(proto); }}
-                    accessibilityLabel={`Change ${proto} network`}
-                  />
-                  <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.text.tertiary }}>
-                    {connecting ? 'Connecting...' : connected ? 'Connected' : accountEnabled[proto] === false ? 'Off' : error && !error.startsWith('skipped') ? 'Error' : 'Offline'}
-                  </Text>
                 </View>
-              </View>
+                <View style={{ alignItems: 'flex-end', gap: 2 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.text.tertiary }}>{status}</Text>
+                  {!!networkLabel && accountEnabled[proto] !== false && <Text style={styles.rowDescription}>{networkLabel}</Text>}
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
+              </TouchableOpacity>
             );
           })}
           </Group>

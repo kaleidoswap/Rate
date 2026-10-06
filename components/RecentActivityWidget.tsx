@@ -1,12 +1,15 @@
 // components/RecentActivityWidget.tsx
 //
-// Dashboard snippet: shows up to 4 activity items, with pending payments first with a "View All" link.
+// An activity list for one place in the app: an asset's history on its detail
+// screen (`assetId`), or the latest items with pending payments first.
 // Tapping a row opens the ActivityDetailSheet inline.
 import React, { useState, useCallback } from 'react';
 import {
     View,
     Text,
     StyleSheet,
+    type StyleProp,
+    type ViewStyle,
     TouchableOpacity,
     ActivityIndicator,
 } from 'react-native';
@@ -28,7 +31,14 @@ import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 
 interface Props {
-    onViewAll: () => void;
+    onViewAll?: () => void;
+    /** Only this asset's items (an asset id, or 'BTC'), newest first. */
+    assetId?: string;
+    /** Swaps name the asset by ticker; matched too. */
+    assetTicker?: string;
+    title?: string;
+    limit?: number;
+    style?: StyleProp<ViewStyle>;
 }
 
 function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
@@ -75,7 +85,7 @@ const LAYER_LABEL: Record<ActivityLayer, string> = {
 
 const MAX_ITEMS = 4;
 
-export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
+export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, assetTicker, title = 'Activity', limit, style }) => {
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
 
@@ -104,12 +114,15 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
         }));
         try {
             const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() });
-            setItems([...result].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status))).slice(0, MAX_ITEMS));
+            const list = assetId
+                ? result.filter(item => item.asset === assetId || (!!assetTicker && item.type === 'swap' && item.asset === assetTicker))
+                : [...result].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
+            setItems(list.slice(0, limit ?? (assetId ? 25 : MAX_ITEMS)));
             return hadConnectedAdapter && failedSources === 0;
         } catch {
             return false;
         }
-    }, [rgbAssets, swapHistory]);
+    }, [rgbAssets, swapHistory, assetId, assetTicker, limit]);
 
     // Refresh when the Dashboard tab regains focus.
     useFocusEffect(
@@ -125,8 +138,9 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
         }, [fetchRecent])
     );
 
-    // Don't render the section if there's nothing to show after loading.
-    if (!loading && items.length === 0) return null;
+    // Don't render the section if there's nothing to show after loading
+    // (an asset's history says so instead).
+    if (!loading && items.length === 0 && !assetId) return null;
 
     const renderRow = (item: ActivityItem) => {
         const v = typeVisual(item.type);
@@ -179,11 +193,11 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
     };
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, style]}>
             <SectionHeader
-                title="Activity"
+                title={title}
                 eyebrow
-                actionLabel="View All"
+                actionLabel={onViewAll ? 'View All' : undefined}
                 onAction={onViewAll}
                 style={styles.sectionHeader}
             />
@@ -192,6 +206,8 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll }) => {
                 <View style={styles.loadingWrap}>
                     <ActivityIndicator size="small" color={theme.colors.primary[500]} />
                 </View>
+            ) : items.length === 0 ? (
+                <Text style={styles.empty}>No activity for this asset yet.</Text>
             ) : (
                 <View style={styles.list}>{items.map(renderRow)}</View>
             )}
@@ -215,6 +231,12 @@ const styles = StyleSheet.create({
     },
     list: {
         gap: theme.spacing[3],
+    },
+    empty: {
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.text.secondary,
+        textAlign: 'center',
+        paddingVertical: theme.spacing[4],
     },
     // Holds every item past the first; the gradient overlay fades them out.
     restWrap: {

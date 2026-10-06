@@ -62,13 +62,14 @@ test('preferences remain actionable and connections retain their destinations', 
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });
 
-test('Bark uses the same interactive network control and describes real versus test bitcoin', async () => {
+test('Bark’s network is changed from its account page, which describes real versus test bitcoin', async () => {
   const { Alert } = require('react-native');
   const alert = jest.spyOn(Alert, 'alert');
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
   fireEvent.press(screen.getByLabelText('Advanced'));
-  fireEvent.press(screen.getByLabelText('Change BARK network'));
+  fireEvent.press(screen.getByLabelText('Bark account settings'));
+  fireEvent.press(screen.getByText('Change network'));
   expect(alert).toHaveBeenCalledWith('Bark network', expect.stringContaining('real bitcoin'), expect.arrayContaining([
     expect.objectContaining({ text: 'Mainnet', onPress: expect.any(Function) }),
     expect.objectContaining({ text: 'Signet (test bitcoin)  ✓', onPress: expect.any(Function) }),
@@ -83,7 +84,8 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
   fireEvent.press(screen.getByLabelText('Advanced'));
-  fireEvent.press(screen.getByLabelText('Change BARK network'));
+  fireEvent.press(screen.getByLabelText('Bark account settings'));
+  fireEvent.press(screen.getByText('Change network'));
   const choices = alert.mock.calls[0][2];
   await act(async () => { choices.find((choice: any) => choice.text === 'Mainnet').onPress(); });
   expect(saveBarkNetwork).toHaveBeenCalledWith('public test fixture', 'mainnet');
@@ -110,6 +112,9 @@ test('account pages expose supported controls and back returns to the account li
   fireEvent.press(screen.getByLabelText('RGB account settings'));
   // RGB: the node is managed over NWC (its own on/off); no "use this account" switch here.
   expect(screen.queryByLabelText('Use this account')).toBeNull();
-  fireEvent.press(screen.getByText('Manage node connection'));
+  // Not connected: the page explains how to connect an RGB Lightning Node and offers it.
+  expect(screen.getByText('How to connect')).toBeTruthy();
+  expect(screen.queryByText('Change network')).toBeNull();
+  fireEvent.press(screen.getByText('Connect node'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });

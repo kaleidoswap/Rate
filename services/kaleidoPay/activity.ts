@@ -6,7 +6,8 @@
 
 import type { SwapAttempt } from '@universal-bolt12/swap-market';
 import { MempoolClient } from '../mempool/MempoolClient';
-import type { SwapAttemptActivityInput } from '../ActivityService';
+import type { ActivityItem, ActivityLayer, SwapAttemptActivityInput } from '../ActivityService';
+import { loadPaymentAttempt, unresolvedAttempt } from './attempts';
 import { kaleidoPayAttempts } from './recovery';
 
 /** Status lookups per feed load; older swaps are shown without one. */
@@ -47,4 +48,35 @@ export async function loadSwapAttemptActivity(
       updatedAt: a.updatedAt,
     };
   }));
+}
+
+/** Shown on the payment-attempt row; opening it resumes the check in Send. */
+export const PAYMENT_ATTEMPT_KIND = 'payment-attempt';
+
+/**
+ * The last payment while its outcome is still being checked, as a pending
+ * activity item: it belongs in the history with everything else, not above it.
+ */
+export async function loadPendingPaymentActivity(walletId: number | undefined): Promise<ActivityItem[]> {
+  if (walletId == null) return [];
+  const attempt = await loadPaymentAttempt(walletId).catch(() => null);
+  if (!attempt || !unresolvedAttempt(attempt)) return [];
+  const source = attempt.sourceId.toLowerCase();
+  const layer: ActivityLayer = source.startsWith('spark') ? 'Spark' : source.startsWith('bark') ? 'Bark'
+    : source.startsWith('ark') ? 'Arkade' : source.startsWith('rgb') ? 'RGB-LN' : 'LN';
+  return [{
+    id: `payment-attempt-${attempt.id}`,
+    type: 'send',
+    source: 'payment',
+    asset: 'BTC',
+    assetName: attempt.recipient,
+    assetTicker: '',
+    assetPrecision: 0,
+    amount: attempt.total,
+    status: attempt.status === 'unknown' ? 'unknown' : 'pending',
+    timestamp: attempt.createdAt,
+    txid: attempt.reference ?? '',
+    layer,
+    kind: PAYMENT_ATTEMPT_KIND,
+  }];
 }
