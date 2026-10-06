@@ -53,8 +53,8 @@ jobs:
       - name: Type-check
         run: pnpm exec tsc --noEmit
 
-      - name: Unit tests
-        run: pnpm exec jest --ci
+      - name: Unit tests (with the coverage floor from jest.config.js)
+        run: pnpm exec jest --ci --coverage --coverageReporters=text-summary
 
   # Builds the production JS bundle the release apps ship (Metro + Babel),
   # catching resolution/transform breakage that tsc and Jest can't see, e.g. a
