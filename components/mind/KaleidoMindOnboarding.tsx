@@ -1,4 +1,5 @@
 import React from 'react';
+import { MIND_DESKTOP_ENABLED } from '../../store/slices/settingsSlice';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -127,13 +128,13 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
             onPress={onSelectLocal}
           />
 
-          <Option
+          {MIND_DESKTOP_ENABLED && <Option
             icon="desktop-outline"
             title="Connect a desktop"
             subtitle="Delegate inference to a paired KaleidoSwap desktop. Your phone stays light; the desktop does the heavy lifting."
             recommended={!localRecommended && runtimeAvailable}
             onPress={onSelectDelegate}
-          />
+          />}
 
           <Option
             icon="moon-outline"

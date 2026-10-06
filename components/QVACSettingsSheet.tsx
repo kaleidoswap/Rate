@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme, leading } from '../theme';
 import type { QVACModel, SttModel, TtsOption, TtsEngine } from '../services/qvacModels';
 import type { QVACConfig, ModelStatus } from '../services/QVACService';
-import type { AiMode } from '../store/slices/settingsSlice';
+import { MIND_DESKTOP_ENABLED, type AiMode } from '../store/slices/settingsSlice';
 
 interface Props {
   visible: boolean;
@@ -158,7 +158,7 @@ export default function QVACSettingsSheet({
             {([
               { key: 'off', icon: 'moon-outline', label: 'Off' },
               { key: 'local', icon: 'phone-portrait-outline', label: 'On this device' },
-              { key: 'delegate', icon: 'desktop-outline', label: 'Desktop' },
+              ...(MIND_DESKTOP_ENABLED ? [{ key: 'delegate', icon: 'desktop-outline', label: 'Desktop' }] : []),
             ] as { key: AiMode; icon: keyof typeof Ionicons.glyphMap; label: string }[]).map((m) => {
               const active = aiMode === m.key;
               return (
@@ -192,7 +192,7 @@ export default function QVACSettingsSheet({
 
           {aiMode === 'off' && (
             <Text style={styles.disabledNote}>
-              KaleidoMind is off. Pick “On this device” or “Desktop” to use it.
+              {MIND_DESKTOP_ENABLED ? 'KaleidoMind is off. Pick “On this device” or “Desktop” to use it.' : 'KaleidoMind is off. Pick “On this device” to use it.'}
             </Text>
           )}
           {aiMode === 'delegate' && (

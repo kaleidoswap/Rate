@@ -29,11 +29,11 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, selectAiOnboarded, setAiOnboarded } from '../store/slices/settingsSlice';
+import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, selectAiOnboarded, setAiOnboarded, MIND_DESKTOP_ENABLED } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
-import { MainHeader, MindAvatar, MindGlyph, Badge } from '../components';
+import { MainHeader, MindAvatar, MindGlyph, Badge, Sheet } from '../components';
 import { ChatEmptyState, MessageBubble, TypingDots, buildCopyText } from '../components/chat';
 import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
@@ -199,6 +199,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   }, [route?.params?.openSettings, navigation]);
   // Conversation history panel (desktop-parity: current conversation + new/clear).
   const [showHistory, setShowHistory] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
   // Latest turn's real inference stats (tok/s + backend) for the header chip.
   const [lastStats, setLastStats] = useState<ChatMsgStats | null>(null);
 
@@ -263,7 +264,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     return `${modelLabel} · ${where}${tps}`;
   }, [qvac.config.delegateEnabled, qvac.config.providerPublicKey, qvac.config.modelId, providerName, lastStats]);
 
-  const nostrState = useSelector((state: RootState) => state.nostr);
 
   const scrollToBottom = useCallback((animated: boolean = true) => {
     if (!scrollViewRef.current) return;
@@ -779,7 +779,9 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           <View style={styles.modelBannerRow}>
             <Ionicons name="desktop-outline" size={18} color={theme.colors.warning[600]} />
             <Text style={styles.modelBannerText}>
-              On-device AI isn’t available on this device. Connect a desktop to run KaleidoMind.
+              {MIND_DESKTOP_ENABLED
+                ? 'On-device AI isn’t available on this device. Connect a desktop to run KaleidoMind.'
+                : 'On-device AI isn’t available on this device, so KaleidoMind can’t run here.'}
             </Text>
             <TouchableOpacity
               onPress={() => dispatch(setAiMode('off'))}
@@ -788,13 +790,13 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             >
               <Text style={styles.modelRetryText}>Off</Text>
             </TouchableOpacity>
-            <TouchableOpacity
+            {MIND_DESKTOP_ENABLED && <TouchableOpacity
               onPress={() => navigation.navigate('PairDesktop')}
               style={styles.modelRetry}
               accessibilityLabel="Connect a desktop"
             >
               <Text style={styles.modelRetryText}>Connect</Text>
-            </TouchableOpacity>
+            </TouchableOpacity>}
           </View>
         </View>
       );
@@ -947,6 +949,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         iconNode={<MindGlyph size={22} color={theme.colors.text.primary} />}
         titleBadge={<Badge label="Experimental" color={theme.colors.warning[500]} size="sm" />}
         rightAction={
+          // Two actions you use mid-chat (voice, new chat); the rest live in "More".
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {aiEnabled && (
               <TouchableOpacity style={styles.headerBtn} accessibilityRole="button"
@@ -954,44 +957,13 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                 <Ionicons name="mic-outline" size={20} color={theme.colors.text.primary} />
               </TouchableOpacity>
             )}
-            {nostrState.isConnected && (
-              <View style={styles.nostrIndicator}>
-                <Ionicons name="checkmark-circle" size={16} color={theme.colors.success[500]} />
-              </View>
-            )}
             {aiEnabled && !isEmpty && (
-              <TouchableOpacity
-                style={styles.headerBtn}
-                onPress={newChat}
-                accessibilityLabel="New chat"
-              >
-                <Ionicons name="create-outline" size={20} color="white" />
+              <TouchableOpacity style={styles.headerBtn} accessibilityRole="button" onPress={newChat} accessibilityLabel="New chat">
+                <Ionicons name="create-outline" size={20} color={theme.colors.text.primary} />
               </TouchableOpacity>
             )}
-            {aiEnabled && !isEmpty && (
-              <TouchableOpacity
-                style={styles.headerBtn}
-                onPress={copyFullChat}
-                accessibilityLabel="Copy full chat"
-              >
-                <Ionicons name="copy-outline" size={20} color="white" />
-              </TouchableOpacity>
-            )}
-            {aiEnabled && (
-              <TouchableOpacity
-                style={styles.headerBtn}
-                onPress={() => setShowHistory(true)}
-                accessibilityLabel="Chat history"
-              >
-                <Ionicons name="time-outline" size={20} color="white" />
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={styles.headerBtn}
-              onPress={() => setShowSettings(true)}
-              accessibilityLabel="AI settings"
-            >
-              <Ionicons name="settings-outline" size={20} color="white" />
+            <TouchableOpacity style={styles.headerBtn} accessibilityRole="button" onPress={() => setShowMenu(true)} accessibilityLabel="More">
+              <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.text.primary} />
             </TouchableOpacity>
           </View>
         }
@@ -1203,7 +1175,22 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             onClose={() => setShowContactsSelector(false)}
           />
 
-          {/* AI settings: model selection + P2P delegation */}
+          <Sheet visible={showMenu} onClose={() => setShowMenu(false)} title="KaleidoMind">
+            {([
+              ...(aiEnabled ? [{ icon: 'time-outline', label: 'Chat history', onPress: () => setShowHistory(true) }] : []),
+              ...(aiEnabled && !isEmpty ? [{ icon: 'copy-outline', label: 'Copy this chat', onPress: copyFullChat }] : []),
+              { icon: 'settings-outline', label: 'Models & settings', onPress: () => setShowSettings(true) },
+            ] as { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }[]).map((item) => (
+              <TouchableOpacity key={item.label} style={styles.menuRow} accessibilityRole="button"
+                onPress={() => { setShowMenu(false); item.onPress(); }}>
+                <Ionicons name={item.icon} size={20} color={theme.colors.text.secondary} />
+                <Text style={styles.menuLabel}>{item.label}</Text>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
+              </TouchableOpacity>
+            ))}
+          </Sheet>
+
+          {/* AI settings: model selection */}
           <QVACSettingsSheet
             visible={showSettings}
             onClose={() => setShowSettings(false)}
@@ -1469,8 +1456,9 @@ const makeStyles = (theme: Theme) =>
     stopRecordingText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.error[600], fontWeight: '700' },
 
     // Header buttons
-    nostrIndicator: { padding: 4, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12 },
-    headerBtn: { padding: 4, backgroundColor: 'rgba(255,255,255,0.18)', borderRadius: 12 },
+    headerBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.surface.secondary, borderRadius: 18 },
+    menuRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], minHeight: 52, paddingHorizontal: theme.spacing[1] },
+    menuLabel: { flex: 1, fontSize: theme.typography.fontSize.base, fontWeight: '500', color: theme.colors.text.primary },
     headerBtnDanger: { backgroundColor: 'rgba(255,59,48,0.85)' },
 
     // Model status banner

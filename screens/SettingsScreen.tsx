@@ -24,6 +24,7 @@ import {
   setSoundEnabled,
   setTransactionNotifications,
   type DisplayDenomination,
+  MIND_DESKTOP_ENABLED,
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
@@ -686,15 +687,15 @@ export default function SettingsScreen({ navigation }: Props) {
             description="On-device models, voice and when the assistant runs"
             onPress={() => navigation.navigate('Dashboard', { screen: 'Mind', params: { openSettings: true } })}
           />
-          <Row
+          {MIND_DESKTOP_ENABLED && <Row
             icon="sparkles-outline"
             iconColor={theme.colors.accent[500]}
             label="Desktop connection"
             description={activePairing ? 'Paired' : 'Run AI on your desktop'}
             value={activePairing ? activePairing.name : 'Connect'}
             onPress={() => navigation.navigate('PairDesktop')}
-          />
-          {activePairing && (
+          />}
+          {MIND_DESKTOP_ENABLED && activePairing && (
             <Row icon="cube-outline" iconColor={theme.colors.accent[500]} label="Active model" value={activePairing.model} />
           )}
           <Row

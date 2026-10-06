@@ -267,9 +267,19 @@ export const selectDisclosureLevel = (state: RootState): DisclosureLevel =>
 export const selectDisplayDenomination = (state: RootState): DisplayDenomination =>
   state.settings.displayDenomination ?? state.settings.bitcoinUnit ?? 'sats';
 
+/**
+ * Running KaleidoMind on a paired desktop is paused: there's no desktop app to
+ * pair with right now. The code stays for when it comes back; set
+ * EXPO_PUBLIC_MIND_DESKTOP=1 to turn it on again.
+ */
+export const MIND_DESKTOP_ENABLED = process.env.EXPO_PUBLIC_MIND_DESKTOP === '1';
+
 // KaleidoMind mode. Defaults 'off' so the QVAC worklet never auto-starts.
-export const selectAiMode = (state: RootState): AiMode =>
-  state.settings.aiMode ?? 'off';
+// A saved 'delegate' runs on this device while desktop mode is paused.
+export const selectAiMode = (state: RootState): AiMode => {
+  const mode = state.settings.aiMode ?? 'off';
+  return mode === 'delegate' && !MIND_DESKTOP_ENABLED ? 'local' : mode;
+};
 
 // Derived on/off used by the worklet kill switch and AI entry points.
 export const selectAiEnabled = (state: RootState): boolean =>
