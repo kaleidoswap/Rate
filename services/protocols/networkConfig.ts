@@ -66,10 +66,14 @@ export function buildNetworkConfig(
 ): string {
   const config: Record<string, unknown> = { ...previous };
   config.network = type === 'spark' ? resolveSparkNetwork(network) : network;
+  // Servers belong to a network: moving to another one starts from its defaults
+  // (a Mutinynet explorer or Ark server can't serve mainnet).
+  const switched = typeof previous.network === 'string' && previous.network !== config.network;
 
   if (type === 'arkade') {
+    if (switched) delete config.esploraUrl;
     const previousUrl = typeof previous.arkServerUrl === 'string' ? previous.arkServerUrl : undefined;
-    const knownDefault = !previousUrl
+    const knownDefault = switched || !previousUrl
       || previousUrl === getDefaultArkadeServerUrl('mainnet')
       || previousUrl === getDefaultArkadeServerUrl('signet');
     if (knownDefault) {

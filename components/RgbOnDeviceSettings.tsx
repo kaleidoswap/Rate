@@ -196,6 +196,9 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
           <Text style={styles.description}>
             {network === 'mainnet' ? 'Real bitcoin and RGB assets.' : 'Test bitcoin, no value.'} Fixed for this wallet once turned on.
           </Text>
+          {/* Each network has its own servers; they can be changed once it's on. */}
+          <Text style={styles.description} selectable>Indexer: {indexer || rgbL1Host(network).indexerUrl}</Text>
+          <Text style={styles.description} selectable>RGB proxy: {proxy || rgbL1Host(network).transportEndpoint}</Text>
         </View>
       )}
       {enabled && connected && (

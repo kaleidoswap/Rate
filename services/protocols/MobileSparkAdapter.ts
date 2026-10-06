@@ -3,8 +3,37 @@ import { validFeeSats, type PaymentFeeRequest } from '../paymentReview';
 
 import { createSparkPayAccount } from '../kaleidoPay/sparkAccount';
 
+/**
+ * A Spark transfer's status as a payment outcome. The SDK returns the proto
+ * enum as a number (5 = COMPLETED), which the engine reads as text and so
+ * always as "pending": a sent payment then never resolved and kept Send locked.
+ * Once the sender's key tweak is done the receiver can claim, so it is paid.
+ */
+export function sparkTransferStatus(status: unknown): 'confirmed' | 'failed' | 'pending' {
+  const NAMES = ['SENDER_INITIATED', 'SENDER_KEY_TWEAK_PENDING', 'SENDER_KEY_TWEAKED', 'RECEIVER_KEY_TWEAKED', 'RECEIVER_REFUND_SIGNED',
+    'COMPLETED', 'EXPIRED', 'RETURNED', 'SENDER_INITIATED_COORDINATOR', 'RECEIVER_KEY_TWEAK_LOCKED', 'RECEIVER_KEY_TWEAK_APPLIED', 'APPLYING_SENDER_KEY_TWEAK'];
+  const name = typeof status === 'number' ? NAMES[status] ?? '' : String(status ?? '').toUpperCase().replace(/^TRANSFER_STATUS_/, '');
+  if (name === 'EXPIRED' || name === 'RETURNED' || name.includes('FAIL')) return 'failed';
+  if (['SENDER_KEY_TWEAKED', 'RECEIVER_KEY_TWEAKED', 'RECEIVER_REFUND_SIGNED', 'COMPLETED', 'RECEIVER_KEY_TWEAK_LOCKED', 'RECEIVER_KEY_TWEAK_APPLIED'].includes(name)
+    || name.includes('COMPLET')) return 'confirmed';
+  return 'pending';
+}
+
 /** Expose the WDK's read-only fee quotes without sending a payment. */
 export class MobileSparkAdapter extends SparkWdkAdapter {
+  async getPaymentStatus(paymentId: string) {
+    const result = await super.getPaymentStatus(paymentId);
+    // Only a transfer receipt carries an amount (Lightning sends resolve on their own path).
+    if (result.status !== 'pending' || result.amount === undefined) return result;
+    const id = paymentId.includes(':') ? paymentId.split(':').pop()! : paymentId;
+    try {
+      const transfer = await this.account.getTransactionReceipt(id);
+      return transfer ? { ...result, status: sparkTransferStatus(transfer.status) } : result;
+    } catch {
+      return result;
+    }
+  }
+
   createPaymentAccount(walletId: number) {
     this.assertConnected();
     if (this.network !== 'mainnet') return null;

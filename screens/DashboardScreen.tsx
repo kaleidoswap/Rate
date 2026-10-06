@@ -1,7 +1,6 @@
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
 import { summarizeBitcoinBalances } from '../utils/wallet-balance-summary';
-import { RecentActivityWidget } from '../components/RecentActivityWidget';
 import { receiveAccountChain } from '../services/kaleidoPay/connect';
 import { chainLabel } from '../utils/receive-routes';
 import type { AccountId } from '../utils/account-routing';
@@ -917,9 +916,6 @@ export default function DashboardScreen({ navigation }: Props) {
           }}
           onIssueAsset={() => navigation.getParent()?.navigate('Assets', { issue: true })}
         />
-
-        {/* The latest payments, so a receive shows up without switching tabs. */}
-        <RecentActivityWidget onViewAll={() => navigation.navigate('Activity')} />
 
         <TouchableOpacity
           accessibilityRole="button"

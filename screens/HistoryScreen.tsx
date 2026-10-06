@@ -1,4 +1,3 @@
-import { UnresolvedPaymentCard } from '../components/payments/UnresolvedPaymentCard';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
     View,
@@ -26,7 +25,7 @@ import {
     type ActivityStatus,
     type AssetMeta,
 } from '../services/ActivityService';
-import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
+import { loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND } from '../services/kaleidoPay/activity';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 
@@ -134,6 +133,7 @@ export default function HistoryScreen() {
     const policy = usePolicy();
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
+    const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
 
     const [items, setItems] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -161,8 +161,12 @@ export default function HistoryScreen() {
             venue: s.venue,
         }));
         try {
-            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() });
-            setItems(result);
+            const [{ items: result, failedSources, hadConnectedAdapter }, pendingPayment] = await Promise.all([
+                loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() }),
+                loadPendingPaymentActivity(walletId),
+            ]);
+            // A payment still being checked sits in the history like any other pending item.
+            setItems([...pendingPayment, ...result]);
             if (!hadConnectedAdapter && result.length === 0) {
                 setSoftError('Wallet is offline. Connect a protocol to see your activity.');
             } else if (failedSources > 0) {
@@ -175,7 +179,7 @@ export default function HistoryScreen() {
             setSoftError(e?.message || 'Failed to load activity.');
             return false;
         }
-    }, [rgbAssets, swapHistory]);
+    }, [rgbAssets, swapHistory, walletId]);
 
     useFocusEffect(useCallback(() => {
         let active = true;
@@ -215,7 +219,7 @@ export default function HistoryScreen() {
         const chip = layerChipColors(item.layer);
         const hasAmount = item.amount !== '';
         return (
-            <TouchableOpacity activeOpacity={0.7} style={styles.row} onPress={() => setSelectedItem(item)}>
+            <TouchableOpacity activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true }) : setSelectedItem(item)}>
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={20} color={v.color} />
                 </View>
@@ -264,7 +268,6 @@ export default function HistoryScreen() {
             <StatusBar barStyle="light-content" />
             <MainHeader title="Activity" />
 
-            <UnresolvedPaymentCard onCheck={() => navigation.navigate('Send', { resumePayment: true })} />
             {/* Filter tabs */}
             <SegmentedTabs
                 options={FILTERS}

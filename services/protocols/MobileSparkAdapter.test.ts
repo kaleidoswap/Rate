@@ -1,7 +1,8 @@
-import { MobileSparkAdapter } from './MobileSparkAdapter';
+import { MobileSparkAdapter, sparkTransferStatus } from './MobileSparkAdapter';
 
+let mockSuperStatus: any = { status: 'pending' };
 jest.mock('@kaleidorg/wallet-engine/adapters/wdk', () => ({
-  SparkWdkAdapter: class { assertConnected() {} },
+  SparkWdkAdapter: class { assertConnected() {} async getPaymentStatus(id: string) { return { paymentHash: id, ...mockSuperStatus }; } },
 }));
 
 function adapterWith(account: any) {
@@ -32,5 +33,33 @@ describe('Spark payment fee preview', () => {
     expect(account.quotePayLightningInvoice).toHaveBeenLastCalledWith({ encodedInvoice: 'lnbc-invoice' });
     await adapter.quotePaymentFee({ ...request, amountless: true });
     expect(account.quotePayLightningInvoice).toHaveBeenLastCalledWith({ encodedInvoice: 'lnbc-invoice', amountSats: 1000 });
+  });
+});
+
+describe('Spark payment status', () => {
+  it('reads the numeric transfer status the SDK returns', () => {
+    expect(sparkTransferStatus(5)).toBe('confirmed');                       // COMPLETED
+    expect(sparkTransferStatus(2)).toBe('confirmed');                       // sender key tweaked: receiver can claim
+    expect(sparkTransferStatus('TRANSFER_STATUS_COMPLETED')).toBe('confirmed');
+    expect(sparkTransferStatus(6)).toBe('failed');                          // EXPIRED
+    expect(sparkTransferStatus(7)).toBe('failed');                          // RETURNED
+    expect(sparkTransferStatus(0)).toBe('pending');
+    expect(sparkTransferStatus(undefined)).toBe('pending');
+  });
+
+  it('a sent transfer resolves instead of staying pending forever', async () => {
+    mockSuperStatus = { status: 'pending', amount: 1000 };
+    const account = { getTransactionReceipt: jest.fn().mockResolvedValue({ status: 5 }) };
+    expect((await adapterWith(account).getPaymentStatus('Transfer:abc')).status).toBe('confirmed');
+    expect(account.getTransactionReceipt).toHaveBeenCalledWith('abc');
+  });
+
+  it('leaves Lightning sends and missing receipts to the engine', async () => {
+    mockSuperStatus = { status: 'pending' }; // no amount: not a transfer receipt
+    const account = { getTransactionReceipt: jest.fn() };
+    expect((await adapterWith(account).getPaymentStatus('ln-1')).status).toBe('pending');
+    expect(account.getTransactionReceipt).not.toHaveBeenCalled();
+    mockSuperStatus = { status: 'confirmed', amount: 5 };
+    expect((await adapterWith(account).getPaymentStatus('t')).status).toBe('confirmed');
   });
 });

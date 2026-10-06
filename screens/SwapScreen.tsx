@@ -176,7 +176,8 @@ export default function SwapScreen({ navigation }: Props) {
     loadAvailableAssets();
 
     if (!swapState.fromAsset) dispatch(setFromAsset('BTC'));
-    if (!swapState.toAsset) dispatch(setToAsset('USDT'));
+    // The destination comes from the loaded pairs (USDT on the RGB node, USDB on
+    // Spark): presetting one here showed it for a moment, then swapped it.
   }, []);
 
   // Clear polling interval on unmount
@@ -946,6 +947,8 @@ export default function SwapScreen({ navigation }: Props) {
               <Text style={styles.assetSelectorTokenNetwork}>{networkLabelFor(ticker)}</Text>
             </View>
           </>
+        ) : pairsLoading && tradingPairs.length === 0 ? (
+          <ActivityIndicator size="small" color={theme.colors.text.inverse} accessibilityLabel="Loading assets" />
         ) : (
           <Text style={styles.selectAssetTokenText}>Choose asset</Text>
         )}
@@ -1318,6 +1321,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingHorizontal: theme.spacing[5],
+    paddingTop: theme.spacing[4],
     paddingBottom: theme.spacing[6],
   },
 

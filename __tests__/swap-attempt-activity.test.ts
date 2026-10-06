@@ -1,3 +1,8 @@
+let mockSaved: any = null;
+jest.mock('../services/kaleidoPay/attempts', () => ({
+  loadPaymentAttempt: async () => mockSaved,
+  unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown'),
+}));
 jest.mock('../services/kaleidoPay/recovery', () => ({ kaleidoPayAttempts: { list: jest.fn(async () => []) } }));
 
 import type { SwapAttempt } from '@universal-bolt12/swap-market';
@@ -41,5 +46,26 @@ describe('loadSwapAttemptActivity', () => {
       client: () => ({ getTxStatus: async () => { throw new Error('offline'); } }) as any,
     });
     expect(rows[0].confirmed).toBe(false);
+  });
+});
+
+describe('loadPendingPaymentActivity', () => {
+  const { loadPendingPaymentActivity, PAYMENT_ATTEMPT_KIND } = require('../services/kaleidoPay/activity');
+  const save = async (value: any) => { mockSaved = value; };
+  const base = { id: 'p1', sourceId: 'spark-ln', provider: 'Spark', total: '1,000 sats', recipient: 'alice@example.com', createdAt: 42, reference: 'tx1' };
+
+  it('lists a payment still being checked as a pending send in the history', async () => {
+    await save({ ...base, status: 'pending' });
+    expect(await loadPendingPaymentActivity(7)).toEqual([expect.objectContaining({
+      id: 'payment-attempt-p1', type: 'send', status: 'pending', amount: '1,000 sats', layer: 'Spark', kind: PAYMENT_ATTEMPT_KIND, timestamp: 42,
+    })]);
+  });
+
+  it('shows nothing once the payment is settled or dismissed, or without a wallet', async () => {
+    await save({ ...base, status: 'completed' });
+    expect(await loadPendingPaymentActivity(7)).toEqual([]);
+    await save({ ...base, status: 'pending', dismissedAt: 50 });
+    expect(await loadPendingPaymentActivity(7)).toEqual([]);
+    expect(await loadPendingPaymentActivity(undefined)).toEqual([]);
   });
 });
