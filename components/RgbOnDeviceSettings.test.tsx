@@ -17,7 +17,12 @@ jest.mock('../services/protocols/rgbL1', () => ({
   saveRgbL1Network: (...a: any[]) => { mockNetwork = a[1]; return (mockSave as any)(...a); },
   rgbBackupPassword: () => 'derived-password',
   isRgbLibNativeAvailable: () => true,
+  rgbL1Host: () => ({ network: 'mutinynet', indexerUrl: 'https://default-indexer', transportEndpoint: 'rpcs://default-proxy' }),
+  loadRgbL1Host: async () => mockHost,
+  saveRgbL1Endpoints: (...a: any[]) => (mockSaveEndpoints as any)(...a),
 }));
+let mockHost = { network: 'mutinynet', indexerUrl: 'https://default-indexer', transportEndpoint: 'rpcs://default-proxy' };
+const mockSaveEndpoints = jest.fn(async () => undefined);
 jest.mock('expo-file-system', () => ({
   Paths: { cache: { uri: 'file:///cache' } },
   File: class { exists = false; uri: string; constructor(dir: any, name: string) { this.uri = `${dir.uri}/${name}`; } delete() {} },
@@ -53,4 +58,18 @@ test('turning it on asks first, saves Mutinynet and connects', async () => {
   // The file export writes rgb-lib's encrypted backup with the seed-derived password.
   await act(async () => { fireEvent.press(screen.getByText('Export backup file')); });
   expect(mockAdapters.RGB_L1.account.backup).toHaveBeenCalledWith(expect.stringMatching(/kaleidoswap-rgb-.*\.rgbbackup$/), 'derived-password');
+});
+
+test('the indexer and proxy can be changed per wallet; saving reconnects', async () => {
+  mockNetwork = 'mutinynet';
+  mockAdapters.RGB_L1 = { isConnected: () => true, account: { backupRequired: async () => false, backup: jest.fn() } };
+  const screen = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  expect(screen.getByLabelText('RGB indexer URL').props.value).toBe('https://default-indexer');
+  fireEvent.changeText(screen.getByLabelText('RGB indexer URL'), 'https://my-esplora.example');
+  await act(async () => { fireEvent.press(screen.getByText('Save and reconnect')); });
+  expect(mockSaveEndpoints).toHaveBeenCalledWith('seed words', { indexerUrl: 'https://my-esplora.example', transportEndpoint: 'rpcs://default-proxy' });
+  expect(mockInitialize).toHaveBeenCalledWith('seed words', []);
+  await act(async () => { fireEvent.press(screen.getByText('Use defaults')); });
+  expect(mockSaveEndpoints).toHaveBeenLastCalledWith('seed words', null);
 });

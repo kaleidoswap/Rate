@@ -1,19 +1,20 @@
 // components/RgbOnDeviceSettings.tsx
 //
-// Settings › Advanced: RGB on this phone (rgb-lib, on-chain, Mutinynet for now).
+// Settings › RGB account: RGB on this phone (rgb-lib, on-chain, Mutinynet for now).
 // Turning it on makes the RGB account a local wallet when no RGB node is paired.
 // RGB state can't be rebuilt from the seed, so rgb-lib's encrypted backup is
 // uploaded to the cloud after every change (services/protocols/rgbBackup.ts);
-// these rows show that, back up on demand, or export the file.
+// these rows show that, back up on demand, or export the file. The indexer and
+// RGB proxy can be changed per wallet.
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { theme, protocolColor } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { initializeProtocols, protocolManager } from '../services/protocols';
-import { loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable } from '../services/protocols/rgbL1';
+import { loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable, loadRgbL1Host, rgbL1Host, saveRgbL1Endpoints } from '../services/protocols/rgbL1';
 import { toFilesystemPath } from '../services/protocols/bark';
 import ToastService from '../services/ToastService';
 import { onRgbBackupStatus, rgbBackupStatus, runRgbBackup, type RgbBackupStatus } from '../services/protocols/rgbBackup';
@@ -40,6 +41,9 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
   const [backupNeeded, setBackupNeeded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cloud, setCloud] = useState<RgbBackupStatus>(rgbBackupStatus());
+  const [indexer, setIndexer] = useState('');
+  const [proxy, setProxy] = useState('');
+  const [endpointError, setEndpointError] = useState<string | null>(null);
   useEffect(() => onRgbBackupStatus(setCloud), []);
   const nodePaired = !!protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected();
 
@@ -47,6 +51,9 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     try {
       const mnemonic = await activeMnemonic(walletId);
       setEnabled(!!(await loadRgbL1Network(mnemonic)));
+      const host = await loadRgbL1Host(mnemonic, NETWORK);
+      setIndexer(host.indexerUrl);
+      setProxy(host.transportEndpoint);
     } catch { setEnabled(false); }
     const account = rgbL1Account();
     setConnected(!!account);
@@ -70,6 +77,25 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
       }
     } catch (e: any) {
       setError(e?.message ?? 'Could not change RGB.');
+    } finally {
+      await refresh();
+      setBusy(false);
+      onChanged?.();
+    }
+  };
+
+  /** Save this wallet's indexer/proxy (null = network defaults) and reconnect with them. */
+  const saveEndpoints = async (endpoints: { indexerUrl: string; transportEndpoint: string } | null) => {
+    setBusy(true);
+    setEndpointError(null);
+    try {
+      const mnemonic = await activeMnemonic(walletId);
+      await saveRgbL1Endpoints(mnemonic, endpoints);
+      if (protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected()) await protocolManager.disconnect('RGB_L1');
+      const result = (await initializeProtocols(mnemonic, [])).get('RGB_L1');
+      if (result && !result.success && !result.error?.startsWith('skipped')) throw new Error(result.error || 'RGB could not reconnect.');
+    } catch (e: any) {
+      setEndpointError(e?.message ?? 'Could not save the endpoints.');
     } finally {
       await refresh();
       setBusy(false);
@@ -176,6 +202,27 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
           {backingUp ? <ActivityIndicator color={theme.colors.primary[500]} /> : <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
         </TouchableOpacity>
       )}
+      {enabled && (
+        <View style={[styles.endpoints, styles.divider]}>
+          <Text style={styles.label}>Network and servers</Text>
+          <Text style={styles.description}>Network: Mutinynet (test bitcoin). Saving reconnects RGB on this phone.</Text>
+          <Text style={styles.fieldLabel}>Indexer (Esplora)</Text>
+          <TextInput accessibilityLabel="RGB indexer URL" style={styles.input} value={indexer} onChangeText={setIndexer} editable={!busy}
+            autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholderTextColor={theme.colors.text.tertiary} />
+          <Text style={styles.fieldLabel}>RGB proxy</Text>
+          <TextInput accessibilityLabel="RGB proxy endpoint" style={styles.input} value={proxy} onChangeText={setProxy} editable={!busy}
+            autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholderTextColor={theme.colors.text.tertiary} />
+          {!!endpointError && <Text accessibilityRole="alert" style={[styles.description, { color: theme.colors.error[500] }]}>{endpointError}</Text>}
+          <View style={styles.endpointActions}>
+            <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => { const d = rgbL1Host(NETWORK); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); void saveEndpoints(null); }}>
+              <Text style={styles.secondaryAction}>Use defaults</Text>
+            </TouchableOpacity>
+            <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => void saveEndpoints({ indexerUrl: indexer, transportEndpoint: proxy })}>
+              <Text style={styles.action}>Save and reconnect</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -188,4 +235,12 @@ const styles = StyleSheet.create({
   label: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
   description: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
   action: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.primary[500] },
+  secondaryAction: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.secondary },
+  endpoints: { paddingHorizontal: theme.spacing[4], paddingVertical: theme.spacing[3], gap: theme.spacing[1.5] },
+  fieldLabel: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: theme.spacing[1.5] },
+  input: {
+    color: theme.colors.text.primary, borderColor: theme.colors.border.medium, borderWidth: 1, borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[3], minHeight: 44, fontSize: theme.typography.fontSize.sm,
+  },
+  endpointActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: theme.spacing[5], marginTop: theme.spacing[2], minHeight: 44, alignItems: 'center' },
 });

@@ -31,3 +31,14 @@ test('the adapter config carries the network endpoints; keys and backup password
   expect(rgbBackupPassword('seed a')).toMatch(/^[0-9a-f]{64}$/);
   expect(rgbBackupPassword('seed a')).not.toBe(rgbBackupPassword('seed b'));
 });
+
+test('a wallet can use its own indexer and proxy; bad URLs are refused', async () => {
+  const { loadRgbL1Host, saveRgbL1Endpoints, validateRgbEndpoint } = require('./rgbL1');
+  await saveRgbL1Endpoints('seed a', { indexerUrl: 'https://my-esplora.example/', transportEndpoint: 'rpcs://my-proxy.example/0.2/json-rpc' });
+  expect(await loadRgbL1Host('seed a', 'mutinynet')).toEqual(expect.objectContaining({ indexerUrl: 'https://my-esplora.example', transportEndpoint: 'rpcs://my-proxy.example/0.2/json-rpc' }));
+  expect((await loadRgbL1Host('seed b', 'mutinynet')).indexerUrl).toBe('https://esplora.signet.kaleidoswap.com');
+  await saveRgbL1Endpoints('seed a', null);
+  expect((await loadRgbL1Host('seed a', 'mutinynet')).indexerUrl).toBe('https://esplora.signet.kaleidoswap.com');
+  expect(() => validateRgbEndpoint('indexer', 'rpcs://not-an-indexer')).toThrow(/https/);
+  expect(() => validateRgbEndpoint('proxy', 'nonsense')).toThrow(/valid/);
+});

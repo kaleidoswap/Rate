@@ -1,4 +1,4 @@
-import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection } from './barkPreferences'
+import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection, isBarkOff } from './barkPreferences'
 /**
  * WDK Protocol Wiring — KaleidoSwap App
  * -------------------------------------
@@ -38,7 +38,7 @@ import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
 import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
-import { RGB_L1_ENABLED, buildRgbL1Config, isRgbLibNativeAvailable, loadRgbL1Network, rgbL1Host } from './rgbL1'
+import { RGB_L1_ENABLED, buildRgbL1Config, isRgbLibNativeAvailable, loadRgbL1Network, loadRgbL1Host } from './rgbL1'
 import { createRgbLibRnModule } from './rgbLibRn'
 import { runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
 
@@ -314,7 +314,7 @@ async function connectRgbL1(
       results.set('RGB_L1', { success: false, error: 'This app build does not include RGB. Install a newer build.' })
       return
     }
-    await manager.connect('RGB_L1', buildRgbL1Config(mnemonic, rgbL1Host(network)) as any)
+    await manager.connect('RGB_L1', buildRgbL1Config(mnemonic, await loadRgbL1Host(mnemonic, network)) as any)
     setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
     void runRgbBackup() // catch up on anything that changed since the last upload
     results.set('RGB_L1', { success: true })
@@ -352,9 +352,17 @@ async function connectBarkOnce(
   results: Map<ProtocolType, { success: boolean; error?: string }>,
 ): Promise<void> {
   try {
+    const existing = manager.getAdapterIfAvailable('BARK')
+    if (await isBarkOff(mnemonic)) {
+      // Turned off for this wallet: release it if it was running.
+      disconnectBarkFromKaleidoPay()
+      if (existing?.isConnected()) await manager.disconnect('BARK')
+      clearBarkConnection()
+      results.set('BARK', { success: false, error: 'skipped: Bark is off for this wallet' })
+      return
+    }
     const host = await loadBarkHost(mnemonic)
     if (!host) throw new Error('Bark network is not configured.')
-    const existing = manager.getAdapterIfAvailable('BARK')
     if (existing?.isConnected() && barkConnectionMatches(mnemonic, host)) {
       connectBarkToKaleidoPay(existing, host.network)
       results.set('BARK', { success: true })

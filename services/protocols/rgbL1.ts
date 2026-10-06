@@ -48,6 +48,38 @@ export function rgbL1Host(network: RgbL1Network): RgbL1Host {
   return DEFAULTS[network]
 }
 
+const endpointsKey = (mnemonic: string) => `rgb-l1-endpoints-v1-${rgbL1WalletKey(mnemonic)}`
+
+/** The wallet's endpoints: its own indexer/proxy when set in Settings, else the network defaults. */
+export async function loadRgbL1Host(mnemonic: string, network: RgbL1Network): Promise<RgbL1Host> {
+  const saved = await DatabaseService.getInstance().getSetting(endpointsKey(mnemonic))
+  let custom: Partial<RgbL1Host> = {}
+  try { custom = saved ? JSON.parse(saved) : {} } catch { /* a bad value falls back to the defaults */ }
+  return {
+    ...DEFAULTS[network],
+    ...(custom.indexerUrl ? { indexerUrl: custom.indexerUrl } : {}),
+    ...(custom.transportEndpoint ? { transportEndpoint: custom.transportEndpoint } : {}),
+  }
+}
+
+/** An Esplora indexer is https; an RGB proxy is rpcs:// (or https://) — plain http only for a local test setup. */
+export function validateRgbEndpoint(kind: 'indexer' | 'proxy', value: string): string {
+  const v = value.trim()
+  const schemes = kind === 'indexer' ? ['https:', 'http:'] : ['rpcs:', 'rpc:', 'https:', 'http:']
+  let url: URL
+  try { url = new URL(v) } catch { throw new Error(`Enter a valid ${kind === 'indexer' ? 'indexer' : 'proxy'} URL.`) }
+  if (!schemes.includes(url.protocol)) throw new Error(`The ${kind} URL must start with ${schemes.map((p) => `${p}//`).join(' or ')}.`)
+  return v.replace(/\/+$/, '')
+}
+
+/** Saves this wallet's endpoints; null clears them back to the network defaults. */
+export async function saveRgbL1Endpoints(mnemonic: string, endpoints: { indexerUrl: string; transportEndpoint: string } | null): Promise<void> {
+  const value = endpoints
+    ? JSON.stringify({ indexerUrl: validateRgbEndpoint('indexer', endpoints.indexerUrl), transportEndpoint: validateRgbEndpoint('proxy', endpoints.transportEndpoint) })
+    : ''
+  await DatabaseService.getInstance().setSetting(endpointsKey(mnemonic), value)
+}
+
 /** Non-secret per-seed key, so one phone with several wallets keeps separate choices. */
 export function rgbL1WalletKey(mnemonic: string): string {
   return bytesToHex(sha256(utf8ToBytes(`kaleidoswap/rgb-l1/v1:${mnemonic.trim()}`))).slice(0, 32)

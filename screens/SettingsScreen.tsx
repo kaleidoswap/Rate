@@ -1,8 +1,8 @@
 import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
-import { RGB_L1_ENABLED } from '../services/protocols/rgbL1';
+import { RGB_L1_ENABLED, loadRgbL1Network } from '../services/protocols/rgbL1';
 import { RgbOnDeviceSettings } from '../components/RgbOnDeviceSettings';
-import { currentBarkHost, loadBarkHost, saveBarkNetwork } from '../services/protocols/barkPreferences';
+import { currentBarkHost, isBarkOff, loadBarkHost, saveBarkNetwork, setBarkOff } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SettingsScreen.tsx
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
@@ -221,6 +221,9 @@ export default function SettingsScreen({ navigation }: Props) {
     BARK: false,
   });
   const [protocolConnecting, setProtocolConnecting] = useState<Partial<Record<SettingsAccount, boolean>>>({});
+  // Which accounts this wallet uses (chosen at setup, changed here). RGB is on when
+  // either its node is paired or RGB on this phone is on.
+  const [accountEnabled, setAccountEnabledState] = useState<Partial<Record<SettingsAccount, boolean>>>({});
   const [protocolErrors, setProtocolErrors] = useState<Partial<Record<SettingsAccount, string>>>({});
   const refreshProtocolStatus = useCallback(() => {
     setProtocolStatus({
@@ -253,9 +256,19 @@ export default function SettingsScreen({ navigation }: Props) {
           map[n.type] = net;
         }
         const wallet = await DatabaseService.getInstance().getActiveWallet();
-        if (BARK_ENABLED && wallet && wallet.id === id && wallet.encrypted_mnemonic) {
-          map.bark = (await loadBarkHost(wallet.encrypted_mnemonic))?.network ?? '';
+        const enabled: Partial<Record<SettingsAccount, boolean>> = {
+          SPARK: nets.some((n) => n.type === 'spark' && n.enabled),
+          ARKADE: nets.some((n) => n.type === 'arkade' && n.enabled),
+          RGB: nets.some((n) => n.type === 'rln' && n.enabled),
+        };
+        if (wallet && wallet.id === id && wallet.encrypted_mnemonic) {
+          if (BARK_ENABLED) {
+            enabled.BARK = !(await isBarkOff(wallet.encrypted_mnemonic));
+            map.bark = enabled.BARK ? (await loadBarkHost(wallet.encrypted_mnemonic))?.network ?? '' : '';
+          }
+          if (await loadRgbL1Network(wallet.encrypted_mnemonic)) enabled.RGB = true;
         }
+        setAccountEnabledState(enabled);
         setProtoNetworks(map);
       } catch { /* ignore */ }
     })();
@@ -313,6 +326,48 @@ export default function SettingsScreen({ navigation }: Props) {
         setProtocolConnecting((prev) => ({ ...prev, [proto]: false }));
       }
     })();
+  };
+
+  /** Turn an account on (connect it) or off (disconnect it, keep its settings). */
+  const setAccountEnabled = async (account: 'SPARK' | 'ARKADE' | 'BARK', on: boolean) => {
+    if (protocolConnecting[account]) return;
+    const id = (activeWallet as any)?.id;
+    if (!id) return;
+    setProtocolConnecting(prev => ({ ...prev, [account]: true }));
+    setProtocolErrors(prev => ({ ...prev, [account]: undefined }));
+    try {
+      const db = DatabaseService.getInstance();
+      const wallet = await db.getActiveWallet();
+      const mnemonic = wallet?.encrypted_mnemonic;
+      if (!wallet || wallet.id !== id || !mnemonic) throw new Error('Unlock your active wallet first.');
+      if (account === 'BARK') {
+        if (on) await saveBarkNetwork(mnemonic, (protoNetworks.bark || 'mainnet') as 'mainnet' | 'signet');
+        else await setBarkOff(mnemonic);
+      } else {
+        const type = PROTOCOL_TO_NETWORK_TYPE[account];
+        const existing = (await db.getWalletNetworks(id)).find((n) => n.type === type);
+        if (existing) await db.updateNetworkConfig(id, type, { enabled: on, config: existing.config });
+        else if (on) await db.addNetworkToWallet(id, { type, enabled: true, config: buildDefaultNetworkConfig(type) });
+      }
+      setAccountEnabledState(prev => ({ ...prev, [account]: on }));
+      if (on) {
+        const refreshed = await db.getActiveWallet();
+        const nets = account === 'BARK' ? [] : (refreshed?.networks ?? []).filter((n) => n.type === PROTOCOL_TO_NETWORK_TYPE[account]);
+        const result = (await initializeProtocols(mnemonic, nets)).get(account);
+        if (result && !result.success) throw new Error(result.error || `${account} did not connect.`);
+        if (account === 'BARK') setProtoNetworks(prev => ({ ...prev, bark: currentBarkHost()?.network ?? 'mainnet' }));
+      } else if (protocolManager.getAdapterIfAvailable(account)?.isConnected()) {
+        await protocolManager.disconnect(account);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Could not change the account.';
+      setProtocolErrors(prev => ({ ...prev, [account]: message }));
+      Alert.alert(on ? 'Account turned on, connection failed' : 'Could not turn off the account', message);
+    } finally {
+      refreshProtocolStatus();
+      await dispatch(loadBtcBalance());
+      setProtocolConnecting(prev => ({ ...prev, [account]: false }));
+    }
   };
 
   const changeBarkNetwork = async (network: 'mainnet' | 'signet') => {
@@ -501,7 +556,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <MainHeader title={account ? ({ RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : query ? 'Search settings' : page ? titles[page] : 'Settings'} onBack={goBack} />
+      <MainHeader title={account ? ({ RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : query ? 'Search settings' : page ? titles[page] : 'Settings'} onBack={goBack} />
       <ScrollView key={account ?? page ?? 'home'} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {!page && <Input
@@ -737,12 +792,21 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {account && activeWallet?.id != null && <AccountSettings account={account} walletId={activeWallet.id}
           network={account === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network ?? 'mainnet' : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[account]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[account]]}
-          connected={protocolStatus[account]} busy={!!protocolConnecting[account]} error={protocolErrors[account]}
+          connected={account === 'RGB' ? !!protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() : protocolStatus[account]}
+          busy={!!protocolConnecting[account]} error={protocolErrors[account]}
+          enabled={accountEnabled[account] ?? true}
+          onEnabled={account === 'RGB' ? undefined : (on) => void setAccountEnabled(account, on)}
           onNetwork={() => account === 'BARK' ? pickBarkNetwork() : pickProtocolNetwork(account)}
           onReconnect={() => account === 'BARK' ? void changeBarkNetwork((protoNetworks.bark ?? currentBarkHost()?.network ?? 'mainnet') as 'mainnet' | 'signet') : changeProtocolNetwork(account, (protoNetworks[PROTOCOL_TO_NETWORK_TYPE[account]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[account]]) as ProtocolNetwork)}
           onConnection={RGB_VIA_NWC ? () => navigation.navigate('NWCConnect') : undefined}
           onSave={patch => { if (account === 'ARKADE') changeProtocolNetwork(account, (protoNetworks.arkade ?? 'signet') as ProtocolNetwork, patch); }}
-        />}
+        >
+          {account === 'RGB' && RGB_L1_ENABLED && (
+            <View style={styles.group}>
+              <RgbOnDeviceSettings walletId={activeWallet.id} onChanged={() => { refreshProtocolStatus(); void dispatch(loadBtcBalance()); }} />
+            </View>
+          )}
+        </AccountSettings>}
 
         {/* Network changes live in the explicit Advanced section in both display modes. */}
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark') && (
@@ -762,9 +826,9 @@ export default function SettingsScreen({ navigation }: Props) {
               ARKADE: theme.colors.networks.arkade,
               BARK: protocolColor('BARK'),
             };
-            const labels: Record<string, string> = { RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
+            const labels: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
             const descs: Record<string, string> = {
-              RGB: 'On-chain, Lightning, RGB assets',
+              RGB: 'RGB assets · your node or this phone',
               SPARK: 'Bitcoin, Lightning and tokens',
               ARKADE: 'Low-fee off-chain bitcoin',
               BARK: 'Bitcoin via Second’s Ark network',
@@ -792,18 +856,13 @@ export default function SettingsScreen({ navigation }: Props) {
                     accessibilityLabel={`Change ${proto} network`}
                   />
                   <Text style={{ fontSize: 11, fontWeight: '600', color: connected ? colors[proto] : theme.colors.text.tertiary }}>
-                    {connecting ? 'Connecting...' : connected ? 'Connected' : error ? 'Error' : 'Offline'}
+                    {connecting ? 'Connecting...' : connected ? 'Connected' : accountEnabled[proto] === false ? 'Off' : error && !error.startsWith('skipped') ? 'Error' : 'Offline'}
                   </Text>
                 </View>
               </View>
             );
           })}
           </Group>
-          {RGB_L1_ENABLED && activeWallet?.id != null && (
-            <Group>
-              <RgbOnDeviceSettings walletId={activeWallet.id} onChanged={() => { refreshProtocolStatus(); void dispatch(loadBtcBalance()); }} />
-            </Group>
-          )}
           </>
         )}
 

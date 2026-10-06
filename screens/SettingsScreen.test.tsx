@@ -97,6 +97,7 @@ test('account pages expose supported controls and back returns to the account li
   fireEvent.press(screen.getByLabelText('Advanced'));
   fireEvent.press(screen.getByLabelText('Spark account settings'));
   expect(screen.getByText('Reconnect account')).toBeTruthy();
+  expect(screen.getByLabelText('Use this account')).toBeTruthy();
   expect(screen.queryByLabelText('Ark server URL')).toBeNull();
   fireEvent.press(screen.getByLabelText('Back'));
   fireEvent.press(screen.getByLabelText('Arkade account settings'));
@@ -106,7 +107,9 @@ test('account pages expose supported controls and back returns to the account li
   expect(screen.getByText('Use an HTTPS URL without credentials, query parameters or a fragment.')).toBeTruthy();
   expect(require('../services/protocols').protocolManager.disconnect).not.toHaveBeenCalled();
   fireEvent.press(screen.getByLabelText('Back'));
-  fireEvent.press(screen.getByLabelText('RGB Lightning node account settings'));
-  fireEvent.press(screen.getByText('Manage wallet connection'));
+  fireEvent.press(screen.getByLabelText('RGB account settings'));
+  // RGB: the node is managed over NWC (its own on/off); no "use this account" switch here.
+  expect(screen.queryByLabelText('Use this account')).toBeNull();
+  fireEvent.press(screen.getByText('Manage node connection'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });

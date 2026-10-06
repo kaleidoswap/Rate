@@ -14,7 +14,8 @@ import {
   KeyboardAvoidingView,
   TextInput,
 } from 'react-native';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
+import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
@@ -22,7 +23,7 @@ import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
-import { buildDefaultNetworkConfig } from '../services/protocols/networkConfig';
+import { ADVANCED_ACCOUNTS, LITE_ACCOUNTS, saveAccountPreferences, walletNetworksFor } from '../services/protocols/accountChoices';
 import { useScreenCaptureProtection } from '../hooks/useScreenCaptureProtection';
 
 interface Props {
@@ -36,6 +37,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   // The recovery phrase is typed on this screen: keep it out of screenshots.
   useScreenCaptureProtection(true);
   const dispatch = useDispatch();
+  const disclosure = useSelector(selectDisclosureLevel);
   const [step, setStep] = useState<RestoreStep>('input');
   const [name, setName] = useState('');
   const [mnemonic, setMnemonic] = useState('');
@@ -131,12 +133,11 @@ export default function WalletRestoreScreen({ navigation }: Props) {
     animateTransition('restoring');
 
     try {
-      // The same accounts a new wallet gets, so funds on any of them show up. A
-      // Lightning wallet (NWC) is connected afterwards in Settings, as on setup.
-      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [
-        { type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') },
-        { type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') },
-      ];
+      // The accounts a new wallet gets in the current mode (Lite: Spark and RGB on
+      // this phone). Others, and a Lightning wallet over NWC, are turned on in Settings.
+      const choice = disclosure === 'advanced' ? ADVANCED_ACCOUNTS : LITE_ACCOUNTS;
+      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = walletNetworksFor(choice);
+      await saveAccountPreferences(phrase, choice);
 
       // @ts-ignore
       const resultAction = await dispatch(createNewWallet({

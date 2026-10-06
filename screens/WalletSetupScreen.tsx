@@ -23,8 +23,11 @@ import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/wa
 import { setDisclosureLevel } from '../store/slices/settingsSlice';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import { theme } from '../theme';
-import { NetworkType, NetworkConfig } from '../services/DatabaseService';
-import { buildDefaultNetworkConfig, PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
+import { NetworkConfig } from '../services/DatabaseService';
+import { PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
+import { ADVANCED_ACCOUNTS, LITE_ACCOUNTS, hasAnyAccount, saveAccountPreferences, walletNetworksFor, type AccountChoice } from '../services/protocols/accountChoices';
+import { BARK_ENABLED } from '../services/protocols/bark';
+import { RGB_L1_ENABLED } from '../services/protocols/rgbL1';
 
 // New wallets start on the default networks; on a test build those hold test bitcoin.
 const TEST_BUILD = PROTOCOL_DEFAULT_NETWORK.spark !== 'mainnet' || PROTOCOL_DEFAULT_NETWORK.arkade !== 'mainnet';
@@ -48,6 +51,14 @@ interface Props {
   navigation: any;
 }
 
+/** The layers Advanced setup offers (the RGB node is its own step, over NWC). */
+const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; icon: string }[] = [
+  { key: 'spark', name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' },
+  ...(RGB_L1_ENABLED ? [{ key: 'rgbOnDevice' as const, name: 'RGB on this phone', desc: 'RGB assets on-chain, no node needed · beta, Mutinynet', icon: 'rgb' }] : []),
+  { key: 'arkade', name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' },
+  ...(BARK_ENABLED ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
+];
+
 type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
 
 export default function WalletSetupScreen({ navigation }: Props) {
@@ -65,12 +76,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
   // Disclosure level chosen at creation (default 'lite', reversible in Settings).
   const [mode, setMode] = useState<DisclosureLevel>('lite');
 
-  // Network selection state — enable all protocols by default (matching extension)
-  const [networks, setNetworks] = useState<{ [key in NetworkType]: boolean }>({
-    spark: true,
-    arkade: true,
-    rln: true,
-  });
+  // Accounts this wallet uses: Lite starts with Spark and RGB on this phone;
+  // Advanced picks its own on the "Choose accounts" step.
+  const [accounts, setAccounts] = useState<AccountChoice>(ADVANCED_ACCOUNTS);
 
   // RLN (RGB Lightning Node) over NWC — paste/scan a connection string to drive a
   // remote node. Optional: the user can skip and add it later in Settings.
@@ -136,11 +144,11 @@ export default function WalletSetupScreen({ navigation }: Props) {
       }
       dispatch(setDisclosureLevel('lite'));
       setMode('lite');
-      setNetworks({ spark: true, arkade: true, rln: rlnConnected });
+      setAccounts(LITE_ACCOUNTS);
       handleCreate();
     } else if (step === 'networks') {
-      if (!networks.spark && !networks.arkade && !rlnConnected) {
-        Alert.alert('Choose a network', 'Enable at least one network to receive and send payments.');
+      if (!hasAnyAccount(accounts, rlnConnected)) {
+        Alert.alert('Choose an account', 'Turn on at least one account to receive and send payments.');
         return;
       }
       handleCreate();
@@ -278,14 +286,10 @@ export default function WalletSetupScreen({ navigation }: Props) {
     animateTransition('creating');
 
     try {
-      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = [];
-
-      if (networks.spark) {
-        selectedNetworks.push({ type: 'spark', enabled: true, config: buildDefaultNetworkConfig('spark') });
-      }
-      if (networks.arkade) {
-        selectedNetworks.push({ type: 'arkade', enabled: true, config: buildDefaultNetworkConfig('arkade') });
-      }
+      const choice = mode === 'lite' ? LITE_ACCOUNTS : accounts;
+      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = walletNetworksFor(choice);
+      // Before the first connect: an account left out (Bark, RGB on this phone) must never start.
+      await saveAccountPreferences(generatedMnemonic, choice);
       // RLN is reached over NWC: enable it only when the user connected a node.
       // The NwcRgbAdapter reads the connection string from SecureStore.
       if (rlnConnected) {
@@ -414,7 +418,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           animateTransition('rln');
         }}
       >
-        <Text style={styles.skipButtonText}>Advanced setup · choose networks</Text>
+        <Text style={styles.skipButtonText}>Advanced setup · choose accounts</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.skipButton}
@@ -441,58 +445,41 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <Text style={styles.stepTitle}>Choose Networks</Text>
+      <Text style={styles.stepTitle}>Choose accounts</Text>
       <Text style={styles.stepDescription}>
-        Select which protocols to enable. You can change these anytime.
+        Pick the layers this wallet uses. You can turn them on or off anytime in Settings.
       </Text>
 
       <Card style={styles.networkCard}>
-        <TouchableOpacity
-          style={styles.networkItem}
-          onPress={() => setNetworks(prev => ({ ...prev, spark: !prev.spark }))}
-          activeOpacity={0.7}
-        >
-          <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: theme.colors.networkChip.spark }]}>
-              <NetworkIcon network="spark" size={24} />
+        {SETUP_ACCOUNTS.map((item, i) => {
+          const on = accounts[item.key];
+          const toggle = (v: boolean) => setAccounts(prev => ({ ...prev, [item.key]: v }));
+          return (
+            <View key={item.key}>
+              {i > 0 && <View style={styles.divider} />}
+              <TouchableOpacity style={styles.networkItem} onPress={() => toggle(!on)} activeOpacity={0.7}
+                accessibilityRole="switch" accessibilityState={{ checked: on }} accessibilityLabel={item.name}>
+                <View style={styles.networkInfo}>
+                  <View style={[styles.iconContainer, { backgroundColor: theme.colors.surface.secondary }]}>
+                    <NetworkIcon network={item.icon} size={24} />
+                  </View>
+                  <View style={styles.networkTextContainer}>
+                    <Text style={styles.networkName}>{item.name}</Text>
+                    <Text style={styles.networkDesc}>{item.desc}</Text>
+                  </View>
+                </View>
+                <Switch
+                  value={on}
+                  onValueChange={toggle}
+                  trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
+                  thumbColor={on ? theme.colors.primary[500] : theme.colors.gray[100]}
+                />
+              </TouchableOpacity>
             </View>
-            <View style={styles.networkTextContainer}>
-              <Text style={styles.networkName}>Spark</Text>
-              <Text style={styles.networkDesc}>Instant bitcoin and Lightning payments</Text>
-            </View>
-          </View>
-          <Switch
-            value={networks.spark}
-            onValueChange={(v) => setNetworks(prev => ({ ...prev, spark: v }))}
-            trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
-            thumbColor={networks.spark ? theme.colors.primary[500] : theme.colors.gray[100]}
-          />
-        </TouchableOpacity>
-
-        <View style={styles.divider} />
-
-        <TouchableOpacity
-          style={styles.networkItem}
-          onPress={() => setNetworks(prev => ({ ...prev, arkade: !prev.arkade }))}
-          activeOpacity={0.7}
-        >
-          <View style={styles.networkInfo}>
-            <View style={[styles.iconContainer, { backgroundColor: theme.colors.networkChip.arkade }]}>
-              <NetworkIcon network="arkade" size={24} />
-            </View>
-            <View style={styles.networkTextContainer}>
-              <Text style={styles.networkName}>Arkade</Text>
-              <Text style={styles.networkDesc}>Low-fee bitcoin payments off-chain</Text>
-            </View>
-          </View>
-          <Switch
-            value={networks.arkade}
-            onValueChange={(v) => setNetworks(prev => ({ ...prev, arkade: v }))}
-            trackColor={{ false: theme.colors.gray[300], true: theme.colors.primary[400] }}
-            thumbColor={networks.arkade ? theme.colors.primary[500] : theme.colors.gray[100]}
-          />
-        </TouchableOpacity>
+          );
+        })}
       </Card>
+      {rlnConnected && <Text style={styles.stepDescription}>Your RGB node is connected too: it is the RGB account while it’s online.</Text>}
     </ScrollView>
   );
 
