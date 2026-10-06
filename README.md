@@ -62,7 +62,7 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
   text chat and hands-free voice, built on the shared `@kaleidorg/mind` engine.
 - **Physical device required.** On-device inference is **not available on a simulator /
   emulator** (the rest of the wallet works fine on one). First launch downloads the
-  models (~400 MB LLM + ~40 MB Whisper).
+  models (~0.5–1.3 GB LLM + ~80 MB Whisper).
 - **Delegate to desktop.** To use the assistant on a simulator — or to offload inference
   — pair the app to a desktop **KaleidoMind provider** over P2P (see
   [AI assistant & voice](#ai-assistant--voice-on-device-vs-delegated)).
@@ -209,7 +209,7 @@ Notes:
 - After changing native addons you must **rebuild** the app (`npx expo run:ios/android`);
   a Metro reload alone won't pick them up.
 - Models are **not** bundled — they download on first launch on a physical device
-  (~400 MB LLM + ~40 MB Whisper). Delegate to a desktop provider to skip the download.
+  (~0.5–1.3 GB LLM + ~80 MB Whisper).
 - Agent skills are bundled separately: `pnpm run bundle-skills` regenerates
   `skills.bundle.json` from `skills/`.
 

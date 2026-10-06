@@ -396,9 +396,9 @@ class QVACService {
     } catch {
       /* use defaults */
     }
-    // First run (no saved choice): pick a model that fits this device's RAM
-    // instead of always defaulting to the same one.
-    if (!hadSaved) {
+    // First run (no saved choice), or a saved model no longer in the catalog
+    // (Qwen3, Llama, GPT-OSS): pick the model that fits this device's RAM.
+    if (!hadSaved || !QVAC_MODELS.some((m) => m.id === this.config.modelId)) {
       try {
         this.config = { ...this.config, modelId: await this.getRecommendedModelId() };
       } catch {

@@ -9,13 +9,9 @@
 //  - DELEGATED: inference runs on a remote P2P provider (e.g. a Mac), so the
 //    phone never downloads the weights. Any model works delegated.
 import {
-  QWEN3_600M_INST_Q4,
-  LLAMA_3_2_1B_INST_Q4_0,
-  LLAMA_TOOL_CALLING_1B_INST_Q4_K,
-  QWEN3_1_7B_INST_Q4,
-  QWEN3_4B_INST_Q4_K_M,
-  QWEN3_8B_INST_Q4_K_M,
-  GPT_OSS_20B_INST_Q4_K_M,
+  QWEN3_5_0_8B_MULTIMODAL_Q4_K_M,
+  QWEN3_5_2B_MULTIMODAL_Q4_K_M,
+  QWEN3_5_4B_MULTIMODAL_Q4_K_M,
 } from '@qvac/sdk';
 
 /** Minimum device class recommended to run a model LOCALLY (on-device). */
@@ -67,24 +63,21 @@ function entry(
   };
 }
 
+// Qwen3.5 is the default family: same sizes as Qwen3, better at following
+// instructions and calling the wallet tools. Its GGUFs run as text-only here
+// (the "multimodal" descriptors only need an extra projector for images).
+// A saved model that's no longer listed (Qwen3, Llama, GPT-OSS) is replaced by
+// the one recommended for the device when the config loads (QVACService).
 export const QVAC_MODELS: QVACModel[] = [
-  entry(QWEN3_600M_INST_Q4, 'Qwen3 0.6B', 'phone'),
-  entry(LLAMA_3_2_1B_INST_Q4_0, 'Llama 3.2 1B', 'phone'),
-  entry(LLAMA_TOOL_CALLING_1B_INST_Q4_K, 'Llama 1B (tool-calling)', 'phone'),
-  entry(QWEN3_1_7B_INST_Q4, 'Qwen3 1.7B', 'phone'),
-  // 4B/8B are large but still run on modern high-RAM phones — let users pick them
-  // on-device instead of gating them behind a "Mac / desktop" tier. Only the 20B
-  // (~11 GB) genuinely needs a desktop.
-  entry(QWEN3_4B_INST_Q4_K_M, 'Qwen3 4B', 'pro'),
-  entry(QWEN3_8B_INST_Q4_K_M, 'Qwen3 8B', 'pro'),
-  entry(GPT_OSS_20B_INST_Q4_K_M, 'GPT-OSS 20B', 'mac'),
+  entry(QWEN3_5_0_8B_MULTIMODAL_Q4_K_M, 'Qwen3.5 0.8B', 'phone'),
+  entry(QWEN3_5_2B_MULTIMODAL_Q4_K_M, 'Qwen3.5 2B', 'phone'),
+  entry(QWEN3_5_4B_MULTIMODAL_Q4_K_M, 'Qwen3.5 4B', 'pro'),
 ];
 
-// Default chat model: Qwen3 1.7B — the sweet spot on modern iPhones (loads on
-// Metal/GPU, ~1GB). Falls back to the first catalog entry if the descriptor is
-// missing. recommendLocalModel still downgrades to 0.6B on low-RAM devices.
+// Default chat model: Qwen3.5 2B (~1.3 GB) — fits modern iPhones and loads on
+// Metal/GPU. recommendLocalModel still picks 0.8B on low-RAM devices.
 export const DEFAULT_MODEL_ID =
-  QVAC_MODELS.find((m) => m.descriptor === QWEN3_1_7B_INST_Q4)?.id ?? QVAC_MODELS[0].id;
+  QVAC_MODELS.find((m) => m.descriptor === QWEN3_5_2B_MULTIMODAL_Q4_K_M)?.id ?? QVAC_MODELS[0].id;
 
 export function getModelById(id: string | undefined | null): QVACModel {
   return QVAC_MODELS.find(m => m.id === id) ?? QVAC_MODELS[0];
@@ -107,10 +100,10 @@ export function recommendLocalModel(totalMemBytes: number): QVACModel {
   const byDescriptor = (d: any) => QVAC_MODELS.find(m => m.descriptor === d);
   const gb = totalMemBytes / GiB;
   let pick: QVACModel | undefined;
-  // 1.7B (~1GB weights) loads comfortably on high-RAM phones (iPhone 15/16/17,
-  // 6GB+); below that, stay on the tiny 0.6B so low-end devices never OOM.
-  if (gb >= 6) pick = byDescriptor(QWEN3_1_7B_INST_Q4);            // high-RAM iPhone
-  else pick = byDescriptor(QWEN3_600M_INST_Q4);                     // tiny, safe default
+  // 2B (~1.3 GB weights) loads comfortably on high-RAM phones (iPhone 15/16/17,
+  // 6GB+); below that, stay on the small 0.8B so low-end devices never OOM.
+  if (gb >= 6) pick = byDescriptor(QWEN3_5_2B_MULTIMODAL_Q4_K_M);  // high-RAM phone
+  else pick = byDescriptor(QWEN3_5_0_8B_MULTIMODAL_Q4_K_M);         // small, safe default
   // Fall back to any local-capable model (then the first model) if a descriptor
   // is missing or somehow not downloadable.
   return (
