@@ -2,7 +2,7 @@ import { MobileSparkAdapter, sparkTransferStatus } from './MobileSparkAdapter';
 
 let mockSuperStatus: any = { status: 'pending' };
 jest.mock('@kaleidorg/wallet-engine/adapters/wdk', () => ({
-  SparkWdkAdapter: class { assertConnected() {} async getPaymentStatus(id: string) { return { paymentHash: id, ...mockSuperStatus }; } },
+  SparkWdkAdapter: class { assertConnected() {} async getBtcBalance() { return { confirmed: 5000, unconfirmed: 0, total: 5000 }; } async getPaymentStatus(id: string) { return { paymentHash: id, ...mockSuperStatus }; } },
 }));
 
 function adapterWith(account: any) {
@@ -61,5 +61,18 @@ describe('Spark payment status', () => {
     expect(account.getTransactionReceipt).not.toHaveBeenCalled();
     mockSuperStatus = { status: 'confirmed', amount: 5 };
     expect((await adapterWith(account).getPaymentStatus('t')).status).toBe('confirmed');
+  });
+});
+
+describe('Spark balance', () => {
+  it('shows received-but-unclaimed transfers as incoming, not spendable', async () => {
+    const adapter = new MobileSparkAdapter();
+    Object.defineProperty(adapter, 'rawWallet', { get: () => ({ getCachedBalance: async () => ({ satsBalance: { incoming: 1200n } }) }) });
+    expect(await adapter.getBtcBalance()).toEqual({ confirmed: 5000, unconfirmed: 1200, total: 6200 });
+  });
+  it('keeps the spendable balance when nothing is incoming or the read fails', async () => {
+    const adapter = new MobileSparkAdapter();
+    Object.defineProperty(adapter, 'rawWallet', { get: () => ({ getCachedBalance: async () => { throw new Error('x'); } }) });
+    expect(await adapter.getBtcBalance()).toEqual({ confirmed: 5000, unconfirmed: 0, total: 5000 });
   });
 });

@@ -65,7 +65,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const byProtocol = useAppSelector(s => s.wallet.btcBalance?.byProtocol);
   const balancesSat = useMemo(() => {
     const out: Partial<Record<PayAccountId, number>> = {};
-    for (const k of ['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]) { const b = byProtocol?.[k]; if (b) out[k] = b.total; }
+    // Spark's total includes transfers not yet claimed; only the confirmed part can pay.
+    for (const k of ['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]) { const b = byProtocol?.[k]; if (b) out[k] = k === 'SPARK' ? b.confirmed : b.total; }
     return out;
   }, [byProtocol]);
   const contacts = useAppSelector(s => s.contacts?.contacts);
