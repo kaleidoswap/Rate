@@ -56,3 +56,5 @@ patchedDependencies:
 # Bark downloads checksum-verified native binaries during installation.
 onlyBuiltDependencies:
   - '@secondts/bark-react-native'
+  # Downloads rgb-lib's iOS xcframework (macOS only) for RGB on this phone.
+  - react-native-rgb

@@ -19,7 +19,7 @@ import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
-import { protocolManager } from '../services/protocols';
+import { protocolManager, rgbAccountAdapter, rgbAccountIsOnDevice } from '../services/protocols';
 import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel, setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
@@ -392,6 +392,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     nwcWalletType,
     nwcCapabilities,
     rgbChannels: !channelsLoaded ? 'unknown' : channels.some((c) => c.is_usable) ? 'some' : 'none',
+    rgbOnDevice: rgbAccountIsOnDevice(),
   };
   const rgbLabel = rgbAccountLabel(caps);
   const connectedNow = getProtocolStatus();
@@ -754,7 +755,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         if (networkType === 'onchain') {
           // Honour the account picked in "By account" mode. In method mode the
           // existing RGB → Spark priority remains the default.
-          const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
+          const rgbAdapter = rgbAccountAdapter();
           const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
           const preferSpark = routeDestination === 'SPARK';
           if (!preferSpark && rgbAdapter?.isConnected() && rgbCanReceiveOnchain(caps)) {
@@ -818,9 +819,9 @@ export default function ReceiveScreen({ navigation }: Props) {
       } else {
         // RGB assets (require RGB adapter)
         if (networkType === 'onchain') {
-          const rgbAssetAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
+          const rgbAssetAdapter = rgbAccountAdapter();
           if (!rgbAssetAdapter?.isConnected() || !rgbAssetAdapter.createRgbInvoice) {
-            throw new Error('Connect your RGB Lightning node in Settings to receive RGB assets.');
+            throw new Error('Turn on RGB in Settings, or connect your RGB node, to receive RGB assets.');
           }
           // 'RGB_NEW' = a blind invoice (no asset_id) that can receive any RGB
           // asset the user doesn't hold yet — the "New RGB asset" entry point.
@@ -929,7 +930,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     const isCurrentGeneration = () => unifiedGenerationRef.current === generationId;
     const startedAt = nowMs();
     receiveLog('unified.usd.start', { generationId });
-    const rgb = protocolManager.getAdapterIfAvailable('RGB_LN');
+    const rgb = rgbAccountAdapter();
     const spark = protocolManager.getAdapterIfAvailable('SPARK');
     receiveLog('unified.usd.adapters', {
       generationId,
@@ -1105,7 +1106,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     // One code carries one network: only accounts on the chosen chain take part
     // (a test setup can have Spark on regtest and Arkade on mutinynet).
     const on = (account: AccountId) => universalAccounts.some((a) => a.account === account);
-    const rgb = on('RGB') ? protocolManager.getAdapterIfAvailable('RGB_LN') : undefined;
+    const rgb = on('RGB') ? rgbAccountAdapter() : undefined;
     const spark = on('SPARK') ? protocolManager.getAdapterIfAvailable('SPARK') : undefined;
     const arkade = on('ARKADE') ? protocolManager.getAdapterIfAvailable('ARKADE') : undefined;
     const bark = on('BARK') ? protocolManager.getAdapterIfAvailable('BARK') : undefined;

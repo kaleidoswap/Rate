@@ -6,7 +6,7 @@
 import { useCallback } from 'react'
 import { useAppDispatch, useAppSelector } from '../store/hooks'
 import { setActiveProtocol } from '../store/slices/walletSlice'
-import { protocolManager } from '../services/protocols'
+import { protocolManager, rgbAccountAdapter } from '../services/protocols'
 import type { ProtocolType } from '../services/protocols'
 import type { RouteResolverAccounts } from '../utils/account-routing'
 
@@ -35,7 +35,7 @@ export function useActiveProtocol() {
 /** Read current connections instead of retaining a mount-time snapshot. */
 function readProtocolStatus(): RouteResolverAccounts {
   return {
-    RGB: protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false,
+    RGB: rgbAccountAdapter()?.isConnected() ?? false,
     SPARK: protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false,
     ARKADE: protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected() ?? false,
     BARK: protocolManager.getAdapterIfAvailable('BARK')?.isConnected() ?? false,

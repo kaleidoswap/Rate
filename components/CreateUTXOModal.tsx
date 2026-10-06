@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
-import { protocolManager } from '../services/protocols';
+import { rgbAccountAdapter } from '../services/protocols';
 
 interface CreateUTXOModalProps {
   visible: boolean;
@@ -89,18 +89,23 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
     setIsLoading(true);
 
     try {
-      const rgbAdapter = protocolManager.getAdapter('RGB_LN');
-      if (!rgbAdapter) {
+      const rgbAdapter = rgbAccountAdapter() as any;
+      if (!rgbAdapter?.isConnected()) {
         throw new Error('RGB adapter not available');
       }
 
-      await rgbAdapter.executeProtocolOperation!('createUtxos', {
-        fee_rate: feeRate,
-        num: numUtxos,
-        size: utxoSize,
-        skip_sync: false,
-        up_to: false,
-      });
+      // RGB on this phone exposes createRgbUtxos; the node takes the same through its operation API.
+      if (typeof rgbAdapter.createRgbUtxos === 'function') {
+        await rgbAdapter.createRgbUtxos({ num: numUtxos, size: utxoSize, feeRate, upTo: false });
+      } else {
+        await rgbAdapter.executeProtocolOperation('createUtxos', {
+          fee_rate: feeRate,
+          num: numUtxos,
+          size: utxoSize,
+          skip_sync: false,
+          up_to: false,
+        });
+      }
 
       Alert.alert('Success', 'UTXOs created successfully');
       onClose();

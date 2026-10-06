@@ -7,7 +7,7 @@ jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f(mockState), u
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: (f: any) => require('react').useEffect(f, [f]) }));
 jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
 jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
-jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
 jest.mock('../services/PairingService', () => ({ PairingService: { getActive: async () => null } }));
 jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => [], getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));

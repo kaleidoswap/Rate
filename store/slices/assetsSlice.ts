@@ -2,7 +2,7 @@ import { toEngineProtocol } from '../../utils/protocol-bridge'
 // store/slices/assetsSlice.ts
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { AssetRecord } from '../../services/DatabaseService';
-import { protocolManager } from '../../services/protocols';
+import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
 import DatabaseService from '../../services/DatabaseService';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../../utils/flashnet';
 
@@ -139,17 +139,31 @@ export const issueNiaAsset = createAsyncThunk<
     const dbService = DatabaseService.getInstance();
 
     // Issue asset via protocolManager
-    const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
-    if (!rgbAdapter?.isConnected() || !rgbAdapter.executeProtocolOperation) {
+    const rgbAdapter = rgbAccountAdapter() as any;
+    if (!rgbAdapter?.isConnected()) {
       throw new Error('RGB protocol not connected');
     }
-    // executeProtocolOperation returns `unknown` (beta.55); narrow to the shape we use.
-    const result = (await rgbAdapter.executeProtocolOperation('issueAssetNIA', {
-      amounts: params.amounts,
-      ticker: params.ticker,
-      name: params.name,
-      precision: params.precision,
-    })) as { asset: any };
+    let result: { asset: any };
+    if (typeof rgbAdapter.issueAssetNia === 'function') {
+      // RGB on this phone returns a unified asset; shape it like the node's answer.
+      const issued = await rgbAdapter.issueAssetNia({
+        amounts: params.amounts, ticker: params.ticker, name: params.name, precision: params.precision,
+      });
+      const supply = params.amounts.reduce((sum, n) => sum + n, 0);
+      result = { asset: {
+        asset_id: issued.id, ticker: issued.ticker, name: issued.name, precision: issued.precision,
+        issued_supply: supply, balance: { settled: Number(issued.balance?.total ?? supply) },
+      } };
+    } else {
+      if (!rgbAdapter.executeProtocolOperation) throw new Error('RGB protocol not connected');
+      // executeProtocolOperation returns `unknown` (beta.55); narrow to the shape we use.
+      result = (await rgbAdapter.executeProtocolOperation('issueAssetNIA', {
+        amounts: params.amounts,
+        ticker: params.ticker,
+        name: params.name,
+        precision: params.precision,
+      })) as { asset: any };
+    }
 
     // Add to database
     await dbService.upsertAsset({

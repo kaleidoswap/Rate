@@ -4,7 +4,7 @@
  * review (see syncPayAccounts). Also tells Receive which chain each account is on.
  */
 import { useEffect } from 'react';
-import { protocolManager } from '../protocols';
+import { protocolManager, rgbAccountProtocol } from '../protocols';
 import { MobileSparkAdapter } from '../protocols/MobileSparkAdapter';
 import { registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
 import type { Network, RequestAsset } from './index';
@@ -36,7 +36,7 @@ export function normalizeChain(raw: unknown): Network | undefined {
 }
 
 /** The chain a connected wallet is on (an Arkade "signet" setting runs on the mutinynet server). */
-export function adapterChain(protocol: PayProtocol | 'BARK', adapter: any): Network | undefined {
+export function adapterChain(protocol: PayProtocol | 'RGB_L1' | 'BARK', adapter: any): Network | undefined {
   if (protocol === 'BARK') return normalizeChain(currentBarkHost()?.network);
   if (protocol === 'ARKADE') {
     const server = String(adapter?.arkInfo?.network ?? '').toLowerCase();
@@ -128,7 +128,7 @@ export function prepareSparkTokenRequest(token: Pick<SparkToken, 'id' | 'ticker'
 
 /** The chain a connected receive account is on, or undefined when it is not connected or can't tell. */
 export function receiveAccountChain(account: 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'): Network | undefined {
-  const protocol = account === 'RGB' ? 'RGB_LN' : account;
+  const protocol = account === 'RGB' ? rgbAccountProtocol() : account;
   let adapter: any;
   try { adapter = protocolManager.getAdapterIfAvailable(protocol); } catch { return undefined; }
   return adapter?.isConnected?.() ? adapterChain(protocol, adapter) : undefined;

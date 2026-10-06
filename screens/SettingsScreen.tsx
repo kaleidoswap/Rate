@@ -1,5 +1,7 @@
 import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
+import { RGB_L1_ENABLED } from '../services/protocols/rgbL1';
+import { RgbOnDeviceSettings } from '../components/RgbOnDeviceSettings';
 import { currentBarkHost, loadBarkHost, saveBarkNetwork } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SettingsScreen.tsx
@@ -37,7 +39,7 @@ import { getStoredHandle } from '../services/kaleidoswapMe';
 import { syncPaymentPush } from '../services/paymentNotifications';
 import SecurityService from '../services/SecurityService';
 import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
-import { initializeProtocols, protocolManager } from '../services/protocols';
+import { initializeProtocols, protocolManager, rgbAccountAdapter } from '../services/protocols';
 import { removeNwcCredential, WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 import { clearNwcConnections } from '../store/slices/nostrSlice';
 import {
@@ -222,7 +224,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const [protocolErrors, setProtocolErrors] = useState<Partial<Record<SettingsAccount, string>>>({});
   const refreshProtocolStatus = useCallback(() => {
     setProtocolStatus({
-      RGB: protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false,
+      RGB: rgbAccountAdapter()?.isConnected() ?? false,
       SPARK: protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false,
       ARKADE: protocolManager.getAdapterIfAvailable('ARKADE')?.isConnected() ?? false,
       BARK: protocolManager.getAdapterIfAvailable('BARK')?.isConnected() ?? false,
@@ -797,6 +799,11 @@ export default function SettingsScreen({ navigation }: Props) {
             );
           })}
           </Group>
+          {RGB_L1_ENABLED && activeWallet?.id != null && (
+            <Group>
+              <RgbOnDeviceSettings walletId={activeWallet.id} onChanged={() => { refreshProtocolStatus(); void dispatch(loadBtcBalance()); }} />
+            </Group>
+          )}
           </>
         )}
 

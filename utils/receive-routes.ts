@@ -22,6 +22,8 @@ export interface ReceiveCaps {
   nwcCapabilities?: readonly string[];
   /** Whether the RGB node has a usable channel; 'unknown' until channels load. */
   rgbChannels?: 'unknown' | 'none' | 'some';
+  /** The RGB account is rgb-lib on this phone: on-chain only, no Lightning. */
+  rgbOnDevice?: boolean;
 }
 
 export interface ReceiveDestination {
@@ -43,13 +45,16 @@ export const chainLabel = (chain?: ReceiveChain) => (chain ? CHAIN_LABELS[chain]
 const has = (accounts: ReceiveAccountInfo[], account: AccountId) => accounts.find(a => a.account === account);
 
 function rgbCanInvoice(caps: ReceiveCaps): boolean {
+  if (caps.rgbOnDevice) return false;
   return caps.nwcWalletType == null || !!caps.nwcCapabilities?.includes('createInvoice');
 }
 /** Whether the RGB slot can give a bitcoin address (a plain NWC Lightning wallet can't). */
 export function rgbCanReceiveOnchain(caps: ReceiveCaps): boolean {
+  if (caps.rgbOnDevice) return true;
   return caps.nwcWalletType !== 'ln' && (caps.nwcWalletType == null || !!caps.nwcCapabilities?.includes('onchain'));
 }
 export function rgbAccountLabel(caps: ReceiveCaps): string {
+  if (caps.rgbOnDevice) return 'RGB wallet';
   return caps.nwcWalletType === 'ln' ? 'Lightning wallet' : 'RGB Lightning node';
 }
 /** An account's name as Receive shows it. */
@@ -61,7 +66,8 @@ export function accountLabel(account: AccountId, caps: ReceiveCaps): string {
 export function lightningDestinations(accounts: ReceiveAccountInfo[], caps: ReceiveCaps): ReceiveDestination[] {
   const out: ReceiveDestination[] = [];
   const rgb = has(accounts, 'RGB');
-  if (rgb) {
+  // RGB on this phone has no Lightning: it isn't a place a Lightning payment can land.
+  if (rgb && !caps.rgbOnDevice) {
     const invoice = rgbCanInvoice(caps);
     const noChannel = caps.nwcWalletType !== 'ln' && caps.rgbChannels === 'none';
     out.push({
@@ -90,7 +96,10 @@ export function onchainDestinations(accounts: ReceiveAccountInfo[], caps: Receiv
   const out: ReceiveDestination[] = [];
   const rgb = has(accounts, 'RGB');
   if (rgb && rgbCanReceiveOnchain(caps)) {
-    out.push({ account: 'RGB', label: rgbAccountLabel(caps), chain: rgb.chain, needsAmount: false, detail: 'Your node’s bitcoin wallet', available: true });
+    out.push({
+      account: 'RGB', label: rgbAccountLabel(caps), chain: rgb.chain, needsAmount: false, available: true,
+      detail: caps.rgbOnDevice ? 'Your RGB wallet on this phone' : 'Your node’s bitcoin wallet',
+    });
   }
   const spark = has(accounts, 'SPARK');
   if (spark) out.push({ account: 'SPARK', label: 'Spark', chain: spark.chain, needsAmount: false, detail: 'Claimed into Spark after it confirms', available: true });
@@ -137,7 +146,7 @@ export function methodsFor(family: AssetFamily | 'USD', accounts: ReceiveAccount
   if (family === 'USD') return ['universal'];
   if (family === 'RGB') {
     if (!has(accounts, 'RGB')) return [];
-    return caps.rgbChannels === 'none' ? ['onchain'] : ['onchain', 'lightning'];
+    return caps.rgbOnDevice || caps.rgbChannels === 'none' ? ['onchain'] : ['onchain', 'lightning'];
   }
   if (family !== 'BTC') return [];
   const methods: ReceiveMethodId[] = ['universal'];

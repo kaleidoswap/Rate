@@ -4,6 +4,7 @@ jest.mock('../services/protocols', () => ({
   protocolManager: {
     getAdapterIfAvailable: jest.fn((name: string) => adapters[name]),
   },
+  rgbAccountAdapter: () => adapters.RGB_LN ?? adapters.RGB_L1,
 }));
 
 import { loadActivity } from '../services/ActivityService';
