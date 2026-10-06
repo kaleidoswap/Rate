@@ -1,6 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { isPayable } from '../services/kaleidoPay';
+import { rgbInvoiceWallet } from '../services/kaleidoPay/connect';
 // screens/QRScannerScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -309,12 +310,12 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const handleRGBInvoice = async (invoice: string) => {
-    // Decoding an RGB invoice requires the RGB/NWC node — don't call it offline.
-    if (!rgbAdapter?.isConnected()) {
-      throw new Error('Your RGB Lightning node isn’t connected. Connect it in Settings to pay RGB invoices.');
+    // Decoding an RGB invoice needs an RGB wallet: the node, or RGB on this phone.
+    const rgbWallet = rgbInvoiceWallet();
+    if (!rgbWallet?.decodeRgbInvoice) {
+      throw new Error('Turn on RGB in Settings, or connect your RGB node, to pay RGB invoices.');
     }
-    // Decode RGB invoice (decodeRgbInvoice returns `unknown` in beta.55; narrow to what we read).
-    const decodedInvoice = (await rgbAdapter.decodeRgbInvoice!({ invoice })) as {
+    const decodedInvoice = (await rgbWallet.decodeRgbInvoice({ invoice })) as {
       assignment?: { type?: string; value?: number | string };
       asset_id?: string;
     };

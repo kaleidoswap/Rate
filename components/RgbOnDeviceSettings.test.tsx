@@ -22,6 +22,12 @@ jest.mock('expo-file-system', () => ({
   Paths: { cache: { uri: 'file:///cache' } },
   File: class { exists = false; uri: string; constructor(dir: any, name: string) { this.uri = `${dir.uri}/${name}`; } delete() {} },
 }));
+const mockRunBackup = jest.fn(async () => undefined);
+jest.mock('../services/protocols/rgbBackup', () => ({
+  rgbBackupStatus: () => ({ state: 'idle' }),
+  onRgbBackupStatus: () => () => undefined,
+  runRgbBackup: (...a: any[]) => (mockRunBackup as any)(...a),
+}));
 jest.mock('../services/ToastService', () => ({ __esModule: true, default: { getInstance: () => ({ success: jest.fn(), error: jest.fn() }) } }));
 
 beforeEach(() => {
@@ -40,8 +46,11 @@ test('turning it on asks first, saves Mutinynet and connects', async () => {
   await act(async () => { buttons[1].onPress(); });
   expect(mockSave).toHaveBeenCalledWith('seed words', 'mutinynet');
   expect(mockInitialize).toHaveBeenCalledWith('seed words', []);
-  // Connected and changed since the last backup: the backup row says so.
-  expect(screen.getByText('Changed since the last backup · back up now')).toBeTruthy();
-  await act(async () => { fireEvent.press(screen.getByText('Back up RGB data')); });
+  // Connected and changed since the last backup: the cloud row says so and backs up on demand.
+  expect(screen.getByText('Changed since the last backup · backs up automatically')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByLabelText('Back up RGB data now')); });
+  expect(mockRunBackup).toHaveBeenCalledWith(true);
+  // The file export writes rgb-lib's encrypted backup with the seed-derived password.
+  await act(async () => { fireEvent.press(screen.getByText('Export backup file')); });
   expect(mockAdapters.RGB_L1.account.backup).toHaveBeenCalledWith(expect.stringMatching(/kaleidoswap-rgb-.*\.rgbbackup$/), 'derived-password');
 });

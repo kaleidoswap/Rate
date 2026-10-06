@@ -40,6 +40,7 @@ import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleid
 import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
 import { RGB_L1_ENABLED, buildRgbL1Config, isRgbLibNativeAvailable, loadRgbL1Network, rgbL1Host } from './rgbL1'
 import { createRgbLibRnModule } from './rgbLibRn'
+import { runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
 
 /** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
 export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
@@ -94,7 +95,8 @@ function registerWdkModuleLoaders(): void {
   // The engine's RGB_L1 adapter loads the WDK rgb module; on the phone that is native
   // rgb-lib behind the same surface (./rgbLibRn.ts), required only on connect.
   if (RGB_L1_ENABLED) {
-    registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => require('react-native-rgb')))
+    // Every change (send, receive, settle) schedules the automatic cloud backup.
+    registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => require('react-native-rgb'), { onChange: scheduleRgbBackup }))
   }
 }
 
@@ -299,10 +301,12 @@ async function connectRgbL1(
     const network = await loadRgbL1Network(mnemonic)
     if (!network || manager.getAdapterIfAvailable('RGB_LN')?.isConnected()) {
       // Turned off, or the node is the RGB account: release the local wallet.
+      setRgbBackupContext(null)
       if (existing?.isConnected()) await manager.disconnect('RGB_L1')
       return
     }
     if (existing?.isConnected()) {
+      setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
       results.set('RGB_L1', { success: true })
       return
     }
@@ -311,6 +315,8 @@ async function connectRgbL1(
       return
     }
     await manager.connect('RGB_L1', buildRgbL1Config(mnemonic, rgbL1Host(network)) as any)
+    setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
+    void runRgbBackup() // catch up on anything that changed since the last upload
     results.set('RGB_L1', { success: true })
     console.log(`[initializeWdkProtocols] RGB_L1 connected (${network})`)
   } catch (error: unknown) {

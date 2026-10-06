@@ -6,8 +6,9 @@
  * RGB Lightning node (paired over NWC) or this on-device wallet; the node wins
  * when both are available (see utils/protocol-bridge.ts).
  *
- * Opt-in per wallet from Settings › Advanced, and Mutinynet only for now: RGB
- * state can't be rebuilt from the seed alone, so mainnet waits for cloud backup.
+ * Opt-in per wallet from Settings › Advanced, and Mutinynet only for now. RGB
+ * state can't be rebuilt from the seed alone: ./rgbBackup.ts uploads rgb-lib's
+ * encrypted backup to VSS after every change.
  * Disable entirely with EXPO_PUBLIC_RGB_L1=0.
  */
 import { TurboModuleRegistry } from 'react-native'
@@ -37,7 +38,8 @@ export interface RgbL1Host {
 const DEFAULTS: Record<RgbL1Network, RgbL1Host> = {
   mutinynet: {
     network: 'mutinynet',
-    indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_INDEXER_URL || 'https://mutinynet.com/api',
+    // KaleidoSwap's Esplora for Mutinynet (KaleidoSwap's signet).
+    indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_INDEXER_URL || 'https://esplora.signet.kaleidoswap.com',
     transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
   },
 }

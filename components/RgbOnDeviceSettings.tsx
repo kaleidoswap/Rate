@@ -1,9 +1,10 @@
 // components/RgbOnDeviceSettings.tsx
 //
 // Settings › Advanced: RGB on this phone (rgb-lib, on-chain, Mutinynet for now).
-// Turning it on makes the RGB account a local wallet when no RGB node is paired;
-// the backup row exports rgb-lib's encrypted backup, which the seed alone can't
-// replace (RGB state and consignments live only in the wallet).
+// Turning it on makes the RGB account a local wallet when no RGB node is paired.
+// RGB state can't be rebuilt from the seed, so rgb-lib's encrypted backup is
+// uploaded to the cloud after every change (services/protocols/rgbBackup.ts);
+// these rows show that, back up on demand, or export the file.
 import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +16,7 @@ import { initializeProtocols, protocolManager } from '../services/protocols';
 import { loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable } from '../services/protocols/rgbL1';
 import { toFilesystemPath } from '../services/protocols/bark';
 import ToastService from '../services/ToastService';
+import { onRgbBackupStatus, rgbBackupStatus, runRgbBackup, type RgbBackupStatus } from '../services/protocols/rgbBackup';
 
 const NETWORK = 'mutinynet' as const;
 
@@ -37,6 +39,8 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
   const [backingUp, setBackingUp] = useState(false);
   const [backupNeeded, setBackupNeeded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cloud, setCloud] = useState<RgbBackupStatus>(rgbBackupStatus());
+  useEffect(() => onRgbBackupStatus(setCloud), []);
   const nodePaired = !!protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected();
 
   const refresh = useCallback(async () => {
@@ -89,7 +93,12 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
     );
   };
 
-  const backup = async () => {
+  const backupNow = async () => {
+    await runRgbBackup(true);
+    await refresh();
+  };
+
+  const exportFile = async () => {
     const account = rgbL1Account();
     if (!account || backingUp) return;
     setBackingUp(true);
@@ -102,7 +111,7 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(file.uri, { dialogTitle: 'Save your RGB backup', mimeType: 'application/octet-stream' });
       }
-      ToastService.getInstance().success('RGB backup created. Keep it with your recovery phrase.');
+      ToastService.getInstance().success('RGB backup file created. Keep it with your recovery phrase.');
     } catch (e: any) {
       ToastService.getInstance().error(e?.message ?? 'Could not create the RGB backup.');
     } finally {
@@ -111,6 +120,12 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
   };
 
   const color = protocolColor('RGB');
+  const cloudColor = cloud.state === 'failed' || (backupNeeded && cloud.state !== 'backing-up') ? theme.colors.warning[500] : theme.colors.primary[500];
+  const cloudLine = cloud.state === 'backing-up' ? 'Backing up…'
+    : cloud.state === 'failed' ? `Last backup failed · ${cloud.error ?? 'retries on the next change'}`
+    : backupNeeded ? 'Changed since the last backup · backs up automatically'
+    : cloud.lastBackupAt ? `Backed up automatically · ${new Date(cloud.lastBackupAt).toLocaleString()}`
+    : 'Backs up automatically after every send and receive';
   const native = isRgbLibNativeAvailable();
   const status = busy ? 'Starting…' : !enabled ? 'Off' : nodePaired ? 'Your RGB node is used while it’s connected' : connected ? 'On · Mutinynet' : 'Not connected';
 
@@ -133,15 +148,30 @@ export function RgbOnDeviceSettings({ walletId, onChanged }: { walletId: number;
               trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }} />}
       </View>
       {enabled && connected && (
-        <TouchableOpacity accessibilityRole="button" onPress={backup} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-          <View style={[styles.icon, { backgroundColor: (backupNeeded ? theme.colors.warning[500] : theme.colors.primary[500]) + '1A' }]}>
-            <Ionicons name="cloud-upload-outline" size={18} color={backupNeeded ? theme.colors.warning[500] : theme.colors.primary[500]} />
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back up RGB data now" onPress={backupNow}
+          disabled={cloud.state === 'backing-up'} activeOpacity={0.7} style={[styles.row, styles.divider]}>
+          <View style={[styles.icon, { backgroundColor: cloudColor + '1A' }]}>
+            <Ionicons name={cloud.state === 'failed' ? 'cloud-offline-outline' : 'cloud-done-outline'} size={18} color={cloudColor} />
           </View>
           <View style={styles.text}>
-            <Text style={styles.label}>Back up RGB data</Text>
-            <Text style={[styles.description, backupNeeded && { color: theme.colors.warning[500] }]} numberOfLines={2}>
-              {backupNeeded ? 'Changed since the last backup · back up now' : 'Encrypted with your recovery phrase'}
+            <Text style={styles.label}>Cloud backup</Text>
+            <Text style={[styles.description, (cloud.state === 'failed' || backupNeeded) && { color: cloudColor }]} numberOfLines={2}>
+              {cloudLine}
             </Text>
+          </View>
+          {cloud.state === 'backing-up'
+            ? <ActivityIndicator color={theme.colors.primary[500]} />
+            : <Text style={styles.action}>Back up now</Text>}
+        </TouchableOpacity>
+      )}
+      {enabled && connected && (
+        <TouchableOpacity accessibilityRole="button" onPress={exportFile} activeOpacity={0.7} style={[styles.row, styles.divider]}>
+          <View style={[styles.icon, { backgroundColor: theme.colors.text.secondary + '1A' }]}>
+            <Ionicons name="share-outline" size={18} color={theme.colors.text.secondary} />
+          </View>
+          <View style={styles.text}>
+            <Text style={styles.label}>Export backup file</Text>
+            <Text style={styles.description} numberOfLines={2}>Encrypted with your recovery phrase · save it anywhere</Text>
           </View>
           {backingUp ? <ActivityIndicator color={theme.colors.primary[500]} /> : <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
         </TouchableOpacity>
@@ -157,4 +187,5 @@ const styles = StyleSheet.create({
   text: { flex: 1, minWidth: 0 },
   label: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
   description: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
+  action: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.primary[500] },
 });

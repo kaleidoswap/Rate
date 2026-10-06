@@ -113,3 +113,27 @@ test('the engine’s RGB_L1 adapter runs on it end to end', async () => {
   await adapter.disconnect();
   expect(wallet.close).toHaveBeenCalled();
 });
+
+test('every change schedules a backup; witness invoices get their output funded; invoices decode in the node’s shape', async () => {
+  const { lib, wallet } = fakeLib();
+  const onChange = jest.fn();
+  const account = await new (createRgbLibRnModule(() => lib as any, { onChange }).WalletManagerRgb)('seed', options).getAccount();
+  await account.receiveAsset({ assetId: 'rgb:usdt' });
+  await account.sendTransaction({ to: 'tb1q', value: 1000 });
+  await account.createUtxos();
+  expect(onChange).toHaveBeenCalledTimes(3);
+  // A refresh that moved a transfer counts as a change; an idle one doesn't.
+  wallet.refresh.mockResolvedValueOnce({ 1: { updatedStatus: 'SETTLED' } } as any);
+  await account.refreshWallet();
+  expect(onChange).toHaveBeenCalledTimes(4);
+  await account.refreshWallet();
+  expect(onChange).toHaveBeenCalledTimes(4);
+  lib.decodeInvoice.mockResolvedValue({ recipientId: 'wvout:abc', transportEndpoints: [], assetId: 'rgb:usdt', invoice: 'i',
+    assignment: { type: 'FUNGIBLE', amount: 500 }, network: 'SIGNET', expirationTimestamp: null } as any);
+  await account.transfer({ token: 'rgb:usdt', recipient: 'rgb:witness-invoice', amount: 500 });
+  expect(wallet.send).toHaveBeenLastCalledWith({ 'rgb:usdt': [expect.objectContaining({ recipientId: 'wvout:abc', witnessData: { amountSat: 1000 }, transportEndpoints: ['rpcs://proxy.example/json-rpc'] })] }, false, 2, 1);
+  expect(onChange).toHaveBeenCalledTimes(5);
+  expect(await account.decodeRgbInvoice('rgb:witness-invoice')).toEqual(expect.objectContaining({
+    asset_id: 'rgb:usdt', recipient_id: 'wvout:abc', assignment: { type: 'Fungible', value: 500 },
+  }));
+});

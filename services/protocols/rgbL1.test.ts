@@ -23,7 +23,7 @@ test('off until the wallet turns it on, then remembered per seed', async () => {
 test('the adapter config carries the network endpoints; keys and backup password never leak the seed', () => {
   const config = buildRgbL1Config('seed a', rgbL1Host('mutinynet'));
   expect(config).toEqual(expect.objectContaining({
-    protocol: 'RGB_L1', network: 'mutinynet', indexerUrl: 'https://mutinynet.com/api',
+    protocol: 'RGB_L1', network: 'mutinynet', indexerUrl: 'https://esplora.signet.kaleidoswap.com',
     transportEndpoint: 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
   }));
   expect(config.dataDir).toBe(`rgb-l1/${rgbL1WalletKey('seed a')}`);

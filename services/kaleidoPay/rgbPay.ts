@@ -23,6 +23,10 @@ export interface RgbPayAdapter {
 export interface RgbPayOptions {
   /** On-chain fee rate in sat/vB; defaults to the old Send screen's "Normal" (2). */
   feeRate?: () => number;
+  /** How Send names the wallet: 'RGB node' (default) or 'RGB wallet' for RGB on this phone. */
+  walletName?: string;
+  /** Register the Lightning account (default true; RGB on this phone has no Lightning). */
+  lightning?: boolean;
 }
 
 /** Conservative size of a node on-chain send (several inputs, change, RGB anchor); the node picks real inputs. */
@@ -81,7 +85,7 @@ export function createRgbLightningAccount(rgb: RgbPayAdapter, network: Network):
 
 export function createRgbOnchainAccount(rgb: RgbPayAdapter, network: Network, opts: RgbPayOptions = {}): PayAccount {
   return createDirectAccount<{ address: string; feeRate: number }>({
-    id: 'rgb-btc', rail: 'btc', network, walletName: 'RGB node', optionName: 'On-chain', estimatedSeconds: 3600,
+    id: 'rgb-btc', rail: 'btc', network, walletName: opts.walletName ?? 'RGB node', optionName: 'On-chain', estimatedSeconds: 3600,
     isConnected: () => rgb.isConnected(),
     async prepare(preview) {
       const address = preview.code.address;
@@ -90,7 +94,7 @@ export function createRgbOnchainAccount(rgb: RgbPayAdapter, network: Network, op
       const amount = preview.request.amountSat;
       const feeRate = feeRateOf(opts);
       const feeSat = onchainFee(opts);
-      if (amount + feeSat > Math.floor((await confirmedBtc(rgb)).confirmed)) throw notEnough('RGB node');
+      if (amount + feeSat > Math.floor((await confirmedBtc(rgb)).confirmed)) throw notEnough(opts.walletName ?? 'RGB node');
       return { feeSat, terms: { address, feeRate }, detail: `${ESTIMATE} (${feeRate} sat/vB)` };
     },
     matches: (preview, terms) => preview.code.address === terms.address,
@@ -109,7 +113,7 @@ export function createRgbOnchainAccount(rgb: RgbPayAdapter, network: Network, op
  */
 export function createRgbAssetAccount(rgb: RgbPayAdapter, network: Network, asset: SpendAsset, opts: RgbPayOptions = {}): PayAccount {
   return createDirectAccount<{ invoice: string; assetId: string; amount: number }>({
-    id: 'rgb-asset', rail: 'rgb', network, walletName: 'RGB node', optionName: `RGB · ${asset.ticker}`, estimatedSeconds: 3600,
+    id: 'rgb-asset', rail: 'rgb', network, walletName: opts.walletName ?? 'RGB node', optionName: `RGB · ${asset.ticker}`, estimatedSeconds: 3600,
     spendAsset: asset,
     isConnected: () => rgb.isConnected(),
     async prepare(preview) {
@@ -126,7 +130,7 @@ export function createRgbAssetAccount(rgb: RgbPayAdapter, network: Network, asse
         const balance = await rgb.getAssetBalance(requested.id);
         // On-chain spendable: the node's available balance less what sits in channels.
         const onchain = Number(balance?.available ?? 0) - Number(balance?.offchain_outbound ?? 0);
-        if (!Number.isFinite(onchain) || requested.amount > onchain) throw notEnough('RGB node');
+        if (!Number.isFinite(onchain) || requested.amount > onchain) throw notEnough(opts.walletName ?? 'RGB node');
       }
       const btcFee = onchainFee(opts);
       return {
@@ -185,9 +189,17 @@ export function registerRgbAssetPayment(asset: SpendAsset): () => void {
   return () => { unregister(); if (assetUnregister === unregister) assetUnregister = null; };
 }
 
-/** Registers the RGB node's Lightning account and, on an RGB Lightning node, its on-chain account. */
+/** The RGB wallet Send pays RGB invoices from right now (the node, or RGB on this phone), if any. */
+export function currentRgbPayAdapter(): RgbPayAdapter | null {
+  return current?.rgb ?? null;
+}
+
+/**
+ * Registers the RGB node's Lightning account and, on an RGB Lightning node, its on-chain account.
+ * RGB on this phone registers with `lightning: false`: on-chain bitcoin and RGB assets only.
+ */
 export function connectRgbPayAccounts(rgb: RgbPayAdapter, network: Network, opts: RgbPayOptions = {}): () => void {
-  const unregister = [registerKaleidoPayAccount(createRgbLightningAccount(rgb, network))];
+  const unregister = opts.lightning === false ? [] : [registerKaleidoPayAccount(createRgbLightningAccount(rgb, network))];
   if (isRln(rgb) && rgb.sendBtcOnchain) unregister.push(registerKaleidoPayAccount(createRgbOnchainAccount(rgb, network, opts)));
   const context = { rgb, network, opts };
   if (isRln(rgb)) current = context;

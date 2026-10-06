@@ -39,8 +39,11 @@ export function libNetwork(network: string): LibNetwork {
 // rgb-lib only moves an incoming transfer forward (and syncs the chain) when asked;
 // reads refresh at most this often so balances stay current without hammering the indexer.
 const REFRESH_EVERY_MS = 30_000
-// Colorable UTXOs rgb-lib creates by default; a witness output needs at least dust.
 const DEFAULT_FEE_RATE = 2
+// The output a sender creates for a witness invoice: rgb-lib's colorable-UTXO size, above dust.
+const WITNESS_OUTPUT_SAT = 1000
+/** rgb-lib names a witness recipient `wvout:…` and a blinded UTXO `utxob:…`. */
+const isWitnessRecipient = (recipientId: string) => /^wvout:/i.test(recipientId)
 
 /** 'RECEIVE_WITNESS' → 'ReceiveWitness', as the RGB node names transfer kinds and statuses. */
 function pascal(value: string): string {
@@ -56,6 +59,8 @@ export class RgbLibRnAccount {
     private readonly lib: RgbModule,
     private readonly wallet: RgbLib.Wallet,
     private readonly transportEndpoint: string,
+    /** Called after anything that changes what a backup holds (send, receive, settle). */
+    private readonly onChange: () => void = () => undefined,
   ) {}
 
   /** Advance pending transfers and sync, at most every REFRESH_EVERY_MS (or now with force). */
@@ -64,8 +69,9 @@ export class RgbLibRnAccount {
     if (!force && Date.now() - this.lastRefresh < REFRESH_EVERY_MS) return
     this.refreshing = (async () => {
       try {
-        await this.wallet.refresh(null, [], false)
+        const updated = await this.wallet.refresh(null, [], false)
         this.lastRefresh = Date.now()
+        if (updated && Object.keys(updated).length) this.onChange() // a transfer moved: settle, receive, fail
       } finally {
         this.refreshing = null
       }
@@ -120,6 +126,7 @@ export class RgbLibRnAccount {
       assetId, assignment, params.durationSeconds ?? params.duration_seconds ?? null,
       [this.transportEndpoint], params.minConfirmations ?? params.min_confirmations ?? 1,
     )
+    this.onChange()
     return { ...data, recipient_id: data.recipientId, expiration_timestamp: data.expirationTimestamp }
   }
 
@@ -134,22 +141,42 @@ export class RgbLibRnAccount {
   }): Promise<RgbLib.OperationResult> {
     const invoice = await this.lib.decodeInvoice(params.recipient)
     const endpoints = invoice.transportEndpoints?.length ? invoice.transportEndpoints : [this.transportEndpoint]
+    // A witness invoice asks the sender to create the receiving output: fund it with
+    // rgb-lib's usual colorable-UTXO size unless the caller chose otherwise.
+    const witnessData = params.witnessData ?? (isWitnessRecipient(invoice.recipientId) ? { amountSat: WITNESS_OUTPUT_SAT } : undefined)
     const recipient: RgbLib.Recipient = {
       recipientId: invoice.recipientId,
       assignment: { type: 'FUNGIBLE', amount: params.amount },
       transportEndpoints: endpoints,
-      ...(params.witnessData ? { witnessData: params.witnessData } : {}),
+      ...(witnessData ? { witnessData } : {}),
     }
     const result = await this.wallet.send(
       { [params.token]: [recipient] }, false, params.feeRate ?? DEFAULT_FEE_RATE, params.minConfirmations ?? 1,
     )
     this.lastRefresh = 0 // the next read picks the transfer up
+    this.onChange()
     return result
   }
 
+  /** An RGB invoice decoded on the device, in the RGB node's shape (what Send reads). */
+  async decodeRgbInvoice(invoice: string) {
+    const d = await this.lib.decodeInvoice(invoice)
+    const fungible = d.assignment?.type === 'FUNGIBLE' && d.assignment.amount
+    return {
+      ...d,
+      asset_id: d.assetId,
+      recipient_id: d.recipientId,
+      transport_endpoints: d.transportEndpoints,
+      expiration_timestamp: d.expirationTimestamp,
+      assignment: fungible ? { type: 'Fungible', value: d.assignment.amount } : { type: pascal(d.assignment?.type ?? 'ANY') },
+    }
+  }
+
   /** Plain BTC on-chain send; resolves to the txid. */
-  sendTransaction(params: { to: string; value: number; feeRate?: number }): Promise<string> {
-    return this.wallet.sendBtc(params.to, params.value, params.feeRate ?? DEFAULT_FEE_RATE)
+  async sendTransaction(params: { to: string; value: number; feeRate?: number }): Promise<string> {
+    const txid = await this.wallet.sendBtc(params.to, params.value, params.feeRate ?? DEFAULT_FEE_RATE)
+    this.onChange()
+    return txid
   }
 
   /** BTC history, with rgb-lib's confirmation time in the shape the adapter reads. */
@@ -180,6 +207,7 @@ export class RgbLibRnAccount {
   async createUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean } = {}): Promise<number> {
     const created = await this.wallet.createUtxos(params.upTo ?? true, params.num ?? 5, params.size ?? null, params.feeRate ?? DEFAULT_FEE_RATE)
     this.lastRefresh = 0
+    this.onChange()
     return created
   }
 
@@ -187,8 +215,10 @@ export class RgbLibRnAccount {
     return this.wallet.signPsbt(psbt)
   }
 
-  issueAssetNia(params: { ticker: string; name: string; precision: number; amounts: number[] }): Promise<RgbLib.AssetNia> {
-    return this.wallet.issueAssetNia(params.ticker, params.name, params.precision, params.amounts)
+  async issueAssetNia(params: { ticker: string; name: string; precision: number; amounts: number[] }): Promise<RgbLib.AssetNia> {
+    const asset = await this.wallet.issueAssetNia(params.ticker, params.name, params.precision, params.amounts)
+    this.onChange()
+    return asset
   }
 
   /** Encrypted backup of everything the seed can't rebuild (RGB state, consignments). */
@@ -211,7 +241,7 @@ export class RgbLibRnAccount {
  * `load` is a lazy `require('react-native-rgb')`, so the native module is touched
  * only when the RGB account connects.
  */
-export function createRgbLibRnModule(load: () => RgbModule) {
+export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: () => void } = {}) {
   class WalletManagerRgb {
     private account: RgbLibRnAccount | null = null
 
@@ -229,7 +259,7 @@ export function createRgbLibRnModule(load: () => RgbModule) {
       const keys = await lib.restoreKeys(network, this.mnemonic)
       const wallet = new lib.Wallet(keys, { network })
       await wallet.goOnline(this.options.indexerUrl)
-      this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint)
+      this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange)
       return this.account
     }
 

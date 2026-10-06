@@ -9,6 +9,7 @@ jest.mock('react-redux', () => ({ useSelector: (cb: any) => cb({ settings: { bit
 jest.mock('expo-camera', () => ({ CameraView: 'CameraView', useCameraPermissions: jest.fn(), scanFromURLAsync: jest.fn() }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => undefined } }));
+jest.mock('../services/kaleidoPay/connect', () => ({ rgbInvoiceWallet: () => null }));
 jest.mock('../components/payments/InvoiceExpiry', () => ({ invoiceExpiry: jest.fn(() => null) }));
 jest.mock('../utils/decodeInvoice', () => ({ decodeBolt11: jest.fn() }));
 beforeEach(() => {

@@ -9,14 +9,16 @@ import { MobileSparkAdapter } from '../protocols/MobileSparkAdapter';
 import { registerKaleidoPayAccount, registerKaleidoPayPreparer } from './index';
 import type { Network, RequestAsset } from './index';
 import { connectSparkPayAccounts, connectedSparkTokens, registerSparkTokenPayment, type SparkToken } from './sparkPay';
-import { connectRgbPayAccounts, rgbRequestAsset, registerRgbAssetPayment } from './rgbPay';
+import { connectRgbPayAccounts, currentRgbPayAdapter, rgbRequestAsset, registerRgbAssetPayment, type RgbPayAdapter } from './rgbPay';
+import { connectRgbL1PayAccounts } from './rgbL1Pay';
 import { connectArkadePayAccounts } from './arkadePay';
 import { getPayOptions } from './payOptions';
 import { currentBarkHost } from '../protocols/barkPreferences';
 import type { ArkadeLightningReceiveOptions } from './arkadeIntents';
 
-type PayProtocol = 'SPARK' | 'RGB_LN' | 'ARKADE';
-const PAY_PROTOCOLS: PayProtocol[] = ['SPARK', 'RGB_LN', 'ARKADE'];
+// RGB_L1 (RGB on this phone) connects only when no RGB node is connected, so at most one RGB wallet registers.
+type PayProtocol = 'SPARK' | 'RGB_LN' | 'RGB_L1' | 'ARKADE';
+const PAY_PROTOCOLS: PayProtocol[] = ['SPARK', 'RGB_LN', 'RGB_L1', 'ARKADE'];
 const registered = new Map<PayProtocol, { adapter: unknown; network: Network; off: () => void }>();
 
 /** The KaleidoSwap maker: configured with the RGB node, else an override, else the live signet maker on test chains. */
@@ -36,7 +38,7 @@ export function normalizeChain(raw: unknown): Network | undefined {
 }
 
 /** The chain a connected wallet is on (an Arkade "signet" setting runs on the mutinynet server). */
-export function adapterChain(protocol: PayProtocol | 'RGB_L1' | 'BARK', adapter: any): Network | undefined {
+export function adapterChain(protocol: PayProtocol | 'BARK', adapter: any): Network | undefined {
   if (protocol === 'BARK') return normalizeChain(currentBarkHost()?.network);
   if (protocol === 'ARKADE') {
     const server = String(adapter?.arkInfo?.network ?? '').toLowerCase();
@@ -49,6 +51,7 @@ export function adapterChain(protocol: PayProtocol | 'RGB_L1' | 'BARK', adapter:
 function register(protocol: PayProtocol, adapter: any, network: Network): () => void {
   if (protocol === 'SPARK') return connectSparkPayAccounts(adapter, network);
   if (protocol === 'RGB_LN') return connectRgbPayAccounts(adapter, network);
+  if (protocol === 'RGB_L1') return connectRgbL1PayAccounts(adapter, network);
   return connectArkadePayAccounts(adapter, network, {
     makerUrl: kaleidoswapMakerUrl(network, getPayOptions().makerUrl),
     arkServerUrl: getPayOptions().arkServerUrl,
@@ -96,13 +99,20 @@ export function usePayAccounts(walletId: number | undefined): void {
 export type RgbRequestAsset = Omit<RequestAsset, 'amount'> & { amount?: number };
 let rgbAssetRegistration: (() => void) | null = null;
 
+/** The connected RGB wallet that can read and pay RGB invoices (the node, or RGB on this phone). */
+export function rgbInvoiceWallet(): RgbPayAdapter | null {
+  syncPayAccounts();
+  const adapter = currentRgbPayAdapter();
+  return adapter?.isConnected() ? adapter : null;
+}
+
 /**
- * Reads an RGB invoice's asset through the RGB node and registers the per-payment
+ * Reads an RGB invoice's asset through the RGB wallet and registers the per-payment
  * asset account, so the request can be planned and quoted in that asset.
  */
 export async function prepareRgbRequest(invoice: string, amount?: number): Promise<RgbRequestAsset> {
-  const adapter = protocolManager.getAdapterIfAvailable('RGB_LN') as any;
-  if (!adapter?.isConnected?.()) throw new Error('Connect your RGB node to pay RGB invoices.');
+  const adapter = rgbInvoiceWallet();
+  if (!adapter) throw new Error('Turn on RGB in Settings, or connect your RGB node, to pay RGB invoices.');
   const asset = await rgbRequestAsset(adapter, invoice, amount);
   rgbAssetRegistration?.();
   rgbAssetRegistration = registerRgbAssetPayment({ id: asset.id, ticker: asset.ticker, precision: asset.precision });
