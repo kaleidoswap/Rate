@@ -19,13 +19,16 @@ import {
   addContact,
   deleteContact,
   toggleFavorite,
+  toggleNostrFavorite,
   setSearchQuery,
   setSelectedContact,
 } from '../store/slices/contactsSlice';
 import { loadContactList, followUser, unfollowUser } from '../store/slices/nostrSlice';
 import { theme } from '../theme';
-import { Button, MainHeader, Sheet, ZapModal, ZapRecipient } from '../components';
+import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input, CopyButton, PressableScale } from '../components';
+import { feedback } from '../utils/feedback';
 import NostrService, { NostrContact } from '../services/NostrService';
+import ToastService from '../services/ToastService';
 import { nip19 } from 'nostr-tools';
 
 interface Props {
@@ -33,24 +36,30 @@ interface Props {
   route?: any;
 }
 
-// Brand-consistent tinted avatar palette (readable on the dark surface).
-const AVATAR_PALETTE: { bg: string; fg: string }[] = [
-  { bg: 'rgba(43,238,121,0.16)', fg: '#2BEE79' },
-  { bg: 'rgba(66,144,255,0.16)', fg: '#60A5FA' },
-  { bg: 'rgba(168,85,247,0.16)', fg: '#C084FC' },
-  { bg: 'rgba(245,158,11,0.16)', fg: '#FBBF24' },
-  { bg: 'rgba(236,72,153,0.16)', fg: '#F472B6' },
-  { bg: 'rgba(20,184,166,0.16)', fg: '#2DD4BF' },
-];
+// A row in the list. `localId` is set when a saved contact was folded into a
+// Nostr follow (same person), so the sheet can still delete the saved copy.
+type ContactRow = Contact & { localId?: string };
+
+const toast = () => ToastService.getInstance();
 
 function avatarColors(name: string) {
+  const palette = theme.colors.avatar;
   const code = name?.charCodeAt(0) || 0;
-  return AVATAR_PALETTE[code % AVATAR_PALETTE.length];
+  return palette[code % palette.length];
+}
+
+// Same person: a shared Lightning address (case-insensitive) or Nostr key.
+function isSamePerson(local: Contact, follow: Contact): boolean {
+  const ln = (c: Contact) => c.lightning_address?.trim().toLowerCase();
+  if (ln(local) && ln(local) === ln(follow)) return true;
+  if (local.npub && local.npub === follow.npub) return true;
+  return !!local.node_pubkey && local.node_pubkey.toLowerCase() === follow.node_pubkey?.toLowerCase();
 }
 
 export default function ContactsScreen({ navigation, route }: Props) {
   const dispatch = useDispatch();
-  const { contacts, searchQuery } = useSelector((state: RootState) => state.contacts);
+  const { contacts, searchQuery, favoriteNostrPubkeys } = useSelector((state: RootState) => state.contacts);
+  const nostrFavorites = favoriteNostrPubkeys ?? []; // undefined in pre-v6 persisted state
   const nostrState = useSelector((state: RootState) => state.nostr);
   const unreadByPubkey = useSelector((state: RootState) => state.chat.unreadByPubkey) || {};
   const [showAddForm, setShowAddForm] = useState(false);
@@ -63,6 +72,8 @@ export default function ContactsScreen({ navigation, route }: Props) {
   const [isAdding, setIsAdding] = useState(false);
   // Zap sheet target (null = closed).
   const [zapRecipient, setZapRecipient] = useState<ZapRecipient | null>(null);
+  // Contact sheet (null = closed). Holds the id so the sheet follows live edits.
+  const [openContactId, setOpenContactId] = useState<string | null>(null);
 
   const convertNostrContact = (nostrContact: NostrContact): Contact => {
     const displayName = nostrContact.profile?.display_name || nostrContact.profile?.name || nostrContact.petname || 'Anonymous';
@@ -75,15 +86,28 @@ export default function ContactsScreen({ navigation, route }: Props) {
       avatar_url: nostrContact.profile?.picture,
       created_at: Date.now(),
       updated_at: Date.now(),
-      is_favorite: false,
+      is_favorite: nostrFavorites.includes(nostrContact.pubkey.toLowerCase()),
       isNostrContact: true,
       npub: nip19.npubEncode(nostrContact.pubkey),
     };
   };
 
   const nostrContacts = nostrState.isConnected ? nostrState.contacts.map(convertNostrContact) : [];
-  const allContacts =
-    contactSource === 'local' ? contacts : contactSource === 'nostr' ? nostrContacts : [...contacts, ...nostrContacts];
+
+  // "All" folds a saved contact into the matching follow: the Nostr entry wins
+  // (it can message), favourite if either side is, and keeps the saved id.
+  const merged: ContactRow[] = (() => {
+    const folded = new Set<string>();
+    const follows = nostrContacts.map((n): ContactRow => {
+      const dup = contacts.find((l) => !folded.has(l.id) && isSamePerson(l, n));
+      if (!dup) return n;
+      folded.add(dup.id);
+      return { ...n, is_favorite: n.is_favorite || dup.is_favorite, localId: dup.id };
+    });
+    return [...contacts.filter((l) => !folded.has(l.id)), ...follows];
+  })();
+  const allContacts: ContactRow[] =
+    contactSource === 'local' ? contacts : contactSource === 'nostr' ? nostrContacts : merged;
 
   const filteredContacts = allContacts.filter((contact: Contact) =>
     contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -98,8 +122,9 @@ export default function ContactsScreen({ navigation, route }: Props) {
   const others = filteredContacts.filter((c) => !c.is_favorite).sort(byName);
   const sections = [
     ...(favorites.length ? [{ title: 'Favorites', data: favorites }] : []),
-    ...(others.length ? [{ title: favorites.length ? 'All Contacts' : '', data: others }] : []),
+    ...(others.length ? [{ title: favorites.length ? 'Contacts' : '', data: others }] : []),
   ];
+  const openContact: ContactRow | null = openContactId ? allContacts.find((c) => c.id === openContactId) ?? null : null;
 
   // A QR scanned in contact mode comes back as a navigation param: open the
   // add form prefilled with the scanned identifier, then clear the param so it
@@ -119,14 +144,14 @@ export default function ContactsScreen({ navigation, route }: Props) {
 
   const handleRefresh = async () => {
     if (!nostrState.isConnected) {
-      Alert.alert('Not Connected', 'Connect Nostr in Settings to sync your social contacts.');
+      toast().info('Connect Nostr in Settings to sync your social contacts.');
       return;
     }
     setIsRefreshing(true);
     try {
       await dispatch(loadContactList() as any);
     } catch (error) {
-      Alert.alert('Error', 'Failed to refresh contacts.');
+      toast().error('Failed to refresh contacts.');
     } finally {
       setIsRefreshing(false);
     }
@@ -170,13 +195,13 @@ export default function ContactsScreen({ navigation, route }: Props) {
     const identifier = addInput.trim();
     const name = addName.trim();
     if (!identifier) {
-      Alert.alert('Error', 'Enter an npub, NIP-05, Lightning address, or node pubkey.');
+      toast().error('Enter an npub, NIP-05, Lightning address, or node pubkey.');
       return;
     }
 
     const kind = detectKind(identifier);
     if (kind === 'unknown') {
-      Alert.alert('Unrecognised', 'Use an npub1…, name@domain, a Lightning address, or a 66-char node pubkey.');
+      toast().error('Unrecognised. Use an npub1…, name@domain, a Lightning address, or a 66-char node pubkey.');
       return;
     }
 
@@ -186,7 +211,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
       if (kind === 'node') {
         addLocalContact({ name: name || 'Node', node_pubkey: identifier.toLowerCase() });
         resetAddForm();
-        Alert.alert('Added', 'Contact saved.');
+        toast().success('Contact saved');
         return;
       }
 
@@ -198,7 +223,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
           const resolved = await NostrService.getInstance().resolveToPubkey(identifier);
           if ('pubkey' in resolved) {
             if (nostrState.contacts.some((c) => c.pubkey === resolved.pubkey)) {
-              Alert.alert('Already following', 'This account is already in your Nostr contacts.');
+              toast().info('Already in your Nostr contacts');
               return;
             }
             await dispatch(
@@ -206,75 +231,101 @@ export default function ContactsScreen({ navigation, route }: Props) {
             ).unwrap();
             await dispatch(loadContactList() as any);
             resetAddForm();
-            Alert.alert('Following', 'Account added to your Nostr contacts.');
+            toast().success('Following on Nostr');
             return;
           }
           // Could not resolve as a Nostr identity.
           if (kind === 'nostr') {
-            Alert.alert('Not found', resolved.error || 'Could not resolve that Nostr identity.');
+            toast().error(resolved.error || 'Could not resolve that Nostr identity.');
             return;
           }
         } else if (kind === 'nostr') {
-          Alert.alert('Connect Nostr', 'Connect Nostr in Settings to follow accounts.');
+          toast().info('Connect Nostr in Settings to follow accounts.');
           return;
         }
 
         // Lightning address (or unresolved NIP-05) → local contact.
         addLocalContact({ name: name || identifier.split('@')[0], lightning_address: identifier });
         resetAddForm();
-        Alert.alert('Added', 'Contact saved.');
+        toast().success('Contact saved');
       }
     } catch (e: any) {
-      Alert.alert('Error', e?.message || 'Failed to add contact.');
+      toast().error(e?.message || 'Failed to add contact.');
     } finally {
       setIsAdding(false);
     }
   };
 
-  const handleDeleteContact = (contact: Contact) => {
-    const isNostr = contact.isNostrContact && contact.node_pubkey;
-    Alert.alert(
-      isNostr ? 'Unfollow' : 'Delete Contact',
-      isNostr
-        ? `Unfollow ${contact.name} on Nostr?`
-        : `Are you sure you want to delete ${contact.name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: isNostr ? 'Unfollow' : 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            if (isNostr) {
-              try {
-                await dispatch(unfollowUser(contact.node_pubkey!) as any).unwrap();
-                await dispatch(loadContactList() as any);
-              } catch (e: any) {
-                Alert.alert('Error', e?.message || 'Failed to unfollow.');
-                return;
-              }
-            }
-            // Remove any local mirror as well.
-            dispatch(deleteContact(contact.id));
-          },
+  const handleUnfollow = (contact: ContactRow) => {
+    Alert.alert('Unfollow', `Unfollow ${contact.name} on Nostr?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Unfollow',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await dispatch(unfollowUser(contact.node_pubkey!) as any).unwrap();
+            await dispatch(loadContactList() as any);
+          } catch (e: any) {
+            toast().error(e?.message || 'Failed to unfollow.');
+            return;
+          }
+          // Remove any local mirror under the Nostr id. A merged saved contact is
+          // kept on purpose: it has its own "Delete saved contact" action.
+          dispatch(deleteContact(contact.id));
+          setOpenContactId(null);
         },
-      ],
-    );
+      },
+    ]);
   };
 
-  // Tapping a contact: zap (Nostr account or any Lightning address) is the
-  // primary action; otherwise fall back to the full Send screen.
-  const handleContactPress = (contact: Contact) => {
+  const handleDeleteSaved = (localId: string, name: string) => {
+    Alert.alert('Delete Contact', `Are you sure you want to delete ${name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          dispatch(deleteContact(localId));
+          setOpenContactId(null);
+        },
+      },
+    ]);
+  };
+
+  // Follows keep their favourite by pubkey; saved contacts on the Contact. A
+  // merged row shows either side's star, so un-starring clears both.
+  const handleToggleFavorite = (c: ContactRow) => {
+    feedback.select();
+    if (!c.isNostrContact || !c.node_pubkey) {
+      dispatch(toggleFavorite(c.id));
+      return;
+    }
+    const pubkey = c.node_pubkey.toLowerCase();
+    const local = c.localId ? contacts.find((l) => l.id === c.localId) : undefined;
+    if (!c.is_favorite || nostrFavorites.includes(pubkey)) dispatch(toggleNostrFavorite(pubkey));
+    if (c.is_favorite && local?.is_favorite) dispatch(toggleFavorite(local.id));
+  };
+
+  // Pay: zap a Nostr account or any Lightning address; otherwise fall back to
+  // the full Send screen (node pubkeys).
+  const payContact = (contact: Contact) => {
     dispatch(setSelectedContact(contact));
+    const fromSheet = openContactId !== null;
+    setOpenContactId(null);
 
     const pubkey = contact.isNostrContact ? contact.node_pubkey : undefined;
     if (pubkey || contact.lightning_address) {
-      setZapRecipient({
+      // Let the contact sheet finish closing first: iOS won't present a modal
+      // while another one is still on screen.
+      const open = () => setZapRecipient({
         name: contact.name,
         pubkey,
         lightningAddress: contact.lightning_address,
         npub: contact.npub,
         avatarUrl: contact.avatar_url,
       });
+      if (fromSheet) setTimeout(open, 300); else open();
       return;
     }
 
@@ -284,60 +335,94 @@ export default function ContactsScreen({ navigation, route }: Props) {
     });
   };
 
+  const messageContact = (contact: Contact) => {
+    setOpenContactId(null);
+    navigation.navigate('Chat', {
+      pubkey: contact.node_pubkey,
+      name: contact.name,
+      npub: contact.npub,
+      avatarUrl: contact.avatar_url,
+    });
+  };
+
+  const canPay = (c: Contact) => !!(c.lightning_address || c.node_pubkey);
+  const canMessage = (c: Contact) => !!(c.isNostrContact && c.node_pubkey);
+  const shortKey = (k: string, head = 12, tail = 6) => (k.length > head + tail + 1 ? `${k.slice(0, head)}…${k.slice(-tail)}` : k);
+
+  const renderAvatar = (contact: Contact, size: number) => {
+    const ac = avatarColors(contact.name);
+    return (
+      <View style={{ width: size, height: size }}>
+        <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: ac.bg }]}>
+          {contact.avatar_url ? (
+            <Image source={{ uri: contact.avatar_url }} style={styles.avatarImg} />
+          ) : (
+            <Text style={[styles.avatarInitial, { color: ac.fg, fontSize: size * 0.4 }]}>
+              {contact.name.charAt(0).toUpperCase()}
+            </Text>
+          )}
+        </View>
+        {/* Nostr accounts carry a small badge instead of a separate icon next to the name. */}
+        {contact.isNostrContact && (
+          <View style={styles.avatarBadge}>
+            <Ionicons name="planet" size={10} color={theme.colors.primary[500]} />
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const counts = { all: merged.length, local: contacts.length, nostr: nostrContacts.length };
+
   const renderHeader = () => (
-    <View>
-      {/* Search */}
+    <View style={styles.listHeader}>
       <View style={styles.searchBar}>
         <Ionicons name="search" size={18} color={theme.colors.text.tertiary} />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search name, address or npub"
+          placeholder="Search contacts"
           value={searchQuery}
           onChangeText={(text) => dispatch(setSearchQuery(text))}
           placeholderTextColor={theme.colors.text.tertiary}
           autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Search contacts"
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => dispatch(setSearchQuery(''))}>
+          <TouchableOpacity onPress={() => dispatch(setSearchQuery(''))} accessibilityLabel="Clear search"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Ionicons name="close-circle" size={18} color={theme.colors.text.tertiary} />
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Source segmented control */}
-      <View style={styles.segment}>
-        {([
-          { key: 'all', label: 'All', count: contacts.length + nostrContacts.length },
-          { key: 'local', label: 'Local', count: contacts.length },
-          ...(nostrState.isConnected ? [{ key: 'nostr', label: 'Nostr', count: nostrContacts.length }] : []),
-        ] as const).map((opt) => {
-          const active = contactSource === opt.key;
-          return (
-            <TouchableOpacity
-              key={opt.key}
-              style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-              onPress={() => setContactSource(opt.key as any)}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                {opt.label}
-              </Text>
-              <View style={[styles.segmentCount, active && styles.segmentCountActive]}>
-                <Text style={[styles.segmentCountText, active && styles.segmentCountTextActive]}>{opt.count}</Text>
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
+      {/* Filters only matter once there is more than one source. */}
+      {nostrState.isConnected && counts.all > 0 && (
+        <SegmentedTabs
+          value={contactSource}
+          onChange={(k) => setContactSource(k)}
+          scrollable={false}
+          fill
+          options={[
+            { key: 'all', label: `All · ${counts.all}` },
+            { key: 'local', label: `Saved · ${counts.local}` },
+            { key: 'nostr', label: `Nostr · ${counts.nostr}` },
+          ]}
+        />
+      )}
 
-      {/* Sync + Profile/Relays now live in the header (refresh + settings).
-          Keep only the onboarding nudge when Nostr isn't connected. */}
       {!nostrState.isConnected && (
-        <TouchableOpacity style={styles.connectBanner} onPress={() => navigation.navigate('NostrSettings')} activeOpacity={0.8}>
-          <Ionicons name="planet-outline" size={16} color={theme.colors.text.secondary} />
-          <Text style={styles.connectBannerText}>Connect Nostr to sync your social contacts</Text>
+        <PressableScale style={styles.connectBanner} onPress={() => navigation.navigate('NostrSettings')} scaleTo={0.98}
+          accessibilityRole="button" accessibilityLabel="Connect Nostr">
+          <View style={styles.connectIcon}>
+            <Ionicons name="planet" size={18} color={theme.colors.primary[500]} />
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.connectTitle}>Find your friends on Nostr</Text>
+            <Text style={styles.connectText}>Sync who you follow, message them and send zaps.</Text>
+          </View>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
-        </TouchableOpacity>
+        </PressableScale>
       )}
     </View>
   );
@@ -349,9 +434,9 @@ export default function ContactsScreen({ navigation, route }: Props) {
     const kind = detectKind(addInput);
     const detected: Record<typeof kind, { label: string; icon: any; color: string }> = {
       nostr: { label: 'Nostr account', icon: 'planet', color: theme.colors.primary[500] },
-      lightning: { label: 'Lightning / NIP-05', icon: 'flash', color: theme.colors.warning[500] },
-      node: { label: 'Node pubkey', icon: 'git-network', color: theme.colors.text.secondary },
-      unknown: { label: '', icon: 'help', color: theme.colors.text.tertiary },
+      lightning: { label: 'Lightning address or NIP-05', icon: 'flash', color: theme.colors.warning[500] },
+      node: { label: 'Lightning node', icon: 'git-network', color: theme.colors.text.secondary },
+      unknown: { label: 'Not recognised yet', icon: 'help-circle-outline', color: theme.colors.text.tertiary },
     };
     const d = detected[kind];
 
@@ -359,180 +444,202 @@ export default function ContactsScreen({ navigation, route }: Props) {
       <Sheet
         visible={showAddForm}
         onClose={() => { if (!isAdding) resetAddForm(); }}
-        title="Add Contact"
-      >
-        <TouchableOpacity
-          style={styles.scanCta}
-          onPress={() => { setShowAddForm(false); openContactScanner(); }}
-          disabled={isAdding}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="qr-code-outline" size={22} color={theme.colors.text.inverse} />
-          <Text style={styles.scanCtaText}>Scan QR code</Text>
-        </TouchableOpacity>
-
-        <View style={styles.orDivider}>
-          <View style={styles.orLine} />
-          <Text style={styles.orText}>or enter manually</Text>
-          <View style={styles.orLine} />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>Name (optional)</Text>
-          <TextInput
-            style={styles.input}
-            value={addName}
-            onChangeText={setAddName}
-            placeholder="Display name"
-            placeholderTextColor={theme.colors.text.tertiary}
-            autoCapitalize="words"
-            returnKeyType="next"
-          />
-        </View>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.inputLabel}>npub, NIP-05, Lightning address, or node pubkey</Text>
-          <TextInput
-            style={styles.input}
-            value={addInput}
-            onChangeText={setAddInput}
-            placeholder="npub1… · name@domain · 66-char pubkey"
-            placeholderTextColor={theme.colors.text.tertiary}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="done"
-            onSubmitEditing={handleSmartAdd}
-          />
-          {addInput.trim().length > 0 && kind !== 'unknown' && (
-            <View style={styles.detectRow}>
-              <Ionicons name={d.icon} size={13} color={d.color} />
-              <Text style={[styles.detectText, { color: d.color }]}>Detected: {d.label}</Text>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.formActions}>
-          <Button title="Cancel" variant="secondary" onPress={resetAddForm} style={{ flex: 1 }} disabled={isAdding} />
+        title="Add contact"
+        subtitle="Paste or scan an npub, Lightning address or node key"
+        footer={
           <Button
-            title={isAdding ? 'Adding…' : 'Add'}
+            title={isAdding ? 'Adding…' : 'Add contact'}
             variant="primary"
             onPress={handleSmartAdd}
-            style={{ flex: 1 }}
             loading={isAdding}
-            disabled={isAdding}
+            disabled={isAdding || kind === 'unknown'}
+            style={styles.sheetFooterBtn}
           />
+        }
+      >
+        <View style={styles.form}>
+        <Input
+          label="Address or key"
+          value={addInput}
+          onChangeText={setAddInput}
+          placeholder="npub1…, name@domain.com"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="next"
+          rightIcon={
+            <TouchableOpacity
+              onPress={() => { setShowAddForm(false); openContactScanner(); }}
+              disabled={isAdding}
+              accessibilityLabel="Scan QR code"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Ionicons name="qr-code-outline" size={20} color={theme.colors.primary[500]} />
+            </TouchableOpacity>
+          }
+        />
+        {addInput.trim().length > 0 && (
+          <View style={styles.detectRow}>
+            <Ionicons name={d.icon} size={13} color={d.color} />
+            <Text style={[styles.detectText, { color: d.color }]}>{d.label}</Text>
+          </View>
+        )}
+        <Input
+          label="Name (optional)"
+          value={addName}
+          onChangeText={setAddName}
+          placeholder={kind === 'nostr' ? 'Uses their Nostr name if empty' : 'How you call them'}
+          autoCapitalize="words"
+          returnKeyType="done"
+          onSubmitEditing={handleSmartAdd}
+        />
         </View>
       </Sheet>
     );
   };
 
-  const renderContactItem = ({ item: contact }: { item: Contact }) => {
-    const ac = avatarColors(contact.name);
+  // One contact: who they are, the ways to reach them, and the rare actions
+  // (favourite, remove) that no longer crowd every row.
+  const renderContactSheet = () => {
+    const c = openContact;
+    const ids: { label: string; value: string; display: string; icon: any; color: string }[] = c ? [
+      ...(c.lightning_address ? [{ label: 'Lightning address', value: c.lightning_address, display: c.lightning_address, icon: 'flash', color: theme.colors.warning[500] }] : []),
+      ...(c.npub ? [{ label: 'Nostr', value: c.npub, display: shortKey(c.npub, 14, 8), icon: 'planet', color: theme.colors.primary[500] }] : []),
+      ...(!c.isNostrContact && c.node_pubkey ? [{ label: 'Node', value: c.node_pubkey, display: shortKey(c.node_pubkey, 12, 8), icon: 'git-network', color: theme.colors.text.secondary }] : []),
+    ] : [];
+    const unread = c?.node_pubkey ? unreadByPubkey[c.node_pubkey] ?? 0 : 0;
+
+    return (
+      <Sheet visible={!!c} onClose={() => setOpenContactId(null)}>
+        {c && (
+          <View>
+            <View style={styles.profileHead}>
+              {renderAvatar(c, 72)}
+              <Text style={styles.profileName} numberOfLines={1}>{c.name}</Text>
+              {!!c.notes && <Text style={styles.profileNotes} numberOfLines={3}>{c.notes}</Text>}
+            </View>
+
+            <View style={styles.sheetActions}>
+              {canPay(c) && (
+                <Button title="Pay" variant="primary" onPress={() => payContact(c)} style={styles.flex}
+                  icon={<Ionicons name="flash" size={16} color={theme.colors.text.inverse} />} />
+              )}
+              {canMessage(c) && (
+                <Button title={unread > 0 ? `Message · ${Math.min(unread, 99)}` : 'Message'} variant="secondary"
+                  onPress={() => messageContact(c)} style={styles.flex}
+                  icon={<Ionicons name="chatbubble-ellipses-outline" size={16} color={theme.colors.text.primary} />} />
+              )}
+            </View>
+
+            {ids.length > 0 && (
+              <View style={styles.group}>
+                {ids.map((row, i) => (
+                  <View key={row.label} style={[styles.idRow, i < ids.length - 1 && styles.rowDivider]}>
+                    <Ionicons name={row.icon} size={16} color={row.color} />
+                    <View style={styles.flex}>
+                      <Text style={styles.idLabel}>{row.label}</Text>
+                      <Text style={styles.idValue} numberOfLines={1}>{row.display}</Text>
+                    </View>
+                    <CopyButton value={row.value} size={16} color={theme.colors.primary[500]} />
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={[styles.group, styles.groupGap]}>
+              <TouchableOpacity style={[styles.menuRow, styles.rowDivider]} onPress={() => handleToggleFavorite(c)}
+                accessibilityRole="button">
+                <Ionicons name={c.is_favorite ? 'star' : 'star-outline'} size={18}
+                  color={c.is_favorite ? theme.colors.warning[500] : theme.colors.text.secondary} />
+                <Text style={styles.menuText}>{c.is_favorite ? 'Remove from favorites' : 'Add to favorites'}</Text>
+              </TouchableOpacity>
+              {c.isNostrContact && c.node_pubkey && (
+                <TouchableOpacity style={[styles.menuRow, !!c.localId && styles.rowDivider]} onPress={() => handleUnfollow(c)}
+                  accessibilityRole="button">
+                  <Ionicons name="person-remove-outline" size={18} color={theme.colors.error[500]} />
+                  <Text style={[styles.menuText, styles.danger]}>Unfollow on Nostr</Text>
+                </TouchableOpacity>
+              )}
+              {/* A plain saved contact, or the saved copy folded into this follow. */}
+              {(!c.isNostrContact || c.localId) && (
+                <TouchableOpacity style={styles.menuRow} onPress={() => handleDeleteSaved(c.localId ?? c.id, c.name)}
+                  accessibilityRole="button">
+                  <Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} />
+                  <Text style={[styles.menuText, styles.danger]}>{c.localId ? 'Delete saved contact' : 'Delete contact'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        )}
+      </Sheet>
+    );
+  };
+
+  const renderContactItem = ({ item: contact, index, section }: { item: Contact; index: number; section: { data: Contact[] } }) => {
+    const first = index === 0;
+    const last = index === section.data.length - 1;
     const detail = contact.lightning_address
       ? contact.lightning_address
-      : contact.isNostrContact && contact.npub
-        ? `${contact.npub.slice(0, 12)}…${contact.npub.slice(-6)}`
+      : contact.npub
+        ? shortKey(contact.npub)
         : contact.node_pubkey
-          ? `${contact.node_pubkey.slice(0, 10)}…`
+          ? `Node ${shortKey(contact.node_pubkey, 8, 4)}`
           : 'No payment method';
+    const unread = contact.node_pubkey ? unreadByPubkey[contact.node_pubkey] ?? 0 : 0;
     return (
-      <TouchableOpacity style={styles.contactRow} activeOpacity={0.7} onPress={() => handleContactPress(contact)}>
-        <View style={[styles.avatar, { backgroundColor: ac.bg }]}>
-          {contact.avatar_url ? (
-            <Image source={{ uri: contact.avatar_url }} style={styles.avatarImg} />
-          ) : (
-            <Text style={[styles.avatarInitial, { color: ac.fg }]}>{contact.name.charAt(0).toUpperCase()}</Text>
-          )}
-        </View>
-
+      <PressableScale
+        scaleTo={0.98}
+        style={[styles.contactRow, first && styles.rowFirst, last && styles.rowLast, !last && styles.rowDivider]}
+        onPress={() => { feedback.select(); setOpenContactId(contact.id); }}
+        accessibilityRole="button"
+        accessibilityLabel={`${contact.name}, ${detail}${unread > 0 ? `, ${unread} unread` : ''}`}
+      >
+        {renderAvatar(contact, 44)}
         <View style={styles.contactInfo}>
-          <View style={styles.contactNameRow}>
-            <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
-            {contact.isNostrContact && (
-              <Ionicons name="planet" size={13} color={theme.colors.primary[500]} />
-            )}
-          </View>
-          <View style={styles.detailRow}>
-            <Ionicons
-              name={contact.lightning_address ? 'flash' : 'key-outline'}
-              size={12}
-              color={contact.lightning_address ? theme.colors.warning[500] : theme.colors.text.tertiary}
-            />
-            <Text style={styles.detailText} numberOfLines={1}>{detail}</Text>
-          </View>
+          <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
+          <Text style={styles.detailText} numberOfLines={1}>{detail}</Text>
         </View>
 
-        {contact.isNostrContact && contact.node_pubkey && (
+        {canMessage(contact) && (
           <TouchableOpacity
             style={styles.iconBtn}
-            onPress={() =>
-              navigation.navigate('Chat', {
-                pubkey: contact.node_pubkey,
-                name: contact.name,
-                npub: contact.npub,
-                avatarUrl: contact.avatar_url,
-              })
-            }
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={() => messageContact(contact)}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
             accessibilityLabel={`Message ${contact.name}`}
           >
-            <Ionicons name="chatbubble-ellipses-outline" size={17} color={theme.colors.primary[500]} />
-            {(unreadByPubkey[contact.node_pubkey] ?? 0) > 0 && (
+            <Ionicons name="chatbubble-ellipses-outline" size={18} color={theme.colors.text.secondary} />
+            {unread > 0 && (
               <View style={styles.unreadBadge}>
-                <Text style={styles.unreadBadgeText}>
-                  {Math.min(unreadByPubkey[contact.node_pubkey], 99)}
-                </Text>
+                <Text style={styles.unreadBadgeText}>{Math.min(unread, 99)}</Text>
               </View>
             )}
           </TouchableOpacity>
         )}
-        {(contact.lightning_address || contact.node_pubkey) && (
+        {canPay(contact) && (
           <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() =>
-              navigation.navigate('Send', {
-                address: contact.lightning_address || contact.node_pubkey,
-                contactName: contact.name,
-              })
-            }
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.payBtn}
+            onPress={() => { feedback.select(); payContact(contact); }}
+            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            accessibilityLabel={`Pay ${contact.name}`}
           >
-            <Ionicons name="paper-plane-outline" size={17} color={theme.colors.text.secondary} />
+            <Ionicons name="flash" size={14} color={theme.colors.primary[500]} />
+            <Text style={styles.payText}>Pay</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={() => dispatch(toggleFavorite(contact.id))}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons
-            name={contact.is_favorite ? 'star' : 'star-outline'}
-            size={20}
-            color={contact.is_favorite ? theme.colors.warning[500] : theme.colors.text.tertiary}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.iconBtn}
-          onPress={() => handleDeleteContact(contact)}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} />
-        </TouchableOpacity>
-      </TouchableOpacity>
+      </PressableScale>
     );
   };
 
   const renderEmpty = () => (
     <View style={styles.empty}>
       <View style={styles.emptyIcon}>
-        <Ionicons name="people-outline" size={44} color={theme.colors.text.tertiary} />
+        <Ionicons name={searchQuery ? 'search' : 'people-outline'} size={36} color={theme.colors.text.tertiary} />
       </View>
       <Text style={styles.emptyTitle}>{searchQuery ? 'No matches' : 'No contacts yet'}</Text>
       <Text style={styles.emptyDesc}>
-        {searchQuery ? 'Try a different search term.' : 'Add a contact to send payments in a tap.'}
+        {searchQuery ? 'Try a name, address or npub.' : 'Save the people you pay so they are one tap away.'}
       </Text>
       {!searchQuery && (
-        <Button title="Add Contact" variant="primary" size="sm" onPress={() => setShowAddForm(true)} style={{ marginTop: theme.spacing[4], paddingHorizontal: theme.spacing[6] }} />
+        <Button title="Add contact" variant="primary" size="sm" onPress={() => setShowAddForm(true)} style={styles.emptyBtn} />
       )}
     </View>
   );
@@ -541,32 +648,34 @@ export default function ContactsScreen({ navigation, route }: Props) {
     <View style={styles.container}>
       <MainHeader
         title="Contacts"
-        subtitle={`${allContacts.length} ${allContacts.length === 1 ? 'connection' : 'connections'}`}
+        subtitle={allContacts.length ? `${allContacts.length} ${allContacts.length === 1 ? 'contact' : 'contacts'}` : undefined}
         icon="people"
         rightAction={
           <>
+            {nostrState.isConnected && (
+              <TouchableOpacity
+                style={styles.headerIconBtn}
+                onPress={handleRefresh}
+                disabled={isRefreshing}
+                activeOpacity={0.8}
+                accessibilityLabel="Sync Nostr contacts"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                {isRefreshing ? (
+                  <ActivityIndicator size="small" color={theme.colors.text.primary} />
+                ) : (
+                  <Ionicons name="refresh" size={19} color={theme.colors.text.primary} />
+                )}
+              </TouchableOpacity>
+            )}
             <TouchableOpacity
               style={styles.headerIconBtn}
-              onPress={handleRefresh}
-              disabled={isRefreshing}
+              onPress={() => navigation.navigate('NostrSettings')}
               activeOpacity={0.8}
-              accessibilityLabel="Refresh contacts"
+              accessibilityLabel="Nostr settings"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              {isRefreshing ? (
-                <ActivityIndicator size="small" color={theme.colors.text.primary} />
-              ) : (
-                <Ionicons name="refresh" size={19} color={theme.colors.text.primary} />
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.headerIconBtn}
-              onPress={() => navigation.navigate('Settings')}
-              activeOpacity={0.8}
-              accessibilityLabel="Settings"
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="settings-outline" size={19} color={theme.colors.text.primary} />
+              <Ionicons name="planet-outline" size={19} color={theme.colors.text.primary} />
             </TouchableOpacity>
           </>
         }
@@ -575,10 +684,10 @@ export default function ContactsScreen({ navigation, route }: Props) {
       <SectionList
         sections={sections}
         keyExtractor={(item) => item.id}
-        renderItem={renderContactItem}
-        ListHeaderComponent={renderHeader}
+        renderItem={renderContactItem as any}
+        ListHeaderComponent={renderHeader()}
         renderSectionHeader={({ section }) =>
-          section.title ? <Text style={styles.sectionHeader}>{section.title}</Text> : null
+          section.title ? <Text style={styles.sectionHeader}>{section.title}</Text> : <View style={styles.sectionGap} />
         }
         ListEmptyComponent={!showAddForm ? renderEmpty : null}
         stickySectionHeadersEnabled={false}
@@ -588,26 +697,25 @@ export default function ContactsScreen({ navigation, route }: Props) {
       />
 
       {/* Floating add button — scanning lives inside the add sheet. */}
-      <TouchableOpacity
+      <PressableScale
         style={styles.fab}
-        onPress={() => setShowAddForm(true)}
-        activeOpacity={0.85}
+        onPress={() => { feedback.select(); setShowAddForm(true); }}
+        scaleTo={0.92}
+        accessibilityRole="button"
         accessibilityLabel="Add contact"
       >
-        <Ionicons name="add" size={30} color={theme.colors.text.inverse} />
-      </TouchableOpacity>
+        <Ionicons name="person-add" size={22} color={theme.colors.text.inverse} />
+      </PressableScale>
 
       {renderAddModal()}
+      {renderContactSheet()}
 
       <ZapModal
         visible={!!zapRecipient}
         recipient={zapRecipient}
         onClose={() => setZapRecipient(null)}
         onSuccess={({ amountSats, isZap }) =>
-          Alert.alert(
-            isZap ? 'Zap sent ⚡' : 'Payment sent',
-            `${amountSats.toLocaleString()} sats sent to ${zapRecipient?.name ?? 'contact'}.`,
-          )
+          toast().success(`${isZap ? 'Zap sent' : 'Payment sent'} · ${amountSats.toLocaleString()} sats to ${zapRecipient?.name ?? 'contact'}`)
         }
       />
     </View>
@@ -615,302 +723,117 @@ export default function ContactsScreen({ navigation, route }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background.secondary,
-  },
+  container: { flex: 1, backgroundColor: theme.colors.background.secondary },
+  flex: { flex: 1, minWidth: 0 },
   headerIconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: 38, height: 38, borderRadius: 19,
     backgroundColor: theme.colors.surface.secondary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-    justifyContent: 'center',
-    alignItems: 'center',
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light,
+    justifyContent: 'center', alignItems: 'center',
   },
   fab: {
-    position: 'absolute',
-    right: theme.spacing[5],
-    bottom: theme.spacing[6],
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    position: 'absolute', right: theme.spacing[5], bottom: theme.spacing[6],
+    width: 56, height: 56, borderRadius: 28,
     backgroundColor: theme.colors.primary[500],
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    alignItems: 'center', justifyContent: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
   },
-  scanCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing[2],
-    paddingVertical: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.primary[500],
-    marginBottom: theme.spacing[4],
-  },
-  scanCtaText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-  },
-  orDivider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    marginBottom: theme.spacing[4],
-  },
-  orLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: theme.colors.border.medium,
-  },
-  orText: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '600',
-    color: theme.colors.text.tertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  listContent: {
-    paddingHorizontal: theme.spacing[4],
-    paddingBottom: 150, // clear the floating action cluster
-    flexGrow: 1,
-  },
+  listContent: { paddingHorizontal: theme.spacing[4], paddingBottom: 140, flexGrow: 1 },
+  listHeader: { gap: theme.spacing[3], paddingTop: theme.spacing[3] },
   searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
-    gap: theme.spacing[3],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    marginTop: theme.spacing[3],
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2],
+    backgroundColor: theme.colors.surface.primary, borderRadius: theme.borderRadius.lg,
+    paddingHorizontal: theme.spacing[3], minHeight: 44,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light,
   },
-  searchInput: {
-    flex: 1,
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.primary,
-    padding: 0,
-  },
-  segment: {
-    flexDirection: 'row',
-    backgroundColor: theme.colors.surface.tertiary,
-    borderRadius: theme.borderRadius.lg,
-    padding: 4,
-    marginTop: theme.spacing[3],
-    gap: 4,
-  },
-  segmentBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: theme.spacing[2],
-    borderRadius: theme.borderRadius.base,
-  },
-  segmentBtnActive: {
-    backgroundColor: theme.colors.primary[500],
-  },
-  segmentText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.secondary,
-  },
-  segmentTextActive: {
-    color: theme.colors.text.inverse,
-  },
-  segmentCount: {
-    minWidth: 20,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.surface.primary,
-    alignItems: 'center',
-  },
-  segmentCountActive: {
-    backgroundColor: 'rgba(255,255,255,0.25)',
-  },
-  segmentCountText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: theme.colors.text.secondary,
-  },
-  segmentCountTextActive: {
-    color: theme.colors.text.inverse,
-  },
+  searchInput: { flex: 1, fontSize: theme.typography.fontSize.base, color: theme.colors.text.primary, paddingVertical: theme.spacing[2] },
   connectBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    marginTop: theme.spacing[3],
-    paddingVertical: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3],
+    padding: theme.spacing[3], borderRadius: theme.borderRadius.lg,
     backgroundColor: theme.colors.surface.primary,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light,
   },
-  connectBannerText: {
-    flex: 1,
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
+  connectIcon: {
+    width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: `${theme.colors.primary[500]}1F`,
   },
+  connectTitle: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
+  connectText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
   sectionHeader: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '700',
-    color: theme.colors.text.tertiary,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginTop: theme.spacing[5],
-    marginBottom: theme.spacing[2],
-    marginLeft: theme.spacing[1],
+    fontSize: theme.typography.fontSize.xs, fontWeight: '700', color: theme.colors.text.tertiary,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    marginTop: theme.spacing[5], marginBottom: theme.spacing[2], marginLeft: theme.spacing[1],
   },
+  sectionGap: { height: theme.spacing[4] },
+  // Rows of a section read as one grouped surface, like the Dashboard asset list.
   contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3],
     backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-    marginBottom: theme.spacing[2],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    gap: theme.spacing[3],
+    paddingVertical: theme.spacing[3], paddingHorizontal: theme.spacing[4], minHeight: 64,
+    borderLeftWidth: StyleSheet.hairlineWidth, borderRightWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light,
   },
-  avatar: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
+  rowFirst: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: theme.borderRadius.xl, borderTopRightRadius: theme.borderRadius.xl,
   },
-  avatarImg: {
-    width: '100%',
-    height: '100%',
+  rowLast: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomLeftRadius: theme.borderRadius.xl, borderBottomRightRadius: theme.borderRadius.xl,
   },
-  avatarInitial: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border.light },
+  avatar: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarImg: { width: '100%', height: '100%' },
+  avatarInitial: { fontWeight: '700' },
+  avatarBadge: {
+    position: 'absolute', right: -2, bottom: -2, width: 18, height: 18, borderRadius: 9,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: theme.colors.surface.secondary,
+    borderWidth: 2, borderColor: theme.colors.surface.primary,
   },
-  contactInfo: {
-    flex: 1,
-    gap: 3,
+  contactInfo: { flex: 1, minWidth: 0, gap: 2 },
+  contactName: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
+  detailText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
+  iconBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  payBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: theme.spacing[3], height: 32, borderRadius: 16,
+    backgroundColor: `${theme.colors.primary[500]}1F`,
   },
-  contactNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  contactName: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    flexShrink: 1,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  detailText: {
-    flex: 1,
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.tertiary,
-  },
-  iconBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: theme.borderRadius.base,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: theme.colors.surface.tertiary,
-  },
+  payText: { fontSize: theme.typography.fontSize.sm, fontWeight: '700', color: theme.colors.primary[500] },
   unreadBadge: {
-    position: 'absolute',
-    top: -3,
-    right: -3,
-    minWidth: 16,
-    height: 16,
-    paddingHorizontal: 4,
-    borderRadius: 8,
-    backgroundColor: theme.colors.primary[500],
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-    borderColor: theme.colors.surface.primary,
+    position: 'absolute', top: 2, right: 0, minWidth: 16, height: 16, paddingHorizontal: 4, borderRadius: 8,
+    backgroundColor: theme.colors.primary[500], alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: theme.colors.surface.primary,
   },
-  unreadBadgeText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: theme.colors.text.inverse,
+  unreadBadgeText: { fontSize: 9, fontWeight: '800', color: theme.colors.text.inverse },
+  // Add sheet
+  form: { gap: theme.spacing[3] },
+  detectRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: -theme.spacing[1] },
+  detectText: { fontSize: theme.typography.fontSize.xs, fontWeight: '600' },
+  sheetFooterBtn: { marginTop: theme.spacing[3] },
+  // Contact sheet
+  profileHead: { alignItems: 'center', gap: theme.spacing[1], paddingTop: theme.spacing[2], paddingBottom: theme.spacing[4] },
+  profileName: { marginTop: theme.spacing[2], fontSize: theme.typography.fontSize.xl, fontWeight: '700', color: theme.colors.text.primary },
+  profileNotes: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, textAlign: 'center', paddingHorizontal: theme.spacing[4] },
+  sheetActions: { flexDirection: 'row', gap: theme.spacing[3], marginBottom: theme.spacing[4] },
+  group: {
+    borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.background.secondary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, overflow: 'hidden',
   },
-  inputGroup: {
-    marginBottom: theme.spacing[3],
-  },
-  detectRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: theme.spacing[2],
-  },
-  detectText: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '600',
-  },
-  inputLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[2],
-  },
-  input: {
-    backgroundColor: theme.colors.surface.tertiary,
-    borderWidth: 1,
-    borderColor: theme.colors.border.medium,
-    borderRadius: theme.borderRadius.lg,
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.primary,
-  },
-  formActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-    marginTop: theme.spacing[2],
-  },
-  empty: {
-    alignItems: 'center',
-    paddingTop: theme.spacing[12],
-    paddingHorizontal: theme.spacing[6],
-  },
+  groupGap: { marginTop: theme.spacing[3] },
+  idRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingLeft: theme.spacing[4], paddingRight: theme.spacing[1], minHeight: 56 },
+  idLabel: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
+  idValue: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, fontWeight: '500', marginTop: 1 },
+  menuRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingHorizontal: theme.spacing[4], minHeight: 48 },
+  menuText: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
+  danger: { color: theme.colors.error[500] },
+  // Empty
+  empty: { alignItems: 'center', paddingTop: theme.spacing[12], paddingHorizontal: theme.spacing[6] },
   emptyIcon: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    backgroundColor: theme.colors.surface.tertiary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[4],
+    width: 72, height: 72, borderRadius: 36, backgroundColor: theme.colors.surface.primary,
+    alignItems: 'center', justifyContent: 'center', marginBottom: theme.spacing[4],
   },
-  emptyTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
-  },
-  emptyDesc: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.tertiary,
-    textAlign: 'center',
-  },
+  emptyTitle: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary, marginBottom: theme.spacing[1] },
+  emptyDesc: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, textAlign: 'center' },
+  emptyBtn: { marginTop: theme.spacing[4], paddingHorizontal: theme.spacing[6] },
 });

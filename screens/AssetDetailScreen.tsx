@@ -1,558 +1,206 @@
 // screens/AssetDetailScreen.tsx
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  ActivityIndicator,
-  Dimensions,
-  Image,
-  RefreshControl,
-} from 'react-native';
+//
+// One asset: what you hold (big, with its dollar value), what you can do with it
+// (Receive / Send / Swap), then its balance breakdown and details as grouped lists
+// in the same style as the Dashboard asset list.
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { RootState } from '../store';
-import { protocolManager } from '../services/protocols';
-import { theme } from '../theme';
-import { Card, Button, ScreenHeader } from '../components';
-import { useAssetIcon } from '../utils';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+import { theme, motion } from '../theme';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { CopyButton } from '../components/CopyButton';
+import { AmountText } from '../components/AmountText';
+import { AssetIcon } from '../components/AssetIcon';
+import { PressableScale } from '../components/PressableScale';
+import { formatUsd } from '../components/AssetList';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { loadBtcBalance } from '../store/slices/walletSlice';
+import { feedback } from '../utils/feedback';
 import { formatAssetAmount } from '../utils/assetAmount';
-import { formatBitcoinAmount } from '../utils/bitcoinUnits';
 
-const { width } = Dimensions.get('window');
+type Protocol = 'BTC' | 'RGB' | 'SPARK' | 'ARKADE';
+
+interface AssetParam {
+  asset_id: string;
+  ticker: string;
+  name: string;
+  precision?: number;
+  issued_supply?: number;
+  balance?: number | Record<string, number | undefined>;
+  isRGB?: boolean;
+  protocol?: Protocol;
+  icon?: string;
+  /** Unit shown after amounts (e.g. "sats"); defaults to the ticker. */
+  unit?: string;
+  /** USD value of the balance, when known. */
+  fiatValue?: number;
+}
 
 interface Props {
   navigation: any;
-  route: {
-    params?: {
-      asset?: {
-        asset_id: string;
-        ticker: string;
-        name: string;
-        precision?: number;
-        issued_supply?: number;
-        balance?: {
-          settled: number;
-          future: number;
-          spendable: number;
-        };
-        isRGB?: boolean;
-        protocol?: 'BTC' | 'RGB' | 'SPARK' | 'ARKADE';
-      };
-    };
+  route: { params?: { asset?: AssetParam } };
+}
+
+const NETWORK_LABEL: Record<Protocol, string> = { BTC: 'Bitcoin', RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade' };
+
+/** "21000" → "21,000"; keeps the decimals as they are. */
+function grouped(amount: string): string {
+  const [int, frac] = amount.split('.');
+  return int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (frac !== undefined ? `.${frac}` : '');
+}
+
+/** Middle-truncates a long id so both ends stay readable. */
+function shortId(id: string): string {
+  return id.length > 22 ? `${id.slice(0, 10)}…${id.slice(-8)}` : id;
+}
+
+/** The balance fields we show, read defensively: callers pass a number, a partial or a full balance. */
+function readBalance(balance: AssetParam['balance']) {
+  if (typeof balance === 'number') return { available: balance, settled: balance, incoming: 0, inChannels: 0 };
+  const b = balance ?? {};
+  const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const settled = num(b.settled ?? b.spendable ?? b.available);
+  return {
+    available: num(b.spendable ?? b.available ?? b.settled),
+    settled,
+    incoming: Math.max(0, num(b.future) - settled),
+    inChannels: num(b.offchain_outbound),
   };
 }
 
 export default function AssetDetailScreen({ navigation, route }: Props) {
-  // Safe extraction with fallback
-  const asset = route?.params?.asset;
-  
-  // If no asset is provided, navigate back
-  if (!asset || !asset.asset_id || !asset.ticker || !asset.name) {
-    React.useEffect(() => {
-      console.warn('AssetDetailScreen: Invalid asset data, navigating back');
-      navigation.goBack();
-    }, [navigation]);
-    return null;
-  }
-
-  const walletState = useSelector((state: RootState) => state.wallet);
-  const bitcoinUnit = useSelector((state: RootState) => state.settings?.bitcoinUnit || 'sats');
-  const { iconUrl } = useAssetIcon(asset.ticker);
-  
-  const [loading, setLoading] = useState(false);
-  const [assetDetails, setAssetDetails] = useState(asset);
+  const passed = route?.params?.asset;
+  const dispatch = useAppDispatch();
+  const storeAssets = useAppSelector(s => (s as any).assets?.rgbAssets) as AssetParam[] | undefined;
   const [refreshing, setRefreshing] = useState(false);
-  
-  // getAdapterIfAvailable (not getAdapter, which throws) + the isConnected() guard
-  // below ensure we never call the RGB/NWC node when it isn't connected.
-  const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
-  const isBTC = asset.asset_id === 'BTC';
-  // Honor the protocol classified by the caller (RGB vs Spark token vs Arkade);
-  // only fall back to the old "non-BTC ⇒ RGB" assumption when it wasn't provided,
-  // so a Spark token is not pushed through the RGB send/receive flow.
-  const isRGB = asset.isRGB ?? !isBTC;
-  // Human label for the asset type chip — protocol-aware so a Spark token is not
-  // mislabelled "RGB Asset".
-  const assetTypeLabel = isBTC
-    ? 'Bitcoin'
-    : asset.protocol === 'SPARK'
-      ? 'Spark Token'
-      : asset.protocol === 'ARKADE'
-        ? 'Arkade Asset'
-        : 'RGB Asset';
+  const valid = !!passed?.asset_id && !!passed?.ticker && !!passed?.name;
 
   useEffect(() => {
-    loadAssetDetails();
-  }, []);
+    if (!valid) navigation.goBack();
+  }, [valid, navigation]);
 
-  const loadAssetDetails = async () => {
-    if (isBTC || !rgbAdapter?.isConnected()) return;
-    
-    try {
-      setLoading(true);
-      // For RGB assets, we could fetch more detailed information
-      // For now, we'll use the asset data passed from the previous screen
-      setAssetDetails(asset);
-    } catch (error) {
-      console.error('Failed to load asset details:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Prefer the live record (balances refresh in the store) over the snapshot we were opened with.
+  const asset = useMemo<AssetParam | undefined>(() => {
+    if (!passed) return undefined;
+    const live = storeAssets?.find(a => a.asset_id === passed.asset_id);
+    return live ? { ...passed, balance: live.balance ?? passed.balance } : passed;
+  }, [passed, storeAssets]);
 
-  const handleRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadAssetDetails();
+    try { await dispatch(loadBtcBalance() as any); } catch { /* the pull just ends */ }
     setRefreshing(false);
-  };
+  }, [dispatch]);
 
-  const handleSend = () => {
-    navigation.navigate('Send', {
-      selectedAsset: {
-        asset_id: assetDetails.asset_id,
-        ticker: assetDetails.ticker,
-        name: assetDetails.name,
-        isRGB,
-      }
-    });
-  };
+  if (!valid || !asset) return null;
 
-  const handleReceive = () => {
-    navigation.navigate('Receive', {
-      selectedAsset: {
-        asset_id: assetDetails.asset_id,
-        ticker: assetDetails.ticker,
-        name: assetDetails.name,
-        isRGB,
-      }
-    });
-  };
+  const isBTC = asset.asset_id === 'BTC';
+  const protocol: Protocol = isBTC ? 'BTC' : asset.protocol ?? (asset.isRGB === false ? 'SPARK' : 'RGB');
+  const isRGB = asset.isRGB ?? protocol === 'RGB';
+  const precision = asset.precision ?? 0;
+  const unit = asset.unit ?? asset.ticker;
+  const fmt = (baseUnits: number) => grouped(formatAssetAmount(baseUnits, precision));
+  const bal = readBalance(asset.balance);
+  const fiat = asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
+  const subtitle = isBTC ? 'Spark, Arkade, Lightning & on-chain' : `${NETWORK_LABEL[protocol]} asset`;
 
-  const AssetIcon = () => {
-    if (isBTC) {
-      return (
-        <View style={styles.iconContainer}>
-          <Ionicons name="logo-bitcoin" size={48} color={theme.colors.networks.bitcoin} />
-        </View>
-      );
-    }
-    
-    if (iconUrl) {
-      return (
-        <View style={styles.iconContainer}>
-          <Image source={{ uri: iconUrl }} style={styles.iconImage} />
-        </View>
-      );
-    }
-    
-    return (
-      <View style={styles.iconContainer}>
-        <Ionicons name="diamond" size={48} color={theme.colors.primary[500]} />
-      </View>
-    );
-  };
+  const selectedAsset = { asset_id: asset.asset_id, ticker: asset.ticker, name: asset.name, isRGB };
+  const actions: Array<{ key: string; label: string; icon: keyof typeof Ionicons.glyphMap; tint: string; onPress: () => void }> = [
+    { key: 'receive', label: 'Receive', icon: 'arrow-down', tint: theme.colors.success[500], onPress: () => navigation.navigate('Receive', { selectedAsset }) },
+    { key: 'swap', label: 'Swap', icon: 'swap-horizontal', tint: theme.colors.brand.violet, onPress: () => navigation.navigate('Swap') },
+    { key: 'send', label: 'Send', icon: 'arrow-up', tint: theme.colors.primary[500], onPress: () => navigation.navigate('Send', { selectedAsset }) },
+  ];
 
-  const renderHeader = () => {
-    const balance = isBTC
-      ? walletState.btcBalance?.vanilla?.spendable || 0
-      : (typeof assetDetails.balance === 'number'
-          ? assetDetails.balance
-          : (assetDetails.balance?.spendable ?? (assetDetails.balance as any)?.available ?? 0));
-
-    // Balances arrive in smallest units (sats for BTC, base units for RGB).
-    // Divide by 10^precision before display, and render BTC in the user's
-    // active unit (sats by default) — previously the raw integer was shown
-    // (e.g. "10000000" instead of "10 USDT").
-    const formattedBalance = isBTC
-      ? formatBitcoinAmount(balance, bitcoinUnit)
-      : formatAssetAmount(balance, assetDetails.precision || 0);
-    const tickerLabel = isBTC
-      ? (bitcoinUnit === 'sats' ? 'sats' : 'BTC')
-      : assetDetails.ticker;
-
-    return (
-      <View style={styles.headerContainer}>
-        <ScreenHeader
-          title="Asset Details"
-          showBack={true}
-        >
-          <View style={styles.assetInfo}>
-            <AssetIcon />
-            <View style={styles.assetTextInfo}>
-              <Text style={styles.assetTicker}>{assetDetails.ticker}</Text>
-              <Text style={styles.assetName}>{assetDetails.name}</Text>
-              <View style={styles.assetTypeContainer}>
-                <Text style={styles.assetType}>
-                  {assetTypeLabel}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.balanceContainer}>
-            <Text style={styles.balanceLabel}>Available Balance</Text>
-            <Text style={styles.balanceAmount}>
-              {formattedBalance}
-            </Text>
-            <Text style={styles.balanceTicker}>{tickerLabel}</Text>
-          </View>
-        </ScreenHeader>
-      </View>
-    );
-  };
-
-  const renderActionButtons = () => (
-    <View style={styles.actionsContainer}>
-      <TouchableOpacity style={styles.actionButton} onPress={handleReceive}>
-        <View style={styles.actionIconContainer}>
-          <Ionicons name="arrow-down" size={24} color={theme.colors.success[500]} />
-        </View>
-        <Text style={styles.actionText}>Receive</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.actionButton} onPress={handleSend}>
-        <View style={styles.actionIconContainer}>
-          <Ionicons name="arrow-up" size={24} color={theme.colors.primary[500]} />
-        </View>
-        <Text style={styles.actionText}>Send</Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  const renderAssetDetails = () => {
-    const details = [
-      { label: 'Asset ID', value: assetDetails.asset_id, copyable: true },
-      { label: 'Ticker', value: assetDetails.ticker },
-      { label: 'Name', value: assetDetails.name },
-    ];
-
-    if (!isBTC) {
-      details.push(
-        { label: 'Precision', value: assetDetails.precision?.toString() || 'N/A' },
-        { label: 'Issued Supply', value: assetDetails.issued_supply?.toLocaleString() || 'N/A' }
-      );
-    }
-
-    // `balance` may be a number (DB AssetRecord), a partial object (the BTC card
-    // passes only { spendable }), or a full { settled, future, spendable }.
-    // Read every field defensively — a missing one used to crash
-    // (undefined.toLocaleString()) when tapping the BTC / a Spark asset card.
-    if (assetDetails.balance != null) {
-      const bal: any = assetDetails.balance;
-      const isNum = typeof bal === 'number';
-      const settled = isNum ? bal : (bal.settled ?? 0);
-      const future = isNum ? bal : (bal.future ?? 0);
-      const spendable = isNum ? bal : (bal.spendable ?? bal.available ?? 0);
-      details.push(
-        { label: 'Settled Balance', value: Number(settled).toLocaleString() },
-        { label: 'Future Balance', value: Number(future).toLocaleString() },
-        { label: 'Spendable Balance', value: Number(spendable).toLocaleString() }
-      );
-    }
-
-    return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Asset Information</Text>
-        <Card style={styles.detailsCard}>
-          {details.map((detail, index) => (
-            <View key={index} style={styles.detailRow}>
-              <Text style={styles.detailLabel}>{detail.label}</Text>
-              <View style={styles.detailValueContainer}>
-                <Text style={styles.detailValue} numberOfLines={1}>
-                  {detail.value}
-                </Text>
-                {detail.copyable && (
-                  <TouchableOpacity 
-                    style={styles.copyButton}
-                    onPress={() => {
-                      // Copy to clipboard implementation would go here
-                      Alert.alert('Copied', `${detail.label} copied to clipboard`);
-                    }}
-                  >
-                    <Ionicons name="copy-outline" size={16} color={theme.colors.primary[500]} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          ))}
-        </Card>
-      </View>
-    );
-  };
-
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-          <Text style={styles.loadingText}>Loading asset details...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // Only what the hero doesn't already say: no repeated name, ticker, network or balance.
+  const detailRows: Array<{ label: string; value: string; copy?: string }> = [
+    ...(bal.inChannels > 0 ? [{ label: 'In Lightning channels', value: `${fmt(bal.inChannels)} ${unit}` }] : []),
+    ...(!isBTC && asset.issued_supply ? [{ label: 'Issued supply', value: `${fmt(asset.issued_supply)} ${asset.ticker}` }] : []),
+    ...(!isBTC ? [{ label: 'Decimals', value: String(precision) }] : []),
+    ...(!isBTC ? [{ label: 'Asset ID', value: shortId(asset.asset_id), copy: asset.asset_id }] : []),
+  ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      {renderActionButtons()}
-      
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <ScreenHeader title={asset.name} showBack onBack={() => navigation.goBack()} />
       <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={theme.colors.primary[500]} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary[500]} />}
       >
-        {renderAssetDetails()}
-        
-        <View style={styles.bottomPadding} />
+        <Animated.View entering={FadeInDown.duration(motion.duration.base)} style={styles.hero}>
+          <AssetIcon ticker={asset.ticker} protocol={isBTC ? undefined : (protocol as 'RGB' | 'SPARK' | 'ARKADE')} logoUri={asset.icon} size={48} />
+          <Text style={styles.heroSub}>{subtitle}</Text>
+          <AmountText style={styles.heroAmount} accessibilityLabel={`Balance ${fmt(bal.available)} ${unit}${fiat ? `, about ${fiat}` : ''}`}>
+            {fmt(bal.available)} <Text style={styles.heroUnit}>{unit}</Text>
+          </AmountText>
+          {fiat && <AmountText style={styles.heroFiat}>≈ {fiat}</AmountText>}
+          {bal.incoming > 0 && (
+            <View style={styles.pendingPill}>
+              <Ionicons name="time-outline" size={13} color={theme.colors.warning[500]} />
+              <Text style={styles.pendingText}>+{fmt(bal.incoming)} {unit} incoming</Text>
+            </View>
+          )}
+        </Animated.View>
+
+        <Animated.View entering={FadeInDown.delay(motion.stagger).duration(motion.duration.base)} style={styles.actions}>
+          {actions.map(a => (
+            <PressableScale key={a.key} scaleTo={0.95} accessibilityRole="button" accessibilityLabel={`${a.label} ${asset.ticker}`}
+              onPress={() => { feedback.select(); a.onPress(); }} style={styles.action}>
+              <View style={[styles.actionIcon, { backgroundColor: `${a.tint}22` }]}>
+                <Ionicons name={a.icon} size={22} color={a.tint} />
+              </View>
+              <Text style={styles.actionLabel}>{a.label}</Text>
+            </PressableScale>
+          ))}
+        </Animated.View>
+
+        {detailRows.length > 0 && <Animated.View entering={FadeInDown.delay(motion.stagger * 2).duration(motion.duration.base)}>
+          <View style={styles.group}>
+            {detailRows.map((d, i) => (
+              <View key={d.label} style={[styles.row, i < detailRows.length - 1 && styles.rowDivider]}>
+                <Text style={styles.rowLabel}>{d.label}</Text>
+                <View style={styles.rowRight}>
+                  <Text style={[styles.rowValue, d.copy && styles.mono]} numberOfLines={1}>{d.value}</Text>
+                  {d.copy && <CopyButton value={d.copy} size={16} color={theme.colors.primary[500]} />}
+                </View>
+              </View>
+            ))}
+          </View>
+        </Animated.View>}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background.secondary,
+  container: { flex: 1, backgroundColor: theme.colors.background.primary },
+  content: { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[8], gap: theme.spacing[4] },
+  hero: { alignItems: 'center', paddingTop: theme.spacing[2], gap: 2 },
+  heroSub: { marginTop: theme.spacing[2], fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
+  heroAmount: { marginTop: theme.spacing[1], fontSize: theme.typography.fontSize['4xl'], fontWeight: '700', color: theme.colors.text.primary },
+  heroUnit: { fontSize: theme.typography.fontSize.lg, fontWeight: '500', color: theme.colors.text.secondary },
+  heroFiat: { fontSize: theme.typography.fontSize.base, color: theme.colors.text.secondary },
+  pendingPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: theme.spacing[2],
+    paddingHorizontal: theme.spacing[3], paddingVertical: 6, borderRadius: theme.borderRadius.full,
+    backgroundColor: `${theme.colors.warning[500]}1A`,
   },
-  
-  headerContainer: {
-    marginBottom: theme.spacing[4],
+  pendingText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.warning[500], fontWeight: '600' },
+  actions: { flexDirection: 'row', justifyContent: 'center', gap: theme.spacing[6] },
+  action: { alignItems: 'center', gap: theme.spacing[1], minWidth: 64 },
+  actionIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  actionLabel: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
+  // Same grouped surface as the Dashboard asset list.
+  group: {
+    borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, overflow: 'hidden',
   },
-  
-  headerGradient: {
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[8],
-    borderBottomLeftRadius: theme.borderRadius['2xl'],
-    borderBottomRightRadius: theme.borderRadius['2xl'],
-  },
-  
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing[5],
-    paddingTop: theme.spacing[4],
-    marginBottom: theme.spacing[6],
-  },
-  
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  headerTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-  },
-  
-  
-  assetInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing[5],
-    marginBottom: theme.spacing[6],
-  },
-  
-  iconContainer: {
-    width: 64,
-    height: 64,
-    borderRadius: theme.borderRadius.xl,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing[4],
-  },
-  
-  iconImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  
-  assetTextInfo: {
-    flex: 1,
-  },
-  
-  assetTicker: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-    marginBottom: theme.spacing[1],
-  },
-  
-  assetName: {
-    fontSize: theme.typography.fontSize.base,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: theme.spacing[2],
-  },
-  
-  assetTypeContainer: {
-    alignSelf: 'flex-start',
-  },
-  
-  assetType: {
-    fontSize: theme.typography.fontSize.xs,
-    color: 'rgba(255, 255, 255, 0.7)',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-    borderRadius: theme.borderRadius.base,
-  },
-  
-  balanceContainer: {
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing[5],
-  },
-  
-  balanceLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: theme.spacing[2],
-  },
-  
-  balanceAmount: {
-    fontSize: theme.typography.fontSize['3xl'],
-    fontWeight: '700',
-    // The header has a dark/gradient background; text.inverse is near-black and
-    // rendered the amount invisible. White matches the sibling label/ticker.
-    color: '#FFFFFF',
-    marginBottom: theme.spacing[1],
-  },
-  
-  balanceTicker: {
-    fontSize: theme.typography.fontSize.base,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  
-  actionsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: theme.spacing[5],
-    marginTop: -theme.spacing[6],
-    marginBottom: theme.spacing[5],
-    justifyContent: 'space-between',
-  },
-  
-  actionButton: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: theme.colors.surface.primary,
-    paddingVertical: theme.spacing[4],
-    marginHorizontal: theme.spacing[2],
-    borderRadius: theme.borderRadius.xl,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  
-  actionIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.gray[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[2],
-  },
-  
-  actionText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-  
-  scrollView: {
-    flex: 1,
-  },
-  
-  scrollContent: {
-    paddingHorizontal: theme.spacing[5],
-    paddingBottom: theme.spacing[6],
-  },
-  
-  section: {
-    marginBottom: theme.spacing[6],
-  },
-  
-  sectionTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[4],
-  },
-  
-  detailsCard: {
-    padding: theme.spacing[5],
-  },
-  
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: theme.spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-  },
-  
-  detailLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: '600',
-    color: theme.colors.text.secondary,
-    flex: 1,
-  },
-  
-  detailValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 2,
-    justifyContent: 'flex-end',
-  },
-  
-  detailValue: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    textAlign: 'right',
-    flex: 1,
-  },
-  
-  copyButton: {
-    marginLeft: theme.spacing[2],
-    padding: theme.spacing[1],
-  },
-  
-  
-  
-  
-  
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  loadingText: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    marginTop: theme.spacing[4],
-  },
-  
-  bottomPadding: {
-    height: theme.spacing[4],
-  },
-}); 
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing[3], minHeight: 44, paddingHorizontal: theme.spacing[4], paddingVertical: theme.spacing[2.5] },
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border.light },
+  rowLabel: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
+  rowRight: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], flexShrink: 1 },
+  rowValue: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, fontWeight: '500', flexShrink: 1, textAlign: 'right' },
+  mono: { fontFamily: theme.typography.fontFamily.mono },
+});

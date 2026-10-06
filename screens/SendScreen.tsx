@@ -35,7 +35,8 @@ import {
   bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError,
 } from '../services/kaleidoPay';
 import type { PayTarget, Preview, PaymentOffer, RequestAsset } from '../services/kaleidoPay';
-import { usePayAccounts, prepareRgbRequest } from '../services/kaleidoPay/connect';
+import { usePayAccounts, prepareRgbRequest, prepareSparkTokenRequest, sendableSparkTokens } from '../services/kaleidoPay/connect';
+import type { SparkToken } from '../services/kaleidoPay/sparkPay';
 import type { RgbRequestAsset } from '../services/kaleidoPay/connect';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
 import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
@@ -78,6 +79,10 @@ export default function SendScreen({ navigation, route }: Props) {
   const [amountSat, setAmountSat] = useState<number | undefined>(undefined);
   const [assetAmount, setAssetAmount] = useState('');
   const [rgbAsset, setRgbAsset] = useState<RgbRequestAsset | null>(null);
+  // A Spark address can be paid in bitcoin or in a Spark token the wallet holds (e.g. USDB).
+  const [sparkTokenList, setSparkTokenList] = useState<SparkToken[]>([]);
+  const [sparkToken, setSparkToken] = useState<SparkToken | null>(null);
+  const [moreQuotes, setMoreQuotes] = useState(false);
   const [showAmountEditor, setShowAmountEditor] = useState(false);
   const [showContacts, setShowContacts] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -117,8 +122,10 @@ export default function SendScreen({ navigation, route }: Props) {
   useEffect(() => {
     revision.current++;
     setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setPreviousTotal('');
-  }, [input, amountSat, assetAmount]);
-  useEffect(() => { setRgbAsset(null); setAssetAmount(''); }, [input]);
+  }, [input, amountSat, assetAmount, sparkToken]);
+  useEffect(() => { setRgbAsset(null); setAssetAmount(''); setSparkToken(null); }, [input]);
+  // Start the slow setup (wallet syncs, server keys) as soon as Send opens, not on Continue.
+  useEffect(() => { void prepareKaleidoPay(); }, []);
 
   // The payment journal: an unresolved payment is shown before anything new can be paid.
   useEffect(() => {
@@ -146,7 +153,7 @@ export default function SendScreen({ navigation, route }: Props) {
 
   const getOffers = useCallback(async (refresh = false) => {
     const current = ++revision.current;
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setMoreQuotes(false);
     if (refresh) setPreviousTotal(total);
     try {
       await prepareKaleidoPay();
@@ -160,21 +167,48 @@ export default function SendScreen({ navigation, route }: Props) {
         const units = Number(assetAmount);
         if (!decoded.amount && !(units > 0)) { setError(`Enter how much ${decoded.ticker} to send.`); return; }
         asset = { id: decoded.id, ticker: decoded.ticker, precision: decoded.precision, amount: decoded.amount ?? Math.round(units * 10 ** decoded.precision) };
+      } else if (!sparkToken) {
+        prepareSparkTokenRequest(null);
+      } else {
+        const units = Number(assetAmount.replace(',', '.'));
+        const amount = Math.round(units * 10 ** sparkToken.precision);
+        if (!(amount > 0)) { setError(`Enter how much ${sparkToken.ticker} to send.`); return; }
+        prepareSparkTokenRequest(sparkToken);
+        asset = { id: sparkToken.id, ticker: sparkToken.ticker, precision: sparkToken.precision, amount };
       }
-      const fresh = await previewInput(input, fixedSat ?? amountSat, requestId.current, { asset });
+      const fresh = await previewInput(input, asset && target?.kind !== 'rgb' ? undefined : fixedSat ?? amountSat, requestId.current, { asset });
       if (current !== revision.current) return;
       if (fresh.plan.status !== 'ready') { setPreview(fresh); setOffers([]); setError(fresh.plan.reason); return; }
-      const result = await quotePaymentOffers(fresh);
+      // Show quotes as they arrive: the first payable one ends the wait, slower providers fill in after.
+      let picked = refresh;
+      const show = (list: PaymentOffer[], done: boolean) => {
+        if (current !== revision.current) return;
+        setPreview(fresh); setOffers(list);
+        const shown = visibleOffers(list);
+        const best = bestOffer(shown.filter(o => o.executable)) ?? shown.find(o => o.executable && o.quote && !o.unavailable);
+        // Pick once, the first time something payable shows (or at the end); later quotes never move the selection.
+        if (!picked && (best || done)) { picked = true; setSelectedId((best ?? bestOffer(shown))?.id); }
+        if (best || done) setBusy(false);
+        setMoreQuotes(!done);
+      };
+      const result = await quotePaymentOffers(fresh, partial => show(partial, false));
+      show(result, true);
       if (current !== revision.current) return;
-      setPreview(fresh); setOffers(result);
-      const shown = visibleOffers(result);
-      if (!refresh) setSelectedId((bestOffer(shown.filter(o => o.executable)) ?? shown.find(o => o.executable && o.quote && !o.unavailable) ?? bestOffer(shown))?.id);
       // Refresh never switches the chosen way to pay, even when its quote fails.
       setReviewUpdated(refresh);
     } catch (e) {
       if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
-    } finally { if (current === revision.current) setBusy(false); }
-  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, target, total, visibleOffers]);
+    } finally { if (current === revision.current) { setBusy(false); setMoreQuotes(false); } }
+  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, visibleOffers]);
+
+  // A Spark address can also be paid in the Spark tokens this wallet holds.
+  const sparkAddressTarget = target?.kind === 'spark' && fixedSat === undefined;
+  useEffect(() => {
+    let live = true;
+    setSparkTokenList([]);
+    if (sparkAddressTarget) void sendableSparkTokens().then(list => { if (live) setSparkTokenList(list); });
+    return () => { live = false; };
+  }, [sparkAddressTarget, input]);
 
   // Continue on a request without an amount asks for one, then carries on.
   // (The editor closes right after confirming, so the intent is latched on confirm.)
@@ -186,7 +220,7 @@ export default function SendScreen({ navigation, route }: Props) {
 
   function review() {
     if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }
-    if (target.kind !== 'rgb' && fixedSat === undefined && !amountSat) { continueAfterAmount.current = true; setShowAmountEditor(true); return; }
+    if (target.kind !== 'rgb' && !sparkToken && fixedSat === undefined && !amountSat) { continueAfterAmount.current = true; setShowAmountEditor(true); return; }
     void getOffers();
   }
 
@@ -349,7 +383,40 @@ export default function SendScreen({ navigation, route }: Props) {
       </View>
     ) : null}
 
-    {target?.kind === 'rgb' ? (rgbAsset && !rgbAsset.amount ? <View style={[card, { marginTop: t.spacing[3] }]}>
+    {sparkAddressTarget && sparkTokenList.length > 0 && <View style={{ marginTop: t.spacing[4], gap: t.spacing[2] }}>
+      <Text style={caption}>Pay in</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.spacing[2] }}>
+        {[null, ...sparkTokenList].map(token => {
+          const active = (token?.id ?? null) === (sparkToken?.id ?? null);
+          const label = token ? token.ticker : 'Bitcoin';
+          return (
+            <PressableScale key={token?.id ?? 'btc'} scaleTo={0.96} accessibilityRole="radio" accessibilityState={{ checked: active }}
+              accessibilityLabel={token ? `Pay in ${token.ticker}, ${formatSpend(token.available, token)} available` : 'Pay in bitcoin'}
+              onPress={() => { if (!active) { feedback.select(); setSparkToken(token); setAssetAmount(''); } }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], minHeight: 44, paddingHorizontal: t.spacing[3], borderRadius: t.borderRadius.full,
+                borderWidth: 1.5, borderColor: active ? t.colors.primary[500] : t.colors.border.light, backgroundColor: active ? t.colors.primary[50] : t.colors.surface.primary }}>
+              {!token ? <Ionicons name="logo-bitcoin" size={16} color={t.colors.networks.bitcoin} />
+                : /^USD/i.test(token.ticker) ? <Ionicons name="logo-usd" size={16} color={t.colors.success[500]} />
+                : <NetworkIcon network="spark" size={16} />}
+              <Text style={{ ...text, fontWeight: '600', color: active ? t.colors.primary[500] : t.colors.text.primary }}>{label}</Text>
+            </PressableScale>
+          );
+        })}
+      </ScrollView>
+    </View>}
+
+    {sparkToken ? <View style={[card, { marginTop: t.spacing[3] }]}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Text style={text}>Amount in {sparkToken.ticker}</Text>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Send all ${sparkToken.ticker}`} hitSlop={8}
+          onPress={() => setAssetAmount((sparkToken.available / 10 ** sparkToken.precision).toFixed(sparkToken.precision).replace(/\.?0+$/, ''))}>
+          <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>Max</Text>
+        </TouchableOpacity>
+      </View>
+      <TextInput accessibilityLabel={`Amount in ${sparkToken.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount} autoFocus
+        placeholder="0" placeholderTextColor={t.colors.text.muted} style={{ ...text, fontSize: t.typography.fontSize['2xl'], paddingVertical: t.spacing[2] }} />
+      <Text style={small}>{formatSpend(sparkToken.available, sparkToken)} available · sent over Spark, no fee</Text>
+    </View> : target?.kind === 'rgb' ? (rgbAsset && !rgbAsset.amount ? <View style={[card, { marginTop: t.spacing[3] }]}>
       <Text style={text}>Amount in {rgbAsset.ticker}</Text>
       <TextInput accessibilityLabel={`Amount in ${rgbAsset.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount}
         placeholder={`Amount in ${rgbAsset.ticker}`} placeholderTextColor={t.colors.text.muted} style={{ ...text, paddingVertical: t.spacing[3] }} />
@@ -455,6 +522,10 @@ export default function SendScreen({ navigation, route }: Props) {
         {!busy && preview.plan.status === 'ready' && !offers.some(o => o.quote) && <Text style={{ ...muted, textAlign: 'center' }}>No way to pay this right now. Check your balances and connected accounts, then refresh.</Text>}
         {selected && !selected.executable && <Text style={{ ...muted, textAlign: 'center' }}>This account can quote but cannot pay yet.</Text>}
         {busy && <ActivityIndicator color={t.colors.primary[500]} />}
+        {!busy && moreQuotes && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
+          <ActivityIndicator size="small" color={t.colors.text.tertiary} />
+          <Text style={small}>Checking other ways to pay…</Text>
+        </View>}
       </View>
     </>;
   };

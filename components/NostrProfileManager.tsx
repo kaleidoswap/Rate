@@ -6,9 +6,10 @@ import {
   StyleSheet,
   Alert,
   TouchableOpacity,
-  ScrollView,
   Clipboard,
   Share,
+  Image,
+  ScrollView,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,18 +25,20 @@ import {
   setError,
   saveKeysSecurely,
   clearKeysSecurely,
-  setRelaysExpanded,
   setNWCConnectionString,
-  setWalletConnectEnabled,
 } from '../store/slices/nostrSlice';
 import NostrService from '../services/NostrService';
+import SecurityService from '../services/SecurityService';
 import { theme, leading } from '../theme';
-import { Card } from './Card';
 import { Button } from './Button';
 import { Input } from './Input';
+import { Sheet } from './Sheet';
+import { CopyButton } from './CopyButton';
 import { WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 import ToastService from '../services/ToastService';
 import { copySensitive } from '../utils/sensitiveClipboard';
+
+const toast = () => ToastService.getInstance();
 
 interface Props {
   navigation?: any;
@@ -59,7 +62,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   const [relayInput, setRelayInput] = useState('');
   const [isAddingRelay, setIsAddingRelay] = useState(false);
   const [isRemovingRelay, setIsRemovingRelay] = useState(false);
-  const [isGeneratingNWC, setIsGeneratingNWC] = useState(false);
+  const [relayStatus, setRelayStatus] = useState<{ url: string; connected: boolean }[]>([]);
 
   const {
     isConnected,
@@ -72,6 +75,9 @@ export default function NostrProfileManager({ navigation }: Props) {
     error,
     walletConnectEnabled,
     nwcConnectionString,
+    relays,
+    connectedWallet,
+    nwcWalletType,
   } = nostrState;
 
   useEffect(() => {
@@ -85,6 +91,19 @@ export default function NostrProfileManager({ navigation }: Props) {
       });
     }
   }, [profile]);
+
+  // NostrService exposes no relay connect/disconnect event, so poll the pool
+  // while connected; a one-shot read per render went stale between renders.
+  useEffect(() => {
+    if (!isConnected) {
+      setRelayStatus([]);
+      return;
+    }
+    const read = () => setRelayStatus(NostrService.getInstance().getRelayStatus());
+    read();
+    const id = setInterval(read, 3000);
+    return () => clearInterval(id);
+  }, [isConnected, relays]);
 
   useEffect(() => {
     if (!walletConnectEnabled || nwcConnectionString) return;
@@ -137,7 +156,7 @@ export default function NostrProfileManager({ navigation }: Props) {
                 ]
               );
             } catch (error) {
-              Alert.alert('Error', 'Failed to generate keys');
+              toast().error('Failed to generate keys');
             }
           }
         }
@@ -147,7 +166,7 @@ export default function NostrProfileManager({ navigation }: Props) {
 
   const handleImportKeys = async () => {
     if (!keyInput.trim()) {
-      Alert.alert('Error', 'Please enter your private key (nsec, npriv, or hex)');
+      toast().error('Please enter your private key (nsec, npriv, or hex)');
       return;
     }
 
@@ -157,7 +176,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       const keys = nostrService.importPrivateKey(keyInput.trim());
 
       if (!keys) {
-        Alert.alert('Error', 'Invalid private key format. Use nsec1…, npriv1…, or 64-character hex.');
+        toast().error('Invalid private key format. Use nsec1…, npriv1…, or 64-character hex.');
         return;
       }
 
@@ -181,65 +200,48 @@ export default function NostrProfileManager({ navigation }: Props) {
       setShowKeyImport(false);
       setKeyInput('');
 
-      Alert.alert('Success', 'Keys imported and saved securely! Your account will be restored automatically next time you open the app.');
+      toast().success('Keys imported and saved securely');
 
       // Load profile
       await dispatch(loadNostrProfile() as any);
     } catch (error) {
-      Alert.alert('Error', 'Failed to import keys');
+      toast().error('Failed to import keys');
     } finally {
       setIsImporting(false);
     }
   };
 
+  // The nsec is the whole identity: gate it behind the device owner (biometrics
+  // or passcode, as for the recovery phrase) and only ever copy it to the
+  // auto-clearing clipboard — no share sheet, which can hand it to any app.
   const handleBackupKeys = async (nsecKey?: string) => {
     const keyToBackup = nsecKey || nsec;
     if (!keyToBackup) {
-      Alert.alert('Error', 'No private key to backup');
+      toast().error('No private key to back up');
       return;
     }
-
-    Alert.alert(
-      'Backup Options',
-      'Choose how you want to backup your private key',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Copy to Clipboard',
-          onPress: () => {
-            copySensitive(keyToBackup);
-            Alert.alert('Copied', 'Private key copied. The clipboard clears in a minute — store it safely now.');
-          }
-        },
-        {
-          text: 'Share',
-          onPress: async () => {
-            try {
-              await Share.share({
-                message: `My Nostr private key: ${keyToBackup}\n\nKeep this safe and never share it publicly!`,
-                title: 'Nostr Private Key Backup',
-              });
-            } catch (error) {
-              console.error('Failed to share key:', error);
-            }
-          }
-        }
-      ]
-    );
+    const security = SecurityService.getInstance();
+    if (!(await security.isDeviceAuthAvailable())) {
+      toast().error('Set a device passcode or biometric lock before backing up your key.');
+      return;
+    }
+    if (!(await security.authenticateForReveal('Authenticate to copy your Nostr private key'))) return;
+    copySensitive(keyToBackup);
+    toast().success('Private key copied. The clipboard clears in a minute — store it safely now.', 5000);
   };
 
   const handleUpdateProfile = async () => {
     if (!isConnected) {
-      Alert.alert('Error', 'Not connected to Nostr');
+      toast().error('Not connected to Nostr');
       return;
     }
 
     try {
       await dispatch(updateNostrProfile(profileForm) as any);
       setShowProfileEdit(false);
-      Alert.alert('Success', 'Profile updated successfully');
+      toast().success('Profile updated');
     } catch (error) {
-      Alert.alert('Error', 'Failed to update profile');
+      toast().error('Failed to update profile');
     }
   };
 
@@ -256,7 +258,7 @@ export default function NostrProfileManager({ navigation }: Props) {
               const nostrService = NostrService.getInstance();
               await nostrService.disconnect();
               dispatch(setConnected(false));
-              Alert.alert('Disconnected', 'You have been disconnected from Nostr. Your keys are still stored and you will be reconnected automatically next time.');
+              toast().info('Disconnected from Nostr. Your keys stay stored for next time.');
             } catch (error) {
               console.error('Failed to disconnect:', error);
             }
@@ -277,7 +279,7 @@ export default function NostrProfileManager({ navigation }: Props) {
               dispatch(clearKeys());
               dispatch(setConnected(false));
 
-              Alert.alert('Keys Removed', 'You have been disconnected and your stored keys have been removed.');
+              toast().success('Disconnected and stored keys removed');
             } catch (error) {
               console.error('Failed to disconnect:', error);
             }
@@ -289,7 +291,7 @@ export default function NostrProfileManager({ navigation }: Props) {
 
   const handleAddRelay = async () => {
     if (!relayInput.trim()) {
-      Alert.alert('Error', 'Please enter a relay URL');
+      toast().error('Please enter a relay URL');
       return;
     }
 
@@ -306,12 +308,12 @@ export default function NostrProfileManager({ navigation }: Props) {
           relays: await nostrService.getRelays()
         };
         await dispatch(initializeNostr(settings) as any);
-        Alert.alert('Success', 'Relay added successfully');
+        toast().success('Relay added');
       } else {
-        Alert.alert('Error', 'Failed to add relay');
+        toast().error('Failed to add relay');
       }
     } catch (error) {
-      Alert.alert('Error', 'Failed to add relay');
+      toast().error('Failed to add relay');
     } finally {
       setIsAddingRelay(false);
     }
@@ -339,12 +341,12 @@ export default function NostrProfileManager({ navigation }: Props) {
                   relays: await nostrService.getRelays()
                 };
                 await dispatch(initializeNostr(settings) as any);
-                Alert.alert('Success', 'Relay removed successfully');
+                toast().success('Relay removed');
               } else {
-                Alert.alert('Error', 'Failed to remove relay');
+                toast().error('Failed to remove relay');
               }
             } catch (error) {
-              Alert.alert('Error', 'Failed to remove relay');
+              toast().error('Failed to remove relay');
             } finally {
               setIsRemovingRelay(false);
             }
@@ -354,1082 +356,299 @@ export default function NostrProfileManager({ navigation }: Props) {
     );
   };
 
-  const handleGenerateNWCConnection = async () => {
-    if (!isConnected) {
-      Alert.alert('Error', 'Please connect to Nostr first');
-      return;
-    }
+  const relayUp = (url: string) => relayStatus.find(r => r.url === url)?.connected ?? false;
+  const relaysUp = relays.filter(relayUp).length;
+  const shortNpub = npub ? `${npub.slice(0, 14)}…${npub.slice(-8)}` : '';
+  const name = profile?.display_name || profile?.name || 'Your profile';
+  const walletLabel = connectedWallet ? (nwcWalletType === 'rln' ? 'RGB Lightning node' : 'Lightning wallet') : null;
 
-    setIsGeneratingNWC(true);
-    try {
-      const nostrService = NostrService.getInstance();
-
-      // First, initialize NWC service if not already done
-      console.log('Initializing NWC service...');
-      const nwcInitialized = await nostrService.initializeNWC(nostrState.relays);
-
-      if (!nwcInitialized) {
-        Alert.alert('Error', 'Failed to initialize Nostr Wallet Connect service');
-        return;
-      }
-
-      const permissions = [
-        'pay_invoice',
-        'make_invoice',
-        'get_balance',
-        'get_info',
-        'lookup_invoice',
-        'list_transactions'
-      ];
-
-      console.log('Generating NWC connection string...');
-      const connectionString = await nostrService.getWalletConnectInfo(permissions, profile?.lud16);
-
-      if (connectionString) {
-        await SecureStore.setItemAsync(WALLET_SERVICE_NWC_URI_KEY, connectionString);
-        dispatch(setNWCConnectionString(connectionString));
-        dispatch(setWalletConnectEnabled(true));
-
-        Alert.alert(
-          'NWC Connection Generated',
-          'Nostr Wallet Connect connection string has been generated successfully!',
-          [
-            { text: 'OK' },
-            {
-              text: 'Copy Connection',
-              onPress: () => handleCopyNWCConnection(connectionString)
-            }
-          ]
-        );
-      } else {
-        Alert.alert('Error', 'Failed to generate NWC connection string');
-      }
-    } catch (error) {
-      console.error('NWC Generation Error:', error);
-      Alert.alert('Error', `Failed to generate NWC connection: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsGeneratingNWC(false);
-    }
+  const reconnect = async () => {
+    await dispatch(initializeNostr({ privateKey: nostrState.privateKey!, relays }) as any);
   };
 
-  const handleCopyNWCConnection = (connectionString?: string) => {
-    const stringToCopy = connectionString || nwcConnectionString;
-    if (!stringToCopy) {
-      Alert.alert('Error', 'No connection string available');
-      return;
-    }
-
-    copySensitive(stringToCopy);
-    ToastService.getInstance().copied('Connection string');
-  };
-
-  const handleShareNWCConnection = async () => {
-    if (!nwcConnectionString) {
-      Alert.alert('Error', 'No connection string available');
-      return;
-    }
-
-    try {
-      await Share.share({
-        message: `Connect to my Nostr wallet:\n\n${nwcConnectionString}`,
-        title: 'Nostr Wallet Connect',
-      });
-    } catch (error) {
-      console.error('Failed to share NWC connection:', error);
-    }
-  };
-
-  const handleDisableNWC = () => {
-    Alert.alert(
-      'Disable Nostr Wallet Connect',
-      'This will disable wallet connect functionality and clear the connection string.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Disable',
-          style: 'destructive',
-          onPress: async () => {
-            await SecureStore.deleteItemAsync(WALLET_SERVICE_NWC_URI_KEY);
-            dispatch(setWalletConnectEnabled(false));
-            dispatch(setNWCConnectionString(null));
-            Alert.alert('Disabled', 'Nostr Wallet Connect has been disabled');
-          }
-        }
-      ]
+  const Row = ({ icon, tint, label, detail, onPress, danger, last, right }: {
+    icon: keyof typeof Ionicons.glyphMap; tint?: string; label: string; detail?: string;
+    onPress?: () => void; danger?: boolean; last?: boolean; right?: React.ReactNode;
+  }) => {
+    const color = danger ? theme.colors.error[500] : tint ?? theme.colors.text.secondary;
+    return (
+      <TouchableOpacity style={[styles.row, !last && styles.rowDivider]} onPress={onPress} disabled={!onPress}
+        activeOpacity={0.7} accessibilityRole={onPress ? 'button' : undefined}>
+        <View style={[styles.rowIcon, { backgroundColor: `${color}1F` }]}>
+          <Ionicons name={icon} size={17} color={color} />
+        </View>
+        <View style={styles.flex}>
+          <Text style={[styles.rowLabel, danger && { color }]}>{label}</Text>
+          {!!detail && <Text style={styles.rowDetail} numberOfLines={1}>{detail}</Text>}
+        </View>
+        {right ?? (onPress && !danger ? <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} /> : null)}
+      </TouchableOpacity>
     );
   };
 
-  const renderConnectionStatus = () => (
-    <Card style={styles.card}>
-      <View style={styles.cardHeader}>
-        <View style={styles.statusIndicator}>
-          <View style={[
-            styles.statusDot,
-            { backgroundColor: isConnected ? theme.colors.success[500] : theme.colors.error[500] }
-          ]} />
-          <Text style={styles.cardTitle}>
-            {isConnected ? 'Connected to Nostr' : 'Not Connected'}
-          </Text>
-        </View>
-        {error && (
-          <TouchableOpacity onPress={() => dispatch(setError(null))}>
-            <Ionicons name="close-circle" size={20} color={theme.colors.error[500]} />
-          </TouchableOpacity>
-        )}
+  // ── No identity yet: one clear choice ──────────────────────────────────────
+  const renderOnboarding = () => (
+    <View style={[styles.card, styles.hero]}>
+      <View style={styles.heroIcon}>
+        <Ionicons name="planet" size={30} color={theme.colors.primary[500]} />
       </View>
-
-      {error && (
-        <Text style={styles.errorText}>{error}</Text>
-      )}
-
-      {!isConnected && !publicKey && (
-        <View style={styles.setupActions}>
-          <Text style={styles.setupDescription}>
-            Get started with Nostr by generating new keys or importing existing ones
-          </Text>
-          <View style={styles.setupButtons}>
-            <Button
-              title="Generate New Keys"
-              onPress={handleGenerateKeys}
-              style={styles.setupButton}
-              loading={isInitializing}
-            />
-            <Button
-              title="Import Existing Keys"
-              onPress={() => setShowKeyImport(true)}
-              variant="ghost"
-              style={styles.setupButton}
-            />
-          </View>
-        </View>
-      )}
-
-      {publicKey && !isConnected && (
-        <View style={styles.reconnectSection}>
-          <Text style={styles.reconnectText}>
-            You have keys but are not connected. Reconnect to use Nostr features.
-          </Text>
-          <Button
-            title="Reconnect"
-            onPress={async () => {
-              const settings = {
-                privateKey: nostrState.privateKey!,
-                relays: nostrState.relays
-              };
-              await dispatch(initializeNostr(settings) as any);
-            }}
-            loading={isInitializing}
-          />
-        </View>
-      )}
-    </Card>
+      <Text style={styles.heroTitle}>Join Nostr</Text>
+      <Text style={styles.heroText}>
+        Follow friends, message them and receive zaps. Your keys stay on this device.
+      </Text>
+      <Button title="Create my identity" onPress={handleGenerateKeys} loading={isInitializing} style={styles.heroBtn} />
+      <Button title="I already have a key" variant="ghost" onPress={() => setShowKeyImport(true)} style={styles.heroBtn} />
+    </View>
   );
 
-  const renderKeyImportForm = () => {
-    if (!showKeyImport) return null;
-
-    return (
-      <Card style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>Import Private Key</Text>
-          <TouchableOpacity onPress={() => setShowKeyImport(false)}>
-            <Ionicons name="close" size={24} color={theme.colors.text.secondary} />
-          </TouchableOpacity>
-        </View>
-
-        <Text style={styles.importDescription}>
-          Enter or paste your Nostr private key (nsec, npriv, or hex) to import your existing identity. Use the paste button to paste from clipboard.
-        </Text>
-
-        <View style={styles.keyInputContainer}>
-          <Input
-            label="Private Key"
-            placeholder="nsec1..., npriv1..., or hex"
-            value={keyInput}
-            onChangeText={setKeyInput}
-            variant="outlined"
-            secureTextEntry={!showKeyInput}
-            multiline
-            style={styles.keyInput}
-          />
-          <View style={styles.keyInputActions}>
-            <TouchableOpacity
-              style={styles.keyInputAction}
-              onPress={async () => {
-                try {
-                  const text = await Clipboard.getString();
-                  if (text) {
-                    setKeyInput(text);
-                  }
-                } catch (error) {
-                  console.error('Failed to paste:', error);
-                }
-              }}
-            >
-              <Ionicons name="clipboard-outline" size={20} color={theme.colors.primary[500]} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.keyInputAction}
-              onPress={() => setShowKeyInput(!showKeyInput)}
-            >
-              <Ionicons
-                name={showKeyInput ? "eye-off-outline" : "eye-outline"}
-                size={20}
-                color={theme.colors.primary[500]}
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.importActions}>
-          <Button
-            title="Cancel"
-            onPress={() => setShowKeyImport(false)}
-            variant="ghost"
-            style={styles.importCancelButton}
-          />
-          <Button
-            title={isImporting ? "Importing..." : "Import"}
-            onPress={handleImportKeys}
-            loading={isImporting}
-            disabled={isImporting || !keyInput.trim()}
-            style={styles.importSubmitButton}
-          />
-        </View>
-      </Card>
-    );
-  };
-
-  const renderIdentityInfo = () => {
-    if (!publicKey) return null;
-
-    return (
-      <Card style={styles.card}>
-        <Text style={styles.cardTitle}>Your Nostr Identity</Text>
-
-        <View style={styles.identityItem}>
-          <Text style={styles.identityLabel}>Public Key (npub)</Text>
-          <View style={styles.identityValueContainer}>
-            <Text style={styles.identityValue} numberOfLines={1}>
-              {npub}
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                if (npub) {
-                  Clipboard.setString(npub);
-                  ToastService.getInstance().copied('Public key');
-                }
-              }}
-            >
-              <Ionicons name="copy-outline" size={20} color={theme.colors.primary[500]} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.identityActions}>
-          <Button
-            title="Backup Private Key"
-            onPress={() => handleBackupKeys()}
-            variant="ghost"
-            size="sm"
-            style={styles.identityButton}
-          />
-          <Button
-            title="Share Profile"
-            onPress={async () => {
-              if (npub) {
-                await Share.share({
-                  message: `Follow me on Nostr: ${npub}`,
-                  title: 'My Nostr Profile',
-                });
-              }
-            }}
-            variant="ghost"
-            size="sm"
-            style={styles.identityButton}
-          />
-        </View>
-      </Card>
-    );
-  };
-
-  const renderProfileSection = () => {
-    if (!isConnected) return null;
-
-    return (
-      <Card style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>Profile</Text>
-          <TouchableOpacity onPress={() => setShowProfileEdit(!showProfileEdit)}>
-            <Ionicons
-              name={showProfileEdit ? "close" : "pencil"}
-              size={20}
-              color={theme.colors.primary[500]}
-            />
-          </TouchableOpacity>
-        </View>
-
-        {!showProfileEdit ? (
-          <View style={styles.profileDisplay}>
-            {profile?.display_name && (
-              <Text style={styles.profileDisplayName}>{profile.display_name}</Text>
-            )}
-            {profile?.name && profile.name !== profile.display_name && (
-              <Text style={styles.profileName}>@{profile.name}</Text>
-            )}
-            {profile?.about && (
-              <Text style={styles.profileAbout}>{profile.about}</Text>
-            )}
-            {profile?.website && (
-              <Text style={styles.profileWebsite}>{profile.website}</Text>
-            )}
-            {profile?.lud16 && (
-              <View style={styles.lightningAddress}>
-                <Ionicons name="flash" size={16} color={theme.colors.warning[500]} />
-                <Text style={styles.lightningAddressText}>{profile.lud16}</Text>
-              </View>
-            )}
-
-            {!profile && (
-              <View style={styles.noProfile}>
-                <Text style={styles.noProfileText}>No profile set up yet</Text>
-                <Button
-                  title="Set Up Profile"
-                  onPress={() => setShowProfileEdit(true)}
-                  size="sm"
-                />
-              </View>
-            )}
-          </View>
-        ) : (
-          <View style={styles.profileEdit}>
-            <Input
-              label="Display Name"
-              placeholder="Your display name"
-              value={profileForm.display_name}
-              onChangeText={(text) => setProfileForm(prev => ({ ...prev, display_name: text }))}
-              variant="outlined"
-              style={styles.profileInput}
-            />
-
-            <Input
-              label="Username"
-              placeholder="username (no spaces)"
-              value={profileForm.name}
-              onChangeText={(text) => setProfileForm(prev => ({ ...prev, name: text.replace(/\s/g, '') }))}
-              variant="outlined"
-              style={styles.profileInput}
-            />
-
-            <Input
-              label="About"
-              placeholder="Tell people about yourself"
-              value={profileForm.about}
-              onChangeText={(text) => setProfileForm(prev => ({ ...prev, about: text }))}
-              variant="outlined"
-              multiline
-              numberOfLines={3}
-              style={styles.profileInput}
-            />
-
-            <Input
-              label="Website"
-              placeholder="https://yourwebsite.com"
-              value={profileForm.website}
-              onChangeText={(text) => setProfileForm(prev => ({ ...prev, website: text }))}
-              variant="outlined"
-              style={styles.profileInput}
-            />
-
-            <Input
-              label="Lightning Address"
-              placeholder="you@wallet.com"
-              value={profileForm.lud16}
-              onChangeText={(text) => setProfileForm(prev => ({ ...prev, lud16: text }))}
-              variant="outlined"
-              style={styles.profileInput}
-            />
-
-            <View style={styles.profileActions}>
-              <Button
-                title="Cancel"
-                onPress={() => setShowProfileEdit(false)}
-                variant="ghost"
-                style={styles.profileCancelButton}
-              />
-              <Button
-                title={isProfileLoading ? "Saving..." : "Save Profile"}
-                onPress={handleUpdateProfile}
-                loading={isProfileLoading}
-                disabled={isProfileLoading}
-                style={styles.profileSaveButton}
-              />
-            </View>
-          </View>
-        )}
-      </Card>
-    );
-  };
-
-  const renderRelayManager = () => {
-    if (!isConnected) return null;
-
-    const displayedRelays = nostrState.isRelaysExpanded
-      ? nostrState.relays
-      : nostrState.relays.slice(0, 2);
-
-    // Get actual relay status
-    const nostrService = NostrService.getInstance();
-    const relayStatus = nostrService.getRelayStatus();
-
-    const getRelayStatus = (relayUrl: string) => {
-      const status = relayStatus.find(r => r.url === relayUrl);
-      return status?.connected || false;
-    };
-
-    return (
-      <Card style={styles.card}>
-        <TouchableOpacity
-          style={styles.relayHeader}
-          onPress={() => dispatch(setRelaysExpanded(!nostrState.isRelaysExpanded))}
-        >
-          <View style={styles.relayHeaderContent}>
-            <Text style={styles.cardTitle}>Relays</Text>
-            <View style={styles.relayCount}>
-              <Text style={styles.relayCountText}>{nostrState.relays.length}</Text>
-            </View>
-            {relayStatus.length > 0 && (
-              <View style={styles.relayConnectionStatus}>
-                <Text style={styles.relayConnectionText}>
-                  {relayStatus.filter(r => r.connected).length}/{relayStatus.length} connected
-                </Text>
-              </View>
-            )}
-          </View>
-          <Ionicons
-            name={nostrState.isRelaysExpanded ? "chevron-up" : "chevron-down"}
-            size={20}
-            color={theme.colors.text.secondary}
-          />
-        </TouchableOpacity>
-
-        {/* Always show a preview of relays */}
-        <View style={styles.relayPreview}>
-          {displayedRelays.map((relay: string, index: number) => {
-            const isConnected = getRelayStatus(relay);
-            return (
-              <View key={relay} style={styles.relayPreviewItem}>
-                <Ionicons
-                  name={isConnected ? "radio" : "radio-outline"}
-                  size={12}
-                  color={isConnected ? theme.colors.success[500] : theme.colors.gray[400]}
-                  style={styles.relayStatusIcon}
-                />
-                <Text style={[
-                  styles.relayPreviewText,
-                  !isConnected && styles.relayDisconnectedText
-                ]} numberOfLines={1}>
-                  {relay.replace('wss://', '').replace('ws://', '')}
-                </Text>
-                {nostrState.isRelaysExpanded && (
-                  <TouchableOpacity
-                    style={styles.removeRelayButtonSmall}
-                    onPress={() => handleRemoveRelay(relay)}
-                    disabled={isRemovingRelay}
-                  >
-                    <Ionicons name="close" size={16} color={theme.colors.error[500]} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          })}
-
-          {!nostrState.isRelaysExpanded && nostrState.relays.length > 2 && (
-            <Text style={styles.moreRelaysText}>
-              +{nostrState.relays.length - 2} more
-            </Text>
+  // ── Identity card: who you are on Nostr, at a glance ───────────────────────
+  const renderIdentity = () => (
+    <View style={[styles.card, styles.identity]}>
+      <View style={styles.identityTop}>
+        <View style={styles.avatar}>
+          {profile?.picture ? (
+            <Image source={{ uri: profile.picture }} style={styles.avatarImg} />
+          ) : (
+            <Text style={styles.avatarInitial}>{(profile?.display_name || profile?.name || 'N').charAt(0).toUpperCase()}</Text>
           )}
         </View>
+        <View style={styles.flex}>
+          <Text style={styles.name} numberOfLines={1}>{name}</Text>
+          {!!profile?.name && profile.name !== profile.display_name && (
+            <Text style={styles.handle} numberOfLines={1}>@{profile.name}</Text>
+          )}
+          <View style={styles.statusRow}>
+            <View style={[styles.statusDot, { backgroundColor: isConnected ? theme.colors.success[500] : theme.colors.warning[500] }]} />
+            <Text style={styles.statusText}>
+              {isConnected ? `Online · ${relaysUp}/${relays.length} relays` : 'Offline'}
+            </Text>
+          </View>
+        </View>
+      </View>
 
-        {/* Expanded content */}
-        {nostrState.isRelaysExpanded && (
-          <View style={styles.expandedRelayContent}>
-            <View style={styles.relayInputContainer}>
-              <Input
-                placeholder="wss://relay.example.com"
-                value={relayInput}
-                onChangeText={setRelayInput}
-                variant="outlined"
-                style={styles.relayInput}
-              />
-              <Button
-                title={isAddingRelay ? "Adding..." : "Add"}
-                onPress={handleAddRelay}
-                disabled={isAddingRelay || !relayInput.trim()}
-                loading={isAddingRelay}
-                size="sm"
-                style={styles.addRelayButton}
-              />
+      {!!profile?.about && <Text style={styles.about} numberOfLines={3}>{profile.about}</Text>}
+
+      <View style={styles.keyRow}>
+        <Ionicons name="key-outline" size={14} color={theme.colors.text.tertiary} />
+        <Text style={styles.keyText} numberOfLines={1}>{shortNpub}</Text>
+        {!!npub && <CopyButton value={npub} size={16} color={theme.colors.primary[500]} />}
+      </View>
+      {!!profile?.lud16 && (
+        <View style={[styles.keyRow, styles.keyRowTight]}>
+          <Ionicons name="flash" size={14} color={theme.colors.warning[500]} />
+          <Text style={styles.keyText} numberOfLines={1}>{profile.lud16}</Text>
+        </View>
+      )}
+
+      {isConnected ? (
+        <View style={styles.identityActions}>
+          <Button title="Edit profile" variant="secondary" size="sm" onPress={() => setShowProfileEdit(true)} style={styles.flex} />
+          <Button title="Share" variant="secondary" size="sm" style={styles.flex}
+            onPress={() => { if (npub) Share.share({ message: `Follow me on Nostr: ${npub}`, title: 'My Nostr profile' }); }} />
+        </View>
+      ) : (
+        <Button title="Reconnect" onPress={reconnect} loading={isInitializing} size="sm" style={styles.reconnectBtn} />
+      )}
+    </View>
+  );
+
+  const renderRelays = () => (
+    <>
+      <View style={styles.sectionHead}>
+        <Text style={styles.sectionLabel}>Relays</Text>
+        <Text style={styles.sectionMeta}>{relaysUp}/{relays.length} connected</Text>
+      </View>
+      <View style={styles.card}>
+        {relays.map((relay: string) => {
+          const up = relayUp(relay);
+          return (
+            <View key={relay} style={[styles.relayRow, styles.rowDivider]}>
+              <View style={[styles.relayDot, { backgroundColor: up ? theme.colors.success[500] : theme.colors.text.tertiary }]} />
+              <Text style={[styles.relayText, !up && styles.relayDown]} numberOfLines={1}>
+                {relay.replace(/^wss?:\/\//, '')}
+              </Text>
+              <TouchableOpacity onPress={() => handleRemoveRelay(relay)} disabled={isRemovingRelay}
+                accessibilityLabel={`Remove ${relay}`} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="remove-circle-outline" size={18} color={theme.colors.text.tertiary} />
+              </TouchableOpacity>
             </View>
-
-            {nostrState.relays.length === 0 && (
-              <Text style={styles.noRelaysText}>No relays configured</Text>
-            )}
-          </View>
-        )}
-      </Card>
-    );
-  };
-
-  const renderNWCManager = () => {
-    if (!isConnected) return null;
-
-    return (
-      <Card style={styles.card}>
-        <View style={styles.nwcHeader}>
-          <View style={styles.nwcHeaderContent}>
-            <Ionicons
-              name="link-outline"
-              size={20}
-              color={theme.colors.primary[500]}
-              style={styles.nwcIcon}
-            />
-            <Text style={styles.cardTitle}>Nostr Wallet Connect</Text>
-            {walletConnectEnabled && (
-              <View style={styles.nwcEnabledBadge}>
-                <Text style={styles.nwcEnabledText}>Active</Text>
-              </View>
-            )}
-          </View>
-        </View>
-
-        <Text style={styles.nwcDescription}>
-          Allow other applications to connect to your wallet via Nostr Wallet Connect protocol
-        </Text>
-
-        {!walletConnectEnabled ? (
-          <View style={styles.nwcDisabledContent}>
-            <Button
-              title={isGeneratingNWC ? "Generating..." : "Enable Wallet Connect"}
-              onPress={handleGenerateNWCConnection}
-              loading={isGeneratingNWC}
-              disabled={isGeneratingNWC}
-              style={styles.enableNWCButton}
-            />
-          </View>
-        ) : (
-          <View style={styles.nwcEnabledContent}>
-            {nwcConnectionString && (
-              <View style={styles.connectionStringContainer}>
-                <Text style={styles.connectionStringLabel}>Connection String:</Text>
-                <View style={styles.connectionStringPreview}>
-                  <Text style={styles.connectionStringText} numberOfLines={2}>
-                    {nwcConnectionString}
-                  </Text>
-                </View>
-
-                <View style={styles.nwcActions}>
-                  <Button
-                    title="Copy"
-                    onPress={() => handleCopyNWCConnection()}
-                    variant="ghost"
-                    size="sm"
-                    style={styles.nwcActionButton}
-                  />
-                  <Button
-                    title="Share"
-                    onPress={handleShareNWCConnection}
-                    variant="ghost"
-                    size="sm"
-                    style={styles.nwcActionButton}
-                  />
-                  <Button
-                    title="Disable"
-                    onPress={handleDisableNWC}
-                    variant="ghost"
-                    size="sm"
-                    style={{ ...styles.nwcActionButton, ...styles.disableButton }}
-                  />
-                </View>
-              </View>
-            )}
-          </View>
-        )}
-      </Card>
-    );
-  };
-
-  const renderActions = () => {
-    if (!isConnected) return null;
-
-    return (
-      <Card style={styles.card}>
-        <Text style={styles.cardTitle}>Actions</Text>
-
-        <View style={styles.actionButtons}>
-          <Button
-            title="View Contacts"
-            onPress={() => navigation?.navigate('Dashboard', { screen: 'Contacts' })}
-            variant="ghost"
-            style={styles.actionButton}
+          );
+        })}
+        <View style={styles.relayAdd}>
+          <Input
+            placeholder="wss://relay.example.com"
+            value={relayInput}
+            onChangeText={setRelayInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            size="sm"
+            style={styles.flex}
           />
-          <Button
-            title="Disconnect"
-            onPress={handleDisconnect}
-            variant="ghost"
-            style={styles.disconnectButton}
-          />
+          <Button title="Add" size="sm" onPress={handleAddRelay} loading={isAddingRelay}
+            disabled={isAddingRelay || !relayInput.trim()} />
         </View>
-      </Card>
-    );
-  };
+      </View>
+    </>
+  );
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {renderConnectionStatus()}
-      {renderKeyImportForm()}
-      {renderIdentityInfo()}
-      {renderProfileSection()}
-      {renderRelayManager()}
-      {/* NWC provider-mode (generate a string for OTHER apps) is intentionally
-          not shown here — connecting an external Lightning wallet lives in the
-          dedicated "Connect a Lightning wallet" flow (NWCConnect). */}
-      {renderActions()}
-    </ScrollView>
+    <View>
+      {!!error && (
+        <TouchableOpacity style={styles.error} onPress={() => dispatch(setError(null))} accessibilityLabel="Dismiss error">
+          <Ionicons name="alert-circle" size={16} color={theme.colors.error[500]} />
+          <Text style={styles.errorText}>{error}</Text>
+          <Ionicons name="close" size={16} color={theme.colors.text.tertiary} />
+        </TouchableOpacity>
+      )}
+
+      {publicKey ? renderIdentity() : renderOnboarding()}
+
+      {isConnected && renderRelays()}
+
+      <Text style={styles.sectionLabel}>Wallet</Text>
+      <View style={styles.card}>
+        <Row icon="flash" tint={theme.colors.warning[500]} label="Connect a Lightning wallet"
+          detail={walletLabel ? `Connected · ${walletLabel}` : 'Pay and check balances via NWC'}
+          onPress={() => navigation?.navigate('NWCConnect')} last />
+      </View>
+
+      {!!publicKey && (
+        <>
+          <Text style={styles.sectionLabel}>Keys</Text>
+          <View style={styles.card}>
+            <Row icon="shield-checkmark-outline" tint={theme.colors.primary[500]} label="Back up private key"
+              detail="Copy your nsec to restore elsewhere" onPress={() => handleBackupKeys()} />
+            <Row icon="log-out-outline" label="Disconnect" danger onPress={handleDisconnect} last />
+          </View>
+        </>
+      )}
+
+      <Sheet visible={showKeyImport} onClose={() => { if (!isImporting) setShowKeyImport(false); }}
+        title="Use an existing key" subtitle="Paste your nsec, npriv or hex private key"
+        footer={<Button title={isImporting ? 'Importing…' : 'Import key'} onPress={handleImportKeys} loading={isImporting}
+          disabled={isImporting || !keyInput.trim()} style={styles.sheetBtn} />}>
+        <View style={styles.form}>
+        <Input
+          label="Private key"
+          placeholder="nsec1…"
+          value={keyInput}
+          onChangeText={setKeyInput}
+          secureTextEntry={!showKeyInput}
+          autoCapitalize="none"
+          autoCorrect={false}
+          rightIcon={
+            <View style={styles.inputIcons}>
+              <TouchableOpacity accessibilityLabel="Paste" hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                onPress={async () => { try { const t = await Clipboard.getString(); if (t) setKeyInput(t.trim()); } catch { /* nothing to paste */ } }}>
+                <Ionicons name="clipboard-outline" size={19} color={theme.colors.primary[500]} />
+              </TouchableOpacity>
+              <TouchableOpacity accessibilityLabel={showKeyInput ? 'Hide key' : 'Show key'} hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                onPress={() => setShowKeyInput(!showKeyInput)}>
+                <Ionicons name={showKeyInput ? 'eye-off-outline' : 'eye-outline'} size={19} color={theme.colors.text.secondary} />
+              </TouchableOpacity>
+            </View>
+          }
+        />
+        <Text style={styles.hint}>Your key is stored in this device's secure storage and never leaves it.</Text>
+        </View>
+      </Sheet>
+
+      <Sheet visible={showProfileEdit} onClose={() => setShowProfileEdit(false)} title="Edit profile"
+        footer={<Button title={isProfileLoading ? 'Saving…' : 'Save'} onPress={handleUpdateProfile} loading={isProfileLoading}
+          disabled={isProfileLoading} style={styles.sheetBtn} />}>
+        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.form}>
+        <Input label="Display name" placeholder="Satoshi" value={profileForm.display_name}
+          onChangeText={(text) => setProfileForm(prev => ({ ...prev, display_name: text }))} />
+        <Input label="Username" placeholder="satoshi" value={profileForm.name} autoCapitalize="none"
+          onChangeText={(text) => setProfileForm(prev => ({ ...prev, name: text.replace(/\s/g, '') }))} />
+        <Input label="About" placeholder="A few words about you" value={profileForm.about} multiline numberOfLines={3}
+          onChangeText={(text) => setProfileForm(prev => ({ ...prev, about: text }))} />
+        <Input label="Lightning address" placeholder="you@kaleidoswap.me" value={profileForm.lud16} autoCapitalize="none"
+          keyboardType="email-address" onChangeText={(text) => setProfileForm(prev => ({ ...prev, lud16: text }))} />
+        <Input label="Website" placeholder="https://" value={profileForm.website} autoCapitalize="none" keyboardType="url"
+          onChangeText={(text) => setProfileForm(prev => ({ ...prev, website: text }))} />
+        </ScrollView>
+      </Sheet>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-
+  flex: { flex: 1, minWidth: 0 },
   card: {
-    marginBottom: theme.spacing[4],
-  },
-
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[3],
-  },
-
-  cardTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: theme.colors.text.primary,
-  },
-
-  statusIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-  },
-
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-
-  errorText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.error[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
-    marginBottom: theme.spacing[3],
-  },
-
-  setupActions: {
-    alignItems: 'center',
-  },
-
-  setupDescription: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing[4],
-    lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.snug),
-  },
-
-  setupButtons: {
-    width: '100%',
-    gap: theme.spacing[3],
-  },
-
-  setupButton: {
-    width: '100%',
-  },
-
-  reconnectSection: {
-    alignItems: 'center',
-  },
-
-  reconnectText: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing[4],
-  },
-
-  importDescription: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[4],
-    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
-  },
-
-  keyInputContainer: {
-    position: 'relative',
-    marginBottom: theme.spacing[4],
-  },
-
-  keyInput: {
-    marginBottom: 0,
-  },
-
-  keyInputActions: {
-    position: 'absolute',
-    right: theme.spacing[3],
-    top: '50%',
-    transform: [{ translateY: -10 }],
-    flexDirection: 'row',
-    gap: theme.spacing[2],
-  },
-
-  keyInputAction: {
-    width: 32,
-    height: 32,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: theme.colors.primary[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  importActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-
-  importCancelButton: {
-    flex: 1,
-  },
-
-  importSubmitButton: {
-    flex: 1,
-  },
-
-  identityItem: {
-    marginBottom: theme.spacing[4],
-  },
-
-  identityLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[2],
-  },
-
-  identityValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.gray[50],
-    borderRadius: theme.borderRadius.base,
-    padding: theme.spacing[3],
-    gap: theme.spacing[2],
-  },
-
-  identityValue: {
-    flex: 1,
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    fontFamily: 'monospace',
-  },
-
-  identityActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-
-  identityButton: {
-    flex: 1,
-  },
-
-  profileDisplay: {
-    gap: theme.spacing[2],
-  },
-
-  profileDisplayName: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: theme.typography.fontWeight.bold,
-    color: theme.colors.text.primary,
-  },
-
-  profileName: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-  },
-
-  profileAbout: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.primary,
-    lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.snug),
-  },
-
-  profileWebsite: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.primary[500],
-  },
-
-  lightningAddress: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-    backgroundColor: theme.colors.warning[50],
-    padding: theme.spacing[2],
-    borderRadius: theme.borderRadius.base,
-  },
-
-  lightningAddressText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.warning[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
-    fontWeight: theme.typography.fontWeight.medium,
-  },
-
-  noProfile: {
-    alignItems: 'center',
-    paddingVertical: theme.spacing[4],
-  },
-
-  noProfileText: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.muted,
-    marginBottom: theme.spacing[3],
-  },
-
-  profileEdit: {
-    gap: theme.spacing[4],
-  },
-
-  profileInput: {
-    marginBottom: 0,
-  },
-
-  profileActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-
-  profileCancelButton: {
-    flex: 1,
-  },
-
-  profileSaveButton: {
-    flex: 1,
-  },
-
-  actionButtons: {
-    gap: theme.spacing[3],
-  },
-
-  actionButton: {
-    width: '100%',
-  },
-
-  disconnectButton: {
-    borderColor: theme.colors.error[500],
-  },
-
-  relayHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[3],
-  },
-
-  relayHeaderContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-  },
-
-  relayCount: {
-    backgroundColor: theme.colors.primary[100],
-    borderRadius: theme.borderRadius.base,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-  },
-
-  relayCountText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: theme.colors.primary[500], // [500] not [700]: dark theme only overrides intent ramps at 50/100
-  },
-
-  relayPreview: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: theme.spacing[2],
-    marginBottom: theme.spacing[3],
-  },
-
-  relayPreviewItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: theme.colors.gray[100],
-    borderRadius: theme.borderRadius.base,
-    paddingVertical: theme.spacing[1],
-    paddingHorizontal: theme.spacing[2],
-    gap: theme.spacing[1],
-  },
-
-  relayStatusIcon: {
-    marginRight: theme.spacing[1],
-  },
-
-  relayPreviewText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    flex: 1,
-  },
-
-  relayDisconnectedText: {
-    color: theme.colors.text.secondary,
-    fontStyle: 'italic',
-  },
-
-  expandedRelayContent: {
-    marginTop: theme.spacing[3],
-  },
-
-  relayInputContainer: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-    marginBottom: theme.spacing[4],
-  },
-
-  relayInput: {
-    flex: 1,
-    marginBottom: 0,
-  },
-
-  addRelayButton: {
-    minWidth: 80,
-  },
-
-  removeRelayButtonSmall: {
-    padding: theme.spacing[1],
-  },
-
-  noRelaysText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    padding: theme.spacing[4],
-  },
-
-  moreRelaysText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-    marginTop: theme.spacing[2],
-  },
-
-  // NWC Styles
-  nwcHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[3],
-  },
-
-  nwcHeaderContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[2],
-  },
-
-  nwcIcon: {
-    marginRight: theme.spacing[1],
-  },
-
-  nwcEnabledBadge: {
-    backgroundColor: theme.colors.success[50], // Fixed: use 50 instead of 100
-    borderRadius: theme.borderRadius.base,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-  },
-
-  nwcEnabledText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: theme.colors.success[500], // [500] not [600]: dark theme only overrides intent ramps at 50/100
-  },
-
-  nwcDescription: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[4],
-    lineHeight: leading(theme.typography.fontSize.sm, theme.typography.lineHeight.relaxed),
-  },
-
-  nwcDisabledContent: {
-    alignItems: 'center',
-    paddingVertical: theme.spacing[4],
-  },
-
-  enableNWCButton: {
-    width: '100%',
-  },
-
-  nwcEnabledContent: {
-    marginTop: theme.spacing[3],
-  },
-
-  connectionStringContainer: {
-    marginBottom: theme.spacing[4],
-  },
-
-  connectionStringLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[2],
-  },
-
-  connectionStringPreview: {
-    backgroundColor: theme.colors.gray[50],
-    borderRadius: theme.borderRadius.base,
-    padding: theme.spacing[3],
-  },
-
-  connectionStringText: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    fontFamily: 'monospace',
-  },
-
-  nwcActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-    marginTop: theme.spacing[4],
-  },
-
-  nwcActionButton: {
-    flex: 1,
-  },
-
-  disableButton: {
-    borderColor: theme.colors.error[500],
-  },
-
-  relayConnectionStatus: {
-    backgroundColor: theme.colors.gray[50],
-    borderRadius: theme.borderRadius.base,
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: theme.spacing[1],
-  },
-
-  relayConnectionText: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.secondary,
-    fontWeight: theme.typography.fontWeight.medium,
-  },
-}); 
+    backgroundColor: theme.colors.surface.primary,
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+    overflow: 'hidden',
+  },
+  sectionLabel: {
+    fontSize: theme.typography.fontSize.xs, fontWeight: '700', color: theme.colors.text.tertiary,
+    textTransform: 'uppercase', letterSpacing: 0.6,
+    marginTop: theme.spacing[5], marginBottom: theme.spacing[2], marginLeft: theme.spacing[1],
+  },
+  sectionHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  sectionMeta: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginRight: theme.spacing[1] },
+  // Onboarding
+  hero: { alignItems: 'center', padding: theme.spacing[5], gap: theme.spacing[2] },
+  heroIcon: {
+    width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: `${theme.colors.primary[500]}1F`, marginBottom: theme.spacing[1],
+  },
+  heroTitle: { fontSize: theme.typography.fontSize.xl, fontWeight: '700', color: theme.colors.text.primary },
+  heroText: {
+    fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, textAlign: 'center',
+    lineHeight: leading(theme.typography.fontSize.sm, 1.45), marginBottom: theme.spacing[2],
+  },
+  heroBtn: { alignSelf: 'stretch' },
+  // Identity
+  identity: { padding: theme.spacing[4] },
+  identityTop: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] },
+  avatar: {
+    width: 56, height: 56, borderRadius: 28, overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: `${theme.colors.primary[500]}29`,
+  },
+  avatarImg: { width: '100%', height: '100%' },
+  avatarInitial: { fontSize: 22, fontWeight: '700', color: theme.colors.primary[500] },
+  name: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
+  handle: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  statusDot: { width: 7, height: 7, borderRadius: 4 },
+  statusText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
+  about: {
+    fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, marginTop: theme.spacing[3],
+    lineHeight: leading(theme.typography.fontSize.sm, 1.45),
+  },
+  keyRow: {
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], marginTop: theme.spacing[3],
+    paddingLeft: theme.spacing[3], borderRadius: theme.borderRadius.lg, minHeight: 44,
+    backgroundColor: theme.colors.background.secondary,
+  },
+  keyRowTight: { marginTop: theme.spacing[2], paddingRight: theme.spacing[3] },
+  keyText: { flex: 1, fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, fontFamily: theme.typography.fontFamily.mono },
+  identityActions: { flexDirection: 'row', gap: theme.spacing[2], marginTop: theme.spacing[4] },
+  reconnectBtn: { marginTop: theme.spacing[4] },
+  // Rows
+  row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingHorizontal: theme.spacing[4], minHeight: 60 },
+  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border.light },
+  rowIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  rowLabel: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
+  rowDetail: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
+  // Relays
+  relayRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingHorizontal: theme.spacing[4], minHeight: 48 },
+  relayDot: { width: 8, height: 8, borderRadius: 4 },
+  relayText: { flex: 1, fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary },
+  relayDown: { color: theme.colors.text.tertiary },
+  relayAdd: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], padding: theme.spacing[3] },
+  // Misc
+  error: {
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], marginBottom: theme.spacing[3],
+    padding: theme.spacing[3], borderRadius: theme.borderRadius.lg, backgroundColor: `${theme.colors.error[500]}1A`,
+  },
+  errorText: { flex: 1, fontSize: theme.typography.fontSize.sm, color: theme.colors.error[500] },
+  inputIcons: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] },
+  form: { gap: theme.spacing[3] },
+  hint: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: -theme.spacing[1] },
+  sheetBtn: { marginTop: theme.spacing[3] },
+});

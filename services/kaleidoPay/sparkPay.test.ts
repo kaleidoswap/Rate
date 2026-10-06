@@ -136,3 +136,55 @@ test('optionally registers the existing on-chain withdrawal account', () => {
   expect(s.createPaymentAccount).toHaveBeenCalledWith(1);
   disconnect();
 });
+
+describe('Spark tokens', () => {
+  const usdb = { id: 'btkn1usdb', ticker: 'USDB', precision: 6 };
+  const tokenSpark = (available = 5_000_000) => ({
+    ...spark(),
+    listAssets: jest.fn(async () => [
+      { id: 'BTC', ticker: 'BTC', precision: 8, balance: { available: 1 } },
+      { id: usdb.id, ticker: 'USDB', name: 'USDB', precision: 6, balance: { available } },
+    ]),
+    sendAsset: jest.fn(async () => ({ txId: 'tok-1' })),
+  });
+  const tokenPreview = (amount: number, sparkAddress = 'sparkt1abc') => ({
+    code: { kind: 'spark', raw: sparkAddress, sparkAddress },
+    request: { id: 'r', network: 'signet', networks: ['signet'], amountSat: 0, acceptedRails: ['spark'], asset: { ...usdb, amount } },
+    plan: {}, addresses: {},
+  }) as unknown as Preview;
+  const tokenRoute = { kind: 'direct', sourceId: 'spark-token', from: 'spark:signet', to: 'spark:signet' } as Route;
+
+  test('lists held tokens, never BTC', async () => {
+    const { sparkTokens } = require('./sparkPay');
+    expect(await sparkTokens(tokenSpark())).toEqual([{ ...usdb, name: 'USDB', available: 5_000_000 }]);
+    expect(await sparkTokens(tokenSpark(0))).toEqual([]);
+  });
+
+  test('quotes a token transfer at no fee and sends exactly what was quoted', async () => {
+    const { createSparkTokenAccount } = require('./sparkPay');
+    const w = tokenSpark();
+    const account = createSparkTokenAccount(w, 'signet', usdb);
+    const q = await account.quote(tokenPreview(2_500_000), tokenRoute);
+    expect(q.spend).toEqual({ asset: usdb, amount: 2_500_000, fee: 0, total: 2_500_000 });
+    expect(await account.execute!(tokenPreview(2_500_000), tokenRoute, q, 'a1')).toEqual({ status: 'completed', reference: 'tok-1' });
+    expect(w.sendAsset).toHaveBeenCalledWith({ assetId: usdb.id, amount: 2_500_000, recipientId: 'sparkt1abc' });
+  });
+
+  test('refuses more than the token balance', async () => {
+    const { createSparkTokenAccount } = require('./sparkPay');
+    const account = createSparkTokenAccount(tokenSpark(1_000_000), 'signet', usdb);
+    await expect(account.quote(tokenPreview(2_000_000), tokenRoute)).rejects.toThrow('Not enough balance in Spark');
+  });
+
+  test('a token request to a Spark address is planned only on the token account', async () => {
+    const { registerSparkTokenPayment } = require('./sparkPay');
+    const off = connectSparkPayAccounts(tokenSpark(), 'signet');
+    const unregister = registerSparkTokenPayment(usdb);
+    const preview = previewTarget({ kind: 'spark', raw: 'sparkt1abc', sparkAddress: 'sparkt1abc', networks: ['signet'] } as any, undefined, 'r', { asset: { ...usdb, amount: 1_000_000 } });
+    expect(preview.request.acceptedRails).toEqual(['spark']);
+    expect(preview.plan.status === 'ready' && [preview.plan.route, ...preview.plan.alternatives].map(r => r.sourceId)).toEqual(['spark-token']);
+    const offers = await quotePaymentOffers(preview);
+    expect(offers[0].quote?.spend?.asset.ticker).toBe('USDB');
+    unregister(); off();
+  });
+});

@@ -86,3 +86,16 @@ test('rechecks disconnect after journaling and before submitting to the provider
   await expect(execution).rejects.toThrow('changed before payment');
   expect(a.execute).not.toHaveBeenCalled();
 });
+test('reports each provider as it answers, without waiting for the slowest', async () => {
+  let release!: () => void;
+  const slow = new Promise<void>(r => { release = r; });
+  account('fast', 10);
+  account('slow', 5, { quote: jest.fn(async () => { await slow; return { recipientSat: 1000, totalSat: 1005, feeSat: 5, expiresAt: Math.floor(Date.now() / 1000) + 60 }; }) });
+  const progress: string[][] = [];
+  const all = quotePaymentOffers(preview(), offers => progress.push(offers.map(o => o.route.sourceId)));
+  await new Promise(r => setTimeout(r, 0));
+  expect(progress).toEqual([['fast']]);
+  release();
+  expect((await all).map(o => o.route.sourceId)).toEqual(['fast', 'slow']);
+  expect(progress[progress.length - 1]).toEqual(['fast', 'slow']);
+});

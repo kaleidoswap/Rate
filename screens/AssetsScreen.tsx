@@ -140,7 +140,10 @@ export default function AssetsScreen({ navigation, route }: Props) {
         style={[styles.assetCard, styles.firstAssetCard]}
         onPress={() =>
           navigation.navigate('AssetDetail', {
-            asset: { asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', precision: 8, isRGB: false },
+            asset: {
+              asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
+              precision: bitcoinUnit === 'BTC' ? 8 : 0, unit: bitcoinUnit, balance: { spendable: btcSats },
+            },
           })
         }
       >

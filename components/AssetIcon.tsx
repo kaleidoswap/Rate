@@ -34,6 +34,7 @@ const ASSET_COLORS: Record<string, string> = {
   USDT: '#26A17B',
   USDC: '#2775CA',
   USDB: theme.colors.accent[500],
+  USD: theme.colors.success[600],
   DEFAULT: theme.colors.gray[500],
 };
 

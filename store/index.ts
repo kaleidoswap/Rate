@@ -56,7 +56,7 @@ const persistConfig: PersistConfig<RootReducerState> = {
   storage: AsyncStorage,
   whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: unread counts / paid markers only, never message content
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 5,
+  version: 6,
   // A timed-out migration rehydrates defaults and can overwrite the only keys.
   // Keep the gate closed until migration succeeds or the user retries.
   timeout: 0,
@@ -136,6 +136,14 @@ const persistConfig: PersistConfig<RootReducerState> = {
           n.selectedNwcConnectionId = n.connectedWallet;
           n.nwcCapabilities = capabilities;
         }
+      }
+    } catch {
+      // Non-fatal.
+    }
+    // v6: per-pubkey favourites for Nostr follows (contacts slice).
+    try {
+      if (state?.contacts && !Array.isArray(state.contacts.favoriteNostrPubkeys)) {
+        state.contacts.favoriteNostrPubkeys = [];
       }
     } catch {
       // Non-fatal.

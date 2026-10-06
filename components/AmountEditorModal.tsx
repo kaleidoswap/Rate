@@ -6,7 +6,7 @@ import { Sheet } from './Sheet';
 import { receiveAmountSats } from '../utils/receive-request';
 import { feedback } from '../utils/feedback';
 
-export interface ReceiveRequestOptions { expirySeconds: number; showCountdown: boolean }
+export interface ReceiveRequestOptions { expirySeconds: number; showCountdown: boolean; /** What it's for: the invoice description. */ note?: string }
 interface Props {
   visible: boolean;
   onClose: () => void;
@@ -28,6 +28,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
   const [fiat, setFiat] = useState(false);
   const [expirySeconds, setExpirySeconds] = useState(3600);
   const [showCountdown, setShowCountdown] = useState(false);
+  const [note, setNote] = useState('');
   const rate = rates.usd;
   const sending = !requestOptions;
   const tokenValue = (sats: number) => bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8);
@@ -37,6 +38,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
     setFiat(false);
     setExpirySeconds(requestOptions?.expirySeconds ?? 3600);
     setShowCountdown(requestOptions?.showCountdown ?? false);
+    setNote(requestOptions?.note ?? '');
   }, [visible]);
   const numeric = Number(value.replace(',', '.'));
   const sats = fiat ? Math.round(numeric / rate * 1e8) : receiveAmountSats(value.replace(',', '.'), bitcoinUnit);
@@ -46,7 +48,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
   const save = () => {
     if (!valid) return;
     feedback.select();
-    onConfirm(empty ? 0 : sats, requestOptions ? { expirySeconds, showCountdown } : undefined);
+    onConfirm(empty ? 0 : sats, requestOptions ? { expirySeconds, showCountdown, note: note.trim() } : undefined);
     close();
   };
   const muted = { color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm };
@@ -67,7 +69,24 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
         </TouchableOpacity>
       </View>
       <Text style={muted}>{empty ? (sending ? 'This request has no amount: you choose how much to send.' : 'The sender chooses the amount.') : !valid ? 'Enter a valid amount of at least 1 sat.' : fiat ? `${tokenValue(sats)} ${bitcoinUnit}` : rate ? `≈ $${((sats / 1e8) * rate).toFixed(2)} USD` : `${sats.toLocaleString()} sats`}</Text>
+      {!sending && <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
+        {/* Quick amounts in dollars, and "any amount" so the payer decides. */}
+        {!!rate && [1, 5, 20].map(usd => <TouchableOpacity key={usd} accessibilityRole="button" accessibilityLabel={`Request ${usd} dollars`}
+          onPress={() => { feedback.select(); setFiat(true); setValue(String(usd)); }}
+          style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary }}>
+          <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>${usd}</Text>
+        </TouchableOpacity>)}
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Any amount: the sender decides" onPress={() => { feedback.select(); setValue(''); }}
+          style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: empty ? t.colors.primary[500] : t.colors.surface.secondary }}>
+          <Text style={{ color: empty ? t.colors.text.inverse : t.colors.text.primary, fontWeight: '600' }}>Any amount</Text>
+        </TouchableOpacity>
+      </View>}
       {requestOptions && <>
+        <Text style={label}>What is it for? · optional</Text>
+        <TextInput accessibilityLabel="Request note" value={note} onChangeText={setNote} maxLength={120} placeholder="e.g. Pizza on Friday"
+          placeholderTextColor={t.colors.text.muted} returnKeyType="done"
+          style={{ minHeight: 48, paddingHorizontal: t.spacing[3], borderRadius: t.borderRadius.md, borderWidth: 1, borderColor: t.colors.border.light, color: t.colors.text.primary, fontSize: t.typography.fontSize.base }} />
+        <Text style={muted}>Shown to the payer in the Lightning invoice.</Text>
         <Text style={label}>Invoice expiry</Text>
         <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
           {([[600, '10 min'], [3600, '1 hour'], [86400, '24 hours']] as const).map(([seconds, title]) => <TouchableOpacity key={seconds}
@@ -83,7 +102,6 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
         </View>
       </>}
       <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
-        {!sending && <TouchableOpacity accessibilityRole="button" onPress={() => setValue('')} style={{ minHeight: 48, paddingHorizontal: t.spacing[4], justifyContent: 'center' }}><Text style={muted}>Clear amount</Text></TouchableOpacity>}
         <TouchableOpacity accessibilityRole="button" disabled={!valid} onPress={save} style={{ flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: t.borderRadius.lg, backgroundColor: t.colors.primary[500], opacity: valid ? 1 : 0.5 }}>
           <Text style={{ ...label, color: t.colors.text.inverse }}>{requestOptions ? 'Save request' : 'Set amount'}</Text>
         </TouchableOpacity>

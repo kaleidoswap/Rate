@@ -161,6 +161,10 @@ export interface SparkPayAdapter {
   getPaymentStatus(id: string): Promise<{ status: string }>;
   /** Existing mainnet on-chain withdrawal account (sparkAccount.ts). */
   createPaymentAccount?(walletId: number): PayAccount | null;
+  /** Spark tokens (e.g. USDB) held by the wallet, with their balance in base units. */
+  listAssets?(): Promise<Array<{ id: string; ticker: string; name?: string; precision: number; balance?: { available?: number } }>>;
+  /** Sends a Spark token to a Spark address. */
+  sendAsset?(params: { assetId: string; amount: number; recipientId: string }): Promise<{ txId: string }>;
 }
 
 /** Lightning fee used only when Spark returns no quote; it is also passed as the fee cap, so it is a true maximum. */
@@ -237,6 +241,72 @@ export function createSparkTransferAccount(spark: SparkPayAdapter, network: Netw
   });
 }
 
+/** A Spark token the wallet can send, with its spendable balance in base units. */
+export interface SparkToken extends SpendAsset { name: string; available: number }
+
+/** The Spark tokens this wallet holds (never BTC), largest balance first. */
+export async function sparkTokens(spark: SparkPayAdapter): Promise<SparkToken[]> {
+  if (!spark.listAssets) return [];
+  const assets = await spark.listAssets();
+  return assets
+    .filter(a => a.id && a.id !== 'BTC' && Number.isInteger(a.precision) && a.precision >= 0 && a.precision <= 18)
+    .map(a => ({ id: a.id, ticker: a.ticker || 'TOKEN', name: a.name || a.ticker || 'Token', precision: a.precision,
+      available: Math.max(0, Math.floor(Number(a.balance?.available ?? 0)) || 0) }))
+    .filter(a => a.available > 0)
+    .sort((a, b) => b.available / 10 ** b.precision - a.available / 10 ** a.precision);
+}
+
+/**
+ * Sends a Spark token (e.g. USDB) to a Spark address. Token transfers carry no fee.
+ * The engine checks a quote against the account's spend asset, so this account is
+ * made per payment (see registerSparkTokenPayment), like RGB assets.
+ */
+export function createSparkTokenAccount(spark: SparkPayAdapter, network: Network, asset: SpendAsset): PayAccount {
+  return createDirectAccount<{ address: string; assetId: string; amount: number }>({
+    id: 'spark-token', rail: 'spark', network, walletName: 'Spark', optionName: `Spark · ${asset.ticker}`, estimatedSeconds: 5,
+    spendAsset: asset,
+    isConnected: connected(spark),
+    async prepare(preview) {
+      const address = preview.code.sparkAddress;
+      const requested = preview.request.asset;
+      if (!address) throw new Error('Tokens can only be sent to a Spark address.');
+      if (!requested || requested.id !== asset.id) throw new Error('This account sends a different token.');
+      if (!spark.sendAsset) throw new Error('This Spark wallet cannot send tokens.');
+      const held = (await sparkTokens(spark)).find(t => t.id === asset.id);
+      if (!held || requested.amount > held.available) throw notEnough('Spark');
+      return {
+        feeSat: 0,
+        spend: { asset, amount: requested.amount, fee: 0, total: requested.amount },
+        terms: { address, assetId: requested.id, amount: requested.amount },
+      };
+    },
+    matches: (preview, terms) => preview.code.sparkAddress === terms.address
+      && preview.request.asset?.id === terms.assetId && preview.request.asset?.amount === terms.amount,
+    async send(terms) {
+      const sent = await spark.sendAsset!({ assetId: terms.assetId, amount: terms.amount, recipientId: terms.address });
+      // transferTokens returns once the transfer is final on Spark.
+      return sent?.txId ? { status: 'completed', reference: sent.txId } : { status: 'unknown' };
+    },
+  });
+}
+
+let currentSpark: { spark: SparkPayAdapter; network: Network } | null = null;
+let tokenUnregister: (() => void) | null = null;
+
+/** The connected Spark wallet's tokens, for Send's asset choice. Empty when Spark is not connected. */
+export async function connectedSparkTokens(): Promise<SparkToken[]> {
+  return currentSpark ? sparkTokens(currentSpark.spark) : [];
+}
+
+/** Registers the Spark-token account for one payment's token (replacing any earlier one). */
+export function registerSparkTokenPayment(asset: SpendAsset): () => void {
+  if (!currentSpark) throw new Error('Spark is not connected.');
+  tokenUnregister?.();
+  const unregister = registerKaleidoPayAccount(createSparkTokenAccount(currentSpark.spark, currentSpark.network, asset));
+  tokenUnregister = unregister;
+  return () => { unregister(); if (tokenUnregister === unregister) tokenUnregister = null; };
+}
+
 /**
  * Registers Spark's Lightning and Spark-address accounts. With `onchainWalletId` it also
  * registers the existing on-chain withdrawal account (sparkAccount.ts, mainnet only).
@@ -246,6 +316,9 @@ export function connectSparkPayAccounts(spark: SparkPayAdapter, network: Network
     registerKaleidoPayAccount(createSparkLightningAccount(spark, network)),
     registerKaleidoPayAccount(createSparkTransferAccount(spark, network)),
   ];
+  const context = { spark, network };
+  currentSpark = context;
+  unregister.push(() => { if (currentSpark === context) { currentSpark = null; tokenUnregister?.(); tokenUnregister = null; } });
   if (opts.onchainWalletId !== undefined) {
     let onchain: PayAccount | null = null;
     try { onchain = spark.createPaymentAccount?.(opts.onchainWalletId) ?? null; } catch { /* not connected / not mainnet */ }
