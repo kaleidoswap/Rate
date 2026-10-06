@@ -157,9 +157,6 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
           ))}
         </Animated.View>
 
-        {/* This asset's payments, right under what you can do with it. */}
-        <RecentActivityWidget assetId={isBTC ? 'BTC' : asset.asset_id} assetTicker={asset.ticker} title="History" style={styles.history} />
-
         {detailRows.length > 0 && <Animated.View entering={FadeInDown.delay(motion.stagger * 2).duration(motion.duration.base)}>
           <View style={styles.group}>
             {detailRows.map((d, i) => (
@@ -173,6 +170,9 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
             ))}
           </View>
         </Animated.View>}
+
+        {/* This asset's payments, after its details. */}
+        <RecentActivityWidget assetId={isBTC ? 'BTC' : asset.asset_id} assetTicker={asset.ticker} title="History" style={styles.history} />
       </ScrollView>
     </SafeAreaView>
   );
