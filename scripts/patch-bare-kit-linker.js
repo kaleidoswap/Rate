@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Re-apply QVAC's manifest-aware Android addon linker after install.
+ * Re-apply QVAC's manifest-aware Android and iOS addon linkers after install.
  *
  * `react-native-bare-kit/android/build.gradle` runs `node link.mjs` on every
  * Gradle build (`preBuild.dependsOn link`) and packages whatever addons it
@@ -11,7 +11,8 @@
  * `qvac.config.json` are in the worker bundle).
  *
  * The QVAC SDK ships a manifest-aware replacement
- * (`@qvac/sdk/expo/plugins/patches/android-link.mjs`) that links only the addons
+ * (`@qvac/sdk/src/expo/plugins/patches/<platform>-link.mjs`, plus the split-addon
+ * resolver it imports) that links only the addons
  * allowlisted in `qvac/addons.manifest.json` (generated from `qvac.config.json`).
  * `expo prebuild` copies it over `link.mjs` locally via `withMobileBundle` — but
  * `pnpm/npm install` restores the stock file, and CI builds the APK without
@@ -36,35 +37,39 @@ function resolveDir(pkgSpec, fallback) {
   }
 }
 
-// The manifest-aware linker shipped by the SDK (location varies by SDK build).
-const sdkDir = resolveDir('@qvac/sdk/package.json', ['@qvac', 'sdk']);
-const src = [
-  path.join(sdkDir, 'expo', 'plugins', 'patches', 'android-link.mjs'),
-  path.join(sdkDir, 'dist', 'expo', 'plugins', 'patches', 'android-link.mjs'),
-].find((p) => fs.existsSync(p));
+const sdkDir = resolveDir('@qvac/sdk/package', ['@qvac', 'sdk', 'package.json']);
+const patchesDir = path.join(sdkDir, 'src', 'expo', 'plugins', 'patches');
+// The patched linkers import this resolver relatively, so it must sit beside them.
+const resolver = path.join(sdkDir, 'dist', 'src', 'expo', 'plugins', 'patches', 'qvac-platform-addons.js');
+const bareKitDir = resolveDir('react-native-bare-kit/package.json', ['react-native-bare-kit', 'package.json']);
 
-// The stock linker that install (re)writes.
-const bareKitDir = resolveDir('react-native-bare-kit/package.json', ['react-native-bare-kit']);
-const dest = path.join(bareKitDir, 'android', 'link.mjs');
-
-if (!src) {
-  console.log('[patch-bare-kit-linker] @qvac/sdk android-link patch not found — skipping.');
-  process.exit(0);
-}
-if (!fs.existsSync(dest)) {
-  console.log('[patch-bare-kit-linker] react-native-bare-kit/android/link.mjs not found — skipping.');
-  process.exit(0);
-}
-
-try {
+function syncFile(src, dest) {
   const want = fs.readFileSync(src);
-  const have = fs.readFileSync(dest);
-  if (want.equals(have)) {
-    process.exit(0); // already manifest-aware
-  }
+  if (fs.existsSync(dest) && want.equals(fs.readFileSync(dest))) return false;
   fs.copyFileSync(src, dest);
-  console.log('[patch-bare-kit-linker] applied manifest-aware Android addon linker (link.mjs).');
-} catch (e) {
-  console.warn('[patch-bare-kit-linker] could not apply patch:', e.message);
-  // Don't fail install — `expo prebuild` can still apply it.
+  return true;
+}
+
+for (const platform of ['android', 'ios']) {
+  const patch = path.join(patchesDir, `${platform}-link.mjs`);
+  const targetDir = path.join(bareKitDir, platform);
+  if (!fs.existsSync(patch) || !fs.existsSync(resolver)) {
+    console.log(`[patch-bare-kit-linker] @qvac/sdk ${platform} link patch not found — skipping.`);
+    continue;
+  }
+  if (!fs.existsSync(path.join(targetDir, 'link.mjs'))) {
+    console.log(`[patch-bare-kit-linker] react-native-bare-kit/${platform}/link.mjs not found — skipping.`);
+    continue;
+  }
+  try {
+    const changed =
+      syncFile(resolver, path.join(targetDir, 'qvac-platform-addons.mjs')) |
+      syncFile(patch, path.join(targetDir, 'link.mjs'));
+    if (changed) {
+      console.log(`[patch-bare-kit-linker] applied manifest-aware ${platform} addon linker (link.mjs).`);
+    }
+  } catch (e) {
+    console.warn(`[patch-bare-kit-linker] could not apply ${platform} patch:`, e.message);
+    // Don't fail install — `expo prebuild` can still apply it.
+  }
 }

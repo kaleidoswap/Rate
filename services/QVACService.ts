@@ -59,10 +59,11 @@ const LOCAL_LLM_CONFIG = {
 // fall back to LOCAL_LLM_CONFIG (CPU) automatically if the GPU load throws.
 // ctx 4096 gives the agentic prompt (system + tools + skills + a little history)
 // room to fit on-device; 2048 overflowed immediately ("prompt exceeds context").
+// gpu_layers is left unset so the engine fits the layers to free device memory.
+const { gpu_layers: _cpuLayers, ...LOCAL_LLM_BASE } = LOCAL_LLM_CONFIG;
 const LOCAL_LLM_CONFIG_GPU = {
-  ...LOCAL_LLM_CONFIG,
+  ...LOCAL_LLM_BASE,
   device: 'gpu',
-  gpu_layers: 99, // offload all layers; llamacpp clamps to the model's count
   // 4096 is the proven-stable Metal window on-device. Larger values (6144/8192)
   // let big agentic prompts fit, BUT can hard-abort the Bare worklet when Metal
   // can't allocate the KV cache — an uncatchable native crash, observed right
@@ -866,7 +867,7 @@ class QVACService {
   }
 
   /**
-   * Load the QVAC 0.12 GGML Supertonic TTS model and keep it resident.
+   * Load the QVAC GGML Supertonic TTS model and keep it resident.
    * Idempotent + single-flighted so concurrent speak calls share one load.
    */
   private async ensureTtsLoaded(): Promise<string> {

@@ -16,8 +16,7 @@ const hosts = ['android-arm64', 'ios-arm64', 'ios-arm64-simulator', 'ios-x64-sim
 
 function resolveSdkDir() {
   try {
-    const pluginEntry = require.resolve('@qvac/sdk/expo-plugin', { paths: [projectRoot] });
-    return path.resolve(path.dirname(pluginEntry), '..', '..', '..');
+    return path.dirname(require.resolve('@qvac/sdk/package', { paths: [projectRoot] }));
   } catch {
     return null;
   }

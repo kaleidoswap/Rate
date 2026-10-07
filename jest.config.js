@@ -46,6 +46,7 @@ module.exports = {
     '^@kaleidorg/mind$': '<rootDir>/node_modules/@kaleidorg/mind/dist/index.js',
     '^@kaleidorg/mind/skills$': '<rootDir>/node_modules/@kaleidorg/mind/dist/skills/loader.js',
     '^@kaleidorg/mind/logger$': '<rootDir>/node_modules/@kaleidorg/mind/dist/logger.js',
+    '^@kaleidorg/mind/(kaleidoswap|knowledge)$': '<rootDir>/node_modules/@kaleidorg/mind/dist/$1/index.js',
     // @kaleidorg/mind/qvac — the QVAC adapter subpath; same import-only exports
     // map, so point Jest's CJS resolver straight at its dist.
     '^@kaleidorg/mind/qvac$': '<rootDir>/node_modules/@kaleidorg/mind/dist/qvac/index.js',
