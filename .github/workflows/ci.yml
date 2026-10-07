@@ -53,6 +53,9 @@ jobs:
       - name: Type-check
         run: pnpm exec tsc --noEmit
 
+      - name: Dependency security regressions
+        run: pnpm test:dependency-security
+
       - name: Unit tests (with the coverage floor from jest.config.js)
         run: pnpm exec jest --ci --coverage --coverageReporters=text-summary
 

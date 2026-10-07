@@ -143,9 +143,6 @@ jest.mock('expo-linear-gradient', () => ({
   LinearGradient: 'LinearGradient',
 }));
 
-// Mock Lottie
-jest.mock('lottie-react-native', () => 'LottieView');
-
 // Mock QRCode
 jest.mock('react-native-qrcode-svg', () => 'QRCode');
 
