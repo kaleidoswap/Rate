@@ -28,13 +28,11 @@ export interface UseQVACResult extends QVACState {
   initialize: () => void;
   /** Available chat models. */
   catalog: QVACModel[];
-  /** Current config (selected model + delegation). */
+  /** Current config (selected model, voice). */
   config: QVACConfig;
   /** Switch the active chat model (downloads/loads it). */
   setModel: (id: string) => Promise<void>;
-  /** Configure P2P delegation to a remote provider. */
-  setDelegate: (opts: { enabled: boolean; providerPublicKey: string }) => Promise<void>;
-  /** Re-read the persisted config into React state (e.g. after pairing elsewhere). */
+  /** Re-read the persisted config into React state (e.g. after another screen changed it). */
   reloadConfig: () => void;
   /** Total device RAM in GB (for the model picker), once detected. */
   deviceMemGb?: number;
@@ -109,13 +107,8 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     refreshDownloaded();
   }, [service, refreshDownloaded]);
 
-  const setDelegate = useCallback(async (opts: { enabled: boolean; providerPublicKey: string }) => {
-    await service.setDelegate(opts);
-    setConfig(service.getConfig());
-  }, [service]);
-
   // Pulls the singleton's current config into local state. Used when another
-  // screen (e.g. PairDesktopScreen) changed delegation via the service directly.
+  // screen changed it via the service directly.
   const reloadConfig = useCallback(() => {
     setConfig(service.getConfig());
   }, [service]);
@@ -192,7 +185,6 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     catalog: QVAC_MODELS,
     config,
     setModel,
-    setDelegate,
     reloadConfig,
     deviceMemGb,
     recommendedModelId,

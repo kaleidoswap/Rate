@@ -63,9 +63,6 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 - **Physical device required.** On-device inference is **not available on a simulator /
   emulator** (the rest of the wallet works fine on one). First launch downloads the
   models (~0.5–1.3 GB LLM + ~80 MB Whisper).
-- **Delegate to desktop.** To use the assistant on a simulator — or to offload inference
-  — pair the app to a desktop **KaleidoMind provider** over P2P (see
-  [AI assistant & voice](#ai-assistant--voice-on-device-vs-delegated)).
 
 ---
 
@@ -191,23 +188,11 @@ Once the app is installed on a simulator/device/emulator, you only need Metro fo
 npx expo start --dev-client    # then press `i` for iOS or `a` for Android
 ```
 
-### AI assistant & voice (on-device vs delegated)
+### AI assistant & voice (on-device)
 
 The AI assistant and voice mode (speech-to-text + text-to-speech) run **on-device
 via the QVAC SDK, which requires a physical device** — they are unavailable on an
 iOS simulator / Android emulator. The rest of the wallet works fine on a simulator.
-
-To develop the AI / voice features without a physical device, **delegate inference
-to a desktop KaleidoMind provider**:
-
-1. Run the KaleidoMind provider on a desktop (it loads the LLM and, for voice, a
-   Whisper STT + Supertonic TTS model, then advertises over P2P).
-2. Pair this app to it from the QVAC / KaleidoMind settings (**Pair Desktop** —
-   scan the provider's public-key QR).
-
-Chat, transcription, and speech synthesis are then served over P2P by the desktop,
-so they work even on a simulator. Toggle delegation off to fall back to on-device
-inference (physical device only).
 
 ### Managing the QVAC install (dev)
 

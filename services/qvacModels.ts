@@ -3,11 +3,9 @@
 // Curated catalog of on-device chat models exposed by the QVAC SDK, plus
 // helpers to turn a model descriptor into a direct HTTPS download URL.
 //
-// Two ways a model can run:
-//  - LOCAL: we HTTPS-download the GGUF to the device and load it. Only possible
-//    for Hugging Face-hosted models (registryPath has /blob/ or /resolve/).
-//  - DELEGATED: inference runs on a remote P2P provider (e.g. a Mac), so the
-//    phone never downloads the weights. Any model works delegated.
+// Models run LOCALLY: we HTTPS-download the GGUF to the device and load it.
+// Only possible for Hugging Face-hosted models (registryPath has /blob/ or
+// /resolve/).
 import {
   QWEN3_5_0_8B_MULTIMODAL_Q4_K_M,
   QWEN3_5_2B_MULTIMODAL_Q4_K_M,
@@ -23,7 +21,7 @@ export interface QVACModel {
   params: string;
   sizeMB: number;
   tier: DeviceTier;
-  /** Raw SDK descriptor — passed to loadModel in delegated mode. */
+  /** Raw SDK descriptor (registry path + expected size). */
   descriptor: any;
   modelType: 'llamacpp-completion';
   /** True if we can HTTPS-download it for local on-device use. */
@@ -85,7 +83,7 @@ export function getModelById(id: string | undefined | null): QVACModel {
 
 const GiB = 1024 * 1024 * 1024;
 
-/** Coarse device class from total RAM (phones only — Macs run via delegation). */
+/** Coarse device class from total RAM (phones only). */
 export function classifyDeviceTier(totalMemBytes: number): DeviceTier {
   return 'phone';
 }
