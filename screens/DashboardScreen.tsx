@@ -45,10 +45,9 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
+import { assetUsdValue, formatUsd, tokenValueSats as priceTokensInSats, tokenValueUsd } from '../utils/portfolio';
 
-// Stablecoins valued at $1 in the asset list.
 const LITE_USD_ID = 'lite-usd';
-const USD_TICKERS = new Set(['USDT', 'USDC', USDB_TICKER.toUpperCase()]);
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
 
 const { width } = Dimensions.get('window');
@@ -166,7 +165,8 @@ export default function DashboardScreen({ navigation }: Props) {
   // state remains the source of truth for rendering.
   const protocolsReadyRef = useRef(false);
   const [refreshing, setRefreshing] = useState(false);
-  const { formatSatoshisToUSD } = useBitcoinConversion();
+  // The same live BTC price the fiat figures use (redux's btcPriceUSD is rarely set).
+  const { formatSatoshisToUSD, bitcoinPrice: liveBtcPrice } = useBitcoinConversion();
   // Denomination-aware formatter for the headline balance (tap to cycle sats/BTC/fiat).
   const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const [loading, setLoading] = useState(true);
@@ -547,23 +547,7 @@ export default function DashboardScreen({ navigation }: Props) {
     && ((protocolManager.getAdapterIfAvailable('RGB_LN') as any)?.walletType?.() ?? nwcWalletType) !== 'ln'
     && (nwcWalletType == null || nwcCapabilities.includes('manageChannels'));
 
-  // Aggregate priced tokens into a sats-equivalent and fold them into the total,
-  // matching the extension (totalBTC = btc across protocols + tokenValueSats).
-  // Only assets with a known USD price contribute (USDB = $1); BTC is already
-  // counted via getTotalBtcBalance()/offChainBalance.
-  const btcPriceUSD = useSelector((state: RootState) => state.wallet.btcPriceUSD);
-  const tokenValueSats = (() => {
-    if (!btcPriceUSD || btcPriceUSD <= 0) return 0;
-    let sats = 0;
-    for (const a of rgbAssets as any[]) {
-      const usd = a?.ticker === USDB_TICKER ? 1 : null;
-      if (usd == null) continue;
-      const display = getAssetBaseUnitBalance(a.balance) / Math.pow(10, a.precision || 0);
-      sats += Math.round(((display * usd) / btcPriceUSD) * 100_000_000);
-    }
-    return sats;
-  })();
-
+  const btcPriceUSD = liveBtcPrice ?? 0;
   const protocolBalances = (btcBalance as any).byProtocol as Record<string, { confirmed: number; unconfirmed: number; total: number }> | undefined;
   // NWC reports Lightning funds already; HTTP RLN reports on-chain funds.
   const rgbBalanceIsLightning = typeof (rgbAccountAdapter() as any)?.walletType === 'function';
@@ -579,8 +563,6 @@ export default function DashboardScreen({ navigation }: Props) {
   );
   const availableBtc = bitcoinSummary.available;
   const pendingBtc = bitcoinSummary.unavailable;
-  const totalBalance = bitcoinSummary.total + tokenValueSats;
-  const denominatedTotal = formatDisplayAmount(totalBalance);
 
   // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
   // which network each lives on. BTC is filtered out of `rgbAssets` upstream, so
@@ -604,7 +586,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const lite = aggregateForLite(liteAssets);
   // The aggregated USD figure is in base units; convert each contributing asset
   // to its human value using its own precision so the display reads as dollars.
-  const liteUsdAssetIds = new Set(
+  const liteUsdAssetIds = new Set<string>(
     liteAssets
       .filter((a: any) => !lite.other.some((o: any) => o.id === a.id))
       .map((a: any) => a.id)
@@ -621,6 +603,13 @@ export default function DashboardScreen({ navigation }: Props) {
     lite.other.some((o: any) => o.id === asset.asset_id)
   );
 
+  // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
+  // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
+  const tokenValueSats = priceTokensInSats(rgbAssets as any[], btcPriceUSD, liteUsdAssetIds);
+  const tokenUsd = tokenValueUsd(rgbAssets as any[], liteUsdAssetIds);
+  const totalBalance = bitcoinSummary.total + tokenValueSats;
+  const denominatedTotal = formatDisplayAmount(totalBalance);
+
   // BTC is the wallet's base asset but is filtered out of `rgbAssets` upstream,
   // so it never reached the dashboard AssetList. Surface it at the top of the
   // list (matching AssetsScreen's BTC row). Balance is on-chain + Lightning, and
@@ -636,10 +625,7 @@ export default function DashboardScreen({ navigation }: Props) {
     fiatValue: btcPriceUSD ? (availableBtc / 100_000_000) * btcPriceUSD : undefined,
   } as any;
   // Dollar stablecoins are worth their face value.
-  const usdValueOf = (asset: any): number | undefined =>
-    USD_TICKERS.has(String(asset?.ticker ?? '').toUpperCase())
-      ? getAssetBaseUnitBalance(asset.balance) / Math.pow(10, asset.precision || 0)
-      : undefined;
+  const usdValueOf = (asset: any): number | undefined => assetUsdValue(asset, liteUsdAssetIds);
 
   const renderChannelModal = () => (
     <Sheet
@@ -848,6 +834,7 @@ export default function DashboardScreen({ navigation }: Props) {
             testBtc={bitcoinSummary.test}
             testNetworks={testNetworks}
             includesTokenValue={tokenValueSats > 0}
+            tokenValueText={tokenUsd > 0 ? formatUsd(tokenUsd) : undefined}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}
             onRefresh={onRefresh}
@@ -887,6 +874,7 @@ export default function DashboardScreen({ navigation }: Props) {
             ...(isLite && liteUsdDisplay > 0 ? [{
               asset_id: LITE_USD_ID, ticker: 'USD', name: 'US Dollar', precision: 2,
               balance: { spendable: Math.round(liteUsdDisplay * 100) },
+              fiatValue: liteUsdDisplay,
             }] : []),
             ...(isLite
               ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined, fiatValue: usdValueOf(a) }))

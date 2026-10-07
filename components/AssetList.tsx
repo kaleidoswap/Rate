@@ -10,6 +10,7 @@ import { AmountText } from './AmountText';
 import { PressableScale } from './PressableScale';
 import { feedback } from '../utils/feedback';
 import { formatAssetAmount, getAssetBaseUnitBalance, type AssetBalanceLike } from '../utils/assetAmount';
+import { formatUsd } from '../utils/portfolio';
 
 interface NiaAsset {
     asset_id: string;
@@ -42,11 +43,7 @@ function groupThousands(amount: string): string {
     return int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (frac !== undefined ? `.${frac}` : '');
 }
 
-export function formatUsd(value: number): string {
-    const abs = Math.abs(value);
-    const digits = abs > 0 && abs < 0.01 ? 4 : 2;
-    return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: digits })}`;
-}
+export { formatUsd };
 
 /** One asset: what it is on the left, how much (and what it's worth) on the right. */
 const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPress: () => void }> = ({ asset, index, last, onPress }) => {

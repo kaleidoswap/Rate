@@ -21,6 +21,10 @@ interface BalanceCardProps {
     /** Accounts on a test network, with the network's name. */
     testNetworks?: Partial<Record<'RGB' | 'SPARK' | 'ARKADE' | 'BARK', string>>;
     includesTokenValue?: boolean;
+    /** Dollar value of the stablecoins folded into the total, e.g. "$12.50". */
+    tokenValueText?: string;
+    /** Showing the last known balance while the live one loads. */
+    updating?: boolean;
     rgbBalanceIsLightning?: boolean;
     bitcoinUnit: string;
     onRefresh: () => void;
@@ -71,6 +75,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     testBtc = 0,
     testNetworks = {},
     includesTokenValue = false,
+    tokenValueText,
+    updating = false,
     rgbBalanceIsLightning = false,
     bitcoinUnit,
     onRefresh,
@@ -161,7 +167,12 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     return (
         <View style={styles.container}>
             <View style={styles.cardHeader}>
-                <Text style={styles.balanceLabel}>{includesTokenValue ? 'Total estimated value' : 'Total balance'}</Text>
+                <View style={styles.labelRow}>
+                    <Text style={styles.balanceLabel}>Total balance</Text>
+                    {updating && (
+                        <Text style={styles.updatingText} accessibilityLabel="Showing your last balance, updating">Updating…</Text>
+                    )}
+                </View>
                 {/* Refresh and balance details stay separate from denomination. */}
                 <View style={styles.topControls}>
                     <TouchableOpacity
@@ -229,6 +240,12 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             {formatUSD(totalBalance) !== '0.00' ? `$${formatUSD(totalBalance)} USD` : ''}
                         </AmountText>
                     </>
+                )}
+                {/* Stablecoins count at $1; say so, so the total isn't a surprise. */}
+                {!loading && includesTokenValue && !!tokenValueText && (
+                    <Text style={styles.subLine}>
+                        Includes {hideAmounts ? '••••' : tokenValueText} in dollar tokens
+                    </Text>
                 )}
                 {/* Incoming funds and test sats are always visible, never folded into the total. */}
                 {!loading && pendingBtc > 0 && (
@@ -314,8 +331,15 @@ const styles = StyleSheet.create({
         alignItems: 'center', paddingTop: theme.spacing[1], paddingBottom: theme.spacing[2],
     },
     primaryBalance: { width: '100%', alignItems: 'center' },
+    labelRow: {
+        flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2],
+    },
+    updatingText: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.tertiary,
+    },
     balanceLabel: {
-        flex: 1, fontSize: theme.typography.fontSize.xs,
+        fontSize: theme.typography.fontSize.xs,
         fontWeight: theme.typography.fontWeight.medium, color: theme.colors.text.secondary,
     },
     subLine: {
