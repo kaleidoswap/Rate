@@ -1,4 +1,5 @@
 import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection, isBarkOff } from './barkPreferences'
+import { withPaymentProofs } from '../paymentProofs'
 /**
  * WDK Protocol Wiring — KaleidoSwap App
  * -------------------------------------
@@ -38,9 +39,10 @@ import { getDefaultArkadeServerUrl, resolveSparkNetwork } from './networkConfig'
 import { BARK_ENABLED, buildBarkConfig, isBarkNativeAvailable } from './bark'
 import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleidoPay/bark'
 import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
-import { RGB_L1_ENABLED, buildRgbL1Config, isRgbLibNativeAvailable, isRgbL1Ready, loadRgbL1Network, loadRgbL1Host, markRgbL1Ready } from './rgbL1'
+import { RGB_L1_ENABLED, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL, buildRgbL1Config, isRgbLibNativeAvailable, isRgbL1Ready, loadRgbL1Network, loadRgbL1Host, markRgbL1Ready, type RgbL1Network } from './rgbL1'
 import { createRgbLibRnModule } from './rgbLibRn'
-import { restoreRgbFromCloud, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
+import { findRgbCloudBackup, restoreRgbFromCloud, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
+import { isRgbNode, rgbOnDeviceStep } from './rgbAccount'
 
 /** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
 export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
@@ -69,7 +71,7 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
  *   the saved wallet preference with ./bark.ts defaults. Disable with EXPO_PUBLIC_BARK=0.
  * - RGB on this phone (RGB_L1): native rgb-lib through `react-native-rgb`, opt-in per
  *   wallet (./rgbL1.ts). Connects only when no RGB node is connected: the node is the
- *   RGB account when paired. Disable with EXPO_PUBLIC_RGB_L1=0.
+ *   RGB account when paired (a plain Lightning wallet over NWC is not an RGB node). Disable with EXPO_PUBLIC_RGB_L1=0.
  */
 const ARKADE_ENABLED = process.env.EXPO_PUBLIC_WDK_ARKADE !== '0'
 // On mobile, RLN/RGB is reached over Nostr Wallet Connect by default (the app
@@ -106,20 +108,23 @@ export function getWdkProtocolManager(): ProtocolManager {
   if (!_wdkManager) {
     registerWdkModuleLoaders()
     _wdkManager = new ProtocolManager()
+    const manager = _wdkManager
+    // Every Lightning payment's preimage is kept for Activity, whichever screen paid.
+    const register = (adapter: any) => manager.registerAdapter(withPaymentProofs(adapter))
     // Spark + RLN: no WASM, SDKs already shipped — always on.
-    _wdkManager.registerAdapter(new MobileSparkAdapter())
+    register(new MobileSparkAdapter())
     // RGB: NWC-backed (remote node over relays) by default on mobile; HTTP WDK
     // adapter when EXPO_PUBLIC_RGB_VIA_NWC=0.
     if (RGB_VIA_NWC) {
-      _wdkManager.registerAdapter(new NwcRgbAdapter())
+      register(new NwcRgbAdapter())
     } else {
-      _wdkManager.registerAdapter(new RlnWdkAdapter())
+      register(new RlnWdkAdapter())
     }
     // Liquid is not part of the app: its native library alone was ~175 MB of the APK.
     // Wallets saved with a Liquid network skip it (no LIQUID case below).
-    if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())
-    if (BARK_ENABLED) _wdkManager.registerAdapter(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
-    if (RGB_L1_ENABLED) _wdkManager.registerAdapter(new RgbLibWdkAdapter())
+    if (ARKADE_ENABLED) register(new ArkadeWdkAdapter())
+    if (BARK_ENABLED) register(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
+    if (RGB_L1_ENABLED) register(new RgbLibWdkAdapter())
   }
   return _wdkManager
 }
@@ -137,15 +142,11 @@ export async function initializeWdkProtocols(
   // Send's ways to pay need the maker (configured with the RGB node) and Arkade's server.
   setPayOptions(payOptionsFrom(networkConfigs))
 
-  for (const nc of networkConfigs) {
-    if (!nc.enabled) continue
-    const protocol = networkTypeToProtocol(nc.type as any)
-    if (!protocol) continue
-
+  const connectNetwork = async (protocol: ProtocolType, nc: { type: string; enabled: boolean; config?: string }): Promise<void> => {
     const existing = manager.getAdapterIfAvailable(protocol)
     if (existing?.isConnected()) {
       results.set(protocol, { success: true })
-      continue
+      return
     }
 
     try {
@@ -199,7 +200,7 @@ export async function initializeWdkProtocols(
             const nwcUri = await SecureStore.getItemAsync(NWC_CONNECTION_KEY)
             if (!nwcUri) {
               results.set(protocol, { success: false, error: 'skipped: no NWC connection string configured' })
-              continue
+              return
             }
             config = {
               protocol: 'RGB_LN',
@@ -212,7 +213,7 @@ export async function initializeWdkProtocols(
             parsed.type === 'remote' ? parsed.url : parsed.nodeUrl || 'http://127.0.0.1:3000'
           if (!nodeUrl) {
             results.set(protocol, { success: false, error: 'skipped: no node URL configured' })
-            continue
+            return
           }
           config = {
             protocol: 'RGB_LN',
@@ -224,7 +225,7 @@ export async function initializeWdkProtocols(
         }
 
         default:
-          continue
+          return
       }
 
       await manager.connect(protocol, config)
@@ -262,8 +263,11 @@ export async function initializeWdkProtocols(
           if (sparkWallet) {
             const sparkNetwork = (config as SparkAdapterConfig).network || 'regtest'
             if (sparkNetwork === 'mainnet' || sparkNetwork === 'regtest') {
-              await flashnetClientManager.initialize(sparkWallet, sparkNetwork)
-              console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`)
+              // Swaps only: off the startup path so balances don't wait on it.
+              void Promise.resolve()
+                .then(() => flashnetClientManager.initialize(sparkWallet, sparkNetwork))
+                .then(() => console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`))
+                .catch((e: unknown) => console.warn('[initializeWdkProtocols] flashnet init failed:', e))
             } else {
               console.log(`[initializeWdkProtocols] flashnet disabled on Spark ${sparkNetwork}`)
             }
@@ -290,8 +294,30 @@ export async function initializeWdkProtocols(
     }
   }
 
-  if (BARK_ENABLED) await connectBark(manager, mnemonic, results)
-  if (RGB_L1_ENABLED) await connectRgbL1(manager, mnemonic, results)
+  // Each account connects on its own, in parallel: startup waits on the slowest one,
+  // not the sum. Configs for the same protocol still try in order.
+  const configsByProtocol = new Map<ProtocolType, Array<{ type: string; enabled: boolean; config?: string }>>()
+  for (const nc of networkConfigs) {
+    if (!nc.enabled) continue
+    const protocol = networkTypeToProtocol(nc.type as any)
+    if (!protocol) continue
+    configsByProtocol.set(protocol, [...(configsByProtocol.get(protocol) ?? []), nc])
+  }
+  const jobs = new Map<ProtocolType, Promise<void>>()
+  for (const [protocol, configs] of configsByProtocol) {
+    jobs.set(protocol, (async () => {
+      for (const nc of configs) {
+        await connectNetwork(protocol, nc)
+        if (results.get(protocol)?.success) return
+      }
+    })())
+  }
+
+  const pending: Array<Promise<void>> = [...jobs.values()]
+  if (BARK_ENABLED) pending.push(connectBark(manager, mnemonic, results))
+  // RGB on this phone yields to a connected RGB node, so it decides after the node settles.
+  if (RGB_L1_ENABLED) pending.push((jobs.get('RGB_LN') ?? Promise.resolve()).then(() => connectRgbL1(manager, mnemonic, results)))
+  await Promise.allSettled(pending)
 
   return results
 }
@@ -299,22 +325,63 @@ export async function initializeWdkProtocols(
 /**
  * RGB on this phone, when the wallet turned it on and no RGB node is connected.
  * Same per-protocol contract as the loop above: record the outcome, never throw.
+ * Calls run one at a time: two opens of rgb-lib's data folder would collide.
  */
-async function connectRgbL1(
+let rgbL1Queue: Promise<void> = Promise.resolve()
+
+export interface RgbL1ConnectOptions {
+  /**
+   * Skip the first-start cloud restore: the caller already restored the data or
+   * asked the user to start without it (Settings).
+   */
+  skipCloudRestore?: boolean
+}
+
+function connectRgbL1(
   manager: ProtocolManager,
   mnemonic: string,
   results: Map<ProtocolType, { success: boolean; error?: string }>,
+  opts: RgbL1ConnectOptions = {},
+): Promise<void> {
+  const run = rgbL1Queue.then(() => connectRgbL1Once(manager, mnemonic, results, opts))
+  rgbL1Queue = run.catch(() => undefined)
+  return run
+}
+
+/**
+ * Brings RGB on this phone in line with the wallet's choice and the RGB node:
+ * starts it, keeps it, or releases it while an RGB node is the RGB account.
+ * Call after the node connects, disconnects or switches, and from Settings.
+ */
+export async function syncRgbOnDevice(
+  mnemonic: string,
+  opts: RgbL1ConnectOptions = {},
+): Promise<{ success: boolean; error?: string } | undefined> {
+  if (!RGB_L1_ENABLED) return { success: false, error: 'skipped: RGB on this phone is not part of this build' }
+  const results = new Map<ProtocolType, { success: boolean; error?: string }>()
+  await connectRgbL1(getWdkProtocolManager(), mnemonic, results, opts)
+  return results.get('RGB_L1')
+}
+
+async function connectRgbL1Once(
+  manager: ProtocolManager,
+  mnemonic: string,
+  results: Map<ProtocolType, { success: boolean; error?: string }>,
+  opts: RgbL1ConnectOptions,
 ): Promise<void> {
   try {
     const existing = manager.getAdapterIfAvailable('RGB_L1')
     const network = await loadRgbL1Network(mnemonic)
-    if (!network || manager.getAdapterIfAvailable('RGB_LN')?.isConnected()) {
-      // Turned off, or the node is the RGB account: release the local wallet.
+    const nodeIsRgb = isRgbNode(manager.getAdapterIfAvailable('RGB_LN') as any)
+    const step = rgbOnDeviceStep({ enabled: !!network, nodeIsRgb, connected: !!existing?.isConnected() })
+    if (step === 'release' || !network) {
+      // Turned off, or an RGB node is the RGB account: release the local wallet.
       setRgbBackupContext(null)
       if (existing?.isConnected()) await manager.disconnect('RGB_L1')
+      if (network && nodeIsRgb) results.set('RGB_L1', { success: false, error: 'skipped: your RGB Lightning Node is the RGB account' })
       return
     }
-    if (existing?.isConnected()) {
+    if (step === 'keep') {
       setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
       results.set('RGB_L1', { success: true })
       return
@@ -323,16 +390,26 @@ async function connectRgbL1(
       results.set('RGB_L1', { success: false, error: 'This app build does not include RGB. Install a newer build.' })
       return
     }
-    if (!(await isRgbL1Ready(mnemonic, network))) {
+    if (!opts.skipCloudRestore && !(await isRgbL1Ready(mnemonic, network))) {
       // First start on this phone: bring the RGB data back from the cloud backup first.
       // If that can't be checked, don't start an empty wallet that would back up over it.
+      let restored: string
       try {
-        const restored = await restoreRgbFromCloud({ mnemonic, network, restore: (path, password) => require('react-native-rgb').restoreBackup(path, password) })
+        restored = await restoreRgbFromCloud({ mnemonic, network, restore: (path, password) => require('react-native-rgb').restoreBackup(path, password) })
         console.log(`[initializeWdkProtocols] RGB_L1 cloud restore: ${restored}`)
       } catch (e: unknown) {
         const why = e instanceof Error ? e.message : String(e)
         results.set('RGB_L1', { success: false, error: `Couldn't restore your RGB backup (${why}). Check your connection and try again.` })
         return
+      }
+      // Nothing on this network, but a backup on another one: don't fix this wallet
+      // to an empty network; let the user pick in Settings › RGB.
+      if (restored === 'no-backup') {
+        const elsewhere = await backupOnOtherNetwork(mnemonic, network)
+        if (elsewhere) {
+          results.set('RGB_L1', { success: false, error: `Your RGB backup is on ${RGB_L1_NETWORK_LABEL[elsewhere]}. Choose its network in Settings › RGB to restore it.` })
+          return
+        }
       }
     }
     await manager.connect('RGB_L1', buildRgbL1Config(mnemonic, await loadRgbL1Host(mnemonic, network)) as any)
@@ -346,6 +423,17 @@ async function connectRgbL1(
     console.error('[initializeWdkProtocols] RGB_L1 failed:', msg)
     results.set('RGB_L1', { success: false, error: msg })
   }
+}
+
+/** Another network with a cloud backup for this seed, best effort (a failed check is "none"). */
+async function backupOnOtherNetwork(mnemonic: string, network: RgbL1Network): Promise<RgbL1Network | null> {
+  for (const other of RGB_L1_NETWORKS) {
+    if (other === network) continue
+    try {
+      if (await findRgbCloudBackup(mnemonic, other)) return other
+    } catch { /* unreachable: don't block the start on another network's check */ }
+  }
+  return null
 }
 
 /**

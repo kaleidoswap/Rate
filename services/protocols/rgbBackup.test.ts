@@ -1,10 +1,12 @@
 const mockDownload = jest.fn(async (): Promise<any> => undefined);
 const mockWrites: Uint8Array[] = [];
+const mockManifest = jest.fn(async (): Promise<any> => undefined);
 const mockUpload = jest.fn(async (_c: any, _p: string, data: Uint8Array) => ({ version: 1, size: data.length, chunks: 1, sha256: 'x', createdAt: 123 }));
 jest.mock('./rgbVss', () => ({
   createVssClient: jest.fn(() => ({})),
   uploadBackupFile: (...a: any[]) => (mockUpload as any)(...a),
   downloadBackupFile: (...a: any[]) => (mockDownload as any)(...a),
+  readBackupManifest: (...a: any[]) => (mockManifest as any)(...a),
   vssSigningKey: () => new Uint8Array(32),
 }));
 jest.mock('./bark', () => ({ toFilesystemPath: (uri: string) => uri.replace('file://', '') }));
@@ -101,5 +103,20 @@ describe('restore from a file', () => {
     await expect(restoreRgbFromFile({ mnemonic: 'seed', path: '/f', restore: exists })).rejects.toThrow(/already has RGB data/);
     const wrong = jest.fn(async () => { throw new Error('Invalid password'); });
     await expect(restoreRgbFromFile({ mnemonic: 'seed', path: '/f', restore: wrong })).rejects.toThrow(/isn’t for this wallet/);
+  });
+});
+
+describe('looking for a cloud backup', () => {
+  const { findRgbCloudBackup } = require('./rgbBackup');
+  test('reads only the manifest of the network’s own store', async () => {
+    expect(await findRgbCloudBackup('seed', 'mutinynet')).toBeNull();
+    mockManifest.mockResolvedValueOnce({ version: 1, size: 3, chunks: 1, sha256: 'x', createdAt: 789 });
+    expect(await findRgbCloudBackup('seed', 'mainnet')).toEqual(expect.objectContaining({ createdAt: 789 }));
+    expect(createVssClient).toHaveBeenLastCalledWith('https://vss.kaleidoswap.com/vss', rgbBackupStoreId('seed', 'mainnet'), expect.any(Uint8Array));
+    expect(mockDownload).not.toHaveBeenCalled();
+  });
+  test('a server it can’t reach is an error, never "no backup"', async () => {
+    mockManifest.mockRejectedValueOnce(new Error('Backup server error (503).'));
+    await expect(findRgbCloudBackup('seed', 'mainnet')).rejects.toThrow(/503/);
   });
 });

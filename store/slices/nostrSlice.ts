@@ -2,6 +2,7 @@
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import * as SecureStore from 'expo-secure-store';
 import NostrService, { NostrProfile, NostrContact, NostrSettings } from '../../services/NostrService';
+import type { ProfileFormField } from '../../utils/nostrProfile';
 import type {
   NwcCapability,
   SavedNwcConnection,
@@ -84,13 +85,9 @@ export const loadNostrProfile = createAsyncThunk(
 
 export const updateNostrProfile = createAsyncThunk(
   'nostr/updateProfile',
-  async (profile: Partial<NostrProfile>) => {
-    const nostrService = NostrService.getInstance();
-    const success = await nostrService.updateProfile(profile);
-    if (success) {
-      return profile;
-    }
-    throw new Error('Failed to update profile');
+  async (edits: Partial<Record<ProfileFormField, string>>, { getState }: any) => {
+    const cached = getState()?.nostr?.profile ?? null;
+    return NostrService.getInstance().updateProfile(edits, cached);
   }
 );
 
@@ -497,7 +494,8 @@ const nostrSlice = createSlice({
       })
       .addCase(loadNostrProfile.fulfilled, (state, action) => {
         state.isProfileLoading = false;
-        state.profile = action.payload;
+        // A failed or empty fetch resolves null; keep what we already have.
+        if (action.payload) state.profile = action.payload;
       })
       .addCase(loadNostrProfile.rejected, (state, action) => {
         state.isProfileLoading = false;
@@ -512,11 +510,7 @@ const nostrSlice = createSlice({
       })
       .addCase(updateNostrProfile.fulfilled, (state, action) => {
         state.isProfileLoading = false;
-        if (state.profile) {
-          state.profile = { ...state.profile, ...action.payload };
-        } else {
-          state.profile = action.payload as NostrProfile;
-        }
+        state.profile = action.payload;
       })
       .addCase(updateNostrProfile.rejected, (state, action) => {
         state.isProfileLoading = false;

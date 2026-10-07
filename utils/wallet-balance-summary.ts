@@ -26,7 +26,7 @@ export function summarizeBitcoinBalances(
     const held = nonNegative(balance.confirmed) + nonNegative(balance.unconfirmed);
     if (testProtocols.has(protocol)) { test += held; continue; }
     total += held;
-    available += nonNegative(protocol === 'RGB' ? balance.total : balance.confirmed);
+    available += nonNegative(protocol === 'RGB' || protocol === 'LN' ? balance.total : balance.confirmed);
   }
   if (!rgbBalanceIsLightning) {
     for (const channel of channels) {
@@ -39,4 +39,59 @@ export function summarizeBitcoinBalances(
   }
   available = Math.min(total, available);
   return { total, available, unavailable: Math.max(0, total - available), test };
+}
+
+export interface BtcBalanceState {
+  vanilla: { settled: number; future: number; spendable: number };
+  colored: { settled: number; future: number; spendable: number };
+  byProtocol?: Record<string, BitcoinBalance>;
+}
+
+/** The dashboard's balance shape from per-account balances. */
+export function btcBalanceFromProtocols(byProtocol: Record<string, BitcoinBalance>): BtcBalanceState & { byProtocol: Record<string, BitcoinBalance> } {
+  let confirmed = 0;
+  let unconfirmed = 0;
+  for (const b of Object.values(byProtocol)) {
+    confirmed += b.confirmed;
+    unconfirmed += b.unconfirmed;
+  }
+  return {
+    vanilla: { settled: confirmed, future: confirmed + unconfirmed, spendable: confirmed },
+    colored: { settled: 0, future: 0, spendable: 0 },
+    byProtocol,
+  };
+}
+
+/** One account's fresh balance replaces its entry; the others keep what they showed. */
+export function withProtocolBalance(prev: BtcBalanceState | null | undefined, protocol: string, balance: BitcoinBalance) {
+  return btcBalanceFromProtocols({ ...(prev?.byProtocol ?? {}), [protocol]: balance });
+}
+
+export type BtcNetwork = 'onchain' | 'lightning' | 'spark' | 'arkade' | 'bark';
+
+/**
+ * Bitcoin per network, as the balance card's breakdown shows it: the RGB node's
+ * wallet is on-chain (its channels are Lightning), unless it is an NWC wallet,
+ * whose whole balance is Lightning.
+ */
+export function bitcoinByNetwork(
+  balances: Record<string, BitcoinBalance>,
+  channels: ChannelBalance[],
+  rgbBalanceIsLightning: boolean,
+): Partial<Record<BtcNetwork, number>> {
+  const out: Partial<Record<BtcNetwork, number>> = {};
+  const rgb = balances.RGB;
+  if (rgb) {
+    if (rgbBalanceIsLightning) out.lightning = nonNegative(rgb.total);
+    else {
+      out.onchain = nonNegative(rgb.confirmed);
+      out.lightning = channels.reduce((sum, c) => sum + nonNegative(c.local_balance_sat), 0);
+    }
+  }
+  // A plain Lightning wallet beside RGB on this phone.
+  if (balances.LN) out.lightning = (out.lightning ?? 0) + nonNegative(balances.LN.total);
+  if (balances.SPARK) out.spark = nonNegative(balances.SPARK.total);
+  if (balances.ARKADE) out.arkade = nonNegative(balances.ARKADE.total);
+  if (balances.BARK) out.bark = nonNegative(balances.BARK.total);
+  return out;
 }

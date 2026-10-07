@@ -3,6 +3,8 @@ import { render, fireEvent, waitFor } from '@testing-library/react-native';
 import DashboardScreen from './DashboardScreen';
 import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager } from '../services/protocols';
+import { saveBalanceSnapshot } from '../services/balanceSnapshot';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const mockState: any = { wallet: { activeWallet: null, btcPriceUSD: 0 }, node: {}, settings: { bitcoinUnit: 'sats' }, nostr: {} };
 const mockDispatch = jest.fn();
@@ -24,8 +26,15 @@ jest.mock('../utils/bitcoinUnits', () => ({
   useBitcoinConversion: () => ({ formatSatoshisToUSD: String }),
   useDisplayAmount: () => ({ format: () => ({ primary: '0', secondary: '$0', unitLabel: 'sats' }), cycle: jest.fn() }),
 }));
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('../components', () => ({
-  BalanceCard: ({ loading }: any) => require('react').createElement(require('react-native').Text, {}, loading ? 'Loading balance' : 'Balance ready'),
+  BalanceCard: ({ loading, updating, byProtocol }: any) => {
+    const { createElement: h, Fragment } = require('react');
+    const { Text } = require('react-native');
+    const accounts = Object.entries(byProtocol ?? {}).map(([k, b]: any) => `${k} ${b.total}`).join(', ');
+    return h(Fragment, {}, h(Text, {}, loading ? 'Loading balance' : 'Balance ready'), updating ? h(Text, {}, 'Updating') : null,
+      h(Text, {}, `Accounts: ${accounts || 'none'}`));
+  },
   ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: () => null,
 }));
 
@@ -68,5 +77,49 @@ describe('dashboard connection recovery', () => {
     expect(initializeProtocolServices).toHaveBeenCalledTimes(2);
     expect(adapter.getBtcBalance).toHaveBeenCalled();
     expect(screen.queryByText('Balance unavailable')).toBeNull();
+  });
+});
+
+describe('fast first balance', () => {
+  const sparkSnapshot = { byProtocol: { SPARK: { confirmed: 1000, unconfirmed: 0, total: 1000 } }, assets: [], channels: [], btcPriceUSD: 0 };
+  beforeEach(async () => {
+    jest.clearAllMocks();
+    await AsyncStorage.clear();
+    (protocolManager.getAdapterIfAvailable as jest.Mock).mockReturnValue(undefined);
+  });
+
+  it('shows the last balance at once while the accounts reconnect', async () => {
+    mockState.wallet.activeWallet = { id: 1, created_at: 5, encrypted_mnemonic: 'test-only-seed' };
+    await saveBalanceSnapshot(mockState.wallet.activeWallet, sparkSnapshot);
+    (initializeProtocolServices as jest.Mock).mockReturnValue(new Promise(() => {}));
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(screen.getByText('Accounts: SPARK 1000')).toBeTruthy());
+    expect(screen.getByText('Updating')).toBeTruthy();
+    expect(screen.queryByText('Loading balance')).toBeNull();
+  });
+
+  it('never shows another wallet\'s last balance', async () => {
+    await saveBalanceSnapshot({ id: 1, created_at: 5 }, sparkSnapshot);
+    mockState.wallet.activeWallet = { id: 2, created_at: 9, encrypted_mnemonic: 'test-only-seed' };
+    (initializeProtocolServices as jest.Mock).mockReturnValue(new Promise(() => {}));
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByText('Accounts: none')).toBeTruthy();
+  });
+
+  it('shows each account as soon as it answers', async () => {
+    mockState.wallet.activeWallet = { id: 3, created_at: 1, encrypted_mnemonic: 'test-only-seed' };
+    let finishArkade: (v: any) => void = () => {};
+    const adapter = (getBtcBalance: () => Promise<any>) => ({
+      isConnected: () => true, getNodeInfo: jest.fn().mockResolvedValue({}), getBtcBalance, listAssets: jest.fn().mockResolvedValue([]),
+    });
+    const spark = adapter(() => Promise.resolve({ confirmed: 500, unconfirmed: 0, total: 500 }));
+    const arkade = adapter(() => new Promise((r) => { finishArkade = r; }));
+    (protocolManager.getAdapterIfAvailable as jest.Mock).mockImplementation(p => (p === 'SPARK' ? spark : p === 'ARKADE' ? arkade : undefined));
+    (initializeProtocolServices as jest.Mock).mockResolvedValue({ results: new Map([['SPARK', { success: true }], ['ARKADE', { success: true }]]) });
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(screen.getByText('Accounts: SPARK 500')).toBeTruthy());
+    finishArkade({ confirmed: 300, unconfirmed: 0, total: 300 });
+    await waitFor(() => expect(screen.getByText('Accounts: SPARK 500, ARKADE 300')).toBeTruthy());
   });
 });

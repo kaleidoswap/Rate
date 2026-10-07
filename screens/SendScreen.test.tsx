@@ -37,6 +37,19 @@ jest.mock('../services/kaleidoPay', () => ({
   quoteSpend: (q: any) => ({ asset: { ticker: 'sats' }, amount: q.recipientSat, fee: q.feeSat, total: q.totalSat }),
   formatSpend: (v: number) => `${v} sats`, bestOffer: (offers: any[]) => offers.filter(o => o.quote).sort((a, b) => a.quote.totalSat - b.quote.totalSat)[0],
 }));
+jest.mock('../services/orchestra/client', () => ({
+  isOrchestraConfigured: () => true, getRoutes: jest.fn(async () => []),
+  getEstimate: jest.fn(async () => ({ estimatedOut: '4990000', feeAmount: '10000', totalFeeAmount: '10000', feeBps: 20, feeAsset: 'USDB', route: ['USDB', 'USDC'] })),
+}));
+jest.mock('../services/crosschainSend', () => {
+  class CrossChainNotSentError extends Error {}
+  return {
+    CrossChainNotSentError, QuoteChangedError: class extends CrossChainNotSentError {},
+    loadCrossChainSession: jest.fn(async () => null), clearCrossChainSession: jest.fn(async () => {}), saveCrossChainSession: jest.fn(async () => {}),
+    readSparkSource: jest.fn(async () => ({ connected: true, mainnet: true, btcSat: 0, usdb: { id: 'btkn1usdb', ticker: 'USDB', name: 'USDB', precision: 6, available: 10_000_000 } })),
+    sendCrossChain: jest.fn(), submitPaid: jest.fn(), refreshOrder: jest.fn(),
+  };
+});
 const offer = (id: string, total: number, expiresAt = Math.floor(Date.now() / 1000) + 60) => ({ id, provider: id, accountName: `Account ${id}`, executable: true, route: { kind: 'direct', sourceId: id, from: 'ln:mainnet', to: 'ln:mainnet' }, quote: { recipientSat: 1000, totalSat: total, feeSat: total - 1000, expiresAt } });
 const nav = () => ({ goBack: jest.fn(), navigate: jest.fn() });
 async function reviewed(navigation = nav()) {
@@ -161,4 +174,40 @@ test('quotes show as they arrive; the first payable one is picked and kept', asy
   const screen = await reviewed();
   expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(true);
   expect(screen.getByLabelText(/^Pay from Spark/)).toBeTruthy();
+});
+
+test('an empty Send lists what it can send to, including other chains', async () => {
+  const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+  await act(async () => {});
+  expect(screen.getByText('You can send to')).toBeTruthy();
+  expect(screen.getByText('Invoice · LNURL · Lightning address · BOLT12 offer')).toBeTruthy();
+  expect(screen.getByText('USDC / USDT to other chains')).toBeTruthy();
+  expect(screen.queryByText('Liquid')).toBeNull();
+});
+
+test('an EVM address sends USDC from Spark after review, and the transfer is tracked', async () => {
+  const { sendCrossChain } = require('../services/crosschainSend');
+  (sendCrossChain as jest.Mock).mockResolvedValue({
+    version: 1, id: 's1', phase: 'submitted', recipient: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', family: 'evm', destChain: 'base', destToken: 'USDC',
+    destDecimals: 6, source: 'USDB', mode: 'exact_in', quoteId: 'q1', depositAddress: 'spark1dep', sourceSparkAddress: 'spark1me',
+    sourceAmountRaw: '5000000', expectedOutRaw: '4990000', order: { id: 'o1', status: 'processing', readToken: 'rt' }, createdAt: 1, updatedAt: 1,
+  });
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: '0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed' } }} />);
+  await act(async () => {});
+  expect(screen.getByText('EVM address')).toBeTruthy();
+  expect(screen.queryByText("This isn't something this wallet can pay.")).toBeNull();
+  expect(screen.getByLabelText(/^Send bitcoin/).props.accessibilityState.disabled).toBe(true);
+  fireEvent.changeText(screen.getByLabelText('Amount to send in USDB'), '5');
+  await act(async () => { await new Promise(r => setTimeout(r, 450)); });
+  expect(screen.getByText('≈ 4.99 USDC')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByText('Review')); });
+  expect(sendCrossChain).not.toHaveBeenCalled();
+  expect(screen.getByText(/can't be reversed/)).toBeTruthy();
+  await act(async () => { pay(screen, 'Send 5 USDB'); });
+  expect(sendCrossChain).toHaveBeenCalledWith(expect.objectContaining({
+    walletId: 1, destDecimals: 6, reviewed: expect.objectContaining({ estimatedOut: '4990000' }),
+    form: expect.objectContaining({ source: 'USDB', destChain: 'base', destToken: 'USDC', recipient: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed', amountRaw: '5000000', mode: 'exact_in' }),
+  }));
+  expect(screen.getByText('Bridging')).toBeTruthy();
+  expect(screen.getByText('Reference: o1')).toBeTruthy();
 });

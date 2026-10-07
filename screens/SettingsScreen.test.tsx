@@ -7,7 +7,7 @@ jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f(mockState), u
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: (f: any) => require('react').useEffect(f, [f]) }));
 jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
 jest.mock('../services/protocols/barkPreferences', () => ({ currentBarkHost: () => ({ network: 'signet' }), loadBarkHost: async () => ({ network: 'signet' }), saveBarkNetwork: jest.fn() }));
-jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => null, disconnect: jest.fn() }, rgbAccountAdapter: () => null, rgbNodeConnected: () => false, reconcileRgbOnDevice: jest.fn(), initializeProtocols: jest.fn(async () => new Map([['BARK', { success: true }]])) }));
 jest.mock('../services/PairingService', () => ({ PairingService: { getActive: async () => null } }));
 jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getWalletNetworks: async () => [], getActiveWallet: async () => ({ id: 1, encrypted_mnemonic: 'public test fixture' }) }) } }));
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
@@ -110,11 +110,13 @@ test('account pages expose supported controls and back returns to the account li
   expect(require('../services/protocols').protocolManager.disconnect).not.toHaveBeenCalled();
   fireEvent.press(screen.getByLabelText('Back'));
   fireEvent.press(screen.getByLabelText('RGB account settings'));
-  // RGB: the node is managed over NWC (its own on/off); no "use this account" switch here.
+  await act(async () => {});
+  // RGB: choose RGB on this phone or a remote RGB Lightning Node; no "use this account" switch.
   expect(screen.queryByLabelText('Use this account')).toBeNull();
-  // Not connected: the page explains how to connect an RGB Lightning Node and offers it.
-  expect(screen.getByText('How to connect')).toBeTruthy();
   expect(screen.queryByText('Change network')).toBeNull();
-  fireEvent.press(screen.getByText('Connect node'));
-  expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
+  expect(screen.getByLabelText('RGB on this phone')).toBeTruthy();
+  // The node's how-to and connect live on their own screen.
+  expect(screen.queryByText('How to connect')).toBeNull();
+  fireEvent.press(screen.getByLabelText('RGB Lightning Node'));
+  expect(navigation.navigate).toHaveBeenCalledWith('RgbNode');
 });

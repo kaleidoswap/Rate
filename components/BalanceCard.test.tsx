@@ -44,4 +44,11 @@ describe('balance disclosure', () => {
     expect(screen.getByText('BTC on Bark')).toBeTruthy();
     expect(screen.getByText('700 sats')).toBeTruthy();
   });
+
+  it('says how much of the total is dollar tokens, and that it is updating', () => {
+    const screen = render(<BalanceCard {...props} includesTokenValue tokenValueText="$12.50" updating />);
+    expect(screen.getByText('Total balance')).toBeTruthy();
+    expect(screen.getByText('Includes $12.50 in dollar tokens')).toBeTruthy();
+    expect(screen.getByText('Updating…')).toBeTruthy();
+  });
 });

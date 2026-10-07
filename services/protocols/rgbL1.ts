@@ -8,7 +8,7 @@
  *
  * Runs on mainnet (the default, like the wallet's other accounts) or Mutinynet.
  * rgb-lib keeps one data folder per seed, not per network, so a wallet's RGB
- * network is fixed the first time it's turned on (see `pinnedRgbL1Network`).
+ * network is fixed once it first starts there (see `lockedRgbL1Network`).
  * RGB state can't be rebuilt from the seed alone: ./rgbBackup.ts uploads
  * rgb-lib's encrypted backup to VSS after every change.
  * Disable entirely with EXPO_PUBLIC_RGB_L1=0.
@@ -100,8 +100,9 @@ const pinnedKey = (mnemonic: string) => `rgb-l1-pinned-network-v1-${rgbL1WalletK
 const isNetwork = (v: string | null | undefined): v is RgbL1Network => !!v && (RGB_L1_NETWORKS as readonly string[]).includes(v)
 
 /**
- * The network this wallet's RGB data on this phone belongs to, once it has been
- * turned on (it stays set when RGB on this phone is turned off again).
+ * The network last chosen for this wallet's RGB data on this phone (it stays set
+ * when RGB on this phone is turned off again). See `lockedRgbL1Network` for
+ * whether it can still change.
  */
 export async function pinnedRgbL1Network(mnemonic: string): Promise<RgbL1Network | null> {
   const db = DatabaseService.getInstance()
@@ -119,24 +120,34 @@ export async function loadRgbL1Network(mnemonic: string): Promise<RgbL1Network |
   return isNetwork(saved) ? saved : null
 }
 
+const readyKey = (mnemonic: string, network: RgbL1Network) => `rgb-l1-ready-v1-${network}-${rgbL1WalletKey(mnemonic)}`
+
+/**
+ * The network this wallet's RGB data is fixed to, once RGB on this phone has
+ * started (or been restored) on it. Until then the network can still change:
+ * a choice that never started holds no data.
+ */
+export async function lockedRgbL1Network(mnemonic: string): Promise<RgbL1Network | null> {
+  const pinned = await pinnedRgbL1Network(mnemonic)
+  return pinned && (await isRgbL1Ready(mnemonic, pinned)) ? pinned : null
+}
+
 /**
  * Turns RGB on this phone on (on `network`) or off (null). A wallet can't move
- * its RGB data to another network: rgb-lib would open the same folder.
+ * its RGB data to another network once it started: rgb-lib would open the same folder.
  */
 export async function saveRgbL1Network(mnemonic: string, network: RgbL1Network | null): Promise<void> {
   if (network && !isNetwork(network)) throw new Error('Unsupported RGB network.')
   const db = DatabaseService.getInstance()
   if (network) {
-    const pinned = await pinnedRgbL1Network(mnemonic)
-    if (pinned && pinned !== network) {
-      throw new Error(`RGB on this phone already runs on ${RGB_L1_NETWORK_LABEL[pinned]} for this wallet.`)
+    const locked = await lockedRgbL1Network(mnemonic)
+    if (locked && locked !== network) {
+      throw new Error(`RGB on this phone already runs on ${RGB_L1_NETWORK_LABEL[locked]} for this wallet.`)
     }
     await db.setSetting(pinnedKey(mnemonic), network)
   }
   await db.setSetting(settingKey(mnemonic), network ?? '')
 }
-
-const readyKey = (mnemonic: string, network: RgbL1Network) => `rgb-l1-ready-v1-${network}-${rgbL1WalletKey(mnemonic)}`
 
 /**
  * Whether RGB on this phone has opened for this seed and network here before.
