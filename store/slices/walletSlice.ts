@@ -3,6 +3,8 @@ import { toEngineProtocol } from '../../utils/protocol-bridge'
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { WalletRecord, NetworkConfig, NetworkType } from '../../services/DatabaseService';
 import DatabaseService from '../../services/DatabaseService';
+import { clearBalanceSnapshots } from '../../services/balanceSnapshot';
+import type { BtcNetwork } from '../../utils/wallet-balance-summary';
 import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
 import type { ProtocolType } from '../../services/protocols';
 
@@ -29,6 +31,10 @@ export interface BtcBalance {
     ARKADE?: ProtocolBalance;
     BARK?: ProtocolBalance;
   };
+  /** The dashboard's bitcoin figures (summarizeBitcoinBalances), so other screens match it. */
+  summary?: { total: number; available: number; unavailable: number; test: number };
+  /** Bitcoin per network, as the balance card's breakdown shows it. */
+  networks?: Partial<Record<BtcNetwork, number>>;
 }
 
 interface WalletState {
@@ -193,6 +199,7 @@ export const deleteWallet = createAsyncThunk(
     try {
       const dbService = DatabaseService.getInstance();
       await dbService.deleteWallet(walletId);
+      await clearBalanceSnapshots(walletId);
       return walletId;
     } catch (error: any) {
       return rejectWithValue(error.message);

@@ -137,15 +137,11 @@ export async function initializeWdkProtocols(
   // Send's ways to pay need the maker (configured with the RGB node) and Arkade's server.
   setPayOptions(payOptionsFrom(networkConfigs))
 
-  for (const nc of networkConfigs) {
-    if (!nc.enabled) continue
-    const protocol = networkTypeToProtocol(nc.type as any)
-    if (!protocol) continue
-
+  const connectNetwork = async (protocol: ProtocolType, nc: { type: string; enabled: boolean; config?: string }): Promise<void> => {
     const existing = manager.getAdapterIfAvailable(protocol)
     if (existing?.isConnected()) {
       results.set(protocol, { success: true })
-      continue
+      return
     }
 
     try {
@@ -199,7 +195,7 @@ export async function initializeWdkProtocols(
             const nwcUri = await SecureStore.getItemAsync(NWC_CONNECTION_KEY)
             if (!nwcUri) {
               results.set(protocol, { success: false, error: 'skipped: no NWC connection string configured' })
-              continue
+              return
             }
             config = {
               protocol: 'RGB_LN',
@@ -212,7 +208,7 @@ export async function initializeWdkProtocols(
             parsed.type === 'remote' ? parsed.url : parsed.nodeUrl || 'http://127.0.0.1:3000'
           if (!nodeUrl) {
             results.set(protocol, { success: false, error: 'skipped: no node URL configured' })
-            continue
+            return
           }
           config = {
             protocol: 'RGB_LN',
@@ -224,7 +220,7 @@ export async function initializeWdkProtocols(
         }
 
         default:
-          continue
+          return
       }
 
       await manager.connect(protocol, config)
@@ -262,8 +258,11 @@ export async function initializeWdkProtocols(
           if (sparkWallet) {
             const sparkNetwork = (config as SparkAdapterConfig).network || 'regtest'
             if (sparkNetwork === 'mainnet' || sparkNetwork === 'regtest') {
-              await flashnetClientManager.initialize(sparkWallet, sparkNetwork)
-              console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`)
+              // Swaps only: off the startup path so balances don't wait on it.
+              void Promise.resolve()
+                .then(() => flashnetClientManager.initialize(sparkWallet, sparkNetwork))
+                .then(() => console.log(`[initializeWdkProtocols] flashnet (Spark DEX) initialized (${sparkNetwork})`))
+                .catch((e: unknown) => console.warn('[initializeWdkProtocols] flashnet init failed:', e))
             } else {
               console.log(`[initializeWdkProtocols] flashnet disabled on Spark ${sparkNetwork}`)
             }
@@ -290,8 +289,30 @@ export async function initializeWdkProtocols(
     }
   }
 
-  if (BARK_ENABLED) await connectBark(manager, mnemonic, results)
-  if (RGB_L1_ENABLED) await connectRgbL1(manager, mnemonic, results)
+  // Each account connects on its own, in parallel: startup waits on the slowest one,
+  // not the sum. Configs for the same protocol still try in order.
+  const configsByProtocol = new Map<ProtocolType, Array<{ type: string; enabled: boolean; config?: string }>>()
+  for (const nc of networkConfigs) {
+    if (!nc.enabled) continue
+    const protocol = networkTypeToProtocol(nc.type as any)
+    if (!protocol) continue
+    configsByProtocol.set(protocol, [...(configsByProtocol.get(protocol) ?? []), nc])
+  }
+  const jobs = new Map<ProtocolType, Promise<void>>()
+  for (const [protocol, configs] of configsByProtocol) {
+    jobs.set(protocol, (async () => {
+      for (const nc of configs) {
+        await connectNetwork(protocol, nc)
+        if (results.get(protocol)?.success) return
+      }
+    })())
+  }
+
+  const pending: Array<Promise<void>> = [...jobs.values()]
+  if (BARK_ENABLED) pending.push(connectBark(manager, mnemonic, results))
+  // RGB on this phone yields to a connected RGB node, so it decides after the node settles.
+  if (RGB_L1_ENABLED) pending.push((jobs.get('RGB_LN') ?? Promise.resolve()).then(() => connectRgbL1(manager, mnemonic, results)))
+  await Promise.allSettled(pending)
 
   return results
 }
