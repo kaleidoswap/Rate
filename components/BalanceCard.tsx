@@ -274,13 +274,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             >
                                 <View style={[styles.networkAccentBar, { backgroundColor: row.accent }]} />
                                 <View style={[styles.networkIconChip, { backgroundColor: row.accent + '22' }]}>
-                                    {row.key === 'BITCOIN' ? (
-                                        <Ionicons name="link" size={15} color={row.accent} />
-                                    ) : row.key === 'RGB' ? (
-                                        <Ionicons name="flash" size={15} color={row.accent} />
-                                    ) : (
-                                        <NetworkIcon network={row.key} size={15} color={row.accent} />
-                                    )}
+                                    <NetworkIcon network={row.key === 'BITCOIN' ? 'onchain' : row.key === 'RGB' ? 'lightning' : row.key} size={16} />
                                 </View>
                                 <View style={styles.networkTextBlock}>
                                     <Text style={styles.networkName}>{row.name}</Text>

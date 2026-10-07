@@ -5,6 +5,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { theme, motion } from '../theme';
 import { Card } from './Card';
 import { AssetIcon } from './AssetIcon';
+import { NetworkIcon } from './NetworkIcon';
 import { SectionHeader } from './SectionHeader';
 import { AmountText } from './AmountText';
 import { PressableScale } from './PressableScale';
@@ -51,8 +52,8 @@ const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPres
     const amount = groupThousands(formatAssetAmount(baseUnits, asset.precision));
     const unit = asset.unit ?? asset.ticker;
     const empty = baseUnits <= 0;
-    const subtitle = [asset.ticker !== asset.name ? asset.ticker : null, asset.protocol ? PROTOCOL_LABEL[asset.protocol] : null]
-        .filter(Boolean).join(' · ');
+    const ticker = asset.ticker !== asset.name ? asset.ticker : null;
+    const network = asset.protocol ? PROTOCOL_LABEL[asset.protocol] : null;
     const fiat = asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
 
     return (
@@ -67,7 +68,14 @@ const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPres
                 <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={40} />
                 <View style={styles.info}>
                     <Text style={styles.name} numberOfLines={1}>{asset.name}</Text>
-                    {!!subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
+                    {(!!ticker || !!network) && (
+                        <View style={styles.subtitleRow}>
+                            {!!ticker && <Text style={styles.subtitle} numberOfLines={1}>{ticker}</Text>}
+                            {!!ticker && !!network && <Text style={styles.subtitle}>·</Text>}
+                            {!!network && <NetworkIcon network={asset.protocol!} size={12} />}
+                            {!!network && <Text style={styles.subtitle} numberOfLines={1}>{network}</Text>}
+                        </View>
+                    )}
                 </View>
                 <View style={styles.amounts}>
                     <AmountText style={[styles.amount, empty && styles.amountEmpty]} numberOfLines={1}>
@@ -157,6 +165,11 @@ const styles = StyleSheet.create({
         fontSize: theme.typography.fontSize.base,
         fontWeight: '600',
         color: theme.colors.text.primary,
+    },
+    subtitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[1],
     },
     subtitle: {
         fontSize: theme.typography.fontSize.xs,

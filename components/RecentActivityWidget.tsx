@@ -18,6 +18,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
 import { theme } from '../theme';
+import { LAYER_LABEL, layerNetworkIcon } from '../utils/activity-layers';
+import { NetworkIcon } from './NetworkIcon';
 import { SectionHeader } from './SectionHeader';
 import { ActivityDetailSheet } from './ActivityDetailSheet';
 import {
@@ -71,17 +73,6 @@ function amountPrefix(type: ActivityItemType): string {
     return '';
 }
 
-const LAYER_LABEL: Record<ActivityLayer, string> = {
-    'L1': 'On-chain',
-    'RGB-L1': 'RGB',
-    'LN': 'Lightning',
-    'RGB-LN': 'RGB · LN',
-    'Spark': 'Spark',
-    'Arkade': 'Arkade',
-    'Bark': 'Bark',
-    'Bark Signet': 'Bark · Signet',
-    'Swap': 'Swap',
-};
 
 const MAX_ITEMS = 4;
 
@@ -170,6 +161,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
                     ) : null}
                     <View style={styles.rowMeta}>
                         <View style={styles.layerChip}>
+                            {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={11} />}
                             <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
                         </View>
                         <View style={[styles.statusDot, { backgroundColor: st.color }]} />
@@ -278,6 +270,9 @@ const styles = StyleSheet.create({
         gap: theme.spacing[2],
     },
     layerChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
         paddingHorizontal: theme.spacing[2],
         paddingVertical: 1,
         borderRadius: theme.borderRadius.sm,

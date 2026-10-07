@@ -55,6 +55,7 @@ import { theme, motion } from '../theme';
 import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText } from '../components';
+import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 
 interface Props {
   navigation: any;
@@ -944,7 +945,10 @@ export default function SwapScreen({ navigation }: Props) {
             {getAssetIcon(ticker)}
             <View>
               <Text style={styles.assetSelectorTokenText}>{ticker}</Text>
-              <Text style={styles.assetSelectorTokenNetwork}>{networkLabelFor(ticker)}</Text>
+              <View style={styles.assetSelectorTokenNetworkRow}>
+                {networkIconForLabel(networkLabelFor(ticker)) && <NetworkIcon network={networkIconForLabel(networkLabelFor(ticker))!} size={10} />}
+                <Text style={styles.assetSelectorTokenNetwork}>{networkLabelFor(ticker)}</Text>
+              </View>
             </View>
           </>
         ) : pairsLoading && tradingPairs.length === 0 ? (
@@ -1469,10 +1473,15 @@ const styles = StyleSheet.create({
     paddingLeft: theme.spacing[4],
   },
 
+  assetSelectorTokenNetworkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: -1,
+  },
   assetSelectorTokenNetwork: {
     fontSize: 10,
     color: theme.colors.text.tertiary,
-    marginTop: -1,
   },
 
   assetSelectorTokenText: {
