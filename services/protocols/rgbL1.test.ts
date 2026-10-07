@@ -20,11 +20,22 @@ test('off until the wallet turns it on, then remembered per seed', async () => {
   await expect(saveRgbL1Network('seed a', 'liquid' as any)).rejects.toThrow(/Unsupported/);
 });
 
-test('the first network a seed uses on this phone stays its RGB network', async () => {
-  const { pinnedRgbL1Network } = require('./rgbL1');
+test('a network chosen but never started can still change', async () => {
+  const { pinnedRgbL1Network, lockedRgbL1Network } = require('./rgbL1');
+  await saveRgbL1Network('seed a', 'mainnet');
+  expect(await lockedRgbL1Network('seed a')).toBeNull();
   await saveRgbL1Network('seed a', 'mutinynet');
+  expect(await pinnedRgbL1Network('seed a')).toBe('mutinynet');
+  expect(await loadRgbL1Network('seed a')).toBe('mutinynet');
+});
+
+test('the network a seed started on this phone stays its RGB network', async () => {
+  const { pinnedRgbL1Network, lockedRgbL1Network, markRgbL1Ready } = require('./rgbL1');
+  await saveRgbL1Network('seed a', 'mutinynet');
+  await markRgbL1Ready('seed a', 'mutinynet');
   await saveRgbL1Network('seed a', null);
   expect(await pinnedRgbL1Network('seed a')).toBe('mutinynet');
+  expect(await lockedRgbL1Network('seed a')).toBe('mutinynet');
   // rgb-lib keeps one folder per seed: switching would open Mutinynet data as mainnet.
   await expect(saveRgbL1Network('seed a', 'mainnet')).rejects.toThrow(/already runs on Mutinynet/);
   await saveRgbL1Network('seed a', 'mutinynet');

@@ -168,11 +168,18 @@ export async function uploadBackupFile(client: VssClient, prefix: string, data: 
  * store has none. Network and server errors throw: "no backup" must never be
  * guessed, or a fresh wallet would start and back up over the real one.
  */
-export async function downloadBackupFile(client: VssClient, prefix: string): Promise<{ data: Uint8Array; manifest: BackupManifest } | undefined> {
+/** The last upload's manifest (size, date) without its chunks, or undefined when there is none. */
+export async function readBackupManifest(client: VssClient, prefix: string): Promise<BackupManifest | undefined> {
   const raw = await client.get(`${prefix}/manifest`);
   if (!raw) return undefined;
   const manifest = JSON.parse(new TextDecoder().decode(raw)) as BackupManifest;
   if (manifest.version !== 1 || !Number.isInteger(manifest.chunks) || manifest.chunks < 1) throw new Error('Unsupported RGB backup.');
+  return manifest;
+}
+
+export async function downloadBackupFile(client: VssClient, prefix: string): Promise<{ data: Uint8Array; manifest: BackupManifest } | undefined> {
+  const manifest = await readBackupManifest(client, prefix);
+  if (!manifest) return undefined;
   const data = new Uint8Array(manifest.size);
   let at = 0;
   for (let i = 0; i < manifest.chunks; i++) {

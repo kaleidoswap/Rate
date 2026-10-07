@@ -84,6 +84,8 @@ export default function WalletSetupScreen({ navigation }: Props) {
   // remote node. Optional: the user can skip and add it later in Settings.
   const [nwcUri, setNwcUri] = useState('');
   const [rlnConnected, setRlnConnected] = useState(false);
+  /** The network the connected node reports, saved with its connection. */
+  const [rlnNetwork, setRlnNetwork] = useState('regtest');
   const [rlnConnecting, setRlnConnecting] = useState(false);
   const [rlnError, setRlnError] = useState('');
   const [showScanner, setShowScanner] = useState(false);
@@ -202,6 +204,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         relays: parsed.relays,
         lastConnectedAt: Date.now(),
       }));
+      setRlnNetwork(info.network || 'regtest');
       setRlnConnected(true);
       proceedAfterRln();
     } catch (e) {
@@ -296,7 +299,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         selectedNetworks.push({
           type: 'rln',
           enabled: true,
-          config: JSON.stringify({ via: 'nwc', network: 'regtest' })
+          config: JSON.stringify({ via: 'nwc', network: rlnNetwork })
         });
       }
 

@@ -66,6 +66,7 @@ import LightningAddressScreen from './screens/LightningAddressScreen';
 import PairDesktopScreen from './screens/PairDesktopScreen';
 import MindSettingsScreen from './screens/MindSettingsScreen';
 import NWCConnectScreen from './screens/NWCConnectScreen';
+import RgbNodeScreen from './screens/RgbNodeScreen';
 
 type RootStackParamList = {
   InitialLoad: undefined;
@@ -91,6 +92,7 @@ type RootStackParamList = {
   MindSettings: undefined;
   LightningAddress: undefined;
   NWCConnect: { scanned?: string } | undefined;
+  RgbNode: undefined;
   Chat: { pubkey: string; name?: string; npub?: string; avatarUrl?: string };
 };
 
@@ -261,6 +263,11 @@ function AppNavigator() {
         <Stack.Screen
           name="NWCConnect"
           component={asModalScreen(NWCConnectScreen)}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen
+          name="RgbNode"
+          component={asModalScreen(RgbNodeScreen)}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
