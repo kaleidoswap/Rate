@@ -95,11 +95,30 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 - **AI / voice** — `@qvac/sdk` (on-device LLM + Whisper), `@kaleidorg/mind`
 - **Wallet engine** — `@kaleidorg/wallet-engine` + protocol SDKs (Spark, Arkade, RGB, Flashnet)
 - **Nostr** — `@nostr-dev-kit/ndk`, `nostr-tools`
-- **Maps** — `react-native-maps` + BTC Map API
+- **Maps** — BTC Map in `react-native-webview` + BTC Map API
 
 ---
 
 ## Quick Start
+
+### Dependency security
+
+Run `pnpm audit` and `pnpm test:dependency-security` after dependency updates.
+The latter checks malformed URL handling and Expo Metro image parsing against
+the installed packages, including the CommonJS compatibility patch for
+`decode-uri-component@0.5.0`. The patch changes only its module export, preserving
+the upstream decoder fix. Expo Metro 0.83.3 is also patched to pass image file
+contents to image-size 2 instead of its removed filename API. Install with pnpm
+so the overrides and patches apply.
+
+As of 2026-10-07, the dependency audit reports three remaining advisories with no
+patched npm release: [node-forge](https://github.com/advisories/GHSA-86w9-cpqp-85rv)
+(Expo CLI), [braces](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)
+(Metro/Jest glob handling), and
+[sprintf-js](https://github.com/advisories/GHSA-hp3w-g68c-fv3c)
+(Jest's configuration loader). They remain visible in the audit; no advisory is
+ignored. These dependency paths describe tooling usage, not a guarantee that all
+possible uses are safe. Recheck upstream fixes before release.
 
 ### Prerequisites
 

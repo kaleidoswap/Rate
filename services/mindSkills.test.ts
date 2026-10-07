@@ -86,8 +86,8 @@ describe('skill ↔ tool connection', () => {
       'get_balances', 'send_payment', 'rln_pay_invoice', 'create_invoice',
       'get_price', 'fiat_to_sats', 'resolve_contact',
       'find_merchant_locations', 'get_merchant_info',
-      'kaleidoswap_get_pairs', 'kaleidoswap_get_quote', 'kaleidoswap_place_order',
-      'kaleidoswap_get_order_status',
+      'kaleidoswap_get_pairs', 'kaleidoswap_get_quote', 'execute_swap',
+      'kaleidoswap_atomic_status',
       'fetch_paid_resource', 'remember', 'recall', 'search_knowledge',
     ]) {
       expect(available.has(t)).toBe(true);
