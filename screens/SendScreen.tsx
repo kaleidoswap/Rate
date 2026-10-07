@@ -5,6 +5,7 @@
 // payment request; every connected account then offers its ways to pay it, directly
 // or through a swap provider, priced the same way. The user reviews the total and
 // pays; the payment journal keeps an unresolved payment from being paid twice.
+// An EVM or Solana address opens the cross-chain send (USDC/USDT from Spark).
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, View, Text, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, KeyboardAvoidingView, Platform, Clipboard, Share } from 'react-native';
 import Animated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
@@ -19,6 +20,11 @@ import { AmountText } from '../components/AmountText';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
+import { SendDestinationsHint } from '../components/payments/SendDestinationsHint';
+import { CrossChainSendPanel } from '../components/payments/CrossChainSendPanel';
+import { detectCrossChainAddress } from '../utils/crosschain';
+import { isUnresolved, unwrapCrossChainUri } from '../utils/crosschain-send';
+import { loadCrossChainSession } from '../services/crosschainSend';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import { contactKeyFor, recordContactEvent, updateContactEventStatus } from '../services/contactHistory';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -104,6 +110,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const requestId = useRef(Crypto.randomUUID());
 
   const { target, error: decodeError } = useMemo(() => decodeQuietly(input), [input]);
+  // Only what the wallet's own decoding rejects can be an address on another chain.
+  const crossChain = useMemo(() => (target ? null : detectCrossChainAddress(unwrapCrossChainUri(input))), [target, input]);
   const fixedSat = target?.amountSat;
   const formatSats = (sats: number) => `${formatBitcoinAmount(sats, bitcoinUnit)} ${bitcoinUnit}`;
   const displaySpend: typeof formatSpend = (value, asset) => asset.id === 'BTC' && asset.ticker === 'sats' ? formatSats(value) : formatSpend(value, asset);
@@ -140,6 +148,16 @@ export default function SendScreen({ navigation, route }: Props) {
     return () => { active = false; revision.current++; };
   }, [walletId]);
   useEffect(() => () => { revision.current++; }, []);
+  // A transfer to another chain still under way reopens where it left off.
+  useEffect(() => {
+    if (!walletId || route.params?.prefilledAddress || route.params?.address) return;
+    let active = true;
+    loadCrossChainSession(walletId)
+      .then(saved => { if (active && isUnresolved(saved)) setInput(current => current.trim() ? current : saved.recipient); })
+      .catch(() => { /* the cross-chain panel reports an unreadable record */ });
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walletId]);
   // An unresolved payment is re-checked as soon as Send can reach its account, so
   // one that went through stops blocking new payments without a manual check.
   useEffect(() => {
@@ -365,11 +383,11 @@ export default function SendScreen({ navigation, route }: Props) {
   const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join('') || '?';
   const avatarColors = [t.colors.networks.spark, t.colors.networks.arkade, t.colors.networks.lightning, t.colors.networks.bitcoin, t.colors.primary[500]];
 
-  const renderInput = () => <>
+  const renderField = () => (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], paddingLeft: t.spacing[4], paddingRight: t.spacing[2], minHeight: 56,
-      borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: target ? t.colors.primary[500] : t.colors.border.light }}>
+      borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: target || crossChain ? t.colors.primary[500] : t.colors.border.light }}>
       <TextInput accessibilityLabel="Payment request" value={input} onChangeText={v => { setInput(v); setContactName(undefined); }} autoCapitalize="none" autoCorrect={false}
-        placeholder="Invoice, address or Lightning address" placeholderTextColor={t.colors.text.muted}
+        placeholder="Paste an invoice or address" placeholderTextColor={t.colors.text.muted}
         style={{ ...text, flex: 1, fontFamily: input ? t.typography.fontFamily.mono : undefined, fontSize: input ? t.typography.fontSize.sm : t.typography.fontSize.base, paddingVertical: t.spacing[3] }} />
       {input ? (
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Clear" onPress={() => { setInput(''); setContactName(undefined); }} hitSlop={8} style={iconButton}>
@@ -384,6 +402,10 @@ export default function SendScreen({ navigation, route }: Props) {
         <Ionicons name="scan-outline" size={18} color={t.colors.text.secondary} />
       </TouchableOpacity>
     </View>
+  );
+
+  const renderInput = () => <>
+    {renderField()}
 
     {target ? (
       <Animated.View entering={FadeInDown.duration(motion.duration.base)} style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], marginTop: t.spacing[3], padding: t.spacing[3],
@@ -469,6 +491,8 @@ export default function SendScreen({ navigation, route }: Props) {
         ))}
       </ScrollView> : <Text style={muted}>People you pay often will show here.</Text>}
     </View>}
+
+    {!target && <View style={{ marginTop: t.spacing[5] }}><SendDestinationsHint /></View>}
   </>;
 
   const renderReview = () => {
@@ -595,7 +619,10 @@ export default function SendScreen({ navigation, route }: Props) {
     <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }} edges={['left', 'right', 'bottom']}>
       <ScreenHeader title={headerTitle} onBack={onBack} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
+        {crossChain && !attempt && !preview ? (
+          <CrossChainSendPanel key={crossChain.normalized} address={crossChain.normalized} family={crossChain.family} walletId={walletId} bitcoinUnit={bitcoinUnit}
+            header={renderField()} onOpenAddress={a => { setInput(a); setContactName(undefined); }} onDone={() => navigation.goBack()} />
+        ) : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
           {KALEIDOPAY_DEMO && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.warning[500] + '22', marginBottom: t.spacing[4] }}>
             <Ionicons name="flask-outline" size={16} color={t.colors.warning[500]} />
             <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: quotes are live, the payment step is simulated. No funds move.</Text>
@@ -606,8 +633,8 @@ export default function SendScreen({ navigation, route }: Props) {
           </View>}
           {journalUnreadable && !attempt && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} style={{ marginBottom: t.spacing[4] }} />}
           {attempt ? renderResult(attempt) : preview ? renderReview() : renderInput()}
-        </ScrollView>
-        {!attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
+        </ScrollView>}
+        {!crossChain && !attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
           {!preview
             ? <Button title={busy ? 'Getting quotes…' : 'Continue'} disabled={!target || busy || !journalReady} onPress={review} />
             : !quote || quote.expiresAt * 1000 <= Date.now() || selected?.unavailable

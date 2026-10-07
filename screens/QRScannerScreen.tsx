@@ -26,6 +26,8 @@ import { useAppSelector } from '../store/hooks';
 import { invoiceExpiry } from '../components/payments/InvoiceExpiry';
 import { protocolManager } from '../services/protocols';
 import { classifyWithdrawDestination } from '../utils/account-routing';
+import { detectCrossChainAddress } from '../utils/crosschain';
+import { unwrapCrossChainUri } from '../utils/crosschain-send';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import { theme } from '../theme';
 import type { RootState } from '../store';
@@ -108,6 +110,11 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       if (isPayable(data)) {
         navigation.navigate('Send', { prefilledAddress: data }); return;
       }
+      // An EVM or Solana address: Send offers USDC/USDT from Spark to that chain.
+      const crossChain = detectCrossChainAddress(unwrapCrossChainUri(data));
+      if (crossChain) {
+        navigation.navigate('Send', { prefilledAddress: crossChain.normalized }); return;
+      }
       const paymentData = await processScannedData(data);
       if (current !== scanRevision.current) return;
       navigation.navigate('Send', {
@@ -159,7 +166,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const UNRECOGNIZED_ERROR =
-    'The scanned QR code is not a recognized Bitcoin, Lightning, RGB, Spark, or Arkade format.';
+    'The scanned QR code is not a recognized Bitcoin, Lightning, RGB, Spark, Arkade, EVM or Solana format.';
 
   const processScannedData = async (raw: string) => {
     let data = raw.trim();
