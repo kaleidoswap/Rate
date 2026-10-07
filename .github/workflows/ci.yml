@@ -56,6 +56,9 @@ jobs:
       - name: Dependency security regressions
         run: pnpm test:dependency-security
 
+      - name: Native image asset formats
+        run: node --test scripts/image-assets.test.cjs
+
       - name: Unit tests (with the coverage floor from jest.config.js)
         run: pnpm exec jest --ci --coverage --coverageReporters=text-summary
 
