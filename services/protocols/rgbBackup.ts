@@ -17,7 +17,7 @@
 import { File, Paths } from 'expo-file-system';
 import { rgbBackupPassword, rgbL1WalletKey, type RgbL1Network } from './rgbL1';
 import { toFilesystemPath } from './bark';
-import { createVssClient, downloadBackupFile, uploadBackupFile, vssSigningKey } from './rgbVss';
+import { createVssClient, downloadBackupFile, readBackupManifest, uploadBackupFile, vssSigningKey, type BackupManifest } from './rgbVss';
 
 export const RGB_VSS_SERVER_URL = process.env.EXPO_PUBLIC_VSS_SERVER_URL || 'https://vss.kaleidoswap.com/vss';
 const DEBOUNCE_MS = 4000;
@@ -97,6 +97,17 @@ export async function runRgbBackup(force = false): Promise<void> {
   return running;
 }
 
+const storeClient = (mnemonic: string, network: RgbL1Network) =>
+  createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(mnemonic, network), vssSigningKey(mnemonic));
+
+/**
+ * Whether this seed has a cloud backup on `network`, without downloading it.
+ * Throws when the server can't be reached: "can't tell" is never "no backup".
+ */
+export async function findRgbCloudBackup(mnemonic: string, network: RgbL1Network): Promise<BackupManifest | null> {
+  return (await readBackupManifest(storeClient(mnemonic, network), PREFIX)) ?? null;
+}
+
 export type RgbRestoreResult = 'restored' | 'no-backup' | 'already-on-phone';
 
 /**
@@ -111,8 +122,7 @@ export async function restoreRgbFromCloud(opts: {
   /** react-native-rgb's `restoreBackup(path, password)`. */
   restore: (path: string, password: string) => Promise<void>
 }): Promise<RgbRestoreResult> {
-  const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(opts.mnemonic, opts.network), vssSigningKey(opts.mnemonic));
-  const backup = await downloadBackupFile(client, PREFIX);
+  const backup = await downloadBackupFile(storeClient(opts.mnemonic, opts.network), PREFIX);
   if (!backup) return 'no-backup';
   const file = new File(Paths.cache, `rgb-restore-${Date.now()}.rgbbackup`);
   try {

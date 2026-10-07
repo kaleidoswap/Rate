@@ -17,7 +17,9 @@ import { coalesceInFlight } from '../../utils/coalesce-in-flight'
 
 import { ProtocolManager } from '@kaleidorg/wallet-engine'
 import type { ProtocolType } from '@kaleidorg/wallet-engine'
-import { getWdkProtocolManager, initializeWdkProtocols } from './wdk'
+import { getWdkProtocolManager, initializeWdkProtocols, syncRgbOnDevice, type RgbL1ConnectOptions } from './wdk'
+import { chooseRgbBacking, isRgbNode } from './rgbAccount'
+import DatabaseService from '../DatabaseService'
 import { setRgbBacking, type RgbBacking } from '../../utils/protocol-bridge'
 
 export function getProtocolManager(): ProtocolManager {
@@ -26,16 +28,31 @@ export function getProtocolManager(): ProtocolManager {
 
 export const protocolManager = getProtocolManager()
 
+/** True when an RGB Lightning Node (not a plain Lightning wallet) is connected. */
+export function rgbNodeConnected(): boolean {
+  return isRgbNode(protocolManager.getAdapterIfAvailable('RGB_LN') as any)
+}
+
 /**
  * The RGB account's engine protocol: the paired RGB node when connected, else
  * RGB on this phone when connected, else the node (so "not connected" reads right).
  */
 export function rgbAccountProtocol(): RgbBacking {
-  if (protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected()) return 'RGB_LN'
-  if (protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected()) return 'RGB_L1'
-  return 'RGB_LN'
+  return chooseRgbBacking(rgbNodeConnected(), !!protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected())
 }
 setRgbBacking(rgbAccountProtocol)
+
+/**
+ * Re-checks RGB on this phone for the active wallet after the RGB node changed
+ * (connected, removed or switched): the two are never the RGB account together.
+ */
+export async function reconcileRgbOnDevice(
+  opts: RgbL1ConnectOptions = {},
+): Promise<{ success: boolean; error?: string } | undefined> {
+  const wallet = await DatabaseService.getInstance().getActiveWallet()
+  if (!wallet?.encrypted_mnemonic) return undefined
+  return syncRgbOnDevice(wallet.encrypted_mnemonic, opts)
+}
 
 /** The adapter behind the RGB account (see rgbAccountProtocol). */
 export function rgbAccountAdapter() {

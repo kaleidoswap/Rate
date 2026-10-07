@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Button, Input, MainHeader } from '../components';
 import { theme, leading } from '../theme';
 import { RootState } from '../store';
-import { protocolManager } from '../services/protocols';
+import { protocolManager, reconcileRgbOnDevice } from '../services/protocols';
 import DatabaseService from '../services/DatabaseService';
 import { setActiveWallet, loadBtcBalance } from '../store/slices/walletSlice';
 import { syncAssets } from '../store/slices/assetsSlice';
@@ -87,6 +87,21 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
     [activeWallet, dispatch],
   );
 
+  // RGB on this phone steps aside while an RGB node is connected and comes back
+  // when it is removed or replaced by a plain Lightning wallet.
+  const reconcileRgb = useCallback(async () => {
+    try {
+      await reconcileRgbOnDevice();
+    } catch (e) {
+      console.warn('[NWCConnect] RGB on this phone could not be updated:', e);
+    }
+  }, []);
+
+  const refreshBalances = useCallback(() => {
+    dispatch(loadBtcBalance() as any);
+    if (activeWallet?.id) dispatch(syncAssets(activeWallet.id) as any);
+  }, [dispatch, activeWallet?.id]);
+
   // Persist + enroll + activate + sync, then land on the Dashboard.
   const finalize = useCallback(
     async (
@@ -118,6 +133,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         // 3) Activate the adapter now.
         await protocolManager.connect('RGB_LN', { protocol: 'RGB_LN', network } as any);
         await protocolManager.setActiveProtocol('RGB_LN');
+        await reconcileRgb();
         // 4) Reflect in Redux + pull fresh balances/assets through the new wallet.
         dispatch(setConnectedWallet(walletPubkey));
         dispatch(setNwcWalletType(type));
@@ -157,12 +173,13 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         } else if (!previous.id && id) {
           await removeNwcCredential(id).catch(() => undefined);
         }
+        await reconcileRgb();
         setConnectionError(friendlyNwcError(e));
       } finally {
         setLoading(false);
       }
     },
-    [dispatch, enrollNetwork, activeWallet?.id, navigation, savedConnections],
+    [dispatch, enrollNetwork, activeWallet?.id, navigation, savedConnections, reconcileRgb],
   );
 
   // Probe the wallet (info + balance), detect its type, then ask the user to
@@ -305,6 +322,8 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         setWalletType(fallback.type);
         setInfo({ alias: fallback.alias, network: fallback.network, methods: [] });
         setSaved(true);
+        await reconcileRgb();
+        refreshBalances();
         Alert.alert('Connection removed', `${fallback.alias || 'Another Lightning wallet'} is now active.`);
         return;
       } catch (error) {
@@ -324,6 +343,9 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
     }
     if (wasSelected) {
       dispatch(selectNwcConnection(null));
+      // Without a node, RGB on this phone is the RGB account again (when it's on).
+      await reconcileRgb();
+      refreshBalances();
     }
     setConnectionString('');
     setSaved(false);
@@ -343,7 +365,8 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
       await enrollNetwork(connection.network);
       await protocolManager.connect('RGB_LN', { protocol: 'RGB_LN', network: connection.network } as any);
       dispatch(selectNwcConnection(connection.id));
-      dispatch(loadBtcBalance() as any);
+      await reconcileRgb();
+      refreshBalances();
       setWalletType(connection.type);
       setInfo({ alias: connection.alias, network: connection.network, methods: [] });
       setBalanceSats(null);
@@ -359,6 +382,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
           // The actionable error below remains the primary failure.
         }
       }
+      await reconcileRgb();
       setConnectionError(friendlyNwcError(error));
     } finally {
       setLoading(false);
