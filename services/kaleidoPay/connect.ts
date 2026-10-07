@@ -136,6 +136,13 @@ export function prepareSparkTokenRequest(token: Pick<SparkToken, 'id' | 'ticker'
   sparkTokenRegistration = token ? registerSparkTokenPayment({ id: token.id, ticker: token.ticker, precision: token.precision }) : null;
 }
 
+/** The connected Spark wallet and its chain (for sends to other chains), or null when Spark is not connected. */
+export function connectedSparkWallet(): { adapter: any; network: Network | undefined } | null {
+  let adapter: any;
+  try { adapter = protocolManager.getAdapterIfAvailable('SPARK'); } catch { return null; }
+  return adapter?.isConnected?.() ? { adapter, network: adapterChain('SPARK', adapter) } : null;
+}
+
 /** The chain a connected receive account is on, or undefined when it is not connected or can't tell. */
 export function receiveAccountChain(account: 'RGB' | 'SPARK' | 'ARKADE' | 'BARK'): Network | undefined {
   const protocol = account === 'RGB' ? rgbAccountProtocol() : account;

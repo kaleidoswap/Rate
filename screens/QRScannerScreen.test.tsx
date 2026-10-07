@@ -96,3 +96,15 @@ test.each(['lnbc-expired', 'bitcoin:?lightning=lnbc-expired'])('rejects an expir
   expect(navigation.navigate).not.toHaveBeenCalled(); expect(screen.getByText(/invoice has expired/)).toBeTruthy();
   expiry.mockReturnValue(null);
 });
+
+test.each([
+  ['0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed', '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'],
+  ['ethereum:0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed@8453', '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'],
+  ['So11111111111111111111111111111111111111112', 'So11111111111111111111111111111111111111112'],
+])('an address on another chain opens Send for a cross-chain transfer: %s', async (code, address) => {
+  (Clipboard.getString as jest.Mock).mockResolvedValue(code);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: address });
+});
