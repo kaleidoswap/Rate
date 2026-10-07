@@ -65,19 +65,21 @@ describe('skill bundle', () => {
 describe('skill ↔ tool connection', () => {
   const skills = skillsFromBundle(skillBundle as SkillBundle);
 
-  it('every skill scopes only to tools the app actually mounts', async () => {
+  it('every skill can act with the tools the app mounts', async () => {
     const available = await mountedToolNames();
-    // The reference reader is added to a skill's scope by the registry, not the
-    // frontmatter, so it must resolve too.
     available.add(READ_REFERENCE_TOOL);
-
-    const missing: Record<string, string[]> = {};
+    // Shared skills from @kaleidorg/mind also name tools other hosts provide
+    // (e.g. kaleido-mcp); the engine hides the ones the app does not mount.
+    // A skill must still have every `requires-tools` entry and at least one
+    // of its tools mounted here.
+    const unusable: Record<string, string[]> = {};
     for (const skill of skills) {
-      for (const tool of skill.tools ?? []) {
-        if (!available.has(tool)) (missing[skill.name] ??= []).push(tool);
-      }
+      const required = (skill.metadata?.['requires-tools'] ?? '').split(',').map((t) => t.trim()).filter(Boolean);
+      const missingRequired = required.filter((t) => !available.has(t));
+      const anyMounted = !skill.tools?.length || skill.tools.some((t) => available.has(t));
+      if (missingRequired.length || !anyMounted) unusable[skill.name] = missingRequired.length ? missingRequired : skill.tools ?? [];
     }
-    expect(missing).toEqual({});
+    expect(unusable).toEqual({});
   });
 
   it('mounts the core wallet + paid-data + merchant tools', async () => {
