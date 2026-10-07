@@ -1,5 +1,5 @@
-// screens/AssetsScreen.tsx
-import React, { useState, useEffect } from 'react';
+// screens/AssetsScreen.tsx — every asset, one clear list.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,318 +7,280 @@ import {
   TouchableOpacity,
   RefreshControl,
   ScrollView,
-  ActivityIndicator,
-  Image,
-  Alert,
+  TextInput,
+  DeviceEventEmitter,
 } from 'react-native';
-import { useDispatch, useSelector } from 'react-redux';
+import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { AppDispatch, RootState } from '../store';
-import { loadAssets, syncAssets } from '../store/slices/assetsSlice';
-import { AssetRecord } from '../services/DatabaseService';
-import { formatAssetAmount } from '../utils/assetAmount';
-import { useAssetIcon } from '../utils';
-import { AssetIcon as SharedAssetIcon } from '../components/AssetIcon';
-import { getAssetFamily } from '../utils/account-routing';
-import { theme, protocolColor, protocolTint } from '../theme';
-import { Card, Button, ScreenHeader } from '../components';
+import { aggregateForLite } from '@kaleidorg/wallet-engine';
+import { RootState } from '../store';
+import { theme } from '../theme';
+import { ScreenHeader } from '../components/ScreenHeader';
+import { AmountText } from '../components/AmountText';
+import { PressableScale } from '../components/PressableScale';
+import { EmptyState } from '../components/EmptyState';
+import { AssetIcon } from '../components/AssetIcon';
+import { NetworkIcon } from '../components/NetworkIcon';
+import { NetworkStack } from '../components/NetworkStack';
 import { IssueAssetModal } from '../components/IssueAssetModal';
 import { usePolicy } from '../hooks/usePolicy';
+import { formatBitcoinAmount, useBitcoinPrice, useDisplayAmount } from '../utils/bitcoinUnits';
+import { getAssetFamily } from '../utils/account-routing';
+import { formatUsd, tokenValueSats } from '../utils/portfolio';
+import {
+  ASSET_FILTERS,
+  availableAssetFilters,
+  buildAssetListItems,
+  dominantHolding,
+  filterAssetItems,
+  formatTokenAmount,
+  networkLabel,
+  type AssetFilter,
+  type AssetListItem,
+} from '../utils/asset-list-model';
 
 interface Props {
   navigation: any;
   route?: { params?: { issue?: boolean } };
 }
 
+const REFRESH_TIMEOUT_MS = 15000;
+const HIDDEN = '••••';
+
 export default function AssetsScreen({ navigation, route }: Props) {
-  const dispatch = useDispatch<AppDispatch>();
-  const { activeWallet, btcBalance } = useSelector((state: RootState) => state.wallet);
+  // Same data the dashboard shows: it writes these after every refresh.
+  const btcBalance = useSelector((state: RootState) => state.wallet.btcBalance);
+  const rgbAssets = useSelector((state: RootState) => state.assets.rgbAssets) as any[];
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
-  const { rgbAssets, isLoading } = useSelector((state: RootState) => state.assets);
-  // BTC is the base asset — show it in the list whenever a node is reporting a
-  // balance (i.e. a wallet/node is connected), even at zero.
-  const btcSats = (btcBalance?.vanilla?.spendable ?? 0) + (btcBalance?.colored?.spendable ?? 0);
-  const showBtc = btcBalance != null;
-  const [refreshing, setRefreshing] = useState(false);
-  // "Issue asset" elsewhere in the app opens this screen with the issue form up.
-  const [showIssueModal, setShowIssueModal] = useState(!!route?.params?.issue);
-  // Issuing RGB assets is an advanced/experimental surface — hidden in Lite mode.
+  const hideBalances = useSelector((state: RootState) => state.settings.hideBalances);
+  const btcPriceUSD = useBitcoinPrice();
+  const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const policy = usePolicy();
+  const isLite = policy.level === 'lite';
+  // Issuing RGB assets is an advanced/experimental surface — hidden in Lite mode.
   const canIssue = policy.showExperimental;
+  // "Issue asset" elsewhere in the app opens this screen with the issue form up.
+  const [showIssueModal, setShowIssueModal] = useState(!!route?.params?.issue && canIssue);
+  const [filter, setFilter] = useState<AssetFilter>('all');
+  const [query, setQuery] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Asset Icon — uses the shared icon (logoUri → CDN → fallback) so Arkade/Spark
-  // token icons (and the asset's own icon metadata) render here too.
-  const AssetIcon = ({
-    ticker,
-    logoUri,
-    protocol,
-  }: {
-    ticker: string;
-    logoUri?: string;
-    protocol?: 'RGB' | 'SPARK' | 'ARKADE';
-  }) => (
-    <View style={styles.assetIconContainer}>
-      <SharedAssetIcon ticker={ticker} logoUri={logoUri} protocol={protocol} size={40} />
-    </View>
-  );
+  // Lite folds its dollar assets into one USD line on the dashboard; do the same here.
+  const liteUsdAssetIds = useMemo(() => {
+    if (!isLite) return undefined;
+    const lite = aggregateForLite(rgbAssets.map((a) => ({ id: a.asset_id, ticker: a.ticker, balance: { total: Number(a.balance) || 0 } })) as any);
+    const other = new Set(lite.other.map((o: any) => o.id));
+    return new Set<string>(rgbAssets.map((a) => a.asset_id).filter((id) => !other.has(id)));
+  }, [rgbAssets, isLite]);
 
+  const items = useMemo(() => buildAssetListItems({
+    btcNetworks: btcBalance?.networks,
+    btcAvailable: btcBalance?.summary?.available ?? ((btcBalance?.vanilla?.spendable ?? 0) + (btcBalance?.colored?.spendable ?? 0)),
+    showBtc: btcBalance != null,
+    assets: rgbAssets,
+    btcPriceUSD,
+    liteUsdAssetIds,
+  }), [btcBalance, rgbAssets, btcPriceUSD, liteUsdAssetIds]);
+
+  const filters = policy.showNetworks ? availableAssetFilters(items) : (['all'] as AssetFilter[]);
+  const activeFilter = filters.includes(filter) ? filter : 'all';
+  const shown = filterAssetItems(items, activeFilter, query);
+
+  // The headline matches the dashboard's: bitcoin held plus dollar tokens at $1.
+  const totalSats = (btcBalance?.summary?.total ?? btcBalance?.vanilla?.spendable ?? 0)
+    + tokenValueSats(rgbAssets, btcPriceUSD, liteUsdAssetIds);
+  const total = formatDisplayAmount(totalSats);
+
+  // A refresh ends when the dashboard writes new balances (or after a while).
   useEffect(() => {
-    if (activeWallet) {
-      loadAssetData();
-    }
-  }, [activeWallet]);
+    if (!refreshing) return;
+    setRefreshing(false);
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [btcBalance, rgbAssets]);
+  useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
 
-  const loadAssetData = async () => {
-    if (!activeWallet?.id) return;
-    try {
-      await dispatch(loadAssets(activeWallet.id));
-    } catch (error) {
-      console.error('Failed to load assets:', error);
-      Alert.alert('Error', 'Failed to load assets');
-    }
-  };
-
-  const handleRefresh = async () => {
-    if (!activeWallet?.id) return;
+  const refresh = () => {
     setRefreshing(true);
-    try {
-      await dispatch(syncAssets(activeWallet.id));
-    } catch (error) {
-      console.error('Failed to sync assets:', error);
-      Alert.alert('Error', 'Failed to sync assets');
-    } finally {
-      setRefreshing(false);
-    }
+    DeviceEventEmitter.emit('rate.refreshBalance');
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => setRefreshing(false), REFRESH_TIMEOUT_MS);
   };
 
-  const handleIssueSuccess = () => {
-    // Refresh the assets list after successful issuance
-    loadAssetData();
-  };
-
-  const renderHeader = () => (
-    <View style={styles.headerContainer}>
-      <ScreenHeader
-        title="Assets"
-        showBack={true}
-        rightAction={
-          canIssue ? (
-            <TouchableOpacity
-              style={styles.issueHeaderButton}
-              onPress={() => setShowIssueModal(true)}
-            >
-              <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
-            </TouchableOpacity>
-          ) : undefined
-        }
-      >
-        <View style={styles.headerStats}>
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>{rgbAssets?.length || 0}</Text>
-            <Text style={styles.statLabel}>Assets</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statItem}>
-            <Text style={styles.statValue}>
-              {rgbAssets?.reduce((sum: number, asset: AssetRecord) => sum + asset.balance, 0)?.toLocaleString() || '0'}
-            </Text>
-            <Text style={styles.statLabel}>Total Tokens</Text>
-          </View>
-        </View>
-      </ScreenHeader>
-    </View>
-  );
-
-  const renderBtcItem = () => {
-    const display =
-      bitcoinUnit === 'BTC' ? (btcSats / 1e8).toFixed(8) : btcSats.toLocaleString();
-    return (
-      <TouchableOpacity
-        key="BTC"
-        style={[styles.assetCard, styles.firstAssetCard]}
-        onPress={() =>
-          navigation.navigate('AssetDetail', {
-            asset: {
-              asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
-              precision: bitcoinUnit === 'BTC' ? 8 : 0, unit: bitcoinUnit, balance: { spendable: btcSats },
-            },
-          })
-        }
-      >
-        <View style={styles.assetCardHeader}>
-          <View style={styles.assetCardLeft}>
-            <AssetIcon ticker="BTC" />
-            <View style={styles.assetInfo}>
-              <Text style={styles.assetTicker}>BTC</Text>
-              <Text style={styles.assetName}>Bitcoin</Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={theme.colors.gray[400]} />
-        </View>
-
-        <View style={styles.assetCardStats}>
-          <View style={styles.assetStat}>
-            <Text style={styles.assetStatLabel}>Balance</Text>
-            <Text style={styles.assetStatValue}>
-              {display} {bitcoinUnit}
-            </Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderAssetItem = (asset: AssetRecord, index: number) => {
-    // The list holds assets from every protocol (RGB, Spark tokens, Arkade), so
-    // classify by id/ticker rather than assuming RGB — this drives the badge and
-    // ensures a Spark token isn't routed through the RGB detail/send flow.
-    const family = getAssetFamily(asset.asset_id, asset.ticker);
-    return (
-    <TouchableOpacity
-      key={asset.asset_id}
-      style={[styles.assetCard, index === 0 && styles.firstAssetCard]}
-      onPress={() => navigation.navigate('AssetDetail', {
+  const openItem = (item: AssetListItem) => {
+    if (item.isBtc) {
+      const sats = item.amount;
+      navigation.navigate('AssetDetail', {
         asset: {
-          ...asset,
-          isRGB: family === 'RGB',
-          protocol: family,
-        }
-      })}
-    >
-      <View style={styles.assetCardHeader}>
-        <View style={styles.assetCardLeft}>
-          <AssetIcon ticker={asset.ticker} logoUri={(asset as any).icon} protocol={(asset as any).protocol} />
-          <View style={styles.assetInfo}>
-            <View style={styles.assetTickerRow}>
-              <Text style={styles.assetTicker}>{asset.ticker}</Text>
-              <View style={[styles.protocolBadge, { backgroundColor: protocolTint(family) }]}>
-                <Text style={[styles.protocolBadgeText, { color: protocolColor(family) }]}>{family}</Text>
-              </View>
-            </View>
-            <Text style={styles.assetName}>{asset.name}</Text>
-          </View>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color={theme.colors.gray[400]} />
-      </View>
-
-      <View style={styles.assetCardStats}>
-        <View style={styles.assetStat}>
-          <Text style={styles.assetStatLabel}>Balance</Text>
-          <Text style={styles.assetStatValue}>
-            {formatAssetAmount(asset.balance, asset.precision || 0)}
-          </Text>
-        </View>
-        <View style={styles.assetStat}>
-          <Text style={styles.assetStatLabel}>Supply</Text>
-          <Text style={styles.assetStatValue}>
-            {asset.issued_supply?.toLocaleString() || 'N/A'}
-          </Text>
-        </View>
-        <View style={styles.assetStat}>
-          <Text style={styles.assetStatLabel}>Precision</Text>
-          <Text style={styles.assetStatValue}>
-            {asset.precision || 0}
-          </Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-    );
+          asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false,
+          precision: bitcoinUnit === 'BTC' ? 8 : 0, unit: bitcoinUnit, balance: { spendable: sats },
+          fiatValue: item.usdValue,
+        },
+      });
+      return;
+    }
+    // A token on several networks opens where most of it lives.
+    const token = dominantHolding(item)?.token;
+    if (!token) return;
+    const family = getAssetFamily(token.asset_id, token.ticker);
+    navigation.navigate('AssetDetail', {
+      asset: {
+        ...token,
+        balance: (token as any).balanceDetail ?? token.balance,
+        isRGB: family === 'RGB',
+        protocol: family,
+        fiatValue: item.unitUsd !== undefined ? (dominantHolding(item)?.amount ?? 0) * item.unitUsd : undefined,
+      },
+    });
   };
 
-  const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <View style={styles.emptyIcon}>
-        <Ionicons name="diamond-outline" size={64} color={theme.colors.gray[400]} />
-      </View>
-      <Text style={styles.emptyTitle}>No Assets Yet</Text>
-      <Text style={styles.emptyDescription}>
-        {canIssue
-          ? 'Issue your first RGB asset to get started with tokenization on Bitcoin'
-          : 'Assets you receive will appear here'}
-      </Text>
-      {canIssue && (
-        <Button
-          title="Issue Your First Asset"
-          variant="primary"
-          size="lg"
-          onPress={() => setShowIssueModal(true)}
-          style={styles.emptyButton}
-          icon={<Ionicons name="add" size={20} color={theme.colors.text.inverse} />}
-        />
-      )}
-    </View>
-  );
+  const amountText = (item: AssetListItem): { amount: string; unit: string } => {
+    if (item.isBtc) return { amount: formatBitcoinAmount(item.amount, bitcoinUnit), unit: bitcoinUnit };
+    return { amount: formatTokenAmount(item.amount, item.precision), unit: item.ticker };
+  };
 
-  const renderAssetsList = () => (
-    <ScrollView 
-      style={styles.assetsList}
-      contentContainerStyle={styles.assetsListContent}
-      showsVerticalScrollIndicator={false}
-    >
-             {showBtc || (rgbAssets && rgbAssets.length > 0) ? (
-        <>
-          {showBtc && renderBtcItem()}
-          {rgbAssets?.map((asset: AssetRecord, index: number) =>
-            renderAssetItem(asset, showBtc ? index + 1 : index),
-          )}
-        </>
-      ) : (
-        renderEmptyState()
-      )}
-    </ScrollView>
-  );
+  // "Spark", or "3 networks" when it lives on several (the icons say which).
+  const whereLabel = (item: AssetListItem): string =>
+    item.networks.length === 1 ? networkLabel(item.networks[0]) : `${item.networks.length} networks`;
 
-  const renderFloatingButton = () => (
-    <TouchableOpacity
-      style={styles.floatingButton}
-      onPress={() => setShowIssueModal(true)}
-      activeOpacity={0.8}
-    >
-      <LinearGradient
-        colors={[theme.colors.brand.violet, theme.colors.brand.violet] as [string, string]}
-        style={styles.floatingButtonGradient}
+  const renderRow = (item: AssetListItem, index: number) => {
+    const { amount, unit } = amountText(item);
+    const fiat = item.usdValue !== undefined && item.usdValue > 0 ? formatUsd(item.usdValue) : null;
+    const empty = item.amount <= 0;
+    const ticker = item.ticker !== item.name ? item.ticker : '';
+    return (
+      <PressableScale
+        key={item.key}
+        scaleTo={0.98}
+        onPress={() => openItem(item)}
+        accessibilityRole="button"
+        accessibilityLabel={hideBalances
+          ? `${item.name}`
+          : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${policy.showNetworks && item.networks.length ? `, on ${item.networks.map(networkLabel).join(', ')}` : ''}`}
+        style={[styles.row, index < shown.length - 1 && styles.rowDivider]}
       >
-        <Ionicons name="add" size={24} color={theme.colors.text.inverse} />
-      </LinearGradient>
-    </TouchableOpacity>
-  );
+        <AssetIcon ticker={item.ticker} logoUri={item.icon} size={40} showBadge={false} />
+        <View style={styles.info}>
+          <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+          {policy.showNetworks && item.networks.length > 0 ? (
+            <View style={styles.subtitleRow}>
+              {!!ticker && <Text style={styles.subtitle}>{ticker}</Text>}
+              {!!ticker && <Text style={styles.subtitle}>·</Text>}
+              <NetworkStack networks={item.networks} label={whereLabel(item)} />
+            </View>
+          ) : (
+            !!ticker && <Text style={styles.subtitle} numberOfLines={1}>{ticker}</Text>
+          )}
+        </View>
+        <View style={styles.amounts}>
+          <AmountText style={[styles.amount, empty && styles.amountEmpty]} numberOfLines={1}>
+            {hideBalances ? HIDDEN : amount} <Text style={styles.unit}>{unit}</Text>
+          </AmountText>
+          {fiat && <AmountText style={styles.fiat} numberOfLines={1}>{hideBalances ? HIDDEN : `≈ ${fiat}`}</AmountText>}
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
+      </PressableScale>
+    );
+  };
 
   return (
-    <SafeAreaView style={styles.container}>
-      {renderHeader()}
-      
-      {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary[500]} />
-          <Text style={styles.loadingText}>Loading assets...</Text>
-        </View>
-      ) : (
-        <>
-          <ScrollView
-            style={styles.scrollView}
-            refreshControl={
-              <RefreshControl 
-                refreshing={refreshing} 
-                onRefresh={handleRefresh}
-                tintColor={theme.colors.primary[500]}
-              />
-            }
-            showsVerticalScrollIndicator={false}
-          >
-            {renderAssetsList()}
-          </ScrollView>
-          
-          {canIssue && rgbAssets && rgbAssets.length > 0 && renderFloatingButton()}
-        </>
-      )}
+    <SafeAreaView style={styles.container} edges={['bottom']}>
+      <ScreenHeader
+        title="Assets"
+        showBack
+        rightAction={canIssue ? (
+          <TouchableOpacity style={styles.addButton} onPress={() => setShowIssueModal(true)}
+            accessibilityRole="button" accessibilityLabel="Issue a new asset">
+            <Ionicons name="add" size={22} color={theme.colors.text.primary} />
+          </TouchableOpacity>
+        ) : undefined}
+      />
 
-      {/* Issue Asset Modal */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={refresh}
+            tintColor={theme.colors.primary[500]} colors={[theme.colors.primary[500]]} />
+        }
+      >
+        <TouchableOpacity style={styles.totalBlock} onPress={cycleDenomination} accessibilityRole="button"
+          accessibilityLabel={`Total balance ${total.primary} ${total.unitLabel}. Tap to change unit.`}>
+          <Text style={styles.totalLabel}>Total balance</Text>
+          <View style={styles.totalRow}>
+            <AmountText style={styles.totalAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>{total.primary}</AmountText>
+            {!total.hidden && (total.unitLabel === 'sats' || total.unitLabel === 'BTC') && (
+              <Text style={styles.totalUnit}>{total.unitLabel}</Text>
+            )}
+          </View>
+          {!!total.secondary && <AmountText style={styles.totalSecondary}>{total.secondary}</AmountText>}
+        </TouchableOpacity>
+
+        <View style={styles.search}>
+          <Ionicons name="search" size={16} color={theme.colors.text.tertiary} />
+          <TextInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search assets"
+            placeholderTextColor={theme.colors.text.tertiary}
+            style={styles.searchInput}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            accessibilityLabel="Search assets"
+          />
+          {!!query && (
+            <TouchableOpacity onPress={() => setQuery('')} accessibilityRole="button" accessibilityLabel="Clear search"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close-circle" size={16} color={theme.colors.text.tertiary} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {filters.length > 1 && (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+            {ASSET_FILTERS.filter((f) => filters.includes(f.key)).map((f) => {
+              const selected = f.key === activeFilter;
+              return (
+                <TouchableOpacity
+                  key={f.key}
+                  onPress={() => setFilter(f.key)}
+                  style={[styles.chip, selected && styles.chipSelected]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  accessibilityLabel={`Show ${f.key === 'all' ? 'all assets' : `assets on ${f.label}`}`}
+                >
+                  {f.key === 'all'
+                    ? <Ionicons name="apps" size={14} color={selected ? theme.colors.text.primary : theme.colors.text.secondary} />
+                    : <NetworkIcon network={f.key} size={14} />}
+                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{f.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+
+        {shown.length > 0 ? (
+          <View style={styles.group}>{shown.map(renderRow)}</View>
+        ) : (
+          <EmptyState
+            icon={query ? 'search-outline' : 'layers-outline'}
+            title={query ? 'No matching assets' : items.length ? 'Nothing on this network' : 'No assets yet'}
+            message={query
+              ? 'Try another name or ticker.'
+              : items.length ? 'Pick another network to see what you hold there.' : 'Assets you receive will appear here.'}
+          />
+        )}
+      </ScrollView>
+
       <IssueAssetModal
         visible={showIssueModal}
         onClose={() => setShowIssueModal(false)}
-        onSuccess={handleIssueSuccess}
+        onSuccess={refresh}
       />
     </SafeAreaView>
   );
@@ -327,272 +289,158 @@ export default function AssetsScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background.secondary,
+    backgroundColor: theme.colors.background.primary,
   },
-  
-  headerContainer: {
-    marginBottom: theme.spacing[4],
+  scroll: { flex: 1 },
+  scrollContent: {
+    paddingHorizontal: theme.spacing[4],
+    paddingBottom: theme.spacing[8],
+    gap: theme.spacing[3],
   },
-  
-  headerGradient: {
-    paddingTop: theme.spacing[2],
-    paddingBottom: theme.spacing[6],
-    borderBottomLeftRadius: theme.borderRadius['2xl'],
-    borderBottomRightRadius: theme.borderRadius['2xl'],
-  },
-  
-  header: {
-    flexDirection: 'row',
+  addButton: {
+    width: 36,
+    height: 36,
+    borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface.secondary,
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing[5],
+    justifyContent: 'center',
+  },
+  totalBlock: {
+    alignItems: 'center',
     paddingTop: theme.spacing[4],
-    marginBottom: theme.spacing[6],
+    paddingBottom: theme.spacing[2],
   },
-  
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  totalLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.medium,
+    color: theme.colors.text.secondary,
   },
-  
-  headerTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-  },
-  
-  issueHeaderButton: {
-    width: 40,
-    height: 40,
-    borderRadius: theme.borderRadius.base,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  headerStats: {
+  totalRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'baseline',
     justifyContent: 'center',
-    paddingHorizontal: theme.spacing[5],
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: theme.borderRadius.lg,
-    marginHorizontal: theme.spacing[5],
-    paddingVertical: theme.spacing[4],
+    gap: theme.spacing[1.5],
+    maxWidth: '100%',
   },
-  
-  statItem: {
-    alignItems: 'center',
-    flex: 1,
+  totalAmount: {
+    fontSize: theme.typography.fontSize['3xl'],
+    fontWeight: '900',
+    color: theme.colors.text.primary,
   },
-  
-  statValue: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-    marginBottom: theme.spacing[1],
+  totalUnit: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: theme.typography.fontWeight.medium,
+    color: theme.colors.text.secondary,
   },
-  
-  statLabel: {
+  totalSecondary: {
+    fontFamily: theme.typography.fontFamily.mono,
     fontSize: theme.typography.fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.8)',
+    color: theme.colors.text.tertiary,
+    marginTop: theme.spacing[0.5],
   },
-  
-  statDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    marginHorizontal: theme.spacing[6],
-  },
-  
-  scrollView: {
-    flex: 1,
-  },
-  
-  assetsList: {
-    flex: 1,
-    paddingHorizontal: theme.spacing[5],
-  },
-  
-  assetsListContent: {
-    paddingBottom: theme.spacing[6],
-  },
-  
-  assetCard: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    padding: theme.spacing[5],
-    marginBottom: theme.spacing[4],
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    ...theme.shadows.sm,
-  },
-  
-  firstAssetCard: {
-    marginTop: 0,
-  },
-  
-  assetCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: theme.spacing[4],
-  },
-  
-  assetCardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  
-  assetIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing[3],
-  },
-  
-  assetIconImage: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-  },
-  
-  assetInfo: {
-    flex: 1,
-  },
-  
-  assetTickerRow: {
+  search: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: theme.spacing[2],
-    marginBottom: theme.spacing[1],
+    paddingHorizontal: theme.spacing[3],
+    minHeight: 44,
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
   },
-
-  assetTicker: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '700',
-    color: theme.colors.primary[500],
+  searchInput: {
+    flex: 1,
+    paddingVertical: theme.spacing[2],
+    fontSize: theme.typography.fontSize.base,
+    color: theme.colors.text.primary,
   },
-
-  protocolBadge: {
-    paddingHorizontal: theme.spacing[2],
-    paddingVertical: 2,
+  chips: {
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[0.5],
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[1.5],
+    minHeight: 34,
+    paddingHorizontal: theme.spacing[3],
     borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
   },
-
-  protocolBadgeText: {
-    fontSize: theme.typography.fontSize.xs,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+  chipSelected: {
+    backgroundColor: theme.colors.surface.secondary,
+    borderColor: theme.colors.primary[500],
   },
-  
-  assetName: {
+  chipText: {
     fontSize: theme.typography.fontSize.sm,
     color: theme.colors.text.secondary,
   },
-  
-  assetCardStats: {
+  chipTextSelected: {
+    color: theme.colors.text.primary,
+    fontWeight: theme.typography.fontWeight.semibold,
+  },
+  // Same row style as the dashboard's asset list.
+  group: {
+    borderRadius: theme.borderRadius.xl,
+    backgroundColor: theme.colors.surface.primary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+    overflow: 'hidden',
+  },
+  row: {
     flexDirection: 'row',
-    backgroundColor: theme.colors.background.secondary,
-    borderRadius: theme.borderRadius.lg,
-    padding: theme.spacing[3],
-  },
-  
-  assetStat: {
-    flex: 1,
     alignItems: 'center',
+    gap: theme.spacing[3],
+    minHeight: 64,
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[4],
   },
-  
-  assetStatLabel: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.text.muted,
-    marginBottom: theme.spacing[1],
+  rowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: theme.colors.border.light,
   },
-  
-  assetStatValue: {
-    fontSize: theme.typography.fontSize.sm,
+  info: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  name: {
+    fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
     color: theme.colors.text.primary,
   },
-  
-  emptyState: {
-    flex: 1,
+  subtitleRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing[10],
-    paddingHorizontal: theme.spacing[6],
+    gap: theme.spacing[1],
   },
-  
-  emptyIcon: {
-    width: 120,
-    height: 120,
-    borderRadius: theme.borderRadius.full,
-    backgroundColor: theme.colors.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[6],
+  subtitle: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.secondary,
   },
-  
-  emptyTitle: {
-    fontSize: theme.typography.fontSize.xl,
-    fontWeight: '700',
+  amounts: {
+    alignItems: 'flex-end',
+    gap: 2,
+    maxWidth: '48%',
+  },
+  amount: {
+    fontSize: theme.typography.fontSize.base,
+    fontWeight: '600',
     color: theme.colors.text.primary,
-    marginBottom: theme.spacing[3],
-    textAlign: 'center',
   },
-  
-  emptyDescription: {
-    fontSize: theme.typography.fontSize.base,
+  amountEmpty: {
+    color: theme.colors.text.tertiary,
+  },
+  unit: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: '500',
     color: theme.colors.text.secondary,
-    textAlign: 'center',
-    lineHeight: 24,
-    marginBottom: theme.spacing[8],
-    maxWidth: 280,
   },
-  
-  emptyButton: {
-    paddingHorizontal: theme.spacing[8],
-  },
-  
-  floatingButton: {
-    position: 'absolute',
-    right: theme.spacing[5],
-    bottom: theme.spacing[5],
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  
-  floatingButtonGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  
-  loadingText: {
-    fontSize: theme.typography.fontSize.base,
+  fiat: {
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.secondary,
-    marginTop: theme.spacing[4],
   },
 });

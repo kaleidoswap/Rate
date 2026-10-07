@@ -9,6 +9,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { theme, motion } from '../theme';
 import { AssetIcon } from './AssetIcon';
+import { NetworkIcon, networkIconForLabel } from './NetworkIcon';
 import { AmountText } from './AmountText';
 import { PressableScale } from './PressableScale';
 import { Sheet } from './Sheet';
@@ -117,7 +118,12 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
           <View style={styles.info}>
             <View style={styles.topRow}>
               <Text style={styles.ticker}>{asset.ticker}</Text>
-              {!!network && <View style={styles.networkTag}><Text style={styles.networkText}>{network}</Text></View>}
+              {!!network && (
+                <View style={styles.networkTag}>
+                  {networkIconForLabel(network) && <NetworkIcon network={networkIconForLabel(network)!} size={11} />}
+                  <Text style={styles.networkText}>{network}</Text>
+                </View>
+              )}
             </View>
             <Text style={styles.name} numberOfLines={1}>{asset.unavailable ?? asset.name}</Text>
           </View>
@@ -255,6 +261,9 @@ const styles = StyleSheet.create({
   topRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] },
   ticker: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.primary },
   networkTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
     paddingHorizontal: theme.spacing[1.5],
     paddingVertical: 1,
     borderRadius: theme.borderRadius.sm,

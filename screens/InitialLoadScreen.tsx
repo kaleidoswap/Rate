@@ -4,6 +4,10 @@ import DatabaseService, { NetworkConfig } from '../services/DatabaseService';
 import { setUnlocked, setInitialized, setActiveWallet } from '../store/slices/walletSlice';
 import { autoRestoreNostrConnection, initializeProtocolServices } from '../services/initializeServices';
 import { BrandLoading } from '../components/brand/BrandLoading';
+import { hasBalanceSnapshot } from '../services/balanceSnapshot';
+
+const STARTUP_WAIT_MS = 8000;
+const SNAPSHOT_STARTUP_WAIT_MS = 1000;
 
 export default function InitialLoadScreen({ navigation }: { navigation: any }) {
   const dispatch = useDispatch();
@@ -36,12 +40,14 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
 
         // Initialize protocol services — timeout after 8s so a slow/unreachable
         // node never blocks the load screen on Android or low-connectivity devices.
+        // With last balances to show, the dashboard can open almost at once.
+        const startupWaitMs = (await hasBalanceSnapshot(activeWallet)) ? SNAPSHOT_STARTUP_WAIT_MS : STARTUP_WAIT_MS;
         let startupTimer: ReturnType<typeof setTimeout> | undefined;
         try {
           await Promise.race([
             initializeProtocolServices(),
             new Promise<void>((resolve) => {
-              startupTimer = setTimeout(resolve, 8000);
+              startupTimer = setTimeout(resolve, startupWaitMs);
             }),
           ]);
         } catch (e) {

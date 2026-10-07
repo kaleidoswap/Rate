@@ -18,6 +18,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { LAYER_LABEL, layerNetworkIcon } from '../utils/activity-layers';
+import { NetworkIcon } from './NetworkIcon';
 import { CopyButton } from './CopyButton';
 import type { ActivityItem, ActivityItemType, ActivityLayer } from '../services/ActivityService';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
@@ -60,17 +62,6 @@ function amountPrefix(type: ActivityItemType): string {
     return '';
 }
 
-const LAYER_LABEL: Record<ActivityLayer, string> = {
-    'L1': 'On-chain',
-    'RGB-L1': 'RGB',
-    'LN': 'Lightning',
-    'RGB-LN': 'RGB · LN',
-    'Spark': 'Spark',
-    'Arkade': 'Arkade',
-    'Bark': 'Bark',
-    'Bark Signet': 'Bark · Signet',
-    'Swap': 'Swap',
-};
 
 export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh }) => {
     const theme = useAppTheme();
@@ -131,6 +122,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     <View style={styles.row}>
                         <Text style={styles.rowLabel}>Payment method</Text>
                         <View style={styles.layerChip}>
+                            {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={14} />}
                             <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
                         </View>
                     </View>
@@ -294,6 +286,9 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         fontWeight: '700',
     },
     layerChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[1],
         paddingHorizontal: theme.spacing[2],
         paddingVertical: 3,
         borderRadius: theme.borderRadius.sm,

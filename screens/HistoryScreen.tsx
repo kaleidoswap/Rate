@@ -17,6 +17,8 @@ import { RootState } from '../store';
 import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
 import { theme } from '../theme';
+import { LAYER_LABEL, layerNetworkIcon } from '../utils/activity-layers';
+import { NetworkIcon } from '../components/NetworkIcon';
 import {
     loadActivity,
     type ActivityItem,
@@ -60,17 +62,6 @@ function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyph
     }
 }
 
-const LAYER_LABEL: Record<ActivityLayer, string> = {
-    'L1': 'On-chain',
-    'RGB-L1': 'RGB',
-    'LN': 'Lightning',
-    'RGB-LN': 'RGB · LN',
-    'Spark': 'Spark',
-    'Arkade': 'Arkade',
-    'Bark': 'Bark',
-    'Bark Signet': 'Bark · Signet',
-    'Swap': 'Swap',
-};
 
 // Map an activity layer to a per-network chip colour pair (background + text)
 // sourced from the shared kaleido-ui tokens, so the chips stay contrast-safe
@@ -244,6 +235,7 @@ export default function HistoryScreen() {
                             {/* Which network a payment used is Advanced detail. */}
                             {policy.showNetworks && (
                                 <View style={[styles.layerChip, { backgroundColor: chip.bg }]}>
+                                    {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={12} />}
                                     <Text style={[styles.layerChipText, { color: chip.text }]}>{LAYER_LABEL[item.layer]}</Text>
                                 </View>
                             )}
@@ -417,6 +409,9 @@ const styles = StyleSheet.create({
         gap: theme.spacing[2],
     },
     layerChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
         paddingHorizontal: theme.spacing[2],
         paddingVertical: 2,
         borderRadius: theme.borderRadius.sm,
