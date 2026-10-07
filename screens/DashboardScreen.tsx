@@ -133,6 +133,15 @@ const EMPTY_BTC_BALANCE = {
   colored: { settled: 0, future: 0, spendable: 0 },
 };
 
+/** How long the first balance waits for every account before showing the connected ones. */
+const EARLY_BALANCE_MS = 2_500;
+
+function anyAccountConnected(): boolean {
+  return (['RGB', 'SPARK', 'ARKADE', 'BARK'] as const).some(
+    (p) => protocolManager.getAdapterIfAvailable(toEngineProtocol(p))?.isConnected() ?? false,
+  );
+}
+
 const ACCOUNT_NAMES: Record<string, string> = {
   RGB_LN: 'your RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark',
 };
@@ -542,6 +551,9 @@ export default function DashboardScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [protocolsReady]);
 
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   const connectAndLoad = async () => {
     if (needsSetup) {
       protocolsReadyRef.current = false;
@@ -554,8 +566,23 @@ export default function DashboardScreen({ navigation }: Props) {
     setIsConnecting(true);
     setConnectionError(null);
     try {
-      if (!await initializeApi()) return;
-      await Promise.all([checkNodeStatus(true), loadDashboardData(true)]);
+      // An unreachable account (a node can take a minute to time out) must not hold
+      // back the others: after a short wait, show what is already connected.
+      const init = initializeApi();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const initFirst = await Promise.race([
+        init.then(() => true),
+        new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), EARLY_BALANCE_MS); }),
+      ]);
+      clearTimeout(timer);
+      if (!mountedRef.current) return;
+      if (!initFirst && anyAccountConnected()) {
+        protocolsReadyRef.current = true;
+        setProtocolsReady(true);
+        await loadDashboardData(true);
+      }
+      if (!await init || !mountedRef.current) return;
+      await Promise.all([checkNodeStatus(true), loadDashboardData(initFirst)]);
     } finally {
       // Both a failed connection and a missing wallet are terminal UI states.
       setIsConnecting(false);

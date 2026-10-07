@@ -88,6 +88,22 @@ describe('fast first balance', () => {
     (protocolManager.getAdapterIfAvailable as jest.Mock).mockReturnValue(undefined);
   });
 
+  it('reads connected accounts while a slow one is still connecting', async () => {
+    mockState.wallet.activeWallet = { id: 1, created_at: 5, encrypted_mnemonic: 'test-only-seed' };
+    const spark = {
+      isConnected: () => true, getNodeInfo: jest.fn().mockResolvedValue({}),
+      getBtcBalance: jest.fn().mockResolvedValue({ confirmed: 2500, unconfirmed: 0, total: 2500 }),
+      listAssets: jest.fn().mockResolvedValue([]),
+    };
+    (protocolManager.getAdapterIfAvailable as jest.Mock).mockImplementation(p => p === 'SPARK' ? spark : undefined);
+    // An unreachable node keeps the startup from settling.
+    (initializeProtocolServices as jest.Mock).mockReturnValue(new Promise(() => {}));
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(screen.getByText('Accounts: SPARK 2500')).toBeTruthy(), { timeout: 5000 });
+    expect(spark.getBtcBalance).toHaveBeenCalled();
+    screen.unmount();
+  });
+
   it('shows the last balance at once while the accounts reconnect', async () => {
     mockState.wallet.activeWallet = { id: 1, created_at: 5, encrypted_mnemonic: 'test-only-seed' };
     await saveBalanceSnapshot(mockState.wallet.activeWallet, sparkSnapshot);
