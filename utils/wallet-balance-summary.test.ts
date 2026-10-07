@@ -47,3 +47,19 @@ describe('progressive and per-network balances', () => {
     expect(bitcoinByNetwork(b, channels, true)).toEqual({ lightning: 700, spark: 6 });
   });
 });
+
+describe('a plain Lightning wallet beside RGB on this phone', () => {
+  const { summarizeBitcoinBalances, bitcoinByNetwork } = require('./wallet-balance-summary');
+  const balances = {
+    RGB: { confirmed: 1000, unconfirmed: 0, total: 1000 },
+    LN: { confirmed: 500, unconfirmed: 0, total: 500 },
+  };
+
+  it('counts the Lightning wallet in the total and as spendable', () => {
+    expect(summarizeBitcoinBalances(balances, [], false)).toMatchObject({ total: 1500, available: 1500 });
+  });
+
+  it('shows it as Lightning in the breakdown', () => {
+    expect(bitcoinByNetwork(balances, [], false)).toMatchObject({ onchain: 1000, lightning: 500 });
+  });
+});

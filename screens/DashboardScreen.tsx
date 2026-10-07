@@ -349,6 +349,9 @@ export default function DashboardScreen({ navigation }: Props) {
       const sparkAdapter = protocolManager.getAdapterIfAvailable('SPARK');
       const arkadeAdapter = protocolManager.getAdapterIfAvailable('ARKADE');
       const barkAdapter = protocolManager.getAdapterIfAvailable('BARK');
+      // A plain Lightning wallet over NWC isn't the RGB account, so it gets its own line.
+      const nodeSlot = protocolManager.getAdapterIfAvailable('RGB_LN');
+      const lightningWallet = nodeSlot && nodeSlot !== rgbAdapter ? nodeSlot : null;
 
       // Balances, assets and channels are all fetched at once, and each account's
       // figure lands on screen as soon as it returns: the headline no longer waits
@@ -356,6 +359,7 @@ export default function DashboardScreen({ navigation }: Props) {
       console.log('Fetching BTC balance...');
       const adapterProtoMap: Array<[any, string]> = [
         [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'], [barkAdapter, 'BARK'],
+        [lightningWallet, 'LN'],
       ];
       const balancesTask = Promise.all(
         adapterProtoMap.map(async ([adapter, proto]) => {

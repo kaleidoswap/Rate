@@ -26,7 +26,7 @@ export function summarizeBitcoinBalances(
     const held = nonNegative(balance.confirmed) + nonNegative(balance.unconfirmed);
     if (testProtocols.has(protocol)) { test += held; continue; }
     total += held;
-    available += nonNegative(protocol === 'RGB' ? balance.total : balance.confirmed);
+    available += nonNegative(protocol === 'RGB' || protocol === 'LN' ? balance.total : balance.confirmed);
   }
   if (!rgbBalanceIsLightning) {
     for (const channel of channels) {
@@ -88,6 +88,8 @@ export function bitcoinByNetwork(
       out.lightning = channels.reduce((sum, c) => sum + nonNegative(c.local_balance_sat), 0);
     }
   }
+  // A plain Lightning wallet beside RGB on this phone.
+  if (balances.LN) out.lightning = (out.lightning ?? 0) + nonNegative(balances.LN.total);
   if (balances.SPARK) out.spark = nonNegative(balances.SPARK.total);
   if (balances.ARKADE) out.arkade = nonNegative(balances.ARKADE.total);
   if (balances.BARK) out.bark = nonNegative(balances.BARK.total);
