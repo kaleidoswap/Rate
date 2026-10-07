@@ -67,8 +67,9 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   // A sheet already starts below the status bar, so padding by the window's top
   // inset stacked a second status bar's worth of dead space above the title on
   // every modal route. See ModalPresentation for why this is declared, not detected.
+  // Flows slide up and close with an X; pages slide in and go back with an arrow.
   const isModal = useIsModalPresentation();
-  const topInset = isModal ? 0 : insets.top;
+  const topInset = insets.top;
 
   return (
     <View style={[styles.container, elevated && styles.containerElevated]}>
@@ -87,11 +88,11 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
                 onPress={onBack}
                 style={styles.iconBtn}
                 accessibilityRole="button"
-                accessibilityLabel="Back"
+                accessibilityLabel={isModal ? 'Close' : 'Back'}
                 hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
               >
                 <Ionicons
-                  name="arrow-back"
+                  name={isModal ? 'close' : 'arrow-back'}
                   size={20}
                   color={theme.colors.text.primary}
                 />
