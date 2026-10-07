@@ -17,7 +17,8 @@ import { coalesceInFlight } from '../../utils/coalesce-in-flight'
 
 import { ProtocolManager } from '@kaleidorg/wallet-engine'
 import type { ProtocolType } from '@kaleidorg/wallet-engine'
-import { getWdkProtocolManager, initializeWdkProtocols, syncRgbOnDevice, type RgbL1ConnectOptions } from './wdk'
+import { getWdkProtocolManager, initializeWdkProtocols, switchRgbL1Network, syncRgbOnDevice, type RgbL1ConnectOptions } from './wdk'
+import type { RgbL1Network } from './rgbL1'
 import { chooseRgbBacking, isRgbNode } from './rgbAccount'
 import DatabaseService from '../DatabaseService'
 import { setRgbBacking, type RgbBacking } from '../../utils/protocol-bridge'
@@ -52,6 +53,15 @@ export async function reconcileRgbOnDevice(
   const wallet = await DatabaseService.getInstance().getActiveWallet()
   if (!wallet?.encrypted_mnemonic) return undefined
   return syncRgbOnDevice(wallet.encrypted_mnemonic, opts)
+}
+
+/** Switches the active wallet's RGB on this phone to `network`'s own RGB wallet. */
+export async function switchRgbOnDeviceNetwork(
+  network: RgbL1Network,
+): Promise<{ success: boolean; error?: string } | undefined> {
+  const wallet = await DatabaseService.getInstance().getActiveWallet()
+  if (!wallet?.encrypted_mnemonic) return { success: false, error: 'Unlock your active wallet first.' }
+  return switchRgbL1Network(wallet.encrypted_mnemonic, network)
 }
 
 /** The adapter behind the RGB account (see rgbAccountProtocol). */

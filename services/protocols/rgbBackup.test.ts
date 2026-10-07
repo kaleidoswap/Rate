@@ -120,3 +120,7 @@ describe('looking for a cloud backup', () => {
     await expect(findRgbCloudBackup('seed', 'mainnet')).rejects.toThrow(/503/);
   });
 });
+
+test('each network of a seed has its own cloud backup', () => {
+  expect(rgbBackupStoreId('seed', 'mainnet')).not.toBe(rgbBackupStoreId('seed', 'mutinynet'));
+});

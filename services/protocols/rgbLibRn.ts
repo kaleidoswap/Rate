@@ -9,7 +9,8 @@
  * (rgb-lib-kotlin on Android, rgb-lib-swift on iOS).
  *
  * Only the calls the adapter makes are implemented. rgb-lib keeps its data in
- * the app's private files; the adapter's `dataDir` is not used here.
+ * the app's private files; the adapter's `dataDir` names a folder inside them
+ * for this wallet (see `rgbLibSubdir`), else rgb-lib's original folder.
  */
 import type * as RgbLib from 'react-native-rgb'
 
@@ -19,6 +20,8 @@ type LibNetwork = RgbLib.BitcoinNetwork
 export interface RgbLibRnOptions {
   /** App network name: 'mutinynet' and 'signet' map to rgb-lib's SIGNET. */
   network: string
+  /** A folder name keeps the wallet in its own folder; anything else ('.') uses the original one. */
+  dataDir?: string
   indexerUrl?: string
   transportEndpoint?: string
 }
@@ -35,6 +38,15 @@ export function libNetwork(network: string): LibNetwork {
     default: throw new Error(`Unsupported RGB network: ${network}`)
   }
 }
+
+/** The folder to open the wallet in, or null for rgb-lib's original folder. */
+export function rgbLibSubdir(dataDir?: string | null): string | null {
+  return dataDir && /^[A-Za-z0-9_-]{1,64}$/.test(dataDir) ? dataDir : null
+}
+
+/** react-native-rgb with the `subdir` support from patches/react-native-rgb@*.patch (typed here so older typings still build). */
+type RgbModuleWithSubdir = RgbModule & { supportsSubdir?: () => boolean }
+type WalletOptionsWithSubdir = NonNullable<ConstructorParameters<RgbModule['Wallet']>[1]> & { subdir?: string }
 
 // rgb-lib only moves an incoming transfer forward (and syncs the chain) when asked;
 // reads refresh at most this often so balances stay current without hammering the indexer.
@@ -256,8 +268,14 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: 
       const network = libNetwork(this.options.network)
       if (!this.options.indexerUrl) throw new Error('RGB needs an indexer URL')
       if (!this.options.transportEndpoint) throw new Error('RGB needs a proxy endpoint')
+      const subdir = rgbLibSubdir(this.options.dataDir)
+      // An older native build would open the original folder instead: never let it.
+      if (subdir && (lib as RgbModuleWithSubdir).supportsSubdir?.() !== true) {
+        throw new Error('Update the app to use RGB on this network.')
+      }
       const keys = await lib.restoreKeys(network, this.mnemonic)
-      const wallet = new lib.Wallet(keys, { network })
+      const walletOptions: WalletOptionsWithSubdir = subdir ? { network, subdir } : { network }
+      const wallet = new lib.Wallet(keys, walletOptions)
       await wallet.goOnline(this.options.indexerUrl)
       this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange)
       return this.account

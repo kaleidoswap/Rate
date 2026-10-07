@@ -3,6 +3,10 @@ const mockConnected = new Set<string>();
 const mockDelays: Record<string, number> = {};
 const mockFail: Record<string, string> = {};
 let mockRgbL1Network: string | null = null;
+let mockCanSwitch = true;
+let mockReady = true;
+const mockConfigs: any[] = [];
+const mockRestorer = jest.fn((_m: string, n: string) => `restore-into-${n}`);
 
 const mockManager = {
   registerAdapter: jest.fn(),
@@ -45,19 +49,31 @@ jest.mock('../kaleidoPay/bark', () => ({ connectBarkToKaleidoPay: jest.fn(), dis
 jest.mock('../kaleidoPay/payOptions', () => ({ setPayOptions: jest.fn() }));
 jest.mock('./rgbL1', () => ({
   RGB_L1_ENABLED: true,
-  buildRgbL1Config: () => ({}),
+  RGB_L1_NETWORKS: ['mainnet', 'mutinynet'],
+  RGB_L1_NETWORK_LABEL: { mainnet: 'Mainnet', mutinynet: 'Mutinynet' },
+  RGB_L1_UPDATE_TO_SWITCH: 'Update the app to switch networks.',
+  buildRgbL1Config: (_m: string, host: any, folder: string | null) => { const c = { network: host.network, folder }; mockConfigs.push(c); return c; },
+  claimRgbL1DataFolder: async (_m: string, n: string) => (n === 'mainnet' ? null : `rgb-${n}`),
   isRgbLibNativeAvailable: () => true,
-  isRgbL1Ready: async () => true,
+  isRgbL1NetworkSwitchSupported: () => mockCanSwitch,
+  isRgbL1Ready: async () => mockReady,
   loadRgbL1Network: async () => mockRgbL1Network,
-  loadRgbL1Host: async () => ({}),
+  loadRgbL1Host: async (_m: string, n: string) => ({ network: n }),
   markRgbL1Ready: async () => {},
+  rgbL1Restorer: (...a: any[]) => (mockRestorer as any)(...a),
+  saveRgbL1Network: async (_m: string, n: string | null) => { mockEvents.push(`save ${n}`); mockRgbL1Network = n; },
 }));
 jest.mock('./rgbLibRn', () => ({ createRgbLibRnModule: jest.fn() }));
+const mockRestoreCloud = jest.fn(async (_o: any) => 'no-backup');
 jest.mock('./rgbBackup', () => ({
-  restoreRgbFromCloud: jest.fn(), runRgbBackup: jest.fn(async () => {}), scheduleRgbBackup: jest.fn(), setRgbBackupContext: jest.fn(),
+  findRgbCloudBackup: jest.fn(async () => null),
+  restoreRgbFromCloud: (o: any) => mockRestoreCloud(o),
+  runRgbBackup: jest.fn(async () => { mockEvents.push('backup'); }),
+  scheduleRgbBackup: jest.fn(),
+  setRgbBackupContext: jest.fn(),
 }));
 
-import { initializeWdkProtocols } from './wdk';
+import { initializeWdkProtocols, switchRgbL1Network, syncRgbOnDevice } from './wdk';
 
 const configs = (...types: string[]) => types.map((type) => ({ type, enabled: true, config: '{}' }));
 
@@ -67,6 +83,10 @@ beforeEach(() => {
   for (const k of Object.keys(mockDelays)) delete mockDelays[k];
   for (const k of Object.keys(mockFail)) delete mockFail[k];
   mockRgbL1Network = null;
+  mockCanSwitch = true;
+  mockReady = true;
+  mockConfigs.length = 0;
+  mockRestoreCloud.mockClear();
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -109,4 +129,42 @@ test('RGB on this phone connects once the node is known to be unavailable', asyn
   const results = await initializeWdkProtocols('seed', configs('rgb', 'spark'));
   expect(mockEvents.indexOf('start RGB_L1')).toBeGreaterThan(mockEvents.indexOf('start RGB_LN'));
   expect(results.get('RGB_L1' as any)).toEqual({ success: true });
+});
+
+test('switching networks backs up and closes the current RGB wallet, then opens the other in its own folder', async () => {
+  mockRgbL1Network = 'mainnet';
+  expect(await syncRgbOnDevice('seed')).toEqual({ success: true });
+  expect(mockConfigs.at(-1)).toEqual({ network: 'mainnet', folder: null });
+  mockEvents.length = 0;
+  expect(await switchRgbL1Network('seed', 'mutinynet')).toEqual({ success: true });
+  expect(mockEvents).toEqual(['backup', 'disconnect RGB_L1', 'save mutinynet', 'start RGB_L1', 'done RGB_L1', 'backup']);
+  expect(mockConfigs.at(-1)).toEqual({ network: 'mutinynet', folder: 'rgb-mutinynet' });
+});
+
+test('a network that never started here restores its own cloud backup into its own folder', async () => {
+  mockRgbL1Network = 'mainnet';
+  await syncRgbOnDevice('seed');
+  mockReady = false;
+  expect(await switchRgbL1Network('seed', 'mutinynet')).toEqual({ success: true });
+  expect(mockRestoreCloud).toHaveBeenCalledWith(expect.objectContaining({ network: 'mutinynet', restore: 'restore-into-mutinynet' }));
+  expect(mockRestorer).toHaveBeenCalledWith('seed', 'mutinynet');
+});
+
+test('a network chosen elsewhere is picked up on the next sync', async () => {
+  mockRgbL1Network = 'mainnet';
+  await syncRgbOnDevice('seed');
+  mockRgbL1Network = 'mutinynet';
+  mockEvents.length = 0;
+  expect(await syncRgbOnDevice('seed')).toEqual({ success: true });
+  expect(mockEvents).toEqual(['disconnect RGB_L1', 'start RGB_L1', 'done RGB_L1', 'backup']);
+});
+
+test('an app build that cannot switch refuses and leaves the current RGB wallet alone', async () => {
+  mockRgbL1Network = 'mainnet';
+  await syncRgbOnDevice('seed');
+  mockCanSwitch = false;
+  mockEvents.length = 0;
+  expect(await switchRgbL1Network('seed', 'mutinynet')).toEqual({ success: false, error: 'Update the app to switch networks.' });
+  expect(mockEvents).toEqual([]);
+  expect(mockRgbL1Network).toBe('mainnet');
 });

@@ -16,16 +16,24 @@ jest.mock('react-native-rgb', () => ({ restoreBackup: jest.fn() }), { virtual: t
 let mockNetwork: string | null = null;
 let mockPinned: string | null = null;
 let mockLocked: string | null = null;
+let mockCanSwitch = true;
+let mockReadyNets: string[] = [];
+const mockSwitch = jest.fn(async (_n: string): Promise<any> => ({ success: true }));
 jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getActiveWallet: async () => ({ id: 7, encrypted_mnemonic: 'seed words' }) }) } }));
 jest.mock('../services/protocols', () => ({
   protocolManager: { getAdapterIfAvailable: (p: string) => mockAdapters[p], disconnect: jest.fn(async () => undefined) },
   reconcileRgbOnDevice: (...a: any[]) => { mockCalls.push('reconcile'); return (mockReconcile as any)(...a); },
+  switchRgbOnDeviceNetwork: (...a: any[]) => { mockCalls.push(`switch:${a[0]}`); return (mockSwitch as any)(...a); },
 }));
 jest.mock('../services/protocols/rgbL1', () => ({
   loadRgbL1Network: async () => mockNetwork,
   saveRgbL1Network: (...a: any[]) => { mockCalls.push(`save:${a[1]}`); mockNetwork = a[1]; if (a[1]) mockPinned = a[1]; return (mockSave as any)(...a); },
   pinnedRgbL1Network: async () => mockPinned,
   lockedRgbL1Network: async () => mockLocked,
+  isRgbL1NetworkSwitchSupported: () => mockCanSwitch,
+  readyRgbL1Networks: async () => mockReadyNets,
+  rgbL1Restorer: () => jest.fn(),
+  RGB_L1_UPDATE_TO_SWITCH: 'Update the app to switch networks.',
   RGB_L1_DEFAULT_NETWORK: 'mainnet',
   RGB_L1_NETWORKS: ['mainnet', 'mutinynet'],
   RGB_L1_NETWORK_LABEL: { mainnet: 'Mainnet', mutinynet: 'Mutinynet' },
@@ -64,6 +72,8 @@ beforeEach(() => {
   mockNetwork = null;
   mockPinned = null;
   mockLocked = null;
+  mockCanSwitch = true;
+  mockReadyNets = [];
   for (const k of Object.keys(mockAdapters)) delete mockAdapters[k];
   mockFindBackup.mockReset().mockResolvedValue(null);
   mockReconcile.mockReset().mockImplementation(async () => { mockAdapters.RGB_L1 = connectedL1(true); return { success: true }; });
@@ -77,7 +87,7 @@ test('Connect asks first, finds no cloud backup, then saves mainnet and connects
   fireEvent.press(screen.getByText('Connect'));
   const [title, message, buttons] = lastAlert();
   expect(title).toBe('RGB on this phone (beta)');
-  expect(message).toMatch(/mainnet, with real funds.*keeps its RGB data on Mainnet once it starts/);
+  expect(message).toMatch(/mainnet, with real funds.*separate RGB wallet with its own balances/);
   expect(mockSave).not.toHaveBeenCalled(); // nothing is fixed before the user goes ahead
   await act(async () => { await press(buttons, 'Continue'); });
   expect(mockFindBackup).toHaveBeenCalledWith('seed words', 'mainnet');
@@ -187,13 +197,60 @@ test('RGB data can be restored from an exported file before it starts', async ()
   expect(mockCalls).toEqual(['save:mainnet', 'restore-file', 'ready', 'reconcile']);
 });
 
-test('once started, the network is fixed and restore is not offered', async () => {
+test('a network already on this phone connects without questions; restore is not offered for it', async () => {
+  mockPinned = 'mutinynet';
+  mockReadyNets = ['mutinynet'];
+  const screen = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  expect(screen.getByText('Mainnet')).toBeTruthy(); // the other network can still be picked
+  expect(screen.queryByText('Restore from cloud')).toBeNull();
+  await act(async () => { fireEvent.press(screen.getByText('Connect')); });
+  expect(mockFindBackup).not.toHaveBeenCalled();
+  expect(mockCalls).toEqual(['save:mutinynet', 'reconcile']);
+});
+
+test('connected: switching asks first, explains the separate wallets, then switches', async () => {
+  mockNetwork = 'mainnet';
+  mockPinned = 'mainnet';
+  mockAdapters.RGB_L1 = connectedL1();
+  const screen = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Switch to Mutinynet'));
+  const [title, message, buttons] = lastAlert();
+  expect(title).toBe('Switch to Mutinynet?');
+  expect(message).toMatch(/own RGB wallet.*separate balances.*Mainnet RGB assets stay here/);
+  expect(mockSwitch).not.toHaveBeenCalled();
+  await act(async () => { await press(buttons, 'Switch'); });
+  expect(mockSwitch).toHaveBeenCalledWith('mutinynet');
+});
+
+test('a failed switch shows why', async () => {
+  mockNetwork = 'mainnet';
+  mockAdapters.RGB_L1 = connectedL1();
+  mockSwitch.mockResolvedValueOnce({ success: false, error: 'Couldn’t restore your RGB backup (offline).' });
+  const screen = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Switch to Mutinynet'));
+  await act(async () => { await press(lastAlert()[2], 'Switch'); });
+  expect(screen.getByText(/Couldn’t restore your RGB backup/)).toBeTruthy();
+});
+
+test('an app build that can’t switch keeps the first network and says to update', async () => {
+  mockCanSwitch = false;
+  mockNetwork = 'mainnet';
+  mockAdapters.RGB_L1 = connectedL1();
+  const connected = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  expect(connected.getByText('Update the app to switch networks.')).toBeTruthy();
+  expect(connected.queryByLabelText('Switch to Mutinynet')).toBeNull();
+  connected.unmount();
+  delete mockAdapters.RGB_L1;
   mockNetwork = null;
   mockPinned = 'mutinynet';
   mockLocked = 'mutinynet';
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
-  expect(screen.getByText(/Mutinynet · fixed for this wallet/)).toBeTruthy();
+  expect(screen.getByText(/Mutinynet · Update the app to switch networks/)).toBeTruthy();
   expect(screen.queryByText('Mainnet')).toBeNull();
   expect(screen.queryByText('Restore from cloud')).toBeNull();
   expect(screen.queryByText('Restore from a backup file')).toBeNull();
@@ -206,7 +263,6 @@ test('once started, the network is fixed and restore is not offered', async () =
 test('the indexer and proxy can be changed per wallet; saving reconnects', async () => {
   mockNetwork = 'mutinynet';
   mockPinned = 'mutinynet';
-  mockLocked = 'mutinynet';
   mockAdapters.RGB_L1 = connectedL1();
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});

@@ -4,8 +4,8 @@
 // Before it starts: pick the network (servers under Advanced), then Connect, or
 // restore this wallet's RGB data from the cloud backup or an exported file.
 // Connect looks for a cloud backup first and asks before restoring it.
-// The network is fixed once the wallet started on it (rgb-lib keeps one data
-// folder per seed). Once connected: status, back up now, export a file, the
+// Each network is a separate RGB wallet; once connected it can switch to the
+// other one (an older app build keeps the first network). Once connected: status, back up now, export a file, the
 // servers, and turning it off. While an RGB node is connected it is the RGB
 // account and this wallet steps aside.
 import React, { useCallback, useEffect, useState } from 'react';
@@ -15,10 +15,11 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { theme } from '../theme';
 import DatabaseService from '../services/DatabaseService';
-import { protocolManager, reconcileRgbOnDevice } from '../services/protocols';
+import { protocolManager, reconcileRgbOnDevice, switchRgbOnDeviceNetwork } from '../services/protocols';
 import {
   loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable, loadRgbL1Host, saveRgbL1Endpoints,
   lockedRgbL1Network, pinnedRgbL1Network, markRgbL1Ready, rgbL1Host, RGB_L1_DEFAULT_NETWORK, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL,
+  readyRgbL1Networks, rgbL1Restorer, isRgbL1NetworkSwitchSupported, RGB_L1_UPDATE_TO_SWITCH,
   type RgbL1Network,
 } from '../services/protocols/rgbL1';
 import { SegmentedTabs } from './SegmentedTabs';
@@ -42,7 +43,6 @@ async function activeMnemonic(walletId: number): Promise<string> {
   return wallet.encrypted_mnemonic;
 }
 
-const nativeRestore = (path: string, password: string) => require('react-native-rgb').restoreBackup(path, password);
 const messageOf = (e: any, fallback: string) => (e?.message ? String(e.message) : fallback);
 
 /** A start that didn't happen, in words (the engine's "skipped: …" reasons included). */
@@ -67,8 +67,10 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
   const [loaded, setLoaded] = useState(false);
   /** The network RGB on this phone is turned on for, or null when it's off. */
   const [enabled, setEnabled] = useState<RgbL1Network | null>(null);
-  /** Set once this seed's RGB data exists on the phone: the network can't change after that. */
+  /** Set on an app build that can't switch networks, once this seed's RGB data is on the phone. */
   const [locked, setLocked] = useState<RgbL1Network | null>(null);
+  /** Networks whose RGB data is already on this phone. */
+  const [ready, setReady] = useState<RgbL1Network[]>([]);
   const [network, setNetwork] = useState<RgbL1Network>(RGB_L1_DEFAULT_NETWORK);
   const [connected, setConnected] = useState(false);
   const [phase, setPhase] = useState<Phase | null>(null);
@@ -88,9 +90,12 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     setConnected(!!account);
     try {
       const mnemonic = await activeMnemonic(walletId);
-      const [on, fixed, pinned] = await Promise.all([loadRgbL1Network(mnemonic), lockedRgbL1Network(mnemonic), pinnedRgbL1Network(mnemonic)]);
+      const [on, fixed, pinned, started] = await Promise.all([
+        loadRgbL1Network(mnemonic), lockedRgbL1Network(mnemonic), pinnedRgbL1Network(mnemonic), readyRgbL1Networks(mnemonic),
+      ]);
       setEnabled(on);
       setLocked(fixed);
+      setReady(started);
       // A fixed network wins; otherwise show the last choice, else keep what's picked.
       const shown = fixed ?? on ?? pinned;
       if (shown) setNetwork(shown);
@@ -133,11 +138,11 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       // Save the choice first: it refuses a network other than the one this wallet's data is on.
       await saveRgbL1Network(mnemonic, network);
       if (restore?.kind === 'cloud') {
-        const result = await restoreRgbFromCloud({ mnemonic, network, restore: nativeRestore });
+        const result = await restoreRgbFromCloud({ mnemonic, network, restore: rgbL1Restorer(mnemonic, network) });
         if (result === 'no-backup') throw new Error(`There’s no RGB backup of this wallet on ${label}.`);
         await markRgbL1Ready(mnemonic, network);
       } else if (restore?.kind === 'file') {
-        await restoreRgbFromFile({ mnemonic, path: toFilesystemPath(restore.uri), restore: nativeRestore });
+        await restoreRgbFromFile({ mnemonic, path: toFilesystemPath(restore.uri), restore: rgbL1Restorer(mnemonic, network) });
         await markRgbL1Ready(mnemonic, network);
       }
       // The restore question was asked here: no automatic cloud restore on this start.
@@ -190,15 +195,43 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
 
   const connect = () => {
     if (busy) return;
-    if (locked) { void run(null); return; } // its data is already on this phone
+    if (locked || ready.includes(network)) { void run(null); return; } // its data is already on this phone
     Alert.alert(
       'RGB on this phone (beta)',
       (network === 'mainnet'
         ? 'Holds RGB assets on-chain on Bitcoin mainnet, with real funds. '
         : 'Holds RGB assets on-chain on Mutinynet, a test network. ')
-      + `This wallet keeps its RGB data on ${label} once it starts. `
+      + 'Each network is a separate RGB wallet with its own balances. '
       + 'RGB assets need more than your recovery phrase: they are backed up to the cloud after every send and receive. You can also export a backup file.',
       [{ text: 'Cancel', style: 'cancel' }, { text: 'Continue', onPress: () => lookForBackup('connect') }],
+    );
+  };
+
+  /** Switch to the other network's own RGB wallet; this one's data stays on the phone. */
+  const otherNetwork = RGB_L1_NETWORKS.find((n) => n !== network) ?? network;
+  const canSwitch = isRgbL1NetworkSwitchSupported();
+  const switchNetwork = () => {
+    if (busy || !canSwitch) return;
+    const to = RGB_L1_NETWORK_LABEL[otherNetwork];
+    Alert.alert(
+      `Switch to ${to}?`,
+      `Each network has its own RGB wallet on this phone, with separate balances and backups. Your ${label} RGB assets stay here and come back when you switch back. `
+      + (otherNetwork === 'mainnet' ? 'Mainnet uses real funds.' : 'Mutinynet is a test network.'),
+      [{ text: 'Cancel', style: 'cancel' }, { text: 'Switch', onPress: async () => {
+        setPhase('connecting');
+        setError(null);
+        try {
+          const result = await switchRgbOnDeviceNetwork(otherNetwork);
+          if (!result?.success) throw new Error(rgbStartError(result?.error));
+          ToastService.getInstance().success(`RGB on this phone is connected on ${to}.`);
+        } catch (e: any) {
+          setError(messageOf(e, 'Could not switch networks.'));
+        } finally {
+          await refresh();
+          setPhase(null);
+          onChanged?.();
+        }
+      } }],
     );
   };
 
@@ -380,9 +413,15 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           {rowIcon('checkmark-circle', theme.colors.success[500])}
           <View style={styles.text}>
             <Text style={styles.label}>Connected · {label}</Text>
-            <Text style={styles.description} numberOfLines={1}>Network fixed for this wallet</Text>
+            <Text style={styles.description} numberOfLines={1}>
+              {canSwitch ? `Switch to ${RGB_L1_NETWORK_LABEL[otherNetwork]} for its own RGB wallet` : RGB_L1_UPDATE_TO_SWITCH}
+            </Text>
           </View>
-          {busy && <ActivityIndicator color={accent} />}
+          {busy ? <ActivityIndicator color={accent} /> : canSwitch && (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Switch to ${RGB_L1_NETWORK_LABEL[otherNetwork]}`} onPress={switchNetwork}>
+              <Text style={styles.action}>Switch</Text>
+            </TouchableOpacity>
+          )}
         </View>
         {errorText}
         {sectionLabel('Backup')}
@@ -427,7 +466,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
         {locked ? (
           <View style={styles.locked}>
             <Ionicons name="lock-closed-outline" size={14} color={theme.colors.text.secondary} />
-            <Text style={[styles.description, styles.text]}>{RGB_L1_NETWORK_LABEL[locked]} · fixed for this wallet</Text>
+            <Text style={[styles.description, styles.text]}>{RGB_L1_NETWORK_LABEL[locked]} · {RGB_L1_UPDATE_TO_SWITCH}</Text>
           </View>
         ) : (
           <>
@@ -435,7 +474,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
               options={RGB_L1_NETWORKS.map((n) => ({ key: n, label: RGB_L1_NETWORK_LABEL[n], disabled: busy }))}
               value={network} onChange={setNetwork} />
             <Text style={styles.description}>
-              {network === 'mainnet' ? 'Real bitcoin and RGB assets.' : 'Test bitcoin, no value.'} Can’t be changed once started.
+              {network === 'mainnet' ? 'Real bitcoin and RGB assets.' : 'Test bitcoin, no value.'} Each network is a separate RGB wallet.
             </Text>
           </>
         )}
@@ -445,7 +484,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
         {errorText}
         <Button title={connectTitle} onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth style={styles.primary} />
       </View>
-      {!locked && (
+      {!locked && !ready.includes(network) && (
         <>
           {sectionLabel('Already have RGB assets?')}
           <TouchableOpacity accessibilityRole="button" onPress={restoreCloud} disabled={busy} activeOpacity={0.7} style={styles.row}>
