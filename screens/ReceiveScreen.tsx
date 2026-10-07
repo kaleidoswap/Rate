@@ -70,6 +70,7 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
+import { BridgeEntryCard } from '../components/receive/BridgeEntryCard';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import { contactKeyFor, recordContactEvent } from '../services/contactHistory';
 
@@ -1828,6 +1829,7 @@ export default function ReceiveScreen({ navigation }: Props) {
           {/* With a QR on screen the status sits right under it; otherwise here. */}
           {!qrOnScreen && renderStatus()}
         </>}
+        <BridgeEntryCard onPress={() => { cancelReceiveWork(); navigation.navigate('Bridge'); }} />
       </ScrollView>
 
       {/* Everything that shapes the request, one tap away instead of above the QR. */}
