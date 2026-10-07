@@ -13,7 +13,7 @@ jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { g
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
 jest.mock('../services/nwc/connectionStore', () => ({ removeNwcCredential: jest.fn() }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: jest.fn(), setActiveWallet: jest.fn() }));
-jest.mock('../utils/feedback', () => ({ feedback: { success: jest.fn() } }));
+jest.mock('../utils/feedback', () => ({ feedback: { success: jest.fn(), select: jest.fn() } }));
 jest.mock('../utils/bitcoinUnits', () => ({ formatDenominatedAmount: () => ({ primary: '1,234,567', unitLabel: 'sats' }), useBitcoinPriceIn: () => 50000 }));
 jest.mock('../components/RevealMnemonicModal', () => ({ RevealMnemonicModal: () => null }));
 jest.mock('../components/OptionSheet', () => ({ OptionSheet: () => null }));
@@ -109,14 +109,19 @@ test('account pages expose supported controls and back returns to the account li
   expect(screen.getByText('Use an HTTPS URL without credentials, query parameters or a fragment.')).toBeTruthy();
   expect(require('../services/protocols').protocolManager.disconnect).not.toHaveBeenCalled();
   fireEvent.press(screen.getByLabelText('Back'));
+  // RGB status reads the same as its hub: Not connected, never "Offline".
+  expect(screen.getByLabelText('RGB account settings').props.accessibilityHint).toMatch(/^Not connected/);
+  expect(screen.getByLabelText('Spark account settings').props.accessibilityHint).toMatch(/^Offline/);
   fireEvent.press(screen.getByLabelText('RGB account settings'));
   await act(async () => {});
   // RGB: choose RGB on this phone or a remote RGB Lightning Node; no "use this account" switch.
   expect(screen.queryByLabelText('Use this account')).toBeNull();
   expect(screen.queryByText('Change network')).toBeNull();
-  expect(screen.getByLabelText('RGB on this phone')).toBeTruthy();
+  expect(screen.getByLabelText('RGB status: Not connected')).toBeTruthy();
+  expect(screen.getByLabelText('This phone')).toBeTruthy();
   // The node's how-to and connect live on their own screen.
   expect(screen.queryByText('How to connect')).toBeNull();
+  fireEvent.press(screen.getByLabelText('RGB node'));
   fireEvent.press(screen.getByLabelText('RGB Lightning Node'));
   expect(navigation.navigate).toHaveBeenCalledWith('RgbNode');
 });
