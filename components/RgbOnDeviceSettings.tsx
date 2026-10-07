@@ -13,7 +13,7 @@ import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity
 import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { theme, protocolColor } from '../theme';
+import { theme } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { protocolManager, reconcileRgbOnDevice } from '../services/protocols';
 import {
@@ -294,14 +294,19 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     }
   };
 
-  const color = protocolColor('RGB');
-  const errorText = !!error && <Text accessibilityRole="alert" style={[styles.description, styles.error]}>{error}</Text>;
+  const accent = theme.colors.primary[500];
+  const errorText = !!error && <Callout tone="error" message={error} style={styles.callout} />;
+  const sectionLabel = (text: string) => <Text accessibilityRole="header" style={styles.sectionLabel}>{text}</Text>;
+  const rowIcon = (name: keyof typeof Ionicons.glyphMap, tint: string = theme.colors.text.secondary) => (
+    <View style={[styles.icon, { backgroundColor: tint + '1A' }]}><Ionicons name={name} size={18} color={tint} /></View>
+  );
+  const chevron = <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />;
 
   if (!isRgbLibNativeAvailable()) {
-    return <View style={styles.row}><Text style={styles.description}>RGB on this phone needs a newer app build.</Text></View>;
+    return <View style={styles.section}><Text style={styles.description}>RGB on this phone needs a newer app build.</Text></View>;
   }
   if (!loaded) {
-    return <View style={styles.row}><ActivityIndicator color={color} /></View>;
+    return <View style={styles.section}><ActivityIndicator color={accent} /></View>;
   }
 
   if (nodeActive) {
@@ -325,7 +330,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       <TextInput accessibilityLabel="RGB proxy endpoint" style={styles.input} value={proxy} editable={!busy}
         onChangeText={(v) => { setProxy(v); setServersEdited(true); }}
         autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholderTextColor={theme.colors.text.tertiary} />
-      {!!endpointError && <Text accessibilityRole="alert" style={[styles.description, styles.error]}>{endpointError}</Text>}
+      {!!endpointError && <Callout tone="error" message={endpointError} />}
       {connected ? (
         <View style={styles.inlineActions}>
           <TouchableOpacity accessibilityRole="button" disabled={busy} onPress={() => { const d = rgbL1Host(network); setIndexer(d.indexerUrl); setProxy(d.transportEndpoint); void saveEndpoints(null); }}>
@@ -345,77 +350,72 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     </View>
   );
 
-  const serversToggle = (
-    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showServers }} onPress={() => setShowServers((v) => !v)}
-      activeOpacity={0.7} style={[styles.row, styles.divider]}>
-      <View style={[styles.icon, { backgroundColor: theme.colors.text.secondary + '1A' }]}>
-        <Ionicons name="server-outline" size={18} color={theme.colors.text.secondary} />
-      </View>
-      <View style={styles.text}>
-        <Text style={styles.label}>{connected ? 'Servers' : 'Advanced: servers'}</Text>
-        <Text style={styles.description} numberOfLines={1}>Indexer and RGB proxy for {label}</Text>
-      </View>
-      <Ionicons name={showServers ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.tertiary} />
-    </TouchableOpacity>
+  const advanced = (
+    <>
+      {sectionLabel('Advanced')}
+      <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showServers }} onPress={() => setShowServers((v) => !v)}
+        activeOpacity={0.7} style={styles.row}>
+        {rowIcon('server-outline')}
+        <View style={styles.text}>
+          <Text style={styles.label}>Servers</Text>
+          <Text style={styles.description} numberOfLines={1}>Indexer and RGB proxy for {label}</Text>
+        </View>
+        <Ionicons name={showServers ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.tertiary} />
+      </TouchableOpacity>
+      {showServers && servers}
+    </>
   );
 
   if (connected) {
-    const cloudColor = cloud.state === 'failed' || (backupNeeded && cloud.state !== 'backing-up') ? theme.colors.warning[500] : theme.colors.primary[500];
+    const cloudWarn = cloud.state === 'failed' || (backupNeeded && cloud.state !== 'backing-up');
+    const cloudColor = cloudWarn ? theme.colors.warning[500] : accent;
     const cloudLine = cloud.state === 'backing-up' ? 'Backing up…'
       : cloud.state === 'failed' ? `Last backup failed · ${cloud.error ?? 'retries on the next change'}`
       : backupNeeded ? 'Changed since the last backup · backs up automatically'
-      : cloud.lastBackupAt ? `Backed up automatically · ${new Date(cloud.lastBackupAt).toLocaleString()}`
-      : 'Backs up automatically after every send and receive';
+      : cloud.lastBackupAt ? `Backed up · ${new Date(cloud.lastBackupAt).toLocaleString()}`
+      : 'Backs up after every send and receive';
     return (
       <View>
         <View style={styles.row}>
-          <View style={[styles.icon, { backgroundColor: color + '1A' }]}>
-            <Ionicons name="checkmark-circle-outline" size={18} color={color} />
-          </View>
+          {rowIcon('checkmark-circle', theme.colors.success[500])}
           <View style={styles.text}>
             <Text style={styles.label}>Connected · {label}</Text>
-            <Text style={styles.description} numberOfLines={2}>On-chain RGB assets on this phone · beta · network fixed for this wallet</Text>
-            {errorText}
+            <Text style={styles.description} numberOfLines={1}>Network fixed for this wallet</Text>
           </View>
-          {busy && <ActivityIndicator color={color} />}
+          {busy && <ActivityIndicator color={accent} />}
         </View>
+        {errorText}
+        {sectionLabel('Backup')}
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back up RGB data now" onPress={backupNow}
-          disabled={cloud.state === 'backing-up'} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-          <View style={[styles.icon, { backgroundColor: cloudColor + '1A' }]}>
-            <Ionicons name={cloud.state === 'failed' ? 'cloud-offline-outline' : 'cloud-done-outline'} size={18} color={cloudColor} />
-          </View>
+          disabled={cloud.state === 'backing-up'} activeOpacity={0.7} style={styles.row}>
+          {rowIcon(cloud.state === 'failed' ? 'cloud-offline-outline' : 'cloud-done-outline', cloudColor)}
           <View style={styles.text}>
             <Text style={styles.label}>Cloud backup</Text>
-            <Text style={[styles.description, (cloud.state === 'failed' || backupNeeded) && { color: cloudColor }]} numberOfLines={2}>{cloudLine}</Text>
+            <Text style={[styles.description, cloudWarn && { color: cloudColor }]} numberOfLines={2}>{cloudLine}</Text>
           </View>
-          {cloud.state === 'backing-up' ? <ActivityIndicator color={theme.colors.primary[500]} /> : <Text style={styles.action}>Back up now</Text>}
+          {cloud.state === 'backing-up' ? <ActivityIndicator color={accent} /> : <Text style={styles.action}>Back up now</Text>}
         </TouchableOpacity>
         <TouchableOpacity accessibilityRole="button" onPress={exportFile} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-          <View style={[styles.icon, { backgroundColor: theme.colors.text.secondary + '1A' }]}>
-            <Ionicons name="share-outline" size={18} color={theme.colors.text.secondary} />
-          </View>
+          {rowIcon('share-outline')}
           <View style={styles.text}>
             <Text style={styles.label}>Export backup file</Text>
-            <Text style={styles.description} numberOfLines={2}>Encrypted with your recovery phrase · save it anywhere</Text>
+            <Text style={styles.description} numberOfLines={1}>Encrypted with your recovery phrase</Text>
           </View>
-          {exporting ? <ActivityIndicator color={theme.colors.primary[500]} /> : <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
+          {exporting ? <ActivityIndicator color={accent} /> : chevron}
         </TouchableOpacity>
-        {serversToggle}
-        {showServers && servers}
+        {advanced}
         <TouchableOpacity accessibilityRole="button" onPress={turnOff} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-          <View style={[styles.icon, { backgroundColor: theme.colors.error[500] + '1A' }]}>
-            <Ionicons name="power-outline" size={18} color={theme.colors.error[500]} />
-          </View>
+          {rowIcon('power-outline')}
           <View style={styles.text}>
-            <Text style={[styles.label, styles.error]}>Disconnect</Text>
-            <Text style={styles.description} numberOfLines={2}>Turns off RGB on this phone · its data stays here</Text>
+            <Text style={[styles.label, styles.danger]}>Disconnect</Text>
+            <Text style={styles.description} numberOfLines={1}>Your RGB data stays on this phone</Text>
           </View>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // Not connected: choose the network, then connect or restore.
+  // Not connected: choose the network, then connect; or restore what you had.
   const connectTitle = phase === 'checking' ? 'Checking for a backup…'
     : phase === 'connecting' ? 'Connecting…'
     : phase === 'restoring' ? 'Restoring…'
@@ -425,16 +425,17 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       <View style={styles.section}>
         <Text style={styles.label}>Network</Text>
         {locked ? (
-          <Text style={styles.description}>
-            {RGB_L1_NETWORK_LABEL[locked]} · fixed for this wallet: its RGB data on this phone is on this network.
-          </Text>
+          <View style={styles.locked}>
+            <Ionicons name="lock-closed-outline" size={14} color={theme.colors.text.secondary} />
+            <Text style={[styles.description, styles.text]}>{RGB_L1_NETWORK_LABEL[locked]} · fixed for this wallet</Text>
+          </View>
         ) : (
           <>
-            <SegmentedTabs
+            <SegmentedTabs scrollable={false} fill
               options={RGB_L1_NETWORKS.map((n) => ({ key: n, label: RGB_L1_NETWORK_LABEL[n], disabled: busy }))}
-              value={network} onChange={setNetwork} fill />
+              value={network} onChange={setNetwork} />
             <Text style={styles.description}>
-              {network === 'mainnet' ? 'Real bitcoin and RGB assets.' : 'Test bitcoin, no value.'} Fixed for this wallet once it starts.
+              {network === 'mainnet' ? 'Real bitcoin and RGB assets.' : 'Test bitcoin, no value.'} Can’t be changed once started.
             </Text>
           </>
         )}
@@ -442,41 +443,36 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           <Text style={styles.description}>On for {RGB_L1_NETWORK_LABEL[enabled]} but not connected.</Text>
         )}
         {errorText}
-      </View>
-      {serversToggle}
-      {showServers && servers}
-      <View style={[styles.section, styles.divider]}>
-        <Button title={connectTitle} onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth />
+        <Button title={connectTitle} onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth style={styles.primary} />
       </View>
       {!locked && (
         <>
-          <TouchableOpacity accessibilityRole="button" onPress={restoreCloud} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-            <View style={[styles.icon, { backgroundColor: theme.colors.text.secondary + '1A' }]}>
-              <Ionicons name="cloud-download-outline" size={18} color={theme.colors.text.secondary} />
-            </View>
+          {sectionLabel('Already have RGB assets?')}
+          <TouchableOpacity accessibilityRole="button" onPress={restoreCloud} disabled={busy} activeOpacity={0.7} style={styles.row}>
+            {rowIcon('cloud-download-outline')}
             <View style={styles.text}>
               <Text style={styles.label}>Restore from cloud</Text>
-              <Text style={styles.description} numberOfLines={2}>This wallet’s automatic backup on {label}</Text>
+              <Text style={styles.description} numberOfLines={1}>This wallet’s automatic backup on {label}</Text>
             </View>
-            {phase === 'restoring' ? <ActivityIndicator color={color} /> : <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
+            {phase === 'restoring' ? <ActivityIndicator color={accent} /> : chevron}
           </TouchableOpacity>
           <TouchableOpacity accessibilityRole="button" onPress={restoreFile} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
-            <View style={[styles.icon, { backgroundColor: theme.colors.text.secondary + '1A' }]}>
-              <Ionicons name="document-attach-outline" size={18} color={theme.colors.text.secondary} />
-            </View>
+            {rowIcon('document-attach-outline')}
             <View style={styles.text}>
               <Text style={styles.label}>Restore from a backup file</Text>
-              <Text style={styles.description} numberOfLines={2}>A file you exported before, on {label}</Text>
+              <Text style={styles.description} numberOfLines={1}>A file you exported before</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
+            {chevron}
           </TouchableOpacity>
         </>
       )}
+      {advanced}
       {enabled && (
         <TouchableOpacity accessibilityRole="button" onPress={turnOff} disabled={busy} activeOpacity={0.7} style={[styles.row, styles.divider]}>
+          {rowIcon('power-outline')}
           <View style={styles.text}>
-            <Text style={[styles.label, styles.error]}>Turn off</Text>
-            <Text style={styles.description} numberOfLines={2}>Stop trying to connect RGB on this phone</Text>
+            <Text style={[styles.label, styles.danger]}>Turn off</Text>
+            <Text style={styles.description} numberOfLines={1}>Stop trying to connect RGB on this phone</Text>
           </View>
         </TouchableOpacity>
       )}
@@ -485,14 +481,22 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingHorizontal: theme.spacing[4], minHeight: 64, paddingVertical: theme.spacing[3] },
-  section: { paddingHorizontal: theme.spacing[4], paddingVertical: theme.spacing[3], gap: theme.spacing[2] },
-  divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
+  row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingHorizontal: theme.spacing[4], minHeight: 60, paddingVertical: theme.spacing[3] },
+  section: { paddingHorizontal: theme.spacing[4], paddingVertical: theme.spacing[4], gap: theme.spacing[2] },
+  sectionLabel: {
+    fontSize: theme.typography.fontSize.xs, fontWeight: '700', color: theme.colors.text.tertiary, textTransform: 'uppercase', letterSpacing: 0.6,
+    paddingHorizontal: theme.spacing[4], paddingTop: theme.spacing[4], paddingBottom: theme.spacing[1],
+    borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light,
+  },
+  divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light, marginLeft: theme.spacing[4] + 32 + theme.spacing[3] },
   icon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   text: { flex: 1, minWidth: 0 },
   label: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },
   description: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
-  error: { color: theme.colors.error[500] },
+  danger: { color: theme.colors.error[500] },
+  callout: { marginHorizontal: theme.spacing[4], marginBottom: theme.spacing[3] },
+  primary: { marginTop: theme.spacing[2] },
+  locked: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5] },
   action: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.primary[500] },
   secondaryAction: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.secondary },
   fields: { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[3], gap: theme.spacing[1.5] },

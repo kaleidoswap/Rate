@@ -1,7 +1,8 @@
 import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
 import { loadRgbL1Network } from '../services/protocols/rgbL1';
-import { RgbAccountSettings } from '../components/RgbAccountSettings';
+import { RgbAccountSettings, RGB_STATUS } from '../components/RgbAccountSettings';
+import { RgbNodeIcon } from '../components/RgbNodeIcon';
 import { rgbNetworkLabel } from '../services/protocols/rgbAccount';
 import { currentBarkHost, isBarkOff, loadBarkHost, saveBarkNetwork, setBarkOff } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
@@ -846,7 +847,11 @@ export default function SettingsScreen({ navigation }: Props) {
             const network = proto === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]];
             const networkLabel = proto === 'RGB' ? rgbNetwork()
               : network ? (proto === 'BARK' && network === 'signet' ? 'Signet' : NETWORK_LABEL[network as ProtocolNetwork] ?? network) : null;
-            const status = connecting ? 'Connecting...' : connected ? 'Connected' : accountEnabled[proto] === false ? 'Off' : error && !error.startsWith('skipped') ? 'Error' : 'Offline';
+            const failed = !!error && !error.startsWith('skipped');
+            // RGB uses the same words as its hub and node screen: Connected / Not connected.
+            const status = connecting ? 'Connecting...' : connected ? 'Connected'
+              : proto === 'RGB' ? (failed ? 'Error' : RGB_STATUS.notConnected)
+              : accountEnabled[proto] === false ? 'Off' : failed ? 'Error' : 'Offline';
             // The whole row opens the account page; its network is changed there.
             return (
               <TouchableOpacity key={proto} activeOpacity={0.7} accessibilityRole="button"
@@ -854,7 +859,7 @@ export default function SettingsScreen({ navigation }: Props) {
                 onPress={() => { setSettingsQuery(''); setPage('advanced'); setAccount(proto); }}
                 style={[styles.row, idx > 0 && styles.rowDivider]}>
                 <View style={[styles.rowIcon, { backgroundColor: colors[proto] + '1A', opacity: connected ? 1 : 0.5 }]}>
-                  <NetworkIcon network={proto} size={18} color={colors[proto]} />
+                  {proto === 'RGB' && rgbNodeConnected() ? <RgbNodeIcon size={18} /> : <NetworkIcon network={proto} size={18} color={colors[proto]} />}
                 </View>
                 <View style={[styles.rowText, { minHeight: 48, justifyContent: 'center' }]}>
                   <Text style={styles.rowLabel}>{labels[proto]}</Text>

@@ -51,6 +51,7 @@ jest.mock('../services/protocols/rgbBackup', () => ({
   restoreRgbFromCloud: (...a: any[]) => { mockCalls.push('restore-cloud'); return (mockRestoreCloud as any)(...a); },
   findRgbCloudBackup: (...a: any[]) => (mockFindBackup as any)(...a),
 }));
+jest.mock('../utils/feedback', () => ({ feedback: { select: jest.fn() } }));
 jest.mock('../services/ToastService', () => ({ __esModule: true, default: { getInstance: () => ({ success: jest.fn(), error: jest.fn() }) } }));
 
 const connectedL1 = (backupRequired = false) => ({ isConnected: () => true, account: { backupRequired: async () => backupRequired, backup: jest.fn(async () => undefined) } });
