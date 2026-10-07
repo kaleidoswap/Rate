@@ -1,5 +1,4 @@
 import React from 'react';
-import { MIND_DESKTOP_ENABLED } from '../../store/slices/settingsSlice';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,8 +18,6 @@ interface Props {
   availability: MindAvailability | null;
   /** Run the model on this device. */
   onSelectLocal: () => void;
-  /** Pair with a desktop and delegate inference to it. */
-  onSelectDelegate: () => void;
   /** Decide later — keep AI off. */
   onSkip: () => void;
 }
@@ -67,14 +64,13 @@ const Option: React.FC<OptionProps> = ({ icon, title, subtitle, badge, disabled,
 
 /**
  * One-time KaleidoMind setup. Lets the user decide how the on-device AI runs —
- * locally, delegated to a desktop, or off — and steers away from options the
+ * locally or off — and steers away from options the
  * device can't support (so we never boot the worklet where it would crash).
  */
 export const KaleidoMindOnboarding: React.FC<Props> = ({
   visible,
   availability,
   onSelectLocal,
-  onSelectDelegate,
   onSkip,
 }) => {
   const runtimeAvailable = availability?.runtimeAvailable ?? false;
@@ -106,8 +102,8 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
             <View style={styles.notice}>
               <Ionicons name="information-circle" size={18} color={theme.colors.warning[500]} />
               <Text style={styles.noticeText}>
-                On-device AI isn’t available here (it needs a physical device). You can connect a
-                desktop to use KaleidoMind, or set it up later.
+                On-device AI isn’t available here (it needs a physical device). You can set it up
+                later on a phone.
               </Text>
             </View>
           )}
@@ -127,14 +123,6 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
             badge={!runtimeAvailable ? 'Unavailable' : undefined}
             onPress={onSelectLocal}
           />
-
-          {MIND_DESKTOP_ENABLED && <Option
-            icon="desktop-outline"
-            title="Connect a desktop"
-            subtitle="Delegate inference to a paired KaleidoSwap desktop. Your phone stays light; the desktop does the heavy lifting."
-            recommended={!localRecommended && runtimeAvailable}
-            onPress={onSelectDelegate}
-          />}
 
           <Option
             icon="moon-outline"

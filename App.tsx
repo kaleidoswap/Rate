@@ -63,7 +63,6 @@ import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
 import LightningAddressScreen from './screens/LightningAddressScreen';
-import PairDesktopScreen from './screens/PairDesktopScreen';
 import MindSettingsScreen from './screens/MindSettingsScreen';
 import NWCConnectScreen from './screens/NWCConnectScreen';
 import RgbNodeScreen from './screens/RgbNodeScreen';
@@ -88,7 +87,6 @@ type RootStackParamList = {
   AssetDetail: { asset: any };
   Map: undefined;
   LSP: undefined;
-  PairDesktop: undefined;
   MindSettings: undefined;
   LightningAddress: undefined;
   NWCConnect: { scanned?: string } | undefined;
@@ -251,11 +249,6 @@ function AppNavigator() {
           options={{ presentation: 'modal' }}
         />
         <Stack.Screen
-          name="PairDesktop"
-          component={asModalScreen(PairDesktopScreen)}
-          options={{ presentation: 'modal', headerShown: false }}
-        />
-        <Stack.Screen
           name="MindSettings"
           component={asModalScreen(MindSettingsScreen)}
           options={{ presentation: 'modal', headerShown: false }}
@@ -304,10 +297,7 @@ function AppNavigator() {
 function QVACEnabledSync() {
   const aiMode = useSelector(selectAiMode);
   React.useEffect(() => {
-    const svc = QVACService.getInstance();
-    svc.setEnabled(aiMode !== 'off');
-    // Desktop mode => delegate to the paired provider; Local/Off => on-device.
-    void svc.setDelegateEnabled(aiMode === 'delegate');
+    QVACService.getInstance().setEnabled(aiMode !== 'off');
   }, [aiMode]);
   return null;
 }

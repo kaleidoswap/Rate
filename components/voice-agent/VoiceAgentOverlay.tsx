@@ -505,12 +505,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.8]) }],
   }));
 
-  // Which LLM is answering + where it runs, shown under the header title.
-  const modelSubtitle = (() => {
-    const delegating = qvac.config?.delegateEnabled && !!qvac.config?.providerPublicKey;
-    const label = getModelById(qvac.config?.modelId)?.label ?? 'On-device AI';
-    return `${label} · ${delegating ? 'via Desktop' : 'on this device'}`;
-  })();
+  // Which LLM is answering, shown under the header title.
+  const modelSubtitle = `${getModelById(qvac.config?.modelId)?.label ?? 'On-device AI'} · on this device`;
 
   const aiFailed = qvac.llmStatus === 'error';
   const speechFailed = qvac.whisperStatus === 'error';
