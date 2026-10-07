@@ -13,6 +13,7 @@ jest.mock('../store/slices/nostrSlice', () => ({
 }));
 jest.mock('../services/NostrService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
 jest.mock('nostr-tools', () => ({ nip19: { npubEncode: (hex: string) => `npub1${hex}` } }));
+jest.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
 const mockToast = { success: jest.fn(), error: jest.fn(), info: jest.fn(), warning: jest.fn() };
 jest.mock('../services/ToastService', () => ({ __esModule: true, default: { getInstance: () => mockToast } }));
 jest.mock('../utils/feedback', () => ({ feedback: { select: jest.fn() } }));
@@ -202,4 +203,58 @@ test('toggleNostrFavorite works on pre-v6 persisted state without the field', ()
   const on = reducer(legacy, toggleNostrFavorite('ABC'));
   expect(on.favoriteNostrPubkeys).toEqual(['abc']);
   expect(reducer(on, toggleNostrFavorite('abc')).favoriteNostrPubkeys).toEqual([]);
+});
+
+describe('a scanned Nostr code', () => {
+  const PUBKEY = 'ab'.repeat(32);
+  const scanned = `npub1${'q'.repeat(58)}`;
+  const nostr = {
+    resolveToPubkey: jest.fn(async () => ({ pubkey: PUBKEY })),
+    getUserInfo: jest.fn(async () => ({
+      npub: scanned,
+      profile: { display_name: 'Dave', nip05: 'dave@example.com', about: 'Hi there', lud16: 'dave@getalby.com', picture: 'https://x/d.png' },
+    })),
+  };
+  beforeEach(() => {
+    (require('../services/NostrService').default.getInstance as jest.Mock).mockReturnValue(nostr);
+  });
+
+  async function openScanned() {
+    const screen = render(<ContactsScreen navigation={navigation} route={{ params: { scannedContact: scanned } }} />);
+    await act(async () => { jest.advanceTimersByTime(400); });
+    return screen;
+  }
+
+  test('opens Add contact prefilled, showing their Nostr profile', async () => {
+    const screen = await openScanned();
+    expect(screen.getByLabelText('Address or key').props.value).toBe(scanned);
+    expect(navigation.setParams).toHaveBeenCalledWith({ scannedContact: undefined });
+    expect(nostr.resolveToPubkey).toHaveBeenCalledWith(scanned);
+    expect(nostr.getUserInfo).toHaveBeenCalledWith(PUBKEY);
+    expect(screen.getByText('Dave')).toBeTruthy();
+    expect(screen.getByText('dave@example.com')).toBeTruthy();
+    expect(screen.getByText('Hi there')).toBeTruthy();
+  });
+
+  test('Add contact follows them on Nostr when connected', async () => {
+    const { followUser } = require('../store/slices/nostrSlice');
+    followUser.mockReturnValue({ type: 'follow' });
+    mockDispatch.mockImplementation((a: any) => ({ ...a, unwrap: async () => undefined }));
+    mockState = state({ nostr: { isConnected: true, contacts: [] } });
+    const screen = await openScanned();
+    await act(async () => { fireEvent.press(screen.getAllByText('Add contact').pop()!); });
+    expect(followUser).toHaveBeenCalledWith({ pubkey: PUBKEY, petname: undefined });
+    expect(mockToast.success).toHaveBeenCalledWith('Following on Nostr');
+    mockDispatch.mockImplementation((a: any) => a);
+  });
+
+  test('without Nostr connected, saves them as a contact with their key and profile', async () => {
+    const screen = await openScanned();
+    await act(async () => { fireEvent.press(screen.getAllByText('Add contact').pop()!); });
+    const added = mockDispatch.mock.calls.map((c) => c[0]).find((a) => a.type === 'contacts/addContact');
+    expect(added.payload).toEqual(expect.objectContaining({
+      name: 'Dave', npub: `npub1${PUBKEY}`, lightning_address: 'dave@getalby.com', avatar_url: 'https://x/d.png',
+    }));
+    expect(mockToast.success).toHaveBeenCalledWith(expect.stringContaining('Contact saved'));
+  });
 });

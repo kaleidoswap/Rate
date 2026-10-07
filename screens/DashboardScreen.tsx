@@ -158,7 +158,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const hasNostrIdentity = useSelector((state: RootState) => !!state.nostr?.publicKey);
   const greeting = useMemo(() => buildGreeting(), []);
   const openProfile = useCallback(
-    () => navigation.navigate(hasNostrIdentity ? 'ProfileEdit' : 'NostrSettings'),
+    () => navigation.navigate(hasNostrIdentity ? 'Profile' : 'NostrSettings'),
     [navigation, hasNostrIdentity],
   );
 

@@ -14,7 +14,7 @@ function brightness(): { get: () => Promise<number>; set: (v: number) => Promise
 }
 
 /** Square, unobstructed modules and a white quiet zone for dense payment requests. Tap to enlarge (and brighten). */
-export const ReceiveQr = React.memo(function ReceiveQr({ value, size }: { value: string; size: number }) {
+export const ReceiveQr = React.memo(function ReceiveQr({ value, size, label = 'payment code' }: { value: string; size: number; label?: string }) {
   const theme = useAppTheme();
   const { width, height } = useWindowDimensions();
   const [readyValue, setReadyValue] = useState('');
@@ -42,10 +42,10 @@ export const ReceiveQr = React.memo(function ReceiveQr({ value, size }: { value:
   const bigSize = Math.min(width, height) - theme.spacing[8] * 2;
   return <>
     <Pressable disabled={!ready} onPress={() => { feedback.select(); setEnlarged(true); }}
-      accessibilityRole="button" accessibilityLabel="Enlarge payment code" accessibilityHint="Shows the code full screen for easier scanning"
+      accessibilityRole="button" accessibilityLabel={`Enlarge ${label}`} accessibilityHint="Shows the code full screen for easier scanning"
       style={{ alignSelf: 'center', backgroundColor: '#FFFFFF', padding: theme.spacing[4], borderRadius: theme.borderRadius.xl }}>
       {ready ? <QRCode value={code} size={size} color="#000000" backgroundColor="#FFFFFF" ecl="M" />
-        : <View accessibilityLabel="Preparing payment code" style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        : <View accessibilityLabel={`Preparing ${label}`} style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
           <ActivityIndicator color={theme.colors.primary[500]} />
         </View>}
     </Pressable>

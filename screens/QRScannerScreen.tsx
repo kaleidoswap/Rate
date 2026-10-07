@@ -29,6 +29,7 @@ import { classifyWithdrawDestination } from '../utils/account-routing';
 import { detectCrossChainAddress } from '../utils/crosschain';
 import { unwrapCrossChainUri } from '../utils/crosschain-send';
 import { decodeBolt11 } from '../utils/decodeInvoice';
+import { nostrIdentity } from '../utils/nostrProfile';
 import { theme } from '../theme';
 import type { RootState } from '../store';
 
@@ -105,6 +106,11 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       }
       if (captureMode === 'contact') {
         navigation.navigate(returnScreen, { scannedContact: data }); return;
+      }
+      // Someone's Nostr code (npub / nprofile): offer to add them as a contact.
+      const nostrId = nostrIdentity(data);
+      if (nostrId) {
+        navigation.navigate('Contacts', { scannedContact: nostrId }); return;
       }
       // Anything payable opens Send as-is: it decodes the code and offers every way to pay it.
       if (isPayable(data)) {

@@ -1,8 +1,8 @@
 // components/ProfileChip.tsx
 //
 // The Dashboard's top-left identity: the user's Nostr avatar, a short welcome
-// line and, under it, their name. Tapping it opens the profile editor, or Nostr
-// setup when there is no identity yet.
+// line and, under it, their name. Tapping it opens the profile, or Nostr setup
+// when there is no identity yet.
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -29,7 +29,7 @@ export function ProfileChip({ profile, hasIdentity, greeting, onPress }: Props) 
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityRole="button"
-      accessibilityLabel={hasIdentity ? `${title}. Edit profile` : 'Set up your profile'}
+      accessibilityLabel={hasIdentity ? `${title}. Open profile` : 'Set up your profile'}
       hitSlop={{ top: 6, bottom: 6 }}
     >
       <ProfileAvatar uri={profile?.picture} name={name} size={40} />

@@ -129,3 +129,11 @@ export function formatNip05(nip05?: string | null): string {
   const v = (nip05 ?? '').trim();
   return v.startsWith('_@') ? v.slice(2) : v;
 }
+
+const NOSTR_ID = /^(?:nostr:)?((?:npub|nprofile)1[02-9ac-hj-np-z]+)$/i;
+
+/** The bare npub1… / nprofile1… in a scanned or pasted code, with or without `nostr:`. */
+export function nostrIdentity(data: string): string | null {
+  const match = NOSTR_ID.exec(data.trim());
+  return match ? match[1].toLowerCase() : null;
+}

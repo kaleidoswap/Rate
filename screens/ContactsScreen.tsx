@@ -27,8 +27,10 @@ import { loadContactList, followUser, unfollowUser } from '../store/slices/nostr
 import { theme } from '../theme';
 import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input, CopyButton, PressableScale } from '../components';
 import { NostrIcon } from '../components/ProtocolIcons';
+import { ProfileAvatar } from '../components/ProfileAvatar';
+import { formatNip05, profileDisplayName, shortNpub } from '../utils/nostrProfile';
 import { feedback } from '../utils/feedback';
-import NostrService, { NostrContact } from '../services/NostrService';
+import NostrService, { NostrContact, type NostrProfile } from '../services/NostrService';
 import ToastService from '../services/ToastService';
 import { contactEvents, type ContactEvent } from '../services/contactHistory';
 import { nip19 } from 'nostr-tools';
@@ -77,6 +79,9 @@ export default function ContactsScreen({ navigation, route }: Props) {
   const [addName, setAddName] = useState('');
   const [addInput, setAddInput] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  // The Nostr profile behind a pasted or scanned npub, when it can be fetched.
+  const [preview, setPreview] = useState<{ pubkey: string; npub: string; profile: NostrProfile | null } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   // Zap sheet target (null = closed).
   const [zapRecipient, setZapRecipient] = useState<ZapRecipient | null>(null);
   // Contact sheet (null = closed). Holds the id so the sheet follows live edits.
@@ -188,12 +193,41 @@ export default function ContactsScreen({ navigation, route }: Props) {
     return 'unknown';
   };
 
+  // Show who an npub / nprofile / hex key belongs to before adding them.
+  useEffect(() => {
+    setPreview(null);
+    const id = addInput.trim();
+    if (!showAddForm || detectKind(id) !== 'nostr' || id.includes('@')) {
+      setPreviewLoading(false);
+      return;
+    }
+    let live = true;
+    setPreviewLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const nostr = NostrService.getInstance();
+        const resolved = await nostr.resolveToPubkey(id);
+        if (!live || !('pubkey' in resolved)) return;
+        const info = await nostr.getUserInfo(resolved.pubkey);
+        if (live) setPreview({ pubkey: resolved.pubkey, npub: info.npub, profile: info.profile });
+      } catch {
+        // No preview: the add still works from the key alone.
+      } finally {
+        if (live) setPreviewLoading(false);
+      }
+    }, 300);
+    return () => { live = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addInput, showAddForm]);
+
   const addLocalContact = (fields: Partial<Contact>) => {
     const contact: Contact = {
       id: `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: (fields.name || 'Contact').trim(),
       lightning_address: fields.lightning_address,
       node_pubkey: fields.node_pubkey,
+      npub: fields.npub,
+      avatar_url: fields.avatar_url,
       created_at: Date.now(),
       updated_at: Date.now(),
       is_favorite: false,
@@ -259,7 +293,26 @@ export default function ContactsScreen({ navigation, route }: Props) {
             return;
           }
         } else if (kind === 'nostr') {
-          toast().info('Connect Nostr in Settings to follow accounts.');
+          // Offline: keep them as a saved contact, so a scanned code isn't lost.
+          const resolved = await NostrService.getInstance().resolveToPubkey(identifier);
+          if (!('pubkey' in resolved)) {
+            toast().error(resolved.error || 'Could not read that Nostr identity.');
+            return;
+          }
+          const npub = nip19.npubEncode(resolved.pubkey);
+          if (contacts.some((c) => c.npub === npub)) {
+            toast().info('Already in your contacts');
+            return;
+          }
+          const known = preview?.pubkey === resolved.pubkey ? preview.profile : null;
+          addLocalContact({
+            name: name || profileDisplayName(known) || 'Nostr contact',
+            npub,
+            lightning_address: known?.lud16 || undefined,
+            avatar_url: known?.picture || undefined,
+          });
+          resetAddForm();
+          toast().success('Contact saved. Connect Nostr in Settings to follow them.');
           return;
         }
 
@@ -500,6 +553,31 @@ export default function ContactsScreen({ navigation, route }: Props) {
           <View style={styles.detectRow}>
             <IdIcon icon={d.icon} size={13} color={d.color} />
             <Text style={[styles.detectText, { color: d.color }]}>{d.label}</Text>
+          </View>
+        )}
+        {(previewLoading || preview) && (
+          <View style={styles.preview} accessibilityLabel="Nostr profile">
+            {preview ? (
+              <>
+                <ProfileAvatar uri={preview.profile?.picture} name={profileDisplayName(preview.profile)} size={44} />
+                <View style={styles.previewText}>
+                  <Text style={styles.previewName} numberOfLines={1}>
+                    {profileDisplayName(preview.profile) || 'No name on Nostr'}
+                  </Text>
+                  <Text style={styles.previewMeta} numberOfLines={1}>
+                    {formatNip05(preview.profile?.nip05) || shortNpub(preview.npub)}
+                  </Text>
+                  {!!preview.profile?.about && (
+                    <Text style={styles.previewAbout} numberOfLines={2}>{preview.profile.about}</Text>
+                  )}
+                </View>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator size="small" color={theme.colors.primary[500]} />
+                <Text style={styles.previewMeta}>Looking up their profile…</Text>
+              </>
+            )}
           </View>
         )}
         <Input
@@ -850,6 +928,15 @@ const styles = StyleSheet.create({
   detectRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: -theme.spacing[1] },
   detectText: { fontSize: theme.typography.fontSize.xs, fontWeight: '600' },
   sheetFooterBtn: { marginTop: theme.spacing[3] },
+  preview: {
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.background.secondary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light,
+  },
+  previewText: { flex: 1, minWidth: 0, gap: 2 },
+  previewName: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.primary },
+  previewMeta: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
+  previewAbout: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
   // Contact sheet
   profileHead: { alignItems: 'center', gap: theme.spacing[1], paddingTop: theme.spacing[2], paddingBottom: theme.spacing[4] },
   profileName: { marginTop: theme.spacing[2], fontSize: theme.typography.fontSize.xl, fontWeight: '700', color: theme.colors.text.primary },

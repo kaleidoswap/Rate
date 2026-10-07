@@ -58,6 +58,7 @@ import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
+import ProfileScreen from './screens/ProfileScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
@@ -84,6 +85,7 @@ type RootStackParamList = {
   DesignSystem: undefined;
   Swap: undefined;
   NostrSettings: undefined;
+  Profile: undefined;
   ProfileEdit: undefined;
   AssetDetail: { asset: any };
   Map: undefined;
@@ -239,6 +241,7 @@ function AppNavigator() {
         <Stack.Screen name="Dashboard" component={DashboardTabs} options={{ animation: 'fade', gestureEnabled: false }} />
         {/* Settings and its pages: full screen, slide in sideways, back arrow. */}
         <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} />
         <Stack.Screen name="MindSettings" component={MindSettingsScreen} />
         <Stack.Screen name="NWCConnect" component={NWCConnectScreen} />
