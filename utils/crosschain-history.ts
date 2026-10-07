@@ -72,7 +72,8 @@ export function recordFromSend(s: CrossChainSendSession): CrossChainRecord {
     recipient: s.recipient,
     orderId: s.order?.id,
     readToken: s.order?.readToken,
-    status: s.order?.status ?? (s.phase === 'paying' ? 'unpaid' : 'processing'),
+    // Moving on from an unconfirmed payment means it didn't go out.
+    status: s.order?.status ?? (s.phase === 'paying' ? (s.dismissedAt ? 'failed' : 'unpaid') : 'processing'),
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
   };

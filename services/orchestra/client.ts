@@ -15,6 +15,9 @@ const API_KEY: string = process.env.EXPO_PUBLIC_FLASHNET_ORCHESTRA_KEY || '';
 // allowlist). Browsers add it to POSTs only; React Native adds none, so send it.
 const ORIGIN = 'https://kaleidoswap.com';
 
+/** A stalled request must not hang a spinner or a poll forever. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export const ORCHESTRA_AUTH_ERROR_CODE = 'ORCHESTRA_AUTH_FAILED';
 export const ORCHESTRA_ORIGIN_ERROR_CODE = 'ORCHESTRA_ORIGIN_MISSING';
 
@@ -176,7 +179,14 @@ function randomId(): string {
 async function request<T>(
   method: 'GET' | 'POST',
   path: string,
-  opts?: { params?: Record<string, string>; body?: unknown; auth?: boolean; idempotency?: string },
+  opts?: {
+    params?: Record<string, string>;
+    body?: unknown;
+    auth?: boolean;
+    idempotency?: string;
+    /** Same key on every retry of one logical operation, so the server can dedupe it. */
+    idempotencyKey?: string;
+  },
 ): Promise<T> {
   const query = opts?.params
     ? Object.entries(opts.params)
@@ -188,13 +198,25 @@ async function request<T>(
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: ORIGIN };
   if (opts?.auth && API_KEY) headers.Authorization = `Bearer ${API_KEY}`;
-  if (opts?.idempotency) headers['X-Idempotency-Key'] = `${opts.idempotency}:${randomId()}`;
+  if (opts?.idempotencyKey) headers['X-Idempotency-Key'] = opts.idempotencyKey;
+  else if (opts?.idempotency) headers['X-Idempotency-Key'] = `${opts.idempotency}:${randomId()}`;
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: opts?.body ? JSON.stringify(opts.body) : undefined,
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method,
+      headers,
+      body: opts?.body ? JSON.stringify(opts.body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (controller.signal.aborted) throw new Error(`Orchestra ${method} ${path} timed out: network request failed`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -246,12 +268,18 @@ export async function createQuote(params: CreateQuoteParams): Promise<OrchestraQ
 /**
  * Turn a funded quote into an order. Fails until the deposit is seen, so the
  * bridge polls it to detect the deposit. Keep the returned `readToken`.
+ *
+ * A submit carrying a payment proof is one operation however often it is
+ * retried, so it reuses one key. A bare poll gets a fresh key each time: a
+ * cached "not funded yet" reply would otherwise hide the deposit.
  */
 export async function submitOrder(params: SubmitOrderParams): Promise<SubmittedOrder> {
+  const proof = params.sparkTxHash ?? params.txHash ?? params.bitcoinTxid;
   return request<SubmittedOrder>('POST', '/v1/orchestration/submit', {
     body: params,
     auth: true,
     idempotency: 'submit',
+    idempotencyKey: proof ? `submit:${params.quoteId}:${proof}` : undefined,
   });
 }
 

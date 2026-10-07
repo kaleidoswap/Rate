@@ -17,7 +17,7 @@
 // Every source is fetched defensively: a failure in one never blocks the rest.
 
 import { protocolManager, rgbAccountAdapter } from './protocols';
-import { refreshCrossChainHistory } from './crosschainHistory';
+import { loadCrossChainHistory, refreshCrossChainHistory } from './crosschainHistory';
 import {
   activityStatusOf,
   formatRecordAmount,
@@ -417,7 +417,9 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
   // 6. Cross-chain orders: deposits from other chains and sends out of Spark
   if (walletId != null) {
     try {
-      for (const rec of await refreshCrossChainHistory(walletId)) {
+      // Statuses refresh in the background; the next load shows them.
+      void refreshCrossChainHistory(walletId).catch(() => {});
+      for (const rec of await loadCrossChainHistory(walletId)) {
         const deposit = rec.direction === 'deposit';
         const external = deposit ? rec.sourceChain : rec.destChain;
         const shown = deposit
