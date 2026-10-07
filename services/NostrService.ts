@@ -24,6 +24,8 @@ import {
   type ProfileFormField,
 } from '../utils/nostrProfile';
 
+const PROFILE_FETCH_TIMEOUT_MS = 6_000;
+
 // NIP-06 derivation path for Nostr keys from a BIP39 mnemonic.
 // m/44'/1237'/<account>'/0/0 — 1237 is the registered Nostr coin type.
 const NOSTR_DERIVATION_PATH = (account = 0) => `m/44'/1237'/${account}'/0/0`;
@@ -492,10 +494,13 @@ class NostrService {
     }
     await this.ensureReady();
 
-    const latest = await this.ndk.fetchEvent(
-      { kinds: [NDKKind.Metadata], authors: [this.user.pubkey], limit: 1 },
-      { closeOnEose: true },
-    );
+    // Slow relays shouldn't hang Save; past the timeout we build on `cached`.
+    const latest = await Promise.race([
+      this.ndk
+        .fetchEvent({ kinds: [NDKKind.Metadata], authors: [this.user.pubkey], limit: 1 }, { closeOnEose: true })
+        .catch(() => null),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), PROFILE_FETCH_TIMEOUT_MS)),
+    ]);
     const base =
       parseProfileContent(latest?.content) ??
       (cached ? JSON.parse(JSON.stringify(cached)) : null);
