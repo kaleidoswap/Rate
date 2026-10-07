@@ -26,6 +26,19 @@ const mockToast = { success: jest.fn(), error: jest.fn() };
 jest.mock('../services/ToastService', () => ({ __esModule: true, default: { getInstance: () => mockToast } }));
 jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: () => null }));
 jest.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
+jest.mock('../utils/feedback', () => ({ feedback: { select: jest.fn() } }));
+jest.mock('../components/Sheet', () => {
+  const { Text, View } = require('react-native');
+  return { Sheet: ({ visible, title, children, footer }: any) => (visible ? <View><Text>{title}</Text>{children}{footer}</View> : null) };
+});
+jest.mock('../components/Input', () => {
+  const { Text, View, TextInput } = require('react-native');
+  return { Input: ({ label, error, ...props }: any) => <View><TextInput accessibilityLabel={label} {...props} />{error ? <Text>{error}</Text> : null}</View> };
+});
+jest.mock('../components/Button', () => {
+  const { Text, TouchableOpacity } = require('react-native');
+  return { Button: ({ title, onPress, disabled }: any) => <TouchableOpacity accessibilityRole="button" onPress={onPress} disabled={disabled}><Text>{title}</Text></TouchableOpacity> };
+});
 jest.mock('../components', () => {
   const { Text, TouchableOpacity, View, TextInput } = require('react-native');
   return {
@@ -114,9 +127,40 @@ it('sends people without a Nostr identity to setup', () => {
   expect(navigation.replace).toHaveBeenCalledWith('NostrSettings');
 });
 
+const savedEdits = async (screen: any) => {
+  await act(async () => { fireEvent.press(screen.getByText('Save')); });
+  return mockDispatch.mock.calls.map(c => c[0]).find(a => a.type === 'update')?.edits;
+};
+const chooseFromLibrary = async (screen: any, target: string) => {
+  fireEvent.press(screen.getByLabelText(target));
+  fireEvent.press(screen.getByText('Choose a photo'));
+  await waitFor(() => expect(pickPhoto).toHaveBeenCalled());
+  await waitFor(() => expect(mockToast.success.mock.calls.length + mockToast.error.mock.calls.length).toBeGreaterThan(0));
+};
+
+it('has no separate link fields: the photo and banner open one choice', () => {
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  expect(screen.queryByLabelText('Or paste a picture link')).toBeNull();
+  expect(screen.queryByLabelText('Or paste a banner link')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Change profile photo'));
+  expect(screen.getByText('Profile photo')).toBeTruthy();
+  expect(screen.getByText('Choose a photo')).toBeTruthy();
+  expect(screen.getByText('Paste a link')).toBeTruthy();
+  expect(screen.getByText('Remove')).toBeTruthy();
+  // On the screen, and in the choice where it matters.
+  expect(screen.getAllByText(/uploaded to a public media server \(blossom\.primal\.net\)/)).toHaveLength(2);
+});
+
+it('offers no Remove when there is no banner yet', () => {
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Change banner'));
+  expect(screen.getByText('Banner')).toBeTruthy();
+  expect(screen.queryByText('Remove')).toBeNull();
+});
+
 it('uploads a chosen profile photo and publishes its link', async () => {
   const screen = render(<ProfileEditScreen navigation={navigation} />);
-  await act(async () => { fireEvent.press(screen.getByLabelText('Choose profile photo')); });
+  await chooseFromLibrary(screen, 'Change profile photo');
 
   expect(pickPhoto).toHaveBeenCalledWith(expect.objectContaining({ allowsEditing: true, aspect: [1, 1], base64: true }));
   const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
@@ -125,37 +169,66 @@ it('uploads a chosen profile photo and publishes its link', async () => {
   expect(init.headers['Content-Type']).toBe('image/jpeg');
   expect(init.headers.Authorization).toMatch(/^Nostr /);
   expect(mockNostr.signEvent).toHaveBeenCalledWith(expect.objectContaining({ kind: 24242, content: 'Upload a.jpg' }));
-  expect(screen.getByLabelText('Or paste a picture link').props.value).toBe('https://cdn.example/new.jpg');
-
-  await act(async () => { fireEvent.press(screen.getByText('Save')); });
-  const update = mockDispatch.mock.calls.map(c => c[0]).find(a => a.type === 'update');
-  expect(update.edits).toEqual({ picture: 'https://cdn.example/new.jpg' });
+  expect(await savedEdits(screen)).toEqual({ picture: 'https://cdn.example/new.jpg' });
 });
 
 it('uses a wide crop for the banner and reconnects first when the key is not loaded', async () => {
   mockNostr.canSign.mockReturnValue(false);
   const screen = render(<ProfileEditScreen navigation={navigation} />);
-  await act(async () => { fireEvent.press(screen.getByLabelText('Choose banner photo')); });
+  await chooseFromLibrary(screen, 'Change banner');
 
   expect(pickPhoto).toHaveBeenCalledWith(expect.objectContaining({ aspect: [3, 1] }));
   expect(mockDispatch.mock.calls.some(c => c[0].type === 'restore')).toBe(true);
-  expect(screen.getByLabelText('Or paste a banner link').props.value).toBe('https://cdn.example/new.jpg');
+  expect(await savedEdits(screen)).toEqual({ banner: 'https://cdn.example/new.jpg' });
 });
 
 it('keeps the old picture and explains when the upload fails', async () => {
   global.fetch = jest.fn(async () => ({ ok: false, status: 401, headers: { get: () => 'auth expired' }, json: async () => ({}) })) as any;
   const screen = render(<ProfileEditScreen navigation={navigation} />);
-  await act(async () => { fireEvent.press(screen.getByLabelText('Choose profile photo')); });
+  await chooseFromLibrary(screen, 'Change profile photo');
 
   expect(mockToast.error).toHaveBeenCalledWith(expect.stringContaining('auth expired'));
-  expect(screen.getByLabelText('Or paste a picture link').props.value).toBe(profile.picture);
+  expect(await savedEdits(screen)).toBeUndefined();
 });
 
 it('does nothing when the picker is cancelled', async () => {
   pickPhoto.mockResolvedValue({ canceled: true, assets: null });
   const screen = render(<ProfileEditScreen navigation={navigation} />);
-  await act(async () => { fireEvent.press(screen.getByLabelText('Choose profile photo')); });
+  fireEvent.press(screen.getByLabelText('Change profile photo'));
+  fireEvent.press(screen.getByText('Choose a photo'));
+  await waitFor(() => expect(pickPhoto).toHaveBeenCalled());
 
   expect(global.fetch).not.toHaveBeenCalled();
   expect(mockToast.error).not.toHaveBeenCalled();
+});
+
+it('pastes a link, checking it first', async () => {
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Change profile photo'));
+  fireEvent.press(screen.getByText('Paste a link'));
+  expect(screen.getByLabelText('Image link').props.value).toBe(profile.picture);
+
+  fireEvent.changeText(screen.getByLabelText('Image link'), 'not a link');
+  fireEvent.press(screen.getByText('Use link'));
+  expect(screen.getByText('Enter a link starting with https://')).toBeTruthy();
+
+  fireEvent.changeText(screen.getByLabelText('Image link'), 'https://example.com/b.png');
+  fireEvent.press(screen.getByText('Use link'));
+  expect(screen.queryByLabelText('Image link')).toBeNull();
+  expect(await savedEdits(screen)).toEqual({ picture: 'https://example.com/b.png' });
+});
+
+it('removes the photo', async () => {
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Change profile photo'));
+  fireEvent.press(screen.getByText('Remove'));
+  expect(screen.queryByText('Choose a photo')).toBeNull();
+  expect(await savedEdits(screen)).toEqual({ picture: '' });
+});
+
+it('an odd photo link from another app does not block saving other fields', async () => {
+  mockState.nostr.profile = { ...profile, picture: 'ipfs://abc' };
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  fireEvent.changeText(screen.getByLabelText('About'), 'Hi');
+  expect(await savedEdits(screen)).toEqual({ about: 'Hi' });
 });

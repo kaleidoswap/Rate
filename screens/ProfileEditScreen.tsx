@@ -1,7 +1,7 @@
 // screens/ProfileEditScreen.tsx
 //
-// The one editor for the user's Nostr profile, opened from the Dashboard
-// header and from Nostr settings. Saving publishes kind-0 metadata: only the
+// The one editor for the user's Nostr profile, opened from the Profile page
+// and from Nostr settings. Saving publishes kind-0 metadata: only the
 // fields changed here are applied, on top of the latest profile on the relays.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
@@ -17,10 +17,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { theme } from '../theme';
+import { motion, theme } from '../theme';
 import { Button, Callout, EmptyState, Input } from '../components';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ProfileAvatar } from '../components/ProfileAvatar';
+import { PhotoChoiceSheet } from '../components/PhotoChoiceSheet';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
   loadNostrProfile,
@@ -62,6 +63,7 @@ export default function ProfileEditScreen({ navigation }: Props) {
   const [saving, setSaving] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [uploading, setUploading] = useState<PhotoField | null>(null);
+  const [choosing, setChoosing] = useState<PhotoField | null>(null);
   const touched = useRef(false);
 
   const changed = useMemo(
@@ -141,8 +143,21 @@ export default function ProfileEditScreen({ navigation }: Props) {
     }
   };
 
+  // Close the choice first: the photo library can't open over a closing sheet.
+  const pickFromLibrary = (field: PhotoField) => {
+    setChoosing(null);
+    setTimeout(() => { void choosePhoto(field); }, motion.duration.base + 80);
+  };
+  const applyChoice = (field: PhotoField, value: string) => {
+    setChoosing(null);
+    set(field)(value);
+  };
+
   const save = async () => {
     const found = validateProfileForm(form);
+    // Photo links only change through the choice sheet, which checks them;
+    // an odd link set by another app shouldn't block saving other fields.
+    for (const f of ['picture', 'banner'] as const) if (!changed.includes(f)) delete found[f];
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     if (changed.length === 0) {
@@ -196,8 +211,8 @@ export default function ProfileEditScreen({ navigation }: Props) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.preview}>
-            <TouchableOpacity style={styles.banner} onPress={() => choosePhoto('banner')} disabled={!!uploading}
-              accessibilityRole="button" accessibilityLabel="Choose banner photo">
+            <TouchableOpacity style={styles.banner} onPress={() => setChoosing('banner')} disabled={!!uploading}
+              accessibilityRole="button" accessibilityLabel="Change banner">
               {isHttpUrl(banner) && <Image source={{ uri: banner }} style={styles.bannerImg} resizeMode="cover" />}
               {uploading === 'banner' ? (
                 <View style={styles.busy}><ActivityIndicator color={theme.colors.primary[500]} /></View>
@@ -207,8 +222,8 @@ export default function ProfileEditScreen({ navigation }: Props) {
                 </View>
               )}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.avatarWrap} onPress={() => choosePhoto('picture')} disabled={!!uploading}
-              accessibilityRole="button" accessibilityLabel="Choose profile photo">
+            <TouchableOpacity style={styles.avatarWrap} onPress={() => setChoosing('picture')} disabled={!!uploading}
+              accessibilityRole="button" accessibilityLabel="Change profile photo">
               <ProfileAvatar uri={isHttpUrl(picture) ? picture : null} name={previewName} size={AVATAR} />
               {uploading === 'picture' ? (
                 <View style={[styles.busy, styles.avatarBusy]}><ActivityIndicator color={theme.colors.primary[500]} /></View>
@@ -220,7 +235,7 @@ export default function ProfileEditScreen({ navigation }: Props) {
             </TouchableOpacity>
           </View>
           <Text style={styles.hint}>
-            Tap the photo or banner to choose an image. It is uploaded to a public media server ({serverHost(BLOSSOM_SERVER)}).
+            Tap the photo or banner to change it. Photos you choose are uploaded to a public media server ({serverHost(BLOSSOM_SERVER)}).
           </Text>
 
           {!isConnected && (
@@ -234,10 +249,6 @@ export default function ProfileEditScreen({ navigation }: Props) {
               onChangeText={set('name')} error={errors.name} />
             <Input label="About" placeholder="A few words about you" value={form.about} multiline numberOfLines={3}
               onChangeText={set('about')} error={errors.about} />
-            <Input label="Or paste a picture link" placeholder="https://…" value={form.picture} autoCapitalize="none"
-              autoCorrect={false} keyboardType="url" onChangeText={set('picture')} error={errors.picture} />
-            <Input label="Or paste a banner link" placeholder="https://…" value={form.banner} autoCapitalize="none"
-              autoCorrect={false} keyboardType="url" onChangeText={set('banner')} error={errors.banner} />
             <View>
               <Input label="Lightning address" placeholder="you@kaleidoswap.me" value={form.lud16}
                 autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
@@ -261,6 +272,16 @@ export default function ProfileEditScreen({ navigation }: Props) {
             disabled={saving || !!uploading || changed.length === 0} />
         </ScrollView>
       </KeyboardAvoidingView>
+      <PhotoChoiceSheet
+        visible={!!choosing}
+        title={choosing === 'banner' ? 'Banner' : 'Profile photo'}
+        current={choosing ? form[choosing] : ''}
+        uploadHost={serverHost(BLOSSOM_SERVER)}
+        onChoosePhoto={() => { if (choosing) pickFromLibrary(choosing); }}
+        onUseLink={url => { if (choosing) applyChoice(choosing, url); }}
+        onRemove={() => { if (choosing) applyChoice(choosing, ''); }}
+        onClose={() => setChoosing(null)}
+      />
     </View>
   );
 }
