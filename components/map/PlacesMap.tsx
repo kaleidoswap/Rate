@@ -37,7 +37,7 @@ interface Props {
 const MAPLIBRE = 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/5.6.0';
 const STYLE_URL = 'https://tiles.openfreemap.org/styles/dark';
 
-const buildHtml = (c: Coords, colors: { bg: string; water: string; user: string; ring: string; bottomInset: number }) => `<!doctype html>
+const buildHtml = (c: Coords, colors: { bg: string; water: string; user: string; ring: string; cluster: string; clusterText: string; bottomInset: number }) => `<!doctype html>
 <html><head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
@@ -45,7 +45,8 @@ const buildHtml = (c: Coords, colors: { bg: string; water: string; user: string;
   integrity="sha384-GriUtmHM/C5kppqM+je9BCInk5YLY4k8/MEXQNSB9gE0BLi6af+iFZlypsIX+LE6" crossorigin="anonymous" />
 <style>
   html, body, #map { height: 100%; margin: 0; background: ${colors.bg}; }
-  .maplibregl-ctrl-attrib { background: rgba(10,19,38,0.75) !important; color: rgba(255,255,255,0.55); font-size: 9px; }
+  .maplibregl-ctrl-attrib { background: rgba(10,19,38,0.75) !important; color: rgba(255,255,255,0.75) !important; font-size: 9px; }
+  .maplibregl-ctrl-attrib-inner, .maplibregl-ctrl-attrib-inner * { color: rgba(255,255,255,0.75) !important; }
   .maplibregl-ctrl-attrib a { color: rgba(255,255,255,0.75) !important; }
   .maplibregl-ctrl-attrib-button { filter: invert(1); }
   .maplibregl-ctrl-bottom-left { bottom: ${colors.bottomInset}px; }
@@ -82,7 +83,7 @@ const buildHtml = (c: Coords, colors: { bg: string; water: string; user: string;
   function select(id, lat, lng) {
     pending.selected = id;
     if (!loaded) return;
-    map.setFilter('places-selected', ['==', ['get', 'id'], id == null ? -1 : id]);
+    map.setFilter('places-selected', ['all', ['!', ['has', 'point_count']], ['==', ['get', 'id'], id == null ? -1 : id]]);
     if (id != null && lat != null) map.easeTo({ center: [lng, lat], duration: 400 });
   }
   function setUser(lat, lng) {
@@ -100,13 +101,22 @@ const buildHtml = (c: Coords, colors: { bg: string; water: string; user: string;
       map.setPaintProperty('background', 'background-color', '${colors.bg}');
       map.setPaintProperty('water', 'fill-color', '${colors.water}');
     } catch (e) {}
-    map.addSource('places', { type: 'geojson', data: empty });
+    // Nearby places are often on top of each other: group them until zoomed in.
+    map.addSource('places', { type: 'geojson', data: empty, cluster: true, clusterRadius: 38, clusterMaxZoom: 16 });
     map.addSource('user', { type: 'geojson', data: empty });
-    map.addLayer({ id: 'places', type: 'circle', source: 'places', paint: {
+    map.addLayer({ id: 'clusters', type: 'circle', source: 'places', filter: ['has', 'point_count'], paint: {
+      'circle-color': '${colors.cluster}', 'circle-opacity': 0.9,
+      'circle-radius': ['step', ['get', 'point_count'], 14, 10, 18, 50, 23],
+      'circle-stroke-color': '${colors.ring}', 'circle-stroke-width': 2 } });
+    map.addLayer({ id: 'cluster-count', type: 'symbol', source: 'places', filter: ['has', 'point_count'], layout: {
+      'text-field': ['get', 'point_count_abbreviated'], 'text-size': 12,
+      'text-font': ['Noto Sans Bold'], 'text-allow-overlap': true },
+      paint: { 'text-color': '${colors.clusterText}' } });
+    map.addLayer({ id: 'places', type: 'circle', source: 'places', filter: ['!', ['has', 'point_count']], paint: {
       'circle-color': ['get', 'color'],
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 13, 6, 17, 9],
       'circle-stroke-color': '${colors.ring}', 'circle-stroke-width': 1.5 } });
-    map.addLayer({ id: 'places-selected', type: 'circle', source: 'places', filter: ['==', ['get', 'id'], -1], paint: {
+    map.addLayer({ id: 'places-selected', type: 'circle', source: 'places', filter: ['all', ['!', ['has', 'point_count']], ['==', ['get', 'id'], -1]], paint: {
       'circle-color': ['get', 'color'], 'circle-radius': 12,
       'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 3 } });
     map.addLayer({ id: 'user-halo', type: 'circle', source: 'user', paint: {
@@ -116,12 +126,23 @@ const buildHtml = (c: Coords, colors: { bg: string; water: string; user: string;
     if (pending.places) setPlaces(pending.places);
     if (pending.user) setUser(pending.user[1], pending.user[0]);
     select(pending.selected);
+    // Start with the attribution folded to its (i) button.
+    var attrib = document.querySelector('.maplibregl-ctrl-attrib');
+    if (attrib) attrib.classList.remove('maplibregl-compact-show');
     post({ type: 'ready' });
   });
   map.on('error', function (e) { if (!loaded) { clearTimeout(failTimer); post({ type: 'error' }); } });
 
   map.on('click', function (e) {
     var box = [[e.point.x - 14, e.point.y - 14], [e.point.x + 14, e.point.y + 14]];
+    var groups = loaded ? map.queryRenderedFeatures(box, { layers: ['clusters'] }) : [];
+    if (groups.length) {
+      var g = groups[0];
+      Promise.resolve(map.getSource('places').getClusterExpansionZoom(g.properties.cluster_id)).then(function (z) {
+        map.easeTo({ center: g.geometry.coordinates, zoom: z + 0.5, duration: 400 });
+      }).catch(function () {});
+      return;
+    }
     var hits = loaded ? map.queryRenderedFeatures(box, { layers: ['places-selected', 'places'] }) : [];
     post({ type: 'select', id: hits.length ? hits[0].properties.id : null });
   });
@@ -149,6 +170,8 @@ export const PlacesMap = forwardRef<PlacesMapHandle, Props>(function PlacesMap(
       bottomInset: bottomInset,
       user: theme.colors.info[500],
       ring: theme.colors.background.primary,
+      cluster: theme.colors.primary[500],
+      clusterText: theme.colors.text.inverse,
     }),
   );
 
