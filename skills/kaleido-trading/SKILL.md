@@ -1,109 +1,36 @@
 ---
 name: kaleido-trading
-description: "Quote and execute swaps between BTC and other assets on whichever venue has the pair — KaleidoSwap (RGB assets: USDT, XAUT) or Flashnet (Spark: USDB). Get assets and pairs, pull an executable quote, execute it, or track it. Triggers when the user wants a price, a quote, to swap or trade assets, or to rebalance between BTC and stablecoins."
+description: "Quote and execute swaps between BTC and other assets on whichever venue lists the pair: KaleidoSwap (RGB USDT, XAUT) or Flashnet (Spark USDB). Pairs, assets, quotes, swap execution and status."
 tools: get_price, fiat_to_sats, kaleidoswap_get_assets, kaleidoswap_get_pairs, kaleidoswap_get_quote, kaleidoswap_get_nodeinfo, execute_swap, kaleidoswap_atomic_status
+requires-tools: kaleidoswap_get_quote, execute_swap
 triggers: quote, swap, trade, rebalance, slippage, pair, pairs, usdt, xaut, usdb, kaleidoswap, flashnet, spark, rfq
 metadata:
   author: kaleidoswap
-  version: "0.4.0"
+  version: "0.5.0"
+  surface: mobile
 ---
+# KaleidoSwap trading (mobile)
 
-# KaleidoSwap trading
+The app picks the venue from the pair: KaleidoSwap for `USDT`/`XAUT`, Flashnet
+for `USDB`. `USDT` and `USDB` are different coins; never swap one for the other.
+Amounts in `kaleidoswap_get_quote` are **display units**: `from_amount: 0.0005`
+means 0.0005 BTC (50,000 sats; 1 BTC = 100,000,000 sats).
 
-Quote and execute swaps. The model picks tools by name; the host binds them
-through whichever transport it runs over (WDK on mobile, HTTP/MCP/CLI on
-desktop).
+## Do
+- Quote with `from_asset_id`, `to_asset_id` (tickers: `BTC`, `USDT`, `XAUT`,
+  `USDB`) and `from_amount`, the amount to sell. No amount given → ask for one.
+- Report `send_amount`, `receive_amount` with `receive_unit`, `fee` and
+  `venue` as returned. The quote expires in about 60 s.
+- Executing moves funds: `execute_swap` with the `quote_id`, only after the
+  user says yes to that quote. Then `kaleidoswap_atomic_status` with the
+  returned `atomic_id` as `payment_hash`; Flashnet swaps complete at once.
+- A pair missing from `kaleidoswap_get_pairs` means that venue is not
+  connected: say so.
+- `USD` is not `USDT` and `gold` is not `XAUT`: confirm before quoting.
 
-**Venue is automatic — you don't choose it.** The same tools quote + execute on
-whichever venue lists the pair: **KaleidoSwap** (RGB assets `USDT`/`XAUT` over
-the Lightning node) or **Flashnet** (Spark pool, `USDB`). The result carries a
-`venue` field; just call the tools and report what they return. The venues use
-different stablecoins (`USDT` = KaleidoSwap, `USDB` = Flashnet) — never swap one
-for the other. If a pair isn't listed by `kaleidoswap_get_pairs`, that venue
-isn't connected; say so rather than guessing.
-
-## Critical rules — these override everything else
-
-You have **no knowledge** of any price, quote, fee, pair, or swap. Every
-number, pair, or quote id in your reply MUST come from a tool result returned
-in the CURRENT turn:
-
-- "What's the BTC price?" → call `get_price` and state the number it returns.
-- "What pairs are listed?" → call `kaleidoswap_get_pairs` and list them.
-- "Quote 100k sats to USDT" → call `kaleidoswap_get_quote(BTC, USDT, 100000)`,
-  then state the receive amount + fees from the result.
-
-**Calling the tool IS the answer.** Never write "the pairs are listed using
-kaleidoswap_get_pairs" or "the function returns the quote" — just call it.
-
-**Never reuse a number across turns.** If the user asks a new question, the
-previous turn's quote, price, or fee is irrelevant — fetch fresh.
-
-**Never invent a quote.** Without a `quote_id` and `receive_amount` returned
-this turn, you do not have a quote. Say so and re-quote.
-
-## Asset codes (canonical)
-
-Only these codes are accepted:
-
-- `BTC` (Bitcoin, amounts always in satoshis)
-- `USDT` (Tether) — **not** `USD`, **not** `tether`
-- `XAUT` (Tether Gold) — **not** `XAU`, **not** `gold`
-
-When the user types `USD` they almost always mean `USDT` — confirm before
-quoting. Same for `gold` → `XAUT`. Don't silently substitute.
-
-## Tools
-
-### `kaleidoswap_get_pairs` — no args
-Use when the user asks "what can I trade", "list pairs", "what's available",
-or before quoting an unfamiliar pair.
-
-### `kaleidoswap_get_quote` — REQUIRES `amount`
-Required args: `from_asset` AND `to_asset` AND `amount`. The maker rejects
-calls missing any of these.
-
-**If the user didn't give an amount, ASK for it. Do not call the tool with
-from/to alone.**
-
-Examples:
-- "Quote 100k sats to USDT" → `{from_asset: "BTC", to_asset: "USDT", amount: 100000}`
-- "What's the USDT/BTC rate?" → ask: "How many USDT do you want to swap?"
-  (no amount → no quote possible).
-- "Buy 50 USDT of BTC" → `{from_asset: "USDT", to_asset: "BTC", amount: 50}`
-  (USDT is what's being spent).
-
-### `execute_swap(quote_id)` 🔒 spend
-Executes the quote on its venue (atomic swap on KaleidoSwap, pool swap on
-Flashnet). Only after `kaleidoswap_get_quote` returned a `quote_id` THIS turn,
-and only when the user has explicitly approved the amount + direction. Returns
-an `atomic_id`.
-
-### `kaleidoswap_atomic_status(atomic_id)`
-Poll after `execute_swap`, with the `atomic_id` it returned. Report status
-plainly — pending, settling, completed, failed. Flashnet swaps complete
-immediately.
-
-## Flow
-
-1. **Pick a pair** — skip when obvious (`BTC/USDT`, `BTC/XAUT`).
-2. **Quote** — `kaleidoswap_get_quote`. REQUIRES amount.
-3. **Show + confirm** — surface pair, direction, amount in, expected out,
-   fees, slippage. **Never hide cost** — a small model must not abbreviate
-   fees out of the message.
-4. **Execute** — `execute_swap(quote_id)`, spend-gated by the engine. The host pauses for the user.
-5. **Track** — poll `kaleidoswap_atomic_status(atomic_id)` until it terminates.
-
-## Don'ts
-
-- Don't invent prices, quotes, quote_ids, or atomic_ids.
-- Don't reuse a number from a previous turn.
-- Don't describe how a tool works — call it.
-- Don't call `kaleidoswap_get_quote` with from/to only — ask for the amount.
-- Don't accept `XAU` as `XAUT` or `USD` as `USDT` silently — confirm.
-- Don't retry the same failing tool call in a loop. If a call fails, read the
-  error and either ask the user, fix the args, or stop.
-
-For the atomic-swap flow (trust-minimised cross-asset swap that the maker
-can't settle from balance), use the `kaleido-trading` atomic recipe — the
-agentic chain is not safe to plan on a 0.6B model.
+## Examples
+- "Quote 0.0005 BTC to USDT" → `kaleidoswap_get_quote {"from_asset_id":"BTC","to_asset_id":"USDT","from_amount":0.0005}`
+- "Swap 100k sats into XAUT" → `kaleidoswap_get_quote {"from_asset_id":"BTC","to_asset_id":"XAUT","from_amount":0.001}`
+- "Sell 20 USDB for BTC" → `kaleidoswap_get_quote {"from_asset_id":"USDB","to_asset_id":"BTC","from_amount":20}`
+- "Yes, do it" → `execute_swap {"quote_id":"<quote_id>"}`
+- "Status of my swap" → `kaleidoswap_atomic_status {"payment_hash":"<atomic_id>"}`
