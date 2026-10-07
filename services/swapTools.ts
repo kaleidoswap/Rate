@@ -3,7 +3,7 @@
 // EITHER venue, picked by the pair —
 //   - KaleidoSwap maker (RGB Lightning node)  → atomic HTLC swap
 //   - Flashnet (Spark DEX pool)               → single-step AMM swap
-// All ON-DEVICE — no MCP, no P2P delegation. The two venues use disjoint asset
+// All ON-DEVICE — no MCP. The two venues use disjoint asset
 // tickers (RGB USDT/XAUT vs Spark USDB), so the ticker selects the venue.
 //
 // Execution replicates rate's tested SwapScreen flows verbatim:
@@ -17,12 +17,8 @@
 // invoice-based shape doesn't match either on-device flow, so `execute_swap`
 // runs the whole tested sequence behind one confirmation.
 
-import {
-  InProcessToolSource,
-  getWalletTool,
-  kaleidoswapTools,
-  type ToolSource,
-} from '@kaleidorg/mind';
+import { InProcessToolSource, getWalletTool, type ToolSource } from '@kaleidorg/mind';
+import { kaleidoswapTools, normalizeKaleidoswapArgs } from '@kaleidorg/mind/kaleidoswap';
 import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
 import {
   normalizeMakerPairs,
@@ -136,8 +132,9 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     return { pairs: pairs.map((p) => ({ base: p.base.ticker, quote: p.quote.ticker, venue: p.venue ?? 'kaleidoswap' })) };
   },
 
-  kaleidoswap_get_quote: async ({ from_asset, to_asset, amount }) => {
+  kaleidoswap_get_quote: async ({ from_asset, to_asset, amount, amount_side }) => {
     requireSwaps();
+    if (amount_side === 'to') throw new Error('Quote by the amount to sell: pass from_amount, not to_amount.');
     const from = String(from_asset ?? '').toUpperCase();
     const to = String(to_asset ?? '').toUpperCase();
     const amt = Number(amount);
@@ -292,6 +289,6 @@ export function buildSwapToolSource(): ToolSource {
     description: d.description,
     parameters: d.parameters,
     requiresConfirmation: d.requiresConfirmation,
-    handler: HANDLERS[d.name]!,
+    handler: (args: Record<string, unknown>) => HANDLERS[d.name]!(normalizeKaleidoswapArgs(d.name, args)),
   })));
 }

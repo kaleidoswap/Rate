@@ -100,6 +100,21 @@ describe('swap tools — KaleidoSwap maker venue', () => {
     expect(q.receive_amount).toBe(73);
   });
 
+  it('get_quote takes the contract args: ticker ids and a display-unit from_amount', async () => {
+    const q: any = await source.execute('kaleidoswap_get_quote', { from_asset_id: 'BTC', to_asset_id: 'USDT', from_amount: 0.001 });
+    expect(maker.getQuote).toHaveBeenCalledWith({
+      from_asset: { asset_id: 'btc', layer: 'BTC_LN', amount: 100_000_000 },
+      to_asset: { asset_id: 'rgb:usdt', layer: 'RGB_LN' },
+    });
+    expect(q.send_amount).toBe(100_000);
+  });
+
+  it('get_quote refuses a to_amount quote instead of treating it as the input', async () => {
+    await expect(source.execute('kaleidoswap_get_quote', { from_asset_id: 'BTC', to_asset_id: 'USDT', to_amount: 10 }))
+      .rejects.toThrow(/from_amount/);
+    expect(maker.getQuote).not.toHaveBeenCalled();
+  });
+
   it('execute_swap replays init→validate→whitelist→execute with the quoted ints', async () => {
     await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
     const res: any = await source.execute('execute_swap', { quote_id: 'rfq1' });
@@ -110,7 +125,7 @@ describe('swap tools — KaleidoSwap maker venue', () => {
     expect(maker.executeSwap).toHaveBeenCalledWith({ swapstring: '100000000/btc/73000000/rgb:usdt/x/hash1', taker_pubkey: '02taker', payment_hash: 'hash1' });
     expect(res.status).toBe('executing');
     expect(res.atomic_id).toBe('hash1');
-    const s: any = await source.execute('kaleidoswap_atomic_status', { atomic_id: res.atomic_id });
+    const s: any = await source.execute('kaleidoswap_atomic_status', { payment_hash: res.atomic_id });
     expect(s.status).toBe('completed');
   });
 
