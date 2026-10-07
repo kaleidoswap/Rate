@@ -108,3 +108,17 @@ test.each([
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
   expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: address });
 });
+
+const NPUB = `npub1${'q'.repeat(58)}`;
+test.each([NPUB, `nostr:${NPUB}`, `NOSTR:${NPUB.toUpperCase()}`, `nostr:nprofile1${'q'.repeat(70)}`])(
+  "someone's Nostr code opens Add contact with their key: %s",
+  async code => {
+    (Clipboard.getString as jest.Mock).mockResolvedValue(code);
+    const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+    const screen = render(<QRScannerScreen navigation={navigation} />);
+    await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+    const expected = code.replace(/^nostr:/i, '').toLowerCase();
+    expect(navigation.navigate).toHaveBeenCalledWith('Contacts', { scannedContact: expected });
+    expect(navigation.navigate).not.toHaveBeenCalledWith('Send', expect.anything());
+  },
+);
