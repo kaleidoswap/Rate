@@ -5,6 +5,7 @@ import { theme, protocolColor } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
 import { Skeleton } from './Skeleton';
 import { AmountText } from './AmountText';
+import { formatUsd, type BreakdownAssetRow } from '../utils/portfolio';
 
 interface ProtocolBalance {
     confirmed: number;
@@ -20,9 +21,8 @@ interface BalanceCardProps {
     testBtc?: number;
     /** Accounts on a test network, with the network's name. */
     testNetworks?: Partial<Record<'RGB' | 'SPARK' | 'ARKADE' | 'BARK', string>>;
-    includesTokenValue?: boolean;
-    /** Dollar value of the stablecoins folded into the total, e.g. "$12.50". */
-    tokenValueText?: string;
+    /** Other assets, listed under the bitcoin rows (see breakdownAssetRows). */
+    assetRows?: BreakdownAssetRow[];
     /** Showing the last known balance while the live one loads. */
     updating?: boolean;
     rgbBalanceIsLightning?: boolean;
@@ -74,8 +74,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     pendingBtc = 0,
     testBtc = 0,
     testNetworks = {},
-    includesTokenValue = false,
-    tokenValueText,
+    assetRows = [],
     updating = false,
     rgbBalanceIsLightning = false,
     bitcoinUnit,
@@ -97,6 +96,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     const activeProtocols = byProtocol
         ? PROTOCOL_DISPLAY.filter(p => byProtocol[p.key as keyof typeof byProtocol])
         : [];
+    const hasBreakdown = activeProtocols.length > 0 || assetRows.length > 0;
     // Per-network balances are collapsed behind a chevron (extension parity).
     const [showBreakdown, setShowBreakdown] = useState(false);
     // The on-chain row belongs to the RGB node's wallet.
@@ -189,7 +189,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
                         />
                     </TouchableOpacity>
-                    {activeProtocols.length > 0 && (
+                    {hasBreakdown && (
                         <TouchableOpacity
                             style={styles.controlButton}
                             hitSlop={CONTROL_HIT_SLOP}
@@ -241,12 +241,6 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         </AmountText>
                     </>
                 )}
-                {/* Stablecoins count at $1; say so, so the total isn't a surprise. */}
-                {!loading && includesTokenValue && !!tokenValueText && (
-                    <Text style={styles.subLine}>
-                        Includes {hideAmounts ? '••••' : tokenValueText} in dollar tokens
-                    </Text>
-                )}
                 {/* Incoming funds and test sats are always visible, never folded into the total. */}
                 {!loading && pendingBtc > 0 && (
                     <Text style={styles.subLine} accessibilityLabel={hideAmounts ? 'Incoming payment pending' : `Incoming ${formatSatoshis(pendingBtc)} ${bitcoinUnit}, pending`}>
@@ -262,10 +256,10 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 
             {/* Per-network breakdown — vertical row list, collapsed behind the
                 chevron above. Mirrors the extension's BITCOIN section. */}
-            {activeProtocols.length > 0 && showBreakdown && (
+            {hasBreakdown && showBreakdown && (
                 <View style={styles.breakdownSection}>
                     <View style={styles.breakdownHairline} />
-                    <Text style={styles.breakdownEyebrow}>Bitcoin</Text>
+                    {breakdownRows.length > 0 && <Text style={styles.breakdownEyebrow}>Bitcoin</Text>}
                     <View style={styles.breakdownList}>
                         {breakdownRows.map((row) => (
                             <View
@@ -293,6 +287,46 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             </View>
                         ))}
                     </View>
+                    {/* Other assets (extension parity): priced ones count in the
+                        total at their dollar value; unpriced ones show no fiat. */}
+                    {assetRows.length > 0 && (
+                        <>
+                            <Text style={[styles.breakdownEyebrow, breakdownRows.length > 0 && styles.breakdownEyebrowSpaced]}>Assets</Text>
+                            <View style={styles.breakdownList}>
+                                {assetRows.map((row) => {
+                                    const accent = row.network ? protocolColor(row.network.toUpperCase()) : theme.colors.success[500];
+                                    return (
+                                        <View key={row.key} style={styles.networkRow} accessibilityLabel={hideAmounts
+                                            ? `${row.ticker}${row.networkLabel ? ` on ${row.networkLabel}` : ''}`
+                                            : `${row.amount} ${row.ticker}${row.networkLabel ? ` on ${row.networkLabel}` : ''}${row.usdValue !== undefined ? `, about ${formatUsd(row.usdValue)}` : ''}`}>
+                                            <View style={[styles.networkAccentBar, { backgroundColor: accent }]} />
+                                            <View style={[styles.networkIconChip, { backgroundColor: accent + '22' }]}>
+                                                {row.network
+                                                    ? <NetworkIcon network={row.network} size={16} />
+                                                    : <Ionicons name="cash-outline" size={16} color={accent} />}
+                                            </View>
+                                            <View style={styles.networkTextBlock}>
+                                                <Text style={styles.networkName} numberOfLines={1}>{row.ticker}</Text>
+                                                <Text style={styles.networkSubtitle} numberOfLines={1}>
+                                                    {row.networkLabel ? `${row.name} · ${row.networkLabel}` : row.name}
+                                                </Text>
+                                            </View>
+                                            <View style={styles.networkValueBlock}>
+                                                {row.usdValue !== undefined && (
+                                                    <AmountText style={styles.networkValueFiat}>
+                                                        {hideAmounts ? '••••' : `≈ ${formatUsd(row.usdValue)}`}
+                                                    </AmountText>
+                                                )}
+                                                <AmountText style={row.usdValue !== undefined ? styles.networkValueSats : styles.networkValueFiat}>
+                                                    {hideAmounts ? '••••' : `${row.amount} ${row.ticker}`}
+                                                </AmountText>
+                                            </View>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+                        </>
+                    )}
                 </View>
             )}
 
@@ -396,6 +430,9 @@ const styles = StyleSheet.create({
         textTransform: 'uppercase',
         color: theme.colors.text.muted,
         marginBottom: theme.spacing[2],
+    },
+    breakdownEyebrowSpaced: {
+        marginTop: theme.spacing[3],
     },
     breakdownList: {
         gap: theme.spacing[1.5],

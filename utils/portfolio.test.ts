@@ -1,4 +1,4 @@
-import { assetUsdValue, tokenUsdPrice, tokenValueSats, tokenValueUsd, usdToSats } from './portfolio';
+import { assetUsdValue, breakdownAssetRows, tokenUsdPrice, tokenValueSats, tokenValueUsd, usdToSats } from './portfolio';
 
 const asset = (ticker: string, baseUnits: number, precision = 6, asset_id = ticker) =>
   ({ asset_id, ticker, precision, balance: { spendable: baseUnits } });
@@ -30,4 +30,34 @@ test('no price, no token value', () => {
 
 test('BTC rows and empty balances add nothing', () => {
   expect(tokenValueUsd([{ asset_id: 'BTC', ticker: 'USD', precision: 0, balance: 100 }, asset('USDC', 0)])).toBe(0);
+});
+
+describe('breakdownAssetRows', () => {
+  const assets = [
+    { asset_id: 'BTC', ticker: 'BTC', precision: 0, balance: { spendable: 1000 } },
+    { asset_id: 'rgb:gold', ticker: 'XAUT', name: 'Gold', precision: 0, balance: { spendable: 3 } },
+    { asset_id: 'rgb:usdt', ticker: 'USDT', name: 'Tether USD', precision: 6, balance: { spendable: 12_500_000 } },
+    { asset_id: 'btkn1usdb', ticker: 'USDB', name: 'USDB', precision: 6, balance: { spendable: 40_000_000 } },
+    { asset_id: 'rgb:empty', ticker: 'NIL', precision: 0, balance: { spendable: 0 } },
+  ];
+
+  test('one row per held asset, priced first by value, with its network', () => {
+    const rows = breakdownAssetRows(assets);
+    expect(rows.map((r) => r.ticker)).toEqual(['USDB', 'USDT', 'XAUT']);
+    expect(rows[0]).toMatchObject({ network: 'spark', networkLabel: 'Spark', amount: '40', usdValue: 40 });
+    expect(rows[1]).toMatchObject({ network: 'rgb', networkLabel: 'RGB', amount: '12.5', usdValue: 12.5, name: 'Tether USD' });
+    expect(rows[2]).toMatchObject({ amount: '3', usdValue: undefined });
+  });
+
+  test('rows add up to the token value counted in the total', () => {
+    const sum = breakdownAssetRows(assets).reduce((s, r) => s + (r.usdValue ?? 0), 0);
+    expect(sum).toBe(tokenValueUsd(assets));
+  });
+
+  test('Lite folds the dollar tokens into one US Dollar row', () => {
+    const rows = breakdownAssetRows(assets, undefined, { foldDollars: true });
+    expect(rows.map((r) => r.ticker)).toEqual(['USD', 'XAUT']);
+    expect(rows[0]).toMatchObject({ name: 'US Dollar', amount: '52.50', usdValue: 52.5 });
+    expect(rows[0].network).toBeUndefined();
+  });
 });

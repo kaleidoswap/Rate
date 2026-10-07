@@ -47,7 +47,7 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
-import { assetUsdValue, formatUsd, tokenValueSats as priceTokensInSats, tokenValueUsd } from '../utils/portfolio';
+import { assetUsdValue, breakdownAssetRows, tokenValueSats as priceTokensInSats } from '../utils/portfolio';
 
 const LITE_USD_ID = 'lite-usd';
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
@@ -716,7 +716,6 @@ export default function DashboardScreen({ navigation }: Props) {
   // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
   // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
   const tokenValueSats = priceTokensInSats(rgbAssets as any[], btcPriceUSD, liteUsdAssetIds);
-  const tokenUsd = tokenValueUsd(rgbAssets as any[], liteUsdAssetIds);
   const totalBalance = bitcoinSummary.total + tokenValueSats;
   const denominatedTotal = formatDisplayAmount(totalBalance);
 
@@ -951,8 +950,7 @@ export default function DashboardScreen({ navigation }: Props) {
             pendingBtc={pendingBtc}
             testBtc={bitcoinSummary.test}
             testNetworks={testNetworks}
-            includesTokenValue={tokenValueSats > 0}
-            tokenValueText={tokenUsd > 0 ? formatUsd(tokenUsd) : undefined}
+            assetRows={breakdownAssetRows(rgbAssets as any[], liteUsdAssetIds, { foldDollars: isLite })}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}
             onRefresh={onRefresh}
