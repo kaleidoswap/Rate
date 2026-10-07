@@ -17,6 +17,12 @@ import { HDKey } from '@scure/bip32';
 import { mnemonicToSeedSync } from '@scure/bip39';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NWCService from './NWCService';
+import {
+  contentToProfile,
+  mergeProfileEdits,
+  parseProfileContent,
+  type ProfileFormField,
+} from '../utils/nostrProfile';
 
 // NIP-06 derivation path for Nostr keys from a BIP39 mnemonic.
 // m/44'/1237'/<account>'/0/0 — 1237 is the registered Nostr coin type.
@@ -471,24 +477,38 @@ class NostrService {
     }
   }
 
-  // Update user profile
-  async updateProfile(profile: Partial<NostrProfile>): Promise<boolean> {
-    try {
-      if (!this.ndk || !this.user) {
-        throw new Error('NDK or user not initialized');
-      }
-
-      const event = new NDKEvent(this.ndk);
-      event.kind = NDKKind.Metadata;
-      event.content = JSON.stringify(profile);
-      
-      await event.publish();
-      console.log('NostrService: Profile updated successfully');
-      return true;
-    } catch (error) {
-      console.error('NostrService: Failed to update profile:', error);
-      return false;
+  /**
+   * Publish profile edits. Kind 0 is replaceable, so the edits are merged onto
+   * the latest profile on the relays (falling back to `cached` when none is
+   * found) to keep every field and unknown key the form doesn't show. Throws
+   * on failure so callers can tell the user.
+   */
+  async updateProfile(
+    edits: Partial<Record<ProfileFormField, string>>,
+    cached?: Partial<NostrProfile> | null,
+  ): Promise<NostrProfile> {
+    if (!this.ndk || !this.user) {
+      throw new Error('Nostr is not connected');
     }
+    await this.ensureReady();
+
+    const latest = await this.ndk.fetchEvent(
+      { kinds: [NDKKind.Metadata], authors: [this.user.pubkey], limit: 1 },
+      { closeOnEose: true },
+    );
+    const base =
+      parseProfileContent(latest?.content) ??
+      (cached ? JSON.parse(JSON.stringify(cached)) : null);
+    const merged = mergeProfileEdits(base, edits);
+
+    const event = new NDKEvent(this.ndk);
+    event.kind = NDKKind.Metadata;
+    event.content = JSON.stringify(merged);
+    const publishedTo = await event.publish();
+    if (publishedTo.size === 0) {
+      throw new Error('No relay accepted the profile update');
+    }
+    return contentToProfile(merged);
   }
 
   /**

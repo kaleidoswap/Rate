@@ -8,8 +8,6 @@ import {
   TouchableOpacity,
   Clipboard,
   Share,
-  Image,
-  ScrollView,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +16,6 @@ import { RootState } from '../store';
 import {
   initializeNostr,
   loadNostrProfile,
-  updateNostrProfile,
   setKeys,
   clearKeys,
   setConnected,
@@ -34,6 +31,7 @@ import { Button } from './Button';
 import { Input } from './Input';
 import { Sheet } from './Sheet';
 import { CopyButton } from './CopyButton';
+import { ProfileAvatar } from './ProfileAvatar';
 import { WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 import ToastService from '../services/ToastService';
 import { copySensitive } from '../utils/sensitiveClipboard';
@@ -50,15 +48,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   const [showKeyImport, setShowKeyImport] = useState(false);
   const [keyInput, setKeyInput] = useState('');
   const [isImporting, setIsImporting] = useState(false);
-  const [showProfileEdit, setShowProfileEdit] = useState(false);
   const [showKeyInput, setShowKeyInput] = useState(false);
-  const [profileForm, setProfileForm] = useState({
-    name: '',
-    display_name: '',
-    about: '',
-    website: '',
-    lud16: '', // Lightning address
-  });
   const [relayInput, setRelayInput] = useState('');
   const [isAddingRelay, setIsAddingRelay] = useState(false);
   const [isRemovingRelay, setIsRemovingRelay] = useState(false);
@@ -68,7 +58,6 @@ export default function NostrProfileManager({ navigation }: Props) {
     isConnected,
     isInitializing,
     profile,
-    isProfileLoading,
     publicKey,
     npub,
     nsec,
@@ -79,18 +68,6 @@ export default function NostrProfileManager({ navigation }: Props) {
     connectedWallet,
     nwcWalletType,
   } = nostrState;
-
-  useEffect(() => {
-    if (profile) {
-      setProfileForm({
-        name: profile.name || '',
-        display_name: profile.display_name || '',
-        about: profile.about || '',
-        website: profile.website || '',
-        lud16: profile.lud16 || '',
-      });
-    }
-  }, [profile]);
 
   // NostrService exposes no relay connect/disconnect event, so poll the pool
   // while connected; a one-shot read per render went stale between renders.
@@ -228,21 +205,6 @@ export default function NostrProfileManager({ navigation }: Props) {
     if (!(await security.authenticateForReveal('Authenticate to copy your Nostr private key'))) return;
     copySensitive(keyToBackup);
     toast().success('Private key copied. The clipboard clears in a minute — store it safely now.', 5000);
-  };
-
-  const handleUpdateProfile = async () => {
-    if (!isConnected) {
-      toast().error('Not connected to Nostr');
-      return;
-    }
-
-    try {
-      await dispatch(updateNostrProfile(profileForm) as any);
-      setShowProfileEdit(false);
-      toast().success('Profile updated');
-    } catch (error) {
-      toast().error('Failed to update profile');
-    }
   };
 
   const handleDisconnect = () => {
@@ -405,13 +367,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   const renderIdentity = () => (
     <View style={[styles.card, styles.identity]}>
       <View style={styles.identityTop}>
-        <View style={styles.avatar}>
-          {profile?.picture ? (
-            <Image source={{ uri: profile.picture }} style={styles.avatarImg} />
-          ) : (
-            <Text style={styles.avatarInitial}>{(profile?.display_name || profile?.name || 'N').charAt(0).toUpperCase()}</Text>
-          )}
-        </View>
+        <ProfileAvatar uri={profile?.picture} name={profile?.display_name || profile?.name || ''} size={56} />
         <View style={styles.flex}>
           <Text style={styles.name} numberOfLines={1}>{name}</Text>
           {!!profile?.name && profile.name !== profile.display_name && (
@@ -442,7 +398,7 @@ export default function NostrProfileManager({ navigation }: Props) {
 
       {isConnected ? (
         <View style={styles.identityActions}>
-          <Button title="Edit profile" variant="secondary" size="sm" onPress={() => setShowProfileEdit(true)} style={styles.flex} />
+          <Button title="Edit profile" variant="secondary" size="sm" onPress={() => navigation?.navigate('ProfileEdit')} style={styles.flex} />
           <Button title="Share" variant="secondary" size="sm" style={styles.flex}
             onPress={() => { if (npub) Share.share({ message: `Follow me on Nostr: ${npub}`, title: 'My Nostr profile' }); }} />
         </View>
@@ -553,23 +509,6 @@ export default function NostrProfileManager({ navigation }: Props) {
         <Text style={styles.hint}>Your key is stored in this device's secure storage and never leaves it.</Text>
         </View>
       </Sheet>
-
-      <Sheet visible={showProfileEdit} onClose={() => setShowProfileEdit(false)} title="Edit profile"
-        footer={<Button title={isProfileLoading ? 'Saving…' : 'Save'} onPress={handleUpdateProfile} loading={isProfileLoading}
-          disabled={isProfileLoading} style={styles.sheetBtn} />}>
-        <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} contentContainerStyle={styles.form}>
-        <Input label="Display name" placeholder="Satoshi" value={profileForm.display_name}
-          onChangeText={(text) => setProfileForm(prev => ({ ...prev, display_name: text }))} />
-        <Input label="Username" placeholder="satoshi" value={profileForm.name} autoCapitalize="none"
-          onChangeText={(text) => setProfileForm(prev => ({ ...prev, name: text.replace(/\s/g, '') }))} />
-        <Input label="About" placeholder="A few words about you" value={profileForm.about} multiline numberOfLines={3}
-          onChangeText={(text) => setProfileForm(prev => ({ ...prev, about: text }))} />
-        <Input label="Lightning address" placeholder="you@kaleidoswap.me" value={profileForm.lud16} autoCapitalize="none"
-          keyboardType="email-address" onChangeText={(text) => setProfileForm(prev => ({ ...prev, lud16: text }))} />
-        <Input label="Website" placeholder="https://" value={profileForm.website} autoCapitalize="none" keyboardType="url"
-          onChangeText={(text) => setProfileForm(prev => ({ ...prev, website: text }))} />
-        </ScrollView>
-      </Sheet>
     </View>
   );
 }
@@ -605,12 +544,6 @@ const styles = StyleSheet.create({
   // Identity
   identity: { padding: theme.spacing[4] },
   identityTop: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3] },
-  avatar: {
-    width: 56, height: 56, borderRadius: 28, overflow: 'hidden', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: `${theme.colors.primary[500]}29`,
-  },
-  avatarImg: { width: '100%', height: '100%' },
-  avatarInitial: { fontSize: 22, fontWeight: '700', color: theme.colors.primary[500] },
   name: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
   handle: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
