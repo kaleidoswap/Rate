@@ -99,7 +99,7 @@ test('RGB on this phone waits for the node and stays off when the node connects'
   mockDelays.RGB_LN = 20;
   const results = await initializeWdkProtocols('seed', configs('rgb'));
   expect(results.get('RGB_LN' as any)).toEqual({ success: true });
-  expect(results.has('RGB_L1' as any)).toBe(false);
+  expect(results.get('RGB_L1' as any)).toEqual({ success: false, error: expect.stringMatching(/^skipped/) });
   expect(mockEvents).not.toContain('start RGB_L1');
 });
 
