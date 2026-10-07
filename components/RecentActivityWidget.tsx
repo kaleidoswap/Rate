@@ -79,6 +79,7 @@ const MAX_ITEMS = 4;
 export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, assetTicker, title = 'Activity', limit, style }) => {
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
+    const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
 
     const [items, setItems] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -104,7 +105,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
             venue: s.venue,
         }));
         try {
-            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() });
+            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity(), walletId });
             const list = assetId
                 ? result.filter(item => item.asset === assetId || (!!assetTicker && item.type === 'swap' && item.asset === assetTicker))
                 : [...result].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
@@ -113,7 +114,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
         } catch {
             return false;
         }
-    }, [rgbAssets, swapHistory, assetId, assetTicker, limit]);
+    }, [rgbAssets, swapHistory, assetId, assetTicker, limit, walletId]);
 
     // Refresh when the Dashboard tab regains focus.
     useFocusEffect(

@@ -17,6 +17,7 @@ jest.mock('../services/ToastService', () => ({ __esModule: true, default: { getI
 let mockSpark: any = null;
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => mockSpark } }));
 jest.mock('../services/kaleidoPay/connect', () => ({ receiveAccountChain: () => 'mainnet' }));
+jest.mock('../store/hooks', () => ({ useAppSelector: (select: any) => select({ wallet: { activeWallet: { id: 1 } } }) }));
 
 const mockClient = {
   getRoutes: jest.fn(),

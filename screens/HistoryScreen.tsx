@@ -153,7 +153,7 @@ export default function HistoryScreen() {
         }));
         try {
             const [{ items: result, failedSources, hadConnectedAdapter }, pendingPayment] = await Promise.all([
-                loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity() }),
+                loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity(), walletId }),
                 loadPendingPaymentActivity(walletId),
             ]);
             // A payment still being checked sits in the history like any other pending item.

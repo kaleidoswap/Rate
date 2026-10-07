@@ -1,3 +1,7 @@
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+);
+
 const adapters: Record<string, any> = {};
 
 jest.mock('../services/protocols', () => ({
@@ -7,6 +11,7 @@ jest.mock('../services/protocols', () => ({
   rgbAccountAdapter: () => adapters.RGB_LN ?? adapters.RGB_L1,
 }));
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { loadActivity } from '../services/ActivityService';
 
 describe('ActivityService', () => {
@@ -129,4 +134,54 @@ test('unknown payment outcomes stay distinct from pending and keep account metad
   expect(items.find(i => i.id === 'spark-uncertain')).toMatchObject({ status: 'unknown', account: 'SPARK', network: 'regtest' });
   expect(items.find(i => i.id === 'spark-submitted')?.status).toBe('pending');
   expect(items.find(i => i.id === 'spark-unexpected')?.status).toBe('unknown');
+});
+
+describe('ActivityService proofs and cross-chain orders', () => {
+  const PREIMAGE = 'ab'.repeat(32);
+
+  beforeEach(async () => {
+    for (const key of Object.keys(adapters)) delete adapters[key];
+    await AsyncStorage.clear();
+  });
+
+  it('carries the preimage of a paid Lightning invoice from the node history', async () => {
+    adapters.RGB_LN = {
+      isConnected: () => true,
+      listPayments: jest.fn(async () => [
+        { payment_hash: 'h1', amt_msat: 5000, inbound: false, status: 'Succeeded', created_at: 1, preimage: PREIMAGE.toUpperCase() },
+        { payment_hash: 'h2', amt_msat: 5000, inbound: true, status: 'Succeeded', created_at: 2, preimage: PREIMAGE },
+      ]),
+      listTransfers: jest.fn(async () => []),
+    };
+    const { items } = await loadActivity();
+    expect(items.find((i) => i.paymentHash === 'h1')?.preimage).toBe(PREIMAGE);
+    expect(items.find((i) => i.paymentHash === 'h2')?.preimage).toBeUndefined();
+  });
+
+  it('reads the preimage and request id of a Spark Lightning send', async () => {
+    adapters.SPARK = {
+      isConnected: () => true,
+      listTransactions: jest.fn(async () => [{
+        id: 'transfer-1', type: 'send', status: 'confirmed', amount: 100, timestamp: 1,
+        protocolData: { userRequest: { id: 'req-1', paymentPreimage: PREIMAGE } },
+      }]),
+    };
+    const { items } = await loadActivity();
+    expect(items[0]).toMatchObject({ preimage: PREIMAGE, requestId: 'req-1' });
+  });
+
+  it('lists this wallet\'s cross-chain orders', async () => {
+    await AsyncStorage.setItem('crosschain-history-v1-7', JSON.stringify([
+      { id: 'q1', direction: 'deposit', sourceChain: 'ethereum', sourceAsset: 'USDT', destChain: 'spark', destAsset: 'BTC',
+        amountInRaw: '2000000', sourceDecimals: 6, amountOutRaw: '3000', destDecimals: 8, orderId: 'o1', status: 'completed', createdAt: 5, updatedAt: 5 },
+      { id: 'q2', direction: 'send', sourceChain: 'spark', sourceAsset: 'USDB', destChain: 'base', destAsset: 'USDC',
+        amountInRaw: '5000000', sourceDecimals: 6, destDecimals: 6, recipient: '0xdef', status: 'failed', createdAt: 6, updatedAt: 6 },
+    ]));
+    const { items } = await loadActivity({ walletId: 7 });
+    expect(items).toEqual([
+      expect.objectContaining({ id: 'crosschain-q2', type: 'send', amount: '5', assetTicker: 'USDB', status: 'failed', assetName: 'To USDC on Base', layer: 'Cross-chain' }),
+      expect.objectContaining({ id: 'crosschain-q1', type: 'receive', rawSats: 3000, status: 'confirmed', assetName: 'From USDT on Ethereum', txid: 'o1' }),
+    ]);
+    expect((await loadActivity({ walletId: 8 })).items).toEqual([]);
+  });
 });

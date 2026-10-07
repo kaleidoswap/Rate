@@ -12,12 +12,21 @@
 //   3. Spark / Arkade unified transactions   — adapter `listTransactions()`
 //   4. KaleidoSwap atomic swaps              — provided from Redux swap history
 //   5. Electrum swap payments (on-chain)     — provided from KaleidoPay attempts
+//   6. Cross-chain orders (bridge deposits, sends to other chains) — kept per wallet
 //
 // Every source is fetched defensively: a failure in one never blocks the rest.
 
 import { protocolManager, rgbAccountAdapter } from './protocols';
+import { refreshCrossChainHistory } from './crosschainHistory';
+import {
+  activityStatusOf,
+  formatRecordAmount,
+  type CrossChainRecord,
+} from '../utils/crosschain-history';
+import { chainLabel } from '../utils/orchestra-ui';
+import { isPreimage } from '../utils/payment-proofs';
 
-export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Bark' | 'Bark Signet' | 'Swap';
+export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Bark' | 'Bark Signet' | 'Swap' | 'Cross-chain';
 
 export type ActivityItemType =
   | 'send'
@@ -33,7 +42,7 @@ export type { ActivityStatus } from '../utils/paymentStatus';
 export interface ActivityItem {
   id: string;
   type: ActivityItemType;
-  source: 'payment' | 'onchain' | 'transfer' | 'swap';
+  source: 'payment' | 'onchain' | 'transfer' | 'swap' | 'crosschain';
   /** Asset id, or 'BTC' for the base layer. */
   asset: string;
   assetName?: string;
@@ -54,6 +63,18 @@ export interface ActivityItem {
   kind?: string;
   /** KaleidoPay/Electrum swap attempt behind this item. */
   swapAttemptId?: string;
+  /** Lightning proof of payment, when the account's history carries it. */
+  preimage?: string;
+  /** The account's own id for the payment request (Spark), for matching a saved proof. */
+  requestId?: string;
+  /** Bridge deposit or send to another chain. */
+  crossChain?: CrossChainRecord;
+}
+
+/** A valid preimage from an account's record, lowercased. */
+function preimageOf(...values: unknown[]): string | undefined {
+  const found = values.find(isPreimage);
+  return found ? found.toLowerCase() : undefined;
 }
 
 export interface AssetMeta {
@@ -174,6 +195,8 @@ export interface LoadActivityOptions {
   assets?: AssetMeta[];
   swaps?: SwapActivityInput[];
   swapAttempts?: SwapAttemptActivityInput[];
+  /** Active wallet, for its cross-chain orders. */
+  walletId?: number | null;
 }
 
 export interface ActivityResult {
@@ -188,7 +211,7 @@ export interface ActivityResult {
  * plus the supplied swap history.
  */
 export async function loadActivity(opts: LoadActivityOptions = {}): Promise<ActivityResult> {
-  const { assets = [], swaps = [], swapAttempts = [] } = opts;
+  const { assets = [], swaps = [], swapAttempts = [], walletId } = opts;
   const items: ActivityItem[] = [];
   let failedSources = 0;
   let hadConnectedAdapter = false;
@@ -241,6 +264,7 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           txid: p.payment_hash || '',
           layer: isRgb ? 'RGB-LN' : 'LN',
           paymentHash: p.payment_hash,
+          preimage: p.inbound ? undefined : preimageOf(p.preimage, p.payment_preimage),
           account: 'RGB',
           fee: typeof p.fee_msat === 'number' ? p.fee_msat / 1000 : undefined,
         });
@@ -305,6 +329,8 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
         const ticker = tx.asset?.ticker;
         const isBtc = !ticker || ticker === 'BTC';
         const precision = tx.asset?.precision ?? 0;
+        const raw: any = (tx as any).protocolData ?? {};
+        const request: any = typeof raw.userRequest === 'object' && raw.userRequest ? raw.userRequest : {};
         items.push({
           id: `${proto.toLowerCase()}-${tx.id}`,
           type: tx.type,
@@ -322,6 +348,11 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
           fee: tx.fee,
           account: proto,
           network,
+          paymentHash: typeof request.paymentHash === 'string' ? request.paymentHash : undefined,
+          preimage: tx.type === 'send'
+            ? preimageOf((tx as any).preimage, request.paymentPreimage, raw.preimage)
+            : undefined,
+          requestId: typeof request.id === 'string' ? request.id : undefined,
         });
       }
     } catch (err) {
@@ -381,6 +412,44 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
       network: a.network,
       swapAttemptId: a.id,
     });
+  }
+
+  // 6. Cross-chain orders: deposits from other chains and sends out of Spark
+  if (walletId != null) {
+    try {
+      for (const rec of await refreshCrossChainHistory(walletId)) {
+        const deposit = rec.direction === 'deposit';
+        const external = deposit ? rec.sourceChain : rec.destChain;
+        const shown = deposit
+          ? formatRecordAmount(rec.amountOutRaw, rec.destDecimals, rec.destAsset)
+          : formatRecordAmount(rec.amountInRaw, rec.sourceDecimals, rec.sourceAsset);
+        const [amount, ...tickerParts] = shown.split(' ');
+        const shownAsset = (deposit ? rec.destAsset : rec.sourceAsset).toUpperCase();
+        const shownRaw = deposit ? rec.amountOutRaw : rec.amountInRaw;
+        items.push({
+          id: `crosschain-${rec.id}`,
+          type: deposit ? 'receive' : 'send',
+          source: 'crosschain',
+          asset: deposit ? rec.destAsset : rec.sourceAsset,
+          assetName: deposit
+            ? `From ${rec.sourceAsset} on ${chainLabel(external)}`
+            : `To ${rec.destAsset} on ${chainLabel(external)}`,
+          assetTicker: tickerParts.join(' '),
+          assetPrecision: 0,
+          amount: amount ?? '',
+          rawSats: shownAsset === 'BTC' && shownRaw ? Number(shownRaw) : undefined,
+          status: activityStatusOf(rec),
+          timestamp: rec.createdAt,
+          txid: rec.orderId ?? rec.id,
+          layer: 'Cross-chain',
+          account: 'SPARK',
+          network: chainLabel(external),
+          crossChain: rec,
+        });
+      }
+    } catch (err) {
+      console.warn('ActivityService: failed to load cross-chain orders', err);
+    }
   }
 
   // Newest first; undated items sink to the bottom.

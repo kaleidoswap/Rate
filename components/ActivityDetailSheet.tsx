@@ -25,6 +25,10 @@ import type { ActivityItem, ActivityItemType, ActivityLayer } from '../services/
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { AccelerationPanel } from './AccelerationPanel';
 import { accelerationTarget } from '../services/TxAccelerationService';
+import { findPaymentProof } from '../services/paymentProofs';
+import { preimageMatches } from '../utils/payment-proofs';
+import { chainLabel } from '../utils/orchestra-ui';
+import { formatRecordAmount } from '../utils/crosschain-history';
 
 interface Props {
     item: ActivityItem | null;
@@ -45,6 +49,7 @@ function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyph
 }
 
 function typeLabel(item: ActivityItem): string {
+    if (item.crossChain) return item.crossChain.direction === 'deposit' ? 'Deposit from another chain' : 'Sent to another chain';
     switch (item.type) {
         case 'receive': return item.status === 'confirmed' ? 'Received' : 'Receive';
         case 'send': return item.status === 'confirmed' ? 'Sent' : 'Payment';
@@ -71,13 +76,29 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const [checkMessage, setCheckMessage] = useState('');
     const [accelerating, setAccelerating] = useState(false);
     useEffect(() => setAccelerating(false), [item?.id]);
+    // The preimage: from the account's history, else the proof kept when this phone paid.
+    const [proof, setProof] = useState<{ preimage: string; paymentHash?: string } | null>(null);
+    useEffect(() => {
+        setProof(null);
+        if (!item || item.type !== 'send' || item.source !== 'payment' || item.status === 'failed') return;
+        if (item.preimage) { setProof({ preimage: item.preimage, paymentHash: item.paymentHash }); return; }
+        let live = true;
+        findPaymentProof([item.paymentHash, item.txid, item.requestId])
+            .then(p => { if (live && p) setProof({ preimage: p.preimage, paymentHash: p.paymentHash }); })
+            .catch(() => {});
+        return () => { live = false; };
+    }, [item]);
     if (!item) return null;
 
     const v = typeVisual(item.type);
     const st = ACTIVITY_STATUS_VISUAL[item.status];
     const hasAmount = item.amount !== '';
     const isIncoming = item.type === 'receive' || item.type === 'issuance';
-    const txLabel = item.paymentHash ? 'Payment hash' : 'Transaction ID';
+    const txLabel = item.crossChain ? 'Order ID' : item.paymentHash ? 'Payment hash' : 'Transaction ID';
+    const cc = item.crossChain;
+    // Spark's history id isn't the payment hash; the proof brings the real one.
+    const proofHash = proof?.paymentHash ?? item.paymentHash;
+    const proofVerified = !!proof && !!proofHash && preimageMatches(proof.preimage, proofHash);
     const target = accelerationTarget(item);
 
     return (
@@ -169,6 +190,41 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                         </View>
                     )}
 
+                    {cc && (
+                        <>
+                            <View style={styles.row}>
+                                <Text style={styles.rowLabel}>Route</Text>
+                                <View style={styles.layerChip}>
+                                    <NetworkIcon network={cc.sourceChain} size={14} />
+                                    <Text style={styles.layerChipText}>{cc.sourceAsset} on {chainLabel(cc.sourceChain)}</Text>
+                                    <Ionicons name="arrow-forward" size={12} color={theme.colors.text.tertiary} />
+                                    <NetworkIcon network={cc.destChain} size={14} />
+                                    <Text style={styles.layerChipText}>{cc.destAsset} on {chainLabel(cc.destChain)}</Text>
+                                </View>
+                            </View>
+                            {!!cc.amountOutRaw && (
+                                <View style={styles.row}>
+                                    <Text style={styles.rowLabel}>{cc.direction === 'deposit' ? 'You receive' : 'They receive'}</Text>
+                                    <Text style={styles.rowValue}>
+                                        {cc.status === 'completed' ? '' : '≈ '}{formatRecordAmount(cc.amountOutRaw, cc.destDecimals, cc.destAsset)}
+                                    </Text>
+                                </View>
+                            )}
+                            {!!cc.recipient && (
+                                <View style={styles.txidBlock}>
+                                    <View style={styles.txidHeader}>
+                                        <Text style={styles.rowLabel}>Recipient</Text>
+                                        <CopyButton value={cc.recipient} label="Copy" size={14} />
+                                    </View>
+                                    <Text style={styles.txidText} selectable numberOfLines={2}>{cc.recipient}</Text>
+                                </View>
+                            )}
+                            {cc.status === 'unpaid' && (
+                                <Text style={styles.rowLabel}>The payment from Spark wasn't confirmed. Open Send to check this transfer before sending again.</Text>
+                            )}
+                        </>
+                    )}
+
                     {/* Txid / payment hash */}
                     {!!item.txid && (
                         <View style={styles.txidBlock}>
@@ -177,6 +233,30 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                                 <CopyButton value={item.txid} label="Copy" size={14} />
                             </View>
                             <Text style={styles.txidText} selectable numberOfLines={3}>{item.txid}</Text>
+                        </View>
+                    )}
+                    {proof && (
+                        <View style={styles.txidBlock}>
+                            <View style={styles.txidHeader}>
+                                <Text style={styles.rowLabel}>Preimage (proof of payment)</Text>
+                                <CopyButton value={proof.preimage} label="Copy" size={14} />
+                            </View>
+                            <Text style={styles.txidText} selectable numberOfLines={3}>{proof.preimage}</Text>
+                            {proofVerified && (
+                                <View style={styles.proofRow}>
+                                    <Ionicons name="checkmark-circle" size={14} color={theme.colors.success[500]} />
+                                    <Text style={styles.proofText}>Matches the payment hash</Text>
+                                </View>
+                            )}
+                            {!!proofHash && proofHash !== item.txid && (
+                                <>
+                                    <View style={[styles.txidHeader, { marginTop: theme.spacing[3] }]}>
+                                        <Text style={styles.rowLabel}>Payment hash</Text>
+                                        <CopyButton value={proofHash} label="Copy" size={14} />
+                                    </View>
+                                    <Text style={styles.txidText} selectable numberOfLines={3}>{proofHash}</Text>
+                                </>
+                            )}
                         </View>
                     )}
                     {target && (
@@ -298,6 +378,17 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         fontSize: 12,
         fontWeight: '600',
         color: theme.colors.text.secondary,
+    },
+    proofRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginTop: theme.spacing[2],
+    },
+    proofText: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.success[500],
+        fontWeight: '600',
     },
     txidBlock: {
         backgroundColor: theme.colors.surface.primary,

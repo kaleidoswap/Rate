@@ -35,6 +35,8 @@ import {
   type CrossChainForm,
   type CrossChainSendSession,
 } from '../utils/crosschain-send';
+import { recordFromSend } from '../utils/crosschain-history';
+import { recordCrossChain } from './crosschainHistory';
 
 const key = (walletId: number) => `crosschain-send-v1-${walletId}`;
 
@@ -42,8 +44,10 @@ export async function loadCrossChainSession(walletId: number): Promise<CrossChai
   return parseSession(await AsyncStorage.getItem(key(walletId)));
 }
 
-export const saveCrossChainSession = (walletId: number, s: CrossChainSendSession) =>
-  AsyncStorage.setItem(key(walletId), JSON.stringify(s));
+export async function saveCrossChainSession(walletId: number, s: CrossChainSendSession): Promise<void> {
+  await AsyncStorage.setItem(key(walletId), JSON.stringify(s));
+  void recordCrossChain(walletId, recordFromSend(s));
+}
 
 export const clearCrossChainSession = (walletId: number) => AsyncStorage.removeItem(key(walletId));
 

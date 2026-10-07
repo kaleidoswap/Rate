@@ -11,6 +11,7 @@ export const LAYER_LABEL: Record<ActivityLayer, string> = {
   'Bark': 'Bark',
   'Bark Signet': 'Bark · Signet',
   'Swap': 'Swap',
+  'Cross-chain': 'Cross-chain',
 };
 
 /** The NetworkIcon for a layer; null when it has none (swaps span two). */

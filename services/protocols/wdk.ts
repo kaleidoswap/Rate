@@ -1,4 +1,5 @@
 import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection, isBarkOff } from './barkPreferences'
+import { withPaymentProofs } from '../paymentProofs'
 /**
  * WDK Protocol Wiring — KaleidoSwap App
  * -------------------------------------
@@ -107,20 +108,23 @@ export function getWdkProtocolManager(): ProtocolManager {
   if (!_wdkManager) {
     registerWdkModuleLoaders()
     _wdkManager = new ProtocolManager()
+    const manager = _wdkManager
+    // Every Lightning payment's preimage is kept for Activity, whichever screen paid.
+    const register = (adapter: any) => manager.registerAdapter(withPaymentProofs(adapter))
     // Spark + RLN: no WASM, SDKs already shipped — always on.
-    _wdkManager.registerAdapter(new MobileSparkAdapter())
+    register(new MobileSparkAdapter())
     // RGB: NWC-backed (remote node over relays) by default on mobile; HTTP WDK
     // adapter when EXPO_PUBLIC_RGB_VIA_NWC=0.
     if (RGB_VIA_NWC) {
-      _wdkManager.registerAdapter(new NwcRgbAdapter())
+      register(new NwcRgbAdapter())
     } else {
-      _wdkManager.registerAdapter(new RlnWdkAdapter())
+      register(new RlnWdkAdapter())
     }
     // Liquid is not part of the app: its native library alone was ~175 MB of the APK.
     // Wallets saved with a Liquid network skip it (no LIQUID case below).
-    if (ARKADE_ENABLED) _wdkManager.registerAdapter(new ArkadeWdkAdapter())
-    if (BARK_ENABLED) _wdkManager.registerAdapter(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
-    if (RGB_L1_ENABLED) _wdkManager.registerAdapter(new RgbLibWdkAdapter())
+    if (ARKADE_ENABLED) register(new ArkadeWdkAdapter())
+    if (BARK_ENABLED) register(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
+    if (RGB_L1_ENABLED) register(new RgbLibWdkAdapter())
   }
   return _wdkManager
 }

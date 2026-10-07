@@ -69,6 +69,9 @@ import {
   type BridgeDestAsset,
 } from '../utils/bridge-session';
 import { feedback } from '../utils/feedback';
+import { useAppSelector } from '../store/hooks';
+import { recordFromBridge } from '../utils/crosschain-history';
+import { recordCrossChain } from '../services/crosschainHistory';
 
 const DEPOSIT_POLL_MS = 5000;
 const STATUS_POLL_MS = 3000;
@@ -173,9 +176,12 @@ export default function BridgeScreen({ navigation }: { navigation: any }) {
   // Only the step, quote and order matter for a resume; typing an amount doesn't.
   const latestState = useRef(state);
   latestState.current = state;
+  const walletId = useAppSelector((s) => s.wallet.activeWallet?.id);
   useEffect(() => {
-    if (loaded) void saveBridgeSession(latestState.current);
-  }, [loaded, state.step, state.quote, state.order]);
+    if (!loaded) return;
+    void saveBridgeSession(latestState.current);
+    void recordCrossChain(walletId, recordFromBridge(latestState.current, Date.now()));
+  }, [loaded, walletId, state.step, state.quote, state.order]);
 
   // ── Derived selection ──
   const route = findRoute(routes, state.sourceChain, state.sourceAsset, state.destAsset);
