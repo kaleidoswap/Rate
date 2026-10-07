@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import type { Theme } from '../../theme';
+import { RgbNodeIcon } from '../ProtocolIcons';
 
 export interface BalanceData {
   total_sats: number;
@@ -16,7 +17,7 @@ export interface BalanceData {
 // Send/Receive and the dashboard breakdown instead of an ad-hoc palette.
 const LAYER_META: Record<string, { label: string; icon: string; net: string }> = {
   spark: { label: 'Spark', icon: 'flash', net: 'spark' },
-  rln: { label: 'Lightning / RGB', icon: 'flash-outline', net: 'lightning' },
+  rln: { label: 'Lightning / RGB', icon: 'rln', net: 'lightning' },
   arkade: { label: 'Arkade', icon: 'cube', net: 'arkade' },
 };
 const meta = (t: Theme, l: string) => {
@@ -85,7 +86,9 @@ const BalanceDetailModal: React.FC<{ visible: boolean; data: BalanceData; onClos
                 <View key={l.layer} style={s.detLayer}>
                   <View style={s.detHead}>
                     <View style={[s.iconChip, { backgroundColor: m.color + '22' }]}>
-                      <Ionicons name={m.icon as any} size={15} color={m.color} />
+                      {m.icon === 'rln'
+                        ? <RgbNodeIcon size={16} badgeBackground={theme.colors.surface.primary} />
+                        : <Ionicons name={m.icon as any} size={15} color={m.color} />}
                     </View>
                     <Text style={s.detName}>{m.label}</Text>
                     <View style={{ flex: 1 }} />

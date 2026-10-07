@@ -26,6 +26,7 @@ import {
 import { loadContactList, followUser, unfollowUser } from '../store/slices/nostrSlice';
 import { theme } from '../theme';
 import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input, CopyButton, PressableScale } from '../components';
+import { NostrIcon } from '../components/ProtocolIcons';
 import { feedback } from '../utils/feedback';
 import NostrService, { NostrContact } from '../services/NostrService';
 import ToastService from '../services/ToastService';
@@ -50,6 +51,11 @@ function avatarColors(name: string) {
 }
 
 // Same person: a shared Lightning address (case-insensitive) or Nostr key.
+/** A contact detail's icon: the Nostr mark for Nostr, else an Ionicons glyph. */
+function IdIcon({ icon, size, color }: { icon: string; size: number; color: string }) {
+  return icon === 'nostr' ? <NostrIcon size={size} /> : <Ionicons name={icon as any} size={size} color={color} />;
+}
+
 function isSamePerson(local: Contact, follow: Contact): boolean {
   const ln = (c: Contact) => c.lightning_address?.trim().toLowerCase();
   if (ln(local) && ln(local) === ln(follow)) return true;
@@ -378,7 +384,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         {/* Nostr accounts carry a small badge instead of a separate icon next to the name. */}
         {contact.isNostrContact && (
           <View style={styles.avatarBadge}>
-            <Ionicons name="planet" size={10} color={theme.colors.primary[500]} />
+            <NostrIcon size={12} />
           </View>
         )}
       </View>
@@ -428,7 +434,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         <PressableScale style={styles.connectBanner} onPress={() => navigation.navigate('NostrSettings')} scaleTo={0.98}
           accessibilityRole="button" accessibilityLabel="Connect Nostr">
           <View style={styles.connectIcon}>
-            <Ionicons name="planet" size={18} color={theme.colors.primary[500]} />
+            <NostrIcon size={22} />
           </View>
           <View style={styles.flex}>
             <Text style={styles.connectTitle}>Find your friends on Nostr</Text>
@@ -446,7 +452,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
   const renderAddModal = () => {
     const kind = detectKind(addInput);
     const detected: Record<typeof kind, { label: string; icon: any; color: string }> = {
-      nostr: { label: 'Nostr account', icon: 'planet', color: theme.colors.primary[500] },
+      nostr: { label: 'Nostr account', icon: 'nostr', color: theme.colors.primary[500] },
       lightning: { label: 'Lightning address or NIP-05', icon: 'flash', color: theme.colors.warning[500] },
       node: { label: 'Lightning node', icon: 'git-network', color: theme.colors.text.secondary },
       unknown: { label: 'Not recognised yet', icon: 'help-circle-outline', color: theme.colors.text.tertiary },
@@ -492,7 +498,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         />
         {addInput.trim().length > 0 && (
           <View style={styles.detectRow}>
-            <Ionicons name={d.icon} size={13} color={d.color} />
+            <IdIcon icon={d.icon} size={13} color={d.color} />
             <Text style={[styles.detectText, { color: d.color }]}>{d.label}</Text>
           </View>
         )}
@@ -516,7 +522,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
     const c = openContact;
     const ids: { label: string; value: string; display: string; icon: any; color: string }[] = c ? [
       ...(c.lightning_address ? [{ label: 'Lightning address', value: c.lightning_address, display: c.lightning_address, icon: 'flash', color: theme.colors.warning[500] }] : []),
-      ...(c.npub ? [{ label: 'Nostr', value: c.npub, display: shortKey(c.npub, 14, 8), icon: 'planet', color: theme.colors.primary[500] }] : []),
+      ...(c.npub ? [{ label: 'Nostr', value: c.npub, display: shortKey(c.npub, 14, 8), icon: 'nostr', color: theme.colors.primary[500] }] : []),
       ...(!c.isNostrContact && c.node_pubkey ? [{ label: 'Node', value: c.node_pubkey, display: shortKey(c.node_pubkey, 12, 8), icon: 'git-network', color: theme.colors.text.secondary }] : []),
     ] : [];
     const unread = c?.node_pubkey ? unreadByPubkey[c.node_pubkey] ?? 0 : 0;
@@ -547,7 +553,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
               <View style={styles.group}>
                 {ids.map((row, i) => (
                   <View key={row.label} style={[styles.idRow, i < ids.length - 1 && styles.rowDivider]}>
-                    <Ionicons name={row.icon} size={16} color={row.color} />
+                    <IdIcon icon={row.icon} size={16} color={row.color} />
                     <View style={styles.flex}>
                       <Text style={styles.idLabel}>{row.label}</Text>
                       <Text style={styles.idValue} numberOfLines={1}>{row.display}</Text>
@@ -708,7 +714,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
               accessibilityLabel="Nostr settings"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="planet-outline" size={19} color={theme.colors.text.primary} />
+              <NostrIcon size={19} color={theme.colors.text.primary} />
             </TouchableOpacity>
           </>
         }
@@ -788,7 +794,7 @@ const styles = StyleSheet.create({
   },
   connectIcon: {
     width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: `${theme.colors.primary[500]}1F`,
+    backgroundColor: theme.colors.surface.secondary,
   },
   connectTitle: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
   connectText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
