@@ -6,7 +6,8 @@
  * same balance the asset rows show (getAssetBaseUnitBalance), so the rows and the
  * headline total always agree.
  */
-import { getAssetBaseUnitBalance, type AssetBalanceLike } from './assetAmount';
+import { formatAssetAmount, getAssetBaseUnitBalance, type AssetBalanceLike } from './assetAmount';
+import { getAssetFamily } from './account-routing';
 
 const SATS_PER_BTC = 100_000_000;
 
@@ -15,6 +16,7 @@ export const USD_STABLECOIN_TICKERS: ReadonlySet<string> = new Set(['USDT', 'USD
 export interface PricedAsset {
   asset_id?: string;
   ticker?: string | null;
+  name?: string | null;
   precision?: number | null;
   balance: AssetBalanceLike;
 }
@@ -70,4 +72,74 @@ export function formatUsd(value: number): string {
   const abs = Math.abs(value);
   const digits = abs > 0 && abs < 0.01 ? 4 : 2;
   return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: digits })}`;
+}
+
+export interface BreakdownAssetRow {
+  key: string;
+  ticker: string;
+  name: string;
+  /** NetworkIcon key ('rgb' | 'spark' | 'arkade'); absent for Lite's folded dollar row. */
+  network?: string;
+  /** "RGB", "Spark", "Arkade". */
+  networkLabel?: string;
+  /** Whole-token amount, e.g. "12.5". */
+  amount: string;
+  /** Dollar value, or undefined when the asset has no price. */
+  usdValue?: number;
+}
+
+const NETWORK_LABEL: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade' };
+
+/**
+ * The non-bitcoin assets for the balance breakdown, one row each: priced ones
+ * first (largest value first), then the unpriced ones, which carry no fiat value
+ * and stay out of the total. Empty balances are left out. In Lite, the dollar
+ * tokens fold into one "US Dollar" row, as in the asset list.
+ */
+export function breakdownAssetRows(
+  assets: readonly PricedAsset[],
+  usdAssetIds?: ReadonlySet<string>,
+  opts: { foldDollars?: boolean } = {},
+): BreakdownAssetRow[] {
+  const rows: BreakdownAssetRow[] = [];
+  let dollars = 0;
+  let hasDollars = false;
+  for (const asset of assets) {
+    const id = String(asset.asset_id ?? '');
+    if (!id || id === 'BTC') continue;
+    const baseUnits = getAssetBaseUnitBalance(asset.balance);
+    if (!(baseUnits > 0)) continue;
+    const usdValue = assetUsdValue(asset, usdAssetIds);
+    if (opts.foldDollars && usdValue !== undefined) {
+      dollars += usdValue;
+      hasDollars = true;
+      continue;
+    }
+    const family = getAssetFamily(id, asset.ticker);
+    const ticker = String(asset.ticker ?? '').trim() || String(asset.name ?? '').trim() || 'Asset';
+    rows.push({
+      key: id,
+      ticker,
+      name: String(asset.name ?? '').trim() || ticker,
+      network: family.toLowerCase(),
+      networkLabel: NETWORK_LABEL[family] ?? family,
+      amount: formatAssetAmount(baseUnits, asset.precision || 0),
+      usdValue,
+    });
+  }
+  rows.sort((a, b) => {
+    if ((a.usdValue === undefined) !== (b.usdValue === undefined)) return a.usdValue === undefined ? 1 : -1;
+    if (a.usdValue !== undefined && b.usdValue !== undefined && a.usdValue !== b.usdValue) return b.usdValue - a.usdValue;
+    return a.ticker.localeCompare(b.ticker);
+  });
+  if (hasDollars) {
+    rows.unshift({
+      key: 'usd',
+      ticker: 'USD',
+      name: 'US Dollar',
+      amount: dollars.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      usdValue: dollars,
+    });
+  }
+  return rows;
 }
