@@ -1,0 +1,499 @@
+diff --git a/android/src/main/java/com/rgb/AppConstants.kt b/android/src/main/java/com/rgb/AppConstants.kt
+index ce4feb7b329579ec9d29a5b642997c2a2121155f..a04b37e446563895bc95c1f595ce5ab823e26241 100644
+--- a/android/src/main/java/com/rgb/AppConstants.kt
++++ b/android/src/main/java/com/rgb/AppConstants.kt
+@@ -31,6 +31,18 @@ object AppConstants {
+     rgbDir = File(context.filesDir, rgbDirName)
+   }
+ 
++  private val subdirPattern = Regex("^[A-Za-z0-9_-]{1,64}$")
++
++  /** rgbDir, or the folder `subdir` inside it (created when missing). */
++  fun rgbDirFor(subdir: String?): File {
++    val base = rgbDir ?: throw IllegalStateException("RGB directory not initialized.")
++    if (subdir.isNullOrEmpty()) return base
++    require(subdirPattern.matches(subdir)) { "Invalid RGB data folder: $subdir" }
++    val dir = File(base, subdir)
++    if (!dir.isDirectory && !dir.mkdirs()) throw IllegalStateException("Could not create RGB data folder: $subdir")
++    return dir
++  }
++
+   @JvmStatic
+   fun ensureInitialized(context: Context) {
+     if (appContext == null || rgbDir == null) {
+diff --git a/android/src/main/java/com/rgb/RgbModule.kt b/android/src/main/java/com/rgb/RgbModule.kt
+index 2472e516bde7cbc371b6bf733409517ef728d062..e3979342bd134119f4b014e975f32f33378fa8d2 100644
+--- a/android/src/main/java/com/rgb/RgbModule.kt
++++ b/android/src/main/java/com/rgb/RgbModule.kt
+@@ -124,10 +124,13 @@ class RgbModule(reactContext: ReactApplicationContext) :
+   }
+ 
+   override fun restoreBackup(path: String, password: String, promise: Promise) {
++    restoreBackupInSubdir(path, password, "", promise)
++  }
++
++  override fun restoreBackupInSubdir(path: String, password: String, subdir: String, promise: Promise) {
+     coroutineScope.launch(Dispatchers.IO) {
+       try {
+-        val rgbDir = AppConstants.rgbDir
+-          ?: throw IllegalStateException("RGB directory not initialized.")
++        val rgbDir = AppConstants.rgbDirFor(subdir)
+         org.rgbtools.restoreBackup(path, password, rgbDir.absolutePath)
+ 
+         withContext(Dispatchers.Main) {
+@@ -216,11 +219,30 @@ class RgbModule(reactContext: ReactApplicationContext) :
+     maxAllocationsPerUtxo: Double,
+     vanillaKeychain: Double,
+     promise: Promise
++  ) {
++    initializeWalletInSubdir(
++      network, accountXpubVanilla, accountXpubColored, mnemonic, masterFingerprint,
++      supportedSchemas, maxAllocationsPerUtxo, vanillaKeychain, "", promise
++    )
++  }
++
++  override fun initializeWalletInSubdir(
++    network: String,
++    accountXpubVanilla: String,
++    accountXpubColored: String,
++    mnemonic: String,
++    masterFingerprint: String,
++    supportedSchemas: ReadableArray,
++    maxAllocationsPerUtxo: Double,
++    vanillaKeychain: Double,
++    subdir: String,
++    promise: Promise
+   ) {
+     coroutineScope.launch(Dispatchers.IO) {
+       try {
+-        val rgbDir = AppConstants.rgbDir
++        AppConstants.rgbDir
+           ?: throw IllegalStateException("RGB directory not initialized. Call AppConstants.initContext() first.")
++        val rgbDir = AppConstants.rgbDirFor(subdir)
+ 
+         val rgbNetwork = getNetwork(network)
+         val schemaList = mutableListOf<AssetSchema>()
+diff --git a/ios/AppConstants.swift b/ios/AppConstants.swift
+index df283bf8d02540952f16c2381c03bade78adaca7..4e4a25f1a48c85c51ddacb262fba62478666a96e 100644
+--- a/ios/AppConstants.swift
++++ b/ios/AppConstants.swift
+@@ -25,6 +25,22 @@ public class AppConstants: NSObject {
+   private override init() {
+     super.init()
+   }
++
++  static func isValidSubdir(_ name: String) -> Bool {
++    return name.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil
++  }
++
++  /// rgbDir, or the folder `subdir` inside it (created when missing). nil when not initialized.
++  func rgbDirFor(subdir: String?) throws -> URL? {
++    guard let base = rgbDir else { return nil }
++    guard let name = subdir, !name.isEmpty else { return base }
++    guard AppConstants.isValidSubdir(name) else {
++      throw NSError(domain: "Rgb", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid RGB data folder: \(name)"])
++    }
++    let dir = base.appendingPathComponent(name, isDirectory: true)
++    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
++    return dir
++  }
+   
+   @objc public func initContext() {
+     queue.sync {
+diff --git a/ios/Rgb.mm b/ios/Rgb.mm
+index 87212e385ca4ced294e4926c6cbc7e8f573fb3d9..41fff4edf764ad52fa91822b89821ebd89e9daf3 100644
+--- a/ios/Rgb.mm
++++ b/ios/Rgb.mm
+@@ -94,15 +94,25 @@ - (void)restoreBackup:(NSString *)path
+              password:(NSString *)password
+               resolve:(RCTPromiseResolveBlock)resolve
+                reject:(RCTPromiseRejectBlock)reject
++{
++    [self restoreBackupInSubdir:path password:password subdir:@"" resolve:resolve reject:reject];
++}
++
++- (void)restoreBackupInSubdir:(NSString *)path
++                     password:(NSString *)password
++                       subdir:(NSString *)subdir
++                      resolve:(RCTPromiseResolveBlock)resolve
++                       reject:(RCTPromiseRejectBlock)reject
+ {
+     __weak Rgb *weakSelf = self;
++    NSString *strongSubdir = [subdir copy] ?: @"";
+     RCTPromiseResolveBlock strongResolve = resolve;
+     RCTPromiseRejectBlock strongReject = reject;
+     NSString *strongPath = [path copy];
+     NSString *strongPassword = [password copy];
+     
+     EXEC_ASYNC({
+-        NSDictionary *result = [RgbSwiftHelper _restoreBackup:strongPath :strongPassword];
++        NSDictionary *result = [RgbSwiftHelper _restoreBackupInSubdir:strongPath password:strongPassword subdir:strongSubdir];
+         NSString *errorMessage = result[@"error"];
+         if (errorMessage != nil) {
+             NSString *errorCode = result[@"errorCode"] ?: @"RESTORE_BACKUP_ERROR";
+@@ -131,6 +141,32 @@ - (void)initializeWallet:(NSString *)network
+                   resolve:(RCTPromiseResolveBlock)resolve
+                    reject:(RCTPromiseRejectBlock)reject
+ {
++    [self initializeWalletInSubdir:network
++                accountXpubVanilla:accountXpubVanilla
++                accountXpubColored:accountXpubColored
++                          mnemonic:mnemonic
++                 masterFingerprint:masterFingerprint
++                  supportedSchemas:supportedSchemas
++             maxAllocationsPerUtxo:maxAllocationsPerUtxo
++                   vanillaKeychain:vanillaKeychain
++                            subdir:@""
++                           resolve:resolve
++                            reject:reject];
++}
++
++- (void)initializeWalletInSubdir:(NSString *)network
++              accountXpubVanilla:(NSString *)accountXpubVanilla
++              accountXpubColored:(NSString *)accountXpubColored
++                        mnemonic:(NSString *)mnemonic
++               masterFingerprint:(NSString *)masterFingerprint
++                supportedSchemas:(NSArray<NSString *> *)supportedSchemas
++           maxAllocationsPerUtxo:(double)maxAllocationsPerUtxo
++                 vanillaKeychain:(double)vanillaKeychain
++                          subdir:(NSString *)subdir
++                         resolve:(RCTPromiseResolveBlock)resolve
++                          reject:(RCTPromiseRejectBlock)reject
++{
++    NSString *strongSubdir = [subdir copy] ?: @"";
+     if (!network || !accountXpubVanilla || !accountXpubColored || !mnemonic || !masterFingerprint || !supportedSchemas) {
+         if (reject) {
+             reject(@"INITIALIZE_WALLET_ERROR", @"Missing required parameters", nil);
+@@ -161,14 +197,15 @@ - (void)initializeWallet:(NSString *)network
+     }
+     
+     EXEC_ASYNC({
+-        NSDictionary *result = [RgbSwiftHelper _initializeWallet:strongNetwork
++        NSDictionary *result = [RgbSwiftHelper _initializeWalletInSubdir:strongNetwork
+                                             accountXpubVanilla:strongAccountXpubVanilla
+                                            accountXpubColored:strongAccountXpubColored
+                                                       mnemonic:strongMnemonic
+                                              masterFingerprint:strongMasterFingerprint
+                                              supportedSchemas:strongSupportedSchemas
+                                         maxAllocationsPerUtxo:strongMaxAllocationsPerUtxo
+-                                              vanillaKeychain:strongVanillaKeychain];
++                                              vanillaKeychain:strongVanillaKeychain
++                                                       subdir:strongSubdir];
+         
+         if (!result) {
+             dispatch_async(dispatch_get_main_queue(), ^{
+diff --git a/ios/Rgb.swift b/ios/Rgb.swift
+index 2211b9ba628c44652361cbd507fd0802e7fe5a44..bba077b2f40fe05e075195b233ef884e2486c740 100644
+--- a/ios/Rgb.swift
++++ b/ios/Rgb.swift
+@@ -132,11 +132,16 @@ public class RgbSwiftHelper: NSObject {
+   
+   @objc
+   public static func _restoreBackup(_ path: String, _ password: String) -> NSDictionary {
++    return _restoreBackupInSubdir(path, password, "")
++  }
++
++  @objc(_restoreBackupInSubdir:password:subdir:)
++  public static func _restoreBackupInSubdir(_ path: String, _ password: String, _ subdir: String) -> NSDictionary {
+     do {
+       let constants = AppConstants.shared
+       constants.ensureInitialized()
+       
+-      guard let rgbDir = constants.rgbDir else {
++      guard let rgbDir = try constants.rgbDirFor(subdir: subdir) else {
+         return ["error": "RGB directory not initialized."] as NSDictionary
+       }
+       
+@@ -176,6 +181,22 @@ public class RgbSwiftHelper: NSObject {
+     _ supportedSchemas: NSArray,
+     _ maxAllocationsPerUtxo: NSNumber,
+     _ vanillaKeychain: NSNumber
++  ) -> NSDictionary {
++    return _initializeWalletInSubdir(network, accountXpubVanilla, accountXpubColored, mnemonic, masterFingerprint,
++                                     supportedSchemas, maxAllocationsPerUtxo, vanillaKeychain, "")
++  }
++
++  @objc(_initializeWalletInSubdir:accountXpubVanilla:accountXpubColored:mnemonic:masterFingerprint:supportedSchemas:maxAllocationsPerUtxo:vanillaKeychain:subdir:)
++  public static func _initializeWalletInSubdir(
++    _ network: String,
++    _ accountXpubVanilla: String,
++    _ accountXpubColored: String,
++    _ mnemonic: String,
++    _ masterFingerprint: String,
++    _ supportedSchemas: NSArray,
++    _ maxAllocationsPerUtxo: NSNumber,
++    _ vanillaKeychain: NSNumber,
++    _ subdir: String
+   ) -> NSDictionary {
+     do {
+       guard !network.isEmpty, !accountXpubVanilla.isEmpty, !accountXpubColored.isEmpty,
+@@ -190,7 +211,7 @@ public class RgbSwiftHelper: NSObject {
+       let constants = AppConstants.shared
+       constants.ensureInitialized()
+       
+-      guard let rgbDir = constants.rgbDir else {
++      guard let rgbDir = try constants.rgbDirFor(subdir: subdir) else {
+         return ["error": "RGB directory not initialized. Call AppConstants.initContext() first."] as NSDictionary
+       }
+       
+diff --git a/lib/module/Wallet.js b/lib/module/Wallet.js
+index 593492f642cb7a516ea308f53ef5702f665283af..96a946fa527f59bb808f57dd4d2042fa17d21eb1 100644
+--- a/lib/module/Wallet.js
++++ b/lib/module/Wallet.js
+@@ -2,6 +2,11 @@
+ 
+ import Rgb from "./NativeRgb.js";
+ import * as Interfaces from "./Interfaces.js";
++
++/** Whether the native module can keep wallets in a folder of their own (`subdir`). */
++export function supportsSubdir() {
++  return typeof Rgb?.initializeWalletInSubdir === 'function' && typeof Rgb?.restoreBackupInSubdir === 'function';
++}
+ export class Wallet {
+   walletId = null;
+   initializationPromise = null;
+@@ -21,6 +26,7 @@ export class Wallet {
+     this.supportedSchemas = options?.supportedSchemas || [Interfaces.AssetSchema.CFA, Interfaces.AssetSchema.NIA, Interfaces.AssetSchema.UDA];
+     this.maxAllocationsPerUtxo = options?.maxAllocationsPerUtxo ?? 1;
+     this.vanillaKeychain = options?.vanillaKeychain ?? 0;
++    this.subdir = options?.subdir || null;
+   }
+ 
+   /**
+@@ -41,7 +47,15 @@ export class Wallet {
+ 
+     // Start initialization
+     this.initializationPromise = (async () => {
+-      this.walletId = await Rgb.initializeWallet(this.network, this.keys.accountXpubVanilla, this.keys.accountXpubColored, this.keys.mnemonic, this.keys.masterFingerprint, this.supportedSchemas, this.maxAllocationsPerUtxo, this.vanillaKeychain);
++      const args = [this.network, this.keys.accountXpubVanilla, this.keys.accountXpubColored, this.keys.mnemonic, this.keys.masterFingerprint, this.supportedSchemas, this.maxAllocationsPerUtxo, this.vanillaKeychain];
++      if (this.subdir) {
++        if (!supportsSubdir()) {
++          throw new Error('This app build cannot keep RGB wallets in separate folders.');
++        }
++        this.walletId = await Rgb.initializeWalletInSubdir(...args, this.subdir);
++      } else {
++        this.walletId = await Rgb.initializeWallet(...args);
++      }
+     })();
+     await this.initializationPromise;
+   }
+diff --git a/lib/module/index.js b/lib/module/index.js
+index 46e5eaf836e585ca3b9235fce88c11e72f48b8e9..714244242458b98c66268792f369eeb8513d59d7 100644
+--- a/lib/module/index.js
++++ b/lib/module/index.js
+@@ -2,7 +2,7 @@
+ 
+ import Rgb from "./NativeRgb.js";
+ import * as Interfaces from "./Interfaces.js";
+-import { Wallet } from "./Wallet.js";
++import { Wallet, supportsSubdir } from "./Wallet.js";
+ export * from "./Interfaces.js";
+ export * from "./Wallet.js";
+ export * from "./RgbError.js";
+@@ -44,8 +44,12 @@ export async function restoreKeys(bitcoinNetwork, mnemonic) {
+  *   - Invalid password
+  *   - Backup restoration fails
+  */
+-export async function restoreBackup(path, password) {
+-  return Rgb.restoreBackup(path, password);
++export async function restoreBackup(path, password, subdir) {
++  if (!subdir) return Rgb.restoreBackup(path, password);
++  if (!supportsSubdir()) {
++    throw new Error('This app build cannot keep RGB wallets in separate folders.');
++  }
++  return Rgb.restoreBackupInSubdir(path, password, subdir);
+ }
+ export async function decodeInvoice(invoice) {
+   return Rgb.decodeInvoice(invoice);
+diff --git a/lib/typescript/src/NativeRgb.d.ts b/lib/typescript/src/NativeRgb.d.ts
+index 86a08bc422d4ca95978a43c757c6c1fb19fe86ba..b93f9430f3662941bab05ece68f26b77f56b2a03 100644
+--- a/lib/typescript/src/NativeRgb.d.ts
++++ b/lib/typescript/src/NativeRgb.d.ts
+@@ -16,7 +16,9 @@ export interface Spec extends TurboModule {
+         masterFingerprint: string;
+     }>;
+     restoreBackup(path: string, password: string): Promise<void>;
++    restoreBackupInSubdir(path: string, password: string, subdir: string): Promise<void>;
+     initializeWallet(network: string, accountXpubVanilla: string, accountXpubColored: string, mnemonic: string, masterFingerprint: string, supportedSchemas: string[], maxAllocationsPerUtxo: number, vanillaKeychain: number): Promise<number>;
++    initializeWalletInSubdir(network: string, accountXpubVanilla: string, accountXpubColored: string, mnemonic: string, masterFingerprint: string, supportedSchemas: string[], maxAllocationsPerUtxo: number, vanillaKeychain: number, subdir: string): Promise<number>;
+     goOnline(walletId: number, skipConsistencyCheck: boolean, indexerUrl: string): Promise<void>;
+     getBtcBalance(walletId: number, skipSync: boolean): Promise<{
+         vanilla: {
+diff --git a/lib/typescript/src/Wallet.d.ts b/lib/typescript/src/Wallet.d.ts
+index 98b5b9efc38dd6efec4d2a3d44a3b740662aa1fd..8321e7a60efc7112e18ffba361a262d5554583bd 100644
+--- a/lib/typescript/src/Wallet.d.ts
++++ b/lib/typescript/src/Wallet.d.ts
+@@ -4,7 +4,11 @@ export interface WalletOptions {
+     supportedSchemas?: Interfaces.AssetSchema[];
+     maxAllocationsPerUtxo?: number;
+     vanillaKeychain?: number;
++    /** Keep this wallet's data in this folder inside the module's data folder (letters, digits, - and _). */
++    subdir?: string;
+ }
++/** Whether the native module can keep wallets in a folder of their own (`subdir`). */
++export declare function supportsSubdir(): boolean;
+ export declare class Wallet {
+     private walletId;
+     private keys;
+@@ -12,6 +16,7 @@ export declare class Wallet {
+     private supportedSchemas;
+     private maxAllocationsPerUtxo;
+     private vanillaKeychain;
++    private subdir;
+     private initializationPromise;
+     /**
+      * Creates a new Wallet instance with the provided keys and configuration.
+diff --git a/lib/typescript/src/index.d.ts b/lib/typescript/src/index.d.ts
+index 83e675d6abad71c82ba9488b5760ace0e7d4ac08..d985ded7e6fec697fa1d8ceac1d5ebf4f0510ede 100644
+--- a/lib/typescript/src/index.d.ts
++++ b/lib/typescript/src/index.d.ts
+@@ -34,6 +34,6 @@ export declare function restoreKeys(bitcoinNetwork: Interfaces.BitcoinNetwork, m
+  *   - Invalid password
+  *   - Backup restoration fails
+  */
+-export declare function restoreBackup(path: string, password: string): Promise<void>;
++export declare function restoreBackup(path: string, password: string, subdir?: string): Promise<void>;
+ export declare function decodeInvoice(invoice: string): Promise<Interfaces.InvoiceData>;
+ //# sourceMappingURL=index.d.ts.map
+\ No newline at end of file
+diff --git a/src/NativeRgb.ts b/src/NativeRgb.ts
+index 7a1e5398500bca0420688a537e7b0e712fcac98d..dc58f7dcb8fbee27bd826cafd052e3b98fc8d85a 100644
+--- a/src/NativeRgb.ts
++++ b/src/NativeRgb.ts
+@@ -30,6 +30,11 @@ export interface Spec extends TurboModule {
+     masterFingerprint: string;
+   }>;
+   restoreBackup(path: string, password: string): Promise<void>;
++  restoreBackupInSubdir(
++    path: string,
++    password: string,
++    subdir: string
++  ): Promise<void>;
+   initializeWallet(
+     network: string,
+     accountXpubVanilla: string,
+@@ -40,6 +45,17 @@ export interface Spec extends TurboModule {
+     maxAllocationsPerUtxo: number,
+     vanillaKeychain: number
+   ): Promise<number>;
++  initializeWalletInSubdir(
++    network: string,
++    accountXpubVanilla: string,
++    accountXpubColored: string,
++    mnemonic: string,
++    masterFingerprint: string,
++    supportedSchemas: string[],
++    maxAllocationsPerUtxo: number,
++    vanillaKeychain: number,
++    subdir: string
++  ): Promise<number>;
+   goOnline(
+     walletId: number,
+     skipConsistencyCheck: boolean,
+diff --git a/src/Wallet.ts b/src/Wallet.ts
+index 8572e5c8989a9413a8a57b0e541ee752416c6969..527e54b6a8d827a24bf6875e427fbce14bf28ca2 100644
+--- a/src/Wallet.ts
++++ b/src/Wallet.ts
+@@ -1,11 +1,21 @@
+ import Rgb from './NativeRgb';
+ import * as Interfaces from './Interfaces';
+ 
++/** Whether the native module can keep wallets in a folder of their own (`subdir`). */
++export function supportsSubdir(): boolean {
++  return (
++    typeof (Rgb as any)?.initializeWalletInSubdir === 'function' &&
++    typeof (Rgb as any)?.restoreBackupInSubdir === 'function'
++  );
++}
++
+ export interface WalletOptions {
+   network?: Interfaces.BitcoinNetwork;
+   supportedSchemas?: Interfaces.AssetSchema[];
+   maxAllocationsPerUtxo?: number;
+   vanillaKeychain?: number;
++  /** Keep this wallet's data in this folder inside the module's data folder (letters, digits, - and _). */
++  subdir?: string;
+ }
+ 
+ export class Wallet {
+@@ -15,6 +25,7 @@ export class Wallet {
+   private supportedSchemas: Interfaces.AssetSchema[];
+   private maxAllocationsPerUtxo: number;
+   private vanillaKeychain: number;
++  private subdir: string | null;
+   private initializationPromise: Promise<void> | null = null;
+ 
+   /**
+@@ -36,6 +47,7 @@ export class Wallet {
+     ];
+     this.maxAllocationsPerUtxo = options?.maxAllocationsPerUtxo ?? 1;
+     this.vanillaKeychain = options?.vanillaKeychain ?? 0;
++    this.subdir = options?.subdir || null;
+   }
+ 
+   /**
+@@ -56,7 +68,7 @@ export class Wallet {
+ 
+     // Start initialization
+     this.initializationPromise = (async () => {
+-      this.walletId = await Rgb.initializeWallet(
++      const args = [
+         this.network,
+         this.keys.accountXpubVanilla,
+         this.keys.accountXpubColored,
+@@ -64,8 +76,16 @@ export class Wallet {
+         this.keys.masterFingerprint,
+         this.supportedSchemas,
+         this.maxAllocationsPerUtxo,
+-        this.vanillaKeychain
+-      );
++        this.vanillaKeychain,
++      ] as const;
++      if (this.subdir) {
++        if (!supportsSubdir()) {
++          throw new Error('This app build cannot keep RGB wallets in separate folders.');
++        }
++        this.walletId = await Rgb.initializeWalletInSubdir(...args, this.subdir);
++      } else {
++        this.walletId = await Rgb.initializeWallet(...args);
++      }
+     })();
+ 
+     await this.initializationPromise;
+diff --git a/src/index.tsx b/src/index.tsx
+index 580de800f1bb3328b2f5e71220ac4863d1e0fa51..45f64fe5fa1e8d992a37c7952e32651f502b5545 100644
+--- a/src/index.tsx
++++ b/src/index.tsx
+@@ -1,6 +1,6 @@
+ import Rgb from './NativeRgb';
+ import * as Interfaces from './Interfaces';
+-import { Wallet } from './Wallet';
++import { Wallet, supportsSubdir } from './Wallet';
+ 
+ export * from './Interfaces';
+ export * from './Wallet';
+@@ -43,6 +43,7 @@ export async function restoreKeys(
+  * Restores a wallet from a backup file.
+  * @param path - The path to the backup file
+  * @param password - The password to decrypt the backup
++ * @param subdir - Restore into this folder inside the module's data folder (see WalletOptions.subdir)
+  * @returns Promise resolving to void on success
+  * @throws {RgbError} Throws RgbError with a code from {@link RgbLibErrors} if:
+  *   - Invalid backup path
+@@ -51,9 +52,14 @@ export async function restoreKeys(
+  */
+ export async function restoreBackup(
+   path: string,
+-  password: string
++  password: string,
++  subdir?: string
+ ): Promise<void> {
+-  return Rgb.restoreBackup(path, password);
++  if (!subdir) return Rgb.restoreBackup(path, password);
++  if (!supportsSubdir()) {
++    throw new Error('This app build cannot keep RGB wallets in separate folders.');
++  }
++  return Rgb.restoreBackupInSubdir(path, password, subdir);
+ }
+ 
+ export async function decodeInvoice(
