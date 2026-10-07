@@ -6,6 +6,10 @@ import { RgbOnDeviceSettings } from './RgbOnDeviceSettings';
 const mockAdapters: Record<string, any> = {};
 const mockInitialize = jest.fn(async () => new Map([['RGB_L1', { success: true }]]));
 const mockSave = jest.fn(async () => undefined);
+const mockReady = jest.fn(async () => undefined);
+const mockRestoreFile = jest.fn(async () => undefined);
+jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/my.rgbbackup' }] })) }));
+jest.mock('react-native-rgb', () => ({ restoreBackup: jest.fn() }), { virtual: true });
 let mockNetwork: string | null = null;
 let mockPinned: string | null = null;
 jest.mock('../services/DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({ getActiveWallet: async () => ({ id: 7, encrypted_mnemonic: 'seed words' }) }) } }));
@@ -20,6 +24,7 @@ jest.mock('../services/protocols/rgbL1', () => ({
   RGB_L1_DEFAULT_NETWORK: 'mainnet',
   RGB_L1_NETWORKS: ['mainnet', 'mutinynet'],
   RGB_L1_NETWORK_LABEL: { mainnet: 'Mainnet', mutinynet: 'Mutinynet' },
+  markRgbL1Ready: (...a: any[]) => (mockReady as any)(...a),
   rgbBackupPassword: () => 'derived-password',
   isRgbLibNativeAvailable: () => true,
   rgbL1Host: () => ({ network: 'mutinynet', indexerUrl: 'https://default-indexer', transportEndpoint: 'rpcs://default-proxy' }),
@@ -37,6 +42,7 @@ jest.mock('../services/protocols/rgbBackup', () => ({
   rgbBackupStatus: () => ({ state: 'idle' }),
   onRgbBackupStatus: () => () => undefined,
   runRgbBackup: (...a: any[]) => (mockRunBackup as any)(...a),
+  restoreRgbFromFile: (...a: any[]) => (mockRestoreFile as any)(...a),
 }));
 jest.mock('../services/ToastService', () => ({ __esModule: true, default: { getInstance: () => ({ success: jest.fn(), error: jest.fn() }) } }));
 
@@ -94,4 +100,17 @@ test('before the first start the wallet picks mainnet or Mutinynet', async () =>
   expect(message).toMatch(/Mutinynet, a test network/);
   await act(async () => { buttons[1].onPress(); });
   expect(mockSave).toHaveBeenCalledWith('seed words', 'mutinynet');
+});
+
+test('RGB data can be restored from an exported file before it starts', async () => {
+  const screen = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  await act(async () => { fireEvent.press(screen.getByText('Restore from a backup file')); });
+  const [title, , buttons] = (Alert.alert as jest.Mock).mock.calls.at(-1);
+  expect(title).toBe('Restore RGB data?');
+  await act(async () => { await buttons[1].onPress(); });
+  expect(mockRestoreFile).toHaveBeenCalledWith(expect.objectContaining({ mnemonic: 'seed words', path: '/cache/my.rgbbackup' }));
+  expect(mockReady).toHaveBeenCalledWith('seed words', 'mainnet'); // no cloud restore over it on start
+  expect(mockSave).toHaveBeenCalledWith('seed words', 'mainnet');
+  expect(mockInitialize).toHaveBeenCalledWith('seed words', []);
 });

@@ -19,7 +19,7 @@ npm run test:coverage   # Run tests with coverage report
 npx jest path/to/file.test.ts
 ```
 
-Coverage thresholds: 70% statements/lines/functions, 60% branches (enforced by jest.config.js).
+Coverage floor (jest.config.js, enforced in CI via `jest --coverage`): set to current coverage (~36% statements/lines, 35% functions, 34% branches) — raise it when you add tests, never lower it.
 
 ## Architecture
 

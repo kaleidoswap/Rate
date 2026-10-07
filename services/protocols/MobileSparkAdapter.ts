@@ -21,6 +21,24 @@ export function sparkTransferStatus(status: unknown): 'confirmed' | 'failed' | '
 
 /** Expose the WDK's read-only fee quotes without sending a payment. */
 export class MobileSparkAdapter extends SparkWdkAdapter {
+  /**
+   * Adds Spark transfers received but not yet claimed (the SDK claims them
+   * every ~10 s) as unconfirmed, so they show as "Incoming" instead of being
+   * invisible. `confirmed` stays what can be spent now.
+   */
+  async getBtcBalance() {
+    const base = await super.getBtcBalance();
+    let incoming = 0;
+    try {
+      const wallet: any = (this as any).rawWallet;
+      if (typeof wallet?.getCachedBalance === 'function') {
+        incoming = Number((await wallet.getCachedBalance())?.satsBalance?.incoming ?? 0);
+      }
+    } catch { /* the cached read is local; keep the spendable balance on any error */ }
+    if (!Number.isFinite(incoming) || incoming <= 0) return base;
+    return { ...base, unconfirmed: (base.unconfirmed ?? 0) + incoming, total: (base.total ?? 0) + incoming };
+  }
+
   async getPaymentStatus(paymentId: string) {
     const result = await super.getPaymentStatus(paymentId);
     // Only a transfer receipt carries an amount (Lightning sends resolve on their own path).

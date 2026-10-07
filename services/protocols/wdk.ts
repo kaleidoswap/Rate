@@ -273,6 +273,15 @@ export async function initializeWdkProtocols(
         } catch (e) {
           console.warn('[initializeWdkProtocols] flashnet init failed:', e)
         }
+        // Bitcoin sent to a Spark deposit address only counts once it's claimed.
+        // Receive claims the address on screen; this catches deposits confirmed
+        // while the app was closed. Background, best effort.
+        const sweeper = manager.getAdapterIfAvailable('SPARK') as any
+        if (typeof sweeper?.sweepSparkL1Deposits === 'function') {
+          void sweeper.sweepSparkL1Deposits()
+            .then((r: { claimedTxids?: string[] }) => { if (r?.claimedTxids?.length) console.log(`[initializeWdkProtocols] claimed ${r.claimedTxids.length} Spark deposit(s)`) })
+            .catch((e: unknown) => console.warn('[initializeWdkProtocols] Spark deposit sweep failed:', e))
+        }
       }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error)

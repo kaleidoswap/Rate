@@ -127,3 +127,27 @@ export async function restoreRgbFromCloud(opts: {
   setStatus({ state: 'done', lastBackupAt: backup.manifest.createdAt });
   return 'restored';
 }
+
+/**
+ * Restores this seed's RGB data from a backup file the user picked (an export
+ * from "Export backup file"). Same rules as the cloud restore: rgb-lib refuses
+ * to overwrite a wallet already on the phone, and the password is the seed's.
+ */
+export async function restoreRgbFromFile(opts: {
+  mnemonic: string
+  path: string
+  restore: (path: string, password: string) => Promise<void>
+}): Promise<void> {
+  try {
+    await opts.restore(opts.path, rgbBackupPassword(opts.mnemonic));
+  } catch (e: any) {
+    const why = `${e?.code ?? ''} ${e?.message ?? ''}`;
+    if (/WalletDirAlreadyExists|already exists/i.test(why)) {
+      throw new Error('This phone already has RGB data for this wallet, so the file wasn’t restored.');
+    }
+    if (/password|decrypt|InvalidBackup|WrongPassword/i.test(why)) {
+      throw new Error('This backup file isn’t for this wallet, or it’s damaged.');
+    }
+    throw e;
+  }
+}

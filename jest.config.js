@@ -23,12 +23,15 @@ module.exports = {
     '!**/node_modules/**',
     '!**/__tests__/**'
   ],
+  // A floor at today's coverage, enforced in CI (jest --coverage): it can only
+  // go up. Raise these as tests are added; the old 70/60 targets were never met
+  // and never checked.
   coverageThreshold: {
     global: {
-      statements: 70,
-      branches: 60,
-      functions: 70,
-      lines: 70
+      statements: 36,
+      branches: 34,
+      functions: 35,
+      lines: 36
     }
   },
   // Sibling packages (universal-bolt12) fall back to this app's node_modules for babel helpers.

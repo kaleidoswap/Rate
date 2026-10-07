@@ -20,6 +20,7 @@ import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
+import { contactKeyFor, recordContactEvent, updateContactEventStatus } from '../services/contactHistory';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { motion, protocolTint } from '../theme';
 import { feedback } from '../utils/feedback';
@@ -65,7 +66,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const byProtocol = useAppSelector(s => s.wallet.btcBalance?.byProtocol);
   const balancesSat = useMemo(() => {
     const out: Partial<Record<PayAccountId, number>> = {};
-    for (const k of ['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]) { const b = byProtocol?.[k]; if (b) out[k] = b.total; }
+    // Spark's total includes transfers not yet claimed; only the confirmed part can pay.
+    for (const k of ['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]) { const b = byProtocol?.[k]; if (b) out[k] = k === 'SPARK' ? b.confirmed : b.total; }
     return out;
   }, [byProtocol]);
   const contacts = useAppSelector(s => s.contacts?.contacts);
@@ -245,15 +247,24 @@ export default function SendScreen({ navigation, route }: Props) {
       setJournalReady(false); paying.current = false; setBusy(false); return;
     }
     setAttempt(next);
+    // A payment to a picked contact goes into that contact's history too.
+    const toContact = contactName && input.trim() ? { contactKey: contactKeyFor(input), contactName } : null;
+    const logForContact = (status: PaymentAttempt['status']) => {
+      if (!toContact) return;
+      void recordContactEvent(walletId, { id: next.id, ...toContact, direction: 'sent', amount: recipient, status, createdAt: next.createdAt, attemptId: next.id }).catch(() => {});
+    };
+    logForContact('pending');
     try {
       const result = await executePaymentOffer(preview, selected, next.id);
       const updated = { ...next, ...result };
       setAttempt(updated);
+      logForContact(updated.status);
       try { await savePaymentAttempt(walletId, updated); }
       catch { setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
     } catch (e) {
       const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown' };
       setAttempt(updated);
+      logForContact(updated.status);
       setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.');
       try { await savePaymentAttempt(walletId, updated); } catch { /* The durable pending record forces a status check on reopen. */ }
     } finally {
@@ -269,6 +280,7 @@ export default function SendScreen({ navigation, route }: Props) {
       const result = await checkPaymentStatus(attempt.sourceId, attempt.id);
       const updated = { ...attempt, ...result };
       await savePaymentAttempt(walletId, updated); setAttempt(updated);
+      void updateContactEventStatus(walletId, attempt.id, updated.status).catch(() => {});
       if (result.status === 'completed') void dispatch(loadBtcBalance());
     } catch { setError('Could not update payment status. Check again before making another payment.'); }
     finally { paying.current = false; setBusy(false); }

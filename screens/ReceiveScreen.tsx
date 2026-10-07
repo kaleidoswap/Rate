@@ -70,6 +70,8 @@ import { SegmentedControl } from '../components/SegmentedControl';
 import { arkadeReceiveOptions, receiveAccountChain } from '../services/kaleidoPay/connect';
 import { claimArkadeLightningReceive, createArkadeLightningReceive, type ArkadeLightningReceive } from '../services/kaleidoPay/arkadeIntents';
 import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
+import NostrContactsSelector from '../components/NostrContactsSelector';
+import { contactKeyFor, recordContactEvent } from '../services/contactHistory';
 
 // Sentinel asset id for receiving an RGB asset the user doesn't hold yet
 // (generates a blind RGB invoice with no specific asset_id).
@@ -230,6 +232,10 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [showOptions, setShowOptions] = useState(false);
   // What the request is for: the Lightning invoice description.
   const [note, setNote] = useState('');
+  // Who the request is for (optional): it goes into that contact's history.
+  const [requestContact, setRequestContact] = useState<{ name: string; key: string } | null>(null);
+  const [showContactPicker, setShowContactPicker] = useState(false);
+  const requestEventId = useRef<string | null>(null);
   const [amount, setAmount] = useState('');
   const [expirySeconds, setExpirySeconds] = useState(3600);
   const [showCountdown, setShowCountdown] = useState(false);
@@ -1359,6 +1365,17 @@ export default function ReceiveScreen({ navigation }: Props) {
   // ── Amount <-> sats bridging for the multi-currency editor ────────────────
   const SATS_PER_BTC = 1e8;
   const currentAmountSats = receiveAmountSats(amount, bitcoinUnit);
+  useEffect(() => {
+    if (!requestContact || walletId == null) return;
+    const id = requestEventId.current ?? `req-${Date.now()}`;
+    requestEventId.current = id;
+    void recordContactEvent(walletId, {
+      id, contactKey: requestContact.key, contactName: requestContact.name, direction: 'requested',
+      amount: currentAmountSats > 0 ? `${currentAmountSats.toLocaleString()} sats` : '', note: note || undefined,
+      status: 'open', createdAt: Date.now(),
+    }).catch(() => {});
+  }, [requestContact, currentAmountSats, note, walletId]);
+
 
   const applyAmountSats = (sats: number) => {
     const next = !sats || sats <= 0 ? '' : String(Math.round(sats));
@@ -1505,7 +1522,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   };
 
   // ── Amount row with pencil edit (opens the multi-currency editor) ─────────
-  const renderAmountRow = () => {
+  const renderAmountRowInner = () => {
     // The amount editor works in BTC/sats/fiat — it can't express an RGB asset
     // amount, and RGB invoices are open-amount anyway, so hide it for RGB assets.
     if (selectedAsset?.isRGB) return null;
@@ -1551,6 +1568,24 @@ export default function ReceiveScreen({ navigation }: Props) {
         </Text>
       </TouchableOpacity>
     );
+  };
+
+  const renderAmountRow = () => {
+    const row = renderAmountRowInner();
+    if (!row) return null;
+    return <>
+      {row}
+      <TouchableOpacity accessibilityRole="button"
+        accessibilityLabel={requestContact ? `Request from ${requestContact.name}. Remove` : 'Request from a contact'}
+        onPress={() => { feedback.select(); if (requestContact) { setRequestContact(null); requestEventId.current = null; } else setShowContactPicker(true); }}
+        style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5], minHeight: 32, marginBottom: theme.spacing[1] }}>
+        <Ionicons name={requestContact ? 'person' : 'person-add-outline'} size={14} color={theme.colors.text.secondary} />
+        <Text style={[styles.amountRowLabel, { color: theme.colors.text.secondary }]} numberOfLines={1}>
+          {requestContact ? `From ${requestContact.name}` : 'From a contact (optional)'}
+        </Text>
+        {requestContact && <Ionicons name="close" size={14} color={theme.colors.text.tertiary} />}
+      </TouchableOpacity>
+    </>;
   };
 
   // Clean QR-sized loader (no copy text) — a spinner sitting where the QR will be.
@@ -1872,6 +1907,8 @@ export default function ReceiveScreen({ navigation }: Props) {
       />
 
       {/* Amount editor — WDK AmountInput (BTC ↔ USD) inside a bottom sheet */}
+      <NostrContactsSelector visible={showContactPicker} onClose={() => setShowContactPicker(false)}
+        onSelectContact={(c) => { const dest = c.lightning_address || c.npub || c.node_pubkey; if (dest) { requestEventId.current = null; setRequestContact({ name: c.name, key: contactKeyFor(dest) }); } setShowContactPicker(false); }} />
       <AmountEditorModal
         visible={showAmountEditor}
         onClose={() => setShowAmountEditor(false)}

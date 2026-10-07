@@ -6,9 +6,9 @@
 //
 //   1. One-shot SWEEP when the receive screen mounts with a Spark on-chain
 //      address — recovers any confirmed deposits made to addresses from earlier
-//      sessions (adapter.sweepL1Deposits()).
+//      sessions (adapter.sweepSparkL1Deposits()).
 //   2. Continuous CLAIM polling (~10s) of the address currently on screen
-//      (adapter.claimL1Deposit(address)); stops once a deposit is claimed.
+//      (adapter.claimSparkL1Deposit({ address })); stops once a deposit is claimed.
 //
 // Both adapter methods are optional (only SparkWdkAdapter implements them) and
 // every call is best-effort — a missing method or transient error just skips
@@ -25,12 +25,12 @@ import { runReceiveOperation } from '../utils/receive-session';
 // lag the local build that actually runs); the methods exist at runtime.
 type SparkClaimAdapter = {
   isConnected?: () => boolean;
-  claimL1Deposit?: (address: string) => Promise<{
+  claimSparkL1Deposit?: (params: { address: string }) => Promise<{
     status: 'awaiting' | 'claimed' | 'error';
     txids?: string[];
     error?: string;
   }>;
-  sweepL1Deposits?: () => Promise<{
+  sweepSparkL1Deposits?: () => Promise<{
     addressesChecked: number;
     claimedTxids: string[];
     errors: string[];
@@ -77,11 +77,11 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
     const operationController = new AbortController();
     void (async () => {
       const adapter = getSparkAdapter();
-      if (!adapter?.sweepL1Deposits) return;
+      if (!adapter?.sweepSparkL1Deposits) return;
       try {
         const res = await runReceiveOperation(
           'Sweep Spark L1 deposits',
-          () => adapter.sweepL1Deposits!(),
+          () => adapter.sweepSparkL1Deposits!(),
           8_000,
           operationController.signal,
         );
@@ -114,11 +114,11 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
     const tick = async () => {
       if (cancelled) return;
       const adapter = getSparkAdapter();
-      if (!adapter?.claimL1Deposit) return;
+      if (!adapter?.claimSparkL1Deposit) return;
       try {
         const res = await runReceiveOperation(
           'Claim Spark L1 deposit',
-          () => adapter.claimL1Deposit!(address),
+          () => adapter.claimSparkL1Deposit!({ address }),
           8_000,
           operationController.signal,
         );
