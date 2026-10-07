@@ -55,7 +55,7 @@ against the KaleidoSwap maker API, with additional venues for breadth:
 The assistant is a natural-language interface to the wallet — ask it to check balances,
 create invoices, send payments, swap assets, or find merchants, in chat or by voice.
 
-- **Private by default.** The LLM (QWEN3 ~600M) and Whisper speech-to-text run **on
+- **Private by default.** The LLM (Qwen3.5 0.8B / 2B, by device RAM) and Whisper speech-to-text run **on
   device** through the [QVAC SDK](https://www.npmjs.com/package/@qvac/sdk). Conversations
   and transcription don't leave your phone.
 - **One agent for chat and voice.** A single runner (`services/mindAgent.ts`) powers both
@@ -193,6 +193,9 @@ npx expo start --dev-client    # then press `i` for iOS or `a` for Android
 The AI assistant and voice mode (speech-to-text + text-to-speech) run **on-device
 via the QVAC SDK, which requires a physical device** — they are unavailable on an
 iOS simulator / Android emulator. The rest of the wallet works fine on a simulator.
+QVAC logs are silent by default; set `"loggerConsoleOutput": true` (and
+`"loggerLevel": "debug"` for native backend output) in `qvac.config.json` while
+debugging.
 
 ### Managing the QVAC install (dev)
 
@@ -210,12 +213,18 @@ Notes:
 - `qvac.config.json` lists the enabled QVAC plugins (LLM completion, Whisper
   transcription, TTS) — edit it to add/remove on-device capabilities, then re-run
   `sync-qvac-bundle`.
+- `@qvac/sdk` 0.21 ships the speech and LLM engines as split addons whose
+  Android/iOS prebuilds live in per-platform packages (`@qvac/*-android-arm64`,
+  `@qvac/*-ios`). They are pinned in `package.json` at the versions the SDK's
+  addons need; when bumping `@qvac/sdk`, `sync-qvac-bundle` names any that must
+  change.
 - After changing native addons you must **rebuild** the app (`npx expo run:ios/android`);
   a Metro reload alone won't pick them up.
 - Models are **not** bundled — they download on first launch on a physical device
   (~0.5–1.3 GB LLM + ~80 MB Whisper).
 - Agent skills are bundled separately: `pnpm run bundle-skills` regenerates
-  `skills.bundle.json` from `skills/`.
+  `skills.bundle.json` from the shared `@kaleidorg/mind` skills plus the
+  app-specific ones in `skills/`.
 
 ---
 
