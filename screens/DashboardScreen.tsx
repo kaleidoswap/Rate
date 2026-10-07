@@ -368,6 +368,9 @@ export default function DashboardScreen({ navigation }: Props) {
         [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'], [barkAdapter, 'BARK'],
         [lightningWallet, 'LN'],
       ];
+      // Counted now, not after the fetch: an account that connects meanwhile
+      // wasn't asked, so it isn't a missing balance.
+      const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
       const balancesTask = Promise.all(
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
@@ -445,7 +448,6 @@ export default function DashboardScreen({ navigation }: Props) {
       const [balanceResults, assetResults, channelsList] = await Promise.all([balancesTask, assetsTask, channelsTask]);
       if (!current()) return;
 
-      const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
       const okBalances = balanceResults.filter(Boolean) as Array<{ proto: string; btc: { confirmed: number; unconfirmed: number; total: number } }>;
       // Bark recovery (moved from the old Bark screen): an incomplete restore can
       // omit funds, so say so next to the total rather than on a separate page.
