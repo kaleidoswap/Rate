@@ -488,7 +488,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing[4], paddingTop: theme.spacing[4], paddingBottom: theme.spacing[1],
     borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light,
   },
-  divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light, marginLeft: theme.spacing[4] + 32 + theme.spacing[3] },
+  divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
   icon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   text: { flex: 1, minWidth: 0 },
   label: { fontSize: theme.typography.fontSize.base, fontWeight: '600', color: theme.colors.text.primary },

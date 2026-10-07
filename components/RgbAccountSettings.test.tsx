@@ -42,7 +42,7 @@ test('with nothing connected, the header says Not connected and mentions an idle
   mockNetwork = 'mainnet';
   const screen = render(<RgbAccountSettings walletId={7} node={{ connected: false }} onOpenNode={jest.fn()} />);
   await act(async () => {});
-  expect(screen.getByText('RGB not connected')).toBeTruthy();
+  expect(screen.getByText('RGB assets')).toBeTruthy();
   expect(screen.getByText(/set up for Mainnet but isn’t connected/)).toBeTruthy();
   expect(screen.getByLabelText('RGB status: Not connected')).toBeTruthy();
 });

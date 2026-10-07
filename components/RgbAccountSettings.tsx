@@ -60,7 +60,7 @@ export function RgbAccountSettings({ walletId, node, onOpenNode, onChanged }: {
   const inUse: Place | null = node.connected ? 'node' : phoneConnected && RGB_L1_ENABLED ? 'phone' : null;
   const success = theme.colors.success[500];
 
-  const statusTitle = inUse === 'node' ? 'On your RGB node' : inUse === 'phone' ? 'On this phone' : 'RGB not connected';
+  const statusTitle = inUse === 'node' ? 'On your RGB node' : inUse === 'phone' ? 'On this phone' : 'RGB assets';
   const statusMeta = inUse === 'node' ? nodeName
     : inUse === 'phone' && phoneNetwork ? `${RGB_L1_NETWORK_LABEL[phoneNetwork]} · beta`
     : phoneNetwork ? `This phone is set up for ${RGB_L1_NETWORK_LABEL[phoneNetwork]} but isn’t connected.`
@@ -87,7 +87,7 @@ export function RgbAccountSettings({ walletId, node, onOpenNode, onChanged }: {
           <SegmentedTabs<Place> scrollable={false} fill value={place} onChange={setPlace}
             options={[
               { key: 'phone', label: 'This phone', icon: inUse === 'phone' ? 'checkmark-circle' : 'phone-portrait-outline' },
-              { key: 'node', label: 'RGB node', icon: inUse === 'node' ? 'checkmark-circle' : 'flash-outline' },
+              { key: 'node', label: 'RGB node', ...(inUse === 'node' ? { icon: 'checkmark-circle' as const } : { renderIcon: (_c: string, size: number) => <RgbNodeIcon size={size} /> }) },
             ]} />
           <Text style={styles.hint}>
             {place === 'phone'

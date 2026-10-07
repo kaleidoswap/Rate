@@ -2,7 +2,6 @@ import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
 import { loadRgbL1Network } from '../services/protocols/rgbL1';
 import { RgbAccountSettings, RGB_STATUS } from '../components/RgbAccountSettings';
-import { RgbNodeIcon } from '../components/RgbNodeIcon';
 import { rgbNetworkLabel } from '../services/protocols/rgbAccount';
 import { currentBarkHost, isBarkOff, loadBarkHost, saveBarkNetwork, setBarkOff } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
