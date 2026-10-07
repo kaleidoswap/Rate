@@ -9,12 +9,20 @@
 // Execution replicates rate's tested SwapScreen flows verbatim:
 //   - maker:    get_quote → initSwap → validateSwapString → whitelist → execute
 //   - flashnet: simulateSwap → executeSwap (minAmountOut floored at 95%)
-// `place_order` is a spend → confirmation-gated by the contract.
+// The execute path is the canonical `execute_swap { quote_id }` from the wallet
+// contract — a spend, so confirmation-gated — run against the cached quote of
+// whichever venue produced it. Status comes from `kaleidoswap_atomic_status`.
 //
-// The contract's `atomic` group is intentionally NOT bound (its invoice-based
-// shape doesn't match either on-device flow); `place_order` is the execute path.
+// `kaleidoswap_atomic_init` / `_execute` are intentionally NOT bound: their
+// invoice-based shape doesn't match either on-device flow, so `execute_swap`
+// runs the whole tested sequence behind one confirmation.
 
-import { bindKaleidoswapTools, type ToolSource } from '@kaleidorg/mind';
+import {
+  InProcessToolSource,
+  getWalletTool,
+  kaleidoswapTools,
+  type ToolSource,
+} from '@kaleidorg/mind';
 import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
 import {
   normalizeMakerPairs,
@@ -37,7 +45,7 @@ const log = (...a: any[]) => { try { console.log('[AI/swap]', ...a); } catch { /
 type Venue = 'kaleidoswap' | 'flashnet';
 
 /** Quotes are short-lived; cache the exact integers the venue quoted so
- *  place_order re-uses them verbatim (re-deriving from a rounded display amount
+ *  execute_swap re-uses them verbatim (re-deriving from a rounded display amount
  *  breaks maker swapstring validation + Flashnet min-out). */
 const QUOTE_TTL_MS = 60_000;
 interface CachedQuote {
@@ -208,17 +216,17 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     return maker().getSwapNodeInfo();
   },
 
-  // ── orders ──
+  // ── execute (core `execute_swap`) ──
   // SPEND (confirmation-gated). Routes to the cached quote's venue and runs that
   // venue's tested execution flow after the user approves.
-  kaleidoswap_place_order: async ({ quote_id }) => {
+  execute_swap: async ({ quote_id }) => {
     requireSwaps();
     const id = String(quote_id ?? '');
     const q = quoteCache.get(id);
     if (!q) throw new Error('That quote is no longer available — please get a fresh quote first.');
     if (Date.now() - q.ts > QUOTE_TTL_MS) {
       quoteCache.delete(id);
-      throw new Error('That quote expired — please re-quote before ordering.');
+      throw new Error('That quote expired — please re-quote before swapping.');
     }
 
     if (q.venue === 'flashnet') {
@@ -231,8 +239,8 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
         maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
       });
       quoteCache.delete(id);
-      log('flashnet order done', { id });
-      return { order_id: id, venue: 'flashnet', status: 'completed', txid: res?.outboundTransferId ?? '' };
+      log('flashnet swap done', { id });
+      return { atomic_id: id, venue: 'flashnet', status: 'completed', txid: res?.outboundTransferId ?? '' };
     }
 
     // KaleidoSwap atomic: init → verify terms → whitelist → taker → execute.
@@ -252,30 +260,38 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     const takerPubkey = await rln().getTakerPubkey();
     await maker().executeSwap({ swapstring, taker_pubkey: takerPubkey, payment_hash: paymentHash });
     quoteCache.delete(id);
-    log('maker order executing', { id });
-    return { order_id: id, venue: 'kaleidoswap', status: 'executing', payment_hash: paymentHash };
+    log('maker swap executing', { id });
+    // The maker tracks atomic swaps by payment hash.
+    return { atomic_id: paymentHash, venue: 'kaleidoswap', status: 'executing', payment_hash: paymentHash };
   },
 
-  kaleidoswap_get_order_status: async ({ order_id }) => {
+  // ── atomic status ──
+  kaleidoswap_atomic_status: async ({ atomic_id }) => {
     requireSwaps();
-    const id = String(order_id);
+    const id = String(atomic_id ?? '');
     // Flashnet settles instantly (no status endpoint).
-    if (id.startsWith('flashnet-')) return { order_id: id, status: 'completed' };
+    if (id.startsWith('flashnet-')) return { atomic_id: id, status: 'completed' };
     const a = protocolManager.getAdapterIfAvailable('RGB_LN');
     const s: any = await a?.getSwapStatus?.(id);
-    return { order_id: id, status: s?.status ?? 'pending' };
-  },
-
-  kaleidoswap_get_order_history: async ({ limit, cursor }) => {
-    if (!rgbAvailable()) return { orders: [] };
-    const params: Record<string, unknown> = {};
-    if (limit != null) params.limit = Number(limit);
-    if (cursor) params.cursor = String(cursor);
-    return (await maker().getOrderHistory?.(params)) ?? { orders: [] };
+    return { atomic_id: id, status: s?.status ?? 'pending' };
   },
 };
 
-/** Build the on-device, venue-aware KaleidoSwap/Flashnet tool source. */
+/** Build the on-device, venue-aware KaleidoSwap/Flashnet tool source: the
+ *  contract's market tools + `kaleidoswap_atomic_status`, and the core
+ *  `execute_swap` as the (confirmation-gated) execute path. */
 export function buildSwapToolSource(): ToolSource {
-  return bindKaleidoswapTools(HANDLERS, { groups: ['market', 'orders'] });
+  const executeSwap = getWalletTool('execute_swap');
+  if (!executeSwap) throw new Error('@kaleidorg/mind has no execute_swap tool');
+  const defs = [
+    ...kaleidoswapTools({ groups: ['market', 'atomic'] }).filter((d) => HANDLERS[d.name]),
+    executeSwap,
+  ];
+  return new InProcessToolSource('kaleidoswap', defs.map((d) => ({
+    name: d.name,
+    description: d.description,
+    parameters: d.parameters,
+    requiresConfirmation: d.requiresConfirmation,
+    handler: HANDLERS[d.name]!,
+  })));
 }

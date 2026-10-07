@@ -5,7 +5,7 @@
 // that move money or could go wrong silently:
 //   - venue routing (KaleidoSwap maker vs Flashnet) by the pair's venue
 //   - unit translation per venue (maker BTC→msat; flashnet BTC→sats; asset→raw)
-//   - quote caching + place_order replaying each venue's tested sequence
+//   - quote caching + execute_swap replaying each venue's tested sequence
 //   - the maker swapstring anti-tamper check aborts before whitelisting
 //
 // Pair *building* (normalizeMakerPairs / buildFlashnetPairs) is mocked to return
@@ -77,12 +77,15 @@ describe('swap tools — KaleidoSwap maker venue', () => {
     source = buildSwapToolSource();
   });
 
-  it('binds market + orders, not the atomic group; place_order is confirm-gated', async () => {
+  it('binds market + atomic_status + execute_swap, not atomic init/execute; execute_swap is confirm-gated', async () => {
     const defs = await Promise.resolve(source.listTools());
     const names = defs.map((d) => d.name);
-    expect(names).toContain('kaleidoswap_place_order');
+    expect(names).toContain('execute_swap');
+    expect(names).toContain('kaleidoswap_atomic_status');
     expect(names).not.toContain('kaleidoswap_atomic_init');
-    expect(defs.find((d) => d.name === 'kaleidoswap_place_order')?.requiresConfirmation).toBe(true);
+    expect(names).not.toContain('kaleidoswap_atomic_execute');
+    expect(names).not.toContain('kaleidoswap_place_order');
+    expect(defs.find((d) => d.name === 'execute_swap')?.requiresConfirmation).toBe(true);
     expect(defs.find((d) => d.name === 'kaleidoswap_get_quote')?.requiresConfirmation).toBeFalsy();
   });
 
@@ -97,27 +100,30 @@ describe('swap tools — KaleidoSwap maker venue', () => {
     expect(q.receive_amount).toBe(73);
   });
 
-  it('place_order replays init→validate→whitelist→execute with the quoted ints', async () => {
+  it('execute_swap replays init→validate→whitelist→execute with the quoted ints', async () => {
     await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
-    const res: any = await source.execute('kaleidoswap_place_order', { quote_id: 'rfq1' });
+    const res: any = await source.execute('execute_swap', { quote_id: 'rfq1' });
     expect(maker.initSwap).toHaveBeenCalledWith({
       rfq_id: 'rfq1', from_asset: 'btc', from_amount: 100_000_000, to_asset: 'rgb:usdt', to_amount: 73_000_000,
     });
     expect(rln.whitelistSwap).toHaveBeenCalledWith('100000000/btc/73000000/rgb:usdt/x/hash1');
     expect(maker.executeSwap).toHaveBeenCalledWith({ swapstring: '100000000/btc/73000000/rgb:usdt/x/hash1', taker_pubkey: '02taker', payment_hash: 'hash1' });
     expect(res.status).toBe('executing');
+    expect(res.atomic_id).toBe('hash1');
+    const s: any = await source.execute('kaleidoswap_atomic_status', { atomic_id: res.atomic_id });
+    expect(s.status).toBe('completed');
   });
 
   it('aborts before whitelisting if the maker swapstring does not match the quote', async () => {
     maker.initSwap.mockResolvedValueOnce({ swapstring: '999/btc/73000000/rgb:usdt/x/hash1', payment_hash: 'hash1' });
     await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
-    await expect(source.execute('kaleidoswap_place_order', { quote_id: 'rfq1' })).rejects.toThrow(/verification failed/i);
+    await expect(source.execute('execute_swap', { quote_id: 'rfq1' })).rejects.toThrow(/verification failed/i);
     expect(rln.whitelistSwap).not.toHaveBeenCalled();
     expect(maker.executeSwap).not.toHaveBeenCalled();
   });
 
-  it('refuses to place an order without a fresh quote', async () => {
-    await expect(source.execute('kaleidoswap_place_order', { quote_id: 'nope' })).rejects.toThrow(/no longer available|re-quote/i);
+  it('refuses to swap without a fresh quote', async () => {
+    await expect(source.execute('execute_swap', { quote_id: 'nope' })).rejects.toThrow(/no longer available|re-quote/i);
     expect(maker.initSwap).not.toHaveBeenCalled();
   });
 });
@@ -156,9 +162,9 @@ describe('swap tools — Flashnet venue', () => {
     expect(q.receive_amount).toBe(36); // 36_000_000 / 10^6
   });
 
-  it('place_order executes the pool swap with a floored minAmountOut', async () => {
+  it('execute_swap executes the pool swap with a floored minAmountOut', async () => {
     const q: any = await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDB', amount: 50_000 });
-    const res: any = await source.execute('kaleidoswap_place_order', { quote_id: q.quote_id });
+    const res: any = await source.execute('execute_swap', { quote_id: q.quote_id });
     expect(flash.executeSwap).toHaveBeenCalledWith(expect.objectContaining({
       poolId: 'pool1', assetInAddress: 'btc-spark', assetOutAddress: 'usdb-spark',
       amountIn: '50000', minAmountOut: String(Math.floor(36_000_000 * 0.95)),
@@ -167,8 +173,8 @@ describe('swap tools — Flashnet venue', () => {
     expect(res.txid).toBe('tx1');
   });
 
-  it('get_order_status reports flashnet orders as completed (instant settle)', async () => {
-    const s: any = await source.execute('kaleidoswap_get_order_status', { order_id: 'flashnet-123' });
+  it('atomic_status reports flashnet swaps as completed (instant settle)', async () => {
+    const s: any = await source.execute('kaleidoswap_atomic_status', { atomic_id: 'flashnet-123' });
     expect(s.status).toBe('completed');
   });
 });

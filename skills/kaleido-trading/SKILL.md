@@ -1,11 +1,11 @@
 ---
 name: kaleido-trading
-description: "Quote and execute swaps between BTC and other assets on whichever venue has the pair — KaleidoSwap (RGB assets: USDT, XAUT) or Flashnet (Spark: USDB). Get assets and pairs, pull an executable quote, place a market order, or track it. Triggers when the user wants a price, a quote, to swap or trade assets, or to rebalance between BTC and stablecoins."
-tools: get_price, fiat_to_sats, kaleidoswap_get_assets, kaleidoswap_get_pairs, kaleidoswap_get_quote, kaleidoswap_get_nodeinfo, kaleidoswap_place_order, kaleidoswap_get_order_status, kaleidoswap_get_order_history
+description: "Quote and execute swaps between BTC and other assets on whichever venue has the pair — KaleidoSwap (RGB assets: USDT, XAUT) or Flashnet (Spark: USDB). Get assets and pairs, pull an executable quote, execute it, or track it. Triggers when the user wants a price, a quote, to swap or trade assets, or to rebalance between BTC and stablecoins."
+tools: get_price, fiat_to_sats, kaleidoswap_get_assets, kaleidoswap_get_pairs, kaleidoswap_get_quote, kaleidoswap_get_nodeinfo, execute_swap, kaleidoswap_atomic_status
 triggers: quote, swap, trade, rebalance, slippage, pair, pairs, usdt, xaut, usdb, kaleidoswap, flashnet, spark, rfq
 metadata:
   author: kaleidoswap
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # KaleidoSwap trading
@@ -24,7 +24,7 @@ isn't connected; say so rather than guessing.
 
 ## Critical rules — these override everything else
 
-You have **no knowledge** of any price, quote, fee, pair, or order. Every
+You have **no knowledge** of any price, quote, fee, pair, or swap. Every
 number, pair, or quote id in your reply MUST come from a tool result returned
 in the CURRENT turn:
 
@@ -73,13 +73,16 @@ Examples:
 - "Buy 50 USDT of BTC" → `{from_asset: "USDT", to_asset: "BTC", amount: 50}`
   (USDT is what's being spent).
 
-### `kaleidoswap_place_order(quote_id)` 🔒 spend
-Only after `kaleidoswap_get_quote` returned a `quote_id` THIS turn, and only
-when the user has explicitly approved the amount + direction.
+### `execute_swap(quote_id)` 🔒 spend
+Executes the quote on its venue (atomic swap on KaleidoSwap, pool swap on
+Flashnet). Only after `kaleidoswap_get_quote` returned a `quote_id` THIS turn,
+and only when the user has explicitly approved the amount + direction. Returns
+an `atomic_id`.
 
-### `kaleidoswap_get_order_status(order_id)`
-Poll after placing an order. Report status plainly — pending, settling,
-completed, failed.
+### `kaleidoswap_atomic_status(atomic_id)`
+Poll after `execute_swap`, with the `atomic_id` it returned. Report status
+plainly — pending, settling, completed, failed. Flashnet swaps complete
+immediately.
 
 ## Flow
 
@@ -88,12 +91,12 @@ completed, failed.
 3. **Show + confirm** — surface pair, direction, amount in, expected out,
    fees, slippage. **Never hide cost** — a small model must not abbreviate
    fees out of the message.
-4. **Place** — spend-gated by the engine. The host pauses for the user.
-5. **Track** — poll `kaleidoswap_get_order_status` until it terminates.
+4. **Execute** — `execute_swap(quote_id)`, spend-gated by the engine. The host pauses for the user.
+5. **Track** — poll `kaleidoswap_atomic_status(atomic_id)` until it terminates.
 
 ## Don'ts
 
-- Don't invent prices, quotes, quote_ids, or order_ids.
+- Don't invent prices, quotes, quote_ids, or atomic_ids.
 - Don't reuse a number from a previous turn.
 - Don't describe how a tool works — call it.
 - Don't call `kaleidoswap_get_quote` with from/to only — ask for the amount.
