@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { Card } from './Card';
 import { Button } from './Button';
+import { RgbNodeIcon } from './ProtocolIcons';
 
 interface Channel {
     channel_id: string;
@@ -52,7 +53,7 @@ export const ChannelList: React.FC<ChannelListProps> = ({
                 <Card style={styles.emptyCard}>
                     <View style={styles.emptyState}>
                         <View style={styles.emptyIcon}>
-                            <Ionicons name="flash-outline" size={28} color={theme.colors.gray[400]} />
+                            <RgbNodeIcon size={26} badgeBackground={theme.colors.gray[100]} />
                         </View>
                         <Text style={styles.emptyTitle}>No channels yet</Text>
                         <Text style={styles.emptyDescription}>

@@ -14,6 +14,7 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { NetworkIcon } from '../components/NetworkIcon';
+import { NostrIcon, RgbNodeIcon } from '../components/ProtocolIcons';
 import { RootState } from '../store';
 import {
   setCurrency,
@@ -82,6 +83,8 @@ const Group: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
 const Row: React.FC<{
   icon?: keyof typeof Ionicons.glyphMap;
+  /** A custom mark (e.g. a protocol logo) in place of the Ionicons glyph. */
+  iconNode?: React.ReactNode;
   iconColor?: string;
   label: string;
   description?: string;
@@ -89,14 +92,14 @@ const Row: React.FC<{
   onPress?: () => void;
   right?: React.ReactNode;
   first?: boolean;
-}> = ({ icon, iconColor, label, description, value, onPress, right, first }) => {
+}> = ({ icon, iconNode, iconColor, label, description, value, onPress, right, first }) => {
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const content = (
     <View style={[styles.row, !first && styles.rowDivider]}>
-      {icon && (
+      {(icon || iconNode) && (
         <View style={[styles.rowIcon, { backgroundColor: theme.colors.surface.secondary }]}>
-          <Ionicons name={icon} size={18} color={iconColor ?? theme.colors.text.secondary} />
+          {iconNode ?? <Ionicons name={icon!} size={18} color={iconColor ?? theme.colors.text.secondary} />}
         </View>
       )}
       <View style={styles.rowText}>
@@ -617,8 +620,7 @@ export default function SettingsScreen({ navigation }: Props) {
         <Group>
           <Row
             first
-            icon="planet"
-            iconColor={theme.colors.primary[500]}
+            iconNode={<NostrIcon size={20} />}
             label="Profile, relays &amp; keys"
             description={nostrState.isConnected ? 'Connected to relays' : 'Not connected'}
             right={
@@ -726,6 +728,7 @@ export default function SettingsScreen({ navigation }: Props) {
           <Row
             first
             icon="flash-outline"
+            iconNode={nostrState.connectedWallet && nostrState.nwcWalletType === 'rln' ? <RgbNodeIcon size={18} /> : undefined}
             iconColor={theme.colors.warning[500]}
             label="Lightning wallet"
             description={nostrState.connectedWallet

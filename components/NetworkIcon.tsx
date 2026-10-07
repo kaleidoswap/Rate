@@ -5,7 +5,7 @@
 import React from 'react';
 import { Image, ImageSourcePropType, View } from 'react-native';
 import { theme } from '../theme';
-import { LiquidIcon, OnchainIcon } from './ProtocolIcons';
+import { LiquidIcon, NostrIcon, OnchainIcon, RgbNodeIcon } from './ProtocolIcons';
 import { chainIcon } from '../utils/orchestra-ui';
 
 interface NetworkIconProps {
@@ -21,8 +21,6 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
   ARKADE: require('../assets/icons/protocols/arkade.png'),
   rgb: require('../assets/icons/protocols/rgb.png'),
   RGB: require('../assets/icons/protocols/rgb.png'),
-  rln: require('../assets/icons/protocols/rgb.png'),
-  RLN: require('../assets/icons/protocols/rgb.png'),
   btc: require('../assets/icons/protocols/btc.png'),
   BTC: require('../assets/icons/protocols/btc.png'),
   bitcoin: require('../assets/icons/protocols/btc.png'),
@@ -55,6 +53,9 @@ export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) 
   // On-chain is a way to pay, not the asset: the extension's chain-link glyph, not the BTC coin.
   if (network.toLowerCase() === 'onchain') return <OnchainIcon size={size} />;
   if (network.toLowerCase() === 'liquid') return <LiquidIcon size={size} />;
+  if (network.toLowerCase() === 'nostr') return <NostrIcon size={size} />;
+  // The RGB Lightning Node: RGB logo with a Lightning badge.
+  if (network.toLowerCase() === 'rln') return <RgbNodeIcon size={size} />;
   // External chains (Ethereum, Tron, Solana…) use the bridge artwork.
   const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()] || chainIcon(network);
 

@@ -153,10 +153,8 @@ export default function DashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
-  // Top-left identity is the user's Nostr profile; the greeting sits under the
-  // name when there's no NIP-05 to show.
+  // Top-left identity is the user's Nostr profile, with the greeting above the name.
   const nostrProfile = useSelector((state: RootState) => state.nostr?.profile ?? null);
-  const nostrNpub = useSelector((state: RootState) => state.nostr?.npub ?? null);
   const hasNostrIdentity = useSelector((state: RootState) => !!state.nostr?.publicKey);
   const greeting = useMemo(() => buildGreeting(), []);
   const openProfile = useCallback(
@@ -888,9 +886,8 @@ export default function DashboardScreen({ navigation }: Props) {
         leftNode={
           <ProfileChip
             profile={nostrProfile}
-            npub={nostrNpub}
             hasIdentity={hasNostrIdentity}
-            fallbackSubtitle={greeting}
+            greeting={greeting}
             onPress={openProfile}
           />
         }

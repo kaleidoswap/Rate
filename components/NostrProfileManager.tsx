@@ -32,6 +32,7 @@ import { Input } from './Input';
 import { Sheet } from './Sheet';
 import { CopyButton } from './CopyButton';
 import { ProfileAvatar } from './ProfileAvatar';
+import { NostrIcon, RgbNodeIcon } from './ProtocolIcons';
 import { WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
 import ToastService from '../services/ToastService';
 import { copySensitive } from '../utils/sensitiveClipboard';
@@ -328,8 +329,8 @@ export default function NostrProfileManager({ navigation }: Props) {
     await dispatch(initializeNostr({ privateKey: nostrState.privateKey!, relays }) as any);
   };
 
-  const Row = ({ icon, tint, label, detail, onPress, danger, last, right }: {
-    icon: keyof typeof Ionicons.glyphMap; tint?: string; label: string; detail?: string;
+  const Row = ({ icon, iconNode, tint, label, detail, onPress, danger, last, right }: {
+    icon: keyof typeof Ionicons.glyphMap; iconNode?: React.ReactNode; tint?: string; label: string; detail?: string;
     onPress?: () => void; danger?: boolean; last?: boolean; right?: React.ReactNode;
   }) => {
     const color = danger ? theme.colors.error[500] : tint ?? theme.colors.text.secondary;
@@ -337,7 +338,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       <TouchableOpacity style={[styles.row, !last && styles.rowDivider]} onPress={onPress} disabled={!onPress}
         activeOpacity={0.7} accessibilityRole={onPress ? 'button' : undefined}>
         <View style={[styles.rowIcon, { backgroundColor: `${color}1F` }]}>
-          <Ionicons name={icon} size={17} color={color} />
+          {iconNode ?? <Ionicons name={icon} size={17} color={color} />}
         </View>
         <View style={styles.flex}>
           <Text style={[styles.rowLabel, danger && { color }]}>{label}</Text>
@@ -352,7 +353,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   const renderOnboarding = () => (
     <View style={[styles.card, styles.hero]}>
       <View style={styles.heroIcon}>
-        <Ionicons name="planet" size={30} color={theme.colors.primary[500]} />
+        <NostrIcon size={34} />
       </View>
       <Text style={styles.heroTitle}>Join Nostr</Text>
       <Text style={styles.heroText}>
@@ -385,7 +386,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       {!!profile?.about && <Text style={styles.about} numberOfLines={3}>{profile.about}</Text>}
 
       <View style={styles.keyRow}>
-        <Ionicons name="key-outline" size={14} color={theme.colors.text.tertiary} />
+        <NostrIcon size={14} />
         <Text style={styles.keyText} numberOfLines={1}>{shortNpub}</Text>
         {!!npub && <CopyButton value={npub} size={16} color={theme.colors.primary[500]} />}
       </View>
@@ -465,6 +466,7 @@ export default function NostrProfileManager({ navigation }: Props) {
       <Text style={styles.sectionLabel}>Wallet</Text>
       <View style={styles.card}>
         <Row icon="flash" tint={theme.colors.warning[500]} label="Connect a Lightning wallet"
+          iconNode={connectedWallet && nwcWalletType === 'rln' ? <RgbNodeIcon size={18} /> : undefined}
           detail={walletLabel ? `Connected · ${walletLabel}` : 'Pay and check balances via NWC'}
           onPress={() => navigation?.navigate('NWCConnect')} last />
       </View>
@@ -533,7 +535,7 @@ const styles = StyleSheet.create({
   hero: { alignItems: 'center', padding: theme.spacing[5], gap: theme.spacing[2] },
   heroIcon: {
     width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: `${theme.colors.primary[500]}1F`, marginBottom: theme.spacing[1],
+    backgroundColor: theme.colors.surface.secondary, marginBottom: theme.spacing[1],
   },
   heroTitle: { fontSize: theme.typography.fontSize.xl, fontWeight: '700', color: theme.colors.text.primary },
   heroText: {

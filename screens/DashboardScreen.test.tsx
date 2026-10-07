@@ -35,7 +35,7 @@ jest.mock('../components', () => ({
     return h(Fragment, {}, h(Text, {}, loading ? 'Loading balance' : 'Balance ready'), updating ? h(Text, {}, 'Updating') : null,
       h(Text, {}, `Accounts: ${accounts || 'none'}`));
   },
-  ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: () => null,
+  ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: ({ leftNode }: any) => leftNode ?? null,
 }));
 
 describe('dashboard connection recovery', () => {
@@ -53,6 +53,15 @@ describe('dashboard connection recovery', () => {
     expect(initializeProtocolServices).not.toHaveBeenCalled();
     fireEvent.press(screen.getByText('Create wallet'));
     expect(navigate).toHaveBeenCalledWith('WalletSetup');
+  });
+  it('greets the user above their profile name', () => {
+    mockState.nostr = { publicKey: 'pk', profile: { display_name: 'Alice' } };
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    const texts = screen.UNSAFE_getAllByType(require('react-native').Text).map((t: any) => String(t.props.children));
+    const nameAt = texts.indexOf('Alice');
+    expect(nameAt).toBeGreaterThan(0);
+    expect(texts[nameAt - 1]).toMatch(/^(Still up|Good|Hi|Morning|Rise|Hey|Evening|Welcome|Winding)/);
+    mockState.nostr = {};
   });
   it('offers restore when a wallet record has no accessible seed', () => {
     mockState.wallet.activeWallet = { id: 1 };

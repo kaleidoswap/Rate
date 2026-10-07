@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 
 import { Button, Input, MainHeader } from '../components';
+import { RgbNodeIcon } from '../components/ProtocolIcons';
 import { theme, leading } from '../theme';
 import { RootState } from '../store';
 import { protocolManager, reconcileRgbOnDevice } from '../services/protocols';
@@ -473,7 +474,9 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                   <View style={styles.typeRow}>
                     <View style={styles.walletIdentity}>
                       <View style={[styles.walletIcon, { backgroundColor: accent + '1A' }]}>
-                        <Ionicons name={rln ? 'cube' : 'flash'} size={18} color={accent} />
+                        {rln
+                          ? <RgbNodeIcon size={20} badgeBackground={theme.colors.surface.primary} />
+                          : <Ionicons name="flash" size={18} color={accent} />}
                       </View>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.walletName} numberOfLines={1}>

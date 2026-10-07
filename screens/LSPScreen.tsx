@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSelector, useDispatch } from 'react-redux';
 import { theme } from '../theme';
 import { Card, Button, ScreenHeader } from '../components';
+import { RgbNodeIcon } from '../components/ProtocolIcons';
 import { RootState } from '../store';
 import { protocolManager } from '../services/protocols';
 import { usePolicy } from '../hooks/usePolicy';
@@ -276,7 +277,7 @@ export default function LSPScreen({ navigation }: Props) {
       <SafeAreaView style={styles.container}>
         <ScreenHeader title="Open a channel" showBack />
         <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
-          <Ionicons name="flash-outline" size={40} color={theme.colors.text.tertiary} />
+          <RgbNodeIcon size={44} badgeBackground={theme.colors.background.primary} />
           <Text style={[styles.loadingText, { textAlign: 'center' }]}>
             Connect your RGB Lightning node to view or open channels.
           </Text>

@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { RgbIcon } from './ProtocolIcons';
 import { rgbAccountAdapter } from '../services/protocols';
 
 interface CreateUTXOModalProps {
@@ -149,7 +150,7 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
           {/* Info Card */}
           <View style={styles.infoCard}>
             <View style={styles.infoIconContainer}>
-              <Ionicons name="flash" size={20} color={theme.colors.primary[500]} />
+              <RgbIcon size={22} />
             </View>
             <View style={styles.infoTextContainer}>
               <Text style={styles.infoTitle}>
@@ -250,7 +251,7 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
               </>
             ) : (
               <>
-                <Ionicons name="flash" size={18} color={theme.colors.text.inverse} />
+                <Ionicons name="add-circle-outline" size={18} color={theme.colors.text.inverse} />
                 <Text style={[styles.createButtonText, { marginLeft: theme.spacing[2] }]}>
                   Create UTXOs
                 </Text>
