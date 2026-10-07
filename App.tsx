@@ -56,6 +56,7 @@ import ContactsScreen from './screens/ContactsScreen';
 import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
+import ProfileEditScreen from './screens/ProfileEditScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
@@ -80,6 +81,7 @@ type RootStackParamList = {
   DesignSystem: undefined;
   Swap: undefined;
   NostrSettings: undefined;
+  ProfileEdit: undefined;
   AssetDetail: { asset: any };
   Map: undefined;
   LSP: undefined;
@@ -234,6 +236,7 @@ function AppNavigator() {
         />
         <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="NostrSettings" component={asModalScreen(NostrSettingsScreen)} options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="ProfileEdit" component={asModalScreen(ProfileEditScreen)} options={{ presentation: 'modal', headerShown: false }} />
         {__DEV__ && <Stack.Screen name="DesignSystem" component={asModalScreen(DesignSystemScreen)} options={{ presentation: 'modal', headerShown: false }} />}
         <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={{ presentation: 'modal', headerShown: false }} />

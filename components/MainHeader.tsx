@@ -30,6 +30,8 @@ interface MainHeaderProps {
   iconNode?: React.ReactNode;
   /** A small node rendered right after the title (e.g. an "Experimental" badge). */
   titleBadge?: React.ReactNode;
+  /** Replace the title area with a custom node (e.g. the Dashboard profile chip). */
+  leftNode?: React.ReactNode;
   onBack?: () => void;
   children?: React.ReactNode;
   /**
@@ -51,6 +53,7 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
   icon,
   iconNode,
   titleBadge,
+  leftNode,
   onBack,
   children,
   elevated,
@@ -96,7 +99,9 @@ export const MainHeader: React.FC<MainHeaderProps> = ({
             )}
 
             <View style={styles.titleArea}>
-              {brandLogo ? (
+              {leftNode ? (
+                leftNode
+              ) : brandLogo ? (
                 <BrandLogo height={36} />
               ) : (
                 <>

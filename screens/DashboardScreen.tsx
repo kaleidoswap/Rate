@@ -41,6 +41,7 @@ import {
   MainHeader
 } from '../components';
 import { Sheet } from '../components/Sheet';
+import { ProfileChip } from '../components/ProfileChip';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
@@ -100,7 +101,7 @@ interface Channel {
 
 /**
  * A time-of-day greeting with a little variety so it changes between opens.
- * `name` (the user's Nostr name, when connected) is used when present.
+ * `name` is appended when given.
  */
 function buildGreeting(name?: string): string {
   const hour = new Date().getHours();
@@ -125,17 +126,20 @@ export default function DashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
-  // Header greeting uses the Nostr display name when connected; falls back to a
-  // name-less greeting otherwise (Nostr stays optional — see header below).
-  const nostrName = useSelector((state: RootState) => {
-    const p = state.nostr?.profile;
-    return (p?.display_name || p?.name || '').trim();
-  });
-  const greeting = useMemo(() => buildGreeting(nostrName || undefined), [nostrName]);
+  // Top-left identity is the user's Nostr profile; the greeting sits under the
+  // name when there's no NIP-05 to show.
+  const nostrProfile = useSelector((state: RootState) => state.nostr?.profile ?? null);
+  const nostrNpub = useSelector((state: RootState) => state.nostr?.npub ?? null);
+  const hasNostrIdentity = useSelector((state: RootState) => !!state.nostr?.publicKey);
+  const greeting = useMemo(() => buildGreeting(), []);
+  const openProfile = useCallback(
+    () => navigation.navigate(hasNostrIdentity ? 'ProfileEdit' : 'NostrSettings'),
+    [navigation, hasNostrIdentity],
+  );
 
   // If Nostr is connected but we never pulled the profile (the wallet-side
   // connect path doesn't fetch it, and a restored connection doesn't either),
-  // fetch it once so the greeting can show the account's name.
+  // fetch it once so the header can show the account's name.
   const nostrConnected = useSelector(
     (state: RootState) => !!(state.nostr?.isConnected || state.nostr?.hasStoredKeys),
   );
@@ -790,7 +794,15 @@ export default function DashboardScreen({ navigation }: Props) {
       {/* Sticky header: lives outside the ScrollView so it stays fixed while
           content scrolls beneath it. `elevated` gives it a downward shadow. */}
       <MainHeader
-        title={greeting}
+        leftNode={
+          <ProfileChip
+            profile={nostrProfile}
+            npub={nostrNpub}
+            hasIdentity={hasNostrIdentity}
+            fallbackSubtitle={greeting}
+            onPress={openProfile}
+          />
+        }
         showLogo={false}
         showSettings
         elevated
