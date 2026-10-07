@@ -896,7 +896,7 @@ export default function DashboardScreen({ navigation }: Props) {
           <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
             <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
             <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
-              {offlineAccounts.join(', ')} {offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete. Tap to retry.
+              {offlineAccounts.join(', ').replace(/^./, (c) => c.toUpperCase())} {offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete. Tap to retry.
             </Text>
           </TouchableOpacity>
         )}
