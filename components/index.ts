@@ -29,6 +29,7 @@ export { default as ZapModal } from './ZapModal';
 export type { ZapRecipient } from './ZapModal';
 export * from './ProtocolIcons';
 export * from './NetworkIcon';
+export * from './NetworkStack';
 export * from './ChannelList';
 export * from './MainHeader';
 export * from './MindMark';

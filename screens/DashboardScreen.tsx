@@ -457,6 +457,8 @@ export default function DashboardScreen({ navigation }: Props) {
         protocol: asset.protocol,
         icon: asset.icon,
         balance: getAssetBaseUnitBalance(asset.balance),
+        // The full breakdown (in channels, incoming) for the asset detail screen.
+        balanceDetail: asset.balance,
         last_updated: Date.now()
       })) as any));
 
