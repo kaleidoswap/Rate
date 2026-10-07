@@ -5,7 +5,8 @@
 import React from 'react';
 import { Image, ImageSourcePropType, View } from 'react-native';
 import { theme } from '../theme';
-import { OnchainIcon } from './ProtocolIcons';
+import { LiquidIcon, OnchainIcon } from './ProtocolIcons';
+import { chainIcon } from '../utils/orchestra-ui';
 
 interface NetworkIconProps {
   network: string;
@@ -36,7 +37,9 @@ const ICON_SOURCES: Record<string, ImageSourcePropType> = {
 export const NetworkIcon: React.FC<NetworkIconProps> = ({ network, size = 16 }) => {
   // On-chain is a way to pay, not the asset: the extension's chain-link glyph, not the BTC coin.
   if (network.toLowerCase() === 'onchain') return <OnchainIcon size={size} />;
-  const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()];
+  if (network.toLowerCase() === 'liquid') return <LiquidIcon size={size} />;
+  // External chains (Ethereum, Tron, Solana…) use the bridge artwork.
+  const source = ICON_SOURCES[network] || ICON_SOURCES[network.toLowerCase()] || chainIcon(network);
 
   if (!source) {
     return <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: theme.colors.gray[500] }} />;

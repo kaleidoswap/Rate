@@ -28,6 +28,11 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+# Inlined into the JS bundle at build time. The Flashnet Orchestra client key
+# (fnp_*) is public by design; without it, cross-chain deposit and send are off.
+env:
+  EXPO_PUBLIC_FLASHNET_ORCHESTRA_KEY: ${{ vars.FLASHNET_ORCHESTRA_KEY }}
+
 jobs:
   # ---------------------------------------------------------------------------
   version:
