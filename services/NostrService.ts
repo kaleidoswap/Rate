@@ -11,7 +11,7 @@ import NDK, {
   generateZapRequest,
   type NDKLnUrlData,
 } from '@nostr-dev-kit/ndk';
-import { getPublicKey, nip19, utils, nip04, nip44, nip17, nip59 } from 'nostr-tools';
+import { finalizeEvent, getPublicKey, nip19, utils, nip04, nip44, nip17, nip59 } from 'nostr-tools';
 import { bech32 } from '@scure/base';
 import { HDKey } from '@scure/bip32';
 import { mnemonicToSeedSync } from '@scure/bip39';
@@ -1100,6 +1100,16 @@ class NostrService {
     const sk = this.signer?.privateKey;
     if (!sk) throw new Error('Nostr identity is locked');
     return sk;
+  }
+
+  /** True when a key is loaded and events can be signed. */
+  canSign(): boolean {
+    return !!this.signer?.privateKey;
+  }
+
+  /** Sign an event sent over HTTP rather than to relays (e.g. media server auth). */
+  signEvent(template: { kind: number; created_at: number; tags: string[][]; content: string }) {
+    return finalizeEvent(template, utils.hexToBytes(this.getPrivateKeyHex()));
   }
 
   /** Encrypt a plaintext message to `recipientPubkey` with a legacy scheme. */

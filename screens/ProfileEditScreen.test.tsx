@@ -1,6 +1,11 @@
 import React from 'react';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import * as ImagePicker from 'expo-image-picker';
 import ProfileEditScreen from './ProfileEditScreen';
+
+jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
+const mockNostr = { canSign: jest.fn(() => true), signEvent: jest.fn((t: any) => ({ ...t, id: 'i', pubkey: 'p', sig: 's' })) };
+jest.mock('../services/NostrService', () => ({ __esModule: true, default: { getInstance: () => mockNostr } }));
 
 let mockState: any;
 const mockUnwrap = jest.fn();
@@ -40,8 +45,19 @@ jest.mock('../components', () => {
 const navigation = { goBack: jest.fn(), replace: jest.fn() };
 const profile = { display_name: 'Satoshi', name: 'satoshi', picture: 'https://example.com/a.png', lud06: 'lnurl1' };
 
+const pickPhoto = ImagePicker.launchImageLibraryAsync as jest.Mock;
+const JPEG_B64 = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).toString('base64');
+const realFetch = global.fetch;
+afterAll(() => { global.fetch = realFetch; });
+
 beforeEach(() => {
   jest.clearAllMocks();
+  mockNostr.canSign.mockReturnValue(true);
+  pickPhoto.mockResolvedValue({ canceled: false, assets: [{ uri: 'file://a.jpg', base64: JPEG_B64, fileName: 'a.jpg' }] });
+  global.fetch = jest.fn(async () => ({
+    ok: true, status: 200, headers: { get: () => null },
+    json: async () => ({ url: 'https://cdn.example/new.jpg' }),
+  })) as any;
   mockUnwrap.mockResolvedValue(undefined);
   mockState = { nostr: { profile, publicKey: 'ab', isConnected: true }, wallet: { activeWallet: { id: 1 } } };
 });
@@ -96,4 +112,50 @@ it('sends people without a Nostr identity to setup', () => {
   const screen = render(<ProfileEditScreen navigation={navigation} />);
   fireEvent.press(screen.getByText('Set up Nostr'));
   expect(navigation.replace).toHaveBeenCalledWith('NostrSettings');
+});
+
+it('uploads a chosen profile photo and publishes its link', async () => {
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByLabelText('Choose profile photo')); });
+
+  expect(pickPhoto).toHaveBeenCalledWith(expect.objectContaining({ allowsEditing: true, aspect: [1, 1], base64: true }));
+  const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+  expect(url).toBe('https://blossom.primal.net/upload');
+  expect(init.method).toBe('PUT');
+  expect(init.headers['Content-Type']).toBe('image/jpeg');
+  expect(init.headers.Authorization).toMatch(/^Nostr /);
+  expect(mockNostr.signEvent).toHaveBeenCalledWith(expect.objectContaining({ kind: 24242, content: 'Upload a.jpg' }));
+  expect(screen.getByLabelText('Or paste a picture link').props.value).toBe('https://cdn.example/new.jpg');
+
+  await act(async () => { fireEvent.press(screen.getByText('Save')); });
+  const update = mockDispatch.mock.calls.map(c => c[0]).find(a => a.type === 'update');
+  expect(update.edits).toEqual({ picture: 'https://cdn.example/new.jpg' });
+});
+
+it('uses a wide crop for the banner and reconnects first when the key is not loaded', async () => {
+  mockNostr.canSign.mockReturnValue(false);
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByLabelText('Choose banner photo')); });
+
+  expect(pickPhoto).toHaveBeenCalledWith(expect.objectContaining({ aspect: [3, 1] }));
+  expect(mockDispatch.mock.calls.some(c => c[0].type === 'restore')).toBe(true);
+  expect(screen.getByLabelText('Or paste a banner link').props.value).toBe('https://cdn.example/new.jpg');
+});
+
+it('keeps the old picture and explains when the upload fails', async () => {
+  global.fetch = jest.fn(async () => ({ ok: false, status: 401, headers: { get: () => 'auth expired' }, json: async () => ({}) })) as any;
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByLabelText('Choose profile photo')); });
+
+  expect(mockToast.error).toHaveBeenCalledWith(expect.stringContaining('auth expired'));
+  expect(screen.getByLabelText('Or paste a picture link').props.value).toBe(profile.picture);
+});
+
+it('does nothing when the picker is cancelled', async () => {
+  pickPhoto.mockResolvedValue({ canceled: true, assets: null });
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByLabelText('Choose profile photo')); });
+
+  expect(global.fetch).not.toHaveBeenCalled();
+  expect(mockToast.error).not.toHaveBeenCalled();
 });
