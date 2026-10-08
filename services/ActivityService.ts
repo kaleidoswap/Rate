@@ -9,6 +9,8 @@
 // Sources, in priority order:
 //   1. Lightning payments (BTC LN + RGB LN) — RGB adapter `listPayments()`
 //   2. RGB on-chain transfers (per asset)   — RGB adapter `listTransfers()`
+//      On-chain BTC of the RGB account's wallet — RGB adapter `listTransactions()`
+//      (the HTTP node adapter and RGB on this phone; NWC has no on-chain list)
 //   3. Spark / Arkade unified transactions   — adapter `listTransactions()`
 //   4. KaleidoSwap atomic swaps              — provided from Redux swap history
 //   5. Electrum swap payments (on-chain)     — provided from KaleidoPay attempts
@@ -180,6 +182,42 @@ function normalizeTransferStatus(status?: string): ActivityStatus {
   return 'pending';
 }
 
+/**
+ * On-chain BTC transactions of the RGB account's wallet (node or this phone),
+ * skipping txids another source already lists (RGB transfers, swap payouts).
+ */
+export function onchainBtcItems(txs: any[], network: string | undefined, listed: Set<string>): ActivityItem[] {
+  const out: ActivityItem[] = [];
+  for (const tx of txs) {
+    if (tx?.asset?.layer !== 'BTC_L1' || !tx.id || listed.has(tx.id)) continue;
+    const raw: any = tx.protocolData ?? {};
+    const fee = Number(raw.fee) > 0 ? Number(raw.fee) : undefined;
+    const net = Number(tx.amount) || 0;
+    // A send's net change includes its fee; show what was sent, the fee apart.
+    const sats = tx.type === 'send' && fee != null && fee < net ? net - fee : net;
+    out.push({
+      id: `onchain-${tx.id}`,
+      type: tx.type === 'send' ? 'send' : 'receive',
+      source: 'onchain',
+      asset: 'BTC',
+      assetName: 'Bitcoin',
+      assetTicker: 'sats',
+      assetPrecision: 0,
+      amount: formatSats(sats),
+      rawSats: sats,
+      status: tx.status === 'confirmed' ? 'confirmed' : 'pending',
+      timestamp: tx.timestamp || undefined,
+      txid: tx.id,
+      layer: 'L1',
+      fee,
+      account: 'RGB',
+      network,
+      kind: raw.transaction_type ?? raw.transactionType,
+    });
+  }
+  return out;
+}
+
 function normalizeSwapStatus(status?: string): ActivityStatus {
   const s = (status || '').toLowerCase();
   if (s === 'completed' || s === 'success') return 'confirmed';
@@ -221,6 +259,10 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
 
   const rgb = rgbAccountAdapter(); // the node, or RGB on this phone
   const rgbConnected = !!rgb?.isConnected();
+  const rgbNetwork = rgbConnected
+    ? (await (rgb as any).getConnectionInfo?.().catch(() => null))?.network
+    : undefined;
+  let rgbOnchain: any[] = [];
 
   // 1. Lightning payments (BTC LN + RGB LN)
   if (rgbConnected) {
@@ -305,11 +347,23 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
             txid: t.txid || '',
             layer: 'RGB-L1',
             kind: t.kind,
+            network: rgbNetwork,
           });
         }
       } catch (err) {
         // Per-asset failure is non-fatal; keep going.
         console.warn(`ActivityService: failed to load transfers for ${meta.ticker}`, err);
+      }
+    }
+    // Over NWC, list_transactions is Lightning invoices: the node's on-chain list
+    // would need an rln_list_transactions method.
+    const overNwc = typeof (rgb as any).walletType === 'function';
+    if (!overNwc && typeof (rgb as any).listTransactions === 'function') {
+      try {
+        rgbOnchain = await (rgb as any).listTransactions();
+      } catch (err) {
+        console.warn('ActivityService: failed to load on-chain BTC transactions', err);
+        failedSources++;
       }
     }
   }
@@ -453,6 +507,9 @@ export async function loadActivity(opts: LoadActivityOptions = {}): Promise<Acti
       console.warn('ActivityService: failed to load cross-chain orders', err);
     }
   }
+
+  // Last, so a txid another source already lists is not shown twice.
+  items.push(...onchainBtcItems(rgbOnchain, rgbNetwork, new Set(items.map((i) => i.txid).filter(Boolean))));
 
   // Newest first; undated items sink to the bottom.
   items.sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));

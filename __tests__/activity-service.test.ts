@@ -12,7 +12,7 @@ jest.mock('../services/protocols', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadActivity } from '../services/ActivityService';
+import { loadActivity, onchainBtcItems } from '../services/ActivityService';
 
 describe('ActivityService', () => {
   beforeEach(() => {
@@ -183,5 +183,65 @@ describe('ActivityService proofs and cross-chain orders', () => {
       expect.objectContaining({ id: 'crosschain-q1', type: 'receive', rawSats: 3000, status: 'confirmed', assetName: 'From USDT on Ethereum', txid: 'o1' }),
     ]);
     expect((await loadActivity({ walletId: 8 })).items).toEqual([]);
+  });
+});
+
+describe('on-chain BTC of the RGB account', () => {
+  const tx = (id: string, over: any = {}) => ({
+    id, type: 'receive', status: 'confirmed', amount: 10_000, timestamp: 5000,
+    asset: { id: 'BTC', layer: 'BTC_L1' }, protocolData: { txid: id, fee: 0 }, ...over,
+  });
+
+  beforeEach(() => {
+    for (const key of Object.keys(adapters)) delete adapters[key];
+  });
+
+  it('maps direction, amount net of fee, status and network', () => {
+    const items = onchainBtcItems([
+      tx('r1'),
+      tx('s1', { type: 'send', status: 'pending', amount: 5_210, timestamp: 0, protocolData: { fee: 210, transaction_type: 'User' } }),
+    ], 'signet', new Set());
+    expect(items).toEqual([
+      expect.objectContaining({ id: 'onchain-r1', type: 'receive', layer: 'L1', source: 'onchain', status: 'confirmed', rawSats: 10_000, fee: undefined, account: 'RGB', network: 'signet', txid: 'r1', timestamp: 5000 }),
+      expect.objectContaining({ id: 'onchain-s1', type: 'send', status: 'pending', rawSats: 5_000, amount: '5,000', fee: 210, kind: 'User', timestamp: undefined }),
+    ]);
+  });
+
+  it('skips Lightning rows and txids another source lists', () => {
+    const items = onchainBtcItems([
+      tx('dup'),
+      tx('ln', { asset: { id: 'BTC', layer: 'BTC_LN' } }),
+      tx('', {}),
+      tx('keep'),
+    ], undefined, new Set(['dup']));
+    expect(items.map((i) => i.txid)).toEqual(['keep']);
+  });
+
+  it('lists the node wallet\'s on-chain BTC once, next to its RGB transfer', async () => {
+    adapters.RGB_LN = {
+      isConnected: () => true,
+      getConnectionInfo: async () => ({ network: 'regtest' }),
+      listPayments: async () => [],
+      listTransfers: async () => [{ txid: 'rgbsend', kind: 'Send', status: 'Settled', created_at: 1, requested_assignment: { value: 5 } }],
+      listTransactions: async () => [tx('rgbsend', { type: 'send' }), tx('deposit')],
+    };
+    const { items } = await loadActivity({ assets: [{ asset_id: 'rgb:a', ticker: 'USDT', name: 'Tether', precision: 0 }] });
+    expect(items.map((i) => [i.id, i.layer, i.network])).toEqual([
+      ['onchain-deposit', 'L1', 'regtest'],
+      ['transfer-rgbsend-0', 'RGB-L1', 'regtest'],
+    ]);
+  });
+
+  it('does not ask an NWC wallet for an on-chain list', async () => {
+    const listTransactions = jest.fn(async () => [tx('ln-invoice')]);
+    adapters.RGB_LN = { isConnected: () => true, walletType: () => 'rln', listPayments: async () => [], listTransactions };
+    const { items } = await loadActivity();
+    expect(listTransactions).not.toHaveBeenCalled();
+    expect(items).toEqual([]);
+  });
+
+  it('counts a failed on-chain list as a failed source', async () => {
+    adapters.RGB_LN = { isConnected: () => true, listPayments: async () => [], listTransactions: async () => { throw new Error('down'); } };
+    expect((await loadActivity()).failedSources).toBe(1);
   });
 });
