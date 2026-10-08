@@ -93,10 +93,6 @@ export function isFlashnetPair(pair: SwapPair | null): boolean {
   return pair?.venue === 'flashnet'
 }
 
-export function isFlashnetQuote(quote: SwapQuoteView | null): boolean {
-  return quote?.protocolData?.engine === 'flashnet'
-}
-
 // ========================================================================
 // Pair & ticker lookups
 // ========================================================================
@@ -295,6 +291,29 @@ export function swapChannelShortfall(
   return null
 }
 
+/**
+ * The most a maker swap can send from the node, in maker units (msat for BTC,
+ * raw asset units otherwise), by the same rules as swapChannelShortfall.
+ * Undefined when the channel data doesn't say.
+ */
+export function maxSwapSendRaw(
+  from: Pick<SwapLegSpec, 'assetId' | 'ticker'>,
+  channels: unknown,
+  htlcMinMsat: number = RLN_HTLC_MIN_MSAT,
+): number | undefined {
+  if (!Array.isArray(channels)) return undefined
+  const rows = channels as ChannelRow[]
+  if (!rows.length) return 0
+  if (isBtcTicker(from.ticker)) {
+    const maxOut = maxOverUsable(rows, outboundMsat)
+    return maxOut === undefined ? undefined : Math.max(0, maxOut - htlcMinMsat)
+  }
+  if (!rows.some((c) => c && 'asset_id' in c)) return undefined
+  return rows
+    .filter((c) => usableRow(c) && c.asset_id === from.assetId && (outboundMsat(c) ?? Infinity) >= htlcMinMsat)
+    .reduce((best, c) => Math.max(best, finite(c.asset_local_amount) ?? 0), 0)
+}
+
 // ========================================================================
 // Quote validation
 // ========================================================================
@@ -307,11 +326,36 @@ export function isQuoteValid(quote: SwapQuoteView | null): boolean {
   return true
 }
 
-export function formatQuoteFee(quote: SwapQuoteView): string {
-  const precision = quote.fee.fee_asset_precision
-  if (precision === 0) return `${quote.fee.final_fee} ${quote.to_asset.ticker}`
-  const display = quote.fee.final_fee / Math.pow(10, precision)
-  return `${display.toFixed(precision)} ${quote.to_asset.ticker}`
+const groupThousands = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+/** A price for display: two decimals from 1 up, six significant digits below. */
+export function formatSwapPrice(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return '0'
+  if (value >= 1) {
+    const [int, dec] = value.toFixed(2).split('.')
+    return `${groupThousands(int)}.${dec}`.replace(/\.00$/, '')
+  }
+  const decimals = Math.min(20, 5 - Math.floor(Math.log10(value)))
+  return value.toFixed(decimals).replace(/\.?0+$/, '')
+}
+
+/**
+ * The quote's rate, e.g. "1 BTC ≈ 62,000 USDT". A BTC pair is priced per whole
+ * BTC whatever the display unit, so a per-sat rate never rounds to zero.
+ */
+export function swapRateLabel(
+  quote: { from_asset: string; to_asset: string; from_amount: number; to_amount: number },
+  bitcoinUnit: 'BTC' | 'sats',
+): string {
+  if (!(quote.from_amount > 0) || !(quote.to_amount > 0)) return '—'
+  const fromBtc = isBtcTicker(quote.from_asset)
+  if (fromBtc !== isBtcTicker(quote.to_asset)) {
+    const btcSide = fromBtc ? quote.from_amount : quote.to_amount
+    const btc = bitcoinUnit === 'sats' ? btcSide / 1e8 : btcSide
+    const other = fromBtc ? quote.to_amount : quote.from_amount
+    return `1 BTC ≈ ${formatSwapPrice(other / btc)} ${fromBtc ? quote.to_asset : quote.from_asset}`
+  }
+  return `1 ${quote.from_asset} ≈ ${formatSwapPrice(quote.to_amount / quote.from_amount)} ${quote.to_asset}`
 }
 
 // ========================================================================

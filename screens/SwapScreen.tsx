@@ -41,20 +41,24 @@ import { syncAssets } from '../store/slices/assetsSlice';
 import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
-  findPair, allTickers, tradableTickers, findPairAsset,
+  findPair, allTickers, tradableTickers, findPairAsset, getPairAsset,
   getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair, getAssetNetwork,
-  normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
-  QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
+  normalizeMakerPairs, buildFlashnetPairs, validateSwapString, swapRateLabel, maxSwapSendRaw,
+  QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS, MSATS_PER_SAT, RLN_HTLC_MIN_MSAT,
 } from '../utils/swap-model';
 import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
+import { describeSwapFailure, SWAP_FAILED_COPY, SWAP_UNCONFIRMED_COPY, type SwapFailureCopy } from '../utils/swap-errors';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
-import { fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer } from '../services/swapQuotes';
+import {
+  fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer,
+  loadChannelLiquidity, quoteChannelShortfall, type ChannelLiquidity,
+} from '../services/swapQuotes';
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, ZoomIn, FadeInDown } from 'react-native-reanimated';
 import { theme, motion } from '../theme';
 import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
-import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText } from '../components';
+import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 
 interface Props {
@@ -98,6 +102,12 @@ export default function SwapScreen({ navigation }: Props) {
   };
   // The unit shown next to a ticker (BTC side respects the active unit).
   const unitLabelFor = (ticker: string) => (isBtcTicker(ticker) ? btcUnitLabel : ticker);
+  const quoteLegLabel = (amount: number, ticker: string) => `${formatDisplayAmount(amount, ticker)} ${unitLabelFor(ticker)}`;
+  // Flashnet takes its fee from the asset paid in, the maker from the asset paid out.
+  const formatQuoteFee = (q: SwapQuote): string => {
+    const ticker = q.venue === 'flashnet' ? q.from_asset : q.to_asset;
+    return `${formatDisplayAmount(q.fee_amount, ticker)} ${unitLabelFor(ticker)}`;
+  };
 
   const [showAssetPicker, setShowAssetPicker] = useState<'from' | 'to' | null>(null);
   // The flip arrow turns half a revolution per tap.
@@ -124,11 +134,16 @@ export default function SwapScreen({ navigation }: Props) {
   // A venue whose prices failed to load, so an empty list says why.
   const [pairsFailed, setPairsFailed] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
+  // The RGB node's channels: what a maker swap can carry (channels unknown = no guard).
+  const [liquidity, setLiquidity] = useState<ChannelLiquidity>({ htlcMinMsat: RLN_HTLC_MIN_MSAT });
   // Set once a swap settles so the confirm modal shows a success screen instead
   // of silently closing (the Flashnet path had no confirmation at all).
   const [swapSuccess, setSwapSuccess] = useState<
     { fromAmount: number; fromTicker: string; toAmount: number; toTicker: string; txid?: string } | null
   >(null);
+  // Set when a swap fails or never confirms, so the sheet ends on a result either way.
+  // `unconfirmed`: no final status yet, so the swap may still complete.
+  const [swapFailure, setSwapFailure] = useState<(SwapFailureCopy & { unconfirmed?: boolean }) | null>(null);
 
   // After any swap, refresh balances everywhere: the global asset list (so a
   // freshly bought Spark token like USDB appears in Assets/Dashboard), the local
@@ -146,6 +161,11 @@ export default function SwapScreen({ navigation }: Props) {
     setTimeout(sync, 4000);
     setTimeout(sync, 12000);
     loadTradingPairs();
+    void refreshLiquidity();
+  };
+
+  const refreshLiquidity = async () => {
+    try { setLiquidity(await loadChannelLiquidity()); } catch { setLiquidity({ htlcMinMsat: RLN_HTLC_MIN_MSAT }); }
   };
 
   // Build a history entry from a settled quote so swaps (both venues) show up in
@@ -155,6 +175,7 @@ export default function SwapScreen({ navigation }: Props) {
     status: SwapExecution['status'],
     txid?: string,
     swapString?: string,
+    errorMessage?: string,
   ) => {
     dispatch(addToHistory({
       rfq_id: q.rfq_id,
@@ -163,6 +184,7 @@ export default function SwapScreen({ navigation }: Props) {
       created_at: Date.now(),
       updated_at: Date.now(),
       txid,
+      error_message: errorMessage,
       from_asset: q.from_asset,
       to_asset: q.to_asset,
       from_amount: q.from_amount,
@@ -418,6 +440,9 @@ export default function SwapScreen({ navigation }: Props) {
       return;
     }
     executingRef.current = true;
+    // Once the provider has the swap, a failure belongs in Activity.
+    let started = false;
+    let swapString = '';
 
     try {
       dispatch(setExecuting(true));
@@ -430,6 +455,7 @@ export default function SwapScreen({ navigation }: Props) {
       if (pair && isFlashnetPair(pair)) {
         // ── Flashnet execution (single step) ──
         setSwapProgress('execute');
+        started = true;
         const client = flashnetClientManager.getClient();
         const poolId = pair.poolId || flashnetClientManager.getPoolId();
         const fromAssetId = getAssetId(pair.base.ticker === quote.from_asset ? pair.base : pair.quote);
@@ -498,12 +524,17 @@ export default function SwapScreen({ navigation }: Props) {
           ? Math.round(quote.to_amount * 1e8 * 1000)
           : Math.round(quote.to_amount * Math.pow(10, toPrecision)));
 
+        // The channels may have changed since the quote: stop before the maker locks anything.
+        const shortfall = quoteChannelShortfall(quote, await loadChannelLiquidity(), quoteLegLabel);
+        if (shortfall) throw new Error(`Can't swap: ${shortfall}`);
+
         // Step 1: Init swap. The maker SDK's SwapRequest is a FLAT shape
         // ({ rfq_id, from_asset, from_amount, to_asset, to_amount }) — passing a
         // nested { asset_id, amount, layer } object (as the old `as any` cast
         // did) sent the asset as an object and the amounts as undefined, so the
         // swap never initialised. Mirrors rate-extension's INIT_SWAP route.
         setSwapProgress('init');
+        started = true;
         const initResult = await client.maker.initSwap({
           rfq_id: quote.rfq_id,
           from_asset: fromAssetId,
@@ -514,6 +545,9 @@ export default function SwapScreen({ navigation }: Props) {
 
         const swapstring = initResult?.swapstring || initResult?.swap_string || '';
         const paymentHash = initResult?.payment_hash || '';
+        // The maker looks a swap up by payment hash, with the token it issued at init.
+        const accessToken: string | undefined = initResult?.access_token || undefined;
+        swapString = swapstring;
 
         // Safety check: verify the maker's swapstring encodes the exact terms we
         // agreed to before whitelisting it on our node. Abort on any mismatch.
@@ -547,17 +581,18 @@ export default function SwapScreen({ navigation }: Props) {
         dispatch(updateExecutionStatus({ rfq_id: quote.rfq_id, status: 'executing' }));
         setSwapProgress('done');
 
-        // Start polling for final status
-        startStatusPolling(quote.rfq_id, quote, execution);
+        startStatusPolling(paymentHash, accessToken, quote, execution);
       }
     } catch (error) {
       console.error('Swap execution failed:', error);
+      const copy = describeSwapFailure(error);
+      feedback.error();
       setSwapProgress('idle');
-      dispatch(updateExecutionStatus({
-        rfq_id: quote.rfq_id,
-        status: 'failed',
-        error_message: error instanceof Error ? error.message : 'Swap execution failed',
-      }));
+      dispatch(updateExecutionStatus({ rfq_id: quote.rfq_id, status: 'failed', error_message: copy.message }));
+      if (started) {
+        recordSwapHistory(quote, 'failed', undefined, swapString, error instanceof Error ? error.message : copy.title);
+      }
+      setSwapFailure(copy);
       dispatch(setExecuting(false));
     } finally {
       executingRef.current = false;
@@ -567,7 +602,8 @@ export default function SwapScreen({ navigation }: Props) {
   // `quote` and `execution` are passed in rather than read from swapState: the
   // interval callback would otherwise see the values captured at render time
   // (before setCurrentExecution landed), losing swap_string/txid in history.
-  const startStatusPolling = (rfqId: string, quote: SwapQuote, execution: SwapExecution) => {
+  const startStatusPolling = (paymentHash: string, accessToken: string | undefined, quote: SwapQuote, execution: SwapExecution) => {
+    const rfqId = quote.rfq_id;
     let pollCount = 0;
     const maxPolls = 20; // × 3s ≈ 1 minute
 
@@ -577,24 +613,28 @@ export default function SwapScreen({ navigation }: Props) {
       setPollingInterval(null);
       dispatch(setExecuting(false));
     };
+    // No final status: recorded as pending, since the swap may still settle.
+    const giveUp = (interval: ReturnType<typeof setInterval>, reason: string) => {
+      recordSwapHistory(quote, 'pending', execution.txid, execution.swap_string, reason);
+      stop(interval);
+      setSwapFailure({ ...SWAP_UNCONFIRMED_COPY, unconfirmed: true });
+      refreshAfterSwap();
+    };
 
     const interval = setInterval(async () => {
       try {
         pollCount++;
 
-        // Poll via kaleido-sdk maker API
         const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
         if (!rgbAdapter?.isConnected()) {
           console.warn('[SwapScreen] RGB adapter not connected, stopping poll');
-          stop(interval);
-          setShowConfirmModal(false);
-          dispatch(setError('Lost connection to your RGB Lightning node. Check the swap in Activity.'));
+          giveUp(interval, 'Lost connection to the RGB Lightning node');
           return;
         }
 
         let status: any;
         try {
-          status = await rgbAdapter.getSwapStatus?.(rfqId);
+          status = await rgbAdapter.getSwapStatus?.(paymentHash, accessToken);
         } catch {
           // Swap status not available yet
           status = undefined;
@@ -603,25 +643,27 @@ export default function SwapScreen({ navigation }: Props) {
         const swapStatus = status?.status || 'pending';
 
         if (swapStatus === 'confirmed' || swapStatus === 'completed' || swapStatus === 'failed') {
-          if (swapStatus === 'failed') feedback.error();
+          const failed = swapStatus === 'failed';
+          if (failed) feedback.error();
           else feedback.swap();
           dispatch(updateExecutionStatus({
             rfq_id: rfqId,
-            status: swapStatus === 'failed' ? 'failed' : 'completed',
-            error_message: swapStatus === 'failed' ? 'Swap failed' : undefined,
+            status: failed ? 'failed' : 'completed',
+            error_message: failed ? SWAP_FAILED_COPY.message : undefined,
           }));
 
           // Record an enriched history entry (amounts/tickers from the quote).
           recordSwapHistory(
             quote,
-            swapStatus === 'failed' ? 'failed' : 'completed',
+            failed ? 'failed' : 'completed',
             status?.txid ?? execution.txid,
             execution.swap_string,
+            failed ? 'The maker reported the swap as failed' : undefined,
           );
 
           stop(interval);
-          if (swapStatus === 'failed') {
-            setShowConfirmModal(false);
+          if (failed) {
+            setSwapFailure(SWAP_FAILED_COPY);
           } else {
             setSwapSuccess({
               fromAmount: quote.from_amount,
@@ -636,11 +678,7 @@ export default function SwapScreen({ navigation }: Props) {
         }
 
         // Still pending (or status unavailable): give up after maxPolls.
-        if (pollCount >= maxPolls) {
-          dispatch(updateExecutionStatus({ rfq_id: rfqId, status: 'failed', error_message: 'Swap timed out' }));
-          stop(interval);
-          setShowConfirmModal(false);
-        }
+        if (pollCount >= maxPolls) giveUp(interval, 'Not confirmed within a minute');
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
       }
@@ -658,14 +696,13 @@ export default function SwapScreen({ navigation }: Props) {
   // KaleidoSwap. The wallet-wide total would let MAX ask for more than that account
   // holds, so BTC shows the balance of the account the pair's venue uses (the larger
   // one when both venues serve it).
+  const selectedPairs = filteredPairs.filter(p =>
+    [swapState.fromAsset, swapState.toAsset].filter(Boolean).every(t => p.base.ticker === t || p.quote.ticker === t));
   const btcBalanceForSwap = (): number | undefined => {
     const byProtocol = (walletState?.btcBalance as any)?.byProtocol as
       Record<string, { confirmed: number; total: number }> | undefined;
     if (!byProtocol) return undefined;
-    const tickers = [swapState.fromAsset, swapState.toAsset].filter(Boolean);
-    const venues = new Set(filteredPairs
-      .filter(p => tickers.every(t => p.base.ticker === t || p.quote.ticker === t))
-      .map(p => p.venue ?? 'kaleidoswap'));
+    const venues = new Set(selectedPairs.map(p => p.venue ?? 'kaleidoswap'));
     const sats = [
       ...(venues.size === 0 || venues.has('flashnet') ? [byProtocol.SPARK?.confirmed ?? 0] : []),
       ...(venues.size === 0 || venues.has('kaleidoswap') ? [byProtocol.RGB?.total ?? 0] : []),
@@ -677,11 +714,29 @@ export default function SwapScreen({ navigation }: Props) {
     const btc = asset && isBtcTicker(ticker) ? btcBalanceForSwap() : undefined;
     return asset && btc !== undefined ? { ...asset, balance: btc } : asset;
   };
+  // What the node's channels can send when only the maker serves this pair (Flashnet
+  // doesn't use channels), in the display unit; undefined when unknown.
+  const makerSendCapacity = (): number | undefined => {
+    if (!selectedPairs.length || selectedPairs.some(isFlashnetPair)) return undefined;
+    const asset = getPairAsset(selectedPairs[0], swapState.fromAsset);
+    if (!asset) return undefined;
+    const raw = maxSwapSendRaw({ assetId: getAssetId(asset), ticker: asset.ticker }, liquidity.channels, liquidity.htlcMinMsat);
+    if (raw === undefined) return undefined;
+    return isBtcTicker(asset.ticker) ? satsToBtcDisplay(Math.floor(raw / MSATS_PER_SAT)) : raw / 10 ** asset.precision;
+  };
+  // MAX and the input clamp: the balance, capped by channel capacity when it applies.
+  const maxSendable = (): number => {
+    const balance = assetByTicker(swapState.fromAsset)?.balance ?? 0;
+    const cap = makerSendCapacity();
+    return cap !== undefined && cap > 0 ? Math.min(balance, cap) : balance;
+  };
 
 
 
   const rgbConnected = protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false;
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
+
+  useEffect(() => { void refreshLiquidity(); }, [rgbConnected]);
 
   // The KaleidoSwap maker URL this wallet trades against, read from its RGB (RLN)
   // network config — the same value initializeWdkProtocols feeds into the maker
@@ -765,6 +820,8 @@ export default function SwapScreen({ navigation }: Props) {
     </View>;
   };
 
+  const liquidityShortfall = swapState.currentQuote ? quoteChannelShortfall(swapState.currentQuote, liquidity, quoteLegLabel) : null;
+
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
       {renderPairsNotice()}
@@ -791,10 +848,7 @@ export default function SwapScreen({ navigation }: Props) {
             <TouchableOpacity
               style={styles.maxButton}
               onPress={() => {
-                const asset = assetByTicker(swapState.fromAsset);
-                if (asset) {
-                  dispatch(setFromAmount(asset.balance.toString()));
-                }
+                if (assetByTicker(swapState.fromAsset)) dispatch(setFromAmount(maxSendable().toString()));
               }}
             >
               <Text style={styles.maxButtonText}>MAX</Text>
@@ -810,9 +864,9 @@ export default function SwapScreen({ navigation }: Props) {
             value={swapState.fromAmount}
             onChangeText={(text) => {
               // Limit the quote input to the available balance for the selected
-              // from-asset/network (same idea as the extension's clamp-to-max):
-              // the user can't request a quote for more than they hold.
-              const max = assetByTicker(swapState.fromAsset)?.balance ?? 0;
+              // from-asset/network (same idea as the extension's clamp-to-max) and,
+              // for maker swaps, to what the channels can send.
+              const max = maxSendable();
               const n = parseFloat(text.replace(/,/g, ''));
               if (max > 0 && Number.isFinite(n) && n > max) {
                 dispatch(setFromAmount(String(max)));
@@ -882,13 +936,13 @@ export default function SwapScreen({ navigation }: Props) {
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Rate</Text>
             <Text style={styles.quoteInfoValue}>
-              1 {unitLabelFor(swapState.fromAsset)} ≈ {swapState.currentQuote.exchange_rate.toFixed(2)} {unitLabelFor(swapState.toAsset)}
+              {swapRateLabel(swapState.currentQuote, bitcoinUnit)}
             </Text>
           </View>
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Swap fee</Text>
             <Text style={styles.quoteInfoValue}>
-              {swapState.currentQuote.fee_amount} {unitLabelFor(swapState.currentQuote.venue === 'flashnet' ? swapState.fromAsset : swapState.toAsset)}
+              {formatQuoteFee(swapState.currentQuote)}
             </Text>
           </View>
           {quoteSecsLeft != null && (
@@ -909,16 +963,21 @@ export default function SwapScreen({ navigation }: Props) {
         </Animated.View>
       )}
 
+      {!!liquidityShortfall && (
+        <Callout tone="warning" title="Not enough channel liquidity" message={liquidityShortfall.charAt(0).toUpperCase() + liquidityShortfall.slice(1)} style={{ marginTop: theme.spacing[3] }} />
+      )}
+
       {/* Main Action Button */}
       <Button
         title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : Number(swapState.fromAmount) > 0 ? 'Refresh quotes' : 'Enter Amount')}
         onPress={() => {
           if (!swapState.currentQuote) { void getQuote(); return; }
+          if (liquidityShortfall) return;
           setReviewQuote(swapState.currentQuote);
           setPreviousReviewQuote(null);
           setShowConfirmModal(true);
         }}
-        disabled={swapState.isQuoteLoading || !Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0}
+        disabled={swapState.isQuoteLoading || !!liquidityShortfall || !Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0}
         loading={swapState.isQuoteLoading}
         variant="primary"
         fullWidth
@@ -1054,7 +1113,52 @@ export default function SwapScreen({ navigation }: Props) {
     dispatch(resetSwap());
   };
 
+  // Leave the failure view; the amount and pair stay for another go.
+  const closeFailure = () => {
+    setSwapFailure(null);
+    setShowConfirmModal(false);
+    setSwapProgress('idle');
+    dispatch(setCurrentExecution(null));
+    dispatch(clearError());
+  };
+
+  // Retry with a fresh quote: the failed one is spent or stale.
+  const retrySwap = async () => {
+    setSwapFailure(null);
+    setSwapProgress('idle');
+    dispatch(setCurrentExecution(null));
+    const fresh = await getQuote();
+    if (fresh) {
+      setReviewQuote(fresh);
+      setPreviousReviewQuote(null);
+    } else {
+      setShowConfirmModal(false);
+    }
+  };
+
   const renderConfirmBody = () => {
+    // Failure screen: what happened in plain words, and a way to try again.
+    if (swapFailure) {
+      return (
+        <View>
+          <View style={{ alignItems: 'center', paddingVertical: theme.spacing[2] }}>
+            <Animated.View entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
+              style={[styles.progressDot, styles.successDot, swapFailure.unconfirmed ? styles.progressDotPending : styles.progressDotFailed]}>
+              <Ionicons name={swapFailure.unconfirmed ? 'time-outline' : 'close'} size={32} color={theme.colors.text.inverse} />
+            </Animated.View>
+            <Text style={styles.confirmTitle}>{swapFailure.title}</Text>
+            <Text style={{ color: theme.colors.text.secondary, marginTop: theme.spacing[1.5], textAlign: 'center' }}>
+              {swapFailure.message}
+            </Text>
+          </View>
+          <View style={[styles.confirmActions, { marginTop: theme.spacing[4] }]}>
+            <Button title="Done" variant="secondary" onPress={closeFailure} style={styles.confirmActionButton} />
+            <Button title="Try again" variant="primary" onPress={retrySwap} style={styles.confirmActionButton} />
+          </View>
+        </View>
+      );
+    }
+
     // Success screen — shown for both venues once a swap settles.
     if (swapSuccess) {
       return (
@@ -1126,7 +1230,7 @@ export default function SwapScreen({ navigation }: Props) {
         <ScrollView style={{ maxHeight: Math.min(360, screenHeight * 0.4) }} contentContainerStyle={styles.confirmDetails}>
           {previousReviewQuote && (previousReviewQuote.to_amount !== reviewQuote.to_amount || previousReviewQuote.fee_amount !== reviewQuote.fee_amount) && (
             <Text style={styles.quoteChangeNotice} accessibilityLiveRegion="polite">
-              Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {previousReviewQuote.fee_amount} → {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}. Review these changes before confirming.
+              Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {formatQuoteFee(previousReviewQuote)} → {formatQuoteFee(reviewQuote)}. Review these changes before confirming.
             </Text>
           )}
           {pair && <View style={styles.confirmRow}>
@@ -1136,13 +1240,13 @@ export default function SwapScreen({ navigation }: Props) {
           <View style={styles.confirmRow}>
             <Text style={styles.confirmLabel}>Rate</Text>
             <Text style={styles.confirmValue}>
-              1 {unitLabelFor(fromTicker)} = {reviewQuote.exchange_rate.toFixed(8)} {unitLabelFor(toTicker)}
+              {swapRateLabel(reviewQuote, bitcoinUnit)}
             </Text>
           </View>
           <View style={styles.confirmRow}>
             <Text style={styles.confirmLabel}>Fee</Text>
             <Text style={styles.confirmValue}>
-              {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}
+              {formatQuoteFee(reviewQuote)}
             </Text>
           </View>
           <View style={styles.confirmRow}>
@@ -1184,12 +1288,13 @@ export default function SwapScreen({ navigation }: Props) {
 
   const renderConfirmModal = () => (
     <Sheet
-      visible={!!swapSuccess || (showConfirmModal && !!reviewQuote)}
-      title={swapSuccess ? undefined : swapState.isExecuting ? 'Swapping…' : 'Review swap'}
+      visible={!!swapSuccess || !!swapFailure || (showConfirmModal && !!reviewQuote)}
+      title={swapSuccess || swapFailure ? undefined : swapState.isExecuting ? 'Swapping…' : 'Review swap'}
       onClose={() => {
         // A running swap can't be walked away from mid-step; the sheet stays until it settles.
         if (swapState.isExecuting) return;
         if (swapSuccess) finishSwap();
+        else if (swapFailure) closeFailure();
         else setShowConfirmModal(false);
       }}
     >
@@ -1292,7 +1397,7 @@ export default function SwapScreen({ navigation }: Props) {
       <ProviderSheet visible={showProviders} selectedId={selectedProvider.current} onClose={() => setShowProviders(false)}
         options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: policy.showNetworks ? (isFlashnetPair(o.pair) ? 'Spark' : 'RGB Lightning node') : undefined,
           amountLabel: 'You receive', amount: o.quote ? `${formatDisplayAmount(o.quote.to_amount, o.quote.to_asset)} ${unitLabelFor(o.quote.to_asset)}` : 'Unavailable',
-          detail: o.quote ? `Fee ${formatDisplayAmount(o.quote.fee_amount, o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)} ${unitLabelFor(o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)}` : '',
+          detail: o.quote ? `Fee ${formatQuoteFee(o.quote)}` : '',
           unavailable: o.unavailable, expiresAt: o.quote?.expiry_timestamp, recommended: bestSwapOffer(providerOffers)?.id === o.id }))}
         onSelect={id => { const chosen = providerOffers.find(o => o.id === id); if (!chosen?.quote || quoteHasExpired(chosen.quote.expiry_timestamp)) return;
           quoteRequestRef.current++; dispatch(setQuoteLoading(false)); selectedProvider.current = id; dispatch(clearError()); dispatch(setCurrentQuote(chosen.quote)); }} />
@@ -1714,6 +1819,16 @@ const styles = StyleSheet.create({
   progressDotDone: {
     backgroundColor: theme.colors.success[500],
     borderColor: theme.colors.success[500],
+  },
+
+  progressDotFailed: {
+    backgroundColor: theme.colors.error[500],
+    borderColor: theme.colors.error[500],
+  },
+
+  progressDotPending: {
+    backgroundColor: theme.colors.warning[500],
+    borderColor: theme.colors.warning[500],
   },
 
   progressDotNum: {
