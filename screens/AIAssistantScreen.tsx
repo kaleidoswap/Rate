@@ -47,6 +47,7 @@ import { getModelById } from '../services/qvacModels';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
 import { useAiConfirm } from '../hooks/useAiConfirm';
+import { stepForTool, turnProgressLabel } from '../utils/turnProgress';
 import * as Haptics from 'expo-haptics';
 
 interface Props {
@@ -183,6 +184,28 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   const [lastStats, setLastStats] = useState<ChatMsgStats | null>(null);
 
   const isEmpty = messages.length === 0;
+
+  // Step + elapsed time under the pending reply (a model step can take a minute).
+  const [progress, setProgress] = useState<{ step: string; startedAt: number } | null>(null);
+  const progressStep = useRef<string | null>(null);
+  const [progressNow, setProgressNow] = useState(Date.now());
+  useEffect(() => {
+    if (!progress) return;
+    setProgressNow(Date.now());
+    const t = setInterval(() => setProgressNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [progress]);
+  const setStep = useCallback((step: string | null) => {
+    if (progressStep.current === step) return;
+    progressStep.current = step;
+    setProgress((p) => (step ? { step, startedAt: p?.startedAt ?? Date.now() } : null));
+  }, []);
+  const progressLabel = progress
+    ? turnProgressLabel(progress.step, progressNow - progress.startedAt, {
+        tokensPerSecond: lastStats?.tokensPerSecond,
+        maxTokens: mindConfig.maxTokens,
+      })
+    : undefined;
 
   // Re-read the model config whenever this screen regains focus. reloadConfig
   // is held in a ref so the effect can depend ONLY on `navigation`.
@@ -449,6 +472,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     }
 
     setIsLoading(true);
+    progressStep.current = null;
+    setStep('Thinking on-device');
 
     const assistantId = nextId();
     addMessage({ id: assistantId, text: '', isUser: false, timestamp: new Date(), streaming: true });
@@ -472,6 +497,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         history,
         onStart: (requestId) => setActiveRequestId(requestId),
         onThinking: (tok) => {
+          setStep('Reasoning');
           thinkingText += tok;
           updateMessage(assistantId, () => ({ thinking: thinkingText }));
         },
@@ -490,7 +516,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           setLastStats(st);
         },
         // A recipe step is executing (deterministic tier).
-        onStep: (name) => updateMessage(assistantId, () => ({ text: `🔧 ${name.replace(/_/g, ' ')}…` })),
+        onStep: (name) => setStep(stepForTool(name)),
         onToken: (token, turn) => {
           updateMessage(assistantId, (m) => {
             if (turn !== streamingTurn) {
@@ -504,16 +530,16 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         },
         // Visible feedback while a tool runs (esp. during the payment gap).
         onToolCall: (call, info) => {
-          updateMessage(assistantId, () => ({
-            text: info.requiresConfirmation
-              ? '⚡ Preparing payment…'
-              : `🔧 ${call.name.replace(/_/g, ' ')}…`,
-          }));
+          setStep(stepForTool(call.name, info.requiresConfirmation));
+          updateMessage(assistantId, () => ({ text: '' }));
           scrollToBottom(true);
         },
         // Money tools pause here for explicit user approval.
         onConfirm: confirm.request,
-        onToolResult: confirm.onToolResult,
+        onToolResult: (event) => {
+          confirm.onToolResult(event);
+          setStep('Thinking');
+        },
       });
 
       if (res.tier === 'fast') {
@@ -577,6 +603,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     }
 
     confirm.reset();
+    setStep(null);
     setActiveRequestId(null);
     setIsLoading(false);
   };
@@ -867,6 +894,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                       onCopy={copyToClipboard}
                       onOpenLink={openLink}
                       onLongPress={handleLongPressMessage}
+                      statusLabel={message.streaming ? progressLabel : undefined}
                       onSelectContact={(name) => {
                         setInputText(`Send to ${name} `);
                         Haptics.selectionAsync();
@@ -877,7 +905,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     <View style={styles.processingRow}>
                       <MindAvatar size={32} style={styles.processingAvatar} />
                       <View style={styles.processingBubble}>
-                        <TypingDots label="Thinking on-device…" />
+                        <TypingDots label={progressLabel ?? 'Thinking on-device…'} />
                       </View>
                     </View>
                   )}
