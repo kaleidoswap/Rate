@@ -46,6 +46,7 @@ import { useQVAC } from '../hooks/useQVAC';
 import { getModelById } from '../services/qvacModels';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
+import { describeSwapQuote } from '../services/swapTools';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import * as Haptics from 'expo-haptics';
 
@@ -433,9 +434,18 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         return { type: 'lightning_invoice', recipient: String(a.to ?? ''), amount: 0, description: `Send ${amt.toLocaleString()} ${asset}`, recipientName: `${amt.toLocaleString()} ${asset}` };
       }
       case 'execute_swap': {
-        const from = String(a.from_asset ?? '').toUpperCase();
-        const to = String(a.to_asset ?? '').toUpperCase();
-        return { type: 'lightning_invoice', recipient: `${from} → ${to}`, amount: 0, description: `Swap ${a.amount ?? ''} ${from} → ${to}` };
+        const q = describeSwapQuote(String(a.quote_id ?? ''));
+        if (!q) return { type: 'lightning_invoice', recipient: 'Swap', amount: 0, description: 'Swap (quote no longer cached)' };
+        const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 8 });
+        const sendSats = q.from === 'BTC' ? Math.round(q.sendAmount) : 0;
+        return {
+          type: 'lightning_invoice',
+          recipient: `${q.from} → ${q.to}`,
+          recipientName: `${fmt(q.sendAmount)} ${q.from === 'BTC' ? 'sats' : q.from} → ${fmt(q.receiveAmount)} ${q.receiveUnit}`,
+          amount: sendSats,
+          description: `Swap on ${q.venue === 'flashnet' ? 'Flashnet' : 'KaleidoSwap'}`,
+          priceUsd: sendSats ? btcPriceUSD : undefined,
+        };
       }
       case 'pay_nostr_contact':
         return { type: 'nostr_contact', recipient: a.contact_name || a.contact_npub || 'Nostr contact', amount: Number(a.amount_sats) || 0, description: a.description || 'Payment to Nostr contact', recipientName: a.contact_name, isNostrContact: true };

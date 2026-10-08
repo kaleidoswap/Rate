@@ -13,7 +13,7 @@
 // real findPair/getAssetId/getQuoteLayers/validateSwapString helpers. On-device
 // end-to-end (a funded node executing a real swap) still needs a device test.
 
-import { buildSwapToolSource } from './swapTools';
+import { buildSwapToolSource, describeSwapQuote } from './swapTools';
 import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
 import { normalizeMakerPairs, buildFlashnetPairs } from '../utils/swap-model';
 
@@ -139,6 +139,105 @@ describe('swap tools — KaleidoSwap maker venue', () => {
 
   it('refuses to swap without a fresh quote', async () => {
     await expect(source.execute('execute_swap', { quote_id: 'nope' })).rejects.toThrow(/no longer available|re-quote/i);
+    expect(maker.initSwap).not.toHaveBeenCalled();
+  });
+});
+
+describe('swap tools — channel capacity preflight', () => {
+  let maker: any;
+  let rln: any;
+  let adapter: any;
+  let source: ReturnType<typeof buildSwapToolSource>;
+  const btcChannel = (outSat: number, inSat: number) => ({
+    channel_id: 'c1', ready: true, is_usable: true,
+    outbound_balance_msat: outSat * 1000, next_outbound_htlc_limit_msat: outSat * 1000, inbound_balance_msat: inSat * 1000,
+  });
+  const usdtChannel = (local: number, remote: number) => ({
+    channel_id: 'c2', ready: true, is_usable: true, asset_id: 'rgb:usdt',
+    asset_local_amount: local, asset_remote_amount: remote,
+    outbound_balance_msat: 10_000_000, next_outbound_htlc_limit_msat: 10_000_000, inbound_balance_msat: 10_000_000,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mNormalize.mockReturnValue([MAKER_PAIR]);
+    mBuildFlash.mockReturnValue([]);
+    maker = {
+      listPairs: jest.fn(async () => ({})),
+      getQuote: jest.fn(async () => ({
+        rfq_id: 'rfq1',
+        from_asset: { asset_id: 'btc', amount: 100_000_000 },
+        to_asset: { asset_id: 'rgb:usdt', amount: 73_000_000 },
+        price: 73000, fee: { final_fee: 12 }, expires_at: 1234,
+      })),
+      initSwap: jest.fn(async () => ({ swapstring: '100000000/btc/73000000/rgb:usdt/x/hash1', payment_hash: 'hash1' })),
+      executeSwap: jest.fn(async () => ({})),
+    };
+    rln = { whitelistSwap: jest.fn(async () => undefined), getTakerPubkey: jest.fn(async () => '02taker') };
+    adapter = {
+      isConnected: () => true,
+      listChannels: jest.fn(async () => [btcChannel(200_000, 0), usdtChannel(0, 100_000_000)]),
+      getNodeInfo: jest.fn(async () => ({ rgb_htlc_min_msat: 3_000_000 })),
+    };
+    mManager.getAdapterIfAvailable.mockImplementation((p: any) => (p === 'RGB_LN' ? adapter : null));
+    mKaleido.isInitialized.mockReturnValue(true);
+    mKaleido.getClient.mockReturnValue({ maker, rln } as any);
+    mFlash.isInitialized.mockReturnValue(false);
+    source = buildSwapToolSource();
+  });
+
+  it('quotes when BTC outbound covers amount + the HTLC minimum and an asset channel can receive', async () => {
+    const q: any = await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    expect(q.quote_id).toBe('rfq1');
+    expect(describeSwapQuote('rfq1')).toMatchObject({ from: 'BTC', to: 'USDT', sendAmount: 100_000, receiveAmount: 73, receiveUnit: 'USDT' });
+  });
+
+  it('BTC → asset: refuses before the confirmation when outbound < amount + 3,000 sats, and says what fits', async () => {
+    maker.getQuote.mockResolvedValueOnce({
+      rfq_id: 'rfq-short',
+      from_asset: { asset_id: 'btc', amount: 100_000_000 },
+      to_asset: { asset_id: 'rgb:usdt', amount: 73_000_000 },
+      expires_at: 1234,
+    });
+    adapter.listChannels.mockResolvedValue([btcChannel(101_000, 0), usdtChannel(0, 100_000_000)]);
+    await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 }))
+      .rejects.toThrow(/can send at most 101,000 sats.*needs 103,000 sats.*Swap at most 98,000 sats/);
+    expect(describeSwapQuote('rfq-short')).toBeNull();
+  });
+
+  it('BTC → asset: refuses when no asset channel has inbound for the asset', async () => {
+    adapter.listChannels.mockResolvedValue([btcChannel(200_000, 0), usdtChannel(0, 1_000_000)]);
+    await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 }))
+      .rejects.toThrow(/no channel can receive 73 USDT/);
+  });
+
+  it('asset → BTC: refuses when BTC inbound < amount + the HTLC minimum', async () => {
+    maker.getQuote.mockResolvedValueOnce({
+      rfq_id: 'rfq2',
+      from_asset: { asset_id: 'rgb:usdt', amount: 73_000_000 },
+      to_asset: { asset_id: 'btc', amount: 100_000_000 },
+      expires_at: 1234,
+    });
+    adapter.listChannels.mockResolvedValue([btcChannel(0, 50_000), usdtChannel(100_000_000, 0)]);
+    await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'USDT', to_asset: 'BTC', amount: 73 }))
+      .rejects.toThrow(/can receive at most 50,000 sats.*103,000 sats/);
+  });
+
+  it('uses the node-reported HTLC minimum', async () => {
+    adapter.getNodeInfo.mockResolvedValue({ rgb_htlc_min_msat: 1_000_000 });
+    adapter.listChannels.mockResolvedValue([btcChannel(101_000, 0), usdtChannel(0, 100_000_000)]);
+    await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 })).resolves.toBeTruthy();
+  });
+
+  it('unreadable channel data does not block', async () => {
+    adapter.listChannels.mockRejectedValue(new Error('node offline'));
+    await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 })).resolves.toBeTruthy();
+  });
+
+  it('execute_swap re-checks and stops before the maker locks the swap', async () => {
+    await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    adapter.listChannels.mockResolvedValue([]);
+    await expect(source.execute('execute_swap', { quote_id: 'rfq1' })).rejects.toThrow(/no channels/);
     expect(maker.initSwap).not.toHaveBeenCalled();
   });
 });

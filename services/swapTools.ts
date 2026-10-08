@@ -30,6 +30,8 @@ import {
   isFlashnetPair,
   getQuoteLayers,
   validateSwapString,
+  swapChannelShortfall,
+  RLN_HTLC_MIN_MSAT,
   MSATS_PER_SAT,
   DEFAULT_FLASHNET_SLIPPAGE_BPS,
   type SwapPair,
@@ -52,8 +54,39 @@ interface CachedQuote {
   rawToAmount: number;
   poolId?: string;
   ts: number;
+  fromTicker: string;
+  toTicker: string;
+  sendAmount: number;
+  receiveAmount: number;
+  receiveUnit: string;
 }
 const quoteCache = new Map<string, CachedQuote>();
+
+/** What a cached quote swaps, for the confirmation sheet (execute_swap only carries quote_id). */
+export function describeSwapQuote(quoteId: string): { from: string; to: string; sendAmount: number; receiveAmount: number; receiveUnit: string; venue: Venue } | null {
+  const q = quoteCache.get(quoteId);
+  if (!q) return null;
+  return { from: q.fromTicker, to: q.toTicker, sendAmount: q.sendAmount, receiveAmount: q.receiveAmount, receiveUnit: q.receiveUnit, venue: q.venue };
+}
+
+/** Throws when the node's channels can't carry this maker swap, before anything is locked. */
+async function assertChannelCapacity(q: CachedQuote): Promise<void> {
+  const a: any = protocolManager.getAdapterIfAvailable('RGB_LN');
+  if (typeof a?.listChannels !== 'function') return;
+  const [channels, info] = await Promise.all([
+    a.listChannels().catch(() => undefined),
+    typeof a.getNodeInfo === 'function' ? a.getNodeInfo().catch(() => undefined) : undefined,
+  ]);
+  const minMsat = Number(info?.rgb_htlc_min_msat);
+  const leg = (assetId: string, ticker: string, raw: number, amount: number) => ({ assetId, ticker, raw, label: `${amount} ${ticker}` });
+  const shortfall = swapChannelShortfall(
+    leg(q.fromAssetId, q.fromTicker, q.rawFromAmount, q.sendAmount),
+    leg(q.toAssetId, q.toTicker, q.rawToAmount, q.receiveAmount),
+    channels,
+    Number.isFinite(minMsat) && minMsat > 0 ? minMsat : RLN_HTLC_MIN_MSAT,
+  );
+  if (shortfall) throw new Error(`Can't swap: ${shortfall}`);
+}
 
 function rgbAvailable(): boolean {
   const a = protocolManager.getAdapterIfAvailable('RGB_LN');
@@ -165,7 +198,12 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
       const rawToAmount = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
       const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
       const quoteId = `flashnet-${Date.now()}`;
-      quoteCache.set(quoteId, { venue: 'flashnet', fromAssetId, toAssetId, rawFromAmount, rawToAmount, poolId, ts: Date.now() });
+      const receiveAmount = isBtcTicker(to) ? rawToAmount : rawToAmount / Math.pow(10, toA.precision);
+      const receiveUnit = isBtcTicker(to) ? 'sats' : to;
+      quoteCache.set(quoteId, {
+        venue: 'flashnet', fromAssetId, toAssetId, rawFromAmount, rawToAmount, poolId, ts: Date.now(),
+        fromTicker: from, toTicker: to, sendAmount: amt, receiveAmount, receiveUnit,
+      });
       log('flashnet quote', { quoteId, from, to, amt, rawToAmount });
       return {
         quote_id: quoteId,
@@ -173,8 +211,8 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
         from_asset: from,
         to_asset: to,
         send_amount: amt,
-        receive_amount: isBtcTicker(to) ? rawToAmount : rawToAmount / Math.pow(10, toA.precision),
-        receive_unit: isBtcTicker(to) ? 'sats' : to,
+        receive_amount: receiveAmount,
+        receive_unit: receiveUnit,
         price: sim?.executionPrice,
         fee: isBtcTicker(from) ? rawFee : rawFee / Math.pow(10, fromA.precision),
         expires_at: Math.floor(Date.now() / 1000) + 30,
@@ -192,7 +230,14 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     if (!rfqId) throw new Error('The maker did not return a quote — try again.');
     const rawToAmount = Number(resp?.to_asset?.amount ?? 0);
     const rawFromQuoted = Number(resp?.from_asset?.amount ?? rawFromAmount);
-    quoteCache.set(rfqId, { venue: 'kaleidoswap', fromAssetId, toAssetId, rawFromAmount: rawFromQuoted, rawToAmount, ts: Date.now() });
+    const receiveAmount = isBtcTicker(to) ? rawToAmount / MSATS_PER_SAT : rawToAmount / Math.pow(10, toA.precision);
+    const receiveUnit = isBtcTicker(to) ? 'sats' : to;
+    const cached: CachedQuote = {
+      venue: 'kaleidoswap', fromAssetId, toAssetId, rawFromAmount: rawFromQuoted, rawToAmount, ts: Date.now(),
+      fromTicker: from, toTicker: to, sendAmount: amt, receiveAmount, receiveUnit,
+    };
+    await assertChannelCapacity(cached);
+    quoteCache.set(rfqId, cached);
     log('maker quote', { rfqId, from, to, amt, rawToAmount });
     return {
       quote_id: rfqId,
@@ -200,8 +245,8 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
       from_asset: from,
       to_asset: to,
       send_amount: amt,
-      receive_amount: isBtcTicker(to) ? rawToAmount / MSATS_PER_SAT : rawToAmount / Math.pow(10, toA.precision),
-      receive_unit: isBtcTicker(to) ? 'sats' : to,
+      receive_amount: receiveAmount,
+      receive_unit: receiveUnit,
       price: resp?.price,
       fee: resp?.fee?.final_fee,
       expires_at: resp?.expires_at,
@@ -240,6 +285,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
       return { atomic_id: id, venue: 'flashnet', status: 'completed', txid: res?.outboundTransferId ?? '' };
     }
 
+    await assertChannelCapacity(q);
     // KaleidoSwap atomic: init → verify terms → whitelist → taker → execute.
     const init: any = await maker().initSwap({
       rfq_id: id,

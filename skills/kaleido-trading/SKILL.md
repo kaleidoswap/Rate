@@ -6,7 +6,7 @@ requires-tools: kaleidoswap_get_quote, execute_swap
 triggers: quote, swap, trade, rebalance, slippage, pair, pairs, usdt, xaut, usdb, kaleidoswap, flashnet, spark, rfq
 metadata:
   author: kaleidoswap
-  version: "0.6.0"
+  version: "0.7.0"
   surface: mobile
 ---
 # KaleidoSwap trading (mobile)
@@ -16,10 +16,12 @@ for `USDB`. `USDT` and `USDB` are different coins; never swap one for the other.
 Amounts in `kaleidoswap_get_quote` are **display units**: `from_amount: 0.0005`
 means 0.0005 BTC (50,000 sats; 1 BTC = 100,000,000 sats).
 
-A KaleidoSwap swap runs over Lightning: it needs a channel with enough outbound
-in the asset you send and inbound in the asset you receive. With no such
-channel, the user buys one from the KaleidoSwap LSP first. Flashnet swaps need
-no channel.
+A KaleidoSwap swap runs over Lightning. Each leg is one payment plus the
+node's 3,000-sat HTLC minimum, so a channel needs outbound ≥ amount + 3,000
+sats in what you send (BTC or the asset) and inbound for what you receive.
+If it falls short, the quote says so: offer the largest swap that fits, or
+buying a bigger channel from the KaleidoSwap LSP. Flashnet swaps need no
+channel.
 
 ## Do
 - Quote with `from_asset_id`, `to_asset_id` (tickers: `BTC`, `USDT`, `XAUT`,
