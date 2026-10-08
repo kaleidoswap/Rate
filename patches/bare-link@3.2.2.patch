@@ -1,0 +1,13 @@
+diff --git a/lib/platform/apple/create-framework.js b/lib/platform/apple/create-framework.js
+index cffcfdb..8d4aa85 100644
+--- a/lib/platform/apple/create-framework.js
++++ b/lib/platform/apple/create-framework.js
+@@ -161,7 +161,7 @@ function createPropertyList(isMac, name, version) {
+   <key>CFBundlePackageType</key>
+   <string>FMWK</string>
+   <key>${isMac ? 'LSMinimumSystemVersion' : 'MinimumOSVersion'}</key>
+-  <string>${isMac ? '12.0' : '14.0'}</string>
++  <string>${isMac ? '12.0' : '15.0'}</string>
+ </dict>
+ </plist>
+ `

@@ -54,6 +54,9 @@ overrides:
 
 # Bark pays BOLT12 offers (payLightningOffer); remove once wallet-engine ships it.
 patchedDependencies:
+  # Addon frameworks declare iOS 15.0 like their binaries (bare-link 3 wrote
+  # 14.0, which App Store Connect rejects with ITMS-90208; fixed in bare-link 4).
+  bare-link@3.2.2: patches/bare-link@3.2.2.patch
   '@kaleidorg/wallet-engine@1.0.0-beta.75': patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
   decode-uri-component@0.5.0: patches/decode-uri-component@0.5.0.patch
   metro@0.83.3: patches/metro@0.83.3.patch

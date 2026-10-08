@@ -36,6 +36,9 @@ patchedDependencies:
   '@kaleidorg/wallet-engine@1.0.0-beta.75':
     hash: 1578bf3164767820650213ed96d3e86efe13eacdfdf61298d2312055ddb2b421
     path: patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
+  bare-link@3.2.2:
+    hash: b00e73506f8d6604e591288e7894a4aa87a51615da6781fc0ee4b07f4c6bbefe
+    path: patches/bare-link@3.2.2.patch
   decode-uri-component@0.5.0:
     hash: 35e0748cbc839a8d0dada506f20e8acd9ccca641561dc9841d5cf27319a59468
     path: patches/decode-uri-component@0.5.0.patch
@@ -9850,7 +9853,7 @@ snapshots:
       which-runtime: 1.4.0
       zod: 4.4.3
     optionalDependencies:
-      bare-link: 3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
+      bare-link: 3.2.2(patch_hash=b00e73506f8d6604e591288e7894a4aa87a51615da6781fc0ee4b07f4c6bbefe)(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
       expo-build-properties: 1.0.10(expo@54.0.37)
       expo-device: 8.0.10(expo@54.0.37)
       expo-file-system: 19.0.24(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
@@ -11408,7 +11411,7 @@ snapshots:
       - bare-url
       - react-native-b4a
 
-  bare-link@3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)):
+  bare-link@3.2.2(patch_hash=b00e73506f8d6604e591288e7894a4aa87a51615da6781fc0ee4b07f4c6bbefe)(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2)):
     dependencies:
       bare-fs: 4.7.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)
       bare-lief: 0.2.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-url@2.4.5)
@@ -16391,7 +16394,7 @@ snapshots:
   react-native-bare-kit@0.15.6(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:
       bare-events: 2.9.1(bare-abort-controller@1.1.2)
-      bare-link: 3.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
+      bare-link: 3.2.2(patch_hash=b00e73506f8d6604e591288e7894a4aa87a51615da6781fc0ee4b07f4c6bbefe)(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
       react: 19.1.4
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
       streamx: 2.28.0(bare-abort-controller@1.1.2)
