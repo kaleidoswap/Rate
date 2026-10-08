@@ -1,5 +1,5 @@
 import { RgbLibWdkAdapter, registerWdkModule } from '@kaleidorg/wallet-engine/adapters/wdk';
-import { createRgbLibRnModule, libNetwork } from './rgbLibRn';
+import { createRgbLibRnModule, libNetwork, rgbLibSubdir } from './rgbLibRn';
 
 // A stand-in for react-native-rgb's native wallet: records calls, returns rgb-lib shapes.
 function fakeLib() {
@@ -98,7 +98,7 @@ test('the engine’s RGB_L1 adapter runs on it end to end', async () => {
   const { lib, wallet } = fakeLib();
   registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => lib as any));
   const adapter = new RgbLibWdkAdapter();
-  await adapter.connect({ protocol: 'RGB_L1', mnemonic: 'seed', dataDir: 'rgb-l1/x', ...options } as any);
+  await adapter.connect({ protocol: 'RGB_L1', mnemonic: 'seed', dataDir: '.', ...options } as any);
   expect(adapter.isConnected()).toBe(true);
   expect(await adapter.getBtcBalance()).toEqual({ confirmed: 50_000, unconfirmed: 10_000, total: 50_000 });
   const assets = await adapter.listAssets();
@@ -136,4 +136,24 @@ test('every change schedules a backup; witness invoices get their output funded;
   expect(await account.decodeRgbInvoice('rgb:witness-invoice')).toEqual(expect.objectContaining({
     asset_id: 'rgb:usdt', recipient_id: 'wvout:abc', assignment: { type: 'Fungible', value: 500 },
   }));
+});
+
+test('a folder name in dataDir opens the wallet in its own folder; anything else uses the original one', async () => {
+  expect(rgbLibSubdir('rgb-mutinynet')).toBe('rgb-mutinynet');
+  expect(rgbLibSubdir('.')).toBeNull();
+  expect(rgbLibSubdir('../escape')).toBeNull();
+  expect(rgbLibSubdir(undefined)).toBeNull();
+  const { lib } = fakeLib();
+  (lib as any).supportsSubdir = () => true;
+  await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: 'rgb-mutinynet' }).getAccount();
+  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET', subdir: 'rgb-mutinynet' });
+  await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: '.' }).getAccount();
+  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET' });
+});
+
+test('an older native build never opens a wallet meant for its own folder', async () => {
+  const { lib } = fakeLib();
+  const manager = new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: 'rgb-mutinynet' });
+  await expect(manager.getAccount()).rejects.toThrow(/Update the app/);
+  expect(lib.Wallet).not.toHaveBeenCalled();
 });

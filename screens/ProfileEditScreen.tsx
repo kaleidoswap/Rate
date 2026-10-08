@@ -1,10 +1,13 @@
 // screens/ProfileEditScreen.tsx
 //
-// The one editor for the user's Nostr profile, opened from the Dashboard
-// header and from Nostr settings. Saving publishes kind-0 metadata: only the
+// The one editor for the user's Nostr profile, opened from the Profile page
+// and from Nostr settings. Saving publishes kind-0 metadata: only the
 // fields changed here are applied, on top of the latest profile on the relays.
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import {
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -14,10 +17,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { theme } from '../theme';
+import { motion, theme } from '../theme';
 import { Button, Callout, EmptyState, Input } from '../components';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ProfileAvatar } from '../components/ProfileAvatar';
+import { PhotoChoiceSheet } from '../components/PhotoChoiceSheet';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
   loadNostrProfile,
@@ -26,6 +30,8 @@ import {
 } from '../store/slices/nostrSlice';
 import { getStoredHandle } from '../services/kaleidoswapMe';
 import ToastService from '../services/ToastService';
+import NostrService from '../services/NostrService';
+import { BLOSSOM_SERVER, base64ToBytes, serverHost, sniffImageType, uploadToBlossom } from '../utils/blossom';
 import {
   PROFILE_FORM_FIELDS,
   isHttpUrl,
@@ -39,6 +45,8 @@ import {
 interface Props {
   navigation: any;
 }
+
+type PhotoField = 'picture' | 'banner';
 
 export default function ProfileEditScreen({ navigation }: Props) {
   const dispatch = useAppDispatch();
@@ -54,6 +62,8 @@ export default function ProfileEditScreen({ navigation }: Props) {
   const [errors, setErrors] = useState<ProfileFormErrors>({});
   const [saving, setSaving] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<PhotoField | null>(null);
+  const [choosing, setChoosing] = useState<PhotoField | null>(null);
   const touched = useRef(false);
 
   const changed = useMemo(
@@ -87,8 +97,67 @@ export default function ProfileEditScreen({ navigation }: Props) {
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: undefined }));
   };
 
+  // Pick a photo, upload it to a public media server and use the returned link.
+  const choosePhoto = async (field: PhotoField) => {
+    if (uploading || saving) return;
+    const toast = ToastService.getInstance();
+    let asset: ImagePicker.ImagePickerAsset | undefined;
+    try {
+      const picked = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        // iOS can only crop to a square, so the banner is used uncropped there.
+        allowsEditing: field === 'picture' || Platform.OS === 'android',
+        aspect: field === 'picture' ? [1, 1] : [3, 1],
+        quality: 0.7,
+        base64: true,
+      });
+      if (picked.canceled) return;
+      asset = picked.assets?.[0];
+    } catch {
+      toast.error("Couldn't open your photos");
+      return;
+    }
+    if (!asset?.base64) {
+      toast.error("Couldn't read that photo");
+      return;
+    }
+
+    setUploading(field);
+    try {
+      const nostr = NostrService.getInstance();
+      if (!nostr.canSign()) await dispatch(restoreNostrConnection()).unwrap();
+      const bytes = base64ToBytes(asset.base64);
+      const url = await uploadToBlossom({
+        bytes,
+        mimeType: sniffImageType(bytes) ?? asset.mimeType ?? 'image/jpeg',
+        name: asset.fileName || `${field}.jpg`,
+        sign: template => nostr.signEvent(template),
+      });
+      set(field)(url);
+      toast.success('Photo uploaded. Save to update your profile.');
+    } catch (e: any) {
+      const reason = e?.message ? `: ${e.message}` : '';
+      toast.error(`Couldn't upload the photo${reason}`);
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  // Close the choice first: the photo library can't open over a closing sheet.
+  const pickFromLibrary = (field: PhotoField) => {
+    setChoosing(null);
+    setTimeout(() => { void choosePhoto(field); }, motion.duration.base + 80);
+  };
+  const applyChoice = (field: PhotoField, value: string) => {
+    setChoosing(null);
+    set(field)(value);
+  };
+
   const save = async () => {
     const found = validateProfileForm(form);
+    // Photo links only change through the choice sheet, which checks them;
+    // an odd link set by another app shouldn't block saving other fields.
+    for (const f of ['picture', 'banner'] as const) if (!changed.includes(f)) delete found[f];
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     if (changed.length === 0) {
@@ -142,13 +211,32 @@ export default function ProfileEditScreen({ navigation }: Props) {
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.preview}>
-            <View style={styles.banner}>
+            <TouchableOpacity style={styles.banner} onPress={() => setChoosing('banner')} disabled={!!uploading}
+              accessibilityRole="button" accessibilityLabel="Change banner">
               {isHttpUrl(banner) && <Image source={{ uri: banner }} style={styles.bannerImg} resizeMode="cover" />}
-            </View>
-            <View style={styles.avatarWrap}>
-              <ProfileAvatar uri={isHttpUrl(picture) ? picture : null} name={previewName} size={80} />
-            </View>
+              {uploading === 'banner' ? (
+                <View style={styles.busy}><ActivityIndicator color={theme.colors.primary[500]} /></View>
+              ) : (
+                <View style={[styles.badge, styles.bannerBadge]}>
+                  <Ionicons name="camera" size={14} color={theme.colors.background.secondary} />
+                </View>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.avatarWrap} onPress={() => setChoosing('picture')} disabled={!!uploading}
+              accessibilityRole="button" accessibilityLabel="Change profile photo">
+              <ProfileAvatar uri={isHttpUrl(picture) ? picture : null} name={previewName} size={AVATAR} />
+              {uploading === 'picture' ? (
+                <View style={[styles.busy, styles.avatarBusy]}><ActivityIndicator color={theme.colors.primary[500]} /></View>
+              ) : (
+                <View style={[styles.badge, styles.avatarBadge]}>
+                  <Ionicons name="camera" size={14} color={theme.colors.background.secondary} />
+                </View>
+              )}
+            </TouchableOpacity>
           </View>
+          <Text style={styles.hint}>
+            Tap the photo or banner to change it. Photos you choose are uploaded to a public media server ({serverHost(BLOSSOM_SERVER)}).
+          </Text>
 
           {!isConnected && (
             <Callout tone="warning" message="Nostr is offline. We'll reconnect when you save." />
@@ -161,10 +249,6 @@ export default function ProfileEditScreen({ navigation }: Props) {
               onChangeText={set('name')} error={errors.name} />
             <Input label="About" placeholder="A few words about you" value={form.about} multiline numberOfLines={3}
               onChangeText={set('about')} error={errors.about} />
-            <Input label="Picture URL" placeholder="https://…" value={form.picture} autoCapitalize="none"
-              autoCorrect={false} keyboardType="url" onChangeText={set('picture')} error={errors.picture} />
-            <Input label="Banner URL" placeholder="https://…" value={form.banner} autoCapitalize="none"
-              autoCorrect={false} keyboardType="url" onChangeText={set('banner')} error={errors.banner} />
             <View>
               <Input label="Lightning address" placeholder="you@kaleidoswap.me" value={form.lud16}
                 autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
@@ -185,9 +269,19 @@ export default function ProfileEditScreen({ navigation }: Props) {
 
           <Text style={styles.hint}>Your profile is public on Nostr and updates in every Nostr app.</Text>
           <Button title={saving ? 'Saving…' : 'Save'} onPress={save} loading={saving}
-            disabled={saving || changed.length === 0} />
+            disabled={saving || !!uploading || changed.length === 0} />
         </ScrollView>
       </KeyboardAvoidingView>
+      <PhotoChoiceSheet
+        visible={!!choosing}
+        title={choosing === 'banner' ? 'Banner' : 'Profile photo'}
+        current={choosing ? form[choosing] : ''}
+        uploadHost={serverHost(BLOSSOM_SERVER)}
+        onChoosePhoto={() => { if (choosing) pickFromLibrary(choosing); }}
+        onUseLink={url => { if (choosing) applyChoice(choosing, url); }}
+        onRemove={() => { if (choosing) applyChoice(choosing, ''); }}
+        onClose={() => setChoosing(null)}
+      />
     </View>
   );
 }
@@ -208,6 +302,24 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border.light,
   },
   bannerImg: { width: '100%', height: '100%' },
+  busy: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.background.backdrop,
+  },
+  avatarBusy: { borderRadius: AVATAR / 2 },
+  badge: {
+    position: 'absolute',
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.primary[500],
+  },
+  bannerBadge: { top: theme.spacing[2], right: theme.spacing[2] },
+  avatarBadge: { right: -2, bottom: -2 },
   avatarWrap: {
     position: 'absolute',
     left: theme.spacing[4],

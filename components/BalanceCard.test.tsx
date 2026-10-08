@@ -45,10 +45,46 @@ describe('balance disclosure', () => {
     expect(screen.getByText('700 sats')).toBeTruthy();
   });
 
-  it('says how much of the total is dollar tokens, and that it is updating', () => {
-    const screen = render(<BalanceCard {...props} includesTokenValue tokenValueText="$12.50" updating />);
+  it('no longer spells out the dollar-token share, and says it is updating', () => {
+    const screen = render(<BalanceCard {...props} updating />);
     expect(screen.getByText('Total balance')).toBeTruthy();
-    expect(screen.getByText('Includes $12.50 in dollar tokens')).toBeTruthy();
+    expect(screen.queryByText(/in dollar tokens/)).toBeNull();
     expect(screen.getByText('Updating…')).toBeTruthy();
+  });
+
+  const assetRows = [
+    { key: 'usdt', ticker: 'USDT', name: 'Tether USD', network: 'rgb', networkLabel: 'RGB', amount: '12.5', usdValue: 12.5 },
+    { key: 'xaut', ticker: 'XAUT', name: 'Gold', network: 'spark', networkLabel: 'Spark', amount: '3' },
+  ];
+
+  it('lists the other assets under bitcoin, with network, amount and dollar value', () => {
+    const screen = render(<BalanceCard {...props} assetRows={assetRows} />);
+    expect(screen.queryByText('USDT')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Show network balances'));
+    expect(screen.getByText('Bitcoin')).toBeTruthy();
+    expect(screen.getByText('Assets')).toBeTruthy();
+    expect(screen.getByText('Tether USD · RGB')).toBeTruthy();
+    expect(screen.getByText('12.5 USDT')).toBeTruthy();
+    expect(screen.getByText('≈ $12.50')).toBeTruthy();
+    // Unpriced: amount only, no fiat.
+    expect(screen.getByText('Gold · Spark')).toBeTruthy();
+    expect(screen.getByText('3 XAUT')).toBeTruthy();
+    expect(screen.getByLabelText('3 XAUT on Spark')).toBeTruthy();
+  });
+
+  it('hides asset amounts when balances are hidden', () => {
+    const screen = render(<BalanceCard {...props} hideAmounts primaryText="••••" primaryUnitLabel="" assetRows={assetRows} />);
+    fireEvent.press(screen.getByLabelText('Show network balances'));
+    expect(screen.getByText('USDT')).toBeTruthy();
+    expect(screen.queryByText('12.5 USDT')).toBeNull();
+    expect(screen.queryByText('≈ $12.50')).toBeNull();
+  });
+
+  it('opens the breakdown for assets alone, before any bitcoin account reports', () => {
+    const screen = render(<BalanceCard {...props} byProtocol={undefined} assetRows={[{ key: 'usd', ticker: 'USD', name: 'US Dollar', amount: '5.00', usdValue: 5 }]} />);
+    fireEvent.press(screen.getByLabelText('Show network balances'));
+    expect(screen.queryByText('Bitcoin')).toBeNull();
+    expect(screen.getByText('US Dollar')).toBeTruthy();
+    expect(screen.getByText('5.00 USD')).toBeTruthy();
   });
 });

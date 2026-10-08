@@ -26,6 +26,7 @@ beforeEach(() => { jest.clearAllMocks(); mockNode = false; mockWallet = false; m
 test('without a node it explains how to connect one and opens the connection screen', async () => {
   const screen = render(<RgbNodeScreen navigation={navigation} />);
   await act(async () => {});
+  expect(screen.getByText('Not connected')).toBeTruthy();
   expect(screen.getByText('How to connect')).toBeTruthy();
   fireEvent.press(screen.getByText('Connect node'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
@@ -50,6 +51,7 @@ test('a connected node shows its name and network and is managed from the connec
   await act(async () => {});
   expect(screen.getByText('My RLN')).toBeTruthy();
   expect(screen.getByText('Connected over NWC · Mutinynet')).toBeTruthy();
+  expect(screen.getByText('Connected')).toBeTruthy();
   expect(screen.queryByText('How to connect')).toBeNull();
   fireEvent.press(screen.getByText('Manage connection'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');

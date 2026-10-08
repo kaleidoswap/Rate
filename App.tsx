@@ -58,6 +58,7 @@ import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
+import ProfileScreen from './screens/ProfileScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
 import SecuritySetupScreen from './screens/SecuritySetupScreen';
 import HistoryScreen from './screens/HistoryScreen';
@@ -84,6 +85,7 @@ type RootStackParamList = {
   DesignSystem: undefined;
   Swap: undefined;
   NostrSettings: undefined;
+  Profile: undefined;
   ProfileEdit: undefined;
   AssetDetail: { asset: any };
   Map: undefined;
@@ -103,6 +105,13 @@ type TabBarIconProps = {
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+
+/**
+ * Flows (send, receive, scan…) cover the whole screen and slide up, closed with
+ * an X or a swipe down. Not iOS's native sheet: its card draws a light rim
+ * along the rounded edges, and stacking sheets shrinks the ones below.
+ */
+const FLOW_OPTIONS = { animation: 'slide_from_bottom', gestureDirection: 'vertical' } as const;
 const Tab = createBottomTabNavigator();
 
 function DashboardTabs() {
@@ -230,67 +239,29 @@ function AppNavigator() {
         <Stack.Screen name="WalletRestore" component={WalletRestoreScreen} />
         <Stack.Screen name="SecuritySetup" component={SecuritySetupScreen} options={{ gestureEnabled: false }} />
         <Stack.Screen name="Dashboard" component={DashboardTabs} options={{ animation: 'fade', gestureEnabled: false }} />
-        <Stack.Screen
-          name="Settings"
-          component={asModalScreen(SettingsScreen)}
-          options={{
-            presentation: 'modal',
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="NostrSettings" component={asModalScreen(NostrSettingsScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="ProfileEdit" component={asModalScreen(ProfileEditScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        {__DEV__ && <Stack.Screen name="DesignSystem" component={asModalScreen(DesignSystemScreen)} options={{ presentation: 'modal', headerShown: false }} />}
-        <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="Bridge" component={asModalScreen(BridgeScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen
-          name="QRScanner"
-          component={asModalScreen(QRScannerScreen)}
-          options={{ presentation: 'modal' }}
-        />
-        <Stack.Screen
-          name="PairDesktop"
-          component={asModalScreen(PairDesktopScreen)}
-          options={{ presentation: 'modal', headerShown: false }}
-        />
-        <Stack.Screen
-          name="MindSettings"
-          component={asModalScreen(MindSettingsScreen)}
-          options={{ presentation: 'modal', headerShown: false }}
-        />
-        <Stack.Screen
-          name="NWCConnect"
-          component={asModalScreen(NWCConnectScreen)}
-          options={{ presentation: 'modal', headerShown: false }}
-        />
-        <Stack.Screen
-          name="RgbNode"
-          component={asModalScreen(RgbNodeScreen)}
-          options={{ presentation: 'modal', headerShown: false }}
-        />
+        {/* Settings and its pages: full screen, slide in sideways, back arrow. */}
+        <Stack.Screen name="Settings" component={SettingsScreen} />
+        <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} />
+        <Stack.Screen name="MindSettings" component={MindSettingsScreen} />
+        <Stack.Screen name="NWCConnect" component={NWCConnectScreen} />
+        <Stack.Screen name="RgbNode" component={RgbNodeScreen} />
+        <Stack.Screen name="PairDesktop" component={PairDesktopScreen} />
+        <Stack.Screen name="LightningAddress" component={LightningAddressScreen} />
+        <Stack.Screen name="LSP" component={LSPScreen} />
+        {__DEV__ && <Stack.Screen name="DesignSystem" component={DesignSystemScreen} />}
+        {/* Short flows: full screen, slide up from the bottom, close button. */}
+        <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="ProfileEdit" component={asModalScreen(ProfileEditScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="Bridge" component={asModalScreen(BridgeScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="QRScanner" component={asModalScreen(QRScannerScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="Swap" component={asModalScreen(SwapScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="AssetDetail" component={asModalScreen(AssetDetailScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
         <Stack.Screen name="Map" component={MapScreen} />
-        <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen
-          name="Swap"
-          component={asModalScreen(SwapScreen)}
-          options={{
-            presentation: 'modal',
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen
-          name="AssetDetail"
-          component={asModalScreen(AssetDetailScreen)}
-          options={{
-            presentation: 'modal',
-            headerShown: false,
-          }}
-        />
-        <Stack.Screen name="LSP" component={asModalScreen(LSPScreen)} options={{ presentation: 'modal', headerShown: false }} />
-        <Stack.Screen name="LightningAddress" component={asModalScreen(LightningAddressScreen)} options={{ presentation: 'modal', headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
   );

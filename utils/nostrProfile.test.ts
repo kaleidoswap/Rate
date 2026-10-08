@@ -1,4 +1,5 @@
 import {
+  nostrIdentity,
   contentToProfile,
   formatNip05,
   mergeProfileEdits,
@@ -107,5 +108,21 @@ describe('display helpers', () => {
     expect(shortNpub(null)).toBe('');
     expect(formatNip05('_@example.com')).toBe('example.com');
     expect(formatNip05('me@example.com')).toBe('me@example.com');
+  });
+});
+
+describe('nostrIdentity', () => {
+  const npub = `npub1${'q'.repeat(58)}`;
+  it('reads an npub or nprofile with or without nostr:, in any case', () => {
+    expect(nostrIdentity(npub)).toBe(npub);
+    expect(nostrIdentity(` nostr:${npub} `)).toBe(npub);
+    expect(nostrIdentity(`NOSTR:${npub.toUpperCase()}`)).toBe(npub);
+    expect(nostrIdentity('nostr:nprofile1qqqq')).toBe('nprofile1qqqq');
+  });
+  it('ignores everything else', () => {
+    expect(nostrIdentity('lnbc1000n1abc')).toBeNull();
+    expect(nostrIdentity('nsec1qqqq')).toBeNull();
+    expect(nostrIdentity('alice@example.com')).toBeNull();
+    expect(nostrIdentity(`${npub}?x=1`)).toBeNull();
   });
 });

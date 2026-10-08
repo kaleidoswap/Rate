@@ -43,6 +43,7 @@ import { createChatInvoice, payChatInvoice } from '../services/chatPayments';
 import ToastService from '../services/ToastService';
 import { findPayable, stripPayable, Payable } from '../utils/decodeInvoice';
 import { PayableCard } from '../components/chat/PayableCard';
+import { NostrIcon } from '../components/ProtocolIcons';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import { theme, leading } from '../theme';
 
@@ -562,7 +563,7 @@ export default function ChatScreen({ navigation, route }: Props) {
 
       {!isConnected ? (
         <View style={styles.center}>
-          <Ionicons name="planet-outline" size={44} color={theme.colors.text.tertiary} />
+          <NostrIcon size={44} />
           <Text style={styles.centerTitle}>Nostr not connected</Text>
           <Text style={styles.centerDesc}>
             Connect Nostr to send and receive encrypted messages.

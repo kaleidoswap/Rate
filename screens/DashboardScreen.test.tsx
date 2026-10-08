@@ -35,7 +35,7 @@ jest.mock('../components', () => ({
     return h(Fragment, {}, h(Text, {}, loading ? 'Loading balance' : 'Balance ready'), updating ? h(Text, {}, 'Updating') : null,
       h(Text, {}, `Accounts: ${accounts || 'none'}`));
   },
-  ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: () => null,
+  ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: ({ leftNode }: any) => leftNode ?? null,
 }));
 
 describe('dashboard connection recovery', () => {
@@ -53,6 +53,15 @@ describe('dashboard connection recovery', () => {
     expect(initializeProtocolServices).not.toHaveBeenCalled();
     fireEvent.press(screen.getByText('Create wallet'));
     expect(navigate).toHaveBeenCalledWith('WalletSetup');
+  });
+  it('greets the user above their profile name', () => {
+    mockState.nostr = { publicKey: 'pk', profile: { display_name: 'Alice' } };
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    const texts = screen.UNSAFE_getAllByType(require('react-native').Text).map((t: any) => String(t.props.children));
+    const nameAt = texts.indexOf('Alice');
+    expect(nameAt).toBeGreaterThan(0);
+    expect(texts[nameAt - 1]).toMatch(/^(Still up|Good|Hi|Morning|Rise|Hey|Evening|Welcome|Winding)/);
+    mockState.nostr = {};
   });
   it('offers restore when a wallet record has no accessible seed', () => {
     mockState.wallet.activeWallet = { id: 1 };
@@ -86,6 +95,22 @@ describe('fast first balance', () => {
     jest.clearAllMocks();
     await AsyncStorage.clear();
     (protocolManager.getAdapterIfAvailable as jest.Mock).mockReturnValue(undefined);
+  });
+
+  it('reads connected accounts while a slow one is still connecting', async () => {
+    mockState.wallet.activeWallet = { id: 1, created_at: 5, encrypted_mnemonic: 'test-only-seed' };
+    const spark = {
+      isConnected: () => true, getNodeInfo: jest.fn().mockResolvedValue({}),
+      getBtcBalance: jest.fn().mockResolvedValue({ confirmed: 2500, unconfirmed: 0, total: 2500 }),
+      listAssets: jest.fn().mockResolvedValue([]),
+    };
+    (protocolManager.getAdapterIfAvailable as jest.Mock).mockImplementation(p => p === 'SPARK' ? spark : undefined);
+    // An unreachable node keeps the startup from settling.
+    (initializeProtocolServices as jest.Mock).mockReturnValue(new Promise(() => {}));
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    await waitFor(() => expect(screen.getByText('Accounts: SPARK 2500')).toBeTruthy(), { timeout: 5000 });
+    expect(spark.getBtcBalance).toHaveBeenCalled();
+    screen.unmount();
   });
 
   it('shows the last balance at once while the accounts reconnect', async () => {

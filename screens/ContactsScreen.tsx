@@ -26,8 +26,11 @@ import {
 import { loadContactList, followUser, unfollowUser } from '../store/slices/nostrSlice';
 import { theme } from '../theme';
 import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input, CopyButton, PressableScale } from '../components';
+import { NostrIcon } from '../components/ProtocolIcons';
+import { ProfileAvatar } from '../components/ProfileAvatar';
+import { formatNip05, profileDisplayName, shortNpub } from '../utils/nostrProfile';
 import { feedback } from '../utils/feedback';
-import NostrService, { NostrContact } from '../services/NostrService';
+import NostrService, { NostrContact, type NostrProfile } from '../services/NostrService';
 import ToastService from '../services/ToastService';
 import { contactEvents, type ContactEvent } from '../services/contactHistory';
 import { nip19 } from 'nostr-tools';
@@ -50,6 +53,11 @@ function avatarColors(name: string) {
 }
 
 // Same person: a shared Lightning address (case-insensitive) or Nostr key.
+/** A contact detail's icon: the Nostr mark for Nostr, else an Ionicons glyph. */
+function IdIcon({ icon, size, color }: { icon: string; size: number; color: string }) {
+  return icon === 'nostr' ? <NostrIcon size={size} /> : <Ionicons name={icon as any} size={size} color={color} />;
+}
+
 function isSamePerson(local: Contact, follow: Contact): boolean {
   const ln = (c: Contact) => c.lightning_address?.trim().toLowerCase();
   if (ln(local) && ln(local) === ln(follow)) return true;
@@ -71,6 +79,9 @@ export default function ContactsScreen({ navigation, route }: Props) {
   const [addName, setAddName] = useState('');
   const [addInput, setAddInput] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  // The Nostr profile behind a pasted or scanned npub, when it can be fetched.
+  const [preview, setPreview] = useState<{ pubkey: string; npub: string; profile: NostrProfile | null } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   // Zap sheet target (null = closed).
   const [zapRecipient, setZapRecipient] = useState<ZapRecipient | null>(null);
   // Contact sheet (null = closed). Holds the id so the sheet follows live edits.
@@ -182,12 +193,41 @@ export default function ContactsScreen({ navigation, route }: Props) {
     return 'unknown';
   };
 
+  // Show who an npub / nprofile / hex key belongs to before adding them.
+  useEffect(() => {
+    setPreview(null);
+    const id = addInput.trim();
+    if (!showAddForm || detectKind(id) !== 'nostr' || id.includes('@')) {
+      setPreviewLoading(false);
+      return;
+    }
+    let live = true;
+    setPreviewLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const nostr = NostrService.getInstance();
+        const resolved = await nostr.resolveToPubkey(id);
+        if (!live || !('pubkey' in resolved)) return;
+        const info = await nostr.getUserInfo(resolved.pubkey);
+        if (live) setPreview({ pubkey: resolved.pubkey, npub: info.npub, profile: info.profile });
+      } catch {
+        // No preview: the add still works from the key alone.
+      } finally {
+        if (live) setPreviewLoading(false);
+      }
+    }, 300);
+    return () => { live = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addInput, showAddForm]);
+
   const addLocalContact = (fields: Partial<Contact>) => {
     const contact: Contact = {
       id: `contact_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: (fields.name || 'Contact').trim(),
       lightning_address: fields.lightning_address,
       node_pubkey: fields.node_pubkey,
+      npub: fields.npub,
+      avatar_url: fields.avatar_url,
       created_at: Date.now(),
       updated_at: Date.now(),
       is_favorite: false,
@@ -253,7 +293,26 @@ export default function ContactsScreen({ navigation, route }: Props) {
             return;
           }
         } else if (kind === 'nostr') {
-          toast().info('Connect Nostr in Settings to follow accounts.');
+          // Offline: keep them as a saved contact, so a scanned code isn't lost.
+          const resolved = await NostrService.getInstance().resolveToPubkey(identifier);
+          if (!('pubkey' in resolved)) {
+            toast().error(resolved.error || 'Could not read that Nostr identity.');
+            return;
+          }
+          const npub = nip19.npubEncode(resolved.pubkey);
+          if (contacts.some((c) => c.npub === npub)) {
+            toast().info('Already in your contacts');
+            return;
+          }
+          const known = preview?.pubkey === resolved.pubkey ? preview.profile : null;
+          addLocalContact({
+            name: name || profileDisplayName(known) || 'Nostr contact',
+            npub,
+            lightning_address: known?.lud16 || undefined,
+            avatar_url: known?.picture || undefined,
+          });
+          resetAddForm();
+          toast().success('Contact saved. Connect Nostr in Settings to follow them.');
           return;
         }
 
@@ -378,7 +437,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         {/* Nostr accounts carry a small badge instead of a separate icon next to the name. */}
         {contact.isNostrContact && (
           <View style={styles.avatarBadge}>
-            <Ionicons name="planet" size={10} color={theme.colors.primary[500]} />
+            <NostrIcon size={12} />
           </View>
         )}
       </View>
@@ -428,7 +487,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         <PressableScale style={styles.connectBanner} onPress={() => navigation.navigate('NostrSettings')} scaleTo={0.98}
           accessibilityRole="button" accessibilityLabel="Connect Nostr">
           <View style={styles.connectIcon}>
-            <Ionicons name="planet" size={18} color={theme.colors.primary[500]} />
+            <NostrIcon size={22} />
           </View>
           <View style={styles.flex}>
             <Text style={styles.connectTitle}>Find your friends on Nostr</Text>
@@ -446,7 +505,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
   const renderAddModal = () => {
     const kind = detectKind(addInput);
     const detected: Record<typeof kind, { label: string; icon: any; color: string }> = {
-      nostr: { label: 'Nostr account', icon: 'planet', color: theme.colors.primary[500] },
+      nostr: { label: 'Nostr account', icon: 'nostr', color: theme.colors.primary[500] },
       lightning: { label: 'Lightning address or NIP-05', icon: 'flash', color: theme.colors.warning[500] },
       node: { label: 'Lightning node', icon: 'git-network', color: theme.colors.text.secondary },
       unknown: { label: 'Not recognised yet', icon: 'help-circle-outline', color: theme.colors.text.tertiary },
@@ -492,8 +551,33 @@ export default function ContactsScreen({ navigation, route }: Props) {
         />
         {addInput.trim().length > 0 && (
           <View style={styles.detectRow}>
-            <Ionicons name={d.icon} size={13} color={d.color} />
+            <IdIcon icon={d.icon} size={13} color={d.color} />
             <Text style={[styles.detectText, { color: d.color }]}>{d.label}</Text>
+          </View>
+        )}
+        {(previewLoading || preview) && (
+          <View style={styles.preview} accessibilityLabel="Nostr profile">
+            {preview ? (
+              <>
+                <ProfileAvatar uri={preview.profile?.picture} name={profileDisplayName(preview.profile)} size={44} />
+                <View style={styles.previewText}>
+                  <Text style={styles.previewName} numberOfLines={1}>
+                    {profileDisplayName(preview.profile) || 'No name on Nostr'}
+                  </Text>
+                  <Text style={styles.previewMeta} numberOfLines={1}>
+                    {formatNip05(preview.profile?.nip05) || shortNpub(preview.npub)}
+                  </Text>
+                  {!!preview.profile?.about && (
+                    <Text style={styles.previewAbout} numberOfLines={2}>{preview.profile.about}</Text>
+                  )}
+                </View>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator size="small" color={theme.colors.primary[500]} />
+                <Text style={styles.previewMeta}>Looking up their profile…</Text>
+              </>
+            )}
           </View>
         )}
         <Input
@@ -516,7 +600,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
     const c = openContact;
     const ids: { label: string; value: string; display: string; icon: any; color: string }[] = c ? [
       ...(c.lightning_address ? [{ label: 'Lightning address', value: c.lightning_address, display: c.lightning_address, icon: 'flash', color: theme.colors.warning[500] }] : []),
-      ...(c.npub ? [{ label: 'Nostr', value: c.npub, display: shortKey(c.npub, 14, 8), icon: 'planet', color: theme.colors.primary[500] }] : []),
+      ...(c.npub ? [{ label: 'Nostr', value: c.npub, display: shortKey(c.npub, 14, 8), icon: 'nostr', color: theme.colors.primary[500] }] : []),
       ...(!c.isNostrContact && c.node_pubkey ? [{ label: 'Node', value: c.node_pubkey, display: shortKey(c.node_pubkey, 12, 8), icon: 'git-network', color: theme.colors.text.secondary }] : []),
     ] : [];
     const unread = c?.node_pubkey ? unreadByPubkey[c.node_pubkey] ?? 0 : 0;
@@ -547,7 +631,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
               <View style={styles.group}>
                 {ids.map((row, i) => (
                   <View key={row.label} style={[styles.idRow, i < ids.length - 1 && styles.rowDivider]}>
-                    <Ionicons name={row.icon} size={16} color={row.color} />
+                    <IdIcon icon={row.icon} size={16} color={row.color} />
                     <View style={styles.flex}>
                       <Text style={styles.idLabel}>{row.label}</Text>
                       <Text style={styles.idValue} numberOfLines={1}>{row.display}</Text>
@@ -708,7 +792,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
               accessibilityLabel="Nostr settings"
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="planet-outline" size={19} color={theme.colors.text.primary} />
+              <NostrIcon size={19} color={theme.colors.text.primary} />
             </TouchableOpacity>
           </>
         }
@@ -788,7 +872,7 @@ const styles = StyleSheet.create({
   },
   connectIcon: {
     width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: `${theme.colors.primary[500]}1F`,
+    backgroundColor: theme.colors.surface.secondary,
   },
   connectTitle: { fontSize: theme.typography.fontSize.sm, fontWeight: '600', color: theme.colors.text.primary },
   connectText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, marginTop: 2 },
@@ -844,6 +928,15 @@ const styles = StyleSheet.create({
   detectRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: -theme.spacing[1] },
   detectText: { fontSize: theme.typography.fontSize.xs, fontWeight: '600' },
   sheetFooterBtn: { marginTop: theme.spacing[3] },
+  preview: {
+    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.background.secondary,
+    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light,
+  },
+  previewText: { flex: 1, minWidth: 0, gap: 2 },
+  previewName: { fontSize: theme.typography.fontSize.base, fontWeight: '700', color: theme.colors.text.primary },
+  previewMeta: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary },
+  previewAbout: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary, marginTop: 2 },
   // Contact sheet
   profileHead: { alignItems: 'center', gap: theme.spacing[1], paddingTop: theme.spacing[2], paddingBottom: theme.spacing[4] },
   profileName: { marginTop: theme.spacing[2], fontSize: theme.typography.fontSize.xl, fontWeight: '700', color: theme.colors.text.primary },

@@ -38,3 +38,4 @@ export * from './Toast';
 export * from './ScreenHeader';
 export * from './ActivityDetailSheet';
 export * from './RecentActivityWidget';
+export * from './PhotoChoiceSheet';

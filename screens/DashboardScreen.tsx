@@ -47,7 +47,7 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
-import { assetUsdValue, formatUsd, tokenValueSats as priceTokensInSats, tokenValueUsd } from '../utils/portfolio';
+import { assetUsdValue, breakdownAssetRows, tokenValueSats as priceTokensInSats } from '../utils/portfolio';
 
 const LITE_USD_ID = 'lite-usd';
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
@@ -133,6 +133,15 @@ const EMPTY_BTC_BALANCE = {
   colored: { settled: 0, future: 0, spendable: 0 },
 };
 
+/** How long the first balance waits for every account before showing the connected ones. */
+const EARLY_BALANCE_MS = 2_500;
+
+function anyAccountConnected(): boolean {
+  return (['RGB', 'SPARK', 'ARKADE', 'BARK'] as const).some(
+    (p) => protocolManager.getAdapterIfAvailable(toEngineProtocol(p))?.isConnected() ?? false,
+  );
+}
+
 const ACCOUNT_NAMES: Record<string, string> = {
   RGB_LN: 'your RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark',
 };
@@ -144,14 +153,12 @@ export default function DashboardScreen({ navigation }: Props) {
   const dispatch = useDispatch();
   const { nodeInfo } = useSelector((state: RootState) => state.node);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
-  // Top-left identity is the user's Nostr profile; the greeting sits under the
-  // name when there's no NIP-05 to show.
+  // Top-left identity is the user's Nostr profile, with the greeting above the name.
   const nostrProfile = useSelector((state: RootState) => state.nostr?.profile ?? null);
-  const nostrNpub = useSelector((state: RootState) => state.nostr?.npub ?? null);
   const hasNostrIdentity = useSelector((state: RootState) => !!state.nostr?.publicKey);
   const greeting = useMemo(() => buildGreeting(), []);
   const openProfile = useCallback(
-    () => navigation.navigate(hasNostrIdentity ? 'ProfileEdit' : 'NostrSettings'),
+    () => navigation.navigate(hasNostrIdentity ? 'Profile' : 'NostrSettings'),
     [navigation, hasNostrIdentity],
   );
 
@@ -361,6 +368,9 @@ export default function DashboardScreen({ navigation }: Props) {
         [rgbAdapter, 'RGB'], [sparkAdapter, 'SPARK'], [arkadeAdapter, 'ARKADE'], [barkAdapter, 'BARK'],
         [lightningWallet, 'LN'],
       ];
+      // Counted now, not after the fetch: an account that connects meanwhile
+      // wasn't asked, so it isn't a missing balance.
+      const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
       const balancesTask = Promise.all(
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
@@ -438,7 +448,6 @@ export default function DashboardScreen({ navigation }: Props) {
       const [balanceResults, assetResults, channelsList] = await Promise.all([balancesTask, assetsTask, channelsTask]);
       if (!current()) return;
 
-      const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
       const okBalances = balanceResults.filter(Boolean) as Array<{ proto: string; btc: { confirmed: number; unconfirmed: number; total: number } }>;
       // Bark recovery (moved from the old Bark screen): an incomplete restore can
       // omit funds, so say so next to the total rather than on a separate page.
@@ -542,6 +551,9 @@ export default function DashboardScreen({ navigation }: Props) {
     return () => sub.remove();
   }, [protocolsReady]);
 
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
   const connectAndLoad = async () => {
     if (needsSetup) {
       protocolsReadyRef.current = false;
@@ -554,8 +566,23 @@ export default function DashboardScreen({ navigation }: Props) {
     setIsConnecting(true);
     setConnectionError(null);
     try {
-      if (!await initializeApi()) return;
-      await Promise.all([checkNodeStatus(true), loadDashboardData(true)]);
+      // An unreachable account (a node can take a minute to time out) must not hold
+      // back the others: after a short wait, show what is already connected.
+      const init = initializeApi();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const initFirst = await Promise.race([
+        init.then(() => true),
+        new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), EARLY_BALANCE_MS); }),
+      ]);
+      clearTimeout(timer);
+      if (!mountedRef.current) return;
+      if (!initFirst && anyAccountConnected()) {
+        protocolsReadyRef.current = true;
+        setProtocolsReady(true);
+        await loadDashboardData(true);
+      }
+      if (!await init || !mountedRef.current) return;
+      await Promise.all([checkNodeStatus(true), loadDashboardData(initFirst)]);
     } finally {
       // Both a failed connection and a missing wallet are terminal UI states.
       setIsConnecting(false);
@@ -689,7 +716,6 @@ export default function DashboardScreen({ navigation }: Props) {
   // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
   // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
   const tokenValueSats = priceTokensInSats(rgbAssets as any[], btcPriceUSD, liteUsdAssetIds);
-  const tokenUsd = tokenValueUsd(rgbAssets as any[], liteUsdAssetIds);
   const totalBalance = bitcoinSummary.total + tokenValueSats;
   const denominatedTotal = formatDisplayAmount(totalBalance);
 
@@ -862,9 +888,8 @@ export default function DashboardScreen({ navigation }: Props) {
         leftNode={
           <ProfileChip
             profile={nostrProfile}
-            npub={nostrNpub}
             hasIdentity={hasNostrIdentity}
-            fallbackSubtitle={greeting}
+            greeting={greeting}
             onPress={openProfile}
           />
         }
@@ -924,8 +949,7 @@ export default function DashboardScreen({ navigation }: Props) {
             pendingBtc={pendingBtc}
             testBtc={bitcoinSummary.test}
             testNetworks={testNetworks}
-            includesTokenValue={tokenValueSats > 0}
-            tokenValueText={tokenUsd > 0 ? formatUsd(tokenUsd) : undefined}
+            assetRows={breakdownAssetRows(rgbAssets as any[], liteUsdAssetIds, { foldDollars: isLite })}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}
             onRefresh={onRefresh}

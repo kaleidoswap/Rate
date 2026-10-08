@@ -27,6 +27,8 @@ describe('cross-chain history', () => {
     };
     expect(recordFromSend(session)).toMatchObject({ direction: 'send', status: 'unpaid', sourceChain: 'spark', recipient: '0xdef' });
     expect(recordFromSend({ ...session, phase: 'paid' }).status).toBe('processing');
+    expect(recordFromSend({ ...session, dismissedAt: 3 }).status).toBe('failed');
+    expect(recordFromSend({ ...session, phase: 'paid', dismissedAt: 3 }).status).toBe('processing');
     expect(recordFromSend({ ...session, phase: 'submitted', order: { id: 'o2', status: 'completed', amountOut: '4991000' } }))
       .toMatchObject({ status: 'completed', orderId: 'o2', amountOutRaw: '4991000' });
   });

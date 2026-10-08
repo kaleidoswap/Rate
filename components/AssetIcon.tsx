@@ -5,7 +5,6 @@
  */
 import React, { useEffect, useState } from 'react';
 import { View, Image, Text, StyleSheet, type ImageSourcePropType } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { SparkIcon, ArkadeIcon, RgbIcon } from './ProtocolIcons';
 
@@ -18,12 +17,6 @@ const PROTOCOL_COLORS: Record<string, string> = {
   RGB: theme.colors.networks.unified,
   SPARK: theme.colors.networks.spark,
   ARKADE: theme.colors.networks.arkade,
-};
-
-const PROTOCOL_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  RGB: 'flash',
-  SPARK: 'sparkles',
-  ARKADE: 'shield-checkmark',
 };
 
 // Colors for text placeholder backgrounds. ETH/USDT/USDC are crypto-brand

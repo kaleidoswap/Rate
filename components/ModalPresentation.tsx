@@ -1,16 +1,10 @@
 import React, { createContext, useContext } from 'react';
 
 /**
- * Marks a screen that the navigator presents as a sheet (`presentation: 'modal'`).
- *
- * `useSafeAreaInsets()` reports the WINDOW's insets, not the presented view's, and
- * react-navigation 6 re-establishes no safe-area provider per modal. A sheet already
- * starts below the status bar, so a header that pads by the full top inset stacks a
- * second status bar's worth of empty space above its title.
- *
- * Detecting this at runtime is unreliable — inside a sheet `measureInWindow` reports
- * coordinates relative to the sheet, so the header reads y = 0 and looks full-screen.
- * The navigator is the only place that actually knows, so it says so explicitly.
+ * Marks a screen presented as a flow: full screen, sliding up from the bottom
+ * (see FLOW_OPTIONS in App.tsx). Its header closes with an X instead of going
+ * back with an arrow. Only the navigator knows how a screen was presented, so
+ * it says so explicitly.
  */
 const ModalPresentationContext = createContext(false);
 

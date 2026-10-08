@@ -185,7 +185,7 @@ export const ToastContainer: React.FC = () => {
     return null;
   }
 
-  return <ToastItem toast={activeToast} onDismiss={handleDismiss} />;
+  return <ToastItem key={activeToast.id} toast={activeToast} onDismiss={handleDismiss} />;
 };
 
 const styles = StyleSheet.create({

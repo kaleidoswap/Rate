@@ -20,7 +20,8 @@ export interface Toast extends ToastConfig {
   timestamp: number;
 }
 
-type ToastListener = (toast: Toast) => void;
+/** Called with the toast to show, or null when the shown one is dismissed. */
+type ToastListener = (toast: Toast | null) => void;
 
 export class ToastService {
   private static instance: ToastService;
@@ -136,7 +137,7 @@ export class ToastService {
   /**
    * Notify all listeners
    */
-  private notifyListeners(toast: Toast): void {
+  private notifyListeners(toast: Toast | null): void {
     this.listeners.forEach(listener => {
       try {
         listener(toast);
@@ -177,6 +178,8 @@ export class ToastService {
   dismiss(id: string): void {
     if (this.activeToast?.id === id) {
       this.activeToast = null;
+      // The screen keeps showing a toast until told it's gone.
+      this.notifyListeners(null);
       // Process next toast in queue
       setTimeout(() => this.processQueue(), 300);
     } else {
@@ -191,6 +194,7 @@ export class ToastService {
   dismissAll(): void {
     this.activeToast = null;
     this.toastQueue = [];
+    this.notifyListeners(null);
   }
 
   /**
