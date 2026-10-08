@@ -43,7 +43,7 @@ import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset,
   getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair, getAssetNetwork,
-  normalizeMakerPairs, buildFlashnetPairs, validateSwapString,
+  normalizeMakerPairs, buildFlashnetPairs, validateSwapString, swapRateLabel,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
 } from '../utils/swap-model';
 import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
@@ -98,6 +98,11 @@ export default function SwapScreen({ navigation }: Props) {
   };
   // The unit shown next to a ticker (BTC side respects the active unit).
   const unitLabelFor = (ticker: string) => (isBtcTicker(ticker) ? btcUnitLabel : ticker);
+  // Flashnet takes its fee from the asset paid in, the maker from the asset paid out.
+  const formatQuoteFee = (q: SwapQuote): string => {
+    const ticker = q.venue === 'flashnet' ? q.from_asset : q.to_asset;
+    return `${formatDisplayAmount(q.fee_amount, ticker)} ${unitLabelFor(ticker)}`;
+  };
 
   const [showAssetPicker, setShowAssetPicker] = useState<'from' | 'to' | null>(null);
   // The flip arrow turns half a revolution per tap.
@@ -882,13 +887,13 @@ export default function SwapScreen({ navigation }: Props) {
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Rate</Text>
             <Text style={styles.quoteInfoValue}>
-              1 {unitLabelFor(swapState.fromAsset)} ≈ {swapState.currentQuote.exchange_rate.toFixed(2)} {unitLabelFor(swapState.toAsset)}
+              {swapRateLabel(swapState.currentQuote, bitcoinUnit)}
             </Text>
           </View>
           <View style={styles.quoteInfoRow}>
             <Text style={styles.quoteInfoLabel}>Swap fee</Text>
             <Text style={styles.quoteInfoValue}>
-              {swapState.currentQuote.fee_amount} {unitLabelFor(swapState.currentQuote.venue === 'flashnet' ? swapState.fromAsset : swapState.toAsset)}
+              {formatQuoteFee(swapState.currentQuote)}
             </Text>
           </View>
           {quoteSecsLeft != null && (
@@ -1126,7 +1131,7 @@ export default function SwapScreen({ navigation }: Props) {
         <ScrollView style={{ maxHeight: Math.min(360, screenHeight * 0.4) }} contentContainerStyle={styles.confirmDetails}>
           {previousReviewQuote && (previousReviewQuote.to_amount !== reviewQuote.to_amount || previousReviewQuote.fee_amount !== reviewQuote.fee_amount) && (
             <Text style={styles.quoteChangeNotice} accessibilityLiveRegion="polite">
-              Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {previousReviewQuote.fee_amount} → {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}. Review these changes before confirming.
+              Quote updated: {formatDisplayAmount(previousReviewQuote.to_amount, toTicker)} → {formatDisplayAmount(reviewQuote.to_amount, toTicker)} {unitLabelFor(toTicker)}. Fee: {formatQuoteFee(previousReviewQuote)} → {formatQuoteFee(reviewQuote)}. Review these changes before confirming.
             </Text>
           )}
           {pair && <View style={styles.confirmRow}>
@@ -1136,13 +1141,13 @@ export default function SwapScreen({ navigation }: Props) {
           <View style={styles.confirmRow}>
             <Text style={styles.confirmLabel}>Rate</Text>
             <Text style={styles.confirmValue}>
-              1 {unitLabelFor(fromTicker)} = {reviewQuote.exchange_rate.toFixed(8)} {unitLabelFor(toTicker)}
+              {swapRateLabel(reviewQuote, bitcoinUnit)}
             </Text>
           </View>
           <View style={styles.confirmRow}>
             <Text style={styles.confirmLabel}>Fee</Text>
             <Text style={styles.confirmValue}>
-              {reviewQuote.fee_amount} {unitLabelFor(isFlashnet ? fromTicker : toTicker)}
+              {formatQuoteFee(reviewQuote)}
             </Text>
           </View>
           <View style={styles.confirmRow}>
@@ -1292,7 +1297,7 @@ export default function SwapScreen({ navigation }: Props) {
       <ProviderSheet visible={showProviders} selectedId={selectedProvider.current} onClose={() => setShowProviders(false)}
         options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: policy.showNetworks ? (isFlashnetPair(o.pair) ? 'Spark' : 'RGB Lightning node') : undefined,
           amountLabel: 'You receive', amount: o.quote ? `${formatDisplayAmount(o.quote.to_amount, o.quote.to_asset)} ${unitLabelFor(o.quote.to_asset)}` : 'Unavailable',
-          detail: o.quote ? `Fee ${formatDisplayAmount(o.quote.fee_amount, o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)} ${unitLabelFor(o.quote.venue === 'flashnet' ? o.quote.from_asset : o.quote.to_asset)}` : '',
+          detail: o.quote ? `Fee ${formatQuoteFee(o.quote)}` : '',
           unavailable: o.unavailable, expiresAt: o.quote?.expiry_timestamp, recommended: bestSwapOffer(providerOffers)?.id === o.id }))}
         onSelect={id => { const chosen = providerOffers.find(o => o.id === id); if (!chosen?.quote || quoteHasExpired(chosen.quote.expiry_timestamp)) return;
           quoteRequestRef.current++; dispatch(setQuoteLoading(false)); selectedProvider.current = id; dispatch(clearError()); dispatch(setCurrentQuote(chosen.quote)); }} />
