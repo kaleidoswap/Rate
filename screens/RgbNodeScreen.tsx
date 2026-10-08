@@ -2,7 +2,8 @@
 //
 // Settings › RGB › RGB Lightning Node: what a node adds, how to connect one over
 // Nostr Wallet Connect, and its status (shown first). The connection itself (paste or scan,
-// saved connections, remove) lives in NWCConnect.
+// saved connections, remove) lives in NWCConnect. NWC has no backup call, so a connected
+// node gets a Backup section saying where its RGB and channel state is protected.
 import React, { useCallback, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useAppSelector } from '../store/hooks';
@@ -21,6 +22,13 @@ const STEPS = [
   'Scan its QR code or paste its nostr+walletconnect:// link.',
   'Review what the node allows and confirm.',
 ];
+
+export const NODE_BACKUP = {
+  title: 'Not restored by your recovery phrase',
+  message: 'Your recovery phrase doesn’t bring back the RGB assets or Lightning channels on this node. They live on the node, and only the node’s own backups protect them.',
+  action: 'If you run the node, back it up where it runs. If someone else runs it, ask them how it’s backed up.',
+  contrast: 'RGB on this phone is different: it backs up to the cloud automatically after every change.',
+} as const;
 
 const RgbNodeScreen: React.FC<Props> = ({ navigation }) => {
   const connections = useAppSelector((s: any) => s.nostr?.nwcConnections ?? []);
@@ -66,6 +74,17 @@ const RgbNodeScreen: React.FC<Props> = ({ navigation }) => {
             <Button title="Manage connection" variant="secondary" onPress={() => navigation.navigate('NWCConnect')} fullWidth />
           )}
         </View>
+
+        {nodeConnected && (
+          <>
+            <Text accessibilityRole="header" style={styles.sectionLabel}>Backup</Text>
+            <View style={styles.card}>
+              <Callout tone="warning" icon="cloud-offline-outline" title={NODE_BACKUP.title} message={NODE_BACKUP.message} />
+              <Text style={styles.text}>{NODE_BACKUP.action}</Text>
+              <Text style={styles.meta}>{NODE_BACKUP.contrast}</Text>
+            </View>
+          </>
+        )}
 
         {plainWallet && (
           <Callout tone="info" message={`${selected?.alias || 'Your Lightning wallet'} is connected over NWC, but it isn’t an RGB node: it’s used for Lightning, and your RGB assets stay on this phone.`} />

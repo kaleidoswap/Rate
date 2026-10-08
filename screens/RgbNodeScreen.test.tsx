@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
-import RgbNodeScreen from './RgbNodeScreen';
+import RgbNodeScreen, { NODE_BACKUP } from './RgbNodeScreen';
 
 let mockNode = false;
 let mockWallet = false;
@@ -15,7 +15,7 @@ jest.mock('../components', () => {
   return {
     MainHeader: ({ title }: any) => <Text>{title}</Text>,
     Badge: ({ label }: any) => <Text>{label}</Text>,
-    Callout: ({ message }: any) => <Text>{message}</Text>,
+    Callout: ({ title, message }: any) => <>{title ? <Text>{title}</Text> : null}<Text>{message}</Text></>,
     Button: ({ title, onPress }: any) => <TouchableOpacity accessibilityRole="button" onPress={onPress}><Text>{title}</Text></TouchableOpacity>,
   };
 });
@@ -28,6 +28,7 @@ test('without a node it explains how to connect one and opens the connection scr
   await act(async () => {});
   expect(screen.getByText('Not connected')).toBeTruthy();
   expect(screen.getByText('How to connect')).toBeTruthy();
+  expect(screen.queryByText('Backup')).toBeNull();
   fireEvent.press(screen.getByText('Connect node'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
   fireEvent.press(screen.getByText('Scan QR code'));
@@ -41,6 +42,8 @@ test('a plain Lightning wallet is not taken for an RGB node', async () => {
   await act(async () => {});
   expect(screen.getByText(/Alby is connected over NWC, but it isn’t an RGB node/)).toBeTruthy();
   expect(screen.getByText('How to connect')).toBeTruthy();
+  expect(screen.queryByText('Backup')).toBeNull();
+  expect(screen.queryByText(NODE_BACKUP.title)).toBeNull();
 });
 
 test('a connected node shows its name and network and is managed from the connection screen', async () => {
@@ -53,6 +56,8 @@ test('a connected node shows its name and network and is managed from the connec
   expect(screen.getByText('Connected over NWC · Mutinynet')).toBeTruthy();
   expect(screen.getByText('Connected')).toBeTruthy();
   expect(screen.queryByText('How to connect')).toBeNull();
+  expect(screen.getByText('Backup')).toBeTruthy();
+  for (const line of Object.values(NODE_BACKUP)) expect(screen.getByText(line)).toBeTruthy();
   fireEvent.press(screen.getByText('Manage connection'));
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });
