@@ -133,3 +133,16 @@ test('connect registers both accounts, recovers swaps, and unregisters', async (
   off();
   expect(previewTarget(btcTarget, 1_000, 'c3').plan.status).toBe('unsupported');
 });
+
+test('a unified code with an Ark address is paid off-chain from Arkade, not by an on-chain exit', async () => {
+  const { groupOffersByAccount } = require('../../utils/send-accounts');
+  const free = { txFeeRate: '0', intentFee: { offchainInput: '0.0', offchainOutput: '0.0', onchainInput: '0.0', onchainOutput: '0.0' } };
+  const off = connectArkadePayAccounts(makeAdapter(free) as any, 'mutinynet');
+  try {
+    const unified: PayTarget = { kind: 'bitcoin', raw: `bitcoin:${BTC}?ark=${OWN_ARK}`, address: BTC, arkAddress: OWN_ARK, networks: ['mutinynet'] };
+    const offers = (await quotePaymentOffers(previewTarget(unified, 5_000, 'u1'))).filter(o => o.route.kind === 'direct');
+    expect(offers.map(o => o.quote?.totalSat)).toEqual([5_000, 5_000]);
+    const [arkade] = groupOffersByAccount(offers, { advanced: true });
+    expect(arkade.best.route).toMatchObject({ sourceId: 'arkade', to: 'ark:mutinynet' });
+  } finally { off(); }
+});

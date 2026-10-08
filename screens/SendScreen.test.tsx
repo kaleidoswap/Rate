@@ -59,7 +59,7 @@ async function reviewed(navigation = nav()) {
   return screen;
 }
 const pay = (screen: any, label: string) => fireEvent(screen.getByLabelText(label), 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
-beforeEach(() => { mockState = baseState(); (require('react-native') as any).KeyboardAvoidingView = 'KeyboardAvoidingView'; jest.clearAllMocks(); });
+beforeEach(() => { mockState = baseState(); (require('react-native') as any).KeyboardAvoidingView = 'KeyboardAvoidingView'; jest.clearAllMocks(); (require('../services/kaleidoPay').checkPaymentStatus as jest.Mock).mockReset(); });
 
 test('one flow: decode, compare ways to pay, and pay only the reviewed total', async () => {
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010), offer('Bark', 1020)]);
@@ -106,6 +106,49 @@ test('an unresolved payment is shown instead of a new review', async () => {
   await act(async () => {});
   expect(screen.getByText('Check status')).toBeTruthy();
   expect(quotePaymentOffers).not.toHaveBeenCalled();
+});
+
+test('a payment in progress is re-checked on its own until it settles', async () => {
+  const { checkPaymentStatus } = require('../services/kaleidoPay');
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'pending' });
+  (checkPaymentStatus as jest.Mock).mockResolvedValue({ status: 'pending' });
+  const screen = await reviewed();
+  jest.useFakeTimers();
+  try {
+    await act(async () => { pay(screen, 'Pay 1010 sats'); });
+    expect(screen.getByText('Payment in progress')).toBeTruthy();
+    await act(async () => { jest.advanceTimersByTime(3_000); });
+    expect(checkPaymentStatus).toHaveBeenCalledWith('Spark', expect.any(String));
+    const calls = (checkPaymentStatus as jest.Mock).mock.calls.length;
+    (checkPaymentStatus as jest.Mock).mockResolvedValue({ status: 'completed', reference: 'h' });
+    await act(async () => { jest.advanceTimersByTime(5_000); });
+    expect((checkPaymentStatus as jest.Mock).mock.calls.length).toBe(calls + 1);
+    expect(screen.getByText('Payment completed')).toBeTruthy();
+    expect(screen.queryByText('Check status')).toBeNull();
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect((checkPaymentStatus as jest.Mock).mock.calls.length).toBe(calls + 1);
+  } finally { jest.useRealTimers(); }
+});
+
+test('an unresolved payment stops being re-checked when Send closes', async () => {
+  const { checkPaymentStatus } = require('../services/kaleidoPay');
+  const { loadPaymentAttempt } = require('../services/kaleidoPay/attempts');
+  (checkPaymentStatus as jest.Mock).mockResolvedValue({ status: 'pending' });
+  loadPaymentAttempt.mockResolvedValueOnce({ id: 'p', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending', createdAt: 1 });
+  jest.useFakeTimers();
+  try {
+    const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+    await act(async () => {});
+    await act(async () => {});
+    expect(checkPaymentStatus).toHaveBeenCalledTimes(1);
+    await act(async () => { jest.advanceTimersByTime(3_000); });
+    expect(checkPaymentStatus).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Check status')).toBeTruthy();
+    screen.unmount();
+    await act(async () => { jest.advanceTimersByTime(60_000); });
+    expect(checkPaymentStatus).toHaveBeenCalledTimes(2);
+  } finally { jest.useRealTimers(); }
 });
 
 test('rapid confirmation taps create only one payment', async () => {
