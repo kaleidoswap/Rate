@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     View,
     Text,
@@ -17,7 +17,15 @@ import { RootState } from '../store';
 import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
 import { theme } from '../theme';
-import { LAYER_LABEL, layerNetworkIcon } from '../utils/activity-layers';
+import {
+    ACTIVITY_NETWORK_LABEL,
+    LAYER_LABEL,
+    activityNetworks,
+    layerNetworkIcon,
+    matchesActivityFilter,
+    type ActivityNetwork,
+    type ActivityTab,
+} from '../utils/activity-layers';
 import { NetworkIcon } from '../components/NetworkIcon';
 import {
     loadActivity,
@@ -31,9 +39,7 @@ import { loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KI
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 
-type FilterTab = 'pending' | 'all' | 'receive' | 'send' | 'swap';
-
-const FILTERS: { key: FilterTab; label: string }[] = [
+const FILTERS: { key: ActivityTab; label: string }[] = [
     { key: 'all', label: 'All' },
     { key: 'pending', label: 'In progress' },
     { key: 'receive', label: 'Received' },
@@ -130,7 +136,8 @@ export default function HistoryScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [softError, setSoftError] = useState<string | null>(null);
-    const [filter, setFilter] = useState<FilterTab>('all');
+    const [filter, setFilter] = useState<ActivityTab>('all');
+    const [network, setNetwork] = useState<ActivityNetwork | 'all'>('all');
     const [selectedItem, setSelectedItem] = useState<ActivityItem | null>(null);
 
     const fetchActivity = useCallback(async () => {
@@ -186,12 +193,19 @@ export default function HistoryScreen() {
         setRefreshing(false);
     }, [fetchActivity]);
 
-    const filtered = items.filter((it) => {
-        if (filter === 'pending') return it.status === 'pending' || it.status === 'unknown';
-        if (filter === 'all') return true;
-        if (filter === 'swap') return it.type === 'swap';
-        return it.type === filter;
-    });
+    // Which network a payment used is Advanced detail: Lite has no network filter.
+    const networks = useMemo(() => (policy.showNetworks ? activityNetworks(items) : []), [items, policy.showNetworks]);
+    const activeNetwork = networks.includes(network as ActivityNetwork) ? network : 'all';
+    const networkOptions = useMemo(() => [
+        { key: 'all' as const, label: 'All networks' },
+        ...networks.map((n) => ({
+            key: n,
+            label: ACTIVITY_NETWORK_LABEL[n],
+            renderIcon: (_color: string, size: number) => <NetworkIcon network={n} size={size} />,
+        })),
+    ], [networks]);
+
+    const filtered = items.filter((it) => matchesActivityFilter(it, filter, activeNetwork));
 
     // Build sections grouped by day.
     const sections = (() => {
@@ -268,6 +282,15 @@ export default function HistoryScreen() {
                 scrollable
                 style={styles.filterBar}
             />
+            {networks.length > 1 && (
+                <SegmentedTabs<ActivityNetwork | 'all'>
+                    options={networkOptions}
+                    value={activeNetwork}
+                    onChange={setNetwork}
+                    scrollable
+                    style={styles.networkBar}
+                />
+            )}
 
             {softError && (
                 <View style={styles.errorBanner}>
@@ -317,6 +340,10 @@ const styles = StyleSheet.create({
     filterBar: {
         paddingHorizontal: theme.spacing[4],
         paddingTop: theme.spacing[3],
+        paddingBottom: theme.spacing[2],
+    },
+    networkBar: {
+        paddingHorizontal: theme.spacing[4],
         paddingBottom: theme.spacing[2],
     },
     errorBanner: {
