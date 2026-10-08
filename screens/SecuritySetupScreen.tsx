@@ -25,19 +25,27 @@ interface Props {
     params?: {
       walletId?: number;
       isInitialSetup?: boolean;
+      /** From Settings: set or change the PIN, or turn it off. Both need the current PIN or biometrics when a PIN exists. */
+      mode?: SecurityMode;
     };
   };
 }
 
-type SecurityStep = 'options' | 'pin' | 'confirmPin' | 'biometric' | 'complete';
+export type SecurityMode = 'setup' | 'pin' | 'disablePin';
+type SecurityStep = 'loading' | 'currentPin' | 'options' | 'pin' | 'confirmPin' | 'biometric' | 'complete';
 
 export default function SecuritySetupScreen({ navigation, route }: Props) {
-  const { isInitialSetup = false } = route.params || {};
-  
-  const [step, setStep] = useState<SecurityStep>('options');
+  const { isInitialSetup = false, mode = 'setup' } = route.params || {};
+  const fromSettings = mode !== 'setup';
+
+  const [step, setStep] = useState<SecurityStep>(fromSettings ? 'loading' : 'options');
   const [pin, setPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
-  const [enablePin, setEnablePin] = useState(false);
+  const [currentPin, setCurrentPin] = useState('');
+  const [currentPinError, setCurrentPinError] = useState<string | null>(null);
+  const [biometricUnlock, setBiometricUnlock] = useState(false);
+  const verifyingCurrent = useRef(false);
+  const [enablePin, setEnablePin] = useState(fromSettings);
   const [enableBiometric, setEnableBiometric] = useState(false);
   const [biometricType, setBiometricType] = useState<'fingerprint' | 'face' | 'iris' | null>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -49,6 +57,58 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
   useEffect(() => {
     checkBiometricAvailability();
   }, []);
+
+  useEffect(() => {
+    if (!fromSettings) return;
+    SecurityService.getInstance().getSecuritySettings().then((s) => {
+      setBiometricUnlock(s.biometricEnabled && s.biometricType !== null);
+      if (s.pinEnabled) setStep('currentPin');
+      else if (mode === 'pin') setStep('pin');
+      else navigation.goBack();
+    }).catch(() => {
+      Alert.alert('Security unavailable', 'Could not read your lock settings. Please try again.');
+      navigation.goBack();
+    });
+  }, [fromSettings, mode, navigation]);
+
+  const afterCurrentPinVerified = async () => {
+    setCurrentPin('');
+    setCurrentPinError(null);
+    if (mode === 'pin') {
+      animateTransition('pin');
+      return;
+    }
+    if (await SecurityService.getInstance().removePin()) navigation.goBack();
+    else Alert.alert('Error', 'Could not turn off the PIN. Please try again.');
+  };
+
+  const submitCurrentPin = async (candidate: string) => {
+    if (verifyingCurrent.current) return;
+    verifyingCurrent.current = true;
+    try {
+      const security = SecurityService.getInstance();
+      if (await security.verifyPin(candidate)) {
+        await afterCurrentPinVerified();
+        return;
+      }
+      shakeError();
+      const until = await security.getPinLockedUntil();
+      setCurrentPinError(until > Date.now()
+        ? `Too many attempts. Try again in ${Math.ceil((until - Date.now()) / 1000)}s`
+        : 'Incorrect PIN');
+      setCurrentPin('');
+    } finally {
+      verifyingCurrent.current = false;
+    }
+  };
+
+  const confirmWithBiometric = async () => {
+    const security = SecurityService.getInstance();
+    if (await security.authenticateWithBiometric('Confirm it’s you', { allowDeviceFallback: false })) {
+      await security.resetPinFailures();
+      await afterCurrentPinVerified();
+    }
+  };
 
   const checkBiometricAvailability = async () => {
     const compatible = await LocalAuthentication.hasHardwareAsync();
@@ -104,7 +164,13 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
   };
 
   const handlePinPress = (digit: string) => {
-    if (step === 'pin') {
+    if (step === 'currentPin') {
+      if (verifyingCurrent.current || currentPin.length >= 6) return;
+      const next = currentPin + digit;
+      setCurrentPin(next);
+      setCurrentPinError(null);
+      if (next.length === 6) submitCurrentPin(next);
+    } else if (step === 'pin') {
       if (pin.length < 6) {
         const newPin = pin + digit;
         setPin(newPin);
@@ -137,7 +203,9 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
   };
 
   const handleBackspace = () => {
-    if (step === 'pin') {
+    if (step === 'currentPin') {
+      setCurrentPin(currentPin.slice(0, -1));
+    } else if (step === 'pin') {
       setPin(pin.slice(0, -1));
     } else if (step === 'confirmPin') {
       setConfirmPin(confirmPin.slice(0, -1));
@@ -188,6 +256,10 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       }
       
       console.log('Security settings saved successfully');
+      if (fromSettings) {
+        navigation.goBack();
+        return;
+      }
       setStep('complete');
       animateComplete();
     } catch (error) {
@@ -197,7 +269,9 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
   };
 
   const handleBack = () => {
-    if (step === 'pin') {
+    if (fromSettings && (step === 'loading' || step === 'currentPin' || step === 'pin')) {
+      navigation.goBack();
+    } else if (step === 'pin') {
       animateTransition('options');
       setPin('');
     } else if (step === 'confirmPin') {
@@ -280,7 +354,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
         ['1', '2', '3'],
         ['4', '5', '6'],
         ['7', '8', '9'],
-        ['', '0', 'delete'],
+        [step === 'currentPin' && biometricUnlock ? 'bio' : '', '0', 'delete'],
       ].map((row, rowIndex) => (
         <View key={rowIndex} style={styles.numpadRow}>
           {row.map((key, keyIndex) => (
@@ -288,11 +362,15 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
               key={keyIndex}
               style={[
                 styles.numpadKey,
-                key === '' && styles.numpadKeyEmpty,
+                (key === '' || key === 'bio') && styles.numpadKeyEmpty,
               ]}
+              accessibilityRole="button"
+              accessibilityLabel={key === 'bio' ? `Use ${getBiometricLabel()}` : key === 'delete' ? 'Delete digit' : key}
               onPress={() => {
                 if (key === 'delete') {
                   handleBackspace();
+                } else if (key === 'bio') {
+                  confirmWithBiometric();
                 } else if (key !== '') {
                   handlePinPress(key);
                 }
@@ -302,6 +380,8 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
             >
               {key === 'delete' ? (
                 <Ionicons name="backspace-outline" size={28} color={theme.colors.text.primary} />
+              ) : key === 'bio' ? (
+                <Ionicons name={getBiometricIcon()} size={28} color={theme.colors.text.primary} />
               ) : (
                 <Text style={styles.numpadKeyText}>{key}</Text>
               )}
@@ -382,9 +462,20 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
     </View>
   );
 
+  const renderCurrentPinStep = () => (
+    <View style={styles.pinStepContent}>
+      <Text style={styles.pinTitle}>Enter current PIN</Text>
+      <Text style={styles.pinSubtitle}>
+        {currentPinError ?? (mode === 'pin' ? 'Confirm it’s you before changing your PIN' : 'Confirm it’s you before turning off your PIN')}
+      </Text>
+      {renderPinDots(currentPin)}
+      {renderNumpad()}
+    </View>
+  );
+
   const renderPinStep = () => (
     <View style={styles.pinStepContent}>
-      <Text style={styles.pinTitle}>Create PIN</Text>
+      <Text style={styles.pinTitle}>{fromSettings ? 'New PIN' : 'Create PIN'}</Text>
       <Text style={styles.pinSubtitle}>Enter a 6-digit PIN code</Text>
       {renderPinDots(pin)}
       {renderNumpad()}
@@ -474,12 +565,13 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScreenHeader
-        title={step === 'complete' ? 'Complete' : 'Security Setup'}
+        title={step === 'complete' ? 'Complete' : mode === 'pin' ? 'Wallet PIN' : mode === 'disablePin' ? 'Turn off PIN' : 'Security Setup'}
         showBack={step !== 'complete'}
         onBack={handleBack}
       />
 
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+        {step === 'currentPin' && renderCurrentPinStep()}
         {step === 'options' && renderOptionsStep()}
         {step === 'pin' && renderPinStep()}
         {step === 'confirmPin' && renderConfirmPinStep()}

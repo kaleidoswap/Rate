@@ -15,13 +15,24 @@ jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: jest.fn(), set
 jest.mock('../utils/feedback', () => ({ feedback: { success: jest.fn(), select: jest.fn() } }));
 jest.mock('../utils/bitcoinUnits', () => ({ formatDenominatedAmount: () => ({ primary: '1,234,567', unitLabel: 'sats' }), useBitcoinPriceIn: () => 50000 }));
 jest.mock('../components/RevealMnemonicModal', () => ({ RevealMnemonicModal: () => null }));
-jest.mock('../components/OptionSheet', () => ({ OptionSheet: () => null }));
+jest.mock('../components/OptionSheet', () => ({
+  OptionSheet: ({ visible, title, options, onSelect }: any) => { const { Text } = require('react-native'); return visible ? options.map((o: any) => <Text key={o.id} onPress={() => onSelect(o.id)}>{`${title}: ${o.label}`}</Text>) : null; },
+}));
 jest.mock('../components', () => ({
   MainHeader: ({ title, onBack }: any) => { const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity accessibilityLabel="Back" onPress={onBack}><Text>{title}</Text></TouchableOpacity>; },
   Input: (props: any) => { const { TextInput } = require('react-native'); return <TextInput {...props} />; }, Button: () => null,
 }));
 const navigation = { goBack: jest.fn(), navigate: jest.fn(), addListener: jest.fn() };
-beforeEach(() => { jest.clearAllMocks(); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
+let mockSecurity: any;
+const lockState = (over: Partial<{ pinEnabled: boolean; biometricEnabled: boolean; biometricType: string | null }>) => {
+  mockSecurity = {
+    getSecuritySettings: jest.fn(async () => ({ pinEnabled: false, biometricEnabled: false, biometricType: 'face', ...over })),
+    authenticateWithBiometric: jest.fn(async () => true),
+    setBiometricEnabled: jest.fn(async () => true),
+  };
+  require('../services/SecurityService').default.getInstance.mockReturnValue(mockSecurity);
+};
+beforeEach(() => { jest.clearAllMocks(); lockState({}); (require('react-native') as any).BackHandler = { addEventListener: () => ({ remove: jest.fn() }) }; (require('react-native') as any).Keyboard = { dismiss: jest.fn() }; });
 test('home shows categories and keeps sensitive and technical actions in their sections', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
@@ -123,4 +134,79 @@ test('account pages expose supported controls and back returns to the account li
   fireEvent.press(screen.getByLabelText('RGB node'));
   fireEvent.press(screen.getByLabelText('RGB Lightning Node'));
   expect(navigation.navigate).toHaveBeenCalledWith('RgbNode');
+});
+
+const openSecurity = async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Security & backup'));
+  await act(async () => {});
+  return screen;
+};
+
+test('turning on Face ID needs a biometric check and is not saved when it fails', async () => {
+  const screen = await openSecurity();
+  expect(screen.getByText('App lock')).toBeTruthy();
+  mockSecurity.authenticateWithBiometric.mockResolvedValueOnce(false);
+  await act(async () => { fireEvent(screen.getByLabelText('Face ID'), 'valueChange', true); });
+  expect(mockSecurity.authenticateWithBiometric).toHaveBeenCalledWith(expect.any(String), { allowDeviceFallback: false });
+  expect(mockSecurity.setBiometricEnabled).not.toHaveBeenCalled();
+  await act(async () => { fireEvent(screen.getByLabelText('Face ID'), 'valueChange', true); });
+  expect(mockSecurity.setBiometricEnabled).toHaveBeenCalledWith(true);
+});
+
+test('without enrolled biometrics only a PIN is offered, and auto-lock waits for a lock', async () => {
+  lockState({ biometricType: null });
+  const screen = await openSecurity();
+  expect(screen.queryByLabelText('Face ID')).toBeNull();
+  expect(screen.queryByLabelText('Biometric unlock')).toBeNull();
+  expect(screen.queryByLabelText('Auto-lock')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Set up PIN'));
+  expect(navigation.navigate).toHaveBeenCalledWith('SecuritySetup', { mode: 'pin' });
+});
+
+test('with a PIN the user can change it, turn it off after confirming, and pick the auto-lock time', async () => {
+  const { Alert } = require('react-native');
+  lockState({ pinEnabled: true });
+  const screen = await openSecurity();
+  fireEvent.press(screen.getByLabelText('Change PIN'));
+  expect(navigation.navigate).toHaveBeenCalledWith('SecuritySetup', { mode: 'pin' });
+  fireEvent.press(screen.getByLabelText('Turn off PIN'));
+  expect(Alert.alert).toHaveBeenLastCalledWith('Turn off PIN?', expect.stringContaining('turns off the app lock'), expect.any(Array));
+  Alert.alert.mock.calls.at(-1)[2].find((b: any) => b.text === 'Turn off').onPress();
+  expect(navigation.navigate).toHaveBeenCalledWith('SecuritySetup', { mode: 'disablePin' });
+  fireEvent.press(screen.getByLabelText('Auto-lock'));
+  fireEvent.press(screen.getByText('Auto-lock: After 15 minutes'));
+  expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'settings/setAutoLockTimeout', payload: 15 }));
+});
+
+test('turning off the only lock asks first and needs the owner to authenticate', async () => {
+  const { Alert } = require('react-native');
+  lockState({ biometricEnabled: true });
+  const screen = await openSecurity();
+  await act(async () => { fireEvent(screen.getByLabelText('Face ID'), 'valueChange', false); });
+  expect(mockSecurity.setBiometricEnabled).not.toHaveBeenCalled();
+  expect(Alert.alert).toHaveBeenLastCalledWith('Turn off app lock?', expect.any(String), expect.any(Array));
+  mockSecurity.authenticateWithBiometric.mockResolvedValueOnce(false);
+  await act(async () => { Alert.alert.mock.calls.at(-1)[2].find((b: any) => b.text === 'Turn off').onPress(); });
+  expect(mockSecurity.setBiometricEnabled).not.toHaveBeenCalled();
+  await act(async () => { Alert.alert.mock.calls.at(-1)[2].find((b: any) => b.text === 'Turn off').onPress(); });
+  expect(mockSecurity.setBiometricEnabled).toHaveBeenCalledWith(false);
+});
+
+test('with a PIN, biometrics turn off without removing the lock', async () => {
+  lockState({ pinEnabled: true, biometricEnabled: true, biometricType: 'fingerprint' });
+  const screen = await openSecurity();
+  await act(async () => { fireEvent(screen.getByLabelText('Touch ID'), 'valueChange', false); });
+  expect(mockSecurity.authenticateWithBiometric).not.toHaveBeenCalled();
+  expect(mockSecurity.setBiometricEnabled).toHaveBeenCalledWith(false);
+});
+
+test('search finds the app lock settings', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.changeText(screen.getByLabelText('Search settings'), 'face id');
+  expect(screen.getByText('App lock')).toBeTruthy();
+  fireEvent.changeText(screen.getByLabelText('Search settings'), 'auto-lock');
+  expect(screen.getByText('App lock')).toBeTruthy();
 });
