@@ -267,6 +267,11 @@ export default function SendScreen({ navigation, route }: Props) {
     void getOffers();
   }
 
+  function resultCue(status: PaymentAttempt['status']) {
+    if (status === 'completed') feedback.send();
+    else if (status === 'failed') feedback.error();
+  }
+
   async function pay() {
     if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || quote.expiresAt * 1000 <= Date.now() || !selected.executable || unresolvedAttempt(attempt)) return;
     paying.current = true; setBusy(true); setError('');
@@ -290,12 +295,14 @@ export default function SendScreen({ navigation, route }: Props) {
       const result = await executePaymentOffer(preview, selected, next.id);
       const updated = { ...next, ...result };
       setAttempt(updated);
+      resultCue(updated.status);
       logForContact(updated.status);
       try { await savePaymentAttempt(walletId, updated); }
       catch { setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
     } catch (e) {
       const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown' };
       setAttempt(updated);
+      resultCue(updated.status);
       logForContact(updated.status);
       setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.');
       try { await savePaymentAttempt(walletId, updated); } catch { /* The durable pending record forces a status check on reopen. */ }
@@ -317,6 +324,7 @@ export default function SendScreen({ navigation, route }: Props) {
       if (quiet && (attemptRef.current !== attempt || (result.status === attempt.status && result.reference === attempt.reference))) return;
       const updated = { ...attempt, ...result };
       await savePaymentAttempt(walletId, updated); setAttempt(updated);
+      if (updated.status !== attempt.status) resultCue(updated.status);
       void updateContactEventStatus(walletId, attempt.id, updated.status).catch(() => {});
       if (result.status === 'completed') void dispatch(loadBtcBalance());
     } catch { if (!quiet) setError('Could not update payment status. Check again before making another payment.'); }
