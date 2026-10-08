@@ -25,9 +25,9 @@ const STEPS = [
 
 export const NODE_BACKUP = {
   title: 'Not restored by your recovery phrase',
-  message: 'Your recovery phrase doesn’t bring back the RGB assets or Lightning channels on this node. They live on the node, and only the node’s own backups protect them.',
+  message: 'Your recovery phrase doesn’t bring back anything on this node: not its bitcoin, RGB assets or Lightning channels. The node has its own keys, and only the node’s own backups protect them.',
   action: 'If you run the node, back it up where it runs. If someone else runs it, ask them how it’s backed up.',
-  contrast: 'RGB on this phone is different: it backs up to the cloud automatically after every change.',
+  contrast: 'RGB on this phone is different: it tries to back up to the cloud after every change. Check its status under RGB on this phone.',
 } as const;
 
 const RgbNodeScreen: React.FC<Props> = ({ navigation }) => {
