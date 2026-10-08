@@ -5,6 +5,8 @@ import { quotePaymentOffers, executePaymentOffer, previewInput } from '../servic
 
 const mockPreview = { code: { kind: 'bolt11', raw: 'lnbc1', invoice: 'lnbc1' }, request: { amountSat: 1000, acceptedRails: ['ln'], networks: ['mainnet'], network: 'mainnet' }, plan: { status: 'ready' } };
 jest.mock('expo-crypto', () => ({ randomUUID: () => 'test-uuid' }));
+jest.mock('../utils/feedback', () => ({ feedback: { select: jest.fn(), send: jest.fn(), error: jest.fn(), warning: jest.fn(), success: jest.fn(), tap: jest.fn() } }));
+const { feedback: mockFeedback } = jest.requireMock('../utils/feedback');
 const mockDispatch = jest.fn();
 let mockState: any;
 const baseState = () => ({ settings: { bitcoinUnit: 'sats' }, wallet: { activeWallet: { id: 1 } } });
@@ -95,6 +97,7 @@ test('a completed payment can be closed and refreshes balances', async () => {
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
   expect(screen.getByText('Payment completed')).toBeTruthy();
   expect(screen.getByText('View in Activity')).toBeTruthy();
+  expect(mockFeedback.send).toHaveBeenCalledTimes(1);
   fireEvent.press(screen.getByText('Done'));
   expect(navigation.goBack).toHaveBeenCalled();
 });
@@ -114,6 +117,25 @@ test('rapid confirmation taps create only one payment', async () => {
   const screen = await reviewed();
   await act(async () => { pay(screen, 'Pay 1010 sats'); pay(screen, 'Pay 1010 sats'); });
   expect(executePaymentOffer).toHaveBeenCalledTimes(1);
+});
+
+test('a failed payment plays the error cue, a pending one stays silent until it completes', async () => {
+  const { PaymentNotSentError, checkPaymentStatus } = require('../services/kaleidoPay');
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  (executePaymentOffer as jest.Mock).mockRejectedValueOnce(new PaymentNotSentError('No route.'));
+  let screen = await reviewed();
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  expect(mockFeedback.error).toHaveBeenCalledTimes(1);
+  expect(mockFeedback.send).not.toHaveBeenCalled();
+  screen.unmount();
+
+  (executePaymentOffer as jest.Mock).mockResolvedValueOnce({ status: 'pending' });
+  screen = await reviewed();
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  expect(mockFeedback.send).not.toHaveBeenCalled();
+  (checkPaymentStatus as jest.Mock).mockResolvedValueOnce({ status: 'completed' });
+  await act(async () => { fireEvent.press(screen.getByText('Check status')); });
+  expect(mockFeedback.send).toHaveBeenCalledTimes(1);
 });
 
 test('a payment that needs checking can be moved past only after confirming the warning', async () => {
