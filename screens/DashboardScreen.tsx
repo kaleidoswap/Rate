@@ -26,12 +26,12 @@ import { RootState } from '../store';
 import { initializeProtocolServices } from '../services/initializeServices';
 import { protocolManager, rgbAccountAdapter } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
-import { setRgbAssets } from '../store/slices/assetsSlice';
+import { setProtocolAssets, setRgbAssets } from '../store/slices/assetsSlice';
 import { loadNostrProfile } from '../store/slices/nostrSlice';
 import {
   selectDisclosureLevel,
 } from '../store/slices/settingsSlice';
-import { policyFor, aggregateForLite } from '@kaleidorg/wallet-engine';
+import { policyFor } from '@kaleidorg/wallet-engine';
 
 import { theme } from '../theme';
 import {
@@ -44,9 +44,12 @@ import {
 import { Sheet } from '../components/Sheet';
 import { ProfileChip } from '../components/ProfileChip';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
-import { formatAssetAmount, getAssetBaseUnitBalance } from '../utils/assetAmount';
+import { formatAssetAmount } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
-import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../utils/flashnet';
+import {
+  assetRecordFromUnified, buildAssetInventory, inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf, withSnapshotFallback,
+  type InventoryAsset, type InventoryRecord,
+} from '../utils/asset-inventory';
 import { assetUsdValue, breakdownAssetRows, tokenValueSats as priceTokensInSats } from '../utils/portfolio';
 
 const LITE_USD_ID = 'lite-usd';
@@ -56,26 +59,6 @@ const { width } = Dimensions.get('window');
 
 interface Props {
   navigation: any;
-}
-
-interface NiaAsset {
-  asset_id: string;
-  asset_iface: string;
-  ticker: string;
-  name: string;
-  details: string | null;
-  precision: number;
-  issued_supply: number;
-  timestamp: number;
-  added_at: number;
-  balance: {
-    settled: number;
-    future: number;
-    spendable: number;
-    offchain_outbound?: number;
-    offchain_inbound?: number;
-  };
-  media: string | null;
 }
 
 interface Channel {
@@ -206,7 +189,10 @@ export default function DashboardScreen({ navigation }: Props) {
     colored: { settled: number; future: number; spendable: number };
     byProtocol?: Record<string, { confirmed: number; unconfirmed: number; total: number }>;
   }>(EMPTY_BTC_BALANCE);
-  const [rgbAssets, setRgbAssetsState] = useState<NiaAsset[]>([]);
+  // Live assets are in redux (the asset inventory every screen reads); the
+  // last known ones stand in here until this wallet's accounts answer.
+  const liveAssets = useAppSelector(state => state.assets.rgbAssets) as InventoryRecord[];
+  const [snapshotAssets, setSnapshotAssets] = useState<InventoryRecord[]>([]);
   const [isUpdating, setIsUpdating] = useState(false);
   const isUpdatingRef = useRef(false);
   // Last known balances (per wallet) shown at launch until the live ones land.
@@ -396,42 +382,21 @@ export default function DashboardScreen({ navigation }: Props) {
       ];
       const assetsTask = Promise.all(
         adapterMap.map(async ([adapter, proto]) => {
-          if (!adapter?.isConnected()) return [] as any[];
+          if (!adapter?.isConnected()) return [] as InventoryRecord[];
           try {
             const unifiedAssets = await adapter.listAssets();
             const mapped = unifiedAssets
-              .filter((a: any) => a.id !== 'BTC')
-              .map((a: any) => {
-                const isUsdb = isUsdbTokenAddress(a.id);
-                return {
-                  asset_id: a.id,
-                  ticker: isUsdb ? USDB_TICKER : a.ticker,
-                  name: isUsdb ? USDB_NAME : a.name,
-                  precision: isUsdb ? USDB_DECIMALS : a.precision,
-                  issued_supply: a.metadata?.issued_supply || 0,
-                  protocol: proto,
-                  icon: a.icon,
-                  balance: {
-                    settled: a.balance.settled ?? a.balance.total,
-                    future: a.balance.pending,
-                    // `available` already folds in on-chain spendable + in-channel
-                    // outbound (see NwcRgbAdapter.mapAssetBalance), so it reflects the
-                    // real holdings even for an asset held purely in a channel.
-                    spendable: a.balance.available,
-                    offchain_outbound: a.balance.offchain_outbound ?? a.balance.locked ?? 0,
-                    offchain_inbound: a.balance.offchain_inbound ?? 0,
-                  },
-                };
-              });
+              .map((a: any) => assetRecordFromUnified(a, proto))
+              .filter((r: InventoryRecord | null): r is InventoryRecord => r !== null);
             // This account's assets replace whatever it showed before.
             if (current()) {
               liveDataRef.current = true;
-              setRgbAssetsState(prev => [...prev.filter((x: any) => x.protocol !== proto), ...mapped]);
+              dispatch(setProtocolAssets({ protocol: proto, assets: mapped }));
             }
             return mapped;
           } catch (e) {
             console.warn('Asset fetch error:', e);
-            return [] as any[];
+            return [] as InventoryRecord[];
           }
         })
       );
@@ -459,25 +424,9 @@ export default function DashboardScreen({ navigation }: Props) {
             ? 'Some balances are unavailable. Your total may be incomplete.' : null);
 
       const assets = assetResults.flat();
-      setRgbAssetsState(assets);
       setChannels(channelsList);
       setChannelsLive(true);
-      dispatch(setRgbAssets(assets.map((asset: any) => ({
-        wallet_id: 1,
-        asset_id: asset.asset_id,
-        ticker: asset.ticker,
-        name: asset.name,
-        precision: asset.precision,
-        issued_supply: asset.issued_supply,
-        // Carry the owning protocol so downstream (activity, asset detail) can
-        // tell Spark/Arkade tokens apart from RGB instead of treating all as RGB.
-        protocol: asset.protocol,
-        icon: asset.icon,
-        balance: getAssetBaseUnitBalance(asset.balance),
-        // The full breakdown (in channels, incoming) for the asset detail screen.
-        balanceDetail: asset.balance,
-        last_updated: Date.now()
-      })) as any));
+      dispatch(setRgbAssets(assets as any));
 
       // Every account failed: keep the last figures on screen (the warning says why)
       // rather than replacing them with zero.
@@ -601,7 +550,9 @@ export default function DashboardScreen({ navigation }: Props) {
     walletKeyRef.current = walletKey;
     liveDataRef.current = false;
     setBtcBalanceState(EMPTY_BTC_BALANCE);
-    setRgbAssetsState([]);
+    setSnapshotAssets([]);
+    // Redux must not keep the previous wallet's assets either.
+    dispatch(setRgbAssets([]));
     setChannels([]);
     setChannelsLive(false);
     setSnapshotChannels([]);
@@ -611,7 +562,7 @@ export default function DashboardScreen({ navigation }: Props) {
     void loadBalanceSnapshot(activeWalletRef.current).then((snap) => {
       if (cancelled || !snap || walletKeyRef.current !== walletKey || liveDataRef.current) return;
       setBtcBalanceState(btcBalanceFromProtocols(snap.byProtocol));
-      setRgbAssetsState(snap.assets as NiaAsset[]);
+      setSnapshotAssets(snap.assets as InventoryRecord[]);
       setSnapshotChannels(snap.channels);
       setSnapshotPrice(snap.btcPriceUSD);
       setShowingSnapshot(true);
@@ -674,64 +625,52 @@ export default function DashboardScreen({ navigation }: Props) {
   const availableBtc = bitcoinSummary.available;
   const pendingBtc = bitcoinSummary.unavailable;
 
-  // Lite-mode aggregation: collapse every asset into BTC / USD / other, hiding
-  // which network each lives on. BTC is filtered out of `rgbAssets` upstream, so
-  // its true total comes from `totalBalance` (on-chain + Lightning). USDt assets
-  // bucket into `usd`; everything else stays in `other`.
-  const assetTotalBaseUnits = (asset: any): number => {
-    const balance = asset?.balance;
-    if (typeof balance === 'number') return balance;
+  // The shared asset inventory, fed with this screen's own bitcoin figures (live
+  // per account, or the last known ones) and, until the accounts answer, the
+  // last known assets of accounts that haven't listed theirs yet.
+  const inventory = buildAssetInventory({
+    btc: {
+      available: availableBtc,
+      networks: bitcoinByNetwork(protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning),
+    },
+    assets: showingSnapshot ? withSnapshotFallback(liveAssets, snapshotAssets) : liveAssets,
+  });
+  const btcEntry = inventoryBtc(inventory);
+  const tokens = inventoryTokens(inventory);
+
+  // Lite collapses every asset into BTC / USD / other, hiding which network each
+  // lives on. Its USD line counts what is held anywhere (in channels too).
+  const assetTotalBaseUnits = (asset: InventoryAsset): number => {
+    const detail = asset.balanceDetail;
+    if (!detail) return asset.balance;
     return (
-      Number(balance?.settled ?? balance?.total ?? getAssetBaseUnitBalance(balance)) +
-      Number(balance?.offchain_inbound ?? 0) +
-      Number(balance?.offchain_outbound ?? 0)
+      Number(detail.settled ?? asset.balance) +
+      Number(detail.offchain_inbound ?? 0) +
+      Number(detail.offchain_outbound ?? 0)
     );
   };
-
-  const liteAssets = rgbAssets.map((asset) => ({
-    id: asset.asset_id,
-    ticker: asset.ticker,
-    balance: { total: assetTotalBaseUnits(asset) },
-  })) as any;
-  const lite = aggregateForLite(liteAssets);
-  // The aggregated USD figure is in base units; convert each contributing asset
-  // to its human value using its own precision so the display reads as dollars.
-  const liteUsdAssetIds = new Set<string>(
-    liteAssets
-      .filter((a: any) => !lite.other.some((o: any) => o.id === a.id))
-      .map((a: any) => a.id)
-  );
-  const liteUsdDisplay = rgbAssets
+  const liteUsdAssetIds = liteUsdIdsOf(tokens);
+  const liteUsdDisplay = tokens
     .filter((asset) => liteUsdAssetIds.has(asset.asset_id))
-    .reduce((sum, asset) => {
-      const total = assetTotalBaseUnits(asset);
-      return sum + total / Math.pow(10, asset.precision ?? 0);
-    }, 0);
-  // Assets the AssetList should show in lite mode: drop USDt (folded into the USD
-  // figure) and keep the original rgbAssets shape the list already renders.
-  const liteOtherAssets = rgbAssets.filter((asset) =>
-    lite.other.some((o: any) => o.id === asset.asset_id)
-  );
+    .reduce((sum, asset) => sum + assetTotalBaseUnits(asset) / Math.pow(10, asset.precision), 0);
+  // Lite's list: the dollar assets are folded into the USD figure.
+  const liteOtherAssets = tokens.filter((asset) => !liteUsdAssetIds.has(asset.asset_id));
 
   // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
   // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
-  const tokenValueSats = priceTokensInSats(rgbAssets as any[], btcPriceUSD, liteUsdAssetIds);
+  const tokenValueSats = priceTokensInSats(tokens, btcPriceUSD, liteUsdAssetIds);
   const totalBalance = bitcoinSummary.total + tokenValueSats;
   const denominatedTotal = formatDisplayAmount(totalBalance);
 
-  // BTC is the wallet's base asset but is filtered out of `rgbAssets` upstream,
-  // so it never reached the dashboard AssetList. Surface it at the top of the
-  // list (matching AssetsScreen's BTC row). Balance is on-chain + Lightning, and
-  // precision follows the BTC/sats display preference so formatAssetAmount renders
-  // it the same way the rest of the wallet does.
+  // Bitcoin leads the list, in the BTC/sats display preference.
   const btcListEntry = {
-    asset_id: 'BTC',
-    ticker: 'BTC',
-    name: 'Bitcoin',
+    asset_id: btcEntry.asset_id,
+    ticker: btcEntry.ticker,
+    name: btcEntry.name,
     precision: bitcoinUnit === 'BTC' ? 8 : 0,
-    balance: { spendable: availableBtc },
+    balance: { spendable: btcEntry.balance },
     unit: bitcoinUnit,
-    fiatValue: btcPriceUSD ? (availableBtc / 100_000_000) * btcPriceUSD : undefined,
+    fiatValue: btcPriceUSD ? (btcEntry.balance / 100_000_000) * btcPriceUSD : undefined,
   } as any;
   // Dollar stablecoins are worth their face value.
   const usdValueOf = (asset: any): number | undefined => assetUsdValue(asset, liteUsdAssetIds);
@@ -840,7 +779,7 @@ export default function DashboardScreen({ navigation }: Props) {
             // Channel asset amounts are in base units; divide by the asset's
             // real precision (USDT=6, XAUT=9, …), not a hardcoded 8.
             const channelAssetPrecision =
-              rgbAssets.find((a) => a.asset_id === selectedChannel.asset_id)?.precision ?? 8;
+              tokens.find((a) => a.asset_id === selectedChannel.asset_id)?.precision ?? 8;
             return (
             <View style={styles.modalSection}>
               <Text style={styles.modalSectionTitle}>RGB Asset Liquidity</Text>
@@ -949,7 +888,7 @@ export default function DashboardScreen({ navigation }: Props) {
             pendingBtc={pendingBtc}
             testBtc={bitcoinSummary.test}
             testNetworks={testNetworks}
-            assetRows={breakdownAssetRows(rgbAssets as any[], liteUsdAssetIds, { foldDollars: isLite })}
+            assetRows={breakdownAssetRows(tokens, liteUsdAssetIds, { foldDollars: isLite })}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             bitcoinUnit={bitcoinUnit}
             onRefresh={onRefresh}
@@ -994,27 +933,24 @@ export default function DashboardScreen({ navigation }: Props) {
             }] : []),
             ...(isLite
               ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined, fiatValue: usdValueOf(a) }))
-              // The list mixes protocols (RGB, Spark tokens, Arkade), so tag each
-              // asset with its real family for the badge instead of leaving it bare.
-              : rgbAssets.map((a) => ({
-                  ...a,
-                  // rgbAssets never contains BTC (filtered upstream), so the family
-                  // is always one of the badge-able protocols.
-                  protocol: getAssetFamily(a.asset_id, a.ticker) as 'RGB' | 'SPARK' | 'ARKADE',
-                  fiatValue: usdValueOf(a),
-                }))),
+              // The list mixes protocols (RGB, Spark tokens, Arkade): each row
+              // carries the account it is on for the badge.
+              : tokens.map((a) => ({ ...a, protocol: a.protocol as 'RGB' | 'SPARK' | 'ARKADE', fiatValue: usdValueOf(a) }))),
           ]}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
           onAssetPress={(asset) => {
             if (asset.asset_id === LITE_USD_ID) { navigation.getParent()?.navigate('Assets'); return; }
-            const family = getAssetFamily(asset.asset_id, asset.ticker);
+            const token = tokens.find((t) => t.asset_id === asset.asset_id);
+            const protocol = token?.protocol ?? getAssetFamily(asset.asset_id, asset.ticker);
             navigation.getParent()?.navigate('AssetDetail', {
               asset: {
                 ...asset,
+                // The full breakdown (in channels, incoming) for the detail screen.
+                ...(token ? { balance: token.balanceDetail ?? token.balance } : {}),
                 // Only RGB assets route through the RGB detail/send flow; Spark
                 // tokens and BTC must not be treated as RGB.
-                isRGB: family === 'RGB',
-                protocol: family,
+                isRGB: protocol === 'RGB',
+                protocol,
               }
             });
           }}

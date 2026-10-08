@@ -33,7 +33,8 @@ export interface AssetListToken {
   balance: AssetBalanceLike;
   protocol?: string | null;
   icon?: string;
-  [extra: string]: unknown;
+  /** The full balance breakdown, for the detail screen. */
+  balanceDetail?: unknown;
 }
 
 export interface AssetHolding {
