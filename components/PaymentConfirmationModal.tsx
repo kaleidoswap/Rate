@@ -1,25 +1,29 @@
 // components/PaymentConfirmationModal.tsx
-import React, { useState, useRef, useEffect } from 'react';
+//
+// The one confirm sheet for money-moving actions, used by the assistant chat,
+// the voice overlay (inline, inside its own modal) and the Nostr chat.
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Pressable,
   Modal,
   Animated,
-  Dimensions,
-  Image,
-  Vibration,
   ActivityIndicator,
+  TextInput,
+  ScrollView,
 } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { CopyButton } from './CopyButton';
+import { haptic } from '../utils/haptics';
+import SecurityService from '../services/SecurityService';
+import { authorizeSpend } from '../services/spendAuth';
+import { secondsLeft, formatSats, type ConfirmReadback } from '../services/aiConfirm';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-interface PaymentDetails {
+export interface PaymentDetails {
   type: 'lightning_address' | 'lightning_invoice' | 'nostr_contact';
   recipient: string;
   amount: number;
@@ -34,275 +38,294 @@ interface PaymentDetails {
 
 interface Props {
   visible: boolean;
-  paymentDetails: PaymentDetails | null;
+  readback?: ConfirmReadback | null;
+  /** Older callers pass the payment fields directly. */
+  paymentDetails?: PaymentDetails | null;
   onConfirm: () => void;
   onCancel: () => void;
+  /** The approved action is running. */
   loading?: boolean;
+  /** Shown instead of the hold button while the sheet checks something (e.g. a re-quote). */
+  busyLabel?: string | null;
+  /** Ask for biometrics/PIN after the hold. */
+  requireAuth?: boolean;
+  priceUsd?: number;
+  /** Render without a native Modal (when already inside one). */
+  inline?: boolean;
+}
+
+export const HOLD_TO_CONFIRM_MS = 1200;
+
+export function readbackFromPaymentDetails(d: PaymentDetails): ConfirmReadback {
+  const rows = [
+    { label: d.type === 'lightning_address' ? 'Lightning address' : d.type === 'nostr_contact' ? 'Nostr contact' : 'Lightning invoice', value: d.lightningAddress || d.recipient, copyable: true },
+    ...(d.description ? [{ label: 'Note', value: d.description }] : []),
+  ];
+  return {
+    kind: 'payment',
+    title: 'Confirm payment',
+    cta: 'Send',
+    amount: d.amount > 0 ? formatSats(d.amount) : undefined,
+    amountSats: d.amount > 0 ? d.amount : undefined,
+    recipientName: d.recipientName,
+    rows,
+    spoken: '',
+  };
+}
+
+const middleTruncate = (s: string, keep = 14) => (s.length > keep * 2 + 3 ? `${s.slice(0, keep)}…${s.slice(-keep)}` : s);
+
+function Countdown({ expiresAt }: { expiresAt: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const left = secondsLeft(expiresAt, now) ?? 0;
+  return (
+    <View style={styles.countdown} accessibilityLiveRegion="polite">
+      <Ionicons name="time-outline" size={14} color={left > 10 ? theme.colors.text.secondary : theme.colors.warning[500]} />
+      <Text style={[styles.countdownText, left <= 10 && { color: theme.colors.warning[500] }]}>
+        {left > 0 ? `Quote expires in ${left} s` : 'Quote expired: approving fetches a fresh price first'}
+      </Text>
+    </View>
+  );
+}
+
+function HoldButton({ label, onComplete, disabled }: { label: string; onComplete: () => void; disabled?: boolean }) {
+  const progress = useRef(new Animated.Value(0)).current;
+  const anim = useRef<Animated.CompositeAnimation | null>(null);
+  const start = () => {
+    if (disabled) return;
+    void haptic.light().catch(() => {});
+    anim.current = Animated.timing(progress, { toValue: 1, duration: HOLD_TO_CONFIRM_MS, useNativeDriver: false });
+    anim.current.start(({ finished }) => {
+      if (finished) {
+        void haptic.heavy().catch(() => {});
+        progress.setValue(0);
+        onComplete();
+      }
+    });
+  };
+  const cancel = () => {
+    anim.current?.stop();
+    Animated.timing(progress, { toValue: 0, duration: 150, useNativeDriver: false }).start();
+  };
+  const width = progress.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+  return (
+    <Pressable
+      onPressIn={start}
+      onPressOut={cancel}
+      disabled={disabled}
+      style={[styles.holdButton, disabled && styles.buttonDisabled]}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}. Hold to confirm`}
+      accessibilityActions={[{ name: 'activate' }]}
+      onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'activate' && !disabled) onComplete(); }}
+      testID="hold-to-confirm"
+    >
+      <Animated.View style={[styles.holdFill, { width }]} />
+      <Ionicons name="finger-print" size={18} color="white" />
+      <Text style={styles.confirmText}>Hold to {label.toLowerCase()}</Text>
+    </Pressable>
+  );
+}
+
+function SheetBody({
+  readback,
+  onConfirm,
+  onCancel,
+  loading,
+  busyLabel,
+  requireAuth,
+  priceUsd,
+}: Required<Pick<Props, 'onConfirm' | 'onCancel'>> & {
+  readback: ConfirmReadback;
+  loading: boolean;
+  busyLabel?: string | null;
+  requireAuth?: boolean;
+  priceUsd?: number;
+}) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [askPin, setAskPin] = useState(false);
+  const [pin, setPin] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authorizing, setAuthorizing] = useState(false);
+
+  useEffect(() => {
+    setAskPin(false);
+    setPin('');
+    setAuthError(null);
+  }, [readback]);
+
+  const approve = async () => {
+    setAuthError(null);
+    if (!requireAuth) return onConfirm();
+    setAuthorizing(true);
+    try {
+      const res = await authorizeSpend(`Approve: ${readback.title.toLowerCase()}`);
+      if (res === 'approved') onConfirm();
+      else if (res === 'pin') setAskPin(true);
+      else setAuthError('Not approved. Hold again to retry.');
+    } finally {
+      setAuthorizing(false);
+    }
+  };
+
+  const submitPin = async () => {
+    setAuthorizing(true);
+    try {
+      if (await SecurityService.getInstance().verifyPin(pin)) {
+        setAskPin(false);
+        onConfirm();
+      } else {
+        setAuthError('Wrong PIN.');
+      }
+    } finally {
+      setPin('');
+      setAuthorizing(false);
+    }
+  };
+
+  const fiat =
+    readback.amountSats && (priceUsd ?? 0) > 0
+      ? `≈ $${((readback.amountSats / 1e8) * (priceUsd as number)).toFixed(2)} USD`
+      : undefined;
+  const busy = loading || !!busyLabel || authorizing;
+
+  return (
+    <View style={styles.modal}>
+      <View style={styles.handleBar} />
+      <View style={styles.headerContent}>
+        <View style={styles.iconCircle}>
+          <Ionicons name={readback.kind === 'swap' ? 'swap-horizontal' : 'shield-checkmark'} size={22} color={theme.colors.primary[500]} />
+        </View>
+        <Text style={styles.title}>{readback.title}</Text>
+        {!!readback.amount && <Text style={styles.amount} testID="confirm-amount">{readback.amount}</Text>}
+        {!!fiat && <Text style={styles.amountUsd}>{fiat}</Text>}
+        {!!readback.recipientName && <Text style={styles.recipient}>to {readback.recipientName}</Text>}
+      </View>
+
+      <ScrollView style={styles.rows} contentContainerStyle={{ gap: theme.spacing[3] }}>
+        {readback.rows.map((r) => {
+          const open = !!expanded[r.label];
+          return (
+            <View key={r.label} style={styles.detailRow}>
+              <Text style={styles.detailLabel}>{r.label}</Text>
+              <View style={styles.detailValueWrap}>
+                {r.copyable ? (
+                  <>
+                    <Pressable onPress={() => setExpanded((e) => ({ ...e, [r.label]: !open }))} accessibilityRole="button" accessibilityLabel={open ? `Collapse ${r.label}` : `Show full ${r.label}`} style={{ flex: 1 }}>
+                      <Text style={[styles.detailValue, styles.mono]} selectable>{open ? r.value : middleTruncate(r.value)}</Text>
+                    </Pressable>
+                    <CopyButton value={r.value} size={16} />
+                  </>
+                ) : (
+                  <Text style={styles.detailValue}>{r.value}</Text>
+                )}
+              </View>
+            </View>
+          );
+        })}
+      </ScrollView>
+
+      {readback.expiresAt != null && <Countdown expiresAt={readback.expiresAt} />}
+
+      {!!readback.warning && (
+        <View style={[styles.notice, styles.warning]}>
+          <Ionicons name="warning-outline" size={16} color={theme.colors.warning[500]} />
+          <Text style={[styles.noticeText, { color: theme.colors.warning[500] }]}>{readback.warning}</Text>
+        </View>
+      )}
+
+      <View style={styles.notice}>
+        <Ionicons name="information-circle" size={16} color={theme.colors.primary[500]} />
+        <Text style={styles.noticeText}>
+          This can't be undone. Check the details{requireAuth ? '; you will also confirm with biometrics or your PIN' : ''}.
+        </Text>
+      </View>
+
+      {askPin && (
+        <View style={styles.pinRow}>
+          <TextInput
+            style={styles.pinInput}
+            value={pin}
+            onChangeText={setPin}
+            placeholder="Wallet PIN"
+            placeholderTextColor={theme.colors.text.tertiary}
+            secureTextEntry
+            keyboardType="number-pad"
+            autoFocus
+            onSubmitEditing={submitPin}
+            accessibilityLabel="Wallet PIN"
+          />
+          <TouchableOpacity style={styles.pinSubmit} onPress={submitPin} disabled={!pin || authorizing}>
+            <Text style={styles.confirmText}>OK</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+      {!!authError && <Text style={styles.authError}>{authError}</Text>}
+
+      <View style={styles.actions}>
+        <TouchableOpacity style={styles.cancelButton} onPress={onCancel} disabled={loading} accessibilityRole="button">
+          <Text style={styles.cancelText}>Cancel</Text>
+        </TouchableOpacity>
+        {busy ? (
+          <View style={[styles.holdButton, styles.buttonDisabled]} accessibilityLiveRegion="polite">
+            <ActivityIndicator size="small" color="white" />
+            <Text style={styles.confirmText}>{loading ? 'Processing…' : busyLabel || 'Checking…'}</Text>
+          </View>
+        ) : (
+          <HoldButton label={readback.cta} onComplete={approve} disabled={askPin} />
+        )}
+      </View>
+    </View>
+  );
 }
 
 export default function PaymentConfirmationModal({
   visible,
+  readback,
   paymentDetails,
   onConfirm,
   onCancel,
   loading = false,
+  busyLabel,
+  requireAuth,
+  priceUsd,
+  inline,
 }: Props) {
-  const [slideAnim] = useState(new Animated.Value(screenHeight));
-  const [fadeAnim] = useState(new Animated.Value(0));
-  const [scaleAnim] = useState(new Animated.Value(0.9));
-
+  const r = readback ?? (paymentDetails ? readbackFromPaymentDetails(paymentDetails) : null);
   useEffect(() => {
-    if (visible) {
-      Vibration.vibrate(50);
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          tension: 65,
-          friction: 11,
-          useNativeDriver: true,
-        }),
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          tension: 65,
-          friction: 11,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    } else {
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: screenHeight,
-          duration: 250,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
+    if (visible) void haptic.warning().catch(() => {});
   }, [visible]);
+  if (!r || !visible) return null;
 
-  const handleConfirm = () => {
-    Vibration.vibrate(100);
-    onConfirm();
-  };
-
-  const formatAmount = (amount: number): string => {
-    if (amount >= 1000000) {
-      return `${(amount / 1000000).toFixed(2)}M`;
-    } else if (amount >= 1000) {
-      return `${(amount / 1000).toFixed(1)}K`;
-    }
-    return amount.toLocaleString();
-  };
-
-  const getRecipientIcon = () => {
-    if (paymentDetails?.isNostrContact) {
-      return 'people';
-    }
-    if (paymentDetails?.type === 'lightning_address') {
-      return 'at';
-    }
-    return 'flash';
-  };
-
-  const getPaymentTypeLabel = () => {
-    switch (paymentDetails?.type) {
-      case 'lightning_address':
-        return 'Lightning Address';
-      case 'lightning_invoice':
-        return 'Lightning Invoice';
-      case 'nostr_contact':
-        return 'Nostr Contact';
-      default:
-        return 'Lightning Payment';
-    }
-  };
-
-  if (!paymentDetails) return null;
-
+  const body = (
+    <SheetBody
+      readback={r}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+      loading={loading}
+      busyLabel={busyLabel}
+      requireAuth={requireAuth}
+      priceUsd={priceUsd ?? paymentDetails?.priceUsd}
+    />
+  );
+  if (inline) {
+    return (
+      <View style={[StyleSheet.absoluteFill, styles.overlay]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={loading ? undefined : onCancel} accessibilityLabel="Dismiss" />
+        {body}
+      </View>
+    );
+  }
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={onCancel}
-    >
-      <Animated.View
-        style={[
-          styles.overlay,
-          {
-            opacity: fadeAnim,
-          },
-        ]}
-      >
-        <BlurView intensity={20} style={StyleSheet.absoluteFill} />
-        
-        <TouchableOpacity
-          style={StyleSheet.absoluteFill}
-          activeOpacity={1}
-          onPress={onCancel}
-        />
-
-        <Animated.View
-          style={[
-            styles.modalContainer,
-            {
-              transform: [
-                { translateY: slideAnim },
-                { scale: scaleAnim },
-              ],
-            },
-          ]}
-        >
-          <View style={styles.modal}>
-            {/* Header */}
-            <View style={styles.header}>
-              <View style={styles.handleBar} />
-              <View style={styles.headerContent}>
-                <View style={styles.iconContainer}>
-                  <LinearGradient
-                    colors={theme.colors.warning.gradient!}
-                    style={styles.iconGradient}
-                  >
-                    <Ionicons name="shield-checkmark" size={24} color="white" />
-                  </LinearGradient>
-                </View>
-                <Text style={styles.title}>Confirm Payment</Text>
-                <Text style={styles.subtitle}>
-                  Please review the payment details before proceeding
-                </Text>
-              </View>
-            </View>
-
-            {/* Payment Details */}
-            <View style={styles.paymentCard}>
-              <LinearGradient
-                colors={[theme.colors.brand.violet, theme.colors.brand.violet]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.amountGradient}
-              >
-                <Text style={styles.amountLabel}>Payment Amount</Text>
-                <Text style={styles.amount}>
-                  {paymentDetails.amount > 0 ? `${formatAmount(paymentDetails.amount)} sats` : (paymentDetails.recipientName || paymentDetails.description || '')}
-                </Text>
-                {paymentDetails.amount > 0 && (paymentDetails.priceUsd ?? 0) > 0 && (
-                  <Text style={styles.amountUsd}>
-                    ≈ ${((paymentDetails.amount / 100000000) * (paymentDetails.priceUsd as number)).toFixed(2)} USD · BTC ${Number(paymentDetails.priceUsd).toLocaleString()}
-                  </Text>
-                )}
-              </LinearGradient>
-
-              {/* Recipient Info */}
-              <View style={styles.recipientSection}>
-                <View style={styles.recipientHeader}>
-                  <View style={styles.recipientIconContainer}>
-                    {paymentDetails.recipientAvatar ? (
-                      <Image
-                        source={{ uri: paymentDetails.recipientAvatar }}
-                        style={styles.avatar}
-                      />
-                    ) : (
-                      <View style={[styles.avatarPlaceholder, { backgroundColor: theme.colors.primary[100] }]}>
-                        <Ionicons name={getRecipientIcon()} size={20} color={theme.colors.primary[600]} />
-                      </View>
-                    )}
-                    <View style={styles.recipientInfo}>
-                      <Text style={styles.recipientName}>
-                        {paymentDetails.recipientName || 'Lightning Payment'}
-                      </Text>
-                      <Text style={styles.recipientType}>
-                        {getPaymentTypeLabel()}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <View style={styles.recipientDetails}>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>To:</Text>
-                    <Text style={styles.detailValue} numberOfLines={1}>
-                      {paymentDetails.recipient}
-                    </Text>
-                  </View>
-                  
-                  {paymentDetails.lightningAddress && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Lightning Address:</Text>
-                      <Text style={styles.detailValue} numberOfLines={1}>
-                        {paymentDetails.lightningAddress}
-                      </Text>
-                    </View>
-                  )}
-
-                  {paymentDetails.description && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Description:</Text>
-                      <Text style={styles.detailValue}>
-                        {paymentDetails.description}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            </View>
-
-            {/* Security Notice */}
-            <View style={styles.securityNotice}>
-              <Ionicons name="information-circle" size={16} color={theme.colors.primary[500]} />
-              <Text style={styles.securityText}>
-                This payment cannot be reversed. Please verify all details carefully.
-              </Text>
-            </View>
-
-            {/* Action Buttons */}
-            <View style={styles.actions}>
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={onCancel}
-                disabled={loading}
-              >
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.confirmButton, loading && styles.buttonDisabled]}
-                onPress={handleConfirm}
-                disabled={loading}
-              >
-                <LinearGradient
-                  colors={loading ? [theme.colors.gray[400], theme.colors.gray[400]] : theme.colors.primary.gradient!}
-                  style={styles.confirmGradient}
-                >
-                  {loading ? (
-                    <View style={styles.loadingContent}>
-                      <ActivityIndicator
-                        size="small"
-                        color="white"
-                        style={styles.loadingSpinner}
-                      />
-                      <Text style={styles.confirmText}>Processing...</Text>
-                    </View>
-                  ) : (
-                    <>
-                      <Ionicons name="send" size={18} color="white" />
-                      <Text style={styles.confirmText}>Confirm Payment</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </Animated.View>
-      </Animated.View>
+    <Modal visible transparent animationType="slide" onRequestClose={loading ? () => {} : onCancel}>
+      <View style={styles.overlay}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={loading ? undefined : onCancel} accessibilityLabel="Dismiss" />
+        {body}
+      </View>
     </Modal>
   );
 }
@@ -313,20 +336,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     backgroundColor: theme.colors.background.backdrop,
   },
-  modalContainer: {
-    justifyContent: 'flex-end',
-  },
   modal: {
     backgroundColor: theme.colors.surface.primary,
     borderTopLeftRadius: theme.borderRadius.xl,
     borderTopRightRadius: theme.borderRadius.xl,
-    paddingBottom: 40,
-    maxHeight: screenHeight * 0.8,
-  },
-  header: {
+    paddingHorizontal: theme.spacing[5],
     paddingTop: theme.spacing[3],
-    paddingHorizontal: theme.spacing[6],
-    paddingBottom: theme.spacing[6],
+    paddingBottom: 36,
+    maxHeight: '90%',
   },
   handleBar: {
     width: 40,
@@ -336,178 +353,83 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: theme.spacing[4],
   },
-  headerContent: {
+  headerContent: { alignItems: 'center', marginBottom: theme.spacing[4] },
+  iconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
-  },
-  iconContainer: {
-    marginBottom: theme.spacing[3],
-  },
-  iconGradient: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
     justifyContent: 'center',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.primary,
+    backgroundColor: theme.colors.surface.secondary,
     marginBottom: theme.spacing[2],
   },
-  subtitle: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-    textAlign: 'center',
-  },
-  paymentCard: {
-    marginHorizontal: theme.spacing[6],
-    marginBottom: theme.spacing[4],
-    borderRadius: theme.borderRadius.lg,
-    overflow: 'hidden',
-    ...theme.shadows.md,
-  },
-  amountGradient: {
-    padding: theme.spacing[6],
-    alignItems: 'center',
-  },
-  amountLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    color: 'rgba(255, 255, 255, 0.8)',
-    marginBottom: theme.spacing[1],
-  },
+  title: { fontSize: theme.typography.fontSize.lg, fontWeight: '700', color: theme.colors.text.primary },
   amount: {
-    fontSize: theme.typography.fontSize['4xl'],
+    fontSize: theme.typography.fontSize['3xl'],
     fontWeight: theme.typography.fontWeight.bold,
-    color: 'white',
-    marginBottom: theme.spacing[1],
-  },
-  amountUsd: {
-    fontSize: theme.typography.fontSize.base,
-    color: 'rgba(255, 255, 255, 0.9)',
-  },
-  recipientSection: {
-    backgroundColor: theme.colors.surface.primary,
-    padding: theme.spacing[5],
-  },
-  recipientHeader: {
-    marginBottom: theme.spacing[4],
-  },
-  recipientIconContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: theme.spacing[3],
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: theme.spacing[3],
-  },
-  recipientInfo: {
-    flex: 1,
-  },
-  recipientName: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.primary,
-    marginBottom: theme.spacing[1],
+    marginTop: theme.spacing[2],
+    fontVariant: ['tabular-nums'],
   },
-  recipientType: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  recipientDetails: {
-    gap: theme.spacing[3],
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  detailLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    fontWeight: theme.typography.fontWeight.medium,
-    color: theme.colors.text.secondary,
-    flex: 1,
-  },
-  detailValue: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-    flex: 2,
-    textAlign: 'right',
-  },
-  securityNotice: {
+  amountUsd: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, marginTop: theme.spacing[1] },
+  recipient: { fontSize: theme.typography.fontSize.base, color: theme.colors.text.primary, marginTop: theme.spacing[1], fontWeight: '600' },
+  rows: { flexGrow: 0, marginBottom: theme.spacing[3] },
+  detailRow: { flexDirection: 'row', alignItems: 'flex-start', gap: theme.spacing[3] },
+  detailLabel: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, width: 110 },
+  detailValueWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1] },
+  detailValue: { flex: 1, fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, textAlign: 'right' },
+  mono: { fontFamily: 'Courier' },
+  countdown: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', marginBottom: theme.spacing[3] },
+  countdownText: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
+  notice: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: theme.spacing[6],
-    marginBottom: theme.spacing[6],
+    gap: theme.spacing[2],
+    marginBottom: theme.spacing[3],
     padding: theme.spacing[3],
-    backgroundColor: theme.colors.primary[50],
+    backgroundColor: theme.colors.surface.secondary,
     borderRadius: theme.borderRadius.md,
-    borderWidth: 1,
-    borderColor: theme.colors.primary[100],
   },
-  securityText: {
-    fontSize: theme.typography.fontSize.xs,
-    color: theme.colors.primary[600],
-    marginLeft: theme.spacing[2],
+  warning: { borderWidth: 1, borderColor: theme.colors.warning[500] },
+  noticeText: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.secondary, flex: 1 },
+  pinRow: { flexDirection: 'row', gap: theme.spacing[2], marginBottom: theme.spacing[3] },
+  pinInput: {
     flex: 1,
+    borderWidth: 1,
+    borderColor: theme.colors.border.light,
+    borderRadius: theme.borderRadius.md,
+    paddingHorizontal: theme.spacing[3],
+    paddingVertical: theme.spacing[2],
+    color: theme.colors.text.primary,
   },
-  actions: {
-    flexDirection: 'row',
-    paddingHorizontal: theme.spacing[6],
-    gap: theme.spacing[3],
+  pinSubmit: {
+    paddingHorizontal: theme.spacing[4],
+    justifyContent: 'center',
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.primary[500],
   },
+  authError: { color: theme.colors.error[500], fontSize: theme.typography.fontSize.sm, textAlign: 'center', marginBottom: theme.spacing[2] },
+  actions: { flexDirection: 'row', gap: theme.spacing[3] },
   cancelButton: {
     flex: 1,
     paddingVertical: theme.spacing[4],
-    paddingHorizontal: theme.spacing[6],
     borderRadius: theme.borderRadius.md,
-    backgroundColor: theme.colors.gray[100],
+    backgroundColor: theme.colors.surface.secondary,
     alignItems: 'center',
   },
-  cancelText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: theme.colors.text.secondary,
-  },
-  confirmButton: {
+  cancelText: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.secondary },
+  holdButton: {
     flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: theme.spacing[2],
+    paddingVertical: theme.spacing[4],
     borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.primary[600],
     overflow: 'hidden',
   },
-  confirmGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: theme.spacing[4],
-    paddingHorizontal: theme.spacing[6],
-    gap: theme.spacing[2],
-  },
-  confirmText: {
-    fontSize: theme.typography.fontSize.base,
-    fontWeight: theme.typography.fontWeight.semibold,
-    color: 'white',
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  loadingContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: theme.spacing[2],
-  },
-  loadingSpinner: {
-    width: 20,
-    height: 20,
-  },
-}); 
+  holdFill: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: theme.colors.primary[400] },
+  confirmText: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: 'white' },
+  buttonDisabled: { opacity: 0.7 },
+});

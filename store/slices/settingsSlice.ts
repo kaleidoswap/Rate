@@ -30,6 +30,8 @@ export interface MindConfig {
   disabledSkills: string[];
   /** User-added MCP connectors (name + URL). */
   mcpServers: { name: string; url: string }[];
+  /** Assistant spends at or above this (sats) also need biometrics/PIN; 0 = always. */
+  confirmAuthThresholdSats: number;
 }
 
 export const DEFAULT_MIND_CONFIG: MindConfig = {
@@ -41,6 +43,7 @@ export const DEFAULT_MIND_CONFIG: MindConfig = {
   memoryEnabled: true,
   disabledSkills: [],
   mcpServers: [],
+  confirmAuthThresholdSats: 50_000,
 };
 
 // Primary denomination the balance/amounts are shown in. Cycled by tapping the

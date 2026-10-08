@@ -34,6 +34,8 @@ export interface HandsFreeHandlers {
 export interface HandsFreeController {
   /** Stop the loop, the mic, and tear down the session. Idempotent. */
   stop(): void;
+  /** Drop mic input while true (e.g. while a confirm sheet is open). */
+  setPaused(paused: boolean): void;
 }
 
 /**
@@ -55,11 +57,12 @@ export async function startHandsFreeVoice(handlers: HandsFreeHandlers): Promise<
   const session = await qvac.openVoiceSession();
   const abort = new AbortController();
   let micGated = false;
+  let paused = false;
   let stopped = false;
 
   // Drop mic frames while the assistant is speaking so it never hears itself.
   const mic: MicStream = startMicStream((pcm) => {
-    if (micGated || stopped) return;
+    if (micGated || paused || stopped) return;
     try {
       session.write(pcm);
     } catch {
@@ -100,6 +103,9 @@ export async function startHandsFreeVoice(handlers: HandsFreeHandlers): Promise<
     .finally(teardown);
 
   return {
+    setPaused(p: boolean) {
+      paused = p;
+    },
     stop() {
       if (stopped) return;
       stopped = true;

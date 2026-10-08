@@ -2,7 +2,9 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import InvoiceQRCode from '../InvoiceQRCode';
+import QRCode from 'react-native-qrcode-svg';
+import InvoiceQRCode, { sharePayable } from '../InvoiceQRCode';
+import { BalanceCard, type BalanceData } from './BalanceCard';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { formatDistance } from '../../services/btcmapService';
 import { leading, type Theme } from '../../theme';
@@ -74,6 +76,52 @@ const MerchantRow: React.FC<{
   </View>
 );
 
+const btcTotal = (b: any): number => Number(b?.total ?? b?.total_sats ?? b?.btc_sats ?? b?.confirmed ?? 0);
+
+/** Balance tools → the chat balance card's shape. */
+export function balanceDataFor(name: string, r: any): BalanceData | null {
+  if (!r || typeof r !== 'object') return null;
+  if (name === 'get_balances' && Array.isArray(r.layers)) return { total_sats: Number(r.total_sats ?? 0), layers: r.layers };
+  const layer = name === 'spark_get_balance' ? 'spark' : name === 'arkade_get_balance' ? 'arkade' : name === 'rln_get_balances' ? 'rln' : null;
+  if (!layer) return null;
+  const sats = btcTotal(layer === 'rln' ? r.btc : r);
+  const assets = layer === 'rln' && Array.isArray(r.assets) ? r.assets.filter((a: any) => a?.ticker && a.ticker !== 'BTC') : [];
+  return { total_sats: sats, layers: [{ layer, btc_sats: sats, assets }] };
+}
+
+const VENUE: Record<string, string> = { kaleidoswap: 'KaleidoSwap', flashnet: 'Flashnet' };
+const amountText = (n: unknown, unit: unknown) => {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '';
+  const u = String(unit ?? '');
+  return u === 'sats' ? `${Math.round(v).toLocaleString()} sats` : `${v.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${u}`;
+};
+const shortHash = (h: string) => (h.length > 24 ? `${h.slice(0, 10)}…${h.slice(-8)}` : h);
+
+/** A receive address or RGB invoice: QR, full value, copy and share. */
+const AddressCard: React.FC<{
+  title: string;
+  value: string;
+  styles: ReturnType<typeof makeStyles>;
+  onCopy: (text: string, label?: string) => void;
+}> = ({ title, value, styles, onCopy }) => (
+  <View style={styles.card}>
+    <Text style={styles.title}>{title}</Text>
+    <View style={styles.qrWrap}>
+      <QRCode value={value} size={168} backgroundColor="#ffffff" color="#000000" />
+    </View>
+    <Text style={styles.addressText} selectable>{value}</Text>
+    <View style={styles.actionRow}>
+      <TouchableOpacity onPress={() => onCopy(value, title)} style={styles.copyButton} accessibilityRole="button" accessibilityLabel={`Copy ${title}`}>
+        <Text style={styles.copyText}>Copy</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={() => { void sharePayable(value, title); }} style={styles.copyButton} accessibilityRole="button" accessibilityLabel={`Share ${title}`}>
+        <Text style={styles.copyText}>Share</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+);
+
 interface FunctionResultCardProps {
   functionCalled: string;
   functionResult: any;
@@ -102,7 +150,105 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
 
   if (!functionResult) return null;
 
+  const balance = balanceDataFor(functionCalled, functionResult);
+  if (balance) return <BalanceCard data={balance} />;
+
   switch (functionCalled) {
+    case 'spark_get_address':
+    case 'arkade_get_address':
+      return functionResult.address ? (
+        <AddressCard
+          title={functionCalled === 'spark_get_address' ? 'Spark address' : 'Arkade address'}
+          value={String(functionResult.address)}
+          styles={styles}
+          onCopy={onCopy}
+        />
+      ) : null;
+
+    case 'rln_create_rgb_invoice':
+      return functionResult.invoice ? (
+        <AddressCard title="RGB invoice" value={String(functionResult.invoice)} styles={styles} onCopy={onCopy} />
+      ) : null;
+
+    case 'kaleidoswap_get_quote':
+      return functionResult.quote_id ? (
+        <View style={styles.card}>
+          <Text style={styles.title}>Swap quote · {VENUE[functionResult.venue] ?? functionResult.venue}</Text>
+          <View style={styles.assetRow}>
+            <Text style={styles.assetTicker}>You send</Text>
+            <Text style={styles.assetBalance}>{amountText(functionResult.send_amount, functionResult.from_asset === 'BTC' ? 'sats' : functionResult.from_asset)}</Text>
+          </View>
+          <View style={styles.assetRow}>
+            <Text style={styles.assetTicker}>You receive</Text>
+            <Text style={styles.assetBalance}>{amountText(functionResult.receive_amount, functionResult.receive_unit)}</Text>
+          </View>
+          {functionResult.fee != null && functionResult.fee_unit ? (
+            <View style={styles.assetRow}>
+              <Text style={styles.assetTicker}>Fee</Text>
+              <Text style={styles.assetBalance}>{amountText(functionResult.fee, functionResult.fee_unit)}</Text>
+            </View>
+          ) : null}
+          <Text style={styles.attribution}>Quotes expire quickly; the confirm sheet re-checks the price.</Text>
+        </View>
+      ) : null;
+
+    case 'execute_swap':
+      return functionResult.atomic_id ? (
+        <View style={styles.card}>
+          <Text style={styles.title}>Swap {functionResult.status === 'completed' ? 'completed' : 'started'} · {VENUE[functionResult.venue] ?? functionResult.venue}</Text>
+          {functionResult.status !== 'completed' && (
+            <Text style={styles.invoiceText}>The swap settles over Lightning; ask for its status in a moment.</Text>
+          )}
+          {!!(functionResult.payment_hash || functionResult.txid) && (
+            <TouchableOpacity
+              onPress={() => onCopy(String(functionResult.payment_hash || functionResult.txid), 'Swap id')}
+              style={styles.copyButton}
+              accessibilityRole="button"
+              accessibilityLabel="Copy swap id"
+            >
+              <Text style={styles.copyText}>Copy id {shortHash(String(functionResult.payment_hash || functionResult.txid))}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : null;
+
+    case 'send_payment':
+    case 'rln_pay_invoice':
+    case 'spark_pay_invoice':
+    case 'rln_send_asset': {
+      if (functionResult.error) {
+        return (
+          <View style={styles.card}>
+            <Text style={styles.errorText}>Payment failed: {String(functionResult.error)}</Text>
+          </View>
+        );
+      }
+      const failed = functionResult.status === 'failed' || functionResult.status === 'cancelled';
+      const pending = functionResult.status === 'pending';
+      const proof = functionResult.preimage || functionResult.paymentHash || functionResult.payment_hash || functionResult.txid;
+      return (
+        <View style={styles.card}>
+          <Text style={failed ? styles.errorText : styles.title}>
+            {failed ? 'Payment failed' : pending ? 'Payment pending' : 'Payment sent'}
+            {Number(functionResult.amount) > 0 && functionCalled !== 'rln_send_asset' ? ` · ${Number(functionResult.amount).toLocaleString()} sats` : ''}
+          </Text>
+          {functionResult.feeKnown !== false && Number(functionResult.fee) > 0 && (
+            <Text style={styles.invoiceText}>Fee {Number(functionResult.fee).toLocaleString()} sats</Text>
+          )}
+          {!!proof && (
+            <TouchableOpacity
+              onPress={() => onCopy(String(proof), functionResult.preimage ? 'Preimage' : 'Payment id')}
+              style={styles.copyButton}
+              accessibilityRole="button"
+              accessibilityLabel={functionResult.preimage ? 'Copy preimage' : 'Copy payment id'}
+            >
+              <Text style={styles.copyText}>{functionResult.preimage ? 'Copy proof of payment' : 'Copy payment id'}</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      );
+    }
+
     case 'pay_lightning_invoice':
       return (
         <View style={styles.card}>
@@ -133,8 +279,7 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
     case 'generate_invoice':
     case 'create_invoice':
     case 'spark_create_invoice':
-    case 'rln_create_ln_invoice':
-    case 'rln_create_rgb_invoice': {
+    case 'rln_create_ln_invoice': {
       const invoice = functionResult.invoice;
       const amount = Number(functionResult.amount_sats ?? functionResult.amount ?? 0);
       return invoice ? (
@@ -143,7 +288,6 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
           amount={amount}
           description={functionResult.description}
           onCopy={() => onCopy(invoice, 'Invoice')}
-          onShare={() => {}}
         />
       ) : (
         <View style={styles.card}>
@@ -347,6 +491,14 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
+    qrWrap: {
+      alignSelf: 'center',
+      padding: theme.spacing[2],
+      backgroundColor: '#ffffff',
+      borderRadius: theme.borderRadius.md,
+      marginBottom: theme.spacing[2],
+    },
+    actionRow: { flexDirection: 'row', gap: theme.spacing[2] },
     card: {
       marginTop: theme.spacing[3],
       padding: theme.spacing[3],

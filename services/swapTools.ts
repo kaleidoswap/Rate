@@ -59,14 +59,177 @@ interface CachedQuote {
   sendAmount: number;
   receiveAmount: number;
   receiveUnit: string;
+  /** The venue's own quote id when it differs from the cache key (after a re-quote). */
+  rfqId?: string;
+  fee?: number;
+  feeUnit?: string;
+  fromLayer?: string;
+  toLayer?: string;
+  /** Venue expiry, ms since epoch. */
+  expiresAt: number;
 }
 const quoteCache = new Map<string, CachedQuote>();
 
+export interface SwapQuoteView {
+  quoteId: string;
+  venue: Venue;
+  from: string;
+  to: string;
+  sendAmount: number;
+  receiveAmount: number;
+  receiveUnit: string;
+  fee?: number;
+  feeUnit?: string;
+  fromLayer?: string;
+  toLayer?: string;
+  expiresAt: number;
+}
+
+function toView(quoteId: string, q: CachedQuote): SwapQuoteView {
+  return {
+    quoteId, venue: q.venue, from: q.fromTicker, to: q.toTicker,
+    sendAmount: q.sendAmount, receiveAmount: q.receiveAmount, receiveUnit: q.receiveUnit,
+    fee: q.fee, feeUnit: q.feeUnit, fromLayer: q.fromLayer, toLayer: q.toLayer,
+    expiresAt: Math.min(q.expiresAt, q.ts + QUOTE_TTL_MS),
+  };
+}
+
 /** What a cached quote swaps, for the confirmation sheet (execute_swap only carries quote_id). */
-export function describeSwapQuote(quoteId: string): { from: string; to: string; sendAmount: number; receiveAmount: number; receiveUnit: string; venue: Venue } | null {
+export function describeSwapQuote(quoteId: string): SwapQuoteView | null {
   const q = quoteCache.get(quoteId);
-  if (!q) return null;
-  return { from: q.fromTicker, to: q.toTicker, sendAmount: q.sendAmount, receiveAmount: q.receiveAmount, receiveUnit: q.receiveUnit, venue: q.venue };
+  return q ? toView(quoteId, q) : null;
+}
+
+/** Re-quote when less than this is left before expiry; a model step can take longer. */
+export const REQUOTE_MARGIN_MS = 20_000;
+/** Largest drop in the received amount accepted without asking the user again. */
+export const PRICE_TOLERANCE = 0.01;
+
+export function quoteNeedsRefresh(q: Pick<SwapQuoteView, 'expiresAt'>, now = Date.now(), marginMs = REQUOTE_MARGIN_MS): boolean {
+  return q.expiresAt - now < marginMs;
+}
+
+/** Fractional drop in what the user receives (positive = worse for the user). */
+export function priceMove(previousReceive: number, nextReceive: number): number {
+  if (!(previousReceive > 0)) return 0;
+  return (previousReceive - nextReceive) / previousReceive;
+}
+
+export interface SwapConfirmCheck {
+  quote: SwapQuoteView;
+  refreshed: boolean;
+  /** Drop vs `shownReceive` (fraction). */
+  move: number;
+  /** The new terms are worse than the tolerance: show them and ask again. */
+  needsReapproval: boolean;
+}
+
+/**
+ * Called by the confirm sheet: keeps the quote behind `quoteId` fresh enough to
+ * survive until execution. A stale quote is replaced (same cache key, new venue
+ * terms) and compared with the amount the user was shown.
+ */
+export async function refreshSwapQuoteForConfirm(
+  quoteId: string,
+  shownReceive?: number,
+  opts: { now?: number; marginMs?: number; tolerance?: number } = {},
+): Promise<SwapConfirmCheck> {
+  const q = quoteCache.get(quoteId);
+  if (!q) throw new Error('That quote is no longer available — please get a fresh quote first.');
+  const now = opts.now ?? Date.now();
+  const tolerance = opts.tolerance ?? PRICE_TOLERANCE;
+  const reference = shownReceive ?? q.receiveAmount;
+  const current = toView(quoteId, q);
+  if (!quoteNeedsRefresh(current, now, opts.marginMs)) {
+    const move = priceMove(reference, q.receiveAmount);
+    return { quote: current, refreshed: false, move, needsReapproval: move > tolerance };
+  }
+  const { id: venueId, quote: next } = await fetchQuote(q.fromTicker, q.toTicker, q.sendAmount);
+  quoteCache.set(quoteId, { ...next, rfqId: next.venue === 'kaleidoswap' ? venueId : undefined });
+  const view = toView(quoteId, quoteCache.get(quoteId)!);
+  const move = priceMove(reference, view.receiveAmount);
+  log('re-quoted for confirm', { quoteId, venueId, move });
+  return { quote: view, refreshed: true, move, needsReapproval: move > tolerance };
+}
+
+function makerFee(resp: any, fromTicker: string, toTicker: string, fromAssetId: string): { fee?: number; feeUnit?: string } {
+  const raw = Number(resp?.fee?.final_fee);
+  if (!Number.isFinite(raw)) return {};
+  const precision = Number(resp?.fee?.fee_asset_precision ?? 0);
+  const asset = String(resp?.fee?.fee_asset ?? '');
+  const display = raw / Math.pow(10, Number.isFinite(precision) ? precision : 0);
+  if (isBtcTicker(asset)) return { fee: Math.round(display * 1e8), feeUnit: 'sats' };
+  return { fee: display, feeUnit: asset === fromAssetId ? fromTicker : toTicker };
+}
+
+/** Quote `amt` (display units) of `from` → `to` on whichever venue lists the pair. */
+async function fetchQuote(from: string, to: string, amt: number): Promise<{ id: string; quote: CachedQuote; price?: unknown }> {
+  const pairs = await loadAllPairs();
+  const pair = findPair(pairs, from, to);
+  if (!pair) throw new Error(`No swap pair for ${from}/${to} on a connected venue.`);
+  const fromA = getPairAsset(pair, from);
+  const toA = getPairAsset(pair, to);
+  if (!fromA || !toA) throw new Error(`Couldn't resolve the assets for ${from}/${to}.`);
+  const fromAssetId = getAssetId(fromA);
+  const toAssetId = getAssetId(toA);
+  const now = Date.now();
+
+  // Flashnet (Spark AMM): BTC settles in sats; assets in raw smallest units.
+  if (isFlashnetPair(pair)) {
+    const client = flashnet();
+    const poolId = pair.poolId || flashnetClientManager.getPoolId() || undefined;
+    const rawFromAmount = isBtcTicker(from) ? Math.round(amt) : Math.round(amt * Math.pow(10, fromA.precision));
+    const sim: any = await client.simulateSwap({
+      poolId,
+      assetInAddress: fromAssetId,
+      assetOutAddress: toAssetId,
+      amountIn: String(rawFromAmount),
+      maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
+    });
+    const rawToAmount = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
+    const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
+    const id = `flashnet-${now}`;
+    log('flashnet quote', { id, from, to, amt, rawToAmount });
+    return {
+      id,
+      price: sim?.executionPrice,
+      quote: {
+        venue: 'flashnet', fromAssetId, toAssetId, rawFromAmount, rawToAmount, poolId, ts: now,
+        fromTicker: from, toTicker: to, sendAmount: amt,
+        receiveAmount: isBtcTicker(to) ? rawToAmount : rawToAmount / Math.pow(10, toA.precision),
+        receiveUnit: isBtcTicker(to) ? 'sats' : to,
+        fee: isBtcTicker(from) ? rawFee : rawFee / Math.pow(10, fromA.precision),
+        feeUnit: isBtcTicker(from) ? 'sats' : from,
+        fromLayer: 'Spark', toLayer: 'Spark',
+        expiresAt: now + 30_000,
+      },
+    };
+  }
+
+  // KaleidoSwap maker (RGB/RLN): BTC quoted in msats.
+  const rawFromAmount = isBtcTicker(from) ? Math.round(amt * MSATS_PER_SAT) : Math.round(amt * Math.pow(10, fromA.precision));
+  const { fromLayer, toLayer } = getQuoteLayers(pair, fromAssetId, toAssetId);
+  const resp: any = await maker().getQuote({
+    from_asset: { asset_id: fromAssetId, layer: fromLayer, amount: rawFromAmount },
+    to_asset: { asset_id: toAssetId, layer: toLayer },
+  });
+  const rfqId = resp?.rfq_id;
+  if (!rfqId) throw new Error('The maker did not return a quote — try again.');
+  const rawToAmount = Number(resp?.to_asset?.amount ?? 0);
+  const rawFromQuoted = Number(resp?.from_asset?.amount ?? rawFromAmount);
+  const expiresSec = Number(resp?.expires_at);
+  const quote: CachedQuote = {
+    venue: 'kaleidoswap', fromAssetId, toAssetId, rawFromAmount: rawFromQuoted, rawToAmount, ts: now,
+    fromTicker: from, toTicker: to, sendAmount: amt,
+    receiveAmount: isBtcTicker(to) ? rawToAmount / MSATS_PER_SAT : rawToAmount / Math.pow(10, toA.precision),
+    receiveUnit: isBtcTicker(to) ? 'sats' : to,
+    ...makerFee(resp, from, to, fromAssetId),
+    fromLayer: String(fromLayer ?? ''), toLayer: String(toLayer ?? ''),
+    expiresAt: Number.isFinite(expiresSec) && expiresSec > 0 ? expiresSec * 1000 : now + QUOTE_TTL_MS,
+  };
+  await assertChannelCapacity(quote);
+  log('maker quote', { rfqId, from, to, amt, rawToAmount });
+  return { id: rfqId, quote, price: resp?.price };
 }
 
 /** Throws when the node's channels can't carry this maker swap, before anything is locked. */
@@ -173,83 +336,20 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     const amt = Number(amount);
     if (!from || !to) throw new Error('from_asset and to_asset are required.');
     if (!amt || Number.isNaN(amt) || amt <= 0) throw new Error('A positive amount is required.');
-
-    const pairs = await loadAllPairs();
-    const pair = findPair(pairs, from, to);
-    if (!pair) throw new Error(`No swap pair for ${from}/${to} on a connected venue.`);
-    const fromA = getPairAsset(pair, from);
-    const toA = getPairAsset(pair, to);
-    if (!fromA || !toA) throw new Error(`Couldn't resolve the assets for ${from}/${to}.`);
-    const fromAssetId = getAssetId(fromA);
-    const toAssetId = getAssetId(toA);
-
-    // ── Flashnet (Spark AMM): BTC settles in SATS; assets in raw smallest units.
-    if (isFlashnetPair(pair)) {
-      const client = flashnet();
-      const poolId = pair.poolId || flashnetClientManager.getPoolId() || undefined;
-      const rawFromAmount = isBtcTicker(from) ? Math.round(amt) : Math.round(amt * Math.pow(10, fromA.precision));
-      const sim: any = await client.simulateSwap({
-        poolId,
-        assetInAddress: fromAssetId,
-        assetOutAddress: toAssetId,
-        amountIn: String(rawFromAmount),
-        maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
-      });
-      const rawToAmount = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
-      const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
-      const quoteId = `flashnet-${Date.now()}`;
-      const receiveAmount = isBtcTicker(to) ? rawToAmount : rawToAmount / Math.pow(10, toA.precision);
-      const receiveUnit = isBtcTicker(to) ? 'sats' : to;
-      quoteCache.set(quoteId, {
-        venue: 'flashnet', fromAssetId, toAssetId, rawFromAmount, rawToAmount, poolId, ts: Date.now(),
-        fromTicker: from, toTicker: to, sendAmount: amt, receiveAmount, receiveUnit,
-      });
-      log('flashnet quote', { quoteId, from, to, amt, rawToAmount });
-      return {
-        quote_id: quoteId,
-        venue: 'flashnet',
-        from_asset: from,
-        to_asset: to,
-        send_amount: amt,
-        receive_amount: receiveAmount,
-        receive_unit: receiveUnit,
-        price: sim?.executionPrice,
-        fee: isBtcTicker(from) ? rawFee : rawFee / Math.pow(10, fromA.precision),
-        expires_at: Math.floor(Date.now() / 1000) + 30,
-      };
-    }
-
-    // ── KaleidoSwap maker (RGB/RLN): BTC quoted in MSATS (×1000).
-    const rawFromAmount = isBtcTicker(from) ? Math.round(amt * MSATS_PER_SAT) : Math.round(amt * Math.pow(10, fromA.precision));
-    const { fromLayer, toLayer } = getQuoteLayers(pair, fromAssetId, toAssetId);
-    const resp: any = await maker().getQuote({
-      from_asset: { asset_id: fromAssetId, layer: fromLayer, amount: rawFromAmount },
-      to_asset: { asset_id: toAssetId, layer: toLayer },
-    });
-    const rfqId = resp?.rfq_id;
-    if (!rfqId) throw new Error('The maker did not return a quote — try again.');
-    const rawToAmount = Number(resp?.to_asset?.amount ?? 0);
-    const rawFromQuoted = Number(resp?.from_asset?.amount ?? rawFromAmount);
-    const receiveAmount = isBtcTicker(to) ? rawToAmount / MSATS_PER_SAT : rawToAmount / Math.pow(10, toA.precision);
-    const receiveUnit = isBtcTicker(to) ? 'sats' : to;
-    const cached: CachedQuote = {
-      venue: 'kaleidoswap', fromAssetId, toAssetId, rawFromAmount: rawFromQuoted, rawToAmount, ts: Date.now(),
-      fromTicker: from, toTicker: to, sendAmount: amt, receiveAmount, receiveUnit,
-    };
-    await assertChannelCapacity(cached);
-    quoteCache.set(rfqId, cached);
-    log('maker quote', { rfqId, from, to, amt, rawToAmount });
+    const { id, quote, price } = await fetchQuote(from, to, amt);
+    quoteCache.set(id, quote);
     return {
-      quote_id: rfqId,
-      venue: 'kaleidoswap',
+      quote_id: id,
+      venue: quote.venue,
       from_asset: from,
       to_asset: to,
       send_amount: amt,
-      receive_amount: receiveAmount,
-      receive_unit: receiveUnit,
-      price: resp?.price,
-      fee: resp?.fee?.final_fee,
-      expires_at: resp?.expires_at,
+      receive_amount: quote.receiveAmount,
+      receive_unit: quote.receiveUnit,
+      price,
+      fee: quote.fee,
+      fee_unit: quote.feeUnit,
+      expires_at: Math.floor(quote.expiresAt / 1000),
     };
   },
 
@@ -266,7 +366,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     const id = String(quote_id ?? '');
     const q = quoteCache.get(id);
     if (!q) throw new Error('That quote is no longer available — please get a fresh quote first.');
-    if (Date.now() - q.ts > QUOTE_TTL_MS) {
+    if (Date.now() - q.ts > QUOTE_TTL_MS || Date.now() >= q.expiresAt) {
       quoteCache.delete(id);
       throw new Error('That quote expired — please re-quote before swapping.');
     }
@@ -288,7 +388,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     await assertChannelCapacity(q);
     // KaleidoSwap atomic: init → verify terms → whitelist → taker → execute.
     const init: any = await maker().initSwap({
-      rfq_id: id,
+      rfq_id: q.rfqId ?? id,
       from_asset: q.fromAssetId,
       from_amount: q.rawFromAmount,
       to_asset: q.toAssetId,

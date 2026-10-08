@@ -51,6 +51,12 @@ function lightningAdapter(): any {
   if (!a) throw new Error('No Lightning wallet is connected.');
   return a;
 }
+/** Which wallet pays Lightning sends, for the confirm sheet. */
+export function lightningRailLabel(): string {
+  if (adapter('SPARK')) return 'Lightning (Spark wallet)';
+  if (adapter('RGB_LN')) return 'Lightning (RGB node)';
+  return 'Lightning';
+}
 function connectedLayers(): WalletLayer[] {
   return (Object.keys(LAYER_PROTO) as (keyof typeof LAYER_PROTO)[]).filter((l) => adapter(LAYER_PROTO[l]));
 }
@@ -82,17 +88,29 @@ function contacts(): any[] {
 }
 /** Lowercase + strip punctuation so "Walter?" / "walter." match "Walter". */
 const normName = (s: unknown) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').trim();
-function findContact(name: string): any | undefined {
+/**
+ * Strict contact match: the whole name, or whole words of it ("Bob" matches
+ * "Bob Smith", "Al" does not match "Walter"). Never a substring.
+ */
+export function matchContacts<T extends { name?: unknown }>(list: T[], name: unknown): T[] {
   const q = normName(name);
-  if (!q) return undefined;
-  const list = contacts();
-  return (
-    list.find((c) => normName(c?.name) === q) ??
-    list.find((c) => {
-      const n = normName(c?.name);
-      return !!n && (n.includes(q) || q.includes(n));
-    })
-  );
+  if (!q) return [];
+  const exact = list.filter((c) => normName(c?.name) === q);
+  if (exact.length) return exact;
+  const words = q.split(/\s+/);
+  return list.filter((c) => {
+    const tokens = normName(c?.name).split(/\s+/).filter(Boolean);
+    return tokens.length > 0 && words.every((w) => tokens.includes(w));
+  });
+}
+/** The one contact for `name`; throws when none or several match (never guess who to pay). */
+export function resolveContactStrict(name: unknown): any {
+  const matches = matchContacts(contacts(), name);
+  if (matches.length === 0) throw noContactError(String(name));
+  if (matches.length > 1) {
+    throw new Error(`There are ${matches.length} contacts matching "${name}" (${matches.map((c) => c.name).join(', ')}) — which one?`);
+  }
+  return matches[0];
 }
 /** "Not found" error that lists the real contacts so the agent can self-correct. */
 function noContactError(name: string): Error {
@@ -120,6 +138,35 @@ async function contactLnAddress(c: any): Promise<string | undefined> {
 const looksLikeDestination = (s: string) => /^(ln(bc|tb|bcrt)|bc1|tb1|[a-z0-9._-]+@)/i.test(s.trim());
 const isLightningAddress = (s: string) => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.trim());
 const isOnchainAddress = (s: string) => /^(bc1|tb1|bcrt1)/i.test(s.trim());
+
+export interface SendPreview {
+  /** Contact name when `to` named a contact. */
+  recipientName?: string;
+  /** What gets paid: a Lightning address, invoice or on-chain address. */
+  destination: string;
+  kind: 'lightning_address' | 'lightning_invoice' | 'onchain' | 'other';
+}
+
+/** Resolve send_payment's `to` the same way the handler does, for the confirm sheet. */
+export async function previewSendPayment(to: unknown): Promise<SendPreview> {
+  const raw = String(to ?? '').trim();
+  if (!raw) throw new Error('A destination (invoice, address, or contact) is required.');
+  let destination = raw;
+  let recipientName: string | undefined;
+  if (!looksLikeDestination(raw)) {
+    const c = resolveContactStrict(raw);
+    const ln = await contactLnAddress(c);
+    if (!ln) throw new Error(`"${c.name ?? raw}" doesn't have a Lightning address set.`);
+    destination = ln;
+    recipientName = c.name;
+  }
+  const kind: SendPreview['kind'] = isLightningAddress(destination)
+    ? 'lightning_address'
+    : /^ln(bc|tb|bcrt)/i.test(destination)
+      ? 'lightning_invoice'
+      : isOnchainAddress(destination) ? 'onchain' : 'other';
+  return { recipientName, destination, kind };
+}
 
 /** Contract tool → handler. Only the safe, well-understood subset for now;
  *  the rest are bound via `allowMissing` (i.e. simply not exposed yet). */
@@ -235,17 +282,8 @@ const HANDLERS: Record<string, WalletHandler> = {
     };
   },
   resolve_contact: async ({ name }) => {
-    const q = normName(name);
-    const list = contacts();
-    log('resolve_contact', { name, total: list.length });
-    const exact = list.filter((c) => normName(c?.name) === q);
-    const matches = exact.length ? exact : list.filter((c) => q && normName(c?.name).includes(q));
-    if (matches.length === 0) throw noContactError(String(name));
-    // Disambiguate duplicates — never guess who to pay.
-    if (matches.length > 1) {
-      throw new Error(`There are ${matches.length} contacts matching "${name}" (${matches.map((c) => c.name).join(', ')}) — which one?`);
-    }
-    const c = matches[0];
+    log('resolve_contact', { name });
+    const c = resolveContactStrict(name);
     const ln = await contactLnAddress(c);
     if (!ln) throw new Error(`"${c.name}" doesn't have a Lightning address set.`);
     return { name: c.name, ln_address: ln, npub: c.npub };
@@ -265,18 +303,8 @@ const HANDLERS: Record<string, WalletHandler> = {
     throw new Error(`To send ${amount ?? ''} ${String(asset).toUpperCase()} to "${to}", ask them for an RGB invoice and paste it here.`);
   },
   send_payment: async ({ to, amount_sats }) => {
-    let target = String(to ?? '').trim();
     const sats = amount_sats != null ? Number(amount_sats) : undefined;
-    // Contact name → its payable destination. Resolves a Nostr contact's
-    // Lightning address live when it wasn't pre-cached (the voice path).
-    if (target && !looksLikeDestination(target)) {
-      const c = findContact(target);
-      if (!c) throw noContactError(String(to));
-      const ln = await contactLnAddress(c);
-      if (!ln) throw new Error(`"${c.name ?? to}" doesn't have a Lightning address set.`);
-      target = ln;
-    }
-    if (!target) throw new Error('A destination (invoice, address, or contact) is required.');
+    let { destination: target } = await previewSendPayment(to);
     // Lightning address (user@domain) → resolve to a BOLT11 invoice via LNURL-pay.
     if (isLightningAddress(target)) {
       if (!sats) throw new Error('I need an amount in sats to pay a Lightning address.');

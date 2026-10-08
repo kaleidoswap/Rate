@@ -5,7 +5,7 @@
 // actually read balances and send sats, so the routing, contact resolution,
 // and guardrails are exercised against a mocked protocolManager.
 
-import { buildWalletToolSource } from './walletTools';
+import { buildWalletToolSource, matchContacts, previewSendPayment } from './walletTools';
 import { protocolManager } from './protocols';
 import { getStore } from '../store/storeProvider';
 import NostrService from './NostrService';
@@ -385,5 +385,37 @@ describe('create_invoice', () => {
 
     const r: any = await source().execute('create_invoice', { asset: 'BTC', amount: 100 });
     expect(r.invoice).toBe(expected);
+  });
+});
+
+describe('strict contact matching', () => {
+  const people = [{ name: 'Walter' }, { name: 'Alice Rossi' }, { name: 'Bob' }, { name: 'Bob Smith' }];
+
+  it('matches the whole name or whole words, never a substring', () => {
+    expect(matchContacts(people, 'Al')).toEqual([]);
+    expect(matchContacts(people, 'alt')).toEqual([]);
+    expect(matchContacts(people, 'walter.')).toEqual([{ name: 'Walter' }]);
+    expect(matchContacts(people, 'alice')).toEqual([{ name: 'Alice Rossi' }]);
+    expect(matchContacts(people, 'rossi alice')).toEqual([{ name: 'Alice Rossi' }]);
+  });
+
+  it('prefers an exact full-name match over word matches', () => {
+    expect(matchContacts(people, 'bob')).toEqual([{ name: 'Bob' }]);
+  });
+
+  it('send_payment refuses a partial name instead of paying the wrong person', async () => {
+    const spark = makeAdapter();
+    setAdapters({ SPARK: spark });
+    setStore({ contacts: [{ name: 'Walter', lightning_address: 'walter@ln.tips' }] });
+    await expect(source().execute('send_payment', { to: 'Al', amount_sats: 100 })).rejects.toThrow('No contact named "Al"');
+    expect(spark.sendPayment).not.toHaveBeenCalled();
+  });
+
+  it('previewSendPayment shows the matched contact and its destination', async () => {
+    setStore({ contacts: [{ name: 'Walter', lightning_address: 'walter@ln.tips' }] });
+    await expect(previewSendPayment('walter')).resolves.toEqual({
+      recipientName: 'Walter', destination: 'walter@ln.tips', kind: 'lightning_address',
+    });
+    await expect(previewSendPayment('lnbc10u1xyz')).resolves.toMatchObject({ destination: 'lnbc10u1xyz', kind: 'lightning_invoice' });
   });
 });

@@ -13,7 +13,9 @@
 // real findPair/getAssetId/getQuoteLayers/validateSwapString helpers. On-device
 // end-to-end (a funded node executing a real swap) still needs a device test.
 
-import { buildSwapToolSource, describeSwapQuote } from './swapTools';
+import { buildSwapToolSource, describeSwapQuote, refreshSwapQuoteForConfirm, quoteNeedsRefresh, priceMove } from './swapTools';
+
+const inAMinute = () => Math.floor(Date.now() / 1000) + 60;
 import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
 import { normalizeMakerPairs, buildFlashnetPairs } from '../utils/swap-model';
 
@@ -62,7 +64,7 @@ describe('swap tools — KaleidoSwap maker venue', () => {
         rfq_id: 'rfq1',
         from_asset: { asset_id: 'btc', amount: 100_000_000 }, // 100k sats → 100M msat
         to_asset: { asset_id: 'rgb:usdt', amount: 73_000_000 }, // 73 USDT (p6)
-        price: 73000, fee: { final_fee: 12 }, expires_at: 1234,
+        price: 73000, fee: { final_fee: 12 }, expires_at: inAMinute(),
       })),
       initSwap: jest.fn(async () => ({ swapstring: '100000000/btc/73000000/rgb:usdt/x/hash1', payment_hash: 'hash1' })),
       executeSwap: jest.fn(async () => ({})),
@@ -168,7 +170,7 @@ describe('swap tools — channel capacity preflight', () => {
         rfq_id: 'rfq1',
         from_asset: { asset_id: 'btc', amount: 100_000_000 },
         to_asset: { asset_id: 'rgb:usdt', amount: 73_000_000 },
-        price: 73000, fee: { final_fee: 12 }, expires_at: 1234,
+        price: 73000, fee: { final_fee: 12 }, expires_at: inAMinute(),
       })),
       initSwap: jest.fn(async () => ({ swapstring: '100000000/btc/73000000/rgb:usdt/x/hash1', payment_hash: 'hash1' })),
       executeSwap: jest.fn(async () => ({})),
@@ -197,7 +199,7 @@ describe('swap tools — channel capacity preflight', () => {
       rfq_id: 'rfq-short',
       from_asset: { asset_id: 'btc', amount: 100_000_000 },
       to_asset: { asset_id: 'rgb:usdt', amount: 73_000_000 },
-      expires_at: 1234,
+      expires_at: inAMinute(),
     });
     adapter.listChannels.mockResolvedValue([btcChannel(101_000, 0), usdtChannel(0, 100_000_000)]);
     await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 }))
@@ -216,7 +218,7 @@ describe('swap tools — channel capacity preflight', () => {
       rfq_id: 'rfq2',
       from_asset: { asset_id: 'rgb:usdt', amount: 73_000_000 },
       to_asset: { asset_id: 'btc', amount: 100_000_000 },
-      expires_at: 1234,
+      expires_at: inAMinute(),
     });
     adapter.listChannels.mockResolvedValue([btcChannel(0, 50_000), usdtChannel(100_000_000, 0)]);
     await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'USDT', to_asset: 'BTC', amount: 73 }))
@@ -305,5 +307,90 @@ describe('swap tools — no venue connected', () => {
     const source = buildSwapToolSource();
     await expect(source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 1000 }))
       .rejects.toThrow(/connect your rgb lightning or spark/i);
+  });
+});
+
+describe('swap confirm re-quote', () => {
+  let maker: any;
+  let source: ReturnType<typeof buildSwapToolSource>;
+  const quoteResp = (rfq: string, toRaw: number, expiresSec: number) => ({
+    rfq_id: rfq,
+    from_asset: { asset_id: 'btc', amount: 100_000_000 },
+    to_asset: { asset_id: 'rgb:usdt', amount: toRaw },
+    fee: { final_fee: 1250, fee_asset: 'BTC', fee_asset_precision: 8 },
+    expires_at: expiresSec,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mNormalize.mockReturnValue([MAKER_PAIR]);
+    mBuildFlash.mockReturnValue([]);
+    maker = {
+      listPairs: jest.fn(async () => ({})),
+      getQuote: jest.fn(),
+      initSwap: jest.fn(async () => ({ swapstring: '100000000/btc/72500000/rgb:usdt/x/hash2', payment_hash: 'hash2' })),
+      executeSwap: jest.fn(async () => ({})),
+    };
+    const rln = { whitelistSwap: jest.fn(async () => undefined), getTakerPubkey: jest.fn(async () => '02taker') };
+    mManager.getAdapterIfAvailable.mockImplementation((p: any) => (p === 'RGB_LN' ? ({ isConnected: () => true } as any) : null));
+    mKaleido.isInitialized.mockReturnValue(true);
+    mKaleido.getClient.mockReturnValue({ maker, rln } as any);
+    mFlash.isInitialized.mockReturnValue(false);
+    source = buildSwapToolSource();
+  });
+
+  it('pure helpers: refresh inside the margin, move is the drop in what you receive', () => {
+    expect(quoteNeedsRefresh({ expiresAt: 100_000 }, 70_000, 20_000)).toBe(false);
+    expect(quoteNeedsRefresh({ expiresAt: 100_000 }, 85_000, 20_000)).toBe(true);
+    expect(priceMove(100, 99)).toBeCloseTo(0.01);
+    expect(priceMove(100, 101)).toBeLessThan(0);
+    expect(priceMove(0, 5)).toBe(0);
+  });
+
+  it('exposes fee, layers and expiry for the readback', async () => {
+    const exp = inAMinute();
+    maker.getQuote.mockResolvedValueOnce(quoteResp('rfqA', 73_000_000, exp));
+    const q: any = await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    expect(q.fee).toBe(1250);
+    expect(q.fee_unit).toBe('sats');
+    expect(describeSwapQuote('rfqA')).toMatchObject({ fee: 1250, feeUnit: 'sats', fromLayer: 'BTC_LN', toLayer: 'RGB_LN', expiresAt: exp * 1000 });
+  });
+
+  it('keeps a fresh quote as is', async () => {
+    maker.getQuote.mockResolvedValueOnce(quoteResp('rfqB', 73_000_000, inAMinute()));
+    await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    const r = await refreshSwapQuoteForConfirm('rfqB', 73);
+    expect(r.refreshed).toBe(false);
+    expect(r.needsReapproval).toBe(false);
+    expect(maker.getQuote).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-quotes a quote close to expiry and accepts a move within tolerance', async () => {
+    const soon = Math.floor(Date.now() / 1000) + 5;
+    maker.getQuote
+      .mockResolvedValueOnce(quoteResp('rfqC', 73_000_000, soon))
+      .mockResolvedValueOnce(quoteResp('rfqC2', 72_500_000, inAMinute()));
+    await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    const r = await refreshSwapQuoteForConfirm('rfqC', 73);
+    expect(r.refreshed).toBe(true);
+    expect(r.quote.quoteId).toBe('rfqC');
+    expect(r.quote.receiveAmount).toBe(72.5);
+    expect(r.needsReapproval).toBe(false);
+
+    await source.execute('execute_swap', { quote_id: 'rfqC' });
+    expect(maker.initSwap).toHaveBeenCalledWith(expect.objectContaining({ rfq_id: 'rfqC2', to_amount: 72_500_000 }));
+  });
+
+  it('asks again when the fresh price is worse than the tolerance', async () => {
+    const soon = Math.floor(Date.now() / 1000) + 5;
+    maker.getQuote
+      .mockResolvedValueOnce(quoteResp('rfqD', 73_000_000, soon))
+      .mockResolvedValueOnce(quoteResp('rfqD2', 71_000_000, inAMinute()));
+    await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    const r = await refreshSwapQuoteForConfirm('rfqD', 73);
+    expect(r.move).toBeGreaterThan(0.01);
+    expect(r.needsReapproval).toBe(true);
+    const again = await refreshSwapQuoteForConfirm('rfqD', r.quote.receiveAmount);
+    expect(again.needsReapproval).toBe(false);
   });
 });
