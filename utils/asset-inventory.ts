@@ -56,6 +56,8 @@ export interface InventoryAsset {
   balanceDetail?: Partial<AssetBalanceDetail>;
   /** Bitcoin: sats per network, as the balance card's breakdown shows them. */
   networks?: Partial<Record<BtcNetwork, number>>;
+  /** Bitcoin: confirmed sats on every network, test networks included (what Send, Receive and Swap can move). */
+  spendable?: number;
   icon?: string;
   issued_supply?: number;
 }
@@ -64,6 +66,8 @@ export interface InventoryBtcInput {
   /** Available bitcoin in sats (the dashboard's summary.available). */
   available: number;
   networks?: Partial<Record<BtcNetwork, number>>;
+  /** Confirmed sats on every network, test networks included. */
+  spendable?: number;
 }
 
 const num = (v: unknown): number => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -153,6 +157,7 @@ export function btcInventoryEntry(btc: InventoryBtcInput | null | undefined): In
     isNativeBtc: true,
     balance: Math.max(0, num(btc?.available)),
     networks: btc?.networks ?? {},
+    spendable: Math.max(0, num(btc?.spendable ?? btc?.available)),
   };
 }
 
@@ -197,7 +202,9 @@ export function btcInputFromWallet(btcBalance: {
   summary?: { available: number }; networks?: Partial<Record<BtcNetwork, number>>;
 } | null | undefined): InventoryBtcInput | null {
   if (!btcBalance) return null;
+  const spendable = num(btcBalance.vanilla?.spendable) + num(btcBalance.colored?.spendable);
   return {
+    spendable,
     available: btcBalance.summary?.available ?? (num(btcBalance.vanilla?.spendable) + num(btcBalance.colored?.spendable)),
     networks: btcBalance.networks,
   };

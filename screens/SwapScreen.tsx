@@ -342,7 +342,7 @@ export default function SwapScreen({ navigation }: Props) {
         // Balance is in the active BTC unit (sats by default) so the MAX
         // button and the amount field agree with how the input is parsed.
         // assetByTicker narrows it to the account the pair's venue spends from.
-        balance: satsToBtcDisplay(btc.balance),
+        balance: satsToBtcDisplay(btc.spendable ?? btc.balance),
         precision: bitcoinUnit === 'sats' ? 0 : 8,
       });
       for (const asset of tokens) {

@@ -186,7 +186,7 @@ export default function ReceiveScreen({ navigation }: Props) {
   // Bitcoin as the asset pickers list it.
   const btcAsset = (): Asset => {
     const btc = inventoryBtc(inventory);
-    return { asset_id: btc.asset_id, ticker: btc.ticker, name: btc.name, isRGB: false, balance: btc.balance };
+    return { asset_id: btc.asset_id, ticker: btc.ticker, name: btc.name, isRGB: false, balance: btc.spendable ?? btc.balance };
   };
   
 

@@ -125,7 +125,13 @@ describe('the redux selector', () => {
     expect(btcInputFromWallet(null)).toBeNull();
     expect(btcInputFromWallet({ vanilla: { spendable: 7 }, colored: { spendable: 1 } })?.available).toBe(8);
     expect(btcInputFromWallet({ vanilla: { spendable: 7 }, summary: { available: 3 }, networks: { spark: 3 } }))
-      .toEqual({ available: 3, networks: { spark: 3 } });
+      .toEqual({ available: 3, spendable: 7, networks: { spark: 3 } });
+  });
+
+  it('keeps test-network bitcoin spendable for Swap and Receive while the total stays mainnet', () => {
+    const [btc] = buildAssetInventory({ btc: btcInputFromWallet({ vanilla: { spendable: 5000 }, summary: { available: 0 } }), assets: [] });
+    expect(btc.balance).toBe(0);
+    expect(btc.spendable).toBe(5000);
   });
 
   it('returns the same list until the balances or the assets change', () => {
