@@ -1,5 +1,5 @@
-import { kaleidoClientManager, flashnetClientManager } from './protocols';
-import { SwapPair, getAssetId, getQuoteLayers, isFlashnetPair, isBtcTicker, DEFAULT_FLASHNET_SLIPPAGE_BPS } from '../utils/swap-model';
+import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
+import { SwapPair, getAssetId, getQuoteLayers, isFlashnetPair, isBtcTicker, swapChannelShortfall, DEFAULT_FLASHNET_SLIPPAGE_BPS, RLN_HTLC_MIN_MSAT } from '../utils/swap-model';
 import type { SwapQuote } from '../store/slices/swapSlice';
 
 const quoteClients = new WeakMap<SwapQuote, unknown>();
@@ -75,4 +75,26 @@ export async function fetchSwapOffers(pairs: SwapPair[], from: string, to: strin
     finally { if (timer) clearTimeout(timer); }
     return offer;
   }));
+}
+/** The RGB node's channels and HTLC minimum. `channels` is undefined when no node is connected or they can't be read. */
+export interface ChannelLiquidity { channels?: unknown[]; htlcMinMsat: number }
+export async function loadChannelLiquidity(): Promise<ChannelLiquidity> {
+  const a: any = protocolManager.getAdapterIfAvailable('RGB_LN');
+  if (typeof a?.listChannels !== 'function' || a.isConnected?.() === false) return { htlcMinMsat: RLN_HTLC_MIN_MSAT };
+  const [channels, info] = await Promise.all([
+    a.listChannels().catch(() => undefined),
+    typeof a.getNodeInfo === 'function' ? a.getNodeInfo().catch(() => undefined) : undefined,
+  ]);
+  const minMsat = Number(info?.rgb_htlc_min_msat);
+  return { channels: Array.isArray(channels) ? channels : undefined, htlcMinMsat: Number.isFinite(minMsat) && minMsat > 0 ? minMsat : RLN_HTLC_MIN_MSAT };
+}
+/** Why the node's channels can't carry this maker quote, or null (Flashnet, unknown channels, or enough liquidity). */
+export function quoteChannelShortfall(quote: SwapQuote, liquidity: ChannelLiquidity, label = (amount: number, ticker: string) => `${amount} ${ticker}`): string | null {
+  if (quote.venue === 'flashnet' || !liquidity.channels) return null;
+  if (!quote.from_asset_id || !quote.to_asset_id || quote.from_amount_raw == null || quote.to_amount_raw == null) return null;
+  return swapChannelShortfall(
+    { assetId: quote.from_asset_id, ticker: quote.from_asset, raw: quote.from_amount_raw, label: label(quote.from_amount, quote.from_asset) },
+    { assetId: quote.to_asset_id, ticker: quote.to_asset, raw: quote.to_amount_raw, label: label(quote.to_amount, quote.to_asset) },
+    liquidity.channels, liquidity.htlcMinMsat,
+  );
 }

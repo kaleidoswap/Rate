@@ -1,4 +1,4 @@
-import { formatSwapPrice, swapRateLabel } from './swap-model';
+import { formatSwapPrice, swapRateLabel, maxSwapSendRaw } from './swap-model';
 
 describe('formatSwapPrice', () => {
   it('groups thousands with two decimals from 1 up', () => {
@@ -42,5 +42,37 @@ describe('swapRateLabel', () => {
 
   it('shows a dash without amounts', () => {
     expect(swapRateLabel({ from_asset: 'BTC', to_asset: 'USDT', from_amount: 0, to_amount: 1 }, 'sats')).toBe('—');
+  });
+});
+
+describe('maxSwapSendRaw', () => {
+  const btc = { assetId: 'btc', ticker: 'BTC' };
+  const usdt = { assetId: 'rgb:usdt', ticker: 'USDT' };
+  const channel = (over: Record<string, unknown>) => ({ channel_id: 'c', ready: true, is_usable: true, ...over });
+
+  it('BTC: the largest usable outbound HTLC less the HTLC minimum, in msat', () => {
+    const channels = [
+      channel({ next_outbound_htlc_limit_msat: 50_000_000 }),
+      channel({ next_outbound_htlc_limit_msat: 120_000_000 }),
+      channel({ next_outbound_htlc_limit_msat: 900_000_000, is_usable: false }),
+    ];
+    expect(maxSwapSendRaw(btc, channels, 3_000_000)).toBe(117_000_000);
+    expect(maxSwapSendRaw(btc, [channel({ next_outbound_htlc_limit_msat: 2_000_000 })], 3_000_000)).toBe(0);
+  });
+
+  it('asset: the largest local balance in a usable channel of that asset with BTC outbound for the HTLC', () => {
+    const channels = [
+      channel({ asset_id: 'rgb:usdt', asset_local_amount: 40_000_000, outbound_balance_msat: 10_000_000 }),
+      channel({ asset_id: 'rgb:usdt', asset_local_amount: 90_000_000, outbound_balance_msat: 1_000_000 }),
+      channel({ asset_id: 'rgb:xaut', asset_local_amount: 500_000_000, outbound_balance_msat: 10_000_000 }),
+    ];
+    expect(maxSwapSendRaw(usdt, channels, 3_000_000)).toBe(40_000_000);
+  });
+
+  it('is 0 with no channels and undefined when the data does not say', () => {
+    expect(maxSwapSendRaw(btc, [])).toBe(0);
+    expect(maxSwapSendRaw(btc, undefined)).toBeUndefined();
+    expect(maxSwapSendRaw(btc, [channel({})])).toBeUndefined();
+    expect(maxSwapSendRaw(usdt, [channel({ outbound_balance_msat: 10_000_000 })])).toBeUndefined();
   });
 });

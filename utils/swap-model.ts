@@ -291,6 +291,29 @@ export function swapChannelShortfall(
   return null
 }
 
+/**
+ * The most a maker swap can send from the node, in maker units (msat for BTC,
+ * raw asset units otherwise), by the same rules as swapChannelShortfall.
+ * Undefined when the channel data doesn't say.
+ */
+export function maxSwapSendRaw(
+  from: Pick<SwapLegSpec, 'assetId' | 'ticker'>,
+  channels: unknown,
+  htlcMinMsat: number = RLN_HTLC_MIN_MSAT,
+): number | undefined {
+  if (!Array.isArray(channels)) return undefined
+  const rows = channels as ChannelRow[]
+  if (!rows.length) return 0
+  if (isBtcTicker(from.ticker)) {
+    const maxOut = maxOverUsable(rows, outboundMsat)
+    return maxOut === undefined ? undefined : Math.max(0, maxOut - htlcMinMsat)
+  }
+  if (!rows.some((c) => c && 'asset_id' in c)) return undefined
+  return rows
+    .filter((c) => usableRow(c) && c.asset_id === from.assetId && (outboundMsat(c) ?? Infinity) >= htlcMinMsat)
+    .reduce((best, c) => Math.max(best, finite(c.asset_local_amount) ?? 0), 0)
+}
+
 // ========================================================================
 // Quote validation
 // ========================================================================

@@ -41,20 +41,23 @@ import { syncAssets } from '../store/slices/assetsSlice';
 import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
-  findPair, allTickers, tradableTickers, findPairAsset,
+  findPair, allTickers, tradableTickers, findPairAsset, getPairAsset,
   getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair, getAssetNetwork,
-  normalizeMakerPairs, buildFlashnetPairs, validateSwapString, swapRateLabel,
-  QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS,
+  normalizeMakerPairs, buildFlashnetPairs, validateSwapString, swapRateLabel, maxSwapSendRaw,
+  QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS, MSATS_PER_SAT, RLN_HTLC_MIN_MSAT,
 } from '../utils/swap-model';
 import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
-import { fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer } from '../services/swapQuotes';
+import {
+  fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer,
+  loadChannelLiquidity, quoteChannelShortfall, type ChannelLiquidity,
+} from '../services/swapQuotes';
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring, ZoomIn, FadeInDown } from 'react-native-reanimated';
 import { theme, motion } from '../theme';
 import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
-import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText } from '../components';
+import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 
 interface Props {
@@ -98,6 +101,7 @@ export default function SwapScreen({ navigation }: Props) {
   };
   // The unit shown next to a ticker (BTC side respects the active unit).
   const unitLabelFor = (ticker: string) => (isBtcTicker(ticker) ? btcUnitLabel : ticker);
+  const quoteLegLabel = (amount: number, ticker: string) => `${formatDisplayAmount(amount, ticker)} ${unitLabelFor(ticker)}`;
   // Flashnet takes its fee from the asset paid in, the maker from the asset paid out.
   const formatQuoteFee = (q: SwapQuote): string => {
     const ticker = q.venue === 'flashnet' ? q.from_asset : q.to_asset;
@@ -129,6 +133,8 @@ export default function SwapScreen({ navigation }: Props) {
   // A venue whose prices failed to load, so an empty list says why.
   const [pairsFailed, setPairsFailed] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
+  // The RGB node's channels: what a maker swap can carry (channels unknown = no guard).
+  const [liquidity, setLiquidity] = useState<ChannelLiquidity>({ htlcMinMsat: RLN_HTLC_MIN_MSAT });
   // Set once a swap settles so the confirm modal shows a success screen instead
   // of silently closing (the Flashnet path had no confirmation at all).
   const [swapSuccess, setSwapSuccess] = useState<
@@ -151,6 +157,11 @@ export default function SwapScreen({ navigation }: Props) {
     setTimeout(sync, 4000);
     setTimeout(sync, 12000);
     loadTradingPairs();
+    void refreshLiquidity();
+  };
+
+  const refreshLiquidity = async () => {
+    try { setLiquidity(await loadChannelLiquidity()); } catch { setLiquidity({ htlcMinMsat: RLN_HTLC_MIN_MSAT }); }
   };
 
   // Build a history entry from a settled quote so swaps (both venues) show up in
@@ -503,6 +514,10 @@ export default function SwapScreen({ navigation }: Props) {
           ? Math.round(quote.to_amount * 1e8 * 1000)
           : Math.round(quote.to_amount * Math.pow(10, toPrecision)));
 
+        // The channels may have changed since the quote: stop before the maker locks anything.
+        const shortfall = quoteChannelShortfall(quote, await loadChannelLiquidity(), quoteLegLabel);
+        if (shortfall) throw new Error(`Can't swap: ${shortfall}`);
+
         // Step 1: Init swap. The maker SDK's SwapRequest is a FLAT shape
         // ({ rfq_id, from_asset, from_amount, to_asset, to_amount }) — passing a
         // nested { asset_id, amount, layer } object (as the old `as any` cast
@@ -663,14 +678,13 @@ export default function SwapScreen({ navigation }: Props) {
   // KaleidoSwap. The wallet-wide total would let MAX ask for more than that account
   // holds, so BTC shows the balance of the account the pair's venue uses (the larger
   // one when both venues serve it).
+  const selectedPairs = filteredPairs.filter(p =>
+    [swapState.fromAsset, swapState.toAsset].filter(Boolean).every(t => p.base.ticker === t || p.quote.ticker === t));
   const btcBalanceForSwap = (): number | undefined => {
     const byProtocol = (walletState?.btcBalance as any)?.byProtocol as
       Record<string, { confirmed: number; total: number }> | undefined;
     if (!byProtocol) return undefined;
-    const tickers = [swapState.fromAsset, swapState.toAsset].filter(Boolean);
-    const venues = new Set(filteredPairs
-      .filter(p => tickers.every(t => p.base.ticker === t || p.quote.ticker === t))
-      .map(p => p.venue ?? 'kaleidoswap'));
+    const venues = new Set(selectedPairs.map(p => p.venue ?? 'kaleidoswap'));
     const sats = [
       ...(venues.size === 0 || venues.has('flashnet') ? [byProtocol.SPARK?.confirmed ?? 0] : []),
       ...(venues.size === 0 || venues.has('kaleidoswap') ? [byProtocol.RGB?.total ?? 0] : []),
@@ -682,11 +696,29 @@ export default function SwapScreen({ navigation }: Props) {
     const btc = asset && isBtcTicker(ticker) ? btcBalanceForSwap() : undefined;
     return asset && btc !== undefined ? { ...asset, balance: btc } : asset;
   };
+  // What the node's channels can send when only the maker serves this pair (Flashnet
+  // doesn't use channels), in the display unit; undefined when unknown.
+  const makerSendCapacity = (): number | undefined => {
+    if (!selectedPairs.length || selectedPairs.some(isFlashnetPair)) return undefined;
+    const asset = getPairAsset(selectedPairs[0], swapState.fromAsset);
+    if (!asset) return undefined;
+    const raw = maxSwapSendRaw({ assetId: getAssetId(asset), ticker: asset.ticker }, liquidity.channels, liquidity.htlcMinMsat);
+    if (raw === undefined) return undefined;
+    return isBtcTicker(asset.ticker) ? satsToBtcDisplay(Math.floor(raw / MSATS_PER_SAT)) : raw / 10 ** asset.precision;
+  };
+  // MAX and the input clamp: the balance, capped by channel capacity when it applies.
+  const maxSendable = (): number => {
+    const balance = assetByTicker(swapState.fromAsset)?.balance ?? 0;
+    const cap = makerSendCapacity();
+    return cap !== undefined && cap > 0 ? Math.min(balance, cap) : balance;
+  };
 
 
 
   const rgbConnected = protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false;
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
+
+  useEffect(() => { void refreshLiquidity(); }, [rgbConnected]);
 
   // The KaleidoSwap maker URL this wallet trades against, read from its RGB (RLN)
   // network config — the same value initializeWdkProtocols feeds into the maker
@@ -770,6 +802,8 @@ export default function SwapScreen({ navigation }: Props) {
     </View>;
   };
 
+  const liquidityShortfall = swapState.currentQuote ? quoteChannelShortfall(swapState.currentQuote, liquidity, quoteLegLabel) : null;
+
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
       {renderPairsNotice()}
@@ -796,10 +830,7 @@ export default function SwapScreen({ navigation }: Props) {
             <TouchableOpacity
               style={styles.maxButton}
               onPress={() => {
-                const asset = assetByTicker(swapState.fromAsset);
-                if (asset) {
-                  dispatch(setFromAmount(asset.balance.toString()));
-                }
+                if (assetByTicker(swapState.fromAsset)) dispatch(setFromAmount(maxSendable().toString()));
               }}
             >
               <Text style={styles.maxButtonText}>MAX</Text>
@@ -815,9 +846,9 @@ export default function SwapScreen({ navigation }: Props) {
             value={swapState.fromAmount}
             onChangeText={(text) => {
               // Limit the quote input to the available balance for the selected
-              // from-asset/network (same idea as the extension's clamp-to-max):
-              // the user can't request a quote for more than they hold.
-              const max = assetByTicker(swapState.fromAsset)?.balance ?? 0;
+              // from-asset/network (same idea as the extension's clamp-to-max) and,
+              // for maker swaps, to what the channels can send.
+              const max = maxSendable();
               const n = parseFloat(text.replace(/,/g, ''));
               if (max > 0 && Number.isFinite(n) && n > max) {
                 dispatch(setFromAmount(String(max)));
@@ -914,16 +945,21 @@ export default function SwapScreen({ navigation }: Props) {
         </Animated.View>
       )}
 
+      {!!liquidityShortfall && (
+        <Callout tone="warning" title="Not enough channel liquidity" message={liquidityShortfall.charAt(0).toUpperCase() + liquidityShortfall.slice(1)} style={{ marginTop: theme.spacing[3] }} />
+      )}
+
       {/* Main Action Button */}
       <Button
         title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : Number(swapState.fromAmount) > 0 ? 'Refresh quotes' : 'Enter Amount')}
         onPress={() => {
           if (!swapState.currentQuote) { void getQuote(); return; }
+          if (liquidityShortfall) return;
           setReviewQuote(swapState.currentQuote);
           setPreviousReviewQuote(null);
           setShowConfirmModal(true);
         }}
-        disabled={swapState.isQuoteLoading || !Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0}
+        disabled={swapState.isQuoteLoading || !!liquidityShortfall || !Number.isFinite(Number(swapState.fromAmount)) || Number(swapState.fromAmount) <= 0}
         loading={swapState.isQuoteLoading}
         variant="primary"
         fullWidth

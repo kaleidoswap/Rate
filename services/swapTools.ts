@@ -31,12 +31,12 @@ import {
   getQuoteLayers,
   validateSwapString,
   swapChannelShortfall,
-  RLN_HTLC_MIN_MSAT,
   MSATS_PER_SAT,
   DEFAULT_FLASHNET_SLIPPAGE_BPS,
   type SwapPair,
 } from '../utils/swap-model';
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
+import { loadChannelLiquidity } from './swapQuotes';
 
 const log = (...a: any[]) => { try { console.log('[AI/swap]', ...a); } catch { /* noop */ } };
 
@@ -234,19 +234,13 @@ async function fetchQuote(from: string, to: string, amt: number): Promise<{ id: 
 
 /** Throws when the node's channels can't carry this maker swap, before anything is locked. */
 async function assertChannelCapacity(q: CachedQuote): Promise<void> {
-  const a: any = protocolManager.getAdapterIfAvailable('RGB_LN');
-  if (typeof a?.listChannels !== 'function') return;
-  const [channels, info] = await Promise.all([
-    a.listChannels().catch(() => undefined),
-    typeof a.getNodeInfo === 'function' ? a.getNodeInfo().catch(() => undefined) : undefined,
-  ]);
-  const minMsat = Number(info?.rgb_htlc_min_msat);
+  const { channels, htlcMinMsat } = await loadChannelLiquidity();
   const leg = (assetId: string, ticker: string, raw: number, amount: number) => ({ assetId, ticker, raw, label: `${amount} ${ticker}` });
   const shortfall = swapChannelShortfall(
     leg(q.fromAssetId, q.fromTicker, q.rawFromAmount, q.sendAmount),
     leg(q.toAssetId, q.toTicker, q.rawToAmount, q.receiveAmount),
     channels,
-    Number.isFinite(minMsat) && minMsat > 0 ? minMsat : RLN_HTLC_MIN_MSAT,
+    htlcMinMsat,
   );
   if (shortfall) throw new Error(`Can't swap: ${shortfall}`);
 }
