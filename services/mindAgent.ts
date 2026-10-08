@@ -4,7 +4,8 @@
 // confirm gate, history trimming, persona/ambient-tool settings — all live in
 // @kaleidorg/mind's Funnel, shared with desktop. This file only supplies what
 // is mobile-specific:
-//   - the QVAC LLM provider (with per-turn temperature/maxTokens + thinking)
+//   - the QVAC LLM provider (with per-turn temperature/maxTokens + thinking),
+//     or the paired desktop's model when enabled and reachable
 //   - the tool sources (wallet/WDK, merchant, memory, RAG, skill references)
 //   - AsyncStorage persistence for memory
 //
@@ -29,6 +30,8 @@ import {
   type ToolSource,
 } from '@kaleidorg/mind';
 import type { QvacTurnStats } from '@kaleidorg/mind/qvac';
+import { createOpenAICompatibleProvider } from '@kaleidorg/mind/openai';
+import { fetch as expoFetch } from 'expo/fetch';
 import skillBundle from '../skills.bundle.json';
 import { buildWalletToolSource } from './walletTools';
 import { buildMerchantToolSource } from './merchantTools';
@@ -37,6 +40,7 @@ import { buildSwapToolSource } from './swapTools';
 import { buildPaidDataToolSource } from './aiPaidData';
 import { buildKnowledgeToolSource } from './aiKnowledge';
 import { asyncStorageMemoryIO } from './aiMemory';
+import { createDesktopRoutingProvider, type HealthFailure, type RemoteProviderFactory } from './desktopModel';
 import type QVACService from './QVACService';
 
 /** Skills shipped with the app, rehydrated from the build-time bundle. */
@@ -69,6 +73,8 @@ export interface MindAgentSettings {
   disabledSkills?: string[];
   /** Max reasoning↔tool rounds in the agentic tier. */
   maxTurns?: number;
+  /** Run inference on the paired desktop's model when it is reachable. */
+  useDesktopModel?: boolean;
 }
 
 /** Callbacks the host wires to the chat/voice UI. The Funnel owns all of these
@@ -99,7 +105,18 @@ export interface MindAgent {
   runTurn(text: string, cbs?: RunTurnCallbacks): Promise<MindTurnResult>;
   /** Skills currently enabled (for the skills sheet). */
   listSkills(): Skill[];
+  /** Cancel an in-flight model call by the id `onStart` reported. */
+  cancel(requestId: string): Promise<void>;
 }
+
+export interface MindAgentOptions {
+  /** A turn fell back from the paired desktop to this device. */
+  onDesktopFallback?: (reason: HealthFailure | 'error') => void;
+  /** Test seam for the desktop provider. */
+  createRemote?: RemoteProviderFactory;
+}
+
+
 
 // Memory has no per-agent deps, so a single store is shared across chat + voice
 // → both see the same recall within a session (and persist to one AsyncStorage
@@ -157,24 +174,50 @@ export function buildMindToolSources(qvac: QVACService): ToolSource[] {
 export function createMindAgent(
   qvac: QVACService,
   getSettings: () => MindAgentSettings = () => ({}),
+  options: MindAgentOptions = {},
 ): MindAgent {
   // The Funnel builds each TurnInput internally, so we inject the per-turn
   // thinking + stats sinks + sampling settings here via closures read at call time.
   let thinkingSink: ((token: string) => void) | undefined;
   let statsSink: ((stats: QvacTurnStats) => void) | undefined;
-  const provider: LLMProvider = {
+  const local: LLMProvider = {
     name: 'qvac',
+    runTurn: (i) =>
+      qvac.runProviderTurn({
+        ...i,
+        onThinking: (t) => thinkingSink?.(t),
+        onStats: (st) => statsSink?.(st),
+      }),
+    cancel: (id) => qvac.cancelRequest(id),
+  };
+  // React Native's global fetch has no streaming body; expo/fetch does.
+  const createRemote: RemoteProviderFactory =
+    options.createRemote ??
+    (({ baseUrl, apiKey, model }) =>
+      createOpenAICompatibleProvider({
+        baseUrl,
+        apiKey,
+        model,
+        fetch: expoFetch as unknown as typeof fetch,
+        onThinking: (t) => thinkingSink?.(t),
+      }));
+  const routing = createDesktopRoutingProvider({
+    local,
+    isEnabled: () => !!getSettings().useDesktopModel,
+    createRemote,
+    onFallback: options.onDesktopFallback,
+  });
+  const provider: LLMProvider = {
+    name: routing.name,
     runTurn: (i) => {
       const s = getSettings();
-      return qvac.runProviderTurn({
+      return routing.runTurn({
         ...i,
         ...(s.temperature != null ? { temperature: s.temperature } : {}),
         ...(s.maxTokens != null ? { maxTokens: s.maxTokens } : {}),
-        onThinking: (t) => thinkingSink?.(t),
-        onStats: (st) => statsSink?.(st),
-      });
+      } as typeof i);
     },
-    cancel: (id) => qvac.cancelRequest(id),
+    cancel: (id) => routing.cancel!(id),
   };
 
   const tools = new ToolRegistry(buildMindToolSources(qvac));
@@ -222,5 +265,8 @@ export function createMindAgent(
       }
     },
     listSkills: () => funnel.listSkills(),
+    cancel: async (requestId) => {
+      await provider.cancel?.(requestId);
+    },
   };
 }

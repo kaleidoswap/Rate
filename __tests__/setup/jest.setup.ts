@@ -11,6 +11,9 @@ jest.mock('expo-secure-store', () => ({
   deleteItemAsync: jest.fn(),
 }));
 
+// expo/fetch needs the native module; tests inject their own fetch.
+jest.mock('expo/fetch', () => ({ fetch: (...args: unknown[]) => (global.fetch as any)(...args) }));
+
 // Mock Expo SQLite
 const mockDatabase = {
   execAsync: jest.fn(),

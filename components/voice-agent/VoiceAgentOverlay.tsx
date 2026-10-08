@@ -219,7 +219,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       handsFreeRef.current?.stop();
       // Abort any in-flight inference so it can't finish + speak after close.
       if (requestIdRef.current) {
-        void qvac.service?.cancelRequest?.(requestIdRef.current).catch(() => {});
+        void agent.cancel(requestIdRef.current).catch(() => {});
         requestIdRef.current = null;
       }
     },

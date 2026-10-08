@@ -30,6 +30,8 @@ export interface MindConfig {
   disabledSkills: string[];
   /** User-added MCP connectors (name + URL). */
   mcpServers: { name: string; url: string }[];
+  /** Run inference on the paired desktop's model (address and token live in SecureStore). */
+  useDesktopModel: boolean;
 }
 
 export const DEFAULT_MIND_CONFIG: MindConfig = {
@@ -41,6 +43,7 @@ export const DEFAULT_MIND_CONFIG: MindConfig = {
   memoryEnabled: true,
   disabledSkills: [],
   mcpServers: [],
+  useDesktopModel: false,
 };
 
 // Primary denomination the balance/amounts are shown in. Cycled by tapping the
