@@ -211,6 +211,90 @@ export function calculateMaxOutboundHtlcMsat(channels: SwapChannel[], rgbHtlcMin
   return Math.max(0, Math.max(...htlcLimits) - rgbHtlcMinSat * MSATS_PER_SAT)
 }
 
+/** RLN's RGB HTLC minimum when the node doesn't report `rgb_htlc_min_msat`. */
+export const RLN_HTLC_MIN_MSAT = 3_000_000
+
+export interface SwapLegSpec {
+  assetId: string
+  ticker: string
+  /** Maker units: msat for BTC, raw asset units otherwise. */
+  raw: number
+  /** e.g. "73 USDT"; used in messages for the asset leg. */
+  label: string
+}
+
+type ChannelRow = Record<string, unknown>
+const finite = (v: unknown): number | undefined =>
+  v == null || v === '' || !Number.isFinite(Number(v)) ? undefined : Number(v)
+const usableRow = (c: ChannelRow) => c.is_usable !== false && c.ready !== false
+const outboundMsat = (c: ChannelRow) => finite(c.next_outbound_htlc_limit_msat ?? c.outbound_balance_msat)
+const inboundMsat = (c: ChannelRow) => finite(c.inbound_balance_msat)
+const fmtSats = (msat: number) => `${Math.floor(msat / MSATS_PER_SAT).toLocaleString('en-US')} sats`
+
+function maxOverUsable(rows: ChannelRow[], pick: (c: ChannelRow) => number | undefined): number | undefined {
+  let best: number | undefined
+  let readable = false
+  for (const c of rows) {
+    const v = pick(c)
+    if (v === undefined) continue
+    readable = true
+    if (usableRow(c)) best = Math.max(best ?? 0, v)
+  }
+  return best ?? (readable ? 0 : undefined)
+}
+
+/**
+ * Why the node's Lightning channels can't carry a BTC <-> RGB swap, or null when
+ * they can (or the channel data doesn't say). Same rules as @kaleidorg/mind's
+ * swapLiquidityShortfall: each leg is one HTLC plus RLN's HTLC minimum.
+ */
+export function swapChannelShortfall(
+  from: SwapLegSpec,
+  to: SwapLegSpec,
+  channels: unknown,
+  htlcMinMsat: number = RLN_HTLC_MIN_MSAT,
+): string | null {
+  const fromBtc = isBtcTicker(from.ticker)
+  if (fromBtc === isBtcTicker(to.ticker)) return null
+  const rows = Array.isArray(channels) ? (channels as ChannelRow[]) : undefined
+  if (!rows) return null
+  const min = fmtSats(htlcMinMsat)
+  if (!rows.length) return 'this swap runs over Lightning and you have no channels. Buy a channel first.'
+  const usable = rows.filter(usableRow)
+  const hasAssetData = rows.some((c) => c && 'asset_id' in c)
+
+  if (fromBtc) {
+    const maxOut = maxOverUsable(rows, outboundMsat)
+    const need = from.raw + htlcMinMsat
+    if (maxOut !== undefined && maxOut < need) {
+      return maxOut <= htlcMinMsat
+        ? `this swap needs a Lightning channel that can send ${fmtSats(need)} (the amount plus the ${min} HTLC minimum), and none can. Buy a channel with at least that much outbound first.`
+        : `your channels can send at most ${fmtSats(maxOut)}, and this swap needs ${fmtSats(need)} (the amount plus the ${min} HTLC minimum). Swap at most ${fmtSats(maxOut - htlcMinMsat)}, or buy a bigger channel.`
+    }
+    if (hasAssetData) {
+      const ok = usable.some((c) =>
+        c.asset_id === to.assetId && (finite(c.asset_remote_amount) ?? 0) >= to.raw && (inboundMsat(c) ?? Infinity) >= htlcMinMsat)
+      if (!ok) {
+        return `no channel can receive ${to.label}: you need a ${to.ticker} channel with at least that much inbound and ${min} of BTC inbound. Buy an asset channel from the LSP first.`
+      }
+    }
+    return null
+  }
+
+  if (hasAssetData) {
+    const ok = usable.some((c) =>
+      c.asset_id === from.assetId && (finite(c.asset_local_amount) ?? 0) >= from.raw && (outboundMsat(c) ?? Infinity) >= htlcMinMsat)
+    if (!ok) {
+      return `no channel can send ${from.label}: you need a ${from.ticker} channel holding at least that much, with ${min} of BTC outbound.`
+    }
+  }
+  const maxIn = maxOverUsable(rows, inboundMsat)
+  if (maxIn !== undefined && maxIn < to.raw + htlcMinMsat) {
+    return `your channels can receive at most ${fmtSats(maxIn)}, and this swap pays you ${fmtSats(to.raw + htlcMinMsat)} (the amount plus the ${min} HTLC minimum). Swap for less BTC, or get more inbound.`
+  }
+  return null
+}
+
 // ========================================================================
 // Quote validation
 // ========================================================================

@@ -129,8 +129,7 @@ export async function clearMindMemory(): Promise<void> {
 /**
  * The exact tool sources the mobile agent mounts — wallet/WDK, merchants,
  * swaps (KaleidoSwap maker + Flashnet, venue-aware), paid data (L402), memory,
- * RAG, and the skill-reference reader. All execute ON-DEVICE (no P2P
- * delegation). Exported so the skill-connection test asserts every bundled
+ * RAG, and the skill-reference reader. All execute ON-DEVICE. Exported so the skill-connection test asserts every bundled
  * skill scopes to tools that actually exist here (no skill can point at a
  * missing tool).
  *

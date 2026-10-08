@@ -8,7 +8,7 @@
 *   - @qvac/sdk/tts-ggml/plugin
  */
 
-import { initializeWorkerCore, ensureRPCSetup } from "@qvac/sdk/worker-core";
+import { initializeWorker, ensureRPCSetup } from "@qvac/sdk/worker-lifecycle";
 import { registerPlugin } from "@qvac/sdk/plugins";
 import { getServerLogger } from "@qvac/sdk/logging";
 
@@ -16,7 +16,7 @@ import { llmPlugin } from "@qvac/sdk/llamacpp-completion/plugin";
 import { whisperPlugin } from "@qvac/sdk/whispercpp-transcription/plugin";
 import { ttsPlugin } from "@qvac/sdk/tts-ggml/plugin";
 
-const { hasRPCConfig } = initializeWorkerCore();
+const { hasRPCConfig } = initializeWorker();
 
 const logger = getServerLogger();
 logger.info("🐻 QVAC Worker (custom bundle)");

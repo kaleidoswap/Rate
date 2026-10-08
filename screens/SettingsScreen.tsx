@@ -26,7 +26,6 @@ import {
   setSoundEnabled,
   setTransactionNotifications,
   type DisplayDenomination,
-  MIND_DESKTOP_ENABLED,
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
@@ -35,7 +34,6 @@ import { loadBtcBalance, setActiveWallet } from '../store/slices/walletSlice';
 import { Button, Input, MainHeader } from '../components';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { protocolColor } from '../theme';
-import { PairingService, type DesktopPairing } from '../services/PairingService';
 import DatabaseService from '../services/DatabaseService';
 import { getStoredHandle } from '../services/kaleidoswapMe';
 import { syncPaymentPush } from '../services/paymentNotifications';
@@ -440,21 +438,6 @@ export default function SettingsScreen({ navigation }: Props) {
     );
   };
 
-  // KaleidoMind — active desktop pairing (refreshed on focus)
-  const [activePairing, setActivePairing] = useState<DesktopPairing | null>(null);
-  useEffect(() => {
-    const refresh = async () => {
-      try {
-        setActivePairing(await PairingService.getActive());
-      } catch {
-        setActivePairing(null);
-      }
-    };
-    refresh();
-    const unsubscribe = navigation.addListener?.('focus', refresh);
-    return () => { if (typeof unsubscribe === 'function') unsubscribe(); };
-  }, [navigation]);
-
   const handleNodeTypeChange = async (useRemoteNode: boolean) => {
     const newType = useRemoteNode ? 'remote' : 'local';
     try {
@@ -700,17 +683,6 @@ export default function SettingsScreen({ navigation }: Props) {
             description="On-device models, voice and when the assistant runs"
             onPress={() => navigation.navigate('Dashboard', { screen: 'Mind', params: { openSettings: true } })}
           />
-          {MIND_DESKTOP_ENABLED && <Row
-            icon="sparkles-outline"
-            iconColor={theme.colors.accent[500]}
-            label="Desktop connection"
-            description={activePairing ? 'Paired' : 'Run AI on your desktop'}
-            value={activePairing ? activePairing.name : 'Connect'}
-            onPress={() => navigation.navigate('PairDesktop')}
-          />}
-          {MIND_DESKTOP_ENABLED && activePairing && (
-            <Row icon="cube-outline" iconColor={theme.colors.accent[500]} label="Active model" value={activePairing.model} />
-          )}
           <Row
             icon="construct-outline"
             iconColor={theme.colors.accent[500]}

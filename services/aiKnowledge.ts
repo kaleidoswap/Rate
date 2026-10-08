@@ -8,10 +8,10 @@
 import {
   Retriever,
   createRagToolSource,
-  BITCOIN_COPILOT_DOCS,
   type EmbeddingProvider,
   type ToolSource,
 } from '@kaleidorg/mind';
+import { BITCOIN_COPILOT_DOCS } from '@kaleidorg/mind/knowledge';
 import type QVACService from './QVACService';
 
 export function buildKnowledgeToolSource(qvac: QVACService): ToolSource {

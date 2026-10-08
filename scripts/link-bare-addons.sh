@@ -20,7 +20,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BAREKIT="$ROOT/node_modules/react-native-bare-kit"
-PATCH="$ROOT/node_modules/@qvac/sdk/expo/plugins/patches/ios-link.mjs"
 
 if [ ! -d "$BAREKIT" ]; then
   echo "[link-bare-addons] react-native-bare-kit not installed — run npm install first." >&2
@@ -29,10 +28,7 @@ fi
 
 # Use the QVAC manifest-aware link script (links only the allowlisted addons)
 # when available; otherwise fall back to bare-kit's stock link.mjs.
-if [ -f "$PATCH" ]; then
-  echo "[link-bare-addons] installing manifest-aware link.mjs"
-  cp "$PATCH" "$BAREKIT/ios/link.mjs"
-fi
+node "$ROOT/scripts/patch-bare-kit-linker.js"
 
 echo "[link-bare-addons] generating addon xcframeworks (node ios/link.mjs)…"
 ( cd "$BAREKIT" && node ios/link.mjs )

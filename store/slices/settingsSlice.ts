@@ -9,8 +9,7 @@ import type { RootState } from '../index';
 // settings:
 //   'off'      AI disabled (the QVAC Bare worklet never starts)
 //   'local'    run the model on this device
-//   'delegate' run it on a paired desktop; the phone relays
-export type AiMode = 'off' | 'local' | 'delegate';
+export type AiMode = 'off' | 'local';
 
 // User-tunable KaleidoMind agent configuration (persisted). Lets the user shape
 // the agent's behaviour, sampling, context window, and knowledge/memory.
@@ -210,7 +209,7 @@ const settingsSlice = createSlice({
     resetMindConfig: (state) => {
       state.mindConfig = DEFAULT_MIND_CONFIG;
     },
-    // Convenience on/off toggle that preserves a chosen 'delegate' setup.
+    // Convenience on/off toggle.
     setAiEnabled: (state, action: PayloadAction<boolean>) => {
       if (action.payload) {
         if (state.aiMode === 'off') state.aiMode = 'local';
@@ -267,19 +266,10 @@ export const selectDisclosureLevel = (state: RootState): DisclosureLevel =>
 export const selectDisplayDenomination = (state: RootState): DisplayDenomination =>
   state.settings.displayDenomination ?? state.settings.bitcoinUnit ?? 'sats';
 
-/**
- * Running KaleidoMind on a paired desktop is paused: there's no desktop app to
- * pair with right now. The code stays for when it comes back; set
- * EXPO_PUBLIC_MIND_DESKTOP=1 to turn it on again.
- */
-export const MIND_DESKTOP_ENABLED = process.env.EXPO_PUBLIC_MIND_DESKTOP === '1';
-
 // KaleidoMind mode. Defaults 'off' so the QVAC worklet never auto-starts.
-// A saved 'delegate' runs on this device while desktop mode is paused.
-export const selectAiMode = (state: RootState): AiMode => {
-  const mode = state.settings.aiMode ?? 'off';
-  return mode === 'delegate' && !MIND_DESKTOP_ENABLED ? 'local' : mode;
-};
+// A 'delegate' saved before desktop mode was removed runs on this device.
+export const selectAiMode = (state: RootState): AiMode =>
+  (state.settings.aiMode ?? 'off') === 'off' ? 'off' : 'local';
 
 // Derived on/off used by the worklet kill switch and AI entry points.
 export const selectAiEnabled = (state: RootState): boolean =>

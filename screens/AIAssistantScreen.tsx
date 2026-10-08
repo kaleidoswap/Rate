@@ -29,7 +29,7 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, selectAiOnboarded, setAiOnboarded, MIND_DESKTOP_ENABLED } from '../store/slices/settingsSlice';
+import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, selectAiOnboarded, setAiOnboarded } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
@@ -44,9 +44,9 @@ import { shareLightningInvoice } from '../components/InvoiceQRCode';
 import ToastService from '../services/ToastService';
 import { useQVAC } from '../hooks/useQVAC';
 import { getModelById } from '../services/qvacModels';
-import { PairingService } from '../services/PairingService';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
+import { describeSwapQuote } from '../services/swapTools';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import * as Haptics from 'expo-haptics';
 
@@ -189,7 +189,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // requestId of the in-flight completion, used to cancel via the stop button
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
 
-  // AI settings sheet (model selection + P2P delegation). Settings → KaleidoMind
+  // AI settings sheet (model selection, voice). Settings → KaleidoMind
   // → "Models & privacy" opens this tab with the sheet up.
   const [showSettings, setShowSettings] = useState(false);
   useEffect(() => {
@@ -203,66 +203,30 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // Latest turn's real inference stats (tok/s + backend) for the header chip.
   const [lastStats, setLastStats] = useState<ChatMsgStats | null>(null);
 
-  // Friendly name of the paired desktop (for the settings chip + header).
-  const [providerName, setProviderName] = useState<string | null>(null);
-
   const isEmpty = messages.length === 0;
 
-  // Re-read delegation config + paired-desktop name whenever this screen
-  // regains focus (e.g. after returning from the QR scanner). reloadConfig is
-  // held in a ref so the effect can depend ONLY on `navigation`.
+  // Re-read the model config whenever this screen regains focus. reloadConfig
+  // is held in a ref so the effect can depend ONLY on `navigation`.
   const reloadConfigRef = useRef(qvac.reloadConfig);
   reloadConfigRef.current = qvac.reloadConfig;
 
   useEffect(() => {
-    const refresh = async () => {
-      reloadConfigRef.current();
-      try {
-        const active = await PairingService.getActive();
-        setProviderName(active?.name ?? null);
-      } catch {
-        setProviderName(null);
-      }
-    };
+    const refresh = () => reloadConfigRef.current();
     refresh();
     const unsub = navigation.addListener?.('focus', refresh);
     return () => { if (typeof unsub === 'function') unsub(); };
   }, [navigation]);
 
-  // Open the QR scanner to pair with a desktop, closing the settings sheet first.
-  const openScanner = useCallback(() => {
-    setShowSettings(false);
-    navigation.navigate('PairDesktop');
-  }, [navigation]);
-
-  // Fully disconnect the paired desktop: clear the engine's delegation config
-  // (key + flag), forget the stored pairing, drop the displayed name, and fall
-  // back to on-device mode. Without clearing providerPublicKey + the pairing,
-  // the desktop would keep showing as "Paired" with no way to remove it.
-  const disconnectDesktop = useCallback(async () => {
-    const key = qvac.config.providerPublicKey;
-    try {
-      await qvac.setDelegate({ enabled: false, providerPublicKey: '' });
-      if (key) await PairingService.forget(key);
-    } catch {
-      /* best-effort — still drop the UI state below */
-    }
-    setProviderName(null);
-    dispatch(setAiMode('local'));
-  }, [qvac, dispatch]);
-
   // Header subtitle: which model + where it runs + live throughput (tok/s) from
   // the last turn (real QVAC stats), mirroring the desktop chat header.
   const headerSubtitle = useMemo(() => {
-    const delegating = qvac.config.delegateEnabled && !!qvac.config.providerPublicKey;
     const modelLabel = getModelById(qvac.config.modelId)?.label ?? 'On-device AI';
-    const where = delegating ? `via ${providerName || 'Desktop'}` : 'on this device';
     const tps =
       lastStats?.tokensPerSecond && lastStats.tokensPerSecond > 0
         ? ` · ${lastStats.tokensPerSecond.toFixed(0)} tok/s${lastStats.device ? ` (${lastStats.device.toUpperCase()})` : ''}`
         : '';
-    return `${modelLabel} · ${where}${tps}`;
-  }, [qvac.config.delegateEnabled, qvac.config.providerPublicKey, qvac.config.modelId, providerName, lastStats]);
+    return `${modelLabel} · on this device${tps}`;
+  }, [qvac.config.modelId, lastStats]);
 
 
   const scrollToBottom = useCallback((animated: boolean = true) => {
@@ -470,9 +434,18 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         return { type: 'lightning_invoice', recipient: String(a.to ?? ''), amount: 0, description: `Send ${amt.toLocaleString()} ${asset}`, recipientName: `${amt.toLocaleString()} ${asset}` };
       }
       case 'execute_swap': {
-        const from = String(a.from_asset ?? '').toUpperCase();
-        const to = String(a.to_asset ?? '').toUpperCase();
-        return { type: 'lightning_invoice', recipient: `${from} → ${to}`, amount: 0, description: `Swap ${a.amount ?? ''} ${from} → ${to}` };
+        const q = describeSwapQuote(String(a.quote_id ?? ''));
+        if (!q) return { type: 'lightning_invoice', recipient: 'Swap', amount: 0, description: 'Swap (quote no longer cached)' };
+        const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 8 });
+        const sendSats = q.from === 'BTC' ? Math.round(q.sendAmount) : 0;
+        return {
+          type: 'lightning_invoice',
+          recipient: `${q.from} → ${q.to}`,
+          recipientName: `${fmt(q.sendAmount)} ${q.from === 'BTC' ? 'sats' : q.from} → ${fmt(q.receiveAmount)} ${q.receiveUnit}`,
+          amount: sendSats,
+          description: `Swap on ${q.venue === 'flashnet' ? 'Flashnet' : 'KaleidoSwap'}`,
+          priceUsd: sendSats ? btcPriceUSD : undefined,
+        };
       }
       case 'pay_nostr_contact':
         return { type: 'nostr_contact', recipient: a.contact_name || a.contact_npub || 'Nostr contact', amount: Number(a.amount_sats) || 0, description: a.description || 'Payment to Nostr contact', recipientName: a.contact_name, isNostrContact: true };
@@ -754,7 +727,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           <View style={styles.modelBannerRow}>
             <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary[600]} />
             <Text style={styles.modelBannerText}>
-              Ask about your wallet or pay by voice. Choose on-device AI or a paired desktop to get started.
+              Ask about your wallet or pay by voice. Turn on on-device AI to get started.
             </Text>
             <TouchableOpacity
               onPress={openMindSetup}
@@ -771,17 +744,15 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     const isError = qvac.llmStatus === 'error';
 
     // Runtime can't run here (e.g. Simulator / no native worklet). Don't show a
-    // scary failure — offer to delegate to a desktop instead.
+    // scary failure.
     const isUnavailable = isError && (qvac.error ?? '').startsWith('unavailable:');
     if (isUnavailable) {
       return (
         <View style={[styles.modelBanner, styles.modelBannerError]}>
           <View style={styles.modelBannerRow}>
-            <Ionicons name="desktop-outline" size={18} color={theme.colors.warning[600]} />
+            <Ionicons name="alert-circle-outline" size={18} color={theme.colors.warning[600]} />
             <Text style={styles.modelBannerText}>
-              {MIND_DESKTOP_ENABLED
-                ? 'On-device AI isn’t available on this device. Connect a desktop to run KaleidoMind.'
-                : 'On-device AI isn’t available on this device, so KaleidoMind can’t run here.'}
+              On-device AI isn’t available on this device, so KaleidoMind can’t run here.
             </Text>
             <TouchableOpacity
               onPress={() => dispatch(setAiMode('off'))}
@@ -790,13 +761,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             >
               <Text style={styles.modelRetryText}>Off</Text>
             </TouchableOpacity>
-            {MIND_DESKTOP_ENABLED && <TouchableOpacity
-              onPress={() => navigation.navigate('PairDesktop')}
-              style={styles.modelRetry}
-              accessibilityLabel="Connect a desktop"
-            >
-              <Text style={styles.modelRetryText}>Connect</Text>
-            </TouchableOpacity>}
           </View>
         </View>
       );
@@ -939,7 +903,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         visible={mindOnboardingOpen}
         availability={mindAvailability}
         onSelectLocal={() => { dispatch(setAiMode('local')); finishMindSetup(); }}
-        onSelectDelegate={() => { finishMindSetup(); navigation.navigate('PairDesktop'); }}
         onSkip={() => { finishMindSetup(); }}
       />
       <VoiceAgentOverlay visible={voiceAgentOpen} autoListen={true} onClose={() => setVoiceAgentOpen(false)} />
@@ -1199,11 +1162,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             llmStatus={qvac.llmStatus}
             combinedProgress={qvac.combinedProgress}
             onSelectModel={(id) => qvac.setModel(id)}
-            onSetDelegate={(opts) => qvac.setDelegate(opts)}
-            onScanQR={openScanner}
-            onDisconnectDesktop={disconnectDesktop}
             onDesignAgent={() => { setShowSettings(false); navigation.navigate('MindSettings'); }}
-            providerName={providerName}
             deviceMemGb={qvac.deviceMemGb}
             recommendedModelId={qvac.recommendedModelId}
             aiMode={aiMode}

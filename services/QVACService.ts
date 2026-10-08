@@ -38,7 +38,6 @@ import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
 import {
   createQvacProvider,
   createQvacVoice,
-  buildDelegateConfig,
   sanitizeForSupertonic,
 } from '@kaleidorg/mind/qvac';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
@@ -60,26 +59,18 @@ const LOCAL_LLM_CONFIG = {
 // fall back to LOCAL_LLM_CONFIG (CPU) automatically if the GPU load throws.
 // ctx 4096 gives the agentic prompt (system + tools + skills + a little history)
 // room to fit on-device; 2048 overflowed immediately ("prompt exceeds context").
+// gpu_layers is left unset so the engine fits the layers to free device memory.
+const { gpu_layers: _cpuLayers, ...LOCAL_LLM_BASE } = LOCAL_LLM_CONFIG;
 const LOCAL_LLM_CONFIG_GPU = {
-  ...LOCAL_LLM_CONFIG,
+  ...LOCAL_LLM_BASE,
   device: 'gpu',
-  gpu_layers: 99, // offload all layers; llamacpp clamps to the model's count
   // 4096 is the proven-stable Metal window on-device. Larger values (6144/8192)
   // let big agentic prompts fit, BUT can hard-abort the Bare worklet when Metal
   // can't allocate the KV cache — an uncatchable native crash, observed right
   // after a voice turn starts generating. So we stay at 4096: a fresh request
   // (e.g. "places to eat in Turin") fits, and the rare long-conversation overflow
-  // is surfaced as a friendly "clear the chat" message instead of crashing. Heavy
-  // prompts that still don't fit should run via Desktop delegation (16k ctx).
+  // is surfaced as a friendly "clear the chat" message instead of crashing.
   ctx_size: 4096,
-} as const;
-
-// Delegated to a desktop provider — it has the RAM to run a big context, so give
-// the agentic prompt plenty of room (Qwen3-600M supports up to 32k). 2048
-// overflowed with the system prompt + tool/skill definitions alone.
-const DELEGATE_LLM_CONFIG = {
-  ...LOCAL_LLM_CONFIG_GPU,
-  ctx_size: 16384,
 } as const;
 
 /**
@@ -88,13 +79,7 @@ const DELEGATE_LLM_CONFIG = {
  * `registry://` source pulls over a Hyperswarm/DHT P2P transport that crashes
  * the bare worklet on iOS. Once the file is on disk we hand the local path to
  * `loadModel`, which mmaps it directly (no worklet networking involved).
- *
- * In DELEGATED mode the model is loaded/run on a remote P2P provider (e.g. a
- * Mac), so the phone never downloads the weights — we pass the SDK descriptor
- * plus a `delegate` config to `loadModel`.
  */
-// SUPERTONIC-2 TTS output sample rate (Hz). Used to build the WAV for playback.
-const TTS_SAMPLE_RATE = 44100;
 
 // Whisper languages we'll request directly from the device locale. whisper.cpp
 // supports far more, but the QVAC handler rejects "auto"/detect_language for
@@ -137,10 +122,6 @@ const CONFIG_KEY = 'qvac.config.v1';
 export interface QVACConfig {
   /** Selected chat model id (see qvacModels.ts). */
   modelId: string;
-  /** Route inference to a remote P2P provider instead of running on-device. */
-  delegateEnabled: boolean;
-  /** Public key of the QVAC provider to delegate to (from `startQVACProvider`). */
-  providerPublicKey: string;
   /** Selected speech-to-text (Whisper) model id for the voice mode. */
   sttModelId: string;
   /** Text-to-speech engine for the voice mode ('supertonic' | 'system'). */
@@ -151,8 +132,6 @@ export interface QVACConfig {
 
 const DEFAULT_CONFIG: QVACConfig = {
   modelId: DEFAULT_MODEL_ID,
-  delegateEnabled: false,
-  providerPublicKey: '',
   sttModelId: DEFAULT_STT_MODEL_ID,
   ttsEngine: DEFAULT_TTS_ENGINE,
 };
@@ -212,7 +191,7 @@ class QVACService {
 
   // All completion + tool-call parsing lives in @kaleidorg/mind-qvac (shared with
   // desktop). We inject the raw SDK fns + a model-id resolver; this host keeps
-  // model lifecycle (load/unload, GPU/delegate) below. Defaults mirror the prior
+  // model lifecycle (load/unload, GPU/CPU) below. Defaults mirror the prior
   // inline turn (0.6 temperature, 512-token cap), overridable per turn.
   private readonly mindProvider = createQvacProvider({
     completion,
@@ -329,7 +308,7 @@ class QVACService {
     }
   }
 
-  // --- Config (selected model + P2P delegation) ---
+  // --- Config (selected model) ---
 
   /** Available chat models (the catalog). */
   getCatalog(): QVACModel[] {
@@ -361,7 +340,7 @@ class QVACService {
    * Whether the QVAC Bare worklet can run here AT ALL — checked WITHOUT booting
    * it (booting on an unsupported target aborts the process natively, which JS
    * can't catch). The iOS Simulator has no bare-abort framework, so the worklet
-   * can't start there; both on-device and delegate modes need it. Used by the
+   * can't start there. Used by the
    * KaleidoMind onboarding to steer users and to refuse init instead of crashing.
    */
   async getAvailability(): Promise<{
@@ -371,7 +350,7 @@ class QVACService {
   }> {
     const runtimeAvailable = this.runtimeOkSync();
     const mem = await this.getDeviceMemoryBytes();
-    // Any real phone runs the smallest model; below ~3 GB we recommend delegating.
+    // Any real phone runs the smallest model; below ~3 GB it may not fit.
     const localCapable = runtimeAvailable && mem >= 3 * 1024 * 1024 * 1024;
     return {
       runtimeAvailable,
@@ -386,7 +365,7 @@ class QVACService {
     try {
       const raw = await AsyncStorage.getItem(CONFIG_KEY);
       if (raw) {
-        const saved = JSON.parse(raw);
+        const { delegateEnabled: _d, providerPublicKey: _k, ...saved } = JSON.parse(raw);
         this.config = { ...DEFAULT_CONFIG, ...saved };
         if (saved.ttsEngine === 'system' && !saved.ttsEngineUserSelected) {
           this.config.ttsEngine = DEFAULT_TTS_ENGINE;
@@ -425,40 +404,13 @@ class QVACService {
     await this.reloadLLM();
   }
 
-  /** Configure P2P delegation (run inference on a remote provider) and reload. */
-  async setDelegate(opts: { enabled: boolean; providerPublicKey: string }): Promise<void> {
-    this.config = {
-      ...this.config,
-      delegateEnabled: opts.enabled,
-      providerPublicKey: opts.providerPublicKey.trim(),
-    };
-    await this.saveConfig();
-    await this.reloadLLM();
-  }
-
   /**
-   * Align delegation with the chosen KaleidoMind mode: Desktop => delegate,
-   * Local/Off => on-device. This is the bridge between the redux `aiMode` and
-   * the engine config, so picking "Desktop" actually runs inference remotely
-   * (previously the mode and config.delegateEnabled were never synced, so
-   * "Desktop" still ran the model locally). No-ops when nothing changes, and
-   * won't enable delegation until a desktop is paired.
-   */
-  async setDelegateEnabled(enabled: boolean): Promise<void> {
-    await this.loadConfig();
-    if (enabled === this.config.delegateEnabled) return;
-    if (enabled && !this.config.providerPublicKey) return; // wait for pairing
-    await this.setDelegate({ enabled, providerPublicKey: this.config.providerPublicKey });
-  }
-
-  /**
-   * Unload + re-initialize the LLM (after a model/delegation change).
+   * Unload + re-initialize the LLM (after a model change).
    *
    * Only HOT-reloads when the LLM was already running. From a cold state we must
-   * NOT boot it here: this is reached at app startup via the aiMode→delegate sync
-   * (App.tsx QVACEnabledSync → setDelegateEnabled → setDelegate), and cold-booting
-   * the worklet + loading the model at launch means a model-load/worklet crash
-   * bricks the entire app in a restart loop. Cold, we just reset status and let
+   * NOT boot it here: cold-booting the worklet + loading the model outside the AI
+   * screen means a model-load/worklet crash can brick the entire app in a
+   * restart loop. Cold, we just reset status and let
    * the model load lazily when the user opens the AI screen (AIAssistantScreen's
    * useQVAC autoInit on focus). Mirrors the "reload only if already active"
    * guard in setSttModel.
@@ -666,7 +618,7 @@ class QVACService {
       console.warn('[QVAC] LLM init skipped — worklet runtime unavailable on this device');
       this.setState({
         llmStatus: 'error',
-        error: 'unavailable: KaleidoMind needs a physical device. Connect a desktop to delegate.',
+        error: 'unavailable: KaleidoMind needs a physical device.',
       });
       return;
     }
@@ -677,76 +629,29 @@ class QVACService {
     try {
       await this.loadConfig();
       let model = getModelById(this.config.modelId);
-      const delegating = this.config.delegateEnabled && !!this.config.providerPublicKey;
 
-      // Guard: if we're running on-device but the selected model can't be
-      // downloaded here (P2P-only, e.g. Qwen3 4B, or oversized for this phone),
-      // fall back to a hardware-appropriate local model instead of failing to
-      // load. This is the common cause of "on-device AI failed to load" after a
-      // bigger model was selected during desktop/delegated testing.
-      if (!delegating && (!model.localCapable || model.tier !== 'phone')) {
+      // Guard: if the selected model can't be downloaded here or is oversized
+      // for a phone, fall back to a hardware-appropriate local model instead of
+      // failing to load.
+      if (!model.localCapable || model.tier !== 'phone') {
         const fallback = recommendLocalModel(await this.getDeviceMemoryBytes());
         console.warn(
-          `[QVAC] '${model.label}' isn't enabled for stable on-device iPhone loading; falling back to '${fallback.label}'`
+          `[QVAC] '${model.label}' isn't enabled for stable on-device loading; falling back to '${fallback.label}'`
         );
         model = fallback;
         this.config = { ...this.config, modelId: fallback.id };
         await this.saveConfig();
       }
 
-      let modelSrc: any;
-      if (delegating) {
-        // Weights are resolved/loaded on the remote provider — pass the SDK
-        // descriptor; the phone downloads nothing.
-        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
-        modelSrc = model.descriptor;
-        console.log('[QVAC] LLM: delegating', model.id, '→', this.config.providerPublicKey.slice(0, 12) + '…');
-      } else {
-        this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
-        const url = hfUrlFromDescriptor(model.descriptor)!;
-        modelSrc = await this.ensureLocalModel(
-          { url, name: model.descriptor.modelId, size: model.descriptor.expectedSize },
-          (pct) => this.setState({ llmDownloadProgress: pct })
-        );
-        console.log('[QVAC] LLM: loadModel start', modelSrc);
-        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
-      }
-
-      try {
-        if (delegating) {
-          // Delegated: the provider (e.g. a Mac) runs the model on its GPU.
-          this.llmModelId = await loadModel({
-            modelSrc,
-            modelType: 'llamacpp-completion',
-            modelConfig: { ...DELEGATE_LLM_CONFIG },
-            delegate: buildDelegateConfig(this.config.providerPublicKey),
-          } as any);
-        } else {
-          // Local: try Metal/GPU offload first, fall back to CPU.
-          this.llmModelId = await this.loadLocalLLM(modelSrc);
-        }
-      } catch (loadErr) {
-        if (!delegating) throw loadErr;
-        // Delegation failed (provider unreachable / RPC error, e.g. a stale
-        // "GPT_OSS_20B + delegate" config left over from desktop testing).
-        // Un-stick the phone: disable delegation, persist it, and load a local
-        // hardware-appropriate model instead of staying stuck on the provider.
-        console.warn(
-          '[QVAC] delegation failed; falling back to a local model:',
-          loadErr instanceof Error ? loadErr.message : String(loadErr)
-        );
-        const local = recommendLocalModel(await this.getDeviceMemoryBytes());
-        this.config = { ...this.config, modelId: local.id, delegateEnabled: false };
-        await this.saveConfig();
-        this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
-        const localUrl = hfUrlFromDescriptor(local.descriptor)!;
-        const localSrc = await this.ensureLocalModel(
-          { url: localUrl, name: local.descriptor.modelId, size: local.descriptor.expectedSize },
-          (pct) => this.setState({ llmDownloadProgress: pct })
-        );
-        this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
-        this.llmModelId = await this.loadLocalLLM(localSrc);
-      }
+      this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
+      const url = hfUrlFromDescriptor(model.descriptor)!;
+      const modelSrc = await this.ensureLocalModel(
+        { url, name: model.descriptor.modelId, size: model.descriptor.expectedSize },
+        (pct) => this.setState({ llmDownloadProgress: pct })
+      );
+      console.log('[QVAC] LLM: loadModel start', modelSrc);
+      this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
+      this.llmModelId = await this.loadLocalLLM(modelSrc);
 
       this.setState({ llmStatus: 'ready' });
       console.log('QVAC LLM ready:', this.llmModelId);
@@ -824,14 +729,6 @@ class QVACService {
     try {
       await this.loadConfig();
 
-      // Transcription ALWAYS runs on-device, even when the LLM is delegated to a
-      // desktop. The @qvac/sdk only registers a `delegatedHandler` for completion
-      // (the LLM) — `transcribe`/`textToSpeech` have none, so a Whisper model
-      // loaded with a `delegate` config becomes a delegated registry entry and
-      // every transcribeAudio() call throws "Model … is a delegated model and
-      // cannot be accessed directly", breaking voice mode the moment a desktop is
-      // paired. Whisper-base is tiny (~40 MB) and runs fine locally on any phone,
-      // so we keep STT on-device and delegate only the heavy LLM.
       this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
 
       // Use the user-selected Whisper variant, but keep the phone voice loop
@@ -907,8 +804,7 @@ class QVACService {
    * The Engine owns the agentic loop + tool execution; this just runs a single
    * round and returns the assistant text, the raw frame (for history push-back)
    * and any tool calls the model requested. Tools are passed as schemas only —
-   * the Engine executes them via its ToolSources (so wallet signing stays here
-   * on-device even when inference is delegated).
+   * the Engine executes them via its ToolSources (so wallet signing stays here).
    */
   async runProviderTurn(
     input: TurnInput & {
@@ -942,8 +838,7 @@ class QVACService {
    * Open a hands-free VAD transcription session for continuous voice. The caller
    * feeds raw PCM via `session.write()` and drives it with `runVoiceAssistant`
    * (both from @kaleidorg/mind/qvac). Requires the Whisper model loaded and
-   * @qvac/sdk ≥ 0.13.1 (the VAD conversation session). The one-shot
-   * `transcribeAudio` path above still works on 0.12.x.
+   * the VAD conversation session in @qvac/sdk.
    */
   async openVoiceSession() {
     if (this.workletBlocked()) throw new Error('on-device AI unavailable on this device');
@@ -972,7 +867,7 @@ class QVACService {
   }
 
   /**
-   * Load the QVAC 0.12 GGML Supertonic TTS model and keep it resident.
+   * Load the QVAC GGML Supertonic TTS model and keep it resident.
    * Idempotent + single-flighted so concurrent speak calls share one load.
    */
   private async ensureTtsLoaded(): Promise<string> {
@@ -981,13 +876,8 @@ class QVACService {
 
     this.ttsLoadPromise = (async () => {
       console.log('[QVAC] TTS: loading Supertonic GGML model');
-      // TTS ALWAYS runs on-device, even when the LLM is delegated. The @qvac/sdk
-      // only forwards completion (the LLM) to a P2P provider — `textToSpeech` has
-      // no delegated handler, so a TTS model loaded with `delegate` throws
-      // "Model … is a delegated model and cannot be accessed directly" on every
-      // synthesize call. The Supertonic model is small, so we keep it local and
-      // delegate only the LLM. Free the Whisper weights first so the phone never
-      // holds both neural voices in RAM at once.
+      // Free the Whisper weights first so the phone never holds both neural
+      // voices in RAM at once.
       if (this.whisperModelId) {
         console.log('[QVAC] TTS: unloading Whisper before neural voice load');
         await this.unloadWhisper().catch(() => {});
