@@ -336,7 +336,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     });
   }, []);
   const handleDepositDetected = React.useCallback((event?: DepositDetectionEvent) => {
-    feedback.swap();
+    feedback.receive();
     setDepositMonitor({
       status: event?.status === 'claimed' ? 'claimed' : 'confirmed',
       layer: event?.layer ?? 'all',

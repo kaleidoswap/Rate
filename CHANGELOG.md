@@ -16,7 +16,7 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   - with the app closed, kaleidoswap.me pushes to the phone when a payment to your Lightning address lands (the amount and address pass through Apple or Google);
   - while the app runs in the background, a balance that went up raises a notification;
   - a periodic background check (when the OS allows, often every 15 minutes or more) does the same for other payments, connecting only Spark.
-- **RGB node backup, said plainly.** Settings → RGB → RGB Lightning Node has a Backup section: the recovery phrase doesn't restore the RGB assets or channels on a connected node, only the node's own backups do, so back it up where it runs or ask whoever runs it. RGB on this phone keeps backing up to the cloud automatically.
+- **RGB node backup, said plainly.** Settings → RGB → RGB Lightning Node has a Backup section: the recovery phrase doesn't restore anything on a connected node (its bitcoin, RGB assets or channels), only the node's own backups do, so back it up where it runs or ask whoever runs it. RGB on this phone tries to back up to the cloud after every change.
 
 ### Changed
 - **Send redesigned.** One field with Paste/Scan (and Clear) inside it, a card saying what was detected (kind, amount, note, expiry), and recent contacts. Open amounts are entered on a large amount you tap. Review shows **Pay from** account cards with each account's balance and what this payment costs from it (best price picked and marked; an account that can't pay says why), a route line (account → rail → recipient, with the swap provider when there is one), and **slide to pay**. "Ways to pay" is now the shared bottom sheet, grouped by account. The result screen has an animated check, View in Activity and Share receipt. Quotes, the payment journal and double-send protection are unchanged.
@@ -50,6 +50,7 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   swap fee, and the wallet claims the payment while Receive is open.
 
 ### Fixed
+- Payment sounds play again: Send chimes when a payment completes (or fails), and Receive plays the received chime when a payment arrives.
 - Swap explains when trading pairs are loading, empty or failed to load, with Retry or a link to Settings.
 - The Nostr private key and NWC connection string are copied with the auto-clearing secure clipboard.
 - Cards no longer fall back to white / light-grey / purple colors, and their

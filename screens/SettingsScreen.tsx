@@ -7,7 +7,7 @@ import { currentBarkHost, isBarkOff, loadBarkHost, saveBarkNetwork, setBarkOff }
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // screens/SettingsScreen.tsx
 import React, { useCallback, useState, useEffect, useMemo } from 'react';
-import { View, ScrollView, StyleSheet, Switch, Alert, Text, TouchableOpacity, BackHandler, Keyboard } from 'react-native';
+import { View, ScrollView, StyleSheet, Switch, Alert, Text, TouchableOpacity, BackHandler, Keyboard, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { useFocusEffect } from '@react-navigation/native';
@@ -25,6 +25,7 @@ import {
   setDisclosureLevel,
   setSoundEnabled,
   setTransactionNotifications,
+  setAutoLockTimeout,
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
@@ -37,7 +38,7 @@ import { protocolColor } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { getStoredHandle } from '../services/kaleidoswapMe';
 import { syncPaymentPush } from '../services/paymentNotifications';
-import SecurityService from '../services/SecurityService';
+import SecurityService, { type SecuritySettings } from '../services/SecurityService';
 import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
 import { initializeProtocols, protocolManager, rgbAccountAdapter, rgbNodeConnected } from '../services/protocols';
 import { removeNwcCredential, WALLET_SERVICE_NWC_URI_KEY } from '../services/nwc/connectionStore';
@@ -62,6 +63,16 @@ type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
 type SettingsAccount = WalletProtocol | 'BARK';
 const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
 const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0';
+const APP_LOCK_TERMS = 'app lock biometric face id touch fingerprint pin passcode auto-lock autolock timeout';
+const AUTO_LOCK_MINUTES = [0, 1, 5, 15, 30, 60];
+const autoLockLabel = (m: number) => m === 0 ? 'Immediately' : m === 60 ? 'After 1 hour' : `After ${m} minute${m === 1 ? '' : 's'}`;
+
+function biometricLabel(type: SecuritySettings['biometricType']): string {
+  if (type === 'face') return Platform.OS === 'ios' ? 'Face ID' : 'Face unlock';
+  if (type === 'fingerprint') return Platform.OS === 'ios' ? 'Touch ID' : 'Fingerprint';
+  if (type === 'iris') return 'Iris';
+  return 'Biometric unlock';
+}
 
 // ---------------------------------------------------------------------------
 // Reusable building blocks — consistent, fully-themed rows so nothing renders
@@ -141,6 +152,7 @@ export default function SettingsScreen({ navigation }: Props) {
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
     { page: 'assistant', terms: 'kaleidomind ai desktop model agent assistant personalize connection' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
+    { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase' },
     { page: 'preferences', terms: 'preferences display detail mode bitcoin balance unit sound sounds payment currency fiat notifications' },
     { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
@@ -208,6 +220,67 @@ export default function SettingsScreen({ navigation }: Props) {
     } catch (e: any) {
       Alert.alert('Security required', e?.message || 'Could not authenticate this device.');
     }
+  };
+
+  // App lock: what SecurityService has stored, re-read whenever it may have changed.
+  const [lock, setLock] = useState<SecuritySettings | null>(null);
+  const [lockBusy, setLockBusy] = useState(false);
+  const refreshLock = useCallback(async () => {
+    try {
+      setLock(await SecurityService.getInstance().getSecuritySettings());
+    } catch {
+      setLock(null);
+    }
+  }, []);
+  useFocusEffect(useCallback(() => { void refreshLock(); }, [refreshLock]));
+  useEffect(() => { if (page === 'security') void refreshLock(); }, [page, refreshLock]);
+  const biometricUsable = !!lock?.biometricEnabled && !!lock.biometricType;
+  const lockOn = !!lock?.pinEnabled || biometricUsable;
+  const bioLabel = biometricLabel(lock?.biometricType ?? null);
+
+  const turnOffBiometric = async () => {
+    const security = SecurityService.getInstance();
+    // Without a PIN this removes the lock, so the owner confirms it first.
+    if (!lock?.pinEnabled && !(await security.authenticateWithBiometric('Confirm to turn off the app lock'))) return;
+    if (!(await security.setBiometricEnabled(false))) Alert.alert('Error', 'Could not change the app lock. Please try again.');
+  };
+
+  const toggleBiometric = async (on: boolean) => {
+    if (!lock || lockBusy) return;
+    if (!on && !lock.pinEnabled) {
+      Alert.alert('Turn off app lock?', 'Without a PIN, anyone with your unlocked phone can open this wallet.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Turn off', style: 'destructive', onPress: () => void runLockChange(turnOffBiometric) },
+      ]);
+      return;
+    }
+    await runLockChange(async () => {
+      if (!on) return turnOffBiometric();
+      if (!lock.biometricType) return;
+      const security = SecurityService.getInstance();
+      // Proves the biometric works before the lock relies on it.
+      if (!(await security.authenticateWithBiometric(`Confirm ${bioLabel} to unlock your wallet`, { allowDeviceFallback: false }))) return;
+      if (!(await security.setBiometricEnabled(true))) Alert.alert('Error', 'Could not change the app lock. Please try again.');
+    });
+  };
+
+  const runLockChange = async (change: () => Promise<void>) => {
+    setLockBusy(true);
+    try {
+      await change();
+    } finally {
+      await refreshLock();
+      setLockBusy(false);
+    }
+  };
+
+  const turnOffPin = () => {
+    Alert.alert('Turn off PIN?', biometricUsable
+      ? `You will unlock the wallet with ${bioLabel} only.`
+      : 'This turns off the app lock. Anyone with your unlocked phone can open this wallet.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Turn off', style: 'destructive', onPress: () => navigation.navigate('SecuritySetup', { mode: 'disablePin' }) },
+    ]);
   };
 
   const closeRevealModal = () => {
@@ -481,7 +554,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   // Which settings selector sheet is open (one bottom sheet at a time).
-  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'display'>(null);
+  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'display' | 'autoLock'>(null);
   const btcPrice = useBitcoinPriceIn(settings.currency);
 
   // Live previews for the unit selector (sample = 1,234,567 sats), matching
@@ -501,6 +574,8 @@ export default function SettingsScreen({ navigation }: Props) {
     { id: 'fiat', label: `Local currency (${settings.currency})`, description: 'Show values in fiat', preview: btcPrice ? unitPreview('fiat') : '—' },
   ];
   const currencyOptions: SheetOption[] = ['USD', 'EUR', 'GBP', 'CHF', 'CAD', 'JPY'].map((c) => ({ id: c, label: c }));
+  const autoLockMinutes = settings.autoLockTimeout ?? 5;
+  const autoLockOptions: SheetOption[] = AUTO_LOCK_MINUTES.map((m) => ({ id: String(m), label: autoLockLabel(m), badge: m === 5 ? 'Default' : undefined }));
   const displayModeOptions: SheetOption[] = [
     { id: 'lite', label: 'Lite', description: 'BTC, USD & assets only' },
     { id: 'advanced', label: 'Advanced', description: 'Networks, routes & channels' },
@@ -574,7 +649,7 @@ export default function SettingsScreen({ navigation }: Props) {
               description={lightningAddress ?? 'Get a name@kaleidoswap.me anyone can pay'} value={lightningAddress ? undefined : 'Get one'}
               onPress={() => navigation.navigate('LightningAddress')} />
             <Row icon="options-outline" label="Preferences" description="Units, currency, sounds and notifications" onPress={() => openPage('preferences')} />
-            <Row icon="shield-checkmark-outline" label="Security & backup" description="Recovery phrase and device data" onPress={() => openPage('security')} />
+            <Row icon="shield-checkmark-outline" label="Security & backup" description="App lock, recovery phrase and device data" onPress={() => openPage('security')} />
             <Row icon="link-outline" label="Connections" description="Lightning wallets and Nostr" onPress={() => openPage('connections')} />
           </Group>
           <SectionLabel>More</SectionLabel>
@@ -585,7 +660,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
         </>}
         {page === 'advanced' && !account && <Text style={styles.pageDescription}>Manage the networks used by your wallet accounts. Test networks use separate test funds.</Text>}
-        {page === 'security' && <Text style={styles.pageDescription}>Keep your recovery phrase private. It gives access to your funds.</Text>}
+        {page === 'security' && <Text style={styles.pageDescription}>Lock the app on this phone and keep your recovery phrase private. The phrase gives access to your funds.</Text>}
 
 
         {!hasSettingsSearchResults && (
@@ -716,6 +791,43 @@ export default function SettingsScreen({ navigation }: Props) {
             }
             onPress={() => navigation.navigate('NWCConnect')}
           />
+        </Group>
+        </>}
+
+        {showSection(APP_LOCK_TERMS) && <>
+        <SectionLabel>App lock</SectionLabel>
+        <Group>
+          {lock === null ? (
+            <Row first icon="lock-closed-outline" label="App lock unavailable" description="Could not read the lock settings. Tap to retry." onPress={() => void refreshLock()} />
+          ) : <>
+            {(lock.biometricType || lock.biometricEnabled) && (
+              <Row
+                first
+                icon={lock.biometricType === 'face' ? 'scan-outline' : lock.biometricType === 'iris' ? 'eye-outline' : 'finger-print'}
+                iconColor={theme.colors.primary[500]}
+                label={bioLabel}
+                description={lock.biometricType ? `Unlock the wallet with ${bioLabel}` : 'Not available on this device'}
+                right={
+                  <Switch
+                    accessibilityLabel={bioLabel}
+                    value={lock.biometricEnabled}
+                    disabled={lockBusy}
+                    onValueChange={(on) => void toggleBiometric(on)}
+                    trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+                  />
+                }
+              />
+            )}
+            {lock.pinEnabled ? <>
+              <Row first={!lock.biometricType && !lock.biometricEnabled} icon="keypad-outline" label="Change PIN" description="Needs your current PIN" onPress={() => navigation.navigate('SecuritySetup', { mode: 'pin' })} />
+              <Row icon="close-circle-outline" label="Turn off PIN" description={biometricUsable ? `Unlock with ${bioLabel} only` : 'Removes the app lock'} onPress={turnOffPin} />
+            </> : (
+              <Row first={!lock.biometricType && !lock.biometricEnabled} icon="keypad-outline" label="Set up PIN" description="A 6-digit code to unlock the wallet" onPress={() => navigation.navigate('SecuritySetup', { mode: 'pin' })} />
+            )}
+            {lockOn && (
+              <Row icon="timer-outline" label="Auto-lock" description="After the app has been in the background" value={autoLockLabel(autoLockMinutes)} onPress={() => setActiveSheet('autoLock')} />
+            )}
+          </>}
         </Group>
         </>}
 
@@ -893,6 +1005,14 @@ export default function SettingsScreen({ navigation }: Props) {
         options={currencyOptions}
         selectedId={settings.currency}
         onSelect={(id) => dispatch(setCurrency(id))}
+        onClose={() => setActiveSheet(null)}
+      />
+      <OptionSheet
+        visible={activeSheet === 'autoLock'}
+        title="Auto-lock"
+        options={autoLockOptions}
+        selectedId={String(autoLockMinutes)}
+        onSelect={(id) => dispatch(setAutoLockTimeout(Number(id)))}
         onClose={() => setActiveSheet(null)}
       />
       <OptionSheet

@@ -16,6 +16,8 @@ export const SWAP_UNCONFIRMED_COPY: SwapFailureCopy = {
   message: "The provider hasn't confirmed this swap yet, so it may still complete. Check Activity and your balance before trying again.",
 };
 
+const CONNECTION_FAILURE = /NETWORK_ERROR|TIMEOUT_ERROR|network|timed? ?out|fetch failed|ECONN|unreachable|did not respond/i;
+
 const RULES: Array<[RegExp, SwapFailureCopy]> = [
   [/verification failed|did not match your quote/i, {
     title: 'Swap stopped for your safety',
@@ -57,7 +59,7 @@ const RULES: Array<[RegExp, SwapFailureCopy]> = [
     title: "Lightning couldn't carry it",
     message: "Your channels couldn't route this swap. Try a smaller amount, or add channel liquidity.",
   }],
-  [/NETWORK_ERROR|TIMEOUT_ERROR|network|timed? ?out|fetch failed|ECONN|unreachable|did not respond/i, {
+  [CONNECTION_FAILURE, {
     title: 'Connection problem',
     message: "Couldn't reach the swap provider. Check your connection and try again.",
   }],
@@ -78,4 +80,11 @@ export function describeSwapFailure(error: unknown): SwapFailureCopy {
   }
   const text = [message, e?.code, e?.details].filter(v => typeof v === 'string').join(' ');
   return RULES.find(([pattern]) => pattern.test(text))?.[1] ?? FALLBACK;
+}
+
+/** The request failed in transit, so the provider may still have acted on it. */
+export function isConnectionFailure(error: unknown): boolean {
+  const e = error as { message?: unknown; code?: unknown } | null | undefined;
+  const text = [typeof error === 'string' ? error : e?.message, e?.code].filter(v => typeof v === 'string').join(' ');
+  return CONNECTION_FAILURE.test(text);
 }

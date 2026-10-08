@@ -72,7 +72,7 @@ type RootStackParamList = {
   InitialLoad: undefined;
   WalletSetup: undefined;
   WalletRestore: undefined;
-  SecuritySetup: { walletId?: number; isInitialSetup?: boolean };
+  SecuritySetup: { walletId?: number; isInitialSetup?: boolean; mode?: 'setup' | 'pin' | 'disablePin' };
   Dashboard: undefined;
   Settings: undefined;
   Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; resumePayment?: boolean } | undefined;

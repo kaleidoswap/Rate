@@ -1,4 +1,4 @@
-import { describeSwapFailure } from './swap-errors';
+import { describeSwapFailure, isConnectionFailure } from './swap-errors';
 
 describe('describeSwapFailure', () => {
   it.each([
@@ -37,5 +37,12 @@ describe('describeSwapFailure', () => {
     expect(copy.message).not.toMatch(/JSON|SDK_ERROR/);
     expect(describeSwapFailure(undefined).title).toBe('Swap failed');
     expect(describeSwapFailure('Insufficient liquidity').title).toBe('Not enough liquidity');
+  });
+
+  it('tells transport failures apart from refusals', () => {
+    expect(isConnectionFailure(new Error('Request timed out'))).toBe(true);
+    expect(isConnectionFailure(Object.assign(new Error('Request failed'), { code: 'NETWORK_ERROR' }))).toBe(true);
+    expect(isConnectionFailure(new Error('Insufficient liquidity'))).toBe(false);
+    expect(isConnectionFailure(undefined)).toBe(false);
   });
 });

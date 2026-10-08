@@ -49,7 +49,7 @@ import {
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS, MSATS_PER_SAT, RLN_HTLC_MIN_MSAT,
 } from '../utils/swap-model';
 import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
-import { describeSwapFailure, SWAP_FAILED_COPY, SWAP_UNCONFIRMED_COPY, type SwapFailureCopy } from '../utils/swap-errors';
+import { describeSwapFailure, isConnectionFailure, SWAP_FAILED_COPY, SWAP_UNCONFIRMED_COPY, type SwapFailureCopy } from '../utils/swap-errors';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import {
   fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer,
@@ -449,6 +449,10 @@ export default function SwapScreen({ navigation }: Props) {
     // Once the provider has the swap, a failure belongs in Activity.
     let started = false;
     let swapString = '';
+    // Set once our node has whitelisted the swap: from then on the maker can
+    // settle it, so an error only means we don't know the outcome yet.
+    let followUp: (() => void) | null = null;
+    let flashnetSubmitted = false;
 
     try {
       dispatch(setExecuting(true));
@@ -475,6 +479,7 @@ export default function SwapScreen({ navigation }: Props) {
           ? btcDisplayToSats(quote.to_amount)
           : quote.to_amount * Math.pow(10, toPrecision));
 
+        flashnetSubmitted = true;
         const result = await client.executeSwap({
           poolId: poolId || '',
           assetInAddress: fromAssetId,
@@ -574,6 +579,7 @@ export default function SwapScreen({ navigation }: Props) {
         setSwapProgress('taker');
         await client.rln.whitelistSwap(swapstring);
         dispatch(updateExecutionStatus({ rfq_id: quote.rfq_id, status: 'whitelisted' }));
+        followUp = () => startStatusPolling(paymentHash, accessToken, quote, execution);
 
         // Step 3: Confirm swap
         setSwapProgress('execute');
@@ -591,7 +597,21 @@ export default function SwapScreen({ navigation }: Props) {
       }
     } catch (error) {
       console.error('Swap execution failed:', error);
+      if (followUp) {
+        setSwapProgress('done');
+        followUp();
+        return;
+      }
       const copy = describeSwapFailure(error);
+      // A Flashnet request that timed out may still have gone through.
+      if (flashnetSubmitted && isConnectionFailure(error)) {
+        setSwapProgress('idle');
+        recordSwapHistory(quote, 'pending', undefined, swapString, error instanceof Error ? error.message : copy.title);
+        setSwapFailure({ ...SWAP_UNCONFIRMED_COPY, unconfirmed: true });
+        dispatch(setExecuting(false));
+        refreshAfterSwap();
+        return;
+      }
       feedback.error();
       setSwapProgress('idle');
       dispatch(updateExecutionStatus({ rfq_id: quote.rfq_id, status: 'failed', error_message: copy.message }));
@@ -1159,7 +1179,13 @@ export default function SwapScreen({ navigation }: Props) {
           </View>
           <View style={[styles.confirmActions, { marginTop: theme.spacing[4] }]}>
             <Button title="Done" variant="secondary" onPress={closeFailure} style={styles.confirmActionButton} />
-            <Button title="Try again" variant="primary" onPress={retrySwap} style={styles.confirmActionButton} />
+            {swapFailure.unconfirmed ? (
+              // The first swap may still settle: no new swap from here.
+              <Button title="View Activity" variant="primary" style={styles.confirmActionButton}
+                onPress={() => { closeFailure(); navigation.navigate('Dashboard', { screen: 'Activity' }); }} />
+            ) : (
+              <Button title="Try again" variant="primary" onPress={retrySwap} style={styles.confirmActionButton} />
+            )}
           </View>
         </View>
       );
