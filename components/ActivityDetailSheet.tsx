@@ -15,6 +15,7 @@ import {
     TouchableOpacity,
     ScrollView,
     Platform,
+    Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
@@ -29,6 +30,7 @@ import { findPaymentProof } from '../services/paymentProofs';
 import { preimageMatches } from '../utils/payment-proofs';
 import { chainLabel } from '../utils/orchestra-ui';
 import { formatRecordAmount } from '../utils/crosschain-history';
+import { activityExplorerUrl } from '../utils/explorer';
 
 interface Props {
     item: ActivityItem | null;
@@ -100,6 +102,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const proofHash = proof?.paymentHash ?? item.paymentHash;
     const proofVerified = !!proof && !!proofHash && preimageMatches(proof.preimage, proofHash);
     const target = accelerationTarget(item);
+    const explorerUrl = activityExplorerUrl(item);
 
     return (
         <Modal
@@ -233,6 +236,12 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                                 <CopyButton value={item.txid} label="Copy" size={14} />
                             </View>
                             <Text style={styles.txidText} selectable numberOfLines={3}>{item.txid}</Text>
+                            {explorerUrl && (
+                                <TouchableOpacity accessibilityRole="link" style={styles.explorerLink} onPress={() => Linking.openURL(explorerUrl).catch(() => {})}>
+                                    <Ionicons name="open-outline" size={14} color={theme.colors.primary[500]} />
+                                    <Text style={styles.explorerLinkText}>View in explorer</Text>
+                                </TouchableOpacity>
+                            )}
                         </View>
                     )}
                     {proof && (
@@ -409,6 +418,17 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
         color: theme.colors.text.secondary,
         lineHeight: 18,
+    },
+    explorerLink: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[1],
+        marginTop: theme.spacing[1],
+    },
+    explorerLinkText: {
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: '600',
+        color: theme.colors.primary[500],
     },
     accelerateButton: {
         flexDirection: 'row',
