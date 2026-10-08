@@ -51,6 +51,12 @@ function lightningAdapter(): any {
   if (!a) throw new Error('No Lightning wallet is connected.');
   return a;
 }
+/** Which wallet pays Lightning sends, for the confirm sheet. */
+export function lightningRailLabel(): string {
+  if (adapter('SPARK')) return 'Lightning (Spark wallet)';
+  if (adapter('RGB_LN')) return 'Lightning (RGB node)';
+  return 'Lightning';
+}
 function connectedLayers(): WalletLayer[] {
   return (Object.keys(LAYER_PROTO) as (keyof typeof LAYER_PROTO)[]).filter((l) => adapter(LAYER_PROTO[l]));
 }

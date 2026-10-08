@@ -81,6 +81,8 @@ export interface RunTurnCallbacks {
     call: { name: string; arguments: Record<string, unknown> },
     info: { requiresConfirmation: boolean }
   ) => void;
+  /** A tool returned (errors arrive as `{error}`). */
+  onToolResult?: (event: { name: string; arguments: Record<string, unknown>; result: unknown }) => void;
   onConfirm?: (call: {
     name: string;
     arguments: Record<string, unknown>;
@@ -214,6 +216,7 @@ export function createMindAgent(
           onToken: cbs.onToken,
           onStep: cbs.onStep,
           onToolCall: cbs.onToolCall,
+          onToolResult: cbs.onToolResult,
           onConfirm: cbs.onConfirm,
         });
       } finally {

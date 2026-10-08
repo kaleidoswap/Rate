@@ -20,6 +20,7 @@ const TONES: Array<{ label: string; text: string }> = [
   { label: 'Cautious', text: 'Be extra careful with money; double-check amounts and recipients.' },
 ];
 const TEMP_OPTS = [{ label: 'Precise', value: 0.2 }, { label: 'Balanced', value: 0.6 }, { label: 'Creative', value: 0.9 }];
+const AUTH_OPTS = [{ label: 'Always', value: 0 }, { label: '10k sats', value: 10_000 }, { label: '50k sats', value: 50_000 }, { label: '250k sats', value: 250_000 }];
 const HIST_OPTS = [{ label: 'Short', value: 4 }, { label: 'Medium', value: 8 }, { label: 'Long', value: 12 }];
 
 export default function MindSettingsScreen() {
@@ -107,6 +108,10 @@ export default function MindSettingsScreen() {
         {/* ── Responses ── */}
         <Section title="Responses">
           <Segmented label="Style" options={TEMP_OPTS} value={cfg.temperature} onChange={(v) => update({ temperature: v })} />
+        </Section>
+
+        <Section title="Payments">
+          <Segmented label="Ask for biometrics or PIN from" options={AUTH_OPTS} value={cfg.confirmAuthThresholdSats} onChange={(v) => update({ confirmAuthThresholdSats: v })} />
         </Section>
 
         {/* ── Context ── */}

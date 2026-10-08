@@ -46,25 +46,12 @@ import { useQVAC } from '../hooks/useQVAC';
 import { getModelById } from '../services/qvacModels';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
-import { describeSwapQuote } from '../services/swapTools';
-import { decodeBolt11 } from '../utils/decodeInvoice';
+import { useAiConfirm } from '../hooks/useAiConfirm';
 import * as Haptics from 'expo-haptics';
 
 interface Props {
   navigation: any;
   route?: { params?: { openSettings?: boolean } };
-}
-
-interface PaymentDetails {
-  type: 'lightning_address' | 'lightning_invoice' | 'nostr_contact';
-  recipient: string;
-  amount: number;
-  description?: string;
-  recipientName?: string;
-  recipientAvatar?: string;
-  lightningAddress?: string;
-  isNostrContact?: boolean;
-  priceUsd?: number;
 }
 
 interface Contact {
@@ -111,11 +98,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
   // Collapsible quick actions (hidden by default once a chat is going).
   const [showActions, setShowActions] = useState(false);
-
-  // Payment confirmation state
-  const [showPaymentConfirmation, setShowPaymentConfirmation] = useState(false);
-  const [pendingPayment, setPendingPayment] = useState<PaymentDetails | null>(null);
-  const [paymentLoading, setPaymentLoading] = useState(false);
 
   // Nostr contacts state
   const [showContactsSelector, setShowContactsSelector] = useState(false);
@@ -182,9 +164,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     try { return agent.listSkills(); } catch { return []; }
   }, [agent]);
   const [activeSkill, setActiveSkill] = useState<Skill | null>(null);
-
-  // Raw tool call awaiting user confirmation (e.g. a payment)
-  const [pendingToolCall, setPendingToolCall] = useState<{ name: string; arguments: any } | null>(null);
 
   // requestId of the in-flight completion, used to cancel via the stop button
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null);
@@ -392,95 +371,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   };
 
   // ---- Payments (human-in-the-loop gate for the agentic loop) ----
-  // The @kaleido/mind engine pauses on money tools and awaits this resolver.
-  // The modal's Confirm/Cancel buttons resolve it; the payment then runs inside
-  // the engine's agentic loop (via the wallet ToolSource) so the model can
-  // summarise the result.
-  const confirmResolver = useRef<((d: { approved: boolean; reason?: string }) => void) | null>(null);
-
-  const cancelPayment = () => {
-    setShowPaymentConfirmation(false);
-    setPendingPayment(null);
-    setPendingToolCall(null);
-    confirmResolver.current?.({ approved: false, reason: 'cancelled by user' });
-    confirmResolver.current = null;
-  };
-
-  // Map a money-moving tool call → the confirmation sheet. Handles the canonical
-  // @kaleidorg/mind contract tools (send_payment, rln_pay_invoice, rln_send_asset,
-  // execute_swap) AND the legacy ones. The amount is read from the call args, and
-  // for a bare invoice we decode it (the amount lives in the invoice, not args).
-  const decAmt = (s: string): number | undefined => {
-    try { return /^ln(bc|tb|bcrt)/i.test(s) ? decodeBolt11(s).amountSats : undefined; } catch { return undefined; }
-  };
-  const buildPaymentDetails = (call: { name: string; arguments: any }): PaymentDetails => {
-    const a = call.arguments || {};
-    switch (call.name) {
-      case 'send_payment': {
-        const to = String(a.to ?? '');
-        const isAddr = to.includes('@');
-        const amount = Number(a.amount_sats) || decAmt(to) || 0;
-        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: to, amount, description: 'Payment', lightningAddress: isAddr ? to : undefined, priceUsd: btcPriceUSD };
-      }
-      case 'rln_pay_invoice': {
-        const inv = String(a.invoice ?? a.to ?? '');
-        let dec: ReturnType<typeof decodeBolt11> | null = null;
-        try { dec = decodeBolt11(inv); } catch { /* ignore */ }
-        return { type: 'lightning_invoice', recipient: inv, amount: dec?.amountSats ?? Number(a.amount_sats) ?? 0, description: dec?.description || 'Invoice payment', priceUsd: btcPriceUSD };
-      }
-      case 'rln_send_asset': {
-        const amt = Number(a.amount) || 0;
-        const asset = String(a.asset ?? '').toUpperCase();
-        return { type: 'lightning_invoice', recipient: String(a.to ?? ''), amount: 0, description: `Send ${amt.toLocaleString()} ${asset}`, recipientName: `${amt.toLocaleString()} ${asset}` };
-      }
-      case 'execute_swap': {
-        const q = describeSwapQuote(String(a.quote_id ?? ''));
-        if (!q) return { type: 'lightning_invoice', recipient: 'Swap', amount: 0, description: 'Swap (quote no longer cached)' };
-        const fmt = (n: number) => n.toLocaleString('en-US', { maximumFractionDigits: 8 });
-        const sendSats = q.from === 'BTC' ? Math.round(q.sendAmount) : 0;
-        return {
-          type: 'lightning_invoice',
-          recipient: `${q.from} → ${q.to}`,
-          recipientName: `${fmt(q.sendAmount)} ${q.from === 'BTC' ? 'sats' : q.from} → ${fmt(q.receiveAmount)} ${q.receiveUnit}`,
-          amount: sendSats,
-          description: `Swap on ${q.venue === 'flashnet' ? 'Flashnet' : 'KaleidoSwap'}`,
-          priceUsd: sendSats ? btcPriceUSD : undefined,
-        };
-      }
-      case 'pay_nostr_contact':
-        return { type: 'nostr_contact', recipient: a.contact_name || a.contact_npub || 'Nostr contact', amount: Number(a.amount_sats) || 0, description: a.description || 'Payment to Nostr contact', recipientName: a.contact_name, isNostrContact: true };
-      default: {
-        // legacy pay_lightning_invoice / generic
-        const target = String(a.invoice_or_address || a.to || '');
-        const isAddr = target.includes('@');
-        return { type: isAddr ? 'lightning_address' : 'lightning_invoice', recipient: target, amount: Number(a.amount_sats) || decAmt(target) || 0, description: a.description || 'Payment', lightningAddress: isAddr ? target : undefined, priceUsd: btcPriceUSD };
-      }
-    }
-  };
-
-  // Opens the confirmation modal and returns a promise the agentic loop awaits.
-  const requestConfirmation = (call: {
-    name: string;
-    arguments: Record<string, unknown>;
-  }): Promise<{ approved: boolean; reason?: string }> => {
-    const details = buildPaymentDetails(call);
-    console.log(`[AI] 🔐 CONFIRM ${call.name} · ${details.amount.toLocaleString()} sats → ${details.recipient || details.recipientName} (awaiting user before executing)`);
-    return new Promise((resolve) => {
-      confirmResolver.current = resolve;
-      setPendingToolCall({ name: call.name, arguments: call.arguments });
-      setPendingPayment(details);
-      setShowPaymentConfirmation(true);
-    });
-  };
-
-  // Approve only — the payment itself executes inside the engine's agentic loop
-  // (via the wallet ToolSource), after which the model summarises the outcome.
-  const handlePaymentConfirm = () => {
-    setShowPaymentConfirmation(false);
-    setPaymentLoading(false);
-    confirmResolver.current?.({ approved: true });
-    confirmResolver.current = null;
-  };
+  // The engine pauses on money tools until the shared sheet resolves; the
+  // approved tool then runs inside the agentic loop and the sheet shows
+  // "Processing" until its result arrives.
+  const confirm = useAiConfirm({ thresholdSats: mindConfig.confirmAuthThresholdSats });
 
   // ---- Send ----
   const sendMessage = async (text: string) => {
@@ -618,7 +512,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           scrollToBottom(true);
         },
         // Money tools pause here for explicit user approval.
-        onConfirm: requestConfirmation,
+        onConfirm: confirm.request,
+        onToolResult: confirm.onToolResult,
       });
 
       if (res.tier === 'fast') {
@@ -664,9 +559,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         }));
       }
 
-      // Clear any lingering confirmation UI.
-      setPendingPayment(null);
-      setPendingToolCall(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('KaleidoMind chat error:', error);
@@ -684,6 +576,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       }));
     }
 
+    confirm.reset();
     setActiveRequestId(null);
     setIsLoading(false);
   };
@@ -1124,11 +1017,14 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
           {/* Payment Confirmation Modal */}
           <PaymentConfirmationModal
-            visible={showPaymentConfirmation}
-            paymentDetails={pendingPayment}
-            onConfirm={handlePaymentConfirm}
-            onCancel={cancelPayment}
-            loading={paymentLoading}
+            visible={!!confirm.state}
+            readback={confirm.state?.readback}
+            onConfirm={confirm.approve}
+            onCancel={confirm.cancel}
+            loading={!!confirm.state?.loading}
+            busyLabel={confirm.state?.busyLabel}
+            requireAuth={confirm.state?.requireAuth}
+            priceUsd={btcPriceUSD}
           />
 
           {/* Nostr Contacts Selector */}
