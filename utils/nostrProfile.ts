@@ -107,8 +107,32 @@ export function contentToProfile(content: Record<string, unknown>): NostrProfile
   };
 }
 
+const CONTACT_ABOUT_MAX = 280;
+
+/**
+ * Only what a contact row and sheet show. Follow lists can hold thousands of
+ * profiles, and they are kept in persisted state.
+ */
+export function slimContactProfile(content: Record<string, unknown> | NostrProfile | null | undefined): NostrProfile | null {
+  if (!content) return null;
+  const { name, display_name, about, picture, nip05, lud16 } = contentToProfile(content as Record<string, unknown>);
+  const slim: NostrProfile = {};
+  if (name) slim.name = name;
+  if (display_name) slim.display_name = display_name;
+  if (about) slim.about = about.length > CONTACT_ABOUT_MAX ? `${about.slice(0, CONTACT_ABOUT_MAX)}…` : about;
+  if (picture) slim.picture = picture;
+  if (nip05) slim.nip05 = nip05;
+  if (lud16) slim.lud16 = lud16;
+  return Object.keys(slim).length > 0 ? slim : null;
+}
+
 export function profileDisplayName(profile?: Partial<NostrProfile> | null): string {
   return (profile?.display_name || profile?.name || '').trim();
+}
+
+/** A follow's name: the one the user gave them, else their own profile name. */
+export function nostrContactName(contact: { petname?: string; profile?: Partial<NostrProfile> | null }): string {
+  return contact.petname?.trim() || profileDisplayName(contact.profile);
 }
 
 export function profileInitials(name: string): string {

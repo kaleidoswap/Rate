@@ -21,10 +21,26 @@ import {
   contentToProfile,
   mergeProfileEdits,
   parseProfileContent,
+  slimContactProfile,
   type ProfileFormField,
 } from '../utils/nostrProfile';
 
 const PROFILE_FETCH_TIMEOUT_MS = 6_000;
+// Follow lists can hold thousands of keys: ask for their profiles in batches,
+// a few at a time, and stop waiting once the overall budget is spent.
+const CONTACT_LIST_FETCH_TIMEOUT_MS = 8_000;
+const CONTACT_PROFILE_BATCH = 200;
+const CONTACT_PROFILE_CONCURRENCY = 4;
+const CONTACT_PROFILE_BATCH_TIMEOUT_MS = 6_000;
+const CONTACT_PROFILES_BUDGET_MS = 15_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 // NIP-06 derivation path for Nostr keys from a BIP39 mnemonic.
 // m/44'/1237'/<account>'/0/0 — 1237 is the registered Nostr coin type.
@@ -533,11 +549,17 @@ class NostrService {
       limit: 1,
     };
 
-    const event = await this.ndk.fetchEvent(filter, { closeOnEose: true });
-    if (event) {
-      // Keep the newest event only (fetchEvent already returns the latest).
-      this.lastContactListEvent = event;
-    }
+    const fetched = await withTimeout(
+      this.ndk.fetchEvent(filter, { closeOnEose: true }),
+      CONTACT_LIST_FETCH_TIMEOUT_MS,
+      'Could not read your follow list from the relays. Try again.',
+    );
+    // A relay can still serve the list we replaced a moment ago: keep the newest.
+    const cached = this.lastContactListEvent;
+    const event = cached && (!fetched || (cached.created_at ?? 0) > (fetched.created_at ?? 0))
+      ? cached
+      : fetched;
+    this.lastContactListEvent = event;
     return event;
   }
 
@@ -582,42 +604,62 @@ class NostrService {
     }
   }
 
-  // Fetch profiles for contacts
+  /**
+   * Fill in contact profiles (kind 0). Keeps the newest profile per key and only
+   * the fields the app shows. Profiles that do not arrive in time are left out,
+   * so a slow relay or a huge follow list never blocks the contact list.
+   */
   private async fetchContactProfiles(contacts: NostrContact[]): Promise<void> {
-    try {
-      if (!this.ndk || contacts.length === 0) return;
+    if (!this.ndk || contacts.length === 0) return;
 
-      const pubkeys = contacts.map(c => c.pubkey);
-      
-      const filter: NDKFilter = {
-        kinds: [0], // Metadata events
-        authors: pubkeys,
-      };
-
-      const profileEvents = await this.ndk.fetchEvents(filter, { closeOnEose: true });
-
-      // Map profiles to contacts
-      const profileMap = new Map<string, NostrProfile>();
-      
-      for (const event of profileEvents) {
-        try {
-          const profile = JSON.parse(event.content) as NostrProfile;
-          profileMap.set(event.pubkey, profile);
-        } catch (error) {
-          console.warn('NostrService: Failed to parse profile for', event.pubkey);
-        }
-      }
-
-      // Update contacts with profiles
-      for (const contact of contacts) {
-        const profile = profileMap.get(contact.pubkey);
-        if (profile) {
-          contact.profile = profile;
-        }
-      }
-    } catch (error) {
-      console.error('NostrService: Failed to fetch contact profiles:', error);
+    const pubkeys = [...new Set(contacts.map(c => c.pubkey))];
+    const batches: string[][] = [];
+    for (let i = 0; i < pubkeys.length; i += CONTACT_PROFILE_BATCH) {
+      batches.push(pubkeys.slice(i, i + CONTACT_PROFILE_BATCH));
     }
+
+    const newest = new Map<string, NDKEvent>();
+    const deadline = Date.now() + CONTACT_PROFILES_BUDGET_MS;
+    const next = { index: 0 };
+    const worker = async () => {
+      while (next.index < batches.length) {
+        const authors = batches[next.index++];
+        const wait = Math.min(CONTACT_PROFILE_BATCH_TIMEOUT_MS, deadline - Date.now());
+        if (wait <= 0) return;
+        await this.collectEvents({ kinds: [0], authors }, wait, (event) => {
+          const prev = newest.get(event.pubkey);
+          if (!prev || (event.created_at ?? 0) > (prev.created_at ?? 0)) newest.set(event.pubkey, event);
+        });
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONTACT_PROFILE_CONCURRENCY, batches.length) }, worker));
+
+    for (const contact of contacts) {
+      const event = newest.get(contact.pubkey);
+      const profile = event ? slimContactProfile(parseProfileContent(event.content)) : null;
+      if (profile) contact.profile = profile;
+    }
+  }
+
+  /** Stream a filter's events until every relay has sent EOSE or `timeoutMs` passes. */
+  private collectEvents(filter: NDKFilter, timeoutMs: number, onEvent: (event: NDKEvent) => void): Promise<void> {
+    return new Promise((resolve) => {
+      let sub: NDKSubscription | undefined;
+      const done = () => {
+        clearTimeout(timer);
+        sub?.stop();
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      try {
+        sub = this.ndk!.subscribe(filter, { closeOnEose: true });
+        sub.on('event', onEvent);
+        sub.on('eose', done);
+      } catch (error) {
+        console.warn('NostrService: profile request failed:', error);
+        done();
+      }
+    });
   }
 
   /**
@@ -682,7 +724,7 @@ class NostrService {
       return ok;
     } catch (error) {
       console.error('NostrService: Failed to follow user:', error);
-      return false;
+      throw error instanceof Error ? error : new Error('Failed to follow user');
     }
   }
 
@@ -719,7 +761,7 @@ class NostrService {
       return ok;
     } catch (error) {
       console.error('NostrService: Failed to unfollow user:', error);
-      return false;
+      throw error instanceof Error ? error : new Error('Failed to unfollow user');
     }
   }
 

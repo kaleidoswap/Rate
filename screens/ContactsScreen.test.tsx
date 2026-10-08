@@ -243,9 +243,36 @@ describe('a scanned Nostr code', () => {
     mockState = state({ nostr: { isConnected: true, contacts: [] } });
     const screen = await openScanned();
     await act(async () => { fireEvent.press(screen.getAllByText('Add contact').pop()!); });
-    expect(followUser).toHaveBeenCalledWith({ pubkey: PUBKEY, petname: undefined });
+    // The profile already looked up is passed along so the new row shows at once,
+    // without reloading the whole follow list.
+    expect(followUser).toHaveBeenCalledWith({
+      pubkey: PUBKEY, petname: undefined, profile: expect.objectContaining({ display_name: 'Dave', lud16: 'dave@getalby.com' }),
+    });
+    const { loadContactList } = require('../store/slices/nostrSlice');
+    expect(loadContactList).not.toHaveBeenCalled();
     expect(mockToast.success).toHaveBeenCalledWith('Following on Nostr');
+    expect(screen.queryByLabelText('Address or key')).toBeNull();
     mockDispatch.mockImplementation((a: any) => a);
+  });
+
+  test('a failed follow keeps the form open and says why', async () => {
+    const { followUser } = require('../store/slices/nostrSlice');
+    followUser.mockReturnValue({ type: 'follow' });
+    mockDispatch.mockImplementation((a: any) => ({ ...a, unwrap: async () => { throw new Error('Could not read your follow list from the relays. Try again.'); } }));
+    mockState = state({ nostr: { isConnected: true, contacts: [] } });
+    const screen = await openScanned();
+    await act(async () => { fireEvent.press(screen.getAllByText('Add contact').pop()!); });
+    expect(mockToast.error).toHaveBeenCalledWith('Could not read your follow list from the relays. Try again.');
+    expect(screen.getByLabelText('Address or key')).toBeTruthy();
+    expect(screen.queryByText('Adding…')).toBeNull();
+    mockDispatch.mockImplementation((a: any) => a);
+  });
+
+  test('a follow shows the name the user gave them', () => {
+    mockState = state({ nostr: { isConnected: true, contacts: [{ pubkey: PUBKEY, petname: 'Dad', profile: { display_name: 'Dave' } }] } });
+    const screen = render(<ContactsScreen navigation={navigation} />);
+    expect(screen.getByText('Dad')).toBeTruthy();
+    expect(screen.queryByText('Dave')).toBeNull();
   });
 
   test('without Nostr connected, saves them as a contact with their key and profile', async () => {

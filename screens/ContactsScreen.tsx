@@ -1,5 +1,5 @@
 // screens/ContactsScreen.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useDeferredValue, memo } from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,7 @@ import { theme } from '../theme';
 import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input, CopyButton, PressableScale } from '../components';
 import { NostrIcon } from '../components/ProtocolIcons';
 import { ProfileAvatar } from '../components/ProfileAvatar';
-import { formatNip05, profileDisplayName, shortNpub } from '../utils/nostrProfile';
+import { formatNip05, nostrContactName, profileDisplayName, shortNpub } from '../utils/nostrProfile';
 import { feedback } from '../utils/feedback';
 import NostrService, { NostrContact, type NostrProfile } from '../services/NostrService';
 import ToastService from '../services/ToastService';
@@ -45,6 +45,7 @@ interface Props {
 type ContactRow = Contact & { localId?: string };
 
 const toast = () => ToastService.getInstance();
+const NO_UNREAD: Record<string, number> = {};
 
 function avatarColors(name: string) {
   const palette = theme.colors.avatar;
@@ -58,19 +59,116 @@ function IdIcon({ icon, size, color }: { icon: string; size: number; color: stri
   return icon === 'nostr' ? <NostrIcon size={size} /> : <Ionicons name={icon as any} size={size} color={color} />;
 }
 
-function isSamePerson(local: Contact, follow: Contact): boolean {
-  const ln = (c: Contact) => c.lightning_address?.trim().toLowerCase();
-  if (ln(local) && ln(local) === ln(follow)) return true;
-  if (local.npub && local.npub === follow.npub) return true;
-  return !!local.node_pubkey && local.node_pubkey.toLowerCase() === follow.node_pubkey?.toLowerCase();
+// bech32 is slow enough to matter across thousands of follows on every render.
+const npubCache = new Map<string, string>();
+function npubOf(pubkey: string): string {
+  let npub = npubCache.get(pubkey);
+  if (!npub) {
+    npub = nip19.npubEncode(pubkey);
+    npubCache.set(pubkey, npub);
+  }
+  return npub;
 }
+
+const lnKey = (c: Contact) => c.lightning_address?.trim().toLowerCase() || undefined;
+const nodeKey = (c: Contact) => c.node_pubkey?.toLowerCase() || undefined;
+const shortKey = (k: string, head = 12, tail = 6) => (k.length > head + tail + 1 ? `${k.slice(0, head)}…${k.slice(-tail)}` : k);
+const canPay = (c: Contact) => !!(c.lightning_address || c.node_pubkey);
+const canMessage = (c: Contact) => !!(c.isNostrContact && c.node_pubkey);
+
+const ContactAvatar = memo(function ContactAvatar({ contact, size }: { contact: Contact; size: number }) {
+  const ac = avatarColors(contact.name);
+  return (
+    <View style={{ width: size, height: size }}>
+      <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: ac.bg }]}>
+        {contact.avatar_url ? (
+          // Nostr pictures are often full-size photos: decode them at the shown size.
+          <Image source={{ uri: contact.avatar_url }} style={styles.avatarImg} resizeMethod="resize" fadeDuration={0} />
+        ) : (
+          <Text style={[styles.avatarInitial, { color: ac.fg, fontSize: size * 0.4 }]}>
+            {contact.name.charAt(0).toUpperCase()}
+          </Text>
+        )}
+      </View>
+      {/* Nostr accounts carry a small badge instead of a separate icon next to the name. */}
+      {contact.isNostrContact && (
+        <View style={styles.avatarBadge}>
+          <NostrIcon size={12} />
+        </View>
+      )}
+    </View>
+  );
+});
+
+interface RowProps {
+  contact: Contact;
+  first: boolean;
+  last: boolean;
+  unread: number;
+  onOpen: (contact: Contact) => void;
+  onMessage: (contact: Contact) => void;
+  onPay: (contact: Contact) => void;
+}
+
+const ContactListRow = memo(function ContactListRow({ contact, first, last, unread, onOpen, onMessage, onPay }: RowProps) {
+  const detail = contact.lightning_address
+    ? contact.lightning_address
+    : contact.npub
+      ? shortKey(contact.npub)
+      : contact.node_pubkey
+        ? `Node ${shortKey(contact.node_pubkey, 8, 4)}`
+        : 'No payment method';
+  return (
+    <PressableScale
+      scaleTo={0.98}
+      style={[styles.contactRow, first && styles.rowFirst, last && styles.rowLast, !last && styles.rowDivider]}
+      onPress={() => onOpen(contact)}
+      accessibilityRole="button"
+      accessibilityLabel={`${contact.name}, ${detail}${unread > 0 ? `, ${unread} unread` : ''}`}
+    >
+      <ContactAvatar contact={contact} size={44} />
+      <View style={styles.contactInfo}>
+        <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
+        <Text style={styles.detailText} numberOfLines={1}>{detail}</Text>
+      </View>
+
+      {canMessage(contact) && (
+        <TouchableOpacity
+          style={styles.iconBtn}
+          onPress={() => onMessage(contact)}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+          accessibilityLabel={`Message ${contact.name}`}
+        >
+          <Ionicons name="chatbubble-ellipses-outline" size={18} color={theme.colors.text.secondary} />
+          {unread > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadBadgeText}>{Math.min(unread, 99)}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      )}
+      {canPay(contact) && (
+        <TouchableOpacity
+          style={styles.payBtn}
+          onPress={() => { feedback.select(); onPay(contact); }}
+          hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+          accessibilityLabel={`Pay ${contact.name}`}
+        >
+          <Ionicons name="flash" size={14} color={theme.colors.primary[500]} />
+          <Text style={styles.payText}>Pay</Text>
+        </TouchableOpacity>
+      )}
+    </PressableScale>
+  );
+});
 
 export default function ContactsScreen({ navigation, route }: Props) {
   const dispatch = useDispatch();
   const { contacts, searchQuery, favoriteNostrPubkeys } = useSelector((state: RootState) => state.contacts);
-  const nostrFavorites = favoriteNostrPubkeys ?? []; // undefined in pre-v6 persisted state
-  const nostrState = useSelector((state: RootState) => state.nostr);
-  const unreadByPubkey = useSelector((state: RootState) => state.chat.unreadByPubkey) || {};
+  const nostrFavorites = useMemo(() => favoriteNostrPubkeys ?? [], [favoriteNostrPubkeys]); // undefined in pre-v6 persisted state
+  const nostrConnected = useSelector((state: RootState) => state.nostr.isConnected);
+  const follows = useSelector((state: RootState) => state.nostr.contacts);
+  const unreadByPubkey = useSelector((state: RootState) => state.chat.unreadByPubkey) || NO_UNREAD;
   const [showAddForm, setShowAddForm] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [contactSource, setContactSource] = useState<'all' | 'local' | 'nostr'>('all');
@@ -87,55 +185,66 @@ export default function ContactsScreen({ navigation, route }: Props) {
   // Contact sheet (null = closed). Holds the id so the sheet follows live edits.
   const [openContactId, setOpenContactId] = useState<string | null>(null);
 
-  const convertNostrContact = (nostrContact: NostrContact): Contact => {
-    const displayName = nostrContact.profile?.display_name || nostrContact.profile?.name || nostrContact.petname || 'Anonymous';
-    return {
+  const nostrContacts = useMemo((): Contact[] => {
+    if (!nostrConnected) return [];
+    const favs = new Set(nostrFavorites);
+    return follows.map((nostrContact: NostrContact): Contact => ({
       id: `nostr_${nostrContact.pubkey}`,
-      name: displayName,
+      name: nostrContactName(nostrContact) || 'Anonymous',
       lightning_address: nostrContact.profile?.lud16,
       node_pubkey: nostrContact.pubkey,
       notes: nostrContact.profile?.about,
       avatar_url: nostrContact.profile?.picture,
-      created_at: Date.now(),
-      updated_at: Date.now(),
-      is_favorite: nostrFavorites.includes(nostrContact.pubkey.toLowerCase()),
+      created_at: 0,
+      updated_at: 0,
+      is_favorite: favs.has(nostrContact.pubkey.toLowerCase()),
       isNostrContact: true,
-      npub: nip19.npubEncode(nostrContact.pubkey),
-    };
-  };
+      npub: npubOf(nostrContact.pubkey),
+    }));
+  }, [nostrConnected, follows, nostrFavorites]);
 
-  const nostrContacts = nostrState.isConnected ? nostrState.contacts.map(convertNostrContact) : [];
-
-  // "All" folds a saved contact into the matching follow: the Nostr entry wins
-  // (it can message), favourite if either side is, and keeps the saved id.
-  const merged: ContactRow[] = (() => {
+  // "All" folds a saved contact into the matching follow (same Lightning
+  // address or key): the Nostr entry wins (it can message), favourite if either
+  // side is, and keeps the saved id.
+  const merged = useMemo((): ContactRow[] => {
+    const byKey = new Map<string, Contact>();
+    for (const l of contacts) {
+      for (const k of [lnKey(l), l.npub, nodeKey(l)]) if (k && !byKey.has(k)) byKey.set(k, l);
+    }
     const folded = new Set<string>();
-    const follows = nostrContacts.map((n): ContactRow => {
-      const dup = contacts.find((l) => !folded.has(l.id) && isSamePerson(l, n));
+    const rows = nostrContacts.map((n): ContactRow => {
+      const dup = [lnKey(n), n.npub, nodeKey(n)]
+        .map((k) => (k ? byKey.get(k) : undefined))
+        .find((l) => l && !folded.has(l.id));
       if (!dup) return n;
       folded.add(dup.id);
       return { ...n, is_favorite: n.is_favorite || dup.is_favorite, localId: dup.id };
     });
-    return [...contacts.filter((l) => !folded.has(l.id)), ...follows];
-  })();
+    return [...contacts.filter((l) => !folded.has(l.id)), ...rows];
+  }, [contacts, nostrContacts]);
   const allContacts: ContactRow[] =
     contactSource === 'local' ? contacts : contactSource === 'nostr' ? nostrContacts : merged;
 
-  const filteredContacts = allContacts.filter((contact: Contact) =>
-    contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (contact.lightning_address || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (contact.node_pubkey || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (contact.npub || '').toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  // Split into Favorites + everyone else, alphabetised within each group.
-  const byName = (a: Contact, b: Contact) => a.name.localeCompare(b.name);
-  const favorites = filteredContacts.filter((c) => c.is_favorite).sort(byName);
-  const others = filteredContacts.filter((c) => !c.is_favorite).sort(byName);
-  const sections = [
-    ...(favorites.length ? [{ title: 'Favorites', data: favorites }] : []),
-    ...(others.length ? [{ title: favorites.length ? 'Contacts' : '', data: others }] : []),
-  ];
+  // Typing stays responsive while a long list re-filters behind it.
+  const deferredQuery = useDeferredValue(searchQuery);
+  const sections = useMemo(() => {
+    const q = deferredQuery.toLowerCase();
+    const filtered = q
+      ? allContacts.filter((contact: Contact) =>
+        contact.name.toLowerCase().includes(q) ||
+        (contact.lightning_address || '').toLowerCase().includes(q) ||
+        (contact.node_pubkey || '').toLowerCase().includes(q) ||
+        (contact.npub || '').toLowerCase().includes(q))
+      : allContacts;
+    // Split into Favorites + everyone else, alphabetised within each group.
+    const byName = (a: Contact, b: Contact) => a.name.localeCompare(b.name);
+    const favorites = filtered.filter((c) => c.is_favorite).sort(byName);
+    const others = filtered.filter((c) => !c.is_favorite).sort(byName);
+    return [
+      ...(favorites.length ? [{ title: 'Favorites', data: favorites }] : []),
+      ...(others.length ? [{ title: favorites.length ? 'Contacts' : '', data: others }] : []),
+    ];
+  }, [allContacts, deferredQuery]);
   const openContact: ContactRow | null = openContactId ? allContacts.find((c) => c.id === openContactId) ?? null : null;
   // Payments with the open contact (what this app sent or asked for).
   const walletId = useSelector((state: RootState) => state.wallet?.activeWallet?.id);
@@ -167,7 +276,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
   };
 
   const handleRefresh = async () => {
-    if (!nostrState.isConnected) {
+    if (!nostrConnected) {
       toast().info('Connect Nostr in Settings to sync your social contacts.');
       return;
     }
@@ -272,17 +381,17 @@ export default function ContactsScreen({ navigation, route }: Props) {
       // (name@domain) that fails to resolve falls back to a Lightning-address
       // local contact, since the two share the same syntax.
       if (kind === 'nostr' || kind === 'lightning') {
-        if (nostrState.isConnected) {
+        if (nostrConnected) {
           const resolved = await NostrService.getInstance().resolveToPubkey(identifier);
           if ('pubkey' in resolved) {
-            if (nostrState.contacts.some((c) => c.pubkey === resolved.pubkey)) {
+            if (follows.some((c) => c.pubkey === resolved.pubkey)) {
               toast().info('Already in your Nostr contacts');
               return;
             }
+            const known = preview?.pubkey === resolved.pubkey ? preview.profile ?? undefined : undefined;
             await dispatch(
-              followUser({ pubkey: resolved.pubkey, petname: name || undefined }) as any,
+              followUser({ pubkey: resolved.pubkey, petname: name || undefined, profile: known }) as any,
             ).unwrap();
-            await dispatch(loadContactList() as any);
             resetAddForm();
             toast().success('Following on Nostr');
             return;
@@ -337,7 +446,6 @@ export default function ContactsScreen({ navigation, route }: Props) {
         onPress: async () => {
           try {
             await dispatch(unfollowUser(contact.node_pubkey!) as any).unwrap();
-            await dispatch(loadContactList() as any);
           } catch (e: any) {
             toast().error(e?.message || 'Failed to unfollow.');
             return;
@@ -417,32 +525,6 @@ export default function ContactsScreen({ navigation, route }: Props) {
     });
   };
 
-  const canPay = (c: Contact) => !!(c.lightning_address || c.node_pubkey);
-  const canMessage = (c: Contact) => !!(c.isNostrContact && c.node_pubkey);
-  const shortKey = (k: string, head = 12, tail = 6) => (k.length > head + tail + 1 ? `${k.slice(0, head)}…${k.slice(-tail)}` : k);
-
-  const renderAvatar = (contact: Contact, size: number) => {
-    const ac = avatarColors(contact.name);
-    return (
-      <View style={{ width: size, height: size }}>
-        <View style={[styles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: ac.bg }]}>
-          {contact.avatar_url ? (
-            <Image source={{ uri: contact.avatar_url }} style={styles.avatarImg} />
-          ) : (
-            <Text style={[styles.avatarInitial, { color: ac.fg, fontSize: size * 0.4 }]}>
-              {contact.name.charAt(0).toUpperCase()}
-            </Text>
-          )}
-        </View>
-        {/* Nostr accounts carry a small badge instead of a separate icon next to the name. */}
-        {contact.isNostrContact && (
-          <View style={styles.avatarBadge}>
-            <NostrIcon size={12} />
-          </View>
-        )}
-      </View>
-    );
-  };
 
   const counts = { all: merged.length, local: contacts.length, nostr: nostrContacts.length };
 
@@ -469,7 +551,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
       </View>
 
       {/* Filters only matter once there is more than one source. */}
-      {nostrState.isConnected && counts.all > 0 && (
+      {nostrConnected && counts.all > 0 && (
         <SegmentedTabs
           value={contactSource}
           onChange={(k) => setContactSource(k)}
@@ -483,7 +565,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         />
       )}
 
-      {!nostrState.isConnected && (
+      {!nostrConnected && (
         <PressableScale style={styles.connectBanner} onPress={() => navigation.navigate('NostrSettings')} scaleTo={0.98}
           accessibilityRole="button" accessibilityLabel="Connect Nostr">
           <View style={styles.connectIcon}>
@@ -610,7 +692,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         {c && (
           <View>
             <View style={styles.profileHead}>
-              {renderAvatar(c, 72)}
+              <ContactAvatar contact={c} size={72} />
               <Text style={styles.profileName} numberOfLines={1}>{c.name}</Text>
               {!!c.notes && <Text style={styles.profileNotes} numberOfLines={3}>{c.notes}</Text>}
             </View>
@@ -691,60 +773,23 @@ export default function ContactsScreen({ navigation, route }: Props) {
     );
   };
 
-  const renderContactItem = ({ item: contact, index, section }: { item: Contact; index: number; section: { data: Contact[] } }) => {
-    const first = index === 0;
-    const last = index === section.data.length - 1;
-    const detail = contact.lightning_address
-      ? contact.lightning_address
-      : contact.npub
-        ? shortKey(contact.npub)
-        : contact.node_pubkey
-          ? `Node ${shortKey(contact.node_pubkey, 8, 4)}`
-          : 'No payment method';
-    const unread = contact.node_pubkey ? unreadByPubkey[contact.node_pubkey] ?? 0 : 0;
-    return (
-      <PressableScale
-        scaleTo={0.98}
-        style={[styles.contactRow, first && styles.rowFirst, last && styles.rowLast, !last && styles.rowDivider]}
-        onPress={() => { feedback.select(); setOpenContactId(contact.id); }}
-        accessibilityRole="button"
-        accessibilityLabel={`${contact.name}, ${detail}${unread > 0 ? `, ${unread} unread` : ''}`}
-      >
-        {renderAvatar(contact, 44)}
-        <View style={styles.contactInfo}>
-          <Text style={styles.contactName} numberOfLines={1}>{contact.name}</Text>
-          <Text style={styles.detailText} numberOfLines={1}>{detail}</Text>
-        </View>
-
-        {canMessage(contact) && (
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => messageContact(contact)}
-            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-            accessibilityLabel={`Message ${contact.name}`}
-          >
-            <Ionicons name="chatbubble-ellipses-outline" size={18} color={theme.colors.text.secondary} />
-            {unread > 0 && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadBadgeText}>{Math.min(unread, 99)}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        )}
-        {canPay(contact) && (
-          <TouchableOpacity
-            style={styles.payBtn}
-            onPress={() => { feedback.select(); payContact(contact); }}
-            hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-            accessibilityLabel={`Pay ${contact.name}`}
-          >
-            <Ionicons name="flash" size={14} color={theme.colors.primary[500]} />
-            <Text style={styles.payText}>Pay</Text>
-          </TouchableOpacity>
-        )}
-      </PressableScale>
-    );
-  };
+  // Rows only re-render when their own contact or unread count changes.
+  const actions = useRef({ payContact, messageContact });
+  actions.current = { payContact, messageContact };
+  const onOpenRow = useCallback((contact: Contact) => { feedback.select(); setOpenContactId(contact.id); }, []);
+  const onMessageRow = useCallback((contact: Contact) => actions.current.messageContact(contact), []);
+  const onPayRow = useCallback((contact: Contact) => actions.current.payContact(contact), []);
+  const renderContactItem = useCallback(({ item, index, section }: { item: Contact; index: number; section: { data: Contact[] } }) => (
+    <ContactListRow
+      contact={item}
+      first={index === 0}
+      last={index === section.data.length - 1}
+      unread={item.node_pubkey ? unreadByPubkey[item.node_pubkey] ?? 0 : 0}
+      onOpen={onOpenRow}
+      onMessage={onMessageRow}
+      onPay={onPayRow}
+    />
+  ), [unreadByPubkey, onOpenRow, onMessageRow, onPayRow]);
 
   const renderEmpty = () => (
     <View style={styles.empty}>
@@ -769,7 +814,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         icon="people"
         rightAction={
           <>
-            {nostrState.isConnected && (
+            {nostrConnected && (
               <TouchableOpacity
                 style={styles.headerIconBtn}
                 onPress={handleRefresh}
@@ -811,6 +856,10 @@ export default function ContactsScreen({ navigation, route }: Props) {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        initialNumToRender={14}
+        maxToRenderPerBatch={12}
+        windowSize={9}
+        removeClippedSubviews
       />
 
       {/* Floating add button — scanning lives inside the add sheet. */}
