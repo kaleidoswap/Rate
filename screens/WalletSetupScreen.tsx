@@ -1,5 +1,5 @@
 // screens/WalletSetupScreen.tsx
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,9 @@ import {
   Alert,
   TouchableOpacity,
   Animated,
+  Easing,
   StatusBar,
+  useWindowDimensions,
   Keyboard,
   Platform,
   KeyboardAvoidingView,
@@ -63,6 +65,7 @@ type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confi
 
 export default function WalletSetupScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
   const dispatch = useDispatch();
   const [step, setStep] = useState<SetupStep>('welcome');
   // No screenshots / recordings while the new recovery phrase is on screen.
@@ -95,8 +98,15 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0)).current;
+  const spinAnim = useRef(new Animated.Value(0)).current;
+  // Only the latest transition may change the step; buttons wait until it lands.
+  const transitionId = useRef(0);
+  const [transitioning, setTransitioning] = useState(false);
+  const creatingRef = useRef(false);
 
   const animateTransition = useCallback((nextStep: SetupStep) => {
+    const id = ++transitionId.current;
+    setTransitioning(true);
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 0,
@@ -109,6 +119,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         useNativeDriver: true,
       })
     ]).start(() => {
+      if (id !== transitionId.current) return;
       setStep(nextStep);
       slideAnim.setValue(30);
       Animated.parallel([
@@ -122,22 +133,49 @@ export default function WalletSetupScreen({ navigation }: Props) {
           duration: 300,
           useNativeDriver: true,
         })
-      ]).start();
+      ]).start(() => {
+        if (id === transitionId.current) setTransitioning(false);
+      });
     });
   }, [fadeAnim, slideAnim]);
+
+  /** Show a step at once, cancelling any transition still running. */
+  const showStep = useCallback((nextStep: SetupStep) => {
+    transitionId.current++;
+    fadeAnim.stopAnimation();
+    slideAnim.stopAnimation();
+    fadeAnim.setValue(1);
+    slideAnim.setValue(0);
+    setTransitioning(false);
+    setStep(nextStep);
+  }, [fadeAnim, slideAnim]);
+
+  useEffect(() => {
+    if (step !== 'creating') return;
+    spinAnim.setValue(0);
+    const loop = Animated.loop(Animated.timing(spinAnim, {
+      toValue: 1,
+      duration: 1200,
+      easing: Easing.linear,
+      useNativeDriver: true,
+    }));
+    loop.start();
+    return () => loop.stop();
+  }, [step, spinAnim]);
 
   const animateSuccess = useCallback(() => {
     scaleAnim.setValue(0);
     Animated.spring(scaleAnim, {
       toValue: 1,
-      friction: 4,
-      tension: 40,
+      friction: 6,
+      tension: 50,
       useNativeDriver: true,
     }).start();
   }, [scaleAnim]);
 
   const handleNext = () => {
     Keyboard.dismiss();
+    if (transitioning) return;
 
     if (step === 'welcome') {
       if (!name.trim()) {
@@ -278,6 +316,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const handleConfirmBackup = async () => {
+    if (creatingRef.current || transitioning) return;
     if (!backupConfirmed) {
       Alert.alert(
         'Backup Required', 
@@ -286,6 +325,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
       return;
     }
 
+    creatingRef.current = true;
     animateTransition('creating');
 
     try {
@@ -317,14 +357,14 @@ export default function WalletSetupScreen({ navigation }: Props) {
           dispatch(setInitialized(true));
           dispatch(setUnlocked(true));
 
-          // Show success screen
-          setStep('success');
+          showStep('success');
           animateSuccess();
+          return;
         }
-      } else {
-        throw new Error('Failed to create wallet');
       }
+      throw new Error((resultAction as any).payload || 'Failed to create wallet');
     } catch (error: any) {
+      creatingRef.current = false;
       Alert.alert('Error', error.message || 'Failed to create wallet');
       animateTransition('confirmBackup');
     }
@@ -346,6 +386,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
 
     if (step === 'creating' || step === 'success') return null;
 
+    // Five steps at 60px lines overflow a phone: shrink the lines to fit.
+    const lineWidth = Math.max(12, Math.min(60, (windowWidth - 48 - steps.length * 24) / (steps.length - 1) - 16));
+
     return (
       <View style={styles.stepIndicatorContainer}>
         {steps.map((s, idx) => (
@@ -361,6 +404,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
             {idx < steps.length - 1 && (
               <View style={[
                 styles.stepLine,
+                { width: lineWidth },
                 idx < currentIdx ? styles.stepLineActive : styles.stepLineInactive
               ]} />
             )}
@@ -412,6 +456,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         style={styles.skipButton}
         accessibilityRole="button"
         onPress={() => {
+          if (transitioning) return;
           if (!name.trim()) {
             Alert.alert('Wallet name required', 'Give your wallet a name before continuing.');
             return;
@@ -551,8 +596,12 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const renderCreatingStep = () => (
     <View style={styles.centerContent}>
       <View style={styles.loadingContainer}>
-        <Animated.View style={[styles.loadingRing, styles.loadingRing1]} />
-        <Animated.View style={[styles.loadingRing, styles.loadingRing2]} />
+        <Animated.View style={[styles.loadingRing, styles.loadingRing1, {
+          transform: [{ rotate: spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] }) }],
+        }]} />
+        <Animated.View style={[styles.loadingRing, styles.loadingRing2, {
+          transform: [{ rotate: spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['360deg', '0deg'] }) }],
+        }]} />
         <View style={styles.loadingIcon}>
           <Ionicons name="wallet" size={36} color={theme.colors.primary[500]} />
         </View>
@@ -780,7 +829,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
                 step === 'confirmBackup' ? handleConfirmBackup :
                 handleNext
               }
-              disabled={step === 'confirmBackup' && !backupConfirmed}
+              disabled={transitioning || (step === 'confirmBackup' && !backupConfirmed)}
               style={styles.nextButton}
             />
           </View>
@@ -791,14 +840,14 @@ export default function WalletSetupScreen({ navigation }: Props) {
             <Button
               title={rlnConnecting ? 'Connecting…' : 'Connect'}
               onPress={handleConnectRln}
-              disabled={rlnConnecting || !nwcUri.trim()}
+              disabled={transitioning || rlnConnecting || !nwcUri.trim()}
               loading={rlnConnecting}
               style={styles.nextButton}
             />
             <TouchableOpacity
               style={styles.skipButton}
               onPress={handleSkipRln}
-              disabled={rlnConnecting}
+              disabled={transitioning || rlnConnecting}
             >
               <Text style={styles.skipButtonText}>Skip for now</Text>
             </TouchableOpacity>

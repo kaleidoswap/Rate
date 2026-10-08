@@ -61,6 +61,9 @@ interface WalletState {
   lastSyncTime: number | null;
 }
 
+/** How long a new wallet waits for its accounts to connect before it opens. */
+const CREATE_CONNECT_WAIT_MS = 8000;
+
 const initialState: WalletState = {
   activeWallet: null,
   wallets: [],
@@ -160,7 +163,6 @@ export const createNewWallet = createAsyncThunk(
   async (params: { name: string; mnemonic: string; networks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] }, { rejectWithValue }) => {
     try {
       const dbService = DatabaseService.getInstance();
-      const walletManager = require('../../services/WalletManager').default.getInstance();
 
       // Create wallet record
       const walletId = await dbService.createWallet({
@@ -176,14 +178,15 @@ export const createNewWallet = createAsyncThunk(
       const wallet = await dbService.getWallet(walletId);
 
       if (wallet) {
-        // Initialize WalletManager
-        const walletNetworks = params.networks.map(n => ({
-          type: n.type as any,
-          enabled: n.enabled,
-          config: n.config ? JSON.parse(n.config) : {},
-        }));
-
-        await walletManager.initialize(params.mnemonic, walletNetworks);
+        // Same arguments as the Dashboard's initializeProtocolServices(), so the two
+        // share one in-flight connect. Slow accounts keep connecting in the background.
+        const { initializeProtocols } = require('../../services/protocols');
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          initializeProtocols(wallet.encrypted_mnemonic || params.mnemonic, wallet.networks || [])
+            .catch((e: unknown) => console.warn('Protocol initialization failed:', e instanceof Error ? e.message : String(e))),
+          new Promise<void>((resolve) => { timer = setTimeout(resolve, CREATE_CONNECT_WAIT_MS); }),
+        ]).finally(() => { if (timer) clearTimeout(timer); });
       }
 
       return wallet;

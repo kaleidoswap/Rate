@@ -476,6 +476,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       <ScreenHeader
         title={step === 'complete' ? 'Complete' : 'Security Setup'}
         showBack={step !== 'complete'}
+        onBack={handleBack}
       />
 
       <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
