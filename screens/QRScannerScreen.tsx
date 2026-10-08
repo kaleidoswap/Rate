@@ -31,6 +31,7 @@ import { unwrapCrossChainUri } from '../utils/crosschain-send';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import { theme } from '../theme';
 import type { RootState } from '../store';
+import { isPairingPayload } from '../services/desktopModel';
 
 const { width, height } = Dimensions.get('window');
 
@@ -42,7 +43,8 @@ interface Props {
 export default function QRScannerScreen({ navigation, route }: Props) {
   // Contact-capture mode hands the raw scanned string back to the requesting
   // screen instead of decoding it as a payment (used by the Contacts screen).
-  const captureMode: 'payment' | 'contact' = route?.params?.mode === 'contact' ? 'contact' : 'payment';
+  const captureMode: 'payment' | 'contact' | 'pairing' =
+    route?.params?.mode === 'contact' || route?.params?.mode === 'pairing' ? route.params.mode : 'payment';
   const returnScreen: string = route?.params?.returnScreen || 'Contacts';
   // Prefill amounts in the user's chosen entry unit so Send interprets them
   // correctly (Send reads a BTC amount as sats when bitcoinUnit === 'sats').
@@ -100,6 +102,10 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       const expiresAt = invoiceExpiry(data.replace(/^lightning:(\/\/)?/i, ''));
       if (expiresAt !== null && expiresAt <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
       if (!data) throw new Error('Nothing to read. Paste a payment request or choose another image.');
+      if (isPairingPayload(data)) {
+        navigation.navigate('DesktopModel', { scannedPairing: data }); return;
+      }
+      if (captureMode === 'pairing') throw new Error('This QR code is not a recognized desktop pairing code. In the desktop app, open Serve models to your phone.');
       if (data.toLowerCase().startsWith('nostr+walletconnect://')) {
         navigation.navigate('NWCConnect', { scanned: data }); return;
       }
@@ -505,7 +511,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       <SafeAreaView style={{ flex: 1 }}>
         <View style={styles.header}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close scanner" style={styles.iconButton} onPress={() => navigation.goBack()}><Ionicons name="close" size={24} color={theme.colors.text.primary} /></TouchableOpacity>
-          <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '600' }}>{captureMode === 'contact' ? 'Scan contact' : 'Scan to pay'}</Text>
+          <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '600' }}>{captureMode === 'contact' ? 'Scan contact' : captureMode === 'pairing' ? 'Pair desktop' : 'Scan to pay'}</Text>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel={flashEnabled ? 'Turn torch off' : 'Turn torch on'} disabled={!permission?.granted} style={styles.iconButton} onPress={toggleFlash}><Ionicons name={flashEnabled ? 'flash' : 'flash-off'} size={24} color={theme.colors.text.primary} /></TouchableOpacity>
         </View>
         <View style={{ flex: 1, overflow: 'hidden' }}>
@@ -527,7 +533,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void pasteRequest()} style={styles.entryAction}><Ionicons name="clipboard-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Paste</Text></TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void chooseImage()} style={styles.entryAction}><Ionicons name="image-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Choose image</Text></TouchableOpacity>
           </View>
-          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Scan an invoice, address or multi-method request. You’ll review the amount, account and fees before paying.'}</Text>
+          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : captureMode === 'pairing' ? 'Scan the QR code the desktop app shows.' : 'Scan an invoice, address or multi-method request. You’ll review the amount, account and fees before paying.'}</Text>
         </View>
       </SafeAreaView>
     </View>

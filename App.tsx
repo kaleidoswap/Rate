@@ -64,6 +64,7 @@ import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
 import LightningAddressScreen from './screens/LightningAddressScreen';
 import MindSettingsScreen from './screens/MindSettingsScreen';
+import DesktopModelScreen from './screens/DesktopModelScreen';
 import NWCConnectScreen from './screens/NWCConnectScreen';
 import RgbNodeScreen from './screens/RgbNodeScreen';
 
@@ -78,7 +79,7 @@ type RootStackParamList = {
   MerchantOffer: undefined;
   Receive: { selectedAsset?: any } | undefined;
   Bridge: undefined;
-  QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
+  QRScanner: { mode?: 'payment' | 'contact' | 'pairing'; returnScreen?: string } | undefined;
   Assets: { issue?: boolean } | undefined;
   DesignSystem: undefined;
   Swap: undefined;
@@ -88,6 +89,7 @@ type RootStackParamList = {
   Map: undefined;
   LSP: undefined;
   MindSettings: undefined;
+  DesktopModel: { scannedPairing?: string } | undefined;
   LightningAddress: undefined;
   NWCConnect: { scanned?: string } | undefined;
   RgbNode: undefined;
@@ -251,6 +253,11 @@ function AppNavigator() {
         <Stack.Screen
           name="MindSettings"
           component={asModalScreen(MindSettingsScreen)}
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+        <Stack.Screen
+          name="DesktopModel"
+          component={asModalScreen(DesktopModelScreen)}
           options={{ presentation: 'modal', headerShown: false }}
         />
         <Stack.Screen

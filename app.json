@@ -24,7 +24,7 @@
         "NSMicrophoneUsageDescription": "Allow KaleidoSwap to use the microphone for on-device voice commands to the AI assistant.",
         "NSPhotoLibraryUsageDescription": "Allow KaleidoSwap to access your photo library to scan QR codes from saved images.",
         "NSPhotoLibraryAddUsageDescription": "Allow KaleidoSwap to save QR codes and receipts to your photo library.",
-        "NSLocalNetworkUsageDescription": "KaleidoSwap uses the local network to download and sync the on-device AI models peer-to-peer.",
+        "NSLocalNetworkUsageDescription": "KaleidoSwap uses the local network to download the on-device AI models peer-to-peer and to reach the desktop model you pair.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "fetch",

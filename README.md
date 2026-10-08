@@ -58,6 +58,11 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 - **Private by default.** The LLM (Qwen3.5 0.8B / 2B, by device RAM) and Whisper speech-to-text run **on
   device** through the [QVAC SDK](https://www.npmjs.com/package/@qvac/sdk). Conversations
   and transcription don't leave your phone.
+- **Desktop model (optional, off by default).** Settings → KaleidoMind → Desktop model pairs
+  the KaleidoSwap desktop app by QR and runs the model there over its OpenAI-compatible API.
+  Tools, skills and confirmations stay on the phone. Prompts, including wallet details the
+  assistant adds, travel over the local network **unencrypted**. If the desktop can't be
+  reached, the assistant falls back to the on-device model.
 - **One agent for chat and voice.** A single runner (`services/mindAgent.ts`) powers both
   text chat and hands-free voice, built on the shared `@kaleidorg/mind` engine.
 - **Physical device required.** On-device inference is **not available on a simulator /
@@ -314,7 +319,7 @@ rate/
 | `ELOOP: too many symbolic links … node_modules` | A self-referencing `node_modules` symlink. `rm node_modules && pnpm install`. |
 | iOS `pod install` → `Unicode Normalization … ASCII-8BIT` | `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` before running. |
 | `npx expo` prompts to install a different Expo version | `node_modules` is broken — reinstall so the local `expo` is used. |
-| AI assistant unavailable | On-device inference needs a **physical device**, or pair a desktop KaleidoMind provider. |
+| AI assistant unavailable | On-device inference needs a **physical device**, or pair the desktop app (Settings → KaleidoMind → Desktop model). |
 
 ---
 

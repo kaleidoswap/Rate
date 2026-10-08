@@ -108,3 +108,20 @@ test.each([
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
   expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: address });
 });
+
+const PAIRING_QR = JSON.stringify({ type: 'kaleido-mind-remote', v: 1, host: '192.168.1.20', port: 47615, token: 'abcdefghijklmnopqrstuvwxyz012345', tls: false });
+test('a desktop pairing code opens the desktop model settings', async () => {
+  (Clipboard.getString as jest.Mock).mockResolvedValue(PAIRING_QR);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).toHaveBeenCalledWith('DesktopModel', { scannedPairing: PAIRING_QR });
+});
+test('pairing mode refuses anything that is not a pairing code', async () => {
+  (Clipboard.getString as jest.Mock).mockResolvedValue('lnbc1000testinvoice');
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { mode: 'pairing' } }} />);
+  await act(async () => { fireEvent.press(screen.getByText('Paste')); });
+  expect(navigation.navigate).not.toHaveBeenCalled();
+  expect(screen.getByText(/not a recognized desktop pairing code/)).toBeTruthy();
+});

@@ -46,6 +46,8 @@ import { useQVAC } from '../hooks/useQVAC';
 import { getModelById } from '../services/qvacModels';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
+import { describeHealthFailure, refreshDesktopHealth } from '../services/desktopModel';
+import { useDesktopModelStatus } from '../hooks/useDesktopModelStatus';
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import * as Haptics from 'expo-haptics';
 
@@ -170,10 +172,24 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // in the sheet never rebuilds the engine or drops the in-memory RAG index.
   const mindConfigRef = useRef(mindConfig);
   mindConfigRef.current = mindConfig;
+  const lastFallbackNotice = useRef(0);
   const agent = useMemo(
-    () => createMindAgent(qvac.service, () => mindConfigRef.current),
+    () =>
+      createMindAgent(qvac.service, () => mindConfigRef.current, {
+        onDesktopFallback: (reason) => {
+          if (Date.now() - lastFallbackNotice.current < 60_000) return;
+          lastFallbackNotice.current = Date.now();
+          const why = reason === 'error' ? 'The desktop stopped answering.' : describeHealthFailure(reason);
+          toast().warning(`${why} Using the on-device model.`, 5000);
+        },
+      }),
     [qvac.service],
   );
+  const desktopStatus = useDesktopModelStatus();
+  const desktopActive = mindConfig.useDesktopModel && desktopStatus.state === 'connected';
+  useEffect(() => {
+    if (mindConfig.useDesktopModel) void refreshDesktopHealth();
+  }, [mindConfig.useDesktopModel]);
 
   // Skills the user can pin to a message (like a `/command`). Pinning one routes
   // the funnel to that skill so the model gets its instructions for the turn.
@@ -219,13 +235,14 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // Header subtitle: which model + where it runs + live throughput (tok/s) from
   // the last turn (real QVAC stats), mirroring the desktop chat header.
   const headerSubtitle = useMemo(() => {
+    if (desktopActive && desktopStatus.state === 'connected') return `${desktopStatus.modelId} · on your desktop`;
     const modelLabel = getModelById(qvac.config.modelId)?.label ?? 'On-device AI';
     const tps =
       lastStats?.tokensPerSecond && lastStats.tokensPerSecond > 0
         ? ` · ${lastStats.tokensPerSecond.toFixed(0)} tok/s${lastStats.device ? ` (${lastStats.device.toUpperCase()})` : ''}`
         : '';
     return `${modelLabel} · on this device${tps}`;
-  }, [qvac.config.modelId, lastStats]);
+  }, [qvac.config.modelId, lastStats, desktopActive, desktopStatus]);
 
 
   const scrollToBottom = useCallback((animated: boolean = true) => {
@@ -531,7 +548,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       return;
     }
 
-    if (!qvac.isReady) {
+    if (!qvac.isReady && !desktopActive) {
       addMessage({
         id: nextId(),
         text:
@@ -680,10 +697,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
   const stopGeneration = useCallback(() => {
     if (activeRequestId) {
-      qvac.service.cancelRequest(activeRequestId);
+      void agent.cancel(activeRequestId).catch(() => {});
       setActiveRequestId(null);
     }
-  }, [activeRequestId, qvac.service]);
+  }, [activeRequestId, agent]);
 
   const formatRecordingDuration = (seconds: number): string => {
     const mins = Math.floor(seconds / 60);

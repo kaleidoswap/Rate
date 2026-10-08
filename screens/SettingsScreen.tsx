@@ -21,6 +21,7 @@ import {
   setUnitPreference,
   selectDisplayDenomination,
   selectDisclosureLevel,
+  selectMindConfig,
   setDisclosureLevel,
   setSoundEnabled,
   setTransactionNotifications,
@@ -128,6 +129,7 @@ export default function SettingsScreen({ navigation }: Props) {
     (connection) => connection.id === nostrState.selectedNwcConnectionId,
   );
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
+  const mindConfig = useAppSelector(selectMindConfig);
   const [settingsQuery, setSettingsQuery] = useState('');
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
@@ -687,6 +689,13 @@ export default function SettingsScreen({ navigation }: Props) {
             label="Personalize assistant"
             description="Personality, memory and responses"
             onPress={() => navigation.navigate('MindSettings')}
+          />
+          <Row
+            icon="desktop-outline"
+            iconColor={theme.colors.accent[500]}
+            label="Desktop model"
+            description={mindConfig.useDesktopModel ? 'On · runs the model on your paired desktop' : 'Off · pair the desktop app to use its model'}
+            onPress={() => navigation.navigate('DesktopModel')}
           />
         </Group>
         </>}
