@@ -50,6 +50,10 @@ import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
 
 interface Props { navigation: any; route: any }
 
+// Re-checks of an unresolved payment: quick at first, then every 15 s, for at most 10 minutes.
+const STATUS_POLL_DELAYS_MS = [3_000, 5_000, 10_000, 15_000];
+const STATUS_POLL_LIMIT_MS = 10 * 60_000;
+
 const KIND_LABEL: Record<PayTarget['kind'], string> = {
   bolt11: 'Lightning invoice', lnurl: 'Lightning address', offer: 'Lightning offer', bitcoin: 'Bitcoin address',
   spark: 'Spark address', ark: 'Ark address', rgb: 'RGB invoice',
@@ -107,6 +111,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const now = useForegroundClock(offers.some(o => !!o.quote) && !attempt);
   const revision = useRef(0);
   const paying = useRef(false);
+  const checking = useRef(false);
   const requestId = useRef(Crypto.randomUUID());
 
   const { target, error: decodeError } = useMemo(() => decodeQuietly(input), [input]);
@@ -158,15 +163,24 @@ export default function SendScreen({ navigation, route }: Props) {
     return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [walletId]);
-  // An unresolved payment is re-checked as soon as Send can reach its account, so
-  // one that went through stops blocking new payments without a manual check.
+  // An unresolved payment is re-checked as soon as Send can reach its account, then
+  // again with backoff while it stays open, so its outcome shows without a manual check.
+  const checkStatusRef = useRef<(quiet?: boolean) => Promise<void>>(async () => {});
+  const attemptRef = useRef(attempt);
   useEffect(() => {
-    if (!attempt || !journalReady) return;
+    if (!journalReady || !unresolvedAttempt(attempt)) return;
     let active = true;
-    void prepareKaleidoPay().then(() => { if (active) void checkStatus(); });
-    return () => { active = false; };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const until = Date.now() + STATUS_POLL_LIMIT_MS;
+    const poll = async (round: number) => {
+      await checkStatusRef.current(round > 0);
+      if (!active || Date.now() >= until) return;
+      timer = setTimeout(() => void poll(round + 1), STATUS_POLL_DELAYS_MS[Math.min(round, STATUS_POLL_DELAYS_MS.length - 1)]);
+    };
+    void prepareKaleidoPay().then(() => { if (active) void poll(0); });
+    return () => { active = false; clearTimeout(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt?.id, journalReady]);
+  }, [attempt?.id, attempt?.status, attempt?.dismissedAt, journalReady]);
 
   const selected = offers.find(o => o.id === selectedId);
   const quote = selected?.quote;
@@ -291,18 +305,25 @@ export default function SendScreen({ navigation, route }: Props) {
     }
   }
 
-  async function checkStatus() {
-    if (!attempt || !walletId || paying.current) return;
-    paying.current = true; setBusy(true); setError('');
+  // `quiet`: a background re-check, which neither blocks the screen nor reports its own failure.
+  async function checkStatus(quiet = false) {
+    if (!attempt || !walletId || paying.current || (quiet && checking.current)) return;
+    const lock = quiet ? checking : paying;
+    lock.current = true;
+    if (!quiet) { setBusy(true); setError(''); }
     try {
       const result = await checkPaymentStatus(attempt.sourceId, attempt.id);
+      // A background result is dropped when nothing changed, or the record changed meanwhile (checked, dismissed).
+      if (quiet && (attemptRef.current !== attempt || (result.status === attempt.status && result.reference === attempt.reference))) return;
       const updated = { ...attempt, ...result };
       await savePaymentAttempt(walletId, updated); setAttempt(updated);
       void updateContactEventStatus(walletId, attempt.id, updated.status).catch(() => {});
       if (result.status === 'completed') void dispatch(loadBtcBalance());
-    } catch { setError('Could not update payment status. Check again before making another payment.'); }
-    finally { paying.current = false; setBusy(false); }
+    } catch { if (!quiet) setError('Could not update payment status. Check again before making another payment.'); }
+    finally { lock.current = false; if (!quiet) setBusy(false); }
   }
+  checkStatusRef.current = checkStatus;
+  attemptRef.current = attempt;
 
   function startNewPayment() {
     if (!walletId || paying.current) return;
