@@ -159,14 +159,16 @@ export function previewTarget(target: PayTarget, amountSat: number | undefined, 
     throw new Error('Enter a whole number of sats.');
   }
   // The receiver's order: an offer's listed rails first, then what the code itself carries.
+  // A BIP21 address is the fallback (BIP321): an account that can pay a carried off-chain
+  // rail does so rather than exiting on-chain, also when both cost the same.
   const listed = targetOfferRails(target);
   const rails = sparkToken ? ['spark'] : [
     ...listed.map(r => r.rail),
     ...(target.invoice ? ['ln'] : []),
-    ...(target.address ? ['btc'] : []),
     ...(target.sparkAddress ? ['spark'] : []),
     ...(target.arkAddress ? ['ark'] : []),
     ...(target.rgbInvoice ? ['rgb'] : []),
+    ...(target.address ? ['btc'] : []),
   ];
   const addresses: Record<string, string> = Object.fromEntries(listed.flatMap(r => r.address ? [[r.rail, r.address]] : []));
   if (target.arkAddress) addresses.ark = target.arkAddress;
