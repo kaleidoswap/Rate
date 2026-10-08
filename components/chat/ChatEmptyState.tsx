@@ -59,13 +59,6 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onSuggestion, onContact
       gradient: theme.colors.warning.gradient!,
       onPress: () => onSuggestion('Find Bitcoin-accepting merchants near me'),
     },
-    {
-      icon: 'time-outline' as const,
-      title: 'Recent activity',
-      subtitle: 'Your latest transactions',
-      gradient: theme.colors.info.gradient!,
-      onPress: () => onSuggestion('Show my recent transactions'),
-    },
   ];
 
   // Pair suggestions into rows of two for the grid layout.
