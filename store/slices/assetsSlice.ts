@@ -1,10 +1,9 @@
-import { toEngineProtocol } from '../../utils/protocol-bridge'
 // store/slices/assetsSlice.ts
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import { AssetRecord } from '../../services/DatabaseService';
 import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
 import DatabaseService from '../../services/DatabaseService';
-import { isUsdbTokenAddress, USDB_DECIMALS, USDB_NAME, USDB_TICKER } from '../../utils/flashnet';
+import { assetRecordFromUnified, replaceProtocolAssets, type InventoryRecord, type TokenProtocol } from '../../utils/asset-inventory';
 
 // Define NiaAsset interface locally since it's not exported from RGBApiService
 interface NiaAsset {
@@ -28,7 +27,11 @@ interface NiaAsset {
 }
 
 interface AssetsState {
-  // Assets data
+  /**
+   * Every account's assets (RGB, Spark, Arkade), not just RGB: the source the
+   * asset inventory (utils/asset-inventory.ts) reads. Written by the dashboard's
+   * refresh and by syncAssets, always as live data.
+   */
   rgbAssets: AssetRecord[];
   
   // Loading states
@@ -63,64 +66,52 @@ export const loadAssets = createAsyncThunk<AssetRecord[], number>(
 );
 
 export const syncAssets = createAsyncThunk<
-  { assets: AssetRecord[]; syncTime: number },
+  { byProtocol: Partial<Record<TokenProtocol, InventoryRecord[]>>; syncTime: number },
   number
 >(
   'assets/sync',
   async (walletId: number) => {
     const dbService = DatabaseService.getInstance();
 
-    // Try protocolManager first
-    let niaAssets: any[] = [];
-    const protocols: Array<'RGB' | 'SPARK' | 'ARKADE'> = ['RGB', 'SPARK', 'ARKADE'];
-    for (const proto of protocols) {
-      const adapter = protocolManager.getAdapterIfAvailable(toEngineProtocol(proto));
-      if (adapter?.isConnected()) {
-        try {
-          // Reconcile with the network first so pending/unclaimed transfers
-          // settle before we read balances. On Spark this runs
-          // experimental_syncWallet(), which is what surfaces tokens (e.g. USDB
-          // just received from a Flashnet swap) that getBalance() would
-          // otherwise report as still-incoming. Best-effort: never block listing.
-          try { await (adapter as any).refreshBalances?.(); } catch { /* non-fatal */ }
-          const unifiedAssets = await adapter.listAssets();
-          const mapped = unifiedAssets
-            .filter((a: any) => a.id !== 'BTC')
-            .map((a: any) => {
-              // Spark surfaces USDB under its raw token name/precision; pin it to
-              // canonical metadata so the stablecoin renders consistently.
-              const isUsdb = isUsdbTokenAddress(a.id);
-              return {
-                asset_id: a.id,
-                ticker: isUsdb ? USDB_TICKER : a.ticker,
-                name: isUsdb ? USDB_NAME : a.name,
-                precision: isUsdb ? USDB_DECIMALS : a.precision,
-                issued_supply: a.metadata?.issued_supply || 0,
-                balance: { settled: a.balance.total, future: a.balance.pending, spendable: a.balance.available },
-              };
-            });
-          niaAssets.push(...mapped);
-        } catch { /* skip */ }
+    // The same accounts, and the same record shape, as the dashboard's refresh.
+    const accounts: Array<[TokenProtocol, any]> = [
+      ['RGB', rgbAccountAdapter()],
+      ['SPARK', protocolManager.getAdapterIfAvailable('SPARK')],
+      ['ARKADE', protocolManager.getAdapterIfAvailable('ARKADE')],
+    ];
+    const byProtocol: Partial<Record<TokenProtocol, InventoryRecord[]>> = {};
+    for (const [proto, adapter] of accounts) {
+      if (!adapter?.isConnected()) continue;
+      try {
+        // Reconcile with the network first so pending/unclaimed transfers
+        // settle before we read balances. On Spark this runs
+        // experimental_syncWallet(), which is what surfaces tokens (e.g. USDB
+        // just received from a Flashnet swap) that getBalance() would
+        // otherwise report as still-incoming. Best-effort: never block listing.
+        try { await adapter.refreshBalances?.(); } catch { /* non-fatal */ }
+        const listed = await adapter.listAssets();
+        byProtocol[proto] = listed
+          .map((a: any) => assetRecordFromUnified(a, proto, walletId))
+          .filter((r: InventoryRecord | null): r is InventoryRecord => r !== null);
+      } catch { /* an account that fails keeps what it showed */ }
+    }
+
+    for (const records of Object.values(byProtocol)) {
+      for (const asset of records ?? []) {
+        await dbService.upsertAsset({
+          wallet_id: walletId,
+          asset_id: asset.asset_id,
+          ticker: asset.ticker,
+          name: asset.name,
+          precision: asset.precision,
+          issued_supply: asset.issued_supply ?? 0,
+          balance: Number(asset.balance) || 0,
+          last_updated: Date.now(),
+        });
       }
     }
 
-    // Update database with latest asset info
-    for (const asset of niaAssets) {
-      await dbService.upsertAsset({
-        wallet_id: walletId,
-        asset_id: asset.asset_id,
-        ticker: asset.ticker,
-        name: asset.name,
-        precision: asset.precision,
-        issued_supply: asset.issued_supply,
-        balance: asset.balance?.settled || asset.balance?.total || 0,
-        last_updated: Date.now(),
-      });
-    }
-    
-    // Get updated assets from database
-    const updatedAssets = await dbService.getAssetsByWallet(walletId);
-    return { assets: updatedAssets, syncTime: Date.now() };
+    return { byProtocol, syncTime: Date.now() };
   }
 );
 
@@ -188,6 +179,12 @@ const assetsSlice = createSlice({
     setRgbAssets: (state, action: PayloadAction<AssetRecord[]>) => {
       state.rgbAssets = action.payload;
     },
+    /** One account's fresh assets replace the ones it listed before. */
+    setProtocolAssets: (state, action: PayloadAction<{ protocol: TokenProtocol; assets: InventoryRecord[] }>) => {
+      state.rgbAssets = replaceProtocolAssets(
+        state.rgbAssets as InventoryRecord[], action.payload.protocol, action.payload.assets,
+      ) as AssetRecord[];
+    },
     addRgbAsset: (state, action: PayloadAction<AssetRecord>) => {
       const existingIndex = state.rgbAssets.findIndex(
         asset => asset.asset_id === action.payload.asset_id
@@ -233,7 +230,11 @@ const assetsSlice = createSlice({
       })
       .addCase(syncAssets.fulfilled, (state, action) => {
         state.isLoading = false;
-        state.rgbAssets = action.payload.assets;
+        let next = state.rgbAssets as InventoryRecord[];
+        for (const [protocol, records] of Object.entries(action.payload.byProtocol)) {
+          next = replaceProtocolAssets(next, protocol as TokenProtocol, records ?? []);
+        }
+        state.rgbAssets = next as AssetRecord[];
         state.lastSyncTime = action.payload.syncTime;
       })
       .addCase(syncAssets.rejected, (state, action) => {
@@ -259,6 +260,7 @@ const assetsSlice = createSlice({
 
 export const {
   setRgbAssets,
+  setProtocolAssets,
   addRgbAsset,
   updateAssetBalance,
   clearError,

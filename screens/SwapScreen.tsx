@@ -1,5 +1,5 @@
 // screens/SwapScreen.tsx
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { usePolicy } from '../hooks/usePolicy';
 import {
   TextInput,
@@ -39,6 +39,8 @@ import { protocolManager } from '../services/protocols';
 import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
 import { syncAssets } from '../store/slices/assetsSlice';
 import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
+import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
+import { useAssetInventory } from '../hooks/useAssetInventory';
 import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset, getPairAsset,
@@ -79,8 +81,9 @@ export default function SwapScreen({ navigation }: Props) {
   const { height: screenHeight } = useWindowDimensions();
   const swapState = useAppSelector((state: RootState) => state.swap);
   const walletState = useAppSelector((state: RootState) => state.wallet);
-  const assetsState = useAppSelector((state: RootState) => state.assets);
-  const rgbAssets = (assetsState?.rgbAssets || []);
+  // The shared asset inventory; what is tradable is decided below, from the pairs.
+  const inventory = useAssetInventory();
+  const tokens = useMemo(() => inventoryTokens(inventory), [inventory]);
   // The wallet is sats-first by default. The BTC-side amount field is therefore
   // entered/shown in this unit — NOT BTC. Treating the input as BTC (the old
   // behaviour) multiplied every BTC swap amount by 1e8, blowing past the maker's
@@ -303,7 +306,7 @@ export default function SwapScreen({ navigation }: Props) {
           });
           // Feed held Spark assets so pool addresses resolve to real
           // ticker/name/precision (the SDK pool payload carries none).
-          const sparkInventory = (rgbAssets || []).map((a: any) => ({
+          const sparkInventory = tokens.map((a) => ({
             asset_id: a.asset_id,
             ticker: a.ticker,
             name: a.name,
@@ -331,22 +334,25 @@ export default function SwapScreen({ navigation }: Props) {
     try {
       // Keyed by ticker so held-asset balances win over pair-derived placeholders.
       const byTicker = new Map<string, Asset>();
-      byTicker.set('BTC', {
-        asset_id: 'BTC',
-        ticker: 'BTC',
-        name: 'Bitcoin',
+      const btc = inventoryBtc(inventory);
+      byTicker.set(btc.ticker, {
+        asset_id: btc.asset_id,
+        ticker: btc.ticker,
+        name: btc.name,
         // Balance is in the active BTC unit (sats by default) so the MAX
         // button and the amount field agree with how the input is parsed.
-        balance: satsToBtcDisplay(walletState?.btcBalance?.vanilla?.spendable || 0),
+        // assetByTicker narrows it to the account the pair's venue spends from.
+        balance: satsToBtcDisplay(btc.spendable ?? btc.balance),
         precision: bitcoinUnit === 'sats' ? 0 : 8,
       });
-      for (const asset of rgbAssets as any[]) {
+      for (const asset of tokens) {
         byTicker.set(asset.ticker, {
           asset_id: asset.asset_id,
           ticker: asset.ticker,
           name: asset.name,
-          balance: getAssetDisplayBalance(asset.balance, asset.precision || 0),
+          balance: getAssetDisplayBalance(asset.balance, asset.precision),
           precision: asset.precision,
+          icon: asset.icon,
         });
       }
       // Surface every ticker that appears in a loaded pair (e.g. Flashnet's USDB)
@@ -380,7 +386,7 @@ export default function SwapScreen({ navigation }: Props) {
   useEffect(() => {
     loadAvailableAssets();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tradingPairs, rgbAssets, walletState?.btcBalance?.vanilla?.spendable, bitcoinUnit]);
+  }, [tradingPairs, inventory, bitcoinUnit]);
 
   // Once pairs load, make sure the from/to selection actually forms a real pair.
   // A Spark-only wallet (no RLN) has no BTC/USDT pair, so fall back to the first
@@ -1030,7 +1036,7 @@ export default function SwapScreen({ navigation }: Props) {
       : allTickers(filteredPairs);
     const pickerAssets = tickers.length
       ? tickers.map(t => assetByTicker(t)).filter((a): a is Asset => !!a)
-      : availableAssets;
+      : availableAssets.map(a => assetByTicker(a.ticker) ?? a);
     const other = side === 'from' ? swapState.toAsset : swapState.fromAsset;
 
     return (

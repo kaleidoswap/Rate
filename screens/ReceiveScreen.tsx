@@ -23,6 +23,8 @@ import { protocolManager, rgbAccountAdapter, rgbAccountIsOnDevice } from '../ser
 import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel, setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
+import { useAssetInventory } from '../hooks/useAssetInventory';
+import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
 import {
   getAssetFamily,
   type AccountId,
@@ -165,11 +167,10 @@ export default function ReceiveScreen({ navigation }: Props) {
   const dispatch = useAppDispatch();
   const theme = useAppTheme();
   const styles = useMemo(() => createReceiveStyles(theme), [theme]);
-  // Narrow selectors: subscribe to ONLY the two fields this screen reads. The
-  // previous coarse `state.wallet` / `state.assets` selectors re-rendered this
-  // ~3k-line component on any unrelated change (price ticks, tx history, etc.).
-  const btcBalance = useAppSelector((state: RootState) => state.wallet?.btcBalance);
-  const rgbAssetsRaw = useAppSelector((state: RootState) => state.assets?.rgbAssets);
+  // The shared asset inventory (bitcoin plus every account's assets). It is
+  // memoized on the wallet's bitcoin balance and the asset list only, so price
+  // ticks or history updates don't re-render this screen.
+  const inventory = useAssetInventory();
   // The receive/deposit flow always denominates BTC in sats (matches rate-extension):
   // integer-sats input, sats quick-amounts, and a correct ≈USD conversion. The global
   // BTC/sats display preference intentionally does NOT apply on this screen — otherwise
@@ -181,20 +182,19 @@ export default function ReceiveScreen({ navigation }: Props) {
   const { width: screenWidth } = useWindowDimensions();
   const qrSize = Math.max(96, Math.min(248, Math.round(screenWidth - 104)));
   
-  // Safe destructuring with fallbacks
-  const rgbAssets = (rgbAssetsRaw || []) as RGBAsset[];
+  const rgbAssets: RGBAsset[] = useMemo(() => inventoryTokens(inventory), [inventory]);
+  // Bitcoin as the asset pickers list it.
+  const btcAsset = (): Asset => {
+    const btc = inventoryBtc(inventory);
+    return { asset_id: btc.asset_id, ticker: btc.ticker, name: btc.name, isRGB: false, balance: btc.spendable ?? btc.balance };
+  };
   
 
   
   // Must call hooks first before any other code
   const getProtocolStatus = useRefreshableProtocolStatus();
 
-  const [selectedAsset, setSelectedAsset] = useState<Asset>({
-    asset_id: 'BTC',
-    ticker: 'BTC',
-    name: 'Bitcoin',
-    isRGB: false,
-  });
+  const [selectedAsset, setSelectedAsset] = useState<Asset>(btcAsset);
 
   // Network selection allows the per-protocol types plus a 'unified' single-QR mode.
   type ReceiveMode = ProtocolNetworkType | 'unified';
@@ -507,15 +507,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Get assets available for Lightning (assets that have channels)
   const getLightningAssets = (): Asset[] => {
-    const lightningAssets: Asset[] = [
-      { 
-        asset_id: 'BTC', 
-        ticker: 'BTC', 
-        name: 'Bitcoin',
-        isRGB: false,
-        balance: btcBalance?.vanilla?.spendable || 0,
-      }
-    ];
+    const lightningAssets: Asset[] = [btcAsset()];
 
     // Add RGB assets that have Lightning channels
     const rgbAssetsWithChannels = channels
@@ -542,13 +534,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Get assets available for on-chain (all assets)
   const getOnChainAssets = (): Asset[] => [
-    { 
-      asset_id: 'BTC', 
-      ticker: 'BTC', 
-      name: 'Bitcoin',
-      isRGB: false,
-      balance: btcBalance?.vanilla?.spendable || 0,
-    },
+    btcAsset(),
     ...(Array.isArray(rgbAssets) ? rgbAssets.map((asset: RGBAsset) => ({
       asset_id: asset.asset_id,
       ticker: asset.ticker,
@@ -563,7 +549,7 @@ export default function ReceiveScreen({ navigation }: Props) {
     return networkType === 'lightning' 
       ? getLightningAssets() 
       : getOnChainAssets();
-  }, [networkType, rgbAssets, btcBalance, channels]);
+  }, [networkType, inventory, channels]);
 
   // A Lightning invoice that pays into `account`. `layer: 'BTC_LN'` matters for Spark:
   // without it the adapter mints a native Spark invoice, not a BOLT11.
@@ -1399,10 +1385,6 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // Handle a pick from the "+" new-asset sheet: switch to a fresh receive on the
   // chosen protocol (Spark / Arkade address, or a blind RGB invoice).
-  const btcAsset = (): Asset => ({
-    asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false, balance: btcBalance?.vanilla?.spendable || 0,
-  });
-
   const handleNewAsset = (kind: NewAssetKind) => {
     feedback.select();
     resetReceiveSurface();
