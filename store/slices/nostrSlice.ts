@@ -2,7 +2,7 @@
 import { createSlice, PayloadAction, createAsyncThunk } from '@reduxjs/toolkit';
 import * as SecureStore from 'expo-secure-store';
 import NostrService, { NostrProfile, NostrContact, NostrSettings } from '../../services/NostrService';
-import type { ProfileFormField } from '../../utils/nostrProfile';
+import { slimContactProfile, type ProfileFormField } from '../../utils/nostrProfile';
 import type {
   NwcCapability,
   SavedNwcConnection,
@@ -102,11 +102,11 @@ export const loadContactList = createAsyncThunk(
 
 export const followUser = createAsyncThunk(
   'nostr/followUser',
-  async ({ pubkey, relay, petname }: { pubkey: string; relay?: string; petname?: string }) => {
+  async ({ pubkey, relay, petname, profile }: { pubkey: string; relay?: string; petname?: string; profile?: NostrProfile }) => {
     const nostrService = NostrService.getInstance();
     const success = await nostrService.followUser(pubkey, relay, petname);
     if (success) {
-      return { pubkey, relay, petname };
+      return { pubkey, relay, petname, profile };
     }
     throw new Error('Failed to follow user');
   }
@@ -525,7 +525,9 @@ const nostrSlice = createSlice({
       })
       .addCase(loadContactList.fulfilled, (state, action) => {
         state.isContactsLoading = false;
-        state.contacts = action.payload;
+        // Profiles that did not arrive this time keep what we already had.
+        const known = new Map(state.contacts.map(c => [c.pubkey, c.profile]));
+        state.contacts = action.payload.map(c => (c.profile || !known.get(c.pubkey) ? c : { ...c, profile: known.get(c.pubkey) }));
         state.contactsLastUpdated = Date.now();
       })
       .addCase(loadContactList.rejected, (state, action) => {
@@ -536,7 +538,12 @@ const nostrSlice = createSlice({
     // Follow user
     builder
       .addCase(followUser.fulfilled, (state, action) => {
-        // The contact will be added when we reload the contact list
+        // Shown at once: the published list is ours, no need to reload it.
+        const { pubkey, relay, petname, profile } = action.payload;
+        if (!state.contacts.some(c => c.pubkey === pubkey)) {
+          state.contacts.push({ pubkey, relay, petname, profile: slimContactProfile(profile) ?? undefined });
+          state.contactsLastUpdated = Date.now();
+        }
         state.contactsError = null;
       })
       .addCase(followUser.rejected, (state, action) => {

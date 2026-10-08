@@ -14,6 +14,7 @@ import { receiveMessage, setActiveConversation } from '../store/slices/chatSlice
 import NostrService, { DirectMessage } from '../services/NostrService';
 import NotificationService from '../services/NotificationService';
 import ToastService from '../services/ToastService';
+import { nostrContactName } from '../utils/nostrProfile';
 
 type Contacts = {
   localContacts: any[];
@@ -22,7 +23,7 @@ type Contacts = {
 
 function resolveName(pubkey: string, { localContacts, nostrContacts }: Contacts): string {
   const nostr = nostrContacts.find((c) => c?.pubkey === pubkey);
-  if (nostr) return nostr.profile?.display_name || nostr.profile?.name || nostr.petname || shortNpub(pubkey);
+  if (nostr) return nostrContactName(nostr) || shortNpub(pubkey);
   const local = localContacts.find((c) => c?.node_pubkey === pubkey);
   if (local?.name) return local.name;
   return shortNpub(pubkey);

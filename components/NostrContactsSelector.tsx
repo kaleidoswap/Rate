@@ -1,5 +1,5 @@
 // components/NostrContactsSelector.tsx
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,7 @@ import { loadContactList } from '../store/slices/nostrSlice';
 import { theme, leading } from '../theme';
 import { NostrContact } from '../types/nostr';
 import { nip19 } from 'nostr-tools';
+import { nostrContactName } from '../utils/nostrProfile';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -93,31 +94,24 @@ export default function NostrContactsSelector({
     }
   }, [visible]);
 
-  // Convert Nostr contacts to Contact format
-  const convertNostrContact = (nostrContact: NostrContact): Contact => {
-    const displayName = nostrContact.profile?.display_name || 
-                       nostrContact.profile?.name || 
-                       nostrContact.petname || 
-                       'Anonymous';
-    
-    return {
-      id: `nostr_${nostrContact.pubkey}`,
-      name: displayName,
-      lightning_address: nostrContact.profile?.lud16,
-      node_pubkey: nostrContact.pubkey,
-      notes: nostrContact.profile?.about,
-      avatar_url: nostrContact.profile?.picture,
-      npub: nip19.npubEncode(nostrContact.pubkey),
-      isNostrContact: true,
-      profile: nostrContact.profile,
-    };
-  };
-
-  // Combine and filter contacts
-  const allContacts = [
-    ...localContacts,
-    ...nostrContacts.map(convertNostrContact)
-  ];
+  // Only contacts with a Lightning address can be picked. Building the rows is
+  // the costly part for long follow lists, so it only reruns when they change.
+  const allContacts = useMemo((): Contact[] => [
+    ...localContacts.filter((c: Contact) => !!c.lightning_address),
+    ...nostrContacts
+      .filter((n: NostrContact) => !!n.profile?.lud16)
+      .map((n: NostrContact): Contact => ({
+        id: `nostr_${n.pubkey}`,
+        name: nostrContactName(n) || 'Anonymous',
+        lightning_address: n.profile?.lud16,
+        node_pubkey: n.pubkey,
+        notes: n.profile?.about,
+        avatar_url: n.profile?.picture,
+        npub: nip19.npubEncode(n.pubkey),
+        isNostrContact: true,
+        profile: n.profile,
+      })),
+  ], [localContacts, nostrContacts]);
 
   const filteredContacts = allContacts.filter((contact: Contact) => {
     // Only show contacts with lightning addresses
@@ -191,7 +185,8 @@ export default function NostrContactsSelector({
             <Image
               source={{ uri: contact.avatar_url }}
               style={styles.avatar}
-
+              resizeMethod="resize"
+              fadeDuration={0}
             />
           ) : (
             <View style={[
@@ -357,6 +352,10 @@ export default function NostrContactsSelector({
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.listContent}
                 ListEmptyComponent={renderEmptyState}
+                initialNumToRender={12}
+                maxToRenderPerBatch={12}
+                windowSize={9}
+                removeClippedSubviews
                 refreshControl={
                   <RefreshControl
                     refreshing={refreshing}
