@@ -6,7 +6,7 @@ import { protocolManager } from '../services/protocols';
 import { saveBalanceSnapshot } from '../services/balanceSnapshot';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const mockState: any = { wallet: { activeWallet: null, btcPriceUSD: 0 }, node: {}, settings: { bitcoinUnit: 'sats' }, nostr: {} };
+const mockState: any = { wallet: { activeWallet: null, btcPriceUSD: 0 }, assets: { rgbAssets: [] }, node: {}, settings: { bitcoinUnit: 'sats' }, nostr: {} };
 const mockDispatch = jest.fn();
 jest.mock('react-redux', () => ({ useDispatch: () => mockDispatch, useSelector: (fn: any) => fn(mockState) }));
 jest.mock('../store/hooks', () => ({ useAppSelector: (fn: any) => fn(mockState) }));
@@ -17,10 +17,13 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../services/initializeServices', () => ({ initializeProtocolServices: jest.fn() }));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: jest.fn() }, rgbAccountAdapter: jest.fn(), rgbAccountProtocol: () => 'RGB_LN' }));
 jest.mock('../store/slices/walletSlice', () => ({ setBtcBalance: (payload: any) => ({ type: 'balance', payload }) }));
-jest.mock('../store/slices/assetsSlice', () => ({ setRgbAssets: (payload: any) => ({ type: 'assets', payload }) }));
+jest.mock('../store/slices/assetsSlice', () => ({
+  setRgbAssets: (payload: any) => ({ type: 'assets', payload }),
+  setProtocolAssets: (payload: any) => ({ type: 'protocolAssets', payload }),
+}));
 jest.mock('../store/slices/nostrSlice', () => ({ loadNostrProfile: jest.fn() }));
 jest.mock('../store/slices/settingsSlice', () => ({ selectDisclosureLevel: () => 'lite' }));
-jest.mock('@kaleidorg/wallet-engine', () => ({ policyFor: () => ({}), aggregateForLite: () => ({ other: [] }) }));
+jest.mock('@kaleidorg/wallet-engine', () => ({ policyFor: () => ({}), liteBucketOf: () => 'OTHER' }));
 jest.mock('../utils/bitcoinUnits', () => ({
   formatBitcoinAmount: String,
   useBitcoinConversion: () => ({ formatSatoshisToUSD: String }),

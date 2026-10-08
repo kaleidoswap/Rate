@@ -13,7 +13,6 @@ import {
 import { useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { aggregateForLite } from '@kaleidorg/wallet-engine';
 import { RootState } from '../store';
 import { theme } from '../theme';
 import { ScreenHeader } from '../components/ScreenHeader';
@@ -28,6 +27,8 @@ import { usePolicy } from '../hooks/usePolicy';
 import { formatBitcoinAmount, useBitcoinPrice, useDisplayAmount } from '../utils/bitcoinUnits';
 import { getAssetFamily } from '../utils/account-routing';
 import { formatUsd, tokenValueSats } from '../utils/portfolio';
+import { inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf } from '../utils/asset-inventory';
+import { useAssetInventory } from '../hooks/useAssetInventory';
 import {
   ASSET_FILTERS,
   availableAssetFilters,
@@ -49,9 +50,11 @@ const REFRESH_TIMEOUT_MS = 15000;
 const HIDDEN = '••••';
 
 export default function AssetsScreen({ navigation, route }: Props) {
-  // Same data the dashboard shows: it writes these after every refresh.
+  // The shared asset inventory: the dashboard's refresh writes it.
   const btcBalance = useSelector((state: RootState) => state.wallet.btcBalance);
-  const rgbAssets = useSelector((state: RootState) => state.assets.rgbAssets) as any[];
+  const inventory = useAssetInventory();
+  const btc = inventoryBtc(inventory);
+  const tokens = useMemo(() => inventoryTokens(inventory), [inventory]);
   const bitcoinUnit = useSelector((state: RootState) => state.settings.bitcoinUnit);
   const hideBalances = useSelector((state: RootState) => state.settings.hideBalances);
   const btcPriceUSD = useBitcoinPrice();
@@ -68,21 +71,17 @@ export default function AssetsScreen({ navigation, route }: Props) {
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Lite folds its dollar assets into one USD line on the dashboard; do the same here.
-  const liteUsdAssetIds = useMemo(() => {
-    if (!isLite) return undefined;
-    const lite = aggregateForLite(rgbAssets.map((a) => ({ id: a.asset_id, ticker: a.ticker, balance: { total: Number(a.balance) || 0 } })) as any);
-    const other = new Set(lite.other.map((o: any) => o.id));
-    return new Set<string>(rgbAssets.map((a) => a.asset_id).filter((id) => !other.has(id)));
-  }, [rgbAssets, isLite]);
+  const liteUsdAssetIds = useMemo(() => (isLite ? liteUsdIdsOf(tokens) : undefined), [tokens, isLite]);
 
   const items = useMemo(() => buildAssetListItems({
-    btcNetworks: btcBalance?.networks,
-    btcAvailable: btcBalance?.summary?.available ?? ((btcBalance?.vanilla?.spendable ?? 0) + (btcBalance?.colored?.spendable ?? 0)),
+    btcNetworks: btc.networks,
+    btcAvailable: btc.balance,
+    // Before any balance is known, bitcoin isn't listed as zero.
     showBtc: btcBalance != null,
-    assets: rgbAssets,
+    assets: tokens,
     btcPriceUSD,
     liteUsdAssetIds,
-  }), [btcBalance, rgbAssets, btcPriceUSD, liteUsdAssetIds]);
+  }), [btc, btcBalance, tokens, btcPriceUSD, liteUsdAssetIds]);
 
   const filters = policy.showNetworks ? availableAssetFilters(items) : (['all'] as AssetFilter[]);
   const activeFilter = filters.includes(filter) ? filter : 'all';
@@ -90,7 +89,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
 
   // The headline matches the dashboard's: bitcoin held plus dollar tokens at $1.
   const totalSats = (btcBalance?.summary?.total ?? btcBalance?.vanilla?.spendable ?? 0)
-    + tokenValueSats(rgbAssets, btcPriceUSD, liteUsdAssetIds);
+    + tokenValueSats(tokens, btcPriceUSD, liteUsdAssetIds);
   const total = formatDisplayAmount(totalSats);
 
   // A refresh ends when the dashboard writes new balances (or after a while).
@@ -99,7 +98,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
     setRefreshing(false);
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [btcBalance, rgbAssets]);
+  }, [btcBalance, inventory]);
   useEffect(() => () => { if (refreshTimer.current) clearTimeout(refreshTimer.current); }, []);
 
   const refresh = () => {
@@ -128,7 +127,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
     navigation.navigate('AssetDetail', {
       asset: {
         ...token,
-        balance: (token as any).balanceDetail ?? token.balance,
+        balance: token.balanceDetail ?? token.balance,
         isRGB: family === 'RGB',
         protocol: family,
         fiatValue: item.unitUsd !== undefined ? (dominantHolding(item)?.amount ?? 0) * item.unitUsd : undefined,
