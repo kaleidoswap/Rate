@@ -23,7 +23,6 @@ import Animated, {
   cancelAnimation,
 } from 'react-native-reanimated';
 import { useSelector } from 'react-redux';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { theme } from '../../theme';
 import Markdown from 'react-native-markdown-display';
 import { MindAvatar } from '../MindMark';
@@ -36,6 +35,8 @@ import { createMindAgent } from '../../services/mindAgent';
 import { getModelById } from '../../services/qvacModels';
 import { startHandsFreeVoice, type HandsFreeController } from '../../services/handsFreeVoice';
 import { selectMindConfig } from '../../store/slices/settingsSlice';
+import { useAiConfirm } from '../../hooks/useAiConfirm';
+import PaymentConfirmationModal from '../PaymentConfirmationModal';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
 interface Bubble {
@@ -69,10 +70,6 @@ function merchantCardFrom(res: any): { name: string; result: any; spoken: string
       ? `Found ${n} Bitcoin-accepting merchant${n === 1 ? '' : 's'} nearby — they're on the card below.`
       : "I couldn't find any Bitcoin-accepting merchants nearby right now.";
   return { name: call.name, result: call.result, spoken };
-}
-interface ConfirmState {
-  call: { name: string; arguments: Record<string, unknown> };
-  resolve: (v: { approved: boolean; reason?: string }) => void;
 }
 
 let _id = 0;
@@ -141,11 +138,11 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
 
 const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
   const qvac = useQVAC();
-  const insets = useSafeAreaInsets();
   // Same KaleidoMind funnel AND settings as the chat screen — fast-path,
   // recipes, contract wallet tools, memory + on-device RAG, confirm gate,
   // persona/sampling/toggles. Settings are read per turn through the ref.
   const mindConfig = useSelector(selectMindConfig);
+  const btcPriceUSD = useSelector((s: any) => s?.wallet?.btcPriceUSD) || 0;
   const mindConfigRef = useRef(mindConfig);
   mindConfigRef.current = mindConfig;
   const agent = useMemo(
@@ -157,7 +154,6 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
-  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Which assistant bubbles have their reasoning expanded (tap to reveal). A
   // value of `undefined` means "auto" — expanded live while reasoning, then
@@ -178,6 +174,21 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // push-to-talk orb, which keeps working when this is off.
   const [handsFree, setHandsFree] = useState(false);
   const handsFreeRef = useRef<HandsFreeController | null>(null);
+  // Money actions: one shared sheet. Listening pauses while it is open; in
+  // hands-free mode the readback is spoken, but approval is always a tap.
+  const confirmGate = useAiConfirm({
+    thresholdSats: mindConfig.confirmAuthThresholdSats,
+    onOpen: (readback) => {
+      voiceRef.current?.cancelListening?.();
+      const hf = handsFreeRef.current;
+      if (hf) {
+        hf.setPaused(true);
+        void stopSpeak();
+        void qvacSpeak(readback.spoken, {});
+      }
+    },
+    onClose: () => handsFreeRef.current?.setPaused(false),
+  });
   // Latest bubbles, read inside the hands-free respond closure (created once
   // when the loop starts) to build turn history without a stale snapshot.
   const bubblesRef = useRef(bubbles);
@@ -297,10 +308,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             patchBubble(assistantId, { thinking: reasoning });
             scrollToEnd();
           },
-          onConfirm: (call) =>
-            new Promise((resolve) => setConfirm({ call, resolve })),
+          onConfirm: confirmGate.request,
+          onToolResult: confirmGate.onToolResult,
         });
         requestIdRef.current = null;
+        confirmGate.reset();
         // If the overlay closed mid-turn, don't patch/speak a stale answer.
         if (!aliveRef.current) return;
         // Merchant results → structured card + short spoken summary (no reading
@@ -326,6 +338,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         });
       } catch (e) {
         requestIdRef.current = null;
+        confirmGate.reset();
         if (!aliveRef.current) return;
         patchBubble(assistantId, { text: '' });
         setActiveId(null);
@@ -404,7 +417,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           patchBubble(assistantId, { thinking: reasoning });
           scrollToEnd();
         },
-        onConfirm: (call) => new Promise((resolve) => setConfirm({ call, resolve })),
+        onConfirm: confirmGate.request,
+        onToolResult: confirmGate.onToolResult,
       });
       requestIdRef.current = null;
       if (!aliveRef.current) return '';
@@ -419,6 +433,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       scrollToEnd();
       return finalText;
     } finally {
+      confirmGate.reset();
       setActiveId(null);
     }
   };
@@ -771,108 +786,21 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
         </View>
 
-        {/* Money-action confirm — a bottom-anchored overlay above the sheet so
-            it's always fully on-screen and tappable (an in-flow card overflowed
-            the max-height sheet and got clipped off the bottom edge). */}
-        {confirm && (
-          <View style={styles.confirmOverlay}>
-            {/* Tap outside the card to dismiss (treated as a decline). */}
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={() => {
-                confirm.resolve({ approved: false, reason: 'declined' });
-                setConfirm(null);
-              }}
-            />
-            {(() => {
-              const info = describeCall(confirm.call);
-              return (
-                <View style={[styles.confirmCard, { paddingBottom: Math.max(insets.bottom, 16) + 8 }]}>
-                  <View style={styles.confirmHandle} />
-                  <View style={styles.confirmIconCircle}>
-                    <Ionicons name={info.icon} size={22} color={theme.colors.primary[500]} />
-                  </View>
-                  <Text style={styles.confirmTitle}>{info.title}</Text>
-                  {!!info.primary && <Text style={styles.confirmAmount}>{info.primary}</Text>}
-                  {info.rows.length > 0 && (
-                    <View style={styles.confirmRows}>
-                      {info.rows.map((r) => (
-                        <View key={r.label} style={styles.confirmRow}>
-                          <Text style={styles.confirmRowLabel}>{r.label}</Text>
-                          <Text style={styles.confirmRowValue} numberOfLines={1}>{r.value}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                  <Text style={styles.confirmNote}>Review the details — this can't be undone.</Text>
-                  <View style={styles.confirmActions}>
-                    <Pressable
-                      style={[styles.confirmBtn, styles.confirmDecline]}
-                      onPress={() => {
-                        confirm.resolve({ approved: false, reason: 'declined' });
-                        setConfirm(null);
-                      }}
-                    >
-                      <Text style={styles.confirmDeclineText}>Cancel</Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.confirmBtn, styles.confirmApprove]}
-                      onPress={() => {
-                        confirm.resolve({ approved: true });
-                        setConfirm(null);
-                      }}
-                    >
-                      <Text style={styles.confirmApproveText}>{info.cta}</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              );
-            })()}
-          </View>
-        )}
+        <PaymentConfirmationModal
+          inline
+          visible={!!confirmGate.state}
+          readback={confirmGate.state?.readback}
+          onConfirm={confirmGate.approve}
+          onCancel={confirmGate.cancel}
+          loading={!!confirmGate.state?.loading}
+          busyLabel={confirmGate.state?.busyLabel}
+          requireAuth={confirmGate.state?.requireAuth}
+          priceUsd={btcPriceUSD}
+        />
       </View>
     </Modal>
   );
 };
-
-interface CallInfo {
-  title: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  cta: string;
-  primary?: string;
-  rows: { label: string; value: string }[];
-}
-
-/** Turn a confirmation-gated tool call into a readable payment card. */
-function describeCall(call: { name: string; arguments: Record<string, unknown> }): CallInfo {
-  const a = call.arguments || {};
-  const shorten = (s?: unknown) => {
-    const v = String(s ?? '').trim();
-    return v.length > 30 ? `${v.slice(0, 14)}…${v.slice(-10)}` : v;
-  };
-  const sats = (n?: unknown) =>
-    n != null && Number.isFinite(Number(n)) ? `${Number(n).toLocaleString()} sats` : undefined;
-
-  switch (call.name) {
-    case 'send_payment':
-      return { title: 'Confirm payment', icon: 'flash', cta: 'Confirm & send', primary: sats(a.amount_sats), rows: [{ label: 'To', value: shorten(a.to) }] };
-    case 'rln_pay_invoice':
-    case 'pay_lightning_invoice':
-      return { title: 'Pay Lightning invoice', icon: 'flash', cta: 'Pay', primary: sats(a.amount ?? a.amount_sats), rows: [{ label: 'Invoice', value: shorten(a.invoice) }] };
-    case 'pay_nostr_contact':
-      return { title: 'Confirm payment', icon: 'flash', cta: 'Confirm & send', primary: sats(a.amount), rows: [{ label: 'To', value: String(a.contact ?? 'a contact') }] };
-    case 'rln_send_asset':
-      return {
-        title: 'Send asset',
-        icon: 'diamond',
-        cta: 'Confirm & send',
-        primary: a.amount != null ? `${a.amount} ${String(a.asset ?? '').toUpperCase()}` : undefined,
-        rows: [{ label: 'To', value: shorten(a.to) }],
-      };
-    default:
-      return { title: 'Confirm action', icon: 'shield-checkmark', cta: 'Approve', rows: [{ label: call.name, value: shorten(JSON.stringify(a)) }] };
-  }
-}
 
 const styles = StyleSheet.create({
   backdrop: {
@@ -961,65 +889,6 @@ const styles = StyleSheet.create({
     borderColor: theme.colors.border.light,
   },
   pauseBtnText: { color: theme.colors.text.primary, fontSize: 13, fontWeight: '600' },
-  confirmOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
-  },
-  confirmCard: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    backgroundColor: theme.colors.surface.elevated,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.medium,
-  },
-  confirmHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    backgroundColor: theme.colors.border.medium,
-    marginBottom: 14,
-  },
-  confirmTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  confirmIconCircle: {
-    alignSelf: 'center',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: `${theme.colors.primary[500]}1A`,
-    marginBottom: 10,
-  },
-  confirmTitle: { color: theme.colors.text.primary, fontWeight: '700', fontSize: 16, textAlign: 'center' },
-  confirmAmount: { color: theme.colors.text.primary, fontWeight: '800', fontSize: 28, textAlign: 'center', marginTop: 6 },
-  confirmRows: {
-    marginTop: 14,
-    backgroundColor: theme.colors.surface.secondary,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 4,
-  },
-  confirmRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingVertical: 10,
-  },
-  confirmRowLabel: { color: theme.colors.text.secondary, fontSize: 13 },
-  confirmRowValue: { color: theme.colors.text.primary, fontSize: 14, fontWeight: '600', flexShrink: 1, textAlign: 'right' },
-  confirmNote: { color: theme.colors.text.tertiary, fontSize: 12, textAlign: 'center', marginTop: 12, marginBottom: 16 },
-  confirmBody: { color: theme.colors.text.secondary, fontSize: 14, lineHeight: 20, marginBottom: 16 },
-  confirmActions: { flexDirection: 'row', gap: 10 },
-  confirmBtn: { flex: 1, height: 50, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  confirmDecline: { backgroundColor: theme.colors.surface.secondary },
-  confirmDeclineText: { color: theme.colors.text.primary, fontWeight: '600' },
-  confirmApprove: { backgroundColor: theme.colors.primary[500] },
-  confirmApproveText: { color: theme.colors.text.inverse, fontWeight: '700' },
 });
 
 export default VoiceAgentOverlay;
