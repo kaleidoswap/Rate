@@ -402,6 +402,27 @@ export class SecurityService {
   }
 
   /**
+   * Turn the wallet PIN off. A biometric lock the device can no longer use is
+   * turned off first, so the lock is never left configured but unusable.
+   */
+  async removePin(): Promise<boolean> {
+    try {
+      const { biometricEnabled, biometricType } = await this.getSecuritySettings();
+      const biometricUsable = biometricEnabled && !!biometricType;
+      if (biometricEnabled && !biometricUsable) {
+        await SecureStore.setItemAsync(SECURITY_KEYS.BIOMETRIC_ENABLED, 'false');
+      }
+      await SecureStore.deleteItemAsync(SECURITY_KEYS.PIN_HASH);
+      await SecureStore.deleteItemAsync(SECURITY_KEYS.PIN_FAILURES);
+      if (!biometricUsable) await SecureStore.deleteItemAsync(SECURITY_KEYS.SECURITY_ENABLED);
+      return true;
+    } catch (error) {
+      console.error('Failed to remove PIN:', error);
+      return false;
+    }
+  }
+
+  /**
    * Change PIN
    */
   async changePin(oldPin: string, newPin: string): Promise<boolean> {

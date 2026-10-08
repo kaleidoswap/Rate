@@ -573,4 +573,42 @@ describe('security settings read failures', () => {
       } finally { clock.mockRestore(); }
     });
   });
+  describe('removePin', () => {
+    const securityService = SecurityService.getInstance();
+    let store: Record<string, string>;
+    const enrolled = (on: boolean) => {
+      (LocalAuthentication.hasHardwareAsync as jest.Mock).mockResolvedValue(on);
+      (LocalAuthentication.isEnrolledAsync as jest.Mock).mockResolvedValue(on);
+      (LocalAuthentication.supportedAuthenticationTypesAsync as jest.Mock).mockResolvedValue([LocalAuthentication.AuthenticationType.FINGERPRINT]);
+    };
+    beforeEach(() => {
+      store = { rate_wallet_pin_hash: 'h', rate_wallet_pin_failures: '{"count":2,"lockedUntil":0}', rate_wallet_security_enabled: 'true' };
+      (SecureStore.setItemAsync as jest.Mock).mockImplementation(async (k: string, v: string) => { store[k] = v; });
+      (SecureStore.getItemAsync as jest.Mock).mockImplementation(async (k: string) => (k in store ? store[k] : null));
+      (SecureStore.deleteItemAsync as jest.Mock).mockImplementation(async (k: string) => { delete store[k]; });
+    });
+
+    it('keeps a usable biometric lock when the PIN goes', async () => {
+      enrolled(true);
+      store.rate_wallet_biometric_enabled = 'true';
+      expect(await securityService.removePin()).toBe(true);
+      expect(store).toEqual({ rate_wallet_biometric_enabled: 'true', rate_wallet_security_enabled: 'true' });
+    });
+
+    it('turns off a biometric lock the device can no longer use instead of leaving it unusable', async () => {
+      enrolled(false);
+      store.rate_wallet_biometric_enabled = 'true';
+      expect(await securityService.removePin()).toBe(true);
+      expect(store).toEqual({ rate_wallet_biometric_enabled: 'false' });
+      expect(await securityService.getSecuritySettings()).toEqual({ pinEnabled: false, biometricEnabled: false, biometricType: null });
+    });
+
+    it('leaves the PIN in place when the biometric flag cannot be cleared', async () => {
+      enrolled(false);
+      store.rate_wallet_biometric_enabled = 'true';
+      (SecureStore.setItemAsync as jest.Mock).mockRejectedValue(new Error('locked'));
+      expect(await securityService.removePin()).toBe(false);
+      expect(store.rate_wallet_pin_hash).toBe('h');
+    });
+  });
 });
