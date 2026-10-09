@@ -7,9 +7,14 @@ jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f({ settings: {
 jest.mock('../services/paymentProofs', () => ({ findPaymentProof: jest.fn(async () => null) }));
 jest.mock('../services/TxAccelerationService', () => ({ accelerationTarget: () => null }));
 jest.mock('./AccelerationPanel', () => ({ AccelerationPanel: () => null }));
-jest.mock('../services/rgbWallet', () => ({ cancelRgbTransfer: (...args: any[]) => mockCancel(...(args as [])) }));
+const mockDelete = jest.fn(async () => true);
+jest.mock('../services/rgbWallet', () => ({
+  cancelRgbTransfer: (...args: any[]) => mockCancel(...(args as [])),
+  deleteRgbTransfer: (...args: any[]) => mockDelete(...(args as [])),
+}));
+let mockCaps: any = {};
 jest.mock('../services/protocols', () => ({
-  rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listTransfers: jest.fn(), account: { failTransfer: jest.fn() } }),
+  rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listTransfers: jest.fn(), account: { failTransfer: jest.fn(), capabilities: () => mockCaps } }),
 }));
 
 import { ActivityDetailSheet } from './ActivityDetailSheet';
@@ -37,4 +42,21 @@ test('a transfer already in a transaction can’t be cancelled', () => {
   const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-confirmations', direction: 'incoming', batchTransferIdx: 7 })} onClose={jest.fn()} />);
   expect(screen.getByText('Waiting for confirmations')).toBeTruthy();
   expect(screen.queryByText('Cancel invoice')).toBeNull();
+});
+
+test('a failed transfer can be removed from history where the wallet can, after confirming', async () => {
+  const failed = item({ status: 'failed', direction: 'outgoing', batchTransferIdx: 4 });
+  expect(render(<ActivityDetailSheet item={failed} onClose={jest.fn()} />).queryByText('Remove from history')).toBeNull();
+  mockCaps = { deleteTransfers: true };
+  const onClose = jest.fn();
+  const onRefresh = jest.fn(async () => true);
+  const screen = render(<ActivityDetailSheet item={failed} onClose={onClose} onRefresh={onRefresh} />);
+  expect(screen.queryByText('Cancel transfer')).toBeNull();
+  fireEvent.press(screen.getByText('Remove from history'));
+  const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
+  await act(async () => { await buttons.find((b: any) => b.text === 'Remove').onPress(); });
+  expect(mockDelete).toHaveBeenCalledWith(expect.anything(), 4);
+  expect(onRefresh).toHaveBeenCalled();
+  expect(onClose).toHaveBeenCalled();
+  mockCaps = {};
 });

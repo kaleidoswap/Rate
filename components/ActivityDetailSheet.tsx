@@ -32,8 +32,8 @@ import { preimageMatches } from '../utils/payment-proofs';
 import { chainLabel } from '../utils/orchestra-ui';
 import { formatRecordAmount } from '../utils/crosschain-history';
 import { activityExplorerUrl } from '../utils/explorer';
-import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
-import { cancelRgbTransfer } from '../services/rgbWallet';
+import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, canDeleteRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
+import { cancelRgbTransfer, deleteRgbTransfer } from '../services/rgbWallet';
 import { rgbAccountAdapter } from '../services/protocols';
 
 interface Props {
@@ -112,7 +112,34 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const explorerUrl = activityExplorerUrl(item);
     const rgb = item.rgbTransfer;
     const rgbAdapter = rgb ? rgbAccountAdapter() : null;
-    const cancellable = !!rgb && canCancelRgbTransfer(rgb, rgbWalletSupport(rgbAdapter));
+    const rgbSupport = rgbWalletSupport(rgbAdapter);
+    const cancellable = !!rgb && canCancelRgbTransfer(rgb, rgbSupport);
+    const removable = !!rgb && canDeleteRgbTransfer(rgb, rgbSupport);
+    const removeTransfer = () => {
+        if (!rgb || rgb.batchTransferIdx == null) return;
+        Alert.alert(
+            'Remove from history?',
+            'This failed transfer moved nothing. Removing it only tidies your history.',
+            [
+                { text: 'Keep', style: 'cancel' },
+                {
+                    text: 'Remove', style: 'destructive', onPress: async () => {
+                        setCancelling(true); setCancelMessage('');
+                        try {
+                            const removed = await deleteRgbTransfer(rgbAdapter, rgb.batchTransferIdx!);
+                            if (!removed) { setCancelMessage('This transfer can’t be removed.'); return; }
+                            await onRefresh?.();
+                            onClose();
+                        } catch (e) {
+                            setCancelMessage(rgbWalletErrorMessage(e, 'delete'));
+                        } finally {
+                            setCancelling(false);
+                        }
+                    },
+                },
+            ],
+        );
+    };
     const cancelTransfer = () => {
         if (!rgb || rgb.batchTransferIdx == null) return;
         Alert.alert(
@@ -314,6 +341,11 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     {cancellable && (
                         <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={cancelTransfer} activeOpacity={0.8}>
                             <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Cancelling…' : rgb?.direction === 'incoming' ? 'Cancel invoice' : 'Cancel transfer'}</Text>
+                        </TouchableOpacity>
+                    )}
+                    {removable && (
+                        <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={removeTransfer} activeOpacity={0.8}>
+                            <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Removing…' : 'Remove from history'}</Text>
                         </TouchableOpacity>
                     )}
                     {!!cancelMessage && <Text accessibilityLiveRegion="polite" style={styles.rowLabel}>{cancelMessage}</Text>}

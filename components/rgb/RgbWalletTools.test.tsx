@@ -1,5 +1,6 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 import { RgbWalletTools } from './RgbWalletTools';
 
 let mockLevel = 'advanced';
@@ -10,6 +11,8 @@ jest.mock('../../store/hooks', () => ({
 }));
 jest.mock('../../services/protocols', () => ({ rgbAccountAdapter: () => mockAdapter }));
 jest.mock('./RgbUtxoSheet', () => ({ RgbUtxoSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'UTXO sheet open') : null) }));
+const mockDeleteFailed = jest.fn(async () => true);
+jest.mock('../../services/rgbWallet', () => ({ deleteFailedRgbTransfers: () => mockDeleteFailed() }));
 jest.mock('./DrainSheet', () => ({ DrainSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'Drain sheet open') : null) }));
 jest.mock('../../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('./IssueAssetSheet', () => ({ IssueAssetSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'Issue sheet open') : null) }));
@@ -47,4 +50,15 @@ test('sending all bitcoin is offered only where the native build can drain', () 
   const screen = render(<RgbWalletTools />);
   fireEvent.press(screen.getByLabelText('Send all bitcoin'));
   expect(screen.getByText('Drain sheet open')).toBeTruthy();
+});
+
+test('failed transfers can be cleared where the native build can, after confirming', async () => {
+  expect(render(<RgbWalletTools />).queryByLabelText('Remove failed transfers')).toBeNull();
+  mockAdapter = { ...device, account: { ...device.account, capabilities: () => ({ deleteTransfers: true }) } };
+  const screen = render(<RgbWalletTools />);
+  fireEvent.press(screen.getByLabelText('Remove failed transfers'));
+  const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
+  await act(async () => { await buttons.find((b: any) => b.text === 'Remove').onPress(); });
+  expect(mockDeleteFailed).toHaveBeenCalled();
+  expect((Alert.alert as jest.Mock).mock.calls.at(-1)[0]).toBe('Removed');
 });
