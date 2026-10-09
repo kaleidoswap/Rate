@@ -26,6 +26,11 @@ export interface AgentLedgerEntry {
   /** The tool or request behind the payment. */
   reason?: string;
   paymentHash?: string;
+  /** Spark's id for the send, once known. */
+  paymentId?: string;
+  /** The invoice paid and when it expires, to settle a payment left pending. */
+  invoice?: string;
+  expiresAt?: number;
   error?: string;
 }
 

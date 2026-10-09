@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { agentStore, closeAgentAccount, openAgentAccount, transferDeps } from '../services/agentWallet/live';
 import { disableAgentWallet, topUpAgentWallet, withdrawFromAgentWallet } from '../services/agentWallet/transfers';
+import { reconcileAgentWallet } from '../services/agentWallet/reconcile';
+import { agentPayWallet } from '../services/agentWallet/account';
 import type { SpendingPolicy, SpendTotals } from '../services/agentWallet/policy';
 import type { AgentLedgerEntry } from '../services/agentWallet/store';
 
@@ -26,14 +28,18 @@ export function useAgentWallet() {
     try {
       const store = await agentStore();
       if (!store) throw new Error('Unlock your wallet first.');
-      const [enabled, policy, entries] = await Promise.all([store.isEnabled(), store.loadPolicy(), store.entries().catch(() => [])]);
-      const totals = await store.totals().catch(() => null);
+      const enabled = await store.isEnabled();
       let balanceSats: number | null = null;
       let error: string | null = null;
       if (enabled) {
-        try { balanceSats = await (await openAgentAccount()).spendableSats(); }
-        catch (e) { error = message(e); }
+        try {
+          const adapter = await openAgentAccount();
+          await reconcileAgentWallet(store, agentPayWallet(adapter));
+          balanceSats = await adapter.spendableSats();
+        } catch (e) { error = message(e); }
       }
+      const [policy, entries] = await Promise.all([store.loadPolicy(), store.entries().catch(() => [])]);
+      const totals = await store.totals().catch(() => null);
       if (alive.current) setState({ loading: false, enabled, balanceSats, policy, totals, entries, error });
     } catch (e) {
       if (alive.current) setState((s) => ({ ...s, loading: false, error: message(e) }));

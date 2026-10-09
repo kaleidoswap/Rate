@@ -7,12 +7,24 @@ import { decode } from 'light-bolt11-decoder';
 import { evaluateSpend, normalizeService, type DenyCode } from './policy';
 import type { AgentWalletStore } from './store';
 import { preimageMatches } from '../../utils/payment-proofs';
+import { withAgentWalletLock } from './lock';
+import { reconcilePending } from './reconcile';
+
+export { withAgentWalletLock };
 
 export interface AgentPayWallet {
   network: string;
   balanceSats(): Promise<number>;
   quoteLightningFee(invoice: string): Promise<number | null>;
-  payInvoice(invoice: string, maxFeeSats: number): Promise<{ preimage?: string; feeSats?: number; status: 'confirmed' | 'pending' | 'failed' }>;
+  payInvoice(invoice: string, maxFeeSats: number): Promise<{ id?: string; preimage?: string; feeSats?: number; status: 'confirmed' | 'pending' | 'failed' }>;
+  /** Where a payment stands, by its Spark id or else its invoice. Throws when it can't be told. */
+  paymentStatus(ref: { id?: string; invoice?: string }): Promise<PaymentLookup>;
+}
+
+export interface PaymentLookup {
+  status: 'confirmed' | 'failed' | 'pending' | 'not_found';
+  feeSats?: number;
+  id?: string;
 }
 
 export interface AgentPayConfirmation {
@@ -96,14 +108,6 @@ export function decodeAgentInvoice(invoice: string): DecodedInvoice | null {
 /** Upper bound on routing fees when the wallet can't quote one. */
 export const fallbackMaxFee = (amountSats: number) => Math.max(5, Math.ceil(amountSats * 0.01));
 
-let queue: Promise<unknown> = Promise.resolve();
-/** One Agent wallet movement at a time, so two can't both fit under the same limit or balance. */
-export function withAgentWalletLock<T>(fn: () => Promise<T>): Promise<T> {
-  const run = queue.then(fn, fn);
-  queue = run.catch(() => {});
-  return run;
-}
-
 const fail = (code: AgentPayErrorCode, reason: string): AgentPayResult => ({ ok: false, code, reason });
 const message = (e: unknown) => (e instanceof Error && e.message ? e.message : 'unknown error');
 
@@ -130,6 +134,7 @@ async function payNow(req: AgentPayRequest, deps: AgentPayDeps): Promise<AgentPa
   }
   if (decoded.expiresAt - now() < MIN_EXPIRY_LEFT_SEC * 1000) return fail('expired', 'The invoice has expired. Ask the service again.');
 
+  await reconcilePending(store, wallet, now()).catch(() => {});
   const policy = await store.loadPolicy();
   const totals = await store.totals(now());
   let feeSats = fallbackMaxFee(amountSats);
@@ -156,7 +161,10 @@ async function payNow(req: AgentPayRequest, deps: AgentPayDeps): Promise<AgentPa
     if (decoded.expiresAt - now() < MIN_EXPIRY_LEFT_SEC * 1000) return fail('expired', 'The invoice expired while waiting for approval. Ask the service again.');
   }
 
-  const entry = await store.add({ kind: 'spend', amountSats, feeSats, status: 'pending', service, reason, paymentHash: decoded.paymentHash });
+  const entry = await store.add({
+    kind: 'spend', amountSats, feeSats, status: 'pending', service, reason,
+    paymentHash: decoded.paymentHash, invoice, expiresAt: decoded.expiresAt,
+  });
   let result: Awaited<ReturnType<AgentPayWallet['payInvoice']>>;
   try {
     result = await wallet.payInvoice(invoice, feeSats);
@@ -169,10 +177,11 @@ async function payNow(req: AgentPayRequest, deps: AgentPayDeps): Promise<AgentPa
     return fail('payment_failed', 'The payment failed.');
   }
   if (result.status !== 'confirmed') {
+    if (result.id) await store.update(entry.id, { paymentId: result.id });
     return fail('payment_pending', 'The payment was sent but has not settled yet. It is counted against your limits until it does.');
   }
   const paidFee = Number.isInteger(result.feeSats) && (result.feeSats as number) >= 0 ? (result.feeSats as number) : feeSats;
-  await store.update(entry.id, { status: 'paid', feeSats: paidFee });
+  await store.update(entry.id, { status: 'paid', feeSats: paidFee, ...(result.id ? { paymentId: result.id } : {}) });
   if (!result.preimage || !preimageMatches(result.preimage, decoded.paymentHash)) {
     return fail('bad_proof', 'The payment went through but its proof did not match the invoice.');
   }

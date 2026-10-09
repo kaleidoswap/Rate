@@ -2,7 +2,7 @@
 // Agent wallet off. Both sides are Spark accounts of the same phrase, so these
 // are fee-free Spark transfers. Each one is logged before it is sent.
 
-import { withAgentWalletLock } from './agentPay';
+import { withAgentWalletLock } from './lock';
 import type { SparkAccountLike } from './account';
 import type { AgentWalletStore } from './store';
 

@@ -8,6 +8,7 @@ import type { ToolDef, ToolSource } from '@kaleidorg/mind';
 import { payFromAgentWallet, type AgentPayConfirmation, type AgentPayDeps } from './agentPay';
 import { normalizeService } from './policy';
 import type { AgentWalletStore } from './store';
+import { reconcileAgentWallet } from './reconcile';
 
 export const PAID_RESOURCE_TOOL = 'fetch_paid_resource';
 export const BUDGET_TOOL = 'agent_budget_status';
@@ -162,6 +163,7 @@ export function buildAgentToolSource(deps: AgentToolDeps): ToolSource {
       if (name === PAID_RESOURCE_TOOL) return fetchPaid(args ?? {}, deps);
       if (name === BUDGET_TOOL) {
         const { store, wallet } = await deps.payDeps();
+        if (store && wallet) await reconcileAgentWallet(store, wallet, (deps.now ?? Date.now)());
         return budgetStatus(store, () => (wallet ? wallet.balanceSats() : Promise.reject(new Error('unavailable'))), (deps.now ?? Date.now)());
       }
       throw new Error(`Unknown tool ${name}`);

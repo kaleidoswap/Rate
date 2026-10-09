@@ -153,6 +153,15 @@ describe('agent_budget_status', () => {
     });
   });
 
+  it('settles pending payments before reporting', async () => {
+    const { store, wallet } = await setup();
+    await store.add({ kind: 'spend', amountSats: 700, feeSats: 0, status: 'pending', service: 'api.example.com', paymentId: 'p1', at: now() });
+    const w = { ...wallet, paymentStatus: jest.fn(async () => ({ status: 'failed' as const })) };
+    const status: any = await source(store, w, jest.fn()).execute(BUDGET_TOOL, {});
+    expect(w.paymentStatus).toHaveBeenCalledWith({ id: 'p1', invoice: undefined });
+    expect(status.spent_today_sats).toBe(0);
+  });
+
   it('says when it is off or its rules are unreadable', async () => {
     expect(await source(null, null, jest.fn()).execute(BUDGET_TOOL, {})).toMatchObject({ enabled: false });
     const damaged = new AgentWalletStore(9, memoryStorage({ 'agentWallet:enabled:9': '1', 'agentWallet:policy:9': 'x' }));
