@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { RgbUtxoSheet } from './RgbUtxoSheet';
 import { IssueAssetSheet } from './IssueAssetSheet';
+import { InflateAssetSheet } from './InflateAssetSheet';
 
 jest.mock('../../services/protocols', () => ({ rgbAccountAdapter: () => null }));
 const mockPick = jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///photos/art.png' }] }));
@@ -181,5 +182,24 @@ describe('IssueAssetSheet', () => {
     const nwc = { protocolName: 'RGB_LN', isConnected: () => true, walletType: () => 'rln', hasRlnMethod: () => true };
     const screen = render(<IssueAssetSheet visible onClose={jest.fn()} adapter={nwc} />);
     expect(screen.getByText(/can’t issue assets over this connection/)).toBeTruthy();
+  });
+});
+
+describe('InflateAssetSheet', () => {
+  it('issues more within the rights, after confirming', async () => {
+    const adapter = device();
+    const inflate = jest.fn(async () => ({ txid: 'inf-tx' }));
+    Object.assign(adapter.account, { capabilities: () => ({ inflate: true }), inflate });
+    const onInflated = jest.fn();
+    const screen = render(<InflateAssetSheet visible onClose={jest.fn()} adapter={adapter} asset={{ asset_id: 'rgb:inf', ticker: 'INF', precision: 2 }} rights={5000} onInflated={onInflated} />);
+    expect(screen.getByText('You can issue up to 50 INF more')).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Amount to issue'), '60');
+    expect(screen.getByText('That’s more than your inflation rights allow.')).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Amount to issue'), '12.5');
+    fireEvent.press(screen.getByText('Issue 12.5 INF'));
+    await confirmAlert('Issue');
+    expect(inflate).toHaveBeenCalledWith({ assetId: 'rgb:inf', inflationAmounts: [1250], feeRate: 2 });
+    expect(onInflated).toHaveBeenCalled();
+    expect(screen.getByText(/It counts once the transaction confirms/)).toBeTruthy();
   });
 });

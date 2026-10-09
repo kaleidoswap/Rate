@@ -14,8 +14,16 @@ jest.mock('../hooks/useRgbTransferWatch', () => ({ useRgbTransferWatch: (args: a
 jest.mock('../components/rgb/RgbWalletTools', () => ({ useRgbWalletSheets: () => ({ sheets: null, openUtxos: mockOpenUtxos, openIssue: jest.fn() }) }));
 jest.mock('../store/slices/assetsSlice', () => ({ refreshRgbAssets: () => ({ type: 'refreshRgbAssets' }) }));
 const mockRefreshTransfers = jest.fn(async () => undefined);
-jest.mock('../services/rgbWallet', () => ({ refreshRgbTransfers: () => mockRefreshTransfers() }));
-jest.mock('../services/protocols', () => ({ rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn() }) }));
+let mockMetadata: any = null;
+let mockRights = 0;
+jest.mock('../services/rgbWallet', () => ({
+  refreshRgbTransfers: () => mockRefreshTransfers(),
+  getRgbAssetMetadata: async () => mockMetadata,
+  rgbInflationRights: async () => mockRights,
+}));
+let mockCaps: any = {};
+jest.mock('../services/protocols', () => ({ rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn(), account: { capabilities: () => mockCaps } }) }));
+jest.mock('../components/rgb/InflateAssetSheet', () => ({ InflateAssetSheet: 'InflateAssetSheet' }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: 'ScreenHeader' }));
 jest.mock('../components/RecentActivityWidget', () => ({ RecentActivityWidget: 'RecentActivityWidget' }));
@@ -27,7 +35,7 @@ const usdt = {
 const open = (asset: any, navigation: any = { navigate: jest.fn(), goBack: jest.fn() }) =>
   ({ navigation, screen: render(<AssetDetailScreen navigation={navigation} route={{ params: { asset } }} />) });
 
-beforeEach(() => { mockAssets = []; mockLevel = 'lite'; mockWatch.mockClear(); });
+beforeEach(() => { mockAssets = []; mockLevel = 'lite'; mockWatch.mockClear(); mockMetadata = null; mockRights = 0; mockCaps = {}; });
 
 test('shows the balance in the asset unit, its breakdown and details', () => {
   const { screen } = open(usdt);
@@ -103,4 +111,35 @@ test('pulling an RGB asset moves its transfers forward and reloads its history',
   await act(async () => { await scroll.props.refreshControl.props.onRefresh(); });
   expect(mockRefreshTransfers).toHaveBeenCalled();
   expect(screen.UNSAFE_getByType('RecentActivityWidget' as any).props.refreshKey).toBe(1);
+});
+
+test('shows the RGB contract: schema, supply, issuance date, description and its image', async () => {
+  mockMetadata = { schema: 'CFA', name: 'Genesis Art', ticker: 'Genesis Art', precision: 0, issuedSupply: 10, timestamp: 1_700_000_000,
+    details: 'Edition of ten', media: { uri: 'file:///media/abc', mime: 'image/png', isImage: true } };
+  const art = { asset_id: 'rgb:art-0123456789abcdefghijklmnop', ticker: 'Genesis Art', name: 'Genesis Art', precision: 0, protocol: 'RGB', isRGB: true, balance: 10 };
+  const { screen } = open(art);
+  expect(await screen.findByText('Collectible (CFA)')).toBeTruthy();
+  expect(screen.getByText('Issued supply')).toBeTruthy();
+  expect(screen.getByText('Issued')).toBeTruthy();
+  expect(screen.getByText('Edition of ten')).toBeTruthy();
+  expect(screen.getByText('Contract ID')).toBeTruthy();
+  expect(screen.getByLabelText('Genesis Art image').props.source).toEqual({ uri: 'file:///media/abc' });
+  expect(screen.queryByText('Ticker')).toBeNull(); // the same as the unit already shown
+});
+
+test('Advanced offers to issue more of an IFA asset the wallet holds inflation rights for', async () => {
+  const { act } = require('@testing-library/react-native');
+  mockMetadata = { schema: 'IFA', ticker: 'INF', precision: 2, issuedSupply: 1000, maxSupply: 5000 };
+  mockRights = 4000;
+  mockCaps = { inflate: true };
+  const inf = { asset_id: 'rgb:inf', ticker: 'INF', name: 'Inflatable', precision: 2, protocol: 'RGB', isRGB: true, balance: 1000 };
+  const lite = open(inf).screen;
+  expect(await lite.findByText('Maximum supply')).toBeTruthy();
+  expect(lite.queryByLabelText('Issue more INF')).toBeNull();
+  mockLevel = 'advanced';
+  const { screen } = open(inf);
+  fireEvent.press(await screen.findByLabelText('Issue more INF'));
+  expect(screen.getByText('Issue more · up to 40 INF')).toBeTruthy();
+  await act(async () => undefined);
+  expect(screen.UNSAFE_getByType('InflateAssetSheet' as any).props).toEqual(expect.objectContaining({ visible: true, rights: 4000 }));
 });
