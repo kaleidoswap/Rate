@@ -216,8 +216,77 @@ test('collectible assets are listed by name next to NIA, and issued with optiona
   (wallet as any).issueAssetCfa = jest.fn(async () => ({ assetId: 'rgb:art', name: 'Art' }));
   const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
   const listed = await account.listAssets();
-  expect(wallet.listAssets).toHaveBeenCalledWith(['NIA', 'CFA']);
+  expect(wallet.listAssets).toHaveBeenCalledWith(['NIA', 'CFA', 'IFA', 'UDA']);
   expect(listed.nia).toEqual([expect.objectContaining({ assetId: 'rgb:art', ticker: 'Art' })]);
   await account.issueAssetCfa({ name: 'Art', details: '', precision: 0, amounts: [10] });
   expect((wallet as any).issueAssetCfa).toHaveBeenCalledWith('Art', null, 0, [10], null);
+});
+
+const open = async (lib: any, network = 'mutinynet') =>
+  new (createRgbLibRnModule(() => lib).WalletManagerRgb)('seed', { ...options, network }).getAccount();
+
+test('capabilities follow what the native wallet has; IFA is off on mainnet', async () => {
+  const { lib, wallet } = fakeLib();
+  expect((await open(lib)).capabilities()).toEqual({ metadata: false, issueUda: false, issueIfa: false, inflate: false, drain: false, deleteTransfers: false });
+  Object.assign(wallet, { getAssetMetadata: jest.fn(), issueAssetUda: jest.fn(), issueAssetIfa: jest.fn(), inflate: jest.fn(), drainTo: jest.fn(), deleteTransfers: jest.fn() });
+  expect((await open(lib)).capabilities()).toEqual({ metadata: true, issueUda: true, issueIfa: true, inflate: true, drain: true, deleteTransfers: true });
+  expect((await open(lib, 'mainnet')).capabilities()).toEqual(expect.objectContaining({ issueIfa: false, inflate: false, drain: true }));
+});
+
+test('metadata carries the media file of a collectible', async () => {
+  const { lib, wallet } = fakeLib();
+  const media = { filePath: '/data/media/abc', mime: 'image/png', digest: 'abc' };
+  (wallet as any).getAssetMetadata = jest.fn(async () => ({ assetSchema: 'CFA', name: 'Art', precision: 0, initialSupply: 10, timestamp: 1 }));
+  wallet.listAssets.mockResolvedValue({ nia: [], uda: [], ifa: [], cfa: [{ assetId: 'rgb:art', name: 'Art', media }] } as any);
+  const account = await open(lib);
+  expect(await account.getAssetMetadata('rgb:art')).toEqual(expect.objectContaining({ assetId: 'rgb:art', assetSchema: 'CFA', initialSupply: 10, media }));
+  expect(await account.getAssetMetadata('rgb:other')).not.toHaveProperty('media');
+});
+
+test('UDA and IFA issuance, inflation rights and inflating', async () => {
+  const { lib, wallet } = fakeLib();
+  Object.assign(wallet, {
+    issueAssetUda: jest.fn(async () => ({ assetId: 'rgb:nft' })),
+    issueAssetIfa: jest.fn(async () => ({ assetId: 'rgb:ifa' })),
+    inflate: jest.fn(async () => ({ txid: 'inflate-tx', batchTransferIdx: 7 })),
+  });
+  wallet.listUnspents.mockResolvedValue([
+    { utxo: {}, pendingBlinded: 0, rgbAllocations: [{ assetId: 'rgb:ifa', assignment: { type: 'INFLATION_RIGHT', amount: 300 }, settled: true }, { assetId: 'rgb:ifa', assignment: { type: 'FUNGIBLE', amount: 5 }, settled: true }] },
+    { utxo: {}, pendingBlinded: 0, rgbAllocations: [{ assetId: 'rgb:ifa', assignment: { type: 'INFLATION_RIGHT', amount: 200 }, settled: true }] },
+  ] as any);
+  const account = await open(lib);
+  await account.issueAssetUda({ ticker: 'NFT', name: 'One', details: '', mediaFilePath: '/tmp/a.png' });
+  expect((wallet as any).issueAssetUda).toHaveBeenCalledWith('NFT', 'One', null, 0, '/tmp/a.png', []);
+  await account.issueAssetIfa({ ticker: 'IFA', name: 'Inflatable', precision: 2, amounts: [100], inflationAmounts: [500] });
+  expect((wallet as any).issueAssetIfa).toHaveBeenCalledWith('IFA', 'Inflatable', 2, [100], [500], 0, null);
+  expect(await account.inflationRights('rgb:ifa')).toBe(500);
+  expect(await account.inflationRights('rgb:none')).toBe(0);
+  await account.inflate({ assetId: 'rgb:ifa', inflationAmounts: [50], feeRate: 4 });
+  expect((wallet as any).inflate).toHaveBeenCalledWith('rgb:ifa', [50], 4, 1);
+});
+
+test('drain never destroys assets: false on builds that still ask, the fee rate alone on newer ones', async () => {
+  const { lib, wallet } = fakeLib();
+  const legacy = jest.fn(async (_address: string, _destroyAssets: boolean, _feeRate: number) => 'drain-old');
+  (wallet as any).drainTo = legacy;
+  expect(await (await open(lib)).drainTo({ address: 'tb1qdest', feeRate: 3 })).toBe('drain-old');
+  expect(legacy).toHaveBeenCalledWith('tb1qdest', false, 3);
+  const current = jest.fn(async (_address: string, _feeRate: number) => 'drain-new');
+  (wallet as any).drainTo = current;
+  expect(await (await open(lib)).drainTo({ address: 'tb1qdest', feeRate: 3 })).toBe('drain-new');
+  expect(current).toHaveBeenCalledWith('tb1qdest', 3);
+});
+
+test('failed transfers are removed one by one or all together; collectibles are sent whole', async () => {
+  const { lib, wallet } = fakeLib();
+  (wallet as any).deleteTransfers = jest.fn(async () => true);
+  const account = await open(lib);
+  expect(await account.deleteTransfer(4)).toBe(true);
+  expect((wallet as any).deleteTransfers).toHaveBeenCalledWith(4, false);
+  await account.deleteFailedTransfers();
+  expect((wallet as any).deleteTransfers).toHaveBeenLastCalledWith(null, false);
+  wallet.listAssets.mockResolvedValue({ nia: [], cfa: [], ifa: [], uda: [{ assetId: 'rgb:nft', ticker: 'NFT', name: 'One', precision: 0 }] } as any);
+  expect((await account.listAssets()).nia).toEqual([expect.objectContaining({ assetId: 'rgb:nft', issuedSupply: 1 })]);
+  await account.transfer({ token: 'rgb:nft', recipient: 'rgb:invoice', amount: 1 });
+  expect(wallet.send.mock.calls.at(-1)![0]['rgb:nft'][0].assignment).toEqual({ type: 'NON_FUNGIBLE' });
 });

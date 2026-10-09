@@ -5,6 +5,8 @@ import { RgbUtxoSheet } from './RgbUtxoSheet';
 import { IssueAssetSheet } from './IssueAssetSheet';
 
 jest.mock('../../services/protocols', () => ({ rgbAccountAdapter: () => null }));
+const mockPick = jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///photos/art.png' }] }));
+jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: () => mockPick() }));
 
 const unspents = [
   { utxo: { outpoint: { txid: 'a'.repeat(64), vout: 0 }, btcAmount: 1000, colorable: true },
@@ -109,6 +111,49 @@ describe('IssueAssetSheet', () => {
     fireEvent.press(screen.getByText('Issue 10 Art'));
     await confirmAlert('Issue');
     expect(adapter.account.issueAssetCfa).toHaveBeenCalledWith({ name: 'Art', details: 'Edition of ten', precision: 0, amounts: [10] });
+  });
+
+  it('a CFA can carry an image picked from the phone', async () => {
+    const adapter = device();
+    const screen = render(<IssueAssetSheet visible onClose={jest.fn()} adapter={adapter} />);
+    fireEvent.press(screen.getByText('Collectible (CFA)'));
+    await act(async () => { fireEvent.press(screen.getByText('Add an image (optional)')); });
+    expect(screen.getByLabelText('Chosen image')).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Name'), 'Art');
+    fireEvent.changeText(screen.getByLabelText('Supply'), '10');
+    fireEvent.press(screen.getByText('Issue 10 Art'));
+    await confirmAlert('Issue');
+    expect(adapter.account.issueAssetCfa).toHaveBeenCalledWith({ name: 'Art', details: null, precision: 0, amounts: [10], filePath: '/photos/art.png' });
+  });
+
+  it('issues a UDA (one unit) and an IFA (with what can be issued later) where the native build can', async () => {
+    const adapter = device();
+    Object.assign(adapter.account, {
+      capabilities: () => ({ issueUda: true, issueIfa: true }),
+      issueAssetUda: jest.fn(async () => ({ assetId: 'rgb:nft', ticker: 'ART1', name: 'First' })),
+      issueAssetIfa: jest.fn(async () => ({ assetId: 'rgb:inf', ticker: 'INF', name: 'Inflatable' })),
+    });
+    const screen = render(<IssueAssetSheet visible onClose={jest.fn()} adapter={adapter} />);
+    fireEvent.press(screen.getByText('Unique (UDA)'));
+    expect(screen.queryByLabelText('Supply')).toBeNull();
+    fireEvent.changeText(screen.getByLabelText('Ticker'), 'art1');
+    fireEvent.changeText(screen.getByLabelText('Name'), 'First');
+    fireEvent.press(screen.getByText('Issue 1 ART1'));
+    await confirmAlert('Issue');
+    expect((adapter.account as any).issueAssetUda).toHaveBeenCalledWith({ ticker: 'ART1', name: 'First', details: null, precision: 0, mediaFilePath: null });
+    screen.rerender(<IssueAssetSheet visible={false} onClose={jest.fn()} adapter={adapter} />);
+    screen.rerender(<IssueAssetSheet visible onClose={jest.fn()} adapter={adapter} />);
+    fireEvent.press(screen.getByText('Inflatable (IFA)'));
+    fireEvent.changeText(screen.getByLabelText('Ticker'), 'INF');
+    fireEvent.changeText(screen.getByLabelText('Name'), 'Inflatable');
+    fireEvent.changeText(screen.getByLabelText('Supply'), '100');
+    fireEvent.press(screen.getByText('Issue asset'));
+    expect(screen.getByText('Enter how much more may be issued later.')).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Can issue later'), '50');
+    expect(screen.getByText('You’ll hold 100 INF, and can issue up to 50 INF more later.')).toBeTruthy();
+    fireEvent.press(screen.getByText('Issue 100 INF'));
+    await confirmAlert('Issue');
+    expect((adapter.account as any).issueAssetIfa).toHaveBeenCalledWith({ ticker: 'INF', name: 'Inflatable', precision: 0, amounts: [100], inflationAmounts: [50] });
   });
 
   it('without a free colorable UTXO, offers to create some and blocks issuing', async () => {

@@ -57,6 +57,22 @@ const WITNESS_OUTPUT_SAT = 1000
 /** rgb-lib names a witness recipient `wvout:…` and a blinded UTXO `utxob:…`. */
 const isWitnessRecipient = (recipientId: string) => /^wvout:/i.test(recipientId)
 
+/**
+ * What this native build offers beyond sending and receiving. Each is detected on the
+ * wallet object, so a build without one leaves the feature hidden instead of failing.
+ */
+export interface RgbDeviceCapabilities {
+  metadata: boolean
+  issueUda: boolean
+  /** IFA issuance and inflation; rgb-lib refuses IFA on mainnet. */
+  issueIfa: boolean
+  inflate: boolean
+  drain: boolean
+  deleteTransfers: boolean
+}
+
+type MaybeWallet = { [K in keyof RgbLib.Wallet]?: unknown }
+
 /** 'RECEIVE_WITNESS' → 'ReceiveWitness', as the RGB node names transfer kinds and statuses. */
 function pascal(value: string): string {
   return value.toLowerCase().replace(/(^|_)([a-z])/g, (_, __, c: string) => c.toUpperCase())
@@ -67,6 +83,7 @@ export class RgbLibRnAccount {
   private lastRefresh = 0
   private refreshing: Promise<boolean> | null = null
   private queue: Promise<unknown> = Promise.resolve()
+  private udaIds = new Set<string>()
 
   constructor(
     private readonly lib: RgbModule,
@@ -74,7 +91,23 @@ export class RgbLibRnAccount {
     private readonly transportEndpoint: string,
     /** Called after anything that changes what a backup holds (send, receive, settle). */
     private readonly onChange: () => void = () => undefined,
+    /** App network name ('mainnet', 'mutinynet', …). */
+    private readonly network: string = '',
   ) {}
+
+  capabilities(): RgbDeviceCapabilities {
+    const w = this.wallet as MaybeWallet
+    const has = (name: keyof RgbLib.Wallet) => typeof w[name] === 'function'
+    const ifa = this.network !== 'mainnet'
+    return {
+      metadata: has('getAssetMetadata'),
+      issueUda: has('issueAssetUda'),
+      issueIfa: ifa && has('issueAssetIfa'),
+      inflate: ifa && has('inflate'),
+      drain: has('drainTo'),
+      deleteTransfers: has('deleteTransfers'),
+    }
+  }
 
   /**
    * rgb-lib keeps one local database: its calls run one at a time, in the order
@@ -130,13 +163,20 @@ export class RgbLibRnAccount {
     return this.serial(() => this.wallet.sync()).catch((e) => console.warn('[RGB_L1] sync failed:', e?.message ?? e))
   }
 
-  /** Fungible assets (NIA, and CFA named by their name), all under `nia`, the list the adapter reads. */
+  /**
+   * Every asset under `nia`, the list the adapter reads: NIA and IFA tokens, CFA named
+   * by their name, and UDA collectibles (one unit each).
+   */
   async listAssets(): Promise<RgbLib.Assets> {
     await this.refresh().catch(() => undefined)
-    const assets = await this.serial(() => this.wallet.listAssets(['NIA', 'CFA']))
+    const assets = await this.serial(() => this.wallet.listAssets(['NIA', 'CFA', 'IFA', 'UDA']))
+      .catch(() => this.serial(() => this.wallet.listAssets(['NIA', 'CFA'])))
       .catch(() => this.serial(() => this.wallet.listAssets(['NIA'])))
     const cfa = (assets.cfa ?? []).map((a) => ({ ...a, ticker: a.name }))
-    return { ...assets, nia: [...(assets.nia ?? []), ...cfa] }
+    const ifa = (assets.ifa ?? []).map((a) => ({ ...a, issuedSupply: a.knownCirculatingSupply ?? a.initialSupply }))
+    const uda = (assets.uda ?? []).map((a) => ({ ...a, issuedSupply: 1 }))
+    this.udaIds = new Set(uda.map((a) => a.assetId))
+    return { ...assets, nia: [...(assets.nia ?? []), ...cfa, ...ifa, ...uda] as RgbLib.AssetNia[] }
   }
 
   /**
@@ -179,9 +219,11 @@ export class RgbLibRnAccount {
     // A witness invoice asks the sender to create the receiving output: fund it with
     // rgb-lib's usual colorable-UTXO size unless the caller chose otherwise.
     const witnessData = params.witnessData ?? (isWitnessRecipient(invoice.recipientId) ? { amountSat: WITNESS_OUTPUT_SAT } : undefined)
+    // A collectible moves whole: a UDA is sent as its one non-fungible unit.
+    const nonFungible = this.udaIds.has(params.token) || invoice.assignment?.type === 'NON_FUNGIBLE'
     const recipient: RgbLib.Recipient = {
       recipientId: invoice.recipientId,
-      assignment: { type: 'FUNGIBLE', amount: params.amount },
+      assignment: nonFungible ? { type: 'NON_FUNGIBLE' } : { type: 'FUNGIBLE', amount: params.amount },
       transportEndpoints: endpoints,
       ...(witnessData ? { witnessData } : {}),
     }
@@ -245,6 +287,97 @@ export class RgbLibRnAccount {
     this.lastRefresh = 0
     if (failed) this.onChange()
     return failed
+  }
+
+  /** Removes a failed transfer from the wallet's history (rgb-lib refuses any other). */
+  async deleteTransfer(batchTransferIdx: number): Promise<boolean> {
+    const deleted = await this.serial(() => this.wallet.deleteTransfers(batchTransferIdx, false))
+    if (deleted) this.onChange()
+    return deleted
+  }
+
+  /** Removes every failed transfer. True when any was removed. */
+  async deleteFailedTransfers(): Promise<boolean> {
+    const deleted = await this.serial(() => this.wallet.deleteTransfers(null, false))
+    if (deleted) this.onChange()
+    return deleted
+  }
+
+  /**
+   * An asset's contract data, plus its media file (CFA, UDA, IFA) when the wallet holds one.
+   * Amounts as rgb-lib reports them: `initialSupply`/`knownCirculatingSupply`/`maxSupply`
+   * from newer builds, `issuedSupply` from older typings.
+   */
+  async getAssetMetadata(assetId: string): Promise<RgbLib.AssetMetadata & { assetSchema?: string; media?: RgbLib.Media }> {
+    const metadata = await this.serial(() => this.wallet.getAssetMetadata(assetId))
+    const media = await this.assetMedia(assetId).catch(() => undefined)
+    return { ...metadata, assetId, ...(media ? { media } : {}) }
+  }
+
+  private async assetMedia(assetId: string): Promise<RgbLib.Media | undefined> {
+    const assets = await this.serial(() => this.wallet.listAssets(['CFA', 'UDA', 'IFA']))
+    const found: any = [...(assets.cfa ?? []), ...(assets.uda ?? []), ...(assets.ifa ?? [])].find((a) => a.assetId === assetId)
+    return found?.media ?? found?.token?.media ?? undefined
+  }
+
+  /** A Unique Digital Asset (one collectible), optionally with a media file at a local path. */
+  async issueAssetUda(params: {
+    ticker: string; name: string; details?: string | null; precision?: number
+    mediaFilePath?: string | null; attachmentsFilePaths?: string[]
+  }): Promise<RgbLib.AssetUda> {
+    const asset = await this.serial(() => this.wallet.issueAssetUda(
+      params.ticker, params.name, params.details || null, params.precision ?? 0,
+      params.mediaFilePath ?? null, params.attachmentsFilePaths ?? [],
+    ))
+    this.onChange()
+    return asset
+  }
+
+  /** An Inflatable Fungible Asset: `inflationAmounts` are the rights to issue more later. */
+  async issueAssetIfa(params: {
+    ticker: string; name: string; precision: number; amounts: number[]
+    inflationAmounts: number[]; replaceRightsNum?: number; rejectListUrl?: string | null
+  }): Promise<RgbLib.AssetIfa> {
+    const asset = await this.serial(() => this.wallet.issueAssetIfa(
+      params.ticker, params.name, params.precision, params.amounts,
+      params.inflationAmounts, params.replaceRightsNum ?? 0, params.rejectListUrl ?? null,
+    ))
+    this.onChange()
+    return asset
+  }
+
+  /** How much more of an IFA asset this wallet may still issue: its unspent inflation rights. */
+  async inflationRights(assetId: string): Promise<number> {
+    const unspents = await this.serial(() => this.wallet.listUnspents(false, true))
+    return unspents.reduce((sum, u) => sum + (u.rgbAllocations ?? [])
+      .filter((a) => a.assetId === assetId && a.assignment?.type === 'INFLATION_RIGHT')
+      .reduce((s, a) => s + (a.assignment.amount ?? 0), 0), 0)
+  }
+
+  /** Issues more of an IFA asset using its inflation rights; broadcasts a transaction. */
+  async inflate(params: { assetId: string; inflationAmounts: number[]; feeRate?: number; minConfirmations?: number }): Promise<RgbLib.OperationResult> {
+    const result = await this.serial(() => this.wallet.inflate(
+      params.assetId, params.inflationAmounts, params.feeRate ?? DEFAULT_FEE_RATE, params.minConfirmations ?? 1,
+    ))
+    this.lastRefresh = 0
+    this.onChange()
+    return result
+  }
+
+  /**
+   * Sends all plain bitcoin to `address`; outputs holding assets stay. rgb-lib up to
+   * 0.3.0-beta.5 takes `(address, destroyAssets, feeRate)` and gets false; later builds
+   * dropped `destroyAssets` and take `(address, feeRate)`.
+   */
+  async drainTo(params: { address: string; feeRate?: number }): Promise<string> {
+    const feeRate = params.feeRate ?? DEFAULT_FEE_RATE
+    const drain = this.wallet.drainTo as unknown as (...args: unknown[]) => Promise<string>
+    const txid = await this.serial(() => drain.length === 2
+      ? drain.call(this.wallet, params.address, feeRate)
+      : drain.call(this.wallet, params.address, false, feeRate))
+    this.lastRefresh = 0
+    this.onChange()
+    return txid
   }
 
   listUnspents(): Promise<RgbLib.Unspent[]> {
@@ -320,7 +453,7 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: 
       const walletOptions: WalletOptionsWithSubdir = subdir ? { network, subdir } : { network }
       const wallet = new lib.Wallet(keys, walletOptions)
       await wallet.goOnline(this.options.indexerUrl)
-      this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange)
+      this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange, this.options.network)
       return this.account
     }
 

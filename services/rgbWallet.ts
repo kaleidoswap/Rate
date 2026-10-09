@@ -7,15 +7,28 @@
 import { MempoolClient } from './mempool/MempoolClient';
 import { mempoolNetworkFor } from '../utils/explorer';
 import {
-  findRgbTransfer, normalizeRgbTransfers, rgbWalletSupport,
-  type RgbIssueRequest, type RgbTransfer,
+  findRgbTransfer, normalizeRgbAssetMetadata, normalizeRgbTransfers, rgbWalletSupport,
+  type RgbAssetMetadata, type RgbIssueRequest, type RgbTransfer,
 } from '../utils/rgb-wallet';
 
 interface DeviceAccount {
   refreshTransfers?: () => Promise<boolean>;
   listTransfers?: (assetId: string | null) => Promise<unknown>;
   failTransfer?: (batchTransferIdx: number) => Promise<boolean>;
-  issueAssetCfa?: (params: { name: string; details?: string | null; precision: number; amounts: number[] }) => Promise<any>;
+  deleteTransfer?: (batchTransferIdx: number) => Promise<boolean>;
+  deleteFailedTransfers?: () => Promise<boolean>;
+  issueAssetCfa?: (params: { name: string; details?: string | null; precision: number; amounts: number[]; filePath?: string | null }) => Promise<any>;
+  issueAssetUda?: (params: { ticker: string; name: string; details?: string | null; precision?: number; mediaFilePath?: string | null }) => Promise<any>;
+  issueAssetIfa?: (params: { ticker: string; name: string; precision: number; amounts: number[]; inflationAmounts: number[] }) => Promise<any>;
+  getAssetMetadata?: (assetId: string) => Promise<unknown>;
+  inflationRights?: (assetId: string) => Promise<number>;
+  inflate?: (params: { assetId: string; inflationAmounts: number[]; feeRate?: number }) => Promise<{ txid?: string }>;
+  drainTo?: (params: { address: string; feeRate?: number }) => Promise<string>;
+}
+
+/** A picked file's URI ('file:///…') as the local path rgb-lib reads. */
+export function localFilePath(uri: string): string {
+  return /^file:\/\//i.test(uri) ? decodeURI(uri.replace(/^file:\/\//i, '')) : uri;
 }
 
 /** The app's rgb-lib bridge behind RGB on this phone, or null for a node. */
@@ -60,11 +73,70 @@ export async function findRgbReceive(adapter: any, { recipientId, assetId }: { r
   return undefined;
 }
 
-/** Fails a transfer still waiting for its counterparty (RGB on this phone). */
+/** Fails a transfer still waiting for its counterparty (RGB on this phone, or the node through the engine). */
 export async function cancelRgbTransfer(adapter: any, batchTransferIdx: number): Promise<boolean> {
   const device = deviceAccount(adapter);
-  if (!device?.failTransfer) throw new Error('Cancelling transfers is not supported by this RGB account.');
-  return device.failTransfer(batchTransferIdx);
+  if (device?.failTransfer) return device.failTransfer(batchTransferIdx);
+  if (rgbWalletSupport(adapter).kind === 'engine-node' && rgbWalletSupport(adapter).cancelTransfer) {
+    const r: any = await adapter.executeProtocolOperation('failTransfers', { batch_transfer_idx: batchTransferIdx, no_asset_only: false, skip_sync: false });
+    return r?.transfers_changed ?? r === true;
+  }
+  throw new Error('Cancelling transfers is not supported by this RGB account.');
+}
+
+/** Removes a failed transfer from the history (RGB on this phone). */
+export async function deleteRgbTransfer(adapter: any, batchTransferIdx: number): Promise<boolean> {
+  const device = deviceAccount(adapter);
+  if (!rgbWalletSupport(adapter).deleteTransfer || !device?.deleteTransfer) throw new Error('Removing transfers is not supported by this RGB account.');
+  return device.deleteTransfer(batchTransferIdx);
+}
+
+/** Removes every failed transfer from the history (RGB on this phone). */
+export async function deleteFailedRgbTransfers(adapter: any): Promise<boolean> {
+  const device = deviceAccount(adapter);
+  if (!rgbWalletSupport(adapter).deleteTransfer || !device?.deleteFailedTransfers) throw new Error('Removing transfers is not supported by this RGB account.');
+  return device.deleteFailedTransfers();
+}
+
+/** An asset's contract data and media, or null when the account can't read it. */
+export async function getRgbAssetMetadata(adapter: any, assetId: string): Promise<RgbAssetMetadata | null> {
+  const support = rgbWalletSupport(adapter);
+  if (!support.metadata) return null;
+  const device = deviceAccount(adapter);
+  if (device?.getAssetMetadata) return normalizeRgbAssetMetadata(await device.getAssetMetadata(assetId));
+  return normalizeRgbAssetMetadata(await adapter.executeProtocolOperation('getAssetMetadata', { asset_id: assetId }));
+}
+
+/** Base units of an IFA asset this wallet may still issue; 0 when it holds no rights or can't inflate. */
+export async function rgbInflationRights(adapter: any, assetId: string): Promise<number> {
+  const device = deviceAccount(adapter);
+  if (!rgbWalletSupport(adapter).inflate || !device?.inflationRights) return 0;
+  return device.inflationRights(assetId);
+}
+
+export async function inflateRgbAsset(adapter: any, params: { assetId: string; amount: number; feeRate: number }): Promise<string | undefined> {
+  const device = deviceAccount(adapter);
+  if (!rgbWalletSupport(adapter).inflate || !device?.inflate) throw new Error('This RGB account cannot inflate assets.');
+  const result = await device.inflate({ assetId: params.assetId, inflationAmounts: [params.amount], feeRate: params.feeRate });
+  return result?.txid;
+}
+
+/** Sends all plain bitcoin of RGB on this phone to `address`; outputs holding assets stay. Resolves to the txid. */
+export async function drainRgbWallet(adapter: any, params: { address: string; feeRate: number }): Promise<string> {
+  const device = deviceAccount(adapter);
+  if (!rgbWalletSupport(adapter).drain || !device?.drainTo) throw new Error('This RGB account cannot send all its bitcoin at once.');
+  return device.drainTo({ address: params.address.trim(), feeRate: params.feeRate });
+}
+
+/** The RGB account's chain ('mainnet', 'mutinynet', …), when known. */
+export async function rgbAccountNetwork(adapter: any): Promise<string | undefined> {
+  try {
+    const info = await adapter?.getConnectionInfo?.();
+    const raw = String(info?.network ?? adapter?.network ?? '').toLowerCase();
+    return raw === 'bitcoin' ? 'mainnet' : raw || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface IssuedRgbAsset {
@@ -79,12 +151,28 @@ export async function issueRgbAsset(adapter: any, request: RgbIssueRequest): Pro
   const support = rgbWalletSupport(adapter);
   if (!support.issue.includes(request.schema)) throw new Error(`This RGB account cannot issue ${request.schema} assets.`);
   const supply = request.amounts.reduce((sum, n) => sum + n, 0);
-  if (request.schema === 'CFA') {
-    const issued = await deviceAccount(adapter)!.issueAssetCfa!({
-      name: request.name, details: request.details ?? null, precision: request.precision, amounts: request.amounts,
-    });
+  const device = deviceAccount(adapter)!;
+  const media = request.mediaPath && support.issueMedia ? localFilePath(request.mediaPath) : null;
+  const done = (issued: any, ticker: string) => {
     if (!issued?.assetId) throw new Error('Issuance returned no asset id: no colorable UTXO');
-    return { assetId: issued.assetId, name: issued.name ?? request.name, ticker: issued.name ?? request.name, precision: request.precision, supply };
+    return { assetId: issued.assetId, name: issued.name ?? request.name, ticker, precision: request.precision, supply };
+  };
+  if (request.schema === 'CFA') {
+    const issued = await device.issueAssetCfa!({
+      name: request.name, details: request.details ?? null, precision: request.precision, amounts: request.amounts,
+      ...(media ? { filePath: media } : {}),
+    });
+    return done(issued, issued?.name ?? request.name);
+  }
+  if (request.schema === 'UDA') {
+    const issued = await device.issueAssetUda!({ ticker: request.ticker!, name: request.name, details: request.details ?? null, precision: 0, mediaFilePath: media });
+    return done(issued, issued?.ticker ?? request.ticker!);
+  }
+  if (request.schema === 'IFA') {
+    const issued = await device.issueAssetIfa!({
+      ticker: request.ticker!, name: request.name, precision: request.precision, amounts: request.amounts, inflationAmounts: request.inflationAmounts ?? [],
+    });
+    return done(issued, issued?.ticker ?? request.ticker!);
   }
   const issued = await adapter.issueAssetNia({ ticker: request.ticker, name: request.name, precision: request.precision, amounts: request.amounts });
   return { assetId: issued.id, name: issued.name ?? request.name, ticker: issued.ticker ?? request.ticker ?? '', precision: request.precision, supply };

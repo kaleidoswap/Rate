@@ -2,6 +2,7 @@ import {
   NO_RGB_WALLET_SUPPORT, canCancelRgbTransfer, findRgbTransfer, hasPendingRgbTransfers, isExpiredRgbInvoice,
   normalizeRgbTransfers, rgbTransferDirection, rgbTransferStatus, rgbTransfersSignature, rgbWalletErrorMessage,
   rgbWalletSupport, startPolling, toBaseUnits, validateRgbIssue, type RgbIssueInput, rgbReceiveStage, createUtxosEstimate,
+  canDeleteRgbTransfer, rgbInvoiceWatch, validateRgbInflate, validateDrainAddress, normalizeRgbAssetMetadata,
 } from './rgb-wallet';
 
 const fn = () => jest.fn();
@@ -13,20 +14,23 @@ describe('rgbWalletSupport', () => {
       account: { issueAssetCfa: fn(), failTransfer: fn(), refreshTransfers: fn() },
     };
     expect(rgbWalletSupport(device)).toEqual({
-      kind: 'device', listUtxos: true, createUtxos: true, issue: ['NIA', 'CFA'], listTransfers: true, refreshTransfers: true, cancelTransfer: true,
+      kind: 'device', listUtxos: true, createUtxos: true, issue: ['NIA', 'CFA'], issueMedia: true, inflate: false,
+      listTransfers: true, refreshTransfers: true, cancelTransfer: true, deleteTransfer: false, metadata: false, drain: false,
     });
     expect(rgbWalletSupport({ ...device, account: null }).issue).toEqual(['NIA']);
+    const full = { ...device, account: { ...device.account, capabilities: () => ({ metadata: true, issueUda: true, issueIfa: true, inflate: true, drain: true, deleteTransfers: true }) } };
+    expect(rgbWalletSupport(full)).toMatchObject({ issue: ['NIA', 'CFA', 'UDA', 'IFA'], inflate: true, deleteTransfer: true, metadata: true, drain: true });
   });
   it('the node over NWC does what its connection advertises and never issues', () => {
     const nwc = { protocolName: 'RGB_LN', isConnected: () => true, walletType: () => 'rln', hasRlnMethod: (m: string) => m !== 'rln_create_utxos' };
     expect(rgbWalletSupport(nwc)).toEqual({
-      kind: 'nwc-node', listUtxos: true, createUtxos: false, issue: [], listTransfers: true, refreshTransfers: true, cancelTransfer: false,
+      ...NO_RGB_WALLET_SUPPORT, kind: 'nwc-node', listUtxos: true, listTransfers: true, refreshTransfers: true,
     });
     expect(rgbWalletSupport({ ...nwc, walletType: () => 'ln' })).toEqual(NO_RGB_WALLET_SUPPORT);
   });
   it('the node through the engine creates UTXOs only with privileged ops', () => {
     const node = { protocolName: 'RGB_LN', isConnected: () => true, executeProtocolOperation: fn(), createRgbUtxos: fn(), listTransfers: fn(), refreshBalances: fn() };
-    expect(rgbWalletSupport(node)).toMatchObject({ kind: 'engine-node', listUtxos: true, createUtxos: false, issue: [], cancelTransfer: false });
+    expect(rgbWalletSupport(node)).toMatchObject({ kind: 'engine-node', listUtxos: true, createUtxos: false, issue: [], cancelTransfer: true, metadata: true, drain: false, deleteTransfer: false });
     expect(rgbWalletSupport({ ...node, allowPrivilegedOps: true }).createUtxos).toBe(true);
   });
   it('nothing when disconnected or missing', () => {
@@ -186,5 +190,53 @@ describe('createUtxosEstimate', () => {
     expect(createUtxosEstimate({ num: 3, size: 3000, feeRate: 2 })).toEqual({ feeSats: 478, totalSats: 9478, enough: true });
     expect(createUtxosEstimate({ num: 3, size: 3000, feeRate: 2, bitcoinSats: 9000 }).enough).toBe(false);
     expect(createUtxosEstimate({ num: 1, size: 1000, feeRate: 1.5, bitcoinSats: 5000 })).toEqual({ feeSats: 230, totalSats: 1230, enough: true });
+  });
+});
+
+describe('wallet tools', () => {
+  it('only a failed transfer with a batch can be removed, where supported', () => {
+    expect(canDeleteRgbTransfer({ status: 'failed', batchTransferIdx: 2 }, { deleteTransfer: true })).toBe(true);
+    expect(canDeleteRgbTransfer({ status: 'settled', batchTransferIdx: 2 }, { deleteTransfer: true })).toBe(false);
+    expect(canDeleteRgbTransfer({ status: 'failed', batchTransferIdx: 2 }, { deleteTransfer: false })).toBe(false);
+  });
+  it('an invoice is followed by its transfer where transfers are listed, else by balance', () => {
+    expect(rgbInvoiceWatch({ recipient_id: 'rid' }, { listTransfers: true })).toEqual({ monitor: 'rgb-transfer', recipientId: 'rid' });
+    expect(rgbInvoiceWatch({ recipientId: 'rid' }, { listTransfers: false })).toEqual({ monitor: 'balance' });
+    expect(rgbInvoiceWatch({}, { listTransfers: true }, 'none')).toEqual({ monitor: 'none' });
+  });
+  it('inflation stays within the rights', () => {
+    expect(validateRgbInflate('1.5', 2, 1000)).toEqual({ amount: 150 });
+    expect(validateRgbInflate('20', 2, 1000).error).toMatch(/inflation rights/);
+    expect(validateRgbInflate('0.001', 2, 1000).error).toMatch(/2 decimals/);
+  });
+  it('a drain goes to a bitcoin address on the account’s network', () => {
+    expect(validateDrainAddress('', null, 'mainnet')).toMatch(/Enter/);
+    expect(validateDrainAddress('nope', null, 'mainnet')).toMatch(/isn’t a bitcoin address/);
+    expect(validateDrainAddress('tb1q', ['signet', 'mutinynet'], 'mainnet')).toMatch(/mainnet/);
+    expect(validateDrainAddress('tb1q', ['signet', 'mutinynet'], 'mutinynet')).toBeNull();
+  });
+  it('metadata from the node or the bridge reads the same; IFA keeps its maximum', () => {
+    expect(normalizeRgbAssetMetadata({ asset_schema: 'Ifa', ticker: 'INF', precision: 2, initial_supply: 10, known_circulating_supply: 15, max_supply: 100, timestamp: 9 }))
+      .toEqual({ schema: 'IFA', ticker: 'INF', name: undefined, precision: 2, issuedSupply: 15, maxSupply: 100, details: undefined, timestamp: 9 });
+    expect(normalizeRgbAssetMetadata({ assetSchema: 'UDA', media: { filePath: 'file:///x', mime: 'video/mp4' } }).media).toEqual({ uri: 'file:///x', mime: 'video/mp4', isImage: false });
+    expect(normalizeRgbAssetMetadata(null)).toEqual({});
+  });
+});
+
+describe('UDA and IFA issuance', () => {
+  const base = { ticker: 'NFT', name: 'One', details: '', precision: '4', amount: '' };
+  it('a UDA is one unit, needs a ticker, and may carry an image', () => {
+    expect(validateRgbIssue({ schema: 'UDA', ...base, mediaPath: 'file:///a.png' }).request)
+      .toEqual({ schema: 'UDA', ticker: 'NFT', name: 'One', precision: 0, amounts: [1], mediaPath: 'file:///a.png' });
+    expect(validateRgbIssue({ schema: 'UDA', ...base, ticker: '' }).errors.ticker).toBeDefined();
+  });
+  it('an IFA needs how much more may be issued later', () => {
+    const ifa = { schema: 'IFA' as const, ticker: 'INF', name: 'Inf', details: '', precision: '2', amount: '10' };
+    expect(validateRgbIssue(ifa).errors.inflation).toMatch(/more may be issued/);
+    expect(validateRgbIssue({ ...ifa, inflation: '5.5' }).request).toEqual({ schema: 'IFA', ticker: 'INF', name: 'Inf', precision: 2, amounts: [1000], inflationAmounts: [550] });
+    expect(validateRgbIssue({ ...ifa, inflation: '0.001' }).errors.inflation).toMatch(/2 decimals/);
+  });
+  it('NIA ignores an image', () => {
+    expect(validateRgbIssue({ schema: 'NIA', ticker: 'T', name: 'T', details: '', precision: '0', amount: '1', mediaPath: '/a.png' }).request).not.toHaveProperty('mediaPath');
   });
 });

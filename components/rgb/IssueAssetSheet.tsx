@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { Sheet } from '../Sheet';
 import { Callout } from '../Callout';
@@ -17,12 +18,16 @@ import {
 import { issueRgbAsset, type IssuedRgbAsset } from '../../services/rgbWallet';
 import { rgbAccountAdapter } from '../../services/protocols';
 
-const SCHEMA_LABEL: Record<RgbIssueSchema, string> = { NIA: 'Token', CFA: 'Collectible' };
+const SCHEMA_LABEL: Record<RgbIssueSchema, string> = { NIA: 'Token', CFA: 'Collectible', UDA: 'Unique', IFA: 'Inflatable' };
 const SCHEMA_HINT: Record<RgbIssueSchema, string> = {
   NIA: 'A fungible token with a ticker, like a stablecoin or points. Non-inflatable: the supply is fixed at issuance.',
   CFA: 'A fungible asset with a name and a description instead of a ticker, for editions or collections. Fixed supply.',
+  UDA: 'A single, indivisible collectible with a ticker, like an NFT. Exactly one exists.',
+  IFA: 'A fungible token with a ticker whose supply can grow: you keep the right to issue up to a set amount more later.',
 };
-const EMPTY: Omit<RgbIssueInput, 'schema'> = { ticker: '', name: '', details: '', precision: '0', amount: '' };
+const EMPTY: Required<Omit<RgbIssueInput, 'schema'>> = { ticker: '', name: '', details: '', precision: '0', amount: '', inflation: '', mediaPath: '' };
+const WITH_TICKER: RgbIssueSchema[] = ['NIA', 'UDA', 'IFA'];
+const WITH_MEDIA: RgbIssueSchema[] = ['CFA', 'UDA'];
 const grouped = (s: string) => {
   const [int, frac] = s.split('.');
   return int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (frac !== undefined ? `.${frac}` : '');
@@ -60,11 +65,30 @@ export function IssueAssetSheet({ visible, onClose, adapter: given, onIssued, on
     }
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { errors, request } = validateRgbIssue({ schema, ...form });
+  const withMedia = support.issueMedia && WITH_MEDIA.includes(schema);
+  const { errors, request } = validateRgbIssue({ schema, ...form, mediaPath: withMedia ? form.mediaPath : '' });
   const set = (key: keyof typeof EMPTY) => (value: string) => setForm(f => ({ ...f, [key]: value }));
   const shown = (key: keyof typeof errors) => (touched || form[key as keyof typeof EMPTY] !== EMPTY[key as keyof typeof EMPTY]) ? errors[key] : undefined;
-  const unit = schema === 'NIA' ? (form.ticker.trim().toUpperCase() || 'tokens') : (form.name.trim() || 'units');
-  const preview = request ? `${grouped(formatAssetAmount(request.amounts[0], request.precision))} ${unit}` : null;
+  const unit = WITH_TICKER.includes(schema) ? (form.ticker.trim().toUpperCase() || 'tokens') : (form.name.trim() || 'units');
+  const amountText = (base: number) => `${grouped(formatAssetAmount(base, request?.precision ?? 0))} ${unit}`;
+  const preview = request ? amountText(request.amounts[0]) : null;
+  const more = request?.inflationAmounts?.[0];
+
+  const pickImage = async () => {
+    try {
+      const picked = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+      const uri = picked.canceled ? undefined : picked.assets?.[0]?.uri;
+      if (uri) setForm(f => ({ ...f, mediaPath: uri }));
+    } catch {
+      setError('Couldn’t open your photos.');
+    }
+  };
+
+  const confirmText = () => {
+    if (schema === 'UDA') return 'A single collectible is created in your RGB wallet. It can’t be split, and no other can be issued under it.';
+    if (schema === 'IFA') return `The asset is created in your RGB wallet and the whole supply is yours. Only this wallet can issue more, up to ${more != null ? amountText(more) : 'the amount you set'}.`;
+    return 'The asset is created in your RGB wallet and the whole supply is yours. The supply can’t be changed later.';
+  };
 
   const submit = () => {
     setTouched(true);
@@ -72,7 +96,7 @@ export function IssueAssetSheet({ visible, onClose, adapter: given, onIssued, on
     feedback.select();
     Alert.alert(
       `Issue ${preview}?`,
-      'The asset is created in your RGB wallet and the whole supply is yours. The supply can’t be changed later.',
+      confirmText(),
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -134,7 +158,7 @@ export function IssueAssetSheet({ visible, onClose, adapter: given, onIssued, on
         <Button title={preview ? `Issue ${preview}` : 'Issue asset'} onPress={submit} loading={issuing} disabled={issuing || freeUtxos === 0} />
       </View>}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: t.spacing[3], paddingBottom: t.spacing[3] }}>
-        {schemas.length > 1 && <SegmentedTabs<RgbIssueSchema> scrollable={false} fill value={schema} onChange={setSchema}
+        {schemas.length > 1 && <SegmentedTabs<RgbIssueSchema> scrollable={schemas.length > 2} fill={schemas.length <= 2} value={schema} onChange={setSchema}
           options={schemas.map(s => ({ key: s, label: `${SCHEMA_LABEL[s]} (${s})` }))} />}
         <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>{SCHEMA_HINT[schema]}</Text>
 
@@ -143,13 +167,23 @@ export function IssueAssetSheet({ visible, onClose, adapter: given, onIssued, on
           {support.createUtxos && onCreateUtxos && <Button title="Create UTXOs" variant="secondary" size="sm" onPress={onCreateUtxos} style={{ marginTop: t.spacing[2] }} />}
         </Callout>}
 
-        {schema === 'NIA' && <Input label="Ticker" placeholder="e.g. PTS" autoCapitalize="characters" autoCorrect={false} maxLength={8}
+        {WITH_TICKER.includes(schema) && <Input label="Ticker" placeholder={schema === 'UDA' ? 'e.g. ART1' : 'e.g. PTS'} autoCapitalize="characters" autoCorrect={false} maxLength={8}
           value={form.ticker} onChangeText={set('ticker')} error={shown('ticker')} accessibilityLabel="Ticker" />}
-        <Input label="Name" placeholder={schema === 'NIA' ? 'e.g. Loyalty Points' : 'e.g. Genesis Edition'} maxLength={40}
+        <Input label="Name" placeholder={schema === 'NIA' || schema === 'IFA' ? 'e.g. Loyalty Points' : 'e.g. Genesis Edition'} maxLength={40}
           value={form.name} onChangeText={set('name')} error={shown('name')} accessibilityLabel="Name" />
-        {schema === 'CFA' && <Input label="Description (optional)" placeholder="What it represents" multiline maxLength={255}
+        {WITH_MEDIA.includes(schema) && <Input label="Description (optional)" placeholder="What it represents" multiline maxLength={255}
           value={form.details} onChangeText={set('details')} error={shown('details')} accessibilityLabel="Description" />}
-        <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
+        {withMedia && (form.mediaPath ? (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3] }}>
+            <Image source={{ uri: form.mediaPath }} accessibilityLabel="Chosen image" style={{ width: 64, height: 64, borderRadius: t.borderRadius.md }} />
+            <Text style={{ flex: 1, color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>Stored in the asset’s contract. Anyone who receives it sees this image.</Text>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Remove image" hitSlop={8} onPress={() => setForm(f => ({ ...f, mediaPath: '' }))}>
+              <Ionicons name="close-circle" size={22} color={t.colors.text.tertiary} />
+            </TouchableOpacity>
+          </View>
+        ) : <Button title="Add an image (optional)" variant="secondary" size="sm" onPress={() => void pickImage()}
+          icon={<Ionicons name="image-outline" size={16} color={t.colors.text.primary} />} />)}
+        {schema !== 'UDA' && <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
           <View style={{ flex: 2 }}>
             <Input label="Supply" placeholder="1000000" keyboardType="decimal-pad"
               value={form.amount} onChangeText={set('amount')} error={shown('amount')} accessibilityLabel="Supply" />
@@ -158,11 +192,15 @@ export function IssueAssetSheet({ visible, onClose, adapter: given, onIssued, on
             <Input label="Decimals" placeholder="0" keyboardType="number-pad" maxLength={2}
               value={form.precision} onChangeText={set('precision')} error={shown('precision')} accessibilityLabel="Decimals" />
           </View>
-        </View>
-        <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }}>
+        </View>}
+        {schema === 'IFA' && <Input label="Can issue later" placeholder="1000000" keyboardType="decimal-pad"
+          value={form.inflation} onChangeText={set('inflation')} error={shown('inflation')} accessibilityLabel="Can issue later" />}
+        {schema !== 'UDA' && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }}>
           Decimals set the smallest amount: 2 decimals lets you send 0.01. They can’t be changed later.
-        </Text>
-        {preview && <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.sm }}>You’ll hold {preview}.</Text>}
+        </Text>}
+        {preview && <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.sm }}>
+          {schema === 'UDA' ? `You’ll hold the one ${unit}.` : more != null ? `You’ll hold ${preview}, and can issue up to ${amountText(more)} more later.` : `You’ll hold ${preview}.`}
+        </Text>}
         {!!error && <Callout tone="error" message={error} />}
       </ScrollView>
     </Sheet>

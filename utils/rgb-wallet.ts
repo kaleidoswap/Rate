@@ -5,7 +5,7 @@
  */
 
 export type RgbBackingKind = 'device' | 'engine-node' | 'nwc-node';
-export type RgbIssueSchema = 'NIA' | 'CFA';
+export type RgbIssueSchema = 'NIA' | 'CFA' | 'UDA' | 'IFA';
 
 export interface RgbWalletSupport {
   kind: RgbBackingKind | null;
@@ -13,15 +13,36 @@ export interface RgbWalletSupport {
   createUtxos: boolean;
   /** Schemas this account can issue; empty when it can't issue. */
   issue: RgbIssueSchema[];
+  /** A CFA or UDA can be issued with an image from the phone. */
+  issueMedia: boolean;
+  /** Issue more of an IFA asset the wallet holds inflation rights for. */
+  inflate: boolean;
   listTransfers: boolean;
   refreshTransfers: boolean;
   /** Fail a transfer still waiting for its counterparty. */
   cancelTransfer: boolean;
+  /** Remove failed transfers from the history. */
+  deleteTransfer: boolean;
+  /** Read an asset's contract data (schema, supply, issuance time, media). */
+  metadata: boolean;
+  /** Send all plain bitcoin to an address. */
+  drain: boolean;
 }
 
 export const NO_RGB_WALLET_SUPPORT: RgbWalletSupport = {
-  kind: null, listUtxos: false, createUtxos: false, issue: [], listTransfers: false, refreshTransfers: false, cancelTransfer: false,
+  kind: null, listUtxos: false, createUtxos: false, issue: [], issueMedia: false, inflate: false,
+  listTransfers: false, refreshTransfers: false, cancelTransfer: false, deleteTransfer: false, metadata: false, drain: false,
 };
+
+/** What the app's rgb-lib bridge reports its native build can do (services/protocols/rgbLibRn.ts). */
+interface DeviceCapabilities {
+  metadata?: boolean;
+  issueUda?: boolean;
+  issueIfa?: boolean;
+  inflate?: boolean;
+  drain?: boolean;
+  deleteTransfers?: boolean;
+}
 
 interface AdapterLike {
   protocolName?: string;
@@ -35,14 +56,15 @@ interface AdapterLike {
   refreshBalances?: unknown;
   executeProtocolOperation?: unknown;
   allowPrivilegedOps?: boolean;
-  account?: { issueAssetCfa?: unknown; failTransfer?: unknown; refreshTransfers?: unknown } | null;
+  account?: { issueAssetCfa?: unknown; failTransfer?: unknown; refreshTransfers?: unknown; capabilities?: () => DeviceCapabilities } | null;
 }
 
 /**
- * What the RGB account's adapter can do. RGB on this phone does everything (CFA
- * and cancelling need the app's rgb-lib bridge). The node through the engine
- * lists and refreshes, and creates UTXOs when privileged ops are on; it can't
- * issue. The node over NWC does what its connection advertises, never issuance.
+ * What the RGB account's adapter can do. RGB on this phone does everything its
+ * native build offers (CFA, UDA, IFA, cancelling, cleanup, drain need the app's
+ * rgb-lib bridge). The node through the engine lists, refreshes, reads metadata
+ * and cancels, and creates UTXOs when privileged ops are on; it can't issue. The
+ * node over NWC does what its connection advertises, never issuance.
  */
 export function rgbWalletSupport(adapter: unknown): RgbWalletSupport {
   const a = adapter as AdapterLike | null | undefined;
@@ -51,39 +73,50 @@ export function rgbWalletSupport(adapter: unknown): RgbWalletSupport {
     if (a.walletType() === 'ln') return NO_RGB_WALLET_SUPPORT;
     const has = (m: string) => a.hasRlnMethod?.(m) === true;
     return {
+      ...NO_RGB_WALLET_SUPPORT,
       kind: 'nwc-node',
       listUtxos: has('rln_list_unspents'),
       createUtxos: has('rln_create_utxos'),
-      issue: [],
       listTransfers: has('rln_list_transfers'),
       refreshTransfers: has('rln_refresh_transfers'),
-      cancelTransfer: false,
     };
   }
   if (a.protocolName === 'RGB_L1') {
     const account = a.account ?? {};
+    const caps: DeviceCapabilities = typeof account.capabilities === 'function' ? account.capabilities() : {};
+    const cfa = typeof account.issueAssetCfa === 'function';
     return {
       kind: 'device',
       listUtxos: typeof a.listUnspents === 'function',
       createUtxos: typeof a.createRgbUtxos === 'function',
       issue: [
         ...(typeof a.issueAssetNia === 'function' ? ['NIA' as const] : []),
-        ...(typeof account.issueAssetCfa === 'function' ? ['CFA' as const] : []),
+        ...(cfa ? ['CFA' as const] : []),
+        ...(caps.issueUda ? ['UDA' as const] : []),
+        ...(caps.issueIfa ? ['IFA' as const] : []),
       ],
+      issueMedia: cfa || !!caps.issueUda,
+      inflate: !!caps.inflate,
       listTransfers: typeof a.listTransfers === 'function',
       refreshTransfers: typeof account.refreshTransfers === 'function' || typeof a.refreshBalances === 'function',
       cancelTransfer: typeof account.failTransfer === 'function',
+      deleteTransfer: !!caps.deleteTransfers,
+      metadata: !!caps.metadata,
+      drain: !!caps.drain,
     };
   }
   if (a.protocolName === 'RGB_LN') {
+    const ops = typeof a.executeProtocolOperation === 'function';
     return {
+      ...NO_RGB_WALLET_SUPPORT,
       kind: 'engine-node',
-      listUtxos: typeof a.executeProtocolOperation === 'function',
+      listUtxos: ops,
       createUtxos: typeof a.createRgbUtxos === 'function' && a.allowPrivilegedOps === true,
-      issue: [],
       listTransfers: typeof a.listTransfers === 'function',
       refreshTransfers: typeof a.refreshBalances === 'function',
-      cancelTransfer: false,
+      // The node's failtransfers takes a batch index: offered only on transfers that carry one.
+      cancelTransfer: ops,
+      metadata: ops,
     };
   }
   return NO_RGB_WALLET_SUPPORT;
@@ -201,6 +234,21 @@ export function canCancelRgbTransfer(t: Pick<RgbTransfer, 'status' | 'batchTrans
   return support.cancelTransfer && t.status === 'waiting-counterparty' && t.batchTransferIdx != null;
 }
 
+/** Only a failed transfer can be removed from the history, and only where the account supports it. */
+export function canDeleteRgbTransfer(t: Pick<RgbTransfer, 'status' | 'batchTransferIdx'>, support: Pick<RgbWalletSupport, 'deleteTransfer'>): boolean {
+  return support.deleteTransfer && t.status === 'failed' && t.batchTransferIdx != null;
+}
+
+/**
+ * How Receive follows an RGB invoice: its own transfer by recipient id where the
+ * account lists transfers, else the asset's balance (`fallback`).
+ */
+export function rgbInvoiceWatch(invoice: { recipient_id?: string; recipientId?: string } | null | undefined,
+  support: Pick<RgbWalletSupport, 'listTransfers'>, fallback: 'balance' | 'none' = 'balance'): { monitor: 'rgb-transfer' | 'balance' | 'none'; recipientId?: string } {
+  const recipientId = invoice?.recipient_id ?? invoice?.recipientId;
+  return recipientId && support.listTransfers ? { monitor: 'rgb-transfer', recipientId } : { monitor: fallback };
+}
+
 /** An unused invoice that expired: a failed receive that never had a transaction. History leaves it out. */
 export function isExpiredRgbInvoice(t: Pick<RgbTransfer, 'status' | 'direction' | 'txid'>): boolean {
   return t.status === 'failed' && t.direction === 'incoming' && !t.txid;
@@ -226,6 +274,10 @@ export interface RgbIssueInput {
   details: string;
   precision: string;
   amount: string;
+  /** IFA: how much more may be issued later. */
+  inflation?: string;
+  /** CFA, UDA: a local image file for the asset. */
+  mediaPath?: string;
 }
 
 export interface RgbIssueRequest {
@@ -235,9 +287,13 @@ export interface RgbIssueRequest {
   details?: string;
   precision: number;
   amounts: number[];
+  inflationAmounts?: number[];
+  mediaPath?: string;
 }
 
-export type RgbIssueErrors = Partial<Record<'ticker' | 'name' | 'details' | 'precision' | 'amount', string>>;
+export type RgbIssueErrors = Partial<Record<'ticker' | 'name' | 'details' | 'precision' | 'amount' | 'inflation', string>>;
+
+const TICKER_SCHEMAS: RgbIssueSchema[] = ['NIA', 'UDA', 'IFA'];
 
 export const RGB_MAX_PRECISION = 18;
 const MAX_NAME = 40;
@@ -255,13 +311,26 @@ export function toBaseUnits(amount: string, precision: number): number | null {
   return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
-/** Checks the issue form; `request` is set only when every field is valid. */
+function amountError(raw: string, precision: number, empty: string): string {
+  const value = raw.trim();
+  if (!value) return empty;
+  return /\.(\d*)$/.test(value) && (value.split('.')[1]?.length ?? 0) > precision
+    ? `At most ${precision} decimal${precision === 1 ? '' : 's'}.`
+    : 'Enter an amount above zero that isn’t too large.';
+}
+
+/**
+ * Checks the issue form; `request` is set only when every field is valid. A UDA is
+ * one indivisible unit (no supply or decimals); an IFA also takes how much more
+ * may be issued later.
+ */
 export function validateRgbIssue(input: RgbIssueInput): { errors: RgbIssueErrors; request?: RgbIssueRequest } {
   const errors: RgbIssueErrors = {};
   const ticker = input.ticker.trim().toUpperCase();
   const name = input.name.trim();
   const details = input.details.trim();
-  if (input.schema === 'NIA') {
+  const unique = input.schema === 'UDA';
+  if (TICKER_SCHEMAS.includes(input.schema)) {
     if (!ticker) errors.ticker = 'Enter a ticker.';
     else if (!/^[A-Z][A-Z0-9]{0,7}$/.test(ticker)) errors.ticker = 'Up to 8 letters and digits, starting with a letter.';
   }
@@ -269,32 +338,52 @@ export function validateRgbIssue(input: RgbIssueInput): { errors: RgbIssueErrors
   else if (name.length > MAX_NAME) errors.name = `Up to ${MAX_NAME} characters.`;
   else if (!/^[\x20-\x7E]+$/.test(name)) errors.name = 'Use plain letters, digits and punctuation.';
   if (details.length > MAX_DETAILS) errors.details = `Up to ${MAX_DETAILS} characters.`;
-  const precision = Number(input.precision);
-  const precisionOk = input.precision.trim() !== '' && Number.isInteger(precision) && precision >= 0 && precision <= RGB_MAX_PRECISION;
+  const precision = unique ? 0 : Number(input.precision);
+  const precisionOk = unique || (input.precision.trim() !== '' && Number.isInteger(precision) && precision >= 0 && precision <= RGB_MAX_PRECISION);
   if (!precisionOk) errors.precision = `A whole number from 0 to ${RGB_MAX_PRECISION}.`;
-  const base = precisionOk ? toBaseUnits(input.amount, precision) : null;
-  if (!input.amount.trim()) errors.amount = 'Enter the supply.';
-  else if (precisionOk && base == null) {
-    errors.amount = /\.(\d*)$/.test(input.amount.trim()) && (input.amount.trim().split('.')[1]?.length ?? 0) > precision
-      ? `At most ${precision} decimal${precision === 1 ? '' : 's'}.`
-      : 'Enter an amount above zero that isn’t too large.';
+  const base = unique ? 1 : precisionOk ? toBaseUnits(input.amount, precision) : null;
+  if (!unique && (!input.amount.trim() || (precisionOk && base == null))) errors.amount = amountError(input.amount, precision, 'Enter the supply.');
+  let inflation: number | null = null;
+  if (input.schema === 'IFA' && precisionOk) {
+    inflation = toBaseUnits(input.inflation ?? '', precision);
+    if (inflation == null) errors.inflation = amountError(input.inflation ?? '', precision, 'Enter how much more may be issued later.');
+    else if (base != null && !Number.isSafeInteger(base + inflation)) errors.inflation = 'The total supply would be too large.';
   }
   if (Object.keys(errors).length || base == null) return { errors };
+  const media = (input.schema === 'CFA' || unique) && input.mediaPath ? input.mediaPath : undefined;
   return {
     errors,
     request: {
       schema: input.schema,
-      ...(input.schema === 'NIA' ? { ticker } : {}),
+      ...(TICKER_SCHEMAS.includes(input.schema) ? { ticker } : {}),
       name,
       ...(details ? { details } : {}),
       precision,
       amounts: [base],
+      ...(inflation != null ? { inflationAmounts: [inflation] } : {}),
+      ...(media ? { mediaPath: media } : {}),
     },
   };
 }
 
+/** Checks an amount to inflate an IFA asset by, against the rights left; base units when valid. */
+export function validateRgbInflate(amount: string, precision: number, rights: number): { error?: string; amount?: number } {
+  const base = toBaseUnits(amount, precision);
+  if (base == null) return { error: amountError(amount, precision, 'Enter how much to issue.') };
+  if (base > rights) return { error: 'That’s more than your inflation rights allow.' };
+  return { amount: base };
+}
+
+/** Checks a drain destination: a bitcoin address on the RGB account's network. */
+export function validateDrainAddress(address: string, addressNetworks: string[] | null, network: string | undefined): string | null {
+  if (!address.trim()) return 'Enter a bitcoin address.';
+  if (!addressNetworks) return 'That isn’t a bitcoin address.';
+  if (network && !addressNetworks.includes(network)) return `That address isn’t on ${network === 'mainnet' ? 'bitcoin mainnet' : network}.`;
+  return null;
+}
+
 /** Plain wording for the ways issuing, creating UTXOs or cancelling can fail. */
-export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' | 'cancel'): string {
+export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' | 'cancel' | 'delete' | 'inflate' | 'drain'): string {
   const message = error instanceof Error ? error.message : String(error ?? '');
   if (/InsufficientAllocationSlots|No uncolored UTXOs|NoAvailableUtxos|no colorable UTXO/i.test(message)) {
     return 'You need a free colorable UTXO first. Create some, wait for them to confirm, then try again.';
@@ -304,6 +393,11 @@ export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' 
   }
   if (/AllocationsAlreadyAvailable/i.test(message)) return 'You already have enough free UTXOs.';
   if (/CannotFailBatchTransfer/i.test(message)) return 'This transfer can no longer be cancelled.';
+  if (/CannotDeleteBatchTransfer/i.test(message)) return 'Only failed transfers can be removed.';
+  if (/CannotUseIfaOnMainnet/i.test(message)) return 'Inflatable assets aren’t available on mainnet yet.';
+  if (/InvalidAddress|invalid address/i.test(message) && action === 'drain') return 'That address can’t receive this. Check it and try again.';
+  if (/NoInflationAmounts|InsufficientAssignments|InflationRight/i.test(message)) return 'Not enough inflation rights left for that amount.';
+  if (/InvalidFilePath|FileNotFound|No such file/i.test(message)) return 'The image couldn’t be read. Pick it again.';
   if (/InvalidTicker/i.test(message)) return 'That ticker isn’t allowed. Use up to 8 capital letters and digits.';
   if (/InvalidName/i.test(message)) return 'That name isn’t allowed. Use plain letters and digits.';
   if (/InvalidPrecision/i.test(message)) return 'That number of decimals isn’t allowed.';
@@ -311,8 +405,54 @@ export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' 
   if (/timed out|timeout|Network|Indexer|Proxy|fetch/i.test(message)) return 'Couldn’t reach the network. Check your connection and try again.';
   if (action === 'issue') return 'The asset couldn’t be issued. Try again.';
   if (action === 'utxos') return 'The UTXOs couldn’t be created. Try again.';
+  if (action === 'delete') return 'The transfer couldn’t be removed. Try again.';
+  if (action === 'inflate') return 'The new supply couldn’t be issued. Try again.';
+  if (action === 'drain') return 'The bitcoin couldn’t be sent. Nothing left your wallet. Try again.';
   return 'The transfer couldn’t be cancelled. Try again.';
 }
+
+// ── Asset metadata ────────────────────────────────────────────────────────
+
+export interface RgbAssetMetadata {
+  schema?: string;
+  ticker?: string;
+  name?: string;
+  precision?: number;
+  /** Base units issued so far (IFA: known circulating supply). */
+  issuedSupply?: number;
+  /** IFA: the most that can ever exist. */
+  maxSupply?: number;
+  details?: string;
+  /** Seconds. */
+  timestamp?: number;
+  media?: { uri: string; mime: string; isImage: boolean };
+}
+
+/** rgb-lib's metadata (camelCase, from the bridge) or the node's (snake_case), in one shape. */
+export function normalizeRgbAssetMetadata(raw: any): RgbAssetMetadata {
+  if (!raw || typeof raw !== 'object') return {};
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v : undefined);
+  const schema = str(raw.assetSchema ?? raw.asset_schema ?? raw.schema)?.toUpperCase();
+  const issued = num(raw.knownCirculatingSupply ?? raw.known_circulating_supply ?? raw.issuedSupply ?? raw.issued_supply ?? raw.initialSupply ?? raw.initial_supply);
+  const max = num(raw.maxSupply ?? raw.max_supply);
+  const path = str(raw.media?.filePath ?? raw.media?.file_path);
+  const mime = str(raw.media?.mime) ?? '';
+  return {
+    schema,
+    ticker: str(raw.ticker),
+    name: str(raw.name),
+    precision: num(raw.precision),
+    issuedSupply: issued,
+    ...(schema === 'IFA' && max != null ? { maxSupply: max } : {}),
+    details: str(raw.details),
+    timestamp: num(raw.timestamp),
+    ...(path ? { media: { uri: /^[a-z]+:\/\//i.test(path) ? path : `file://${path}`, mime, isImage: /^image\//i.test(mime) } } : {}),
+  };
+}
+
+export const RGB_SCHEMA_LABEL: Record<string, string> = {
+  NIA: 'Token (NIA)', CFA: 'Collectible (CFA)', UDA: 'Unique collectible (UDA)', IFA: 'Inflatable token (IFA)',
+};
 
 // ── UTXO creation ─────────────────────────────────────────────────────────
 
