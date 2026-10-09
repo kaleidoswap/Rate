@@ -139,7 +139,7 @@ export function parseLooseNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-const FRACTION_WORDS = /\b(half|all|everything|quarter|metà|meta|mezzo|tutto|tutti|quarto)\b|\d+\s*%/i;
+const FRACTION_WORDS = /(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(half|all|everything|quarter|metà|meta|mezzo|tutto|tutti|quarto)(?![A-Za-zÀ-ÖØ-öø-ÿ])|\d+\s*%/i;
 
 /**
  * Validate an untrusted intent object (a model's JSON). Returns null when the

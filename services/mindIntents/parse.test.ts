@@ -165,3 +165,8 @@ describe('intent schema', () => {
     expect(extractJsonObject('{broken')).toBeNull();
   });
 });
+
+test('an Italian fraction word grounds a model fraction', () => {
+  expect(validateIntent({ kind: 'swap', amount: 0.5, unit: 'fraction' }, 'scambia metà dei miei btc')).toEqual({ kind: 'swap', amount: { value: 0.5, unit: 'fraction' } });
+  expect(validateIntent({ kind: 'swap', amount: 0.5, unit: 'fraction' }, 'swap smallest btc')).toEqual({ kind: 'swap' });
+});

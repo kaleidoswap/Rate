@@ -45,9 +45,9 @@ const RECEIVED_Q = /\b(receive|received|got|earned|came in|ricevut[oaie]|incassa
 const BALANCE_Q = /\b(balance|funds|how much (do i|have i|i have)|what do i have|saldo|quanto ho|cosa ho|fondi)\b/i;
 
 const FRACTIONS: [RegExp, number][] = [
-  [/(?<![\p{L}])(half|metà|meta|mezzo)(?![\p{L}])/iu, 0.5],
-  [/(?<![\p{L}])(quarter|quarto)(?![\p{L}])/iu, 0.25],
-  [/(?<![\p{L}])(all|everything|tutto|tutti|tutta)(?![\p{L}])/iu, 1],
+  [/(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(half|metà|meta|mezzo)(?![A-Za-zÀ-ÖØ-öø-ÿ])/i, 0.5],
+  [/(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(quarter|quarto)(?![A-Za-zÀ-ÖØ-öø-ÿ])/i, 0.25],
+  [/(?:^|[^A-Za-zÀ-ÖØ-öø-ÿ])(all|everything|tutto|tutti|tutta)(?![A-Za-zÀ-ÖØ-öø-ÿ])/i, 1],
 ];
 
 const LAYERS: [RegExp, IntentNetwork][] = [
