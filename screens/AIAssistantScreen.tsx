@@ -37,6 +37,7 @@ import { MainHeader, MindAvatar, MindGlyph, Badge, Sheet } from '../components';
 import { ChatEmptyState, MessageBubble, TypingDots, buildCopyText } from '../components/chat';
 import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
+import { IntentBar } from '../components/mind/IntentBar';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import QVACSettingsSheet from '../components/QVACSettingsSheet';
@@ -878,7 +879,13 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
               {renderModelStatus()}
 
               {isEmpty ? (
-                <ChatEmptyState onSuggestion={(q) => sendMessage(q)} onContacts={() => setShowContactsSelector(true)} />
+                <>
+                  <IntentBar
+                    style={styles.intentBar}
+                    onReview={(target) => (navigation.getParent?.() ?? navigation).navigate(target.screen, target.params)}
+                  />
+                  <ChatEmptyState onSuggestion={(q) => sendMessage(q)} onContacts={() => setShowContactsSelector(true)} />
+                </>
               ) : (
                 <ScrollView
                   ref={scrollViewRef}
@@ -1154,6 +1161,7 @@ const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.colors.background.primary },
     chatContainer: { flex: 1 },
+    intentBar: { marginHorizontal: theme.spacing[4], marginTop: theme.spacing[3] },
     background: { flex: 1 },
     skillsBackdrop: { flex: 1, backgroundColor: theme.colors.background.backdrop, justifyContent: 'flex-end' },
     skillsSheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: theme.borderRadius.xl, borderTopRightRadius: theme.borderRadius.xl, padding: theme.spacing[5], paddingBottom: theme.spacing[9] },

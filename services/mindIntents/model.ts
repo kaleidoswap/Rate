@@ -2,7 +2,7 @@
 // network: the local QVAC model when it is loaded, otherwise nothing (callers
 // fall back to rules and templates).
 
-import QVACService from '../QVACService';
+import type QVACService from '../QVACService';
 
 export interface LocalTextModel {
   /** The model is loaded and can answer now. */
@@ -13,7 +13,9 @@ export interface LocalTextModel {
 const DEFAULT_TIMEOUT_MS = 12_000;
 
 /** The app's on-device model, or one that is never ready while KaleidoMind is off. */
-export function localTextModel(qvac: QVACService = QVACService.getInstance()): LocalTextModel {
+export function localTextModel(given?: QVACService): LocalTextModel {
+  // Loaded on first use so screens that only show the bar don't start the QVAC SDK.
+  const qvac: QVACService = given ?? require('../QVACService').default.getInstance();
   return {
     ready: () => qvac.isEnabled() && qvac.getState().llmStatus === 'ready',
     async complete(system, user, opts = {}) {
