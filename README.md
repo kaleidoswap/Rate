@@ -400,3 +400,15 @@ On macOS, use `--platform ios` and `pnpm ios --device`. Keep a separate test wal
 `EXPO_PUBLIC_BARK_ESPLORA_URL`; these values are bundled at build time.
 Unilateral exit/recovery operations remain library APIs, without dedicated mobile controls.
 Native device linking and funded flows must be verified in a development build.
+
+### AI library baseline
+
+The app pins `@kaleidorg/mind` to `0.11.0` and uses the in-process wallet bindings,
+not the desktop Node provider. Normal installs use the published package. For
+local engine development, build the sibling core and run
+`SYNC_MIND_LOCAL=1 pnpm sync-mind`; launch Metro with the same flag to watch it.
+`SYNC_MIND_FORCE=1` also permits a mismatched local version and is for development only.
+Reinstall with `pnpm install --force --ignore-scripts` to restore the published
+package after an overlay. Dataset collection remains off; adding consent and
+review UI is a separate integration. Validate voice/model behavior on a physical
+device before shipping an app release.

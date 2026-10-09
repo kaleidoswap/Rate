@@ -50,6 +50,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --ignore-scripts
 
+      - name: Published Mind dependency isolation
+        run: node --test scripts/sync-mind.test.cjs
+
       - name: Type-check
         run: pnpm exec tsc --noEmit
 
