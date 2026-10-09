@@ -22,6 +22,9 @@ test('the framework counts as installed only with the pinned version marker', ()
   fs.writeFileSync(path.join(fw, 'Info.plist'), '');
   fs.writeFileSync(path.join(fw, '.rgb-lib-version'), '0.3.0-beta.4 old\n');
   expect(isInstalled(dir)).toBe(false);
+  // Installed before macOS and x86_64 simulator slices were dropped: redo it.
   fs.writeFileSync(path.join(fw, '.rgb-lib-version'), `${RGB_LIB_VERSION} ${XCFRAMEWORK_SHA256}\n`);
+  expect(isInstalled(dir)).toBe(false);
+  fs.writeFileSync(path.join(fw, '.rgb-lib-version'), `${RGB_LIB_VERSION} ${XCFRAMEWORK_SHA256} ios-only\n`);
   expect(isInstalled(dir)).toBe(true);
 });

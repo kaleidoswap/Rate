@@ -39,7 +39,7 @@ function verifyBinding(iosDir = IOS_DIR) {
 function isInstalled(iosDir = IOS_DIR) {
   const marker = path.join(iosDir, FRAMEWORK, MARKER);
   return fs.existsSync(path.join(iosDir, FRAMEWORK, 'Info.plist')) && fs.existsSync(marker)
-    && fs.readFileSync(marker, 'utf8').trim() === `${RGB_LIB_VERSION} ${XCFRAMEWORK_SHA256}`;
+    && fs.readFileSync(marker, 'utf8').trim() === `${RGB_LIB_VERSION} ${XCFRAMEWORK_SHA256} ios-only`;
 }
 
 function download(url, dest, redirects = 5) {
@@ -66,6 +66,32 @@ function download(url, dest, redirects = 5) {
   });
 }
 
+// The release ships macOS and fat simulator slices over 2 GiB, more than
+// CocoaPods can read. Keep the device slice as published; drop macOS and thin
+// the simulator slice to arm64.
+function trimSlices(target) {
+  const plist = path.join(target, 'Info.plist');
+  const info = JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', plist], { encoding: 'utf8' }));
+  const kept = [];
+  for (const lib of info.AvailableLibraries) {
+    const slice = path.join(target, lib.LibraryIdentifier);
+    if (lib.SupportedPlatform !== 'ios') {
+      fs.rmSync(slice, { recursive: true, force: true });
+      continue;
+    }
+    if (lib.SupportedPlatformVariant === 'simulator' && lib.SupportedArchitectures.length > 1) {
+      const binary = path.join(slice, lib.LibraryPath, 'rgb_libFFI');
+      execFileSync('lipo', [binary, '-thin', 'arm64', '-output', `${binary}.arm64`], { stdio: 'inherit' });
+      fs.renameSync(`${binary}.arm64`, binary);
+      lib.SupportedArchitectures = ['arm64'];
+    }
+    kept.push(lib);
+  }
+  info.AvailableLibraries = kept;
+  fs.writeFileSync(plist, JSON.stringify(info));
+  execFileSync('plutil', ['-convert', 'xml1', plist], { stdio: 'inherit' });
+}
+
 async function install(iosDir = IOS_DIR) {
   verifyBinding(iosDir);
   if (process.platform !== 'darwin') return 'skipped: not macOS';
@@ -80,7 +106,8 @@ async function install(iosDir = IOS_DIR) {
     fs.rmSync(target, { recursive: true, force: true });
     execFileSync('unzip', ['-q', '-o', zip, '-d', iosDir], { stdio: 'inherit' });
     if (!fs.existsSync(path.join(target, 'Info.plist'))) throw new Error(`${FRAMEWORK} missing after extraction`);
-    fs.writeFileSync(path.join(target, MARKER), `${RGB_LIB_VERSION} ${XCFRAMEWORK_SHA256}\n`);
+    trimSlices(target);
+    fs.writeFileSync(path.join(target, MARKER), `${RGB_LIB_VERSION} ${XCFRAMEWORK_SHA256} ios-only\n`);
     return 'installed';
   } finally {
     fs.rmSync(zip, { force: true });
@@ -97,4 +124,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { RGB_LIB_VERSION, XCFRAMEWORK_SHA256, BINDING_SHA256, verifyBinding, isInstalled, install };
+module.exports = { RGB_LIB_VERSION, XCFRAMEWORK_SHA256, BINDING_SHA256, verifyBinding, isInstalled, install, trimSlices };
