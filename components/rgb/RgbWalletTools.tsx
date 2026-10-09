@@ -10,6 +10,8 @@ import { rgbWalletSupport } from '../../utils/rgb-wallet';
 import { feedback } from '../../utils/feedback';
 import { RgbUtxoSheet } from './RgbUtxoSheet';
 import { IssueAssetSheet } from './IssueAssetSheet';
+import { DrainSheet } from './DrainSheet';
+import { loadBtcBalance } from '../../store/slices/walletSlice';
 import type { IssuedRgbAsset } from '../../services/rgbWallet';
 
 const NO_ASSETS: never[] = [];
@@ -18,7 +20,7 @@ const NO_ASSETS: never[] = [];
 export function useRgbWalletSheets({ onViewAsset }: { onViewAsset?: (asset: IssuedRgbAsset) => void } = {}) {
   const dispatch = useAppDispatch();
   const assets = (useAppSelector(s => s.assets?.rgbAssets) ?? NO_ASSETS) as Array<{ asset_id: string; ticker: string; precision?: number }>;
-  const [open, setOpen] = useState<'utxos' | 'issue' | null>(null);
+  const [open, setOpen] = useState<'utxos' | 'issue' | 'drain' | null>(null);
   const [reason, setReason] = useState<string | undefined>();
   const refresh = () => { void dispatch(refreshRgbAssets()); };
   const close = () => { setOpen(null); setReason(undefined); };
@@ -29,9 +31,10 @@ export function useRgbWalletSheets({ onViewAsset }: { onViewAsset?: (asset: Issu
       <IssueAssetSheet visible={open === 'issue'} onClose={close} onIssued={refresh}
         onCreateUtxos={() => { setReason('Issuing needs a free colorable UTXO. Create some here, then issue once they confirm.'); setOpen('utxos'); }}
         onViewAsset={onViewAsset ? (asset) => { close(); onViewAsset(asset); } : undefined} />
+      {open === 'drain' && <DrainSheet visible onClose={close} onDrained={() => { void dispatch(loadBtcBalance()); }} />}
     </>
   );
-  return { sheets, openUtxos: () => setOpen('utxos'), openIssue: () => setOpen('issue') };
+  return { sheets, openUtxos: () => setOpen('utxos'), openIssue: () => setOpen('issue'), openDrain: () => setOpen('drain') };
 }
 
 /** Settings › RGB: UTXOs and issuing, for the RGB account in use (Advanced only). */
@@ -39,11 +42,12 @@ export function RgbWalletTools({ onViewAsset }: { onViewAsset?: (asset: IssuedRg
   const t = useAppTheme();
   const level = useAppSelector(selectDisclosureLevel);
   const support = rgbWalletSupport(rgbAccountAdapter());
-  const { sheets, openUtxos, openIssue } = useRgbWalletSheets({ onViewAsset });
+  const { sheets, openUtxos, openIssue, openDrain } = useRgbWalletSheets({ onViewAsset });
   if (level !== 'advanced' || !support.kind) return null;
   const rows = [
     ...(support.listUtxos || support.createUtxos ? [{ key: 'utxos', icon: 'cube-outline' as const, label: 'UTXOs', detail: 'Which outputs hold assets, which are free, and creating more', onPress: openUtxos }] : []),
-    ...(support.issue.length ? [{ key: 'issue', icon: 'add-circle-outline' as const, label: 'Issue an asset', detail: support.issue.includes('CFA') ? 'A new token or collectible' : 'A new token', onPress: openIssue }] : []),
+    ...(support.issue.length ? [{ key: 'issue', icon: 'add-circle-outline' as const, label: 'Issue an asset', detail: support.issue.length > 1 ? 'A new token or collectible' : 'A new token', onPress: openIssue }] : []),
+    ...(support.drain ? [{ key: 'drain', icon: 'exit-outline' as const, label: 'Send all bitcoin', detail: 'Empty the plain bitcoin to one address; assets stay', onPress: openDrain }] : []),
   ];
   if (!rows.length) return null;
 

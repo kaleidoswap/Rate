@@ -10,6 +10,8 @@ jest.mock('../../store/hooks', () => ({
 }));
 jest.mock('../../services/protocols', () => ({ rgbAccountAdapter: () => mockAdapter }));
 jest.mock('./RgbUtxoSheet', () => ({ RgbUtxoSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'UTXO sheet open') : null) }));
+jest.mock('./DrainSheet', () => ({ DrainSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'Drain sheet open') : null) }));
+jest.mock('../../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('./IssueAssetSheet', () => ({ IssueAssetSheet: ({ visible }: any) => (visible ? require('react').createElement(require('react-native').Text, null, 'Issue sheet open') : null) }));
 
 const device = { protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn(), createRgbUtxos: jest.fn(), issueAssetNia: jest.fn(), account: { issueAssetCfa: jest.fn() } };
@@ -37,4 +39,12 @@ test('the node over NWC shows only what its connection allows, and never issuing
   expect(screen.queryByLabelText('Issue an asset')).toBeNull();
   mockAdapter = { ...mockAdapter, hasRlnMethod: () => false };
   expect(render(<RgbWalletTools />).toJSON()).toBeNull();
+});
+
+test('sending all bitcoin is offered only where the native build can drain', () => {
+  expect(render(<RgbWalletTools />).queryByLabelText('Send all bitcoin')).toBeNull();
+  mockAdapter = { ...device, account: { ...device.account, capabilities: () => ({ drain: true }) } };
+  const screen = render(<RgbWalletTools />);
+  fireEvent.press(screen.getByLabelText('Send all bitcoin'));
+  expect(screen.getByText('Drain sheet open')).toBeTruthy();
 });

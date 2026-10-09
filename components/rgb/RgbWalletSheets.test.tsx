@@ -4,6 +4,7 @@ import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { RgbUtxoSheet } from './RgbUtxoSheet';
 import { IssueAssetSheet } from './IssueAssetSheet';
 import { InflateAssetSheet } from './InflateAssetSheet';
+import { DrainSheet } from './DrainSheet';
 
 jest.mock('../../services/protocols', () => ({ rgbAccountAdapter: () => null }));
 const mockPick = jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///photos/art.png' }] }));
@@ -201,5 +202,49 @@ describe('InflateAssetSheet', () => {
     expect(inflate).toHaveBeenCalledWith({ assetId: 'rgb:inf', inflationAmounts: [1250], feeRate: 2 });
     expect(onInflated).toHaveBeenCalled();
     expect(screen.getByText(/It counts once the transaction confirms/)).toBeTruthy();
+  });
+});
+
+describe('DrainSheet', () => {
+  const drainable = () => {
+    const adapter = device();
+    const drainTo = jest.fn(async () => 'd'.repeat(64));
+    Object.assign(adapter.account, { capabilities: () => ({ drain: true }), drainTo });
+    adapter.getConnectionInfo.mockResolvedValue({ network: 'mutinynet' });
+    return { adapter, drainTo };
+  };
+  const TB = 'tb1qw508d6qejxtdg4y5r3zarvary0c5xw7kxpjzsx';
+
+  it('needs a valid address on the wallet’s network and an explicit acknowledgement, then confirms', async () => {
+    const { adapter, drainTo } = drainable();
+    const onDrained = jest.fn();
+    const screen = render(<DrainSheet visible onClose={jest.fn()} adapter={adapter} onDrained={onDrained} />);
+    expect(await screen.findByText('Plain bitcoin now: 60,000 sats.', {}, { timeout: 5000 })).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Bitcoin address'), 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4');
+    expect(screen.getByText(/isn’t on mutinynet/)).toBeTruthy();
+    fireEvent.changeText(screen.getByLabelText('Bitcoin address'), TB);
+    fireEvent.press(screen.getAllByText('Send all bitcoin').at(-1)!);
+    expect(Alert.alert).not.toHaveBeenCalled(); // not acknowledged yet
+    fireEvent.press(screen.getByLabelText(/I understand this sends all/));
+    fireEvent.press(screen.getAllByText('Send all bitcoin').at(-1)!);
+    const [title, , buttons] = (Alert.alert as jest.Mock).mock.calls.at(-1);
+    expect(title).toBe('Send all your plain bitcoin?');
+    expect(buttons.find((b: any) => b.text === 'Send all').style).toBe('destructive');
+    await confirmAlert('Send all');
+    expect(drainTo).toHaveBeenCalledWith({ address: TB, feeRate: 2 });
+    expect(onDrained).toHaveBeenCalled();
+    expect(screen.getByText('Bitcoin sent')).toBeTruthy();
+  });
+
+  it('says plainly when it fails', async () => {
+    const { adapter, drainTo } = drainable();
+    drainTo.mockRejectedValueOnce(new Error('InsufficientBitcoins'));
+    const screen = render(<DrainSheet visible onClose={jest.fn()} adapter={adapter} />);
+    await screen.findByText('Plain bitcoin now: 60,000 sats.', {}, { timeout: 5000 });
+    fireEvent.changeText(screen.getByLabelText('Bitcoin address'), TB);
+    fireEvent.press(screen.getByLabelText(/I understand this sends all/));
+    fireEvent.press(screen.getAllByText('Send all bitcoin').at(-1)!);
+    await confirmAlert('Send all');
+    expect(screen.getByText(/Not enough bitcoin in your RGB wallet/)).toBeTruthy();
   });
 });
