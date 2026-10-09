@@ -193,3 +193,25 @@ describe('answers from wallet data', () => {
     expect(answerBalance({ kind: 'balance', asset: 'USDT' }, input)).toMatchObject({ title: 'Your USDT', rows: [{ units: 5 }] });
   });
 });
+
+describe('runIntent', () => {
+  const { runIntent } = require('./run') as typeof import('./run');
+  const run = (text: string, activity: ActivityItem[] = []) => runIntent(text, {
+    model: null,
+    card: deps(),
+    balance: () => ({ totalSat: 5000, byAccount: {}, assets: [], advanced: false }),
+    activity: async () => activity,
+  });
+
+  test('actions become cards, questions become answers', async () => {
+    expect((await run('send 10€ to Mario')).type).toBe('action');
+    expect(await run('what is my balance')).toMatchObject({ type: 'answer', answer: { kind: 'balance', totalSat: 5000 } });
+    expect(await run('how much did I spend this week')).toMatchObject({ type: 'answer', answer: { kind: 'spending', totalSat: 0 } });
+  });
+
+  test('anything else gets examples and a hint to turn on KaleidoMind', async () => {
+    const r = await run('tell me a joke');
+    expect(r.type).toBe('none');
+    expect((r as any).message).toMatch(/Turn on KaleidoMind/);
+  });
+});
