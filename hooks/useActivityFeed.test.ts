@@ -11,6 +11,7 @@ const adapters: Record<string, any> = {};
 jest.mock('../services/protocols', () => ({
   protocolManager: { getAdapterIfAvailable: (name: string) => adapters[name] },
   rgbAccountAdapter: () => undefined,
+  rgbAccountIsOnDevice: () => false,
 }));
 
 import { clearActivityCache } from '../services/ActivityService';

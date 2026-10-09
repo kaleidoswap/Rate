@@ -9,6 +9,7 @@ jest.mock('../services/protocols', () => ({
     getAdapterIfAvailable: jest.fn((name: string) => adapters[name]),
   },
   rgbAccountAdapter: () => adapters.RGB_LN ?? adapters.RGB_L1,
+  rgbAccountIsOnDevice: () => !adapters.RGB_LN && !!adapters.RGB_L1,
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -337,6 +338,39 @@ describe('streamActivity', () => {
 
     transfers.resolve([{ txid: 'rgbsend', kind: 'Send', status: 'Settled', created_at: 1, requested_assignment: { value: 5 } }]);
     expect((await done).items.map((i) => i.id)).toEqual(['transfer-rgbsend-0']);
+  });
+
+  const assetList = [
+    { asset_id: 'rgb:a', ticker: 'AAA', name: 'A', precision: 0 },
+    { asset_id: 'rgb:b', ticker: 'BBB', name: 'B', precision: 0 },
+    { asset_id: 'rgb:c', ticker: 'CCC', name: 'C', precision: 0 },
+  ];
+  const trackingTransfers = () => {
+    let active = 0;
+    let peak = 0;
+    const listTransfers = jest.fn(async ({ asset_id }: { asset_id: string }) => {
+      peak = Math.max(peak, ++active);
+      await new Promise((r) => setTimeout(r, 5));
+      active--;
+      return [{ txid: `tx-${asset_id}`, kind: 'Send', status: 'Settled', created_at: 1 }];
+    });
+    return { listTransfers, peak: () => peak };
+  };
+
+  it('asks RGB on this phone for one asset\'s transfers at a time', async () => {
+    const t = trackingTransfers();
+    adapters.RGB_L1 = { isConnected: () => true, listPayments: async () => [], listTransfers: t.listTransfers };
+    const { items } = await streamActivity({ assets: assetList }).done;
+    expect(t.listTransfers.mock.calls.map(([a]) => a.asset_id)).toEqual(['rgb:a', 'rgb:b', 'rgb:c']);
+    expect(t.peak()).toBe(1);
+    expect(items).toHaveLength(3);
+  });
+
+  it('asks the RGB node for every asset\'s transfers together', async () => {
+    const t = trackingTransfers();
+    adapters.RGB_LN = { isConnected: () => true, listPayments: async () => [], listTransfers: t.listTransfers };
+    await streamActivity({ assets: assetList }).done;
+    expect(t.peak()).toBe(3);
   });
 
   it('reuses a call still running from the previous load', async () => {

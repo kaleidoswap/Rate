@@ -19,7 +19,7 @@
 // Every source is fetched on its own, with a timeout: a slow or failing one
 // never blocks the rest (see streamActivity).
 
-import { protocolManager, rgbAccountAdapter } from './protocols';
+import { protocolManager, rgbAccountAdapter, rgbAccountIsOnDevice } from './protocols';
 import { loadCrossChainHistory, refreshCrossChainHistory } from './crosschainHistory';
 import {
   activityStatusOf,
@@ -525,6 +525,7 @@ export function streamActivity(
 
   const rgb: any = rgbAccountAdapter(); // the node, or RGB on this phone
   const rgbConnected = !!rgb?.isConnected();
+  const onDevice = rgbConnected && rgbAccountIsOnDevice();
   // Over NWC, list_transactions is Lightning invoices: the node's on-chain list
   // would need an rln_list_transactions method.
   const overNwc = typeof rgb?.walletType === 'function';
@@ -552,16 +553,23 @@ export function streamActivity(
       label: 'RGB transfers',
       load: async () => {
         const network = await rgbNetwork();
-        const perAsset = await Promise.all(rgbAssets.map(async (meta) => {
+        const forAsset = async (meta: AssetMeta) => {
           try {
             const res: any = await rgb.listTransfers({ asset_id: meta.asset_id });
             return { meta, transfers: (res?.transfers || res || []) as any[] };
           } catch (err) {
             // Per-asset failure is non-fatal; keep going.
             console.warn(`ActivityService: failed to load transfers for ${meta.ticker}`, err);
-            return { meta, transfers: [] };
+            return { meta, transfers: [] as any[] };
           }
-        }));
+        };
+        // RGB on this phone is one local wallet database: ask it one asset at a time.
+        let perAsset: Awaited<ReturnType<typeof forAsset>>[] = [];
+        if (onDevice) {
+          for (const meta of rgbAssets) perAsset.push(await forAsset(meta));
+        } else {
+          perAsset = await Promise.all(rgbAssets.map(forAsset));
+        }
         const items: ActivityItem[] = [];
         for (const { meta, transfers } of perAsset) items.push(...transferItems(transfers, meta, network, items.length));
         return items;
