@@ -21,7 +21,7 @@ interface CreateUTXOModalProps {
   visible: boolean;
   onClose: () => void;
   onSuccess: () => void;
-  operationType: 'issuance' | 'channel';
+  operationType: 'issuance' | 'channel' | 'receive';
   channelCapacity?: number;
   error?: string;
 }
@@ -59,7 +59,7 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
       return channelCapacity || DEFAULT_UTXO_SIZE;
     }
     // Default size for issuing an asset
-    if (operationType === 'issuance') {
+    if (operationType === 'issuance' || operationType === 'receive') {
       return DEFAULT_UTXO_SIZE;
     }
     // For channel, use the channel capacity
@@ -156,7 +156,9 @@ export const CreateUTXOModal: React.FC<CreateUTXOModalProps> = ({
               <Text style={styles.infoTitle}>
                 {operationType === 'issuance'
                   ? 'Issuing an RGB asset requires colorable UTXOs.'
-                  : 'Opening a channel with RGB assets requires colorable UTXOs.'}
+                  : operationType === 'receive'
+                    ? 'A blinded RGB invoice needs a free colorable UTXO to receive into.'
+                    : 'Opening a channel with RGB assets requires colorable UTXOs.'}
               </Text>
               <Text style={styles.infoDescription}>
                 This operation requires an on-chain transaction. A fee of approximately{' '}
