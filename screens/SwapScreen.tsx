@@ -65,6 +65,7 @@ import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 
 interface Props {
   navigation: any;
+  route?: { params?: { fromAsset?: string; toAsset?: string; fromAmountSat?: number; fromAmountUnits?: number } };
 }
 
 interface Asset {
@@ -76,7 +77,7 @@ interface Asset {
   precision?: number;
 }
 
-export default function SwapScreen({ navigation }: Props) {
+export default function SwapScreen({ navigation, route }: Props) {
   const dispatch = useAppDispatch();
   const { height: screenHeight } = useWindowDimensions();
   const swapState = useAppSelector((state: RootState) => state.swap);
@@ -205,6 +206,20 @@ export default function SwapScreen({ navigation }: Props) {
     // The destination comes from the loaded pairs (USDT on the RGB node, USDB on
     // Spark): presetting one here showed it for a moment, then swapped it.
   }, []);
+
+  // Prefilled from KaleidoMind: the pair and amount the user asked for; quoting and review stay here.
+  useEffect(() => {
+    const p = route?.params;
+    if (!p?.fromAsset || !p.toAsset) return;
+    dispatch(setFromAsset(p.fromAsset));
+    dispatch(setToAsset(p.toAsset));
+    if (isBtcTicker(p.fromAsset) && Number.isSafeInteger(p.fromAmountSat) && p.fromAmountSat! > 0) {
+      dispatch(setFromAmount(String(satsToBtcDisplay(p.fromAmountSat!))));
+    } else if (!isBtcTicker(p.fromAsset) && Number.isFinite(p.fromAmountUnits) && p.fromAmountUnits! > 0) {
+      dispatch(setFromAmount(String(p.fromAmountUnits)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params]);
 
   // Clear polling interval on unmount
   useEffect(() => {

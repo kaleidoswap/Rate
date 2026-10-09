@@ -134,7 +134,9 @@ export default function SendScreen({ navigation, route }: Props) {
     const p = route.params ?? {};
     if (p.prefilledAddress || p.address) setInput(p.prefilledAddress || p.address);
     if (p.contactName) setContactName(p.contactName);
-    if (p.prefilledAmount) {
+    if (Number.isSafeInteger(p.prefilledAmountSat) && p.prefilledAmountSat > 0) {
+      setAmountSat(p.prefilledAmountSat);
+    } else if (p.prefilledAmount) {
       const n = Number(p.prefilledAmount);
       if (Number.isFinite(n) && n > 0) setAmountSat(bitcoinUnit === 'BTC' ? Math.round(n * 1e8) : Math.round(n));
     }
