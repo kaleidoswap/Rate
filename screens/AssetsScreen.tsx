@@ -22,7 +22,9 @@ import { EmptyState } from '../components/EmptyState';
 import { AssetIcon } from '../components/AssetIcon';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { NetworkStack } from '../components/NetworkStack';
-import { IssueAssetModal } from '../components/IssueAssetModal';
+import { useRgbWalletSheets } from '../components/rgb/RgbWalletTools';
+import { rgbAccountAdapter } from '../services/protocols';
+import { rgbWalletSupport } from '../utils/rgb-wallet';
 import { usePolicy } from '../hooks/usePolicy';
 import { formatBitcoinAmount, useBitcoinPrice, useDisplayAmount } from '../utils/bitcoinUnits';
 import { getAssetFamily } from '../utils/account-routing';
@@ -61,10 +63,18 @@ export default function AssetsScreen({ navigation, route }: Props) {
   const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const policy = usePolicy();
   const isLite = policy.level === 'lite';
-  // Issuing RGB assets is an advanced/experimental surface — hidden in Lite mode.
-  const canIssue = policy.showExperimental;
+  // Issuing RGB assets is an Advanced surface, offered only where the RGB account can issue.
+  const canIssue = policy.showExperimental && rgbWalletSupport(rgbAccountAdapter()).issue.length > 0;
+  const rgbSheets = useRgbWalletSheets({
+    onViewAsset: (a) => navigation.navigate('AssetDetail', {
+      asset: { asset_id: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, issued_supply: a.supply, isRGB: true, protocol: 'RGB', balance: { settled: a.supply, future: a.supply, spendable: a.supply } },
+    }),
+  });
   // "Issue asset" elsewhere in the app opens this screen with the issue form up.
-  const [showIssueModal, setShowIssueModal] = useState(!!route?.params?.issue && canIssue);
+  useEffect(() => {
+    if (route?.params?.issue && canIssue) rgbSheets.openIssue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params?.issue]);
   const [filter, setFilter] = useState<AssetFilter>('all');
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
@@ -190,7 +200,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
         title="Assets"
         showBack
         rightAction={canIssue ? (
-          <TouchableOpacity style={styles.addButton} onPress={() => setShowIssueModal(true)}
+          <TouchableOpacity style={styles.addButton} onPress={rgbSheets.openIssue}
             accessibilityRole="button" accessibilityLabel="Issue a new asset">
             <Ionicons name="add" size={22} color={theme.colors.text.primary} />
           </TouchableOpacity>
@@ -276,11 +286,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
         )}
       </ScrollView>
 
-      <IssueAssetModal
-        visible={showIssueModal}
-        onClose={() => setShowIssueModal(false)}
-        onSuccess={refresh}
-      />
+      {rgbSheets.sheets}
     </SafeAreaView>
   );
 }

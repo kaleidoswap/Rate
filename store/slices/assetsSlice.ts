@@ -115,6 +115,20 @@ export const syncAssets = createAsyncThunk<
   }
 );
 
+/** Re-reads the RGB account's assets (after an issuance or a transfer settles). */
+export const refreshRgbAssets = createAsyncThunk<void, void>(
+  'assets/refreshRgb',
+  async (_, { dispatch }) => {
+    const adapter = rgbAccountAdapter() as any;
+    if (!adapter?.isConnected()) return;
+    const listed = await adapter.listAssets();
+    const records = listed
+      .map((a: any) => assetRecordFromUnified(a, 'RGB'))
+      .filter((r: InventoryRecord | null): r is InventoryRecord => r !== null);
+    dispatch(assetsSlice.actions.setProtocolAssets({ protocol: 'RGB', assets: records }));
+  }
+);
+
 export const issueNiaAsset = createAsyncThunk<
   NiaAsset,
   {

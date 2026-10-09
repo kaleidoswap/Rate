@@ -52,7 +52,7 @@ import { NetworkStack } from '../components/NetworkStack';
 import { AmountEditorModal } from '../components/AmountEditorModal';
 import { RgbAssetSheet, type RgbAssetChoice } from '../components/receive/RgbAssetSheet';
 import { RgbReceiveAdvanced, type RgbUtxoState } from '../components/receive/RgbReceiveAdvanced';
-import { CreateUTXOModal } from '../components/CreateUTXOModal';
+import { RgbUtxoSheet } from '../components/rgb/RgbUtxoSheet';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { feedback } from '../utils/feedback';
 import {
@@ -1414,8 +1414,8 @@ export default function ReceiveScreen({ navigation }: Props) {
     try {
       const list = await runReceiveOperation('List RGB UTXOs', () => listRgbUtxos(adapter), 15_000);
       setRgbUtxos({ loading: false, list });
-    } catch (e: any) {
-      setRgbUtxos({ loading: false, error: e?.message || 'Couldn’t load UTXOs.' });
+    } catch {
+      setRgbUtxos({ loading: false, error: 'Couldn’t load UTXOs. Try again.' });
     }
   };
 
@@ -1916,11 +1916,12 @@ export default function ReceiveScreen({ navigation }: Props) {
         onPickAny={() => receiveRgbAsset(null)}
         onPickAsset={receiveRgbAsset}
       />
-      <CreateUTXOModal
+      <RgbUtxoSheet
         visible={showCreateUtxos}
         onClose={() => setShowCreateUtxos(false)}
-        onSuccess={() => { void loadRgbUtxos(); }}
-        operationType="receive"
+        assets={rgbAssets}
+        reason="A blinded invoice needs a free colorable UTXO to receive into."
+        onCreated={() => { void loadRgbUtxos(); }}
       />
 
       {/* Amount editor — WDK AmountInput (BTC ↔ USD) inside a bottom sheet */}

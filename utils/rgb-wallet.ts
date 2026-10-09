@@ -303,6 +303,21 @@ export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' 
   return 'The transfer couldn’t be cancelled. Try again.';
 }
 
+// ── UTXO creation ─────────────────────────────────────────────────────────
+
+export const RGB_UTXO_COUNTS = [1, 3, 5, 10] as const;
+export const RGB_UTXO_SIZES = [1000, 3000, 10_000] as const;
+
+/** What creating `num` UTXOs of `size` sats costs at `feeRate`, and whether the plain bitcoin covers it. */
+export function createUtxosEstimate({ num, size, feeRate, bitcoinSats }: {
+  num: number; size: number; feeRate: number; bitcoinSats?: number;
+}): { feeSats: number; totalSats: number; enough: boolean } {
+  // A couple of inputs, one output per UTXO, and change.
+  const feeSats = Math.ceil((110 + 43 * num) * feeRate);
+  const totalSats = num * size + feeSats;
+  return { feeSats, totalSats, enough: bitcoinSats == null || totalSats <= bitcoinSats };
+}
+
 // ── Polling ───────────────────────────────────────────────────────────────
 
 /**
