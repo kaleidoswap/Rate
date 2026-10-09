@@ -47,10 +47,12 @@ import {
 } from '../hooks/useDepositDetection';
 import { useSparkAutoClaim } from '../hooks/useSparkAutoClaim';
 import { AssetIcon } from '../components/AssetIcon';
-import { AssetSelector } from '../components/AssetSelector';
-import { UsdCoinIcon } from '../components/ProtocolIcons';
+import { RgbIcon, UsdCoinIcon } from '../components/ProtocolIcons';
+import { NetworkStack } from '../components/NetworkStack';
 import { AmountEditorModal } from '../components/AmountEditorModal';
-import { NewAssetSheet, type NewAssetKind } from '../components/NewAssetSheet';
+import { RgbAssetSheet, type RgbAssetChoice } from '../components/receive/RgbAssetSheet';
+import { RgbReceiveAdvanced, type RgbUtxoState } from '../components/receive/RgbReceiveAdvanced';
+import { CreateUTXOModal } from '../components/CreateUTXOModal';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { feedback } from '../utils/feedback';
 import {
@@ -64,6 +66,7 @@ import {
 import {
   accountsOnChain, chainLabel, defaultDestination, destinationsFor, legacyRoute, lightningDestinations,
   methodsFor, rgbAccountLabel, rgbCanReceiveOnchain, accountLabel, routeOf, universalChains, universalLightning,
+  methodIcons, receiveAccountIcon, receiveAssetLabel, receiveSummary,
   type ReceiveAccountInfo, type ReceiveCaps, type ReceiveChain, type ReceiveMethodId,
 } from '../utils/receive-routes';
 import { MyAddressPanel } from '../components/receive/MyAddressPanel';
@@ -75,10 +78,12 @@ import { BarkBoardingPanel } from '../components/receive/BarkBoardingPanel';
 import { BridgeEntryCard } from '../components/receive/BridgeEntryCard';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import { contactKeyFor, recordContactEvent } from '../services/contactHistory';
+import {
+  ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, listRgbUtxos, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport,
+  type RgbReceiveOptions,
+} from '../utils/rgb-receive';
 
-// Sentinel asset id for receiving an RGB asset the user doesn't hold yet
-// (generates a blind RGB invoice with no specific asset_id).
-const NEW_RGB_ASSET_ID = 'RGB_NEW';
+const NEW_RGB_ASSET_ID = ANY_RGB_ASSET_ID;
 // Verbose receive logging is opt-in even in dev. In an Expo dev client every
 // console.log is a bridge round-trip, and the unified flow emits ~12+ lines per
 // generation plus one on every tap — enough to visibly stall the JS thread while
@@ -242,9 +247,10 @@ export default function ReceiveScreen({ navigation }: Props) {
   const [showCountdown, setShowCountdown] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [showAssetSelector, setShowAssetSelector] = useState(false);
-  // "+" opens the new-asset chooser (Spark / Arkade / new RGB asset).
-  const [showNewAsset, setShowNewAsset] = useState(false);
+  const [showRgbAssets, setShowRgbAssets] = useState(false);
+  const [rgbOptions, setRgbOptions] = useState<RgbReceiveOptions>(DEFAULT_RGB_RECEIVE_OPTIONS);
+  const [rgbUtxos, setRgbUtxos] = useState<RgbUtxoState | null>(null);
+  const [showCreateUtxos, setShowCreateUtxos] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [channelsLoading, setChannelsLoading] = useState(false);
@@ -412,12 +418,24 @@ export default function ReceiveScreen({ navigation }: Props) {
   // methods: RGB USDT invoice, Spark).
   const unifiedAsset: 'BTC' | 'USD' = isUsdAsset ? 'USD' : 'BTC';
   const assetFamily = isUsdAsset ? 'USD' as const : getAssetFamily(selectedAsset.asset_id, selectedAsset.ticker);
-  const receiveMethodIds: ReceiveMethodId[] = methodsFor(assetFamily, receiveAccounts, caps);
+  // An asset the RGB account doesn't hold yet (any, or one by contract id) has no channel: on-chain only.
+  const rgbAssetHeld = rgbAssets.some((a) => a.asset_id === selectedAsset.asset_id);
+  const receiveMethodIds: ReceiveMethodId[] = methodsFor(assetFamily, receiveAccounts, caps)
+    .filter((m) => assetFamily !== 'RGB' || rgbAssetHeld || m === 'onchain');
   const route = routeOf({ networkType, arkadeSubMode, selectedAccount });
   const destinationsOf = (method: ReceiveMethodId) => destinationsFor(method, receiveAccounts, caps, assetFamily);
   const routeDestinations = destinationsOf(route.method);
-  const routeDestination = route.account ?? defaultDestination(routeDestinations, null, requestedSats);
+  // A remembered account that can't take this asset (Arkade for an RGB asset) never names the route.
+  const routeDestination = route.account && routeDestinations.some((d) => d.account === route.account)
+    ? route.account
+    : defaultDestination(routeDestinations, null, requestedSats);
   const routeTarget = routeDestinations.find((d) => d.account === routeDestination);
+  const rgbAdapterNow = rgbAccountAdapter();
+  const rgbConnected = !!rgbAdapterNow?.isConnected();
+  const rgbSupport = rgbReceiveSupport(rgbConnected ? rgbAdapterNow : null);
+  // RGB invoice options are an Advanced-mode control; Lite always makes the default invoice.
+  const showRgbAdvanced = !isLite && selectedAsset.isRGB && networkType === 'onchain' && rgbConnected;
+  const rgbOptionsInEffect = isLite ? DEFAULT_RGB_RECEIVE_OPTIONS : rgbOptions;
   // A fixed-amount destination (Bark, Arkade Lightning) waits for an amount instead of failing.
   const awaitingAmount = networkType === 'lightning' && !!routeTarget?.needsAmount && requestedSats <= 0;
 
@@ -816,19 +834,15 @@ export default function ReceiveScreen({ navigation }: Props) {
           if (!rgbAssetAdapter?.isConnected() || !rgbAssetAdapter.createRgbInvoice) {
             throw new Error('Turn on RGB in Settings, or connect your RGB node, to receive RGB assets.');
           }
-          // 'RGB_NEW' = a blind invoice (no asset_id) that can receive any RGB
-          // asset the user doesn't hold yet — the "New RGB asset" entry point.
+          // No asset id (RGB_NEW) receives any RGB asset, including one not held yet.
+          const params = rgbInvoiceParams({
+            assetId: selectedAsset.asset_id,
+            expirySeconds,
+            options: rgbOptionsInEffect,
+            support: rgbReceiveSupport(rgbAssetAdapter),
+          });
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>
-            callAbortableAdapterMethod<any>(
-              rgbAssetAdapter,
-              'createRgbInvoice',
-              [{
-                ...(selectedAsset.asset_id === NEW_RGB_ASSET_ID ? {} : { asset_id: selectedAsset.asset_id }),
-                min_confirmations: 1,
-                duration_seconds: expirySeconds,
-              }],
-              signal,
-            ));
+            callAbortableAdapterMethod<any>(rgbAssetAdapter, 'createRgbInvoice', [params], signal));
           result = rgbInvoice?.invoice ?? rgbInvoice?.recipient_id;
           methodMeta = {
             key: 'rgb-onchain',
@@ -904,11 +918,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         ms: Math.round(nowMs() - startedAt),
       });
       const errorMessage = error instanceof Error ? error.message : 'Failed to generate address. Please try again.';
-      if (errorMessage.includes('No uncolored UTXOs')) {
-        setError('Your RGB Lightning node has no free bitcoin output to receive this asset into. Send a small amount of bitcoin to it on-chain first, or receive over Lightning.');
-      } else {
-        setError(errorMessage);
-      }
+      setError(rgbReceiveErrorMessage(errorMessage, { advanced: showRgbAdvanced, onDevice: rgbAccountIsOnDevice() }));
       setAddress('');
     } finally {
       if (isCurrentGeneration()) setLoading(false);
@@ -1323,6 +1333,8 @@ export default function ReceiveScreen({ navigation }: Props) {
     if (selectedAsset && allAssets.length > 0) {
       const isAssetAvailable =
         selectedAsset.asset_id === NEW_RGB_ASSET_ID ||
+        // Any RGB asset can be received on-chain, held or not (picked by contract id).
+        (selectedAsset.isRGB && networkType === 'onchain') ||
         // Synthetic 'USD' isn't a real per-network asset (it's the multi-protocol
         // USD aggregator) so it never appears in allAssets — don't bounce it to BTC.
         selectedAsset.asset_id === 'USD' ||
@@ -1342,7 +1354,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // A single request identity prevents overlapping amount/network regeneration.
   const cancelScheduledAddress = useReceiveGeneration(
-    networkType !== 'unified' && !awaitingAmount ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, routeDestination, amount, expirySeconds, note]) : null,
+    networkType !== 'unified' && !awaitingAmount ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, routeDestination, amount, expirySeconds, note, selectedAsset.isRGB ? rgbOptionsInEffect : null]) : null,
     () => { setAddress(''); setError(null); setLoading(true); },
     () => { void generateAddress(); },
     () => { addressGenerationRef.current += 1; },
@@ -1383,22 +1395,33 @@ export default function ReceiveScreen({ navigation }: Props) {
     (!!receiveTarget && !showDepositSuccess) ||
     ['pending', 'claimed', 'failed', 'expired'].includes(depositMonitor.status);
 
-  // Handle a pick from the "+" new-asset sheet: switch to a fresh receive on the
-  // chosen protocol (Spark / Arkade address, or a blind RGB invoice).
-  const handleNewAsset = (kind: NewAssetKind) => {
+  // An RGB asset is received on-chain into the RGB account.
+  const receiveRgbAsset = (asset: RgbAssetChoice | null) => {
     feedback.select();
     resetReceiveSurface();
-    if (kind === 'spark') {
-      setSelectedAsset(btcAsset());
-      setNetworkType('spark');
-    } else if (kind === 'arkade') {
-      setSelectedAsset(btcAsset());
-      setNetworkType('arkade');
-    } else {
-      // New RGB asset → blind RGB invoice via the on-chain RGB path.
-      setSelectedAsset({ asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'New RGB asset', isRGB: true });
-      setNetworkType('onchain');
+    setSelectedAsset(asset
+      ? { asset_id: asset.asset_id, ticker: asset.ticker, name: asset.name, isRGB: true }
+      : { asset_id: NEW_RGB_ASSET_ID, ticker: 'RGB', name: 'Any RGB asset', isRGB: true });
+    setSelectedAccount('RGB');
+    setArkadeSubMode('ark');
+    setNetworkType('onchain');
+  };
+
+  const loadRgbUtxos = async () => {
+    const adapter = rgbAccountAdapter();
+    if (!adapter?.isConnected()) return;
+    setRgbUtxos({ loading: true });
+    try {
+      const list = await runReceiveOperation('List RGB UTXOs', () => listRgbUtxos(adapter), 15_000);
+      setRgbUtxos({ loading: false, list });
+    } catch (e: any) {
+      setRgbUtxos({ loading: false, error: e?.message || 'Couldn’t load UTXOs.' });
     }
+  };
+
+  const changeRgbOptions = (next: RgbReceiveOptions) => {
+    resetReceiveSurface();
+    setRgbOptions(next);
   };
 
   // ── Asset tabs: BTC | USD | (custom) | + ──────────────────────────────────
@@ -1414,20 +1437,27 @@ export default function ReceiveScreen({ navigation }: Props) {
 
   // One line saying what the request is; tap it to change asset, method or account.
   const renderOptionsPill = () => {
-    const asset = selectedAsset.ticker === 'BTC' ? 'Bitcoin' : isUsdAsset ? 'US Dollar' : selectedAsset.name || selectedAsset.ticker;
-    const how = ({ universal: 'any wallet', lightning: 'Lightning', onchain: 'on-chain', spark: 'Spark', ark: 'Ark' } as Record<ReceiveMethodId, string>)[route.method];
-    const landsIn = networkType === 'unified' ? universalLnAccount : routeDestination;
-    const summary = [how, landsIn ? `to ${accountLabel(landsIn, caps)}` : null].filter(Boolean).join(' · ');
+    const asset = receiveAssetLabel(selectedAsset);
+    const { text: summary, icons } = receiveSummary({
+      method: route.method,
+      account: networkType === 'unified' ? (unifiedAsset === 'BTC' ? universalLnAccount : null) : routeDestination,
+      caps,
+      included: networkType === 'unified' && unifiedAsset === 'BTC' ? universalAccounts.map((a) => a.account) : [],
+    });
     return (
       <TouchableOpacity
         accessibilityRole="button" accessibilityLabel={`${asset}, ${summary}. Change receive options`}
         onPress={() => { feedback.select(); setShowOptions(true); }} activeOpacity={0.7} style={styles.optionsPill}
       >
-        {selectedAsset.ticker === 'BTC' || isUsdAsset
-          ? (isUsdAsset ? <UsdCoinIcon size={16} /> : <AssetIcon ticker="BTC" size={16} showBadge={false} />)
-          : <AssetIcon ticker={selectedAsset.ticker} protocol={selectedAsset.isRGB ? 'RGB' : undefined} size={16} showBadge={false} />}
+        {selectedAsset.asset_id === NEW_RGB_ASSET_ID
+          ? <RgbIcon size={16} />
+          : selectedAsset.ticker === 'BTC' || isUsdAsset
+            ? (isUsdAsset ? <UsdCoinIcon size={16} /> : <AssetIcon ticker="BTC" size={16} showBadge={false} />)
+            : <AssetIcon ticker={selectedAsset.ticker} protocol={selectedAsset.isRGB ? 'RGB' : undefined} size={16} showBadge={false} />}
         <Text style={styles.optionsPillAsset} numberOfLines={1}>{asset}</Text>
-        {!!summary && <Text style={styles.optionsPillSummary} numberOfLines={1}>· {summary}</Text>}
+        {!!summary && <Text style={styles.optionsPillSummary}>·</Text>}
+        {icons.length > 0 && <NetworkStack networks={icons} size={16} />}
+        {!!summary && <Text style={styles.optionsPillSummary} numberOfLines={1}>{summary}</Text>}
         <Ionicons name="chevron-down" size={14} color={theme.colors.text.secondary} />
       </TouchableOpacity>
     );
@@ -1492,17 +1522,29 @@ export default function ReceiveScreen({ navigation }: Props) {
               showBadge={false}
             />
           ), t)}
-        <TouchableOpacity
-          style={styles.assetAddTab}
-          accessibilityRole="button" accessibilityLabel="Receive another asset"
-          onPress={() => { feedback.select(); afterOptions(() => setShowNewAsset(true)); }}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="add" size={20} color={theme.colors.text.secondary} />
-        </TouchableOpacity>
       </View>
     );
   };
+
+  const renderRgbEntry = () => (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel={rgbConnected ? 'Receive an RGB asset. Any asset, or a specific one by contract ID' : 'Receive an RGB asset. Turn on RGB in Settings first'}
+      disabled={!rgbConnected}
+      onPress={() => { feedback.select(); afterOptions(() => setShowRgbAssets(true)); }}
+      activeOpacity={0.7}
+      style={[styles.rgbEntry, !rgbConnected && { opacity: 0.6 }]}
+    >
+      <View style={styles.rgbEntryIcon}><RgbIcon size={20} /></View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rgbEntryTitle}>Receive an RGB asset</Text>
+        <Text style={styles.rgbEntryDetail} numberOfLines={2}>
+          {rgbConnected ? 'Any asset, or a specific one by contract ID' : 'Turn on RGB in Settings, or connect your RGB node'}
+        </Text>
+      </View>
+      {rgbConnected && <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />}
+    </TouchableOpacity>
+  );
 
   // ── Amount row with pencil edit (opens the multi-currency editor) ─────────
   const renderAmountRowInner = () => {
@@ -1807,6 +1849,17 @@ export default function ReceiveScreen({ navigation }: Props) {
         ) : <>
           {renderOptionsPill()}
           {renderContent()}
+          {showRgbAdvanced && (
+            <RgbReceiveAdvanced
+              support={rgbSupport}
+              options={rgbOptions}
+              onChange={changeRgbOptions}
+              requestExpirySeconds={expirySeconds}
+              utxos={rgbUtxos}
+              onLoadUtxos={() => { void loadRgbUtxos(); }}
+              onCreateUtxos={rgbSupport.createUtxos ? () => setShowCreateUtxos(true) : undefined}
+            />
+          )}
           {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
           {/* With a QR on screen the status sits right under it; otherwise here. */}
           {!qrOnScreen && renderStatus()}
@@ -1819,6 +1872,7 @@ export default function ReceiveScreen({ navigation }: Props) {
         <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={styles.optionsCaption}>Asset</Text>
           {renderAssetTabs()}
+          {renderRgbEntry()}
           <Text style={styles.optionsCaption}>How they pay</Text>
           <ReceiveRoutePicker
             methods={receiveMethodIds}
@@ -1830,6 +1884,8 @@ export default function ReceiveScreen({ navigation }: Props) {
             amountSats={requestedSats}
             chains={unifiedAsset === 'BTC' ? chainGroups : undefined}
             accountLabel={(account) => accountLabel(account, caps)}
+            iconFor={(account) => receiveAccountIcon(account, caps)}
+            methodIcons={Object.fromEntries(receiveMethodIds.map((m) => [m, methodIcons(m, receiveAccounts, caps)]))}
             chain={activeChain}
             onChain={(chain) => {
               if (chain === activeChain) return;
@@ -1852,42 +1908,19 @@ export default function ReceiveScreen({ navigation }: Props) {
         </ScrollView>
       </Sheet>
 
-      {/* Asset picker (opened by the "+" tab) */}
-      <AssetSelector
-        visible={showAssetSelector}
-        onClose={() => setShowAssetSelector(false)}
-        onSelect={(asset) => {
-          resetReceiveSurface();
-          setSelectedAsset({
-            asset_id: asset.asset_id,
-            ticker: asset.ticker,
-            name: asset.name,
-            isRGB: asset.isRGB || asset.protocol === 'RGB',
-            balance: asset.balance,
-          });
-        }}
-        assets={allAssets.map((a) => ({
-          asset_id: a.asset_id,
-          ticker: a.ticker,
-          name: a.name,
-          balance: a.balance,
-          isRGB: a.isRGB,
-          protocol: a.isRGB ? ('RGB' as const) : undefined,
-        }))}
-        selectedAssetId={selectedAsset?.asset_id}
-        title="Select Asset"
+      <RgbAssetSheet
+        visible={showRgbAssets}
+        onClose={() => setShowRgbAssets(false)}
+        accountLabel={rgbLabel}
+        held={rgbAssets.filter((a) => getAssetFamily(a.asset_id, a.ticker) === 'RGB')}
+        onPickAny={() => receiveRgbAsset(null)}
+        onPickAsset={receiveRgbAsset}
       />
-
-      {/* "+" new-asset chooser (Spark / Arkade / new RGB asset) */}
-      <NewAssetSheet
-        visible={showNewAsset}
-        onClose={() => setShowNewAsset(false)}
-        available={(() => {
-          const status = getProtocolStatus();
-          return { spark: !!status.SPARK, arkade: !!status.ARKADE, rgb: !!status.RGB };
-        })()}
-        onPick={handleNewAsset}
-        onChooseExisting={() => setShowAssetSelector(true)}
+      <CreateUTXOModal
+        visible={showCreateUtxos}
+        onClose={() => setShowCreateUtxos(false)}
+        onSuccess={() => { void loadRgbUtxos(); }}
+        operationType="receive"
       />
 
       {/* Amount editor — WDK AmountInput (BTC ↔ USD) inside a bottom sheet */}
