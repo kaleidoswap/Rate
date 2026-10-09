@@ -25,6 +25,6 @@ export function ReceiveStatus({ visible, status, message, hint }: {
       <Text style={{ color, fontSize: t.typography.fontSize.sm }}>{title}</Text>
     </View>
     {!!hint && !received && !problem && <Text style={{ color: t.colors.warning[500], textAlign: 'center', fontSize: t.typography.fontSize.xs }}>{hint}</Text>}
-    {!!message && (problem || busy) && <Text style={{ color: t.colors.text.secondary, textAlign: 'center', fontSize: t.typography.fontSize.sm }}>{message}</Text>}
+    {!!message && (problem || busy || status === 'watching') && <Text style={{ color: t.colors.text.secondary, textAlign: 'center', fontSize: t.typography.fontSize.sm }}>{message}</Text>}
   </View>;
 }

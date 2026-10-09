@@ -3,7 +3,7 @@
 // An activity list for one place in the app: an asset's history on its detail
 // screen (`assetId`), or the latest items with pending payments first.
 // Tapping a row opens the ActivityDetailSheet inline.
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
     View,
     Text,
@@ -30,6 +30,7 @@ import {
 import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
 import { useActivityFeed } from '../hooks/useActivityFeed';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { RGB_TRANSFER_STATUS_LABEL } from '../utils/rgb-wallet';
 
 interface Props {
     onViewAll?: () => void;
@@ -40,6 +41,8 @@ interface Props {
     title?: string;
     limit?: number;
     style?: StyleProp<ViewStyle>;
+    /** Changing it loads the list again (e.g. an RGB transfer moved). */
+    refreshKey?: number;
 }
 
 function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
@@ -75,7 +78,7 @@ function amountPrefix(type: ActivityItemType): string {
 
 const MAX_ITEMS = 4;
 
-export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, assetTicker, title = 'Activity', limit, style }) => {
+export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, assetTicker, title = 'Activity', limit, style, refreshKey }) => {
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
     const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
@@ -106,6 +109,8 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
     }), [rgbAssets, swapHistory, walletId]);
     // Refreshes when the screen regains focus.
     const feed = useActivityFeed(feedOptions);
+    const { refresh } = feed;
+    useEffect(() => { if (refreshKey) void refresh(); }, [refreshKey, refresh]);
 
     const items = useMemo(() => {
         const list = assetId
@@ -127,7 +132,8 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
         const isIncoming = item.type === 'receive' || item.type === 'issuance' || item.type === 'swap';
         // Swaps carry the full "X sats → Y USDB" route in assetName; show it as a
         // subtitle so the route is visible without crowding the amount column.
-        const subtitle = item.type === 'swap' ? item.assetName : undefined;
+        const subtitle = item.type === 'swap' ? item.assetName
+            : item.rgbTransfer && item.status === 'pending' ? RGB_TRANSFER_STATUS_LABEL[item.rgbTransfer.status] : undefined;
 
         return (
             <TouchableOpacity

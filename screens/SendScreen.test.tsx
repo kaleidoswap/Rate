@@ -39,6 +39,9 @@ jest.mock('../services/kaleidoPay', () => ({
   quoteSpend: (q: any) => ({ asset: { ticker: 'sats' }, amount: q.recipientSat, fee: q.feeSat, total: q.totalSat }),
   formatSpend: (v: number) => `${v} sats`, bestOffer: (offers: any[]) => offers.filter(o => o.quote).sort((a, b) => a.quote.totalSat - b.quote.totalSat)[0],
 }));
+let mockFeeOptions: any = null;
+const mockSetSpeed = jest.fn();
+jest.mock('../services/kaleidoPay/rgbL1Pay', () => ({ rgbL1FeeOptions: () => mockFeeOptions, setRgbL1FeeSpeed: (s: string) => mockSetSpeed(s) }));
 jest.mock('../services/orchestra/client', () => ({
   isOrchestraConfigured: () => true, getRoutes: jest.fn(async () => []),
   getEstimate: jest.fn(async () => ({ estimatedOut: '4990000', feeAmount: '10000', totalFeeAmount: '10000', feeBps: 20, feeAsset: 'USDB', route: ['USDB', 'USDC'] })),
@@ -275,4 +278,31 @@ test('an EVM address sends USDC from Spark after review, and the transfer is tra
   }));
   expect(screen.getByText('Bridging')).toBeTruthy();
   expect(screen.getByText('Reference: o1')).toBeTruthy();
+});
+
+test('paying from RGB on this phone offers Slow, Normal and Fast with their fee; Normal by default', async () => {
+  mockFeeOptions = [
+    { speed: 'slow', rate: 3, feeSat: 900, live: true },
+    { speed: 'normal', rate: 7, feeSat: 2100, live: true },
+    { speed: 'fast', rate: 12, feeSat: 3600, live: true },
+  ];
+  const rgbOffer = { ...offer('rgb-btc', 3100), route: { kind: 'direct', sourceId: 'rgb-btc', from: 'btc:mainnet', to: 'btc:mainnet' } };
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([rgbOffer]);
+  const screen = await reviewed();
+  expect(screen.getByText('Network fee')).toBeTruthy();
+  expect(screen.getByText(/About 2,100 sats at 7 sat\/vB/)).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByText('Fast · 3,600 sats')); });
+  expect(mockSetSpeed).toHaveBeenLastCalledWith('fast');
+  expect(quotePaymentOffers).toHaveBeenCalledTimes(2);
+  expect(screen.getByText(/About 3,600 sats at 12 sat\/vB/)).toBeTruthy();
+  expect(screen.queryByText('Review updated quote')).toBeNull(); // the user chose it: no second review
+  mockFeeOptions = null;
+});
+
+test('no fee speed for other accounts', async () => {
+  mockFeeOptions = [{ speed: 'normal', rate: 2, feeSat: 600, live: false }];
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  const screen = await reviewed();
+  expect(screen.queryByText('Network fee')).toBeNull();
+  mockFeeOptions = null;
 });

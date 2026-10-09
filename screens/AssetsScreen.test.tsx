@@ -17,7 +17,10 @@ jest.mock('../utils/bitcoinUnits', () => ({
 jest.mock('../components/ScreenHeader', () => ({
   ScreenHeader: ({ rightAction }: any) => rightAction ?? null,
 }));
-jest.mock('../components/IssueAssetModal', () => ({ IssueAssetModal: () => null }));
+const mockOpenIssue = jest.fn();
+let mockRgb: any = { protocolName: 'RGB_L1', isConnected: () => true, issueAssetNia: jest.fn() };
+jest.mock('../components/rgb/RgbWalletTools', () => ({ useRgbWalletSheets: () => ({ sheets: null, openIssue: mockOpenIssue, openUtxos: jest.fn() }) }));
+jest.mock('../services/protocols', () => ({ rgbAccountAdapter: () => mockRgb }));
 
 const stateWith = (extra: object = {}) => ({
   wallet: {
@@ -95,7 +98,18 @@ test('one add button in Advanced; pull to refresh asks the dashboard for fresh b
   (DeviceEventEmitter as any).emit = emit;
   const screen = render(<AssetsScreen navigation={navigation()} />);
   expect(screen.getAllByLabelText('Issue a new asset')).toHaveLength(1);
+  fireEvent.press(screen.getByLabelText('Issue a new asset'));
+  expect(mockOpenIssue).toHaveBeenCalled();
   const scroll = screen.UNSAFE_getAllByType(require('react-native').ScrollView)[0];
   scroll.props.refreshControl.props.onRefresh();
   expect(emit).toHaveBeenCalledWith('rate.refreshBalance');
+});
+
+test('no issue button when the RGB account can’t issue (the node over NWC)', () => {
+  mockLevel = 'advanced';
+  const saved = mockRgb;
+  mockRgb = { protocolName: 'RGB_LN', isConnected: () => true, walletType: () => 'rln', hasRlnMethod: () => true };
+  const screen = render(<AssetsScreen navigation={navigation()} />);
+  expect(screen.queryByLabelText('Issue a new asset')).toBeNull();
+  mockRgb = saved;
 });

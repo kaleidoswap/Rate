@@ -12,7 +12,6 @@ const mockRestoreFile = jest.fn(async () => undefined);
 const mockRestoreCloud = jest.fn(async (): Promise<string> => 'restored');
 const mockFindBackup = jest.fn(async (): Promise<any> => null);
 jest.mock('expo-document-picker', () => ({ getDocumentAsync: jest.fn(async () => ({ canceled: false, assets: [{ uri: 'file:///cache/my.rgbbackup' }] })) }));
-jest.mock('react-native-rgb', () => ({ restoreBackup: jest.fn() }), { virtual: true });
 let mockNetwork: string | null = null;
 let mockPinned: string | null = null;
 let mockLocked: string | null = null;

@@ -72,11 +72,7 @@ patchedDependencies:
   '@kaleidorg/wallet-engine@1.0.0-beta.75': patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
   decode-uri-component@0.5.0: patches/decode-uri-component@0.5.0.patch
   metro@0.83.3: patches/metro@0.83.3.patch
-  # RGB on this phone keeps each extra network's wallet in a folder of its own.
-  react-native-rgb@0.2.4: patches/react-native-rgb@0.2.4.patch
 
 # Bark downloads checksum-verified native binaries during installation.
 onlyBuiltDependencies:
   - '@secondts/bark-react-native'
-  # Downloads rgb-lib's iOS xcframework (macOS only) for RGB on this phone.
-  - react-native-rgb

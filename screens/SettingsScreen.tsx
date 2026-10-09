@@ -2,6 +2,7 @@ import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
 import { loadRgbL1Network } from '../services/protocols/rgbL1';
 import { RgbAccountSettings, RGB_STATUS } from '../components/RgbAccountSettings';
+import { RgbWalletTools } from '../components/rgb/RgbWalletTools';
 import { rgbNetworkLabel } from '../services/protocols/rgbAccount';
 import { currentBarkHost, isBarkOff, loadBarkHost, saveBarkNetwork, setBarkOff } from '../services/protocols/barkPreferences';
 import { toEngineProtocol } from '../utils/protocol-bridge'
@@ -894,6 +895,7 @@ export default function SettingsScreen({ navigation }: Props) {
             onOpenNode={() => navigation.navigate('RgbNode')}
             onChanged={() => { refreshProtocolStatus(); setRgbRevision((r) => r + 1); void dispatch(loadBtcBalance()); }} />
         )}
+        {account === 'RGB' && <RgbWalletTools key={rgbRevision} />}
         {account && account !== 'RGB' && activeWallet?.id != null && <AccountSettings account={account} walletId={activeWallet.id}
           network={account === 'BARK' ? protoNetworks.bark ?? currentBarkHost()?.network ?? 'mainnet' : protoNetworks[PROTOCOL_TO_NETWORK_TYPE[account]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[account]]}
           connected={protocolStatus[account]}

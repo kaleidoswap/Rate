@@ -15,7 +15,7 @@
  * first opens.
  */
 import { File, Paths } from 'expo-file-system';
-import { rgbBackupPassword, rgbL1WalletKey, type RgbL1Network } from './rgbL1';
+import { rgbBackupPassword, rgbL1DataId, rgbL1WalletKey, type RgbL1Network } from './rgbL1';
 import { toFilesystemPath } from './bark';
 import { createVssClient, downloadBackupFile, readBackupManifest, uploadBackupFile, vssSigningKey, type BackupManifest } from './rgbVss';
 
@@ -50,7 +50,7 @@ export function onRgbBackupStatus(listener: (s: RgbBackupStatus) => void): () =>
   return () => listeners.delete(listener);
 }
 
-/** Per seed and network, apart from the other wallets' VSS data under the same key. */
+/** Per seed and wallet (`rgbL1DataId`), apart from the other wallets' VSS data under the same key. */
 export const rgbBackupStoreId = (mnemonic: string, network: string) => `rgb-l1-file-${rgbL1WalletKey(mnemonic)}-${network}`;
 
 /** Set while RGB on this phone is connected (./wdk.ts), cleared when it disconnects. */
@@ -80,7 +80,7 @@ export async function runRgbBackup(force = false): Promise<void> {
       try {
         await account.backup(toFilesystemPath(file.uri), rgbBackupPassword(ctx.mnemonic));
         const data = await file.bytes();
-        const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(ctx.mnemonic, ctx.network), vssSigningKey(ctx.mnemonic));
+        const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network)), vssSigningKey(ctx.mnemonic));
         const manifest = await uploadBackupFile(client, PREFIX, data);
         setStatus({ state: 'done', lastBackupAt: manifest.createdAt });
       } finally {
@@ -98,7 +98,7 @@ export async function runRgbBackup(force = false): Promise<void> {
 }
 
 const storeClient = (mnemonic: string, network: RgbL1Network) =>
-  createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(mnemonic, network), vssSigningKey(mnemonic));
+  createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(mnemonic, rgbL1DataId(network)), vssSigningKey(mnemonic));
 
 /**
  * Whether this seed has a cloud backup on `network`, without downloading it.
@@ -119,7 +119,7 @@ export type RgbRestoreResult = 'restored' | 'no-backup' | 'already-on-phone';
 export async function restoreRgbFromCloud(opts: {
   mnemonic: string
   network: RgbL1Network
-  /** react-native-rgb's `restoreBackup(path, password)`. */
+  /** rgb-lib's `restoreBackup(path, password)`. */
   restore: (path: string, password: string) => Promise<void>
 }): Promise<RgbRestoreResult> {
   const backup = await downloadBackupFile(storeClient(opts.mnemonic, opts.network), PREFIX);
@@ -129,7 +129,7 @@ export async function restoreRgbFromCloud(opts: {
     file.write(backup.data);
     await opts.restore(toFilesystemPath(file.uri), rgbBackupPassword(opts.mnemonic));
   } catch (e: any) {
-    if (/WalletDirAlreadyExists|already exists/i.test(`${e?.code ?? ''} ${e?.message ?? ''}`)) return 'already-on-phone';
+    if (/WalletDirAlreadyExists|WALLET_DIR_ALREADY_EXISTS|already exists/i.test(`${e?.code ?? ''} ${e?.message ?? ''}`)) return 'already-on-phone';
     throw e;
   } finally {
     try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
@@ -152,10 +152,10 @@ export async function restoreRgbFromFile(opts: {
     await opts.restore(opts.path, rgbBackupPassword(opts.mnemonic));
   } catch (e: any) {
     const why = `${e?.code ?? ''} ${e?.message ?? ''}`;
-    if (/WalletDirAlreadyExists|already exists/i.test(why)) {
+    if (/WalletDirAlreadyExists|WALLET_DIR_ALREADY_EXISTS|already exists/i.test(why)) {
       throw new Error('This phone already has RGB data for this wallet, so the file wasn’t restored.');
     }
-    if (/password|decrypt|InvalidBackup|WrongPassword/i.test(why)) {
+    if (/password|decrypt|InvalidBackup|WrongPassword|WRONG_PASSWORD|UnsupportedBackupVersion/i.test(why)) {
       throw new Error('This backup file isn’t for this wallet, or it’s damaged.');
     }
     throw e;

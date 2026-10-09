@@ -186,6 +186,11 @@ jest.mock('expo-sharing', () => ({
   shareAsync: jest.fn(async () => undefined),
 }));
 
+// expo-image-picker's native module isn't available under Jest either.
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn(async () => ({ canceled: true, assets: null })),
+}));
+
 jest.mock('expo-file-system', () => ({
   File: class {
     exists = true;

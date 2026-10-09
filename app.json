@@ -87,9 +87,9 @@
           },
           "android": {
             "minSdkVersion": 29,
-            "compileSdkVersion": 35,
+            "compileSdkVersion": 36,
             "targetSdkVersion": 34,
-            "buildToolsVersion": "35.0.0",
+            "buildToolsVersion": "36.0.0",
             "useLegacyPackaging": true
           }
         }

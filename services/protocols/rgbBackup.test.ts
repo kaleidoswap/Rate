@@ -38,7 +38,9 @@ test('a change backs up once after the burst settles, to the wallet’s own stor
   await runRgbBackup(); // waits for the one in flight
   expect(account.backup).toHaveBeenCalledTimes(1);
   expect(account.backup).toHaveBeenCalledWith(expect.stringMatching(/^\/cache\/rgb-backup-\d+\.rgbbackup$/), expect.stringMatching(/^[0-9a-f]{64}$/));
-  expect(createVssClient).toHaveBeenCalledWith('https://vss.kaleidoswap.com/vss', rgbBackupStoreId('seed', 'mutinynet'), expect.any(Uint8Array));
+  // Mutinynet is rgb-lib's custom signet now: its own store, never the old SIGNET wallet's.
+  expect(createVssClient).toHaveBeenCalledWith('https://vss.kaleidoswap.com/vss', rgbBackupStoreId('seed', 'mutinynet-signetcustom'), expect.any(Uint8Array));
+  expect(createVssClient).not.toHaveBeenCalledWith(expect.anything(), rgbBackupStoreId('seed', 'mutinynet'), expect.anything());
   expect(mockUpload).toHaveBeenCalledWith({}, 'rgb-backup-file', new Uint8Array([1, 2, 3]));
   expect(rgbBackupStatus()).toEqual({ state: 'done', lastBackupAt: 123 });
 });

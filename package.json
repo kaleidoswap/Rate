@@ -16,7 +16,7 @@
     "bundle-skills": "node node_modules/@kaleidorg/mind/scripts/bundle-skills.mjs --out skills.bundle.json node_modules/@kaleidorg/mind/skills/merchant-finder node_modules/@kaleidorg/mind/skills/paid-data node_modules/@kaleidorg/mind/skills/wallet-assistant skills",
     "sync-qvac-bundle": "node scripts/sync-qvac-bundle.js",
     "sync-mind": "bash scripts/sync-mind.sh",
-    "postinstall": "node scripts/prepare-bark-native.js && node scripts/sync-qvac-bundle.js && node scripts/patch-bare-kit-linker.js && npm run sync-mind",
+    "postinstall": "node scripts/prepare-bark-native.js && node modules/kaleido-rgb/scripts/download-rgb-lib-ios.js && node scripts/sync-qvac-bundle.js && node scripts/patch-bare-kit-linker.js && npm run sync-mind",
     "test:native-setup": "node --test scripts/prepare-bark-native.test.cjs",
     "test:dependency-security": "node --test scripts/dependency-security.test.cjs"
   },
@@ -102,7 +102,6 @@
     "react-native-markdown-display": "^7.0.2",
     "react-native-qrcode-svg": "^6.3.21",
     "react-native-reanimated": "~4.1.7",
-    "react-native-rgb": "0.2.4",
     "react-native-safe-area-context": "5.6.2",
     "react-native-screens": "~4.16.0",
     "react-native-svg": "^15.12.1",

@@ -6,6 +6,7 @@
  * Pure: the screen passes in what is connected and on which chain.
  */
 import type { AccountId, AssetFamily } from './account-routing';
+import { ANY_RGB_ASSET_ID } from './rgb-receive';
 
 export type ReceiveMethodId = 'universal' | 'lightning' | 'onchain' | 'spark' | 'ark';
 export type ReceiveChain = 'mainnet' | 'signet' | 'mutinynet' | 'testnet' | 'regtest';
@@ -54,12 +55,77 @@ export function rgbCanReceiveOnchain(caps: ReceiveCaps): boolean {
   return caps.nwcWalletType !== 'ln' && (caps.nwcWalletType == null || !!caps.nwcCapabilities?.includes('onchain'));
 }
 export function rgbAccountLabel(caps: ReceiveCaps): string {
-  if (caps.rgbOnDevice) return 'RGB wallet';
+  if (caps.rgbOnDevice) return 'RGB on this phone';
   return caps.nwcWalletType === 'ln' ? 'Lightning wallet' : 'RGB Lightning node';
 }
 /** An account's name as Receive shows it. */
 export function accountLabel(account: AccountId, caps: ReceiveCaps): string {
   return account === 'RGB' ? rgbAccountLabel(caps) : account === 'SPARK' ? 'Spark' : account === 'ARKADE' ? 'Arkade' : 'Bark';
+}
+
+/**
+ * The icon (a NetworkIcon key) for the account a payment lands in. The RGB account is
+ * RGB on this phone, the RGB Lightning Node, or a plain Lightning wallet over NWC.
+ */
+export function receiveAccountIcon(account: AccountId, caps: ReceiveCaps): string {
+  if (account === 'RGB') return caps.rgbOnDevice ? 'rgb' : caps.nwcWalletType === 'ln' ? 'lightning' : 'rln';
+  return account.toLowerCase();
+}
+
+/**
+ * Icons for a way to pay. Ark lands in Arkade or Bark (two Ark servers), so the generic
+ * Ark method shows the icon of each Ark account it can land in.
+ */
+export function methodIcons(method: ReceiveMethodId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps): string[] {
+  switch (method) {
+    case 'universal': return [];
+    case 'lightning': return ['lightning'];
+    case 'onchain': return ['onchain'];
+    case 'spark': return ['spark'];
+    case 'ark': {
+      const icons = arkDestinations(accounts).map(d => receiveAccountIcon(d.account, caps));
+      return icons.length ? icons : ['arkade'];
+    }
+  }
+}
+
+const SUMMARY_METHOD: Record<ReceiveMethodId, string> = {
+  universal: 'Any wallet', lightning: 'Lightning', onchain: 'On-chain', spark: 'Spark', ark: 'Ark',
+};
+
+/**
+ * The one-line summary of a request ("On-chain to Spark") and the icons beside it: the
+ * rail when it isn't an account (on-chain, Lightning), then the account it lands in.
+ * The universal code shows every account it includes.
+ */
+export function receiveSummary({ method, account, caps, included = [] }: {
+  method: ReceiveMethodId;
+  account: AccountId | null;
+  caps: ReceiveCaps;
+  /** Universal code: the accounts it includes. */
+  included?: AccountId[];
+}): { text: string; icons: string[] } {
+  if (method === 'universal') {
+    return {
+      text: account ? `Any wallet · Lightning to ${accountLabel(account, caps)}` : 'Any wallet',
+      icons: [...new Set(included.map(a => receiveAccountIcon(a, caps)))],
+    };
+  }
+  if (!account) return { text: SUMMARY_METHOD[method], icons: methodIcons(method, [], caps) };
+  const accountIcon = receiveAccountIcon(account, caps);
+  const rail = method === 'onchain' ? 'onchain' : method === 'lightning' && accountIcon !== 'rln' && accountIcon !== 'lightning' ? 'lightning' : null;
+  return {
+    text: method === 'spark' ? 'Spark' : `${SUMMARY_METHOD[method]} to ${accountLabel(account, caps)}`,
+    icons: rail ? [rail, accountIcon] : [accountIcon],
+  };
+}
+
+/** The asset as the summary names it. */
+export function receiveAssetLabel(asset: { asset_id: string; ticker: string; name?: string }): string {
+  if (asset.asset_id === ANY_RGB_ASSET_ID) return 'Any RGB asset';
+  if (asset.ticker === 'BTC') return 'Bitcoin';
+  if (/usd/i.test(asset.ticker)) return 'US Dollar';
+  return asset.name || asset.ticker;
 }
 
 /** Accounts a Lightning payment can land in, best first. */
@@ -98,7 +164,7 @@ export function onchainDestinations(accounts: ReceiveAccountInfo[], caps: Receiv
   if (rgb && rgbCanReceiveOnchain(caps)) {
     out.push({
       account: 'RGB', label: rgbAccountLabel(caps), chain: rgb.chain, needsAmount: false, available: true,
-      detail: caps.rgbOnDevice ? 'Your RGB wallet on this phone' : 'Your node’s bitcoin wallet',
+      detail: caps.rgbOnDevice ? 'Your RGB wallet · on-chain only' : 'Your node’s bitcoin wallet',
     });
   }
   const spark = has(accounts, 'SPARK');

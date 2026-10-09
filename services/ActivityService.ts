@@ -10,7 +10,7 @@
 //   1. Lightning payments (BTC LN + RGB LN) — RGB adapter `listPayments()`
 //   2. RGB on-chain transfers (per asset)   — RGB adapter `listTransfers()`
 //      On-chain BTC of the RGB account's wallet — RGB adapter `listTransactions()`
-//      (the HTTP node adapter and RGB on this phone; NWC has no on-chain list)
+//      (the HTTP node adapter, RGB on this phone, and NWC when it allows rln_list_transactions)
 //   3. Spark / Arkade unified transactions   — adapter `listTransactions()`
 //   4. KaleidoSwap atomic swaps              — provided from Redux swap history
 //   5. Electrum swap payments (on-chain)     — provided from KaleidoPay attempts
@@ -28,6 +28,7 @@ import {
 } from '../utils/crosschain-history';
 import { chainLabel } from '../utils/orchestra-ui';
 import { isPreimage } from '../utils/payment-proofs';
+import { isExpiredRgbInvoice, normalizeRgbTransfers, type RgbTransfer } from '../utils/rgb-wallet';
 
 export type ActivityLayer = 'L1' | 'RGB-L1' | 'LN' | 'RGB-LN' | 'Spark' | 'Arkade' | 'Bark' | 'Bark Signet' | 'Swap' | 'Cross-chain';
 
@@ -72,6 +73,8 @@ export interface ActivityItem {
   requestId?: string;
   /** Bridge deposit or send to another chain. */
   crossChain?: CrossChainRecord;
+  /** An RGB on-chain transfer's own progress (status is only pending/confirmed/failed). */
+  rgbTransfer?: Pick<RgbTransfer, 'status' | 'direction' | 'batchTransferIdx' | 'recipientId'>;
 }
 
 /** A valid preimage from an account's record, lowercased. */
@@ -342,15 +345,19 @@ function paymentItems(payments: any[], assetMap: Record<string, AssetMeta>): Act
   return items;
 }
 
-function transferItems(transfers: any[], meta: AssetMeta, network: string | undefined, offset: number): ActivityItem[] {
-  return transfers.map((t, i) => {
+/** An asset's RGB transfers; an invoice that expired unused is left out. */
+export function transferItems(transfers: any[], meta: AssetMeta, network: string | undefined, offset: number): ActivityItem[] {
+  const out: ActivityItem[] = [];
+  transfers.forEach((t, i) => {
+    const [parsed] = normalizeRgbTransfers([t]);
+    if (parsed && isExpiredRgbInvoice(parsed)) return;
     const kind: string = t.kind || 'Send';
     let type: ActivityItemType = 'send';
     if (kind === 'ReceiveBlind' || kind === 'ReceiveWitness' || kind.includes('Receive')) type = 'receive';
     else if (kind === 'Issuance' || kind === 'Inflation') type = 'issuance';
 
     const rawAmount = t.requested_assignment?.value ?? t.amount ?? 0;
-    return {
+    out.push({
       id: `transfer-${t.txid || offset + i}-${t.idx ?? 0}`,
       type,
       source: 'transfer',
@@ -365,8 +372,10 @@ function transferItems(transfers: any[], meta: AssetMeta, network: string | unde
       layer: 'RGB-L1',
       kind: t.kind,
       network,
-    };
+      ...(parsed ? { rgbTransfer: { status: parsed.status, direction: parsed.direction, batchTransferIdx: parsed.batchTransferIdx, recipientId: parsed.recipientId } } : {}),
+    });
   });
+  return out;
 }
 
 function protocolItems(proto: 'SPARK' | 'ARKADE' | 'BARK', txs: any[], network: string | undefined): ActivityItem[] {
@@ -527,7 +536,7 @@ export function streamActivity(
   const rgbConnected = !!rgb?.isConnected();
   const onDevice = rgbConnected && rgbAccountIsOnDevice();
   // Over NWC, list_transactions is Lightning invoices: the node's on-chain list
-  // would need an rln_list_transactions method.
+  // comes from rln_list_transactions instead.
   const overNwc = typeof rgb?.walletType === 'function';
   let networkLookup: Promise<string | undefined> | undefined;
   const rgbNetwork = () => (networkLookup ??= new Promise<any>((resolve) => resolve(rgb.getConnectionInfo?.()))
@@ -575,13 +584,17 @@ export function streamActivity(
         return items;
       },
     });
-    if (!overNwc && typeof rgb.listTransactions === 'function') {
+    // Over NWC the node's on-chain list is its own method, when the connection allows it.
+    const onchainList = overNwc
+      ? (rgb.hasRlnMethod?.('rln_list_transactions') ? () => rgb.listOnchainTransactions() : null)
+      : typeof rgb.listTransactions === 'function' ? () => rgb.listTransactions() : null;
+    if (onchainList) {
       tasks.push({
         source: 'onchain',
         counted: true,
         label: 'on-chain BTC transactions',
         load: async () => {
-          const [txs, network] = await Promise.all([rgb.listTransactions(), rgbNetwork()]);
+          const [txs, network] = await Promise.all([onchainList(), rgbNetwork()]);
           return onchainBtcItems(txs, network, new Set());
         },
       });

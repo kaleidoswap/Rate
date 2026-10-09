@@ -50,7 +50,12 @@ export type NwcMethod =
   | 'rln_get_address'
   | 'rln_decode_ln_invoice'
   | 'rln_send_btc'
-  | 'rln_list_payments';
+  | 'rln_list_payments'
+  | 'rln_list_transfers'
+  | 'rln_list_transactions'
+  | 'rln_list_unspents'
+  | 'rln_create_utxos'
+  | 'rln_refresh_transfers';
 
 export interface NwcGetInfoResult {
   alias?: string;

@@ -248,6 +248,39 @@ describe('on-chain BTC of the RGB account', () => {
     expect(items).toEqual([]);
   });
 
+  it('lists the NWC node’s on-chain history when its connection allows it', async () => {
+    const listTransactions = jest.fn(async () => [tx('ln-invoice')]);
+    adapters.RGB_LN = {
+      isConnected: () => true, walletType: () => 'rln', hasRlnMethod: (m: string) => m === 'rln_list_transactions',
+      listPayments: async () => [], listTransactions, listOnchainTransactions: async () => [tx('deposit')],
+    };
+    const { items } = await loadActivity();
+    expect(listTransactions).not.toHaveBeenCalled();
+    expect(items.map((i) => i.id)).toEqual(['onchain-deposit']);
+  });
+
+  it('RGB transfers carry their own progress, and an invoice that expired unused is left out', async () => {
+    adapters.RGB_L1 = {
+      isConnected: () => true,
+      getConnectionInfo: async () => ({ network: 'signet' }),
+      listPayments: async () => [],
+      listTransfers: async () => [
+        { idx: 1, batch_transfer_idx: 4, kind: 'ReceiveWitness', status: 'WaitingCounterparty', created_at: 3, recipient_id: 'open' },
+        { idx: 2, batch_transfer_idx: 5, kind: 'ReceiveWitness', status: 'Failed', created_at: 2, recipient_id: 'expired' },
+        { idx: 3, batch_transfer_idx: 6, kind: 'Send', status: 'WaitingConfirmations', created_at: 1, txid: 'f'.repeat(64), requested_assignment: { value: 1500 } },
+        { idx: 4, batch_transfer_idx: 7, kind: 'Send', status: 'WaitingBroadcast', created_at: 0.5, requested_assignment: { value: 100 } },
+        { idx: 5, batch_transfer_idx: 8, kind: 'Send', status: 'Initiated', created_at: 0.25, requested_assignment: { value: 200 } },
+      ],
+    };
+    const { items } = await loadActivity({ assets: [{ asset_id: 'rgb:a', ticker: 'USDT', name: 'Tether', precision: 2 }] });
+    expect(items.map((i) => [i.type, i.status, i.rgbTransfer?.status, i.rgbTransfer?.batchTransferIdx, i.amount])).toEqual([
+      ['receive', 'pending', 'waiting-counterparty', 4, '0'],
+      ['send', 'pending', 'waiting-confirmations', 6, '15'],
+      ['send', 'pending', 'waiting-broadcast', 7, '1'],
+      ['send', 'pending', 'initiated', 8, '2'],
+    ]);
+  });
+
   it('counts a failed on-chain list as a failed source', async () => {
     adapters.RGB_LN = { isConnected: () => true, listPayments: async () => [], listTransactions: async () => { throw new Error('down'); } };
     expect((await loadActivity()).failedSources).toBe(1);

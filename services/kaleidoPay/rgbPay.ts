@@ -14,7 +14,7 @@ export interface RgbPayAdapter {
   getPaymentStatus(hash: string): Promise<{ status: string }>;
   sendBtcOnchain?(params: { address: string; amount: number; feeRate?: number }): Promise<any>;
   decodeRgbInvoice?(params: { invoice: string }): Promise<any>;
-  sendAsset?(params: { asset_id: string; recipientId: string; amount: number }): Promise<any>;
+  sendAsset?(params: { asset_id: string; recipientId: string; amount: number; feeRate?: number }): Promise<any>;
   getAssetBalance?(assetId: string): Promise<any>;
   getAsset?(assetId: string): Promise<{ id: string; ticker: string; precision: number }>;
   getTransaction?(txId: string): Promise<{ status?: string }>;
@@ -112,7 +112,7 @@ export function createRgbOnchainAccount(rgb: RgbPayAdapter, network: Network, op
  * spend asset, so this account is made per payment (see registerRgbAssetPayment).
  */
 export function createRgbAssetAccount(rgb: RgbPayAdapter, network: Network, asset: SpendAsset, opts: RgbPayOptions = {}): PayAccount {
-  return createDirectAccount<{ invoice: string; assetId: string; amount: number }>({
+  return createDirectAccount<{ invoice: string; assetId: string; amount: number; feeRate?: number }>({
     id: 'rgb-asset', rail: 'rgb', network, walletName: opts.walletName ?? 'RGB node', optionName: `RGB · ${asset.ticker}`, estimatedSeconds: 3600,
     spendAsset: asset,
     isConnected: () => rgb.isConnected(),
@@ -133,17 +133,19 @@ export function createRgbAssetAccount(rgb: RgbPayAdapter, network: Network, asse
         if (!Number.isFinite(onchain) || requested.amount > onchain) throw notEnough(opts.walletName ?? 'RGB node');
       }
       const btcFee = onchainFee(opts);
+      // A wallet that chooses its rate (RGB on this phone) pays the one quoted.
+      const feeRate = opts.feeRate ? feeRateOf(opts) : undefined;
       return {
         // The miner fee is paid in sats from the node's bitcoin, not from the asset.
         feeSat: btcFee,
         spend: { asset, amount: requested.amount, fee: 0, total: requested.amount },
-        terms: { invoice, assetId: requested.id, amount: requested.amount },
-        detail: `Plus about ${btcFee.toLocaleString()} sats network fee (estimate)`,
+        terms: { invoice, assetId: requested.id, amount: requested.amount, ...(feeRate ? { feeRate } : {}) },
+        detail: `Plus about ${btcFee.toLocaleString()} sats network fee (estimate${feeRate ? `, ${feeRate} sat/vB` : ''})`,
       };
     },
     matches: (preview, terms) => preview.code.rgbInvoice === terms.invoice && preview.request.asset?.id === terms.assetId && preview.request.asset?.amount === terms.amount,
     async send(terms) {
-      const sent = await rgb.sendAsset!({ asset_id: terms.assetId, recipientId: terms.invoice, amount: terms.amount });
+      const sent = await rgb.sendAsset!({ asset_id: terms.assetId, recipientId: terms.invoice, amount: terms.amount, ...(terms.feeRate ? { feeRate: terms.feeRate } : {}) });
       const txid = txidOf(sent);
       return txid ? { status: 'pending', reference: txid } : { status: 'unknown' };
     },

@@ -45,6 +45,8 @@ import type { PayTarget, Preview, PaymentOffer, RequestAsset } from '../services
 import { usePayAccounts, prepareRgbRequest, prepareSparkTokenRequest, sendableSparkTokens } from '../services/kaleidoPay/connect';
 import type { SparkToken } from '../services/kaleidoPay/sparkPay';
 import type { RgbRequestAsset } from '../services/kaleidoPay/connect';
+import { rgbL1FeeOptions, setRgbL1FeeSpeed, type RgbFeeSpeed } from '../services/kaleidoPay/rgbL1Pay';
+import { SegmentedTabs } from '../components/SegmentedTabs';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
 import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
 
@@ -53,6 +55,10 @@ interface Props { navigation: any; route: any }
 // Re-checks of an unresolved payment: quick at first, then every 15 s, for at most 10 minutes.
 const STATUS_POLL_DELAYS_MS = [3_000, 5_000, 10_000, 15_000];
 const STATUS_POLL_LIMIT_MS = 10 * 60_000;
+
+// RGB on this phone pays on-chain from these accounts, at a speed chosen in the review.
+const RGB_ONCHAIN_SOURCES = new Set(['rgb-btc', 'rgb-asset']);
+const SPEED_LABEL: Record<RgbFeeSpeed, string> = { slow: 'Slow', normal: 'Normal', fast: 'Fast' };
 
 const KIND_LABEL: Record<PayTarget['kind'], string> = {
   bolt11: 'Lightning invoice', lnurl: 'Lightning address', offer: 'Lightning offer', bitcoin: 'Bitcoin address',
@@ -108,6 +114,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const [journalReady, setJournalReady] = useState(false);
   const [journalUnreadable, setJournalUnreadable] = useState(false);
+  const [feeSpeed, setFeeSpeed] = useState<RgbFeeSpeed>('normal');
   const now = useForegroundClock(offers.some(o => !!o.quote) && !attempt);
   const revision = useRef(0);
   const paying = useRef(false);
@@ -141,6 +148,8 @@ export default function SendScreen({ navigation, route }: Props) {
   useEffect(() => { setRgbAsset(null); setAssetAmount(''); setSparkToken(null); }, [input]);
   // Start the slow setup (wallet syncs, server keys) as soon as Send opens, not on Continue.
   useEffect(() => { void prepareKaleidoPay(); }, []);
+  // Each visit starts at the Normal fee speed.
+  useEffect(() => { setRgbL1FeeSpeed('normal'); return () => setRgbL1FeeSpeed('normal'); }, []);
 
   // The payment journal: an unresolved payment is shown before anything new can be paid.
   useEffect(() => {
@@ -194,10 +203,11 @@ export default function SendScreen({ navigation, route }: Props) {
     return list.filter(o => ids.has(o.id) || !offerAccount(o));
   }, [advanced, balancesSat]);
 
-  const getOffers = useCallback(async (refresh = false) => {
+  // `quiet`: re-quoted because the user changed the fee speed, so the new total needs no second review.
+  const getOffers = useCallback(async (refresh = false, quiet = false) => {
     const current = ++revision.current;
     setBusy(true); setError(''); setMoreQuotes(false);
-    if (refresh) setPreviousTotal(total);
+    if (refresh && !quiet) setPreviousTotal(total);
     try {
       await prepareKaleidoPay();
       if (current !== revision.current) return;
@@ -238,7 +248,7 @@ export default function SendScreen({ navigation, route }: Props) {
       show(result, true);
       if (current !== revision.current) return;
       // Refresh never switches the chosen way to pay, even when its quote fails.
-      setReviewUpdated(refresh);
+      setReviewUpdated(refresh && !quiet);
     } catch (e) {
       if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
     } finally { if (current === revision.current) { setBusy(false); setMoreQuotes(false); } }
@@ -394,6 +404,16 @@ export default function SendScreen({ navigation, route }: Props) {
   const shownSat = fixedSat ?? amountSat;
   const usdOf = (sats: number) => usd ? `≈ $${formatSatoshisToUSD(sats, usd)}` : '';
   const selectedAccount = selected ? offerAccount(selected) : null;
+  const feeOptions = selected && RGB_ONCHAIN_SOURCES.has(selected.route.sourceId) ? rgbL1FeeOptions() : null;
+  const feeOption = feeOptions?.find(o => o.speed === feeSpeed);
+  const chooseSpeed = (next: RgbFeeSpeed) => {
+    if (next === feeSpeed || busy) return;
+    feedback.select();
+    setFeeSpeed(next);
+    setRgbL1FeeSpeed(next);
+    setPreviousTotal('');
+    void getOffers(true, true);
+  };
 
   const headerTitle = attempt ? (attempt.status === 'completed' ? 'Sent' : 'Payment') : 'Send';
   const onBack = () => {
@@ -582,6 +602,13 @@ export default function SendScreen({ navigation, route }: Props) {
         <NetworkIcon network={railIcon(selected.route.to)} size={16} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }}>{railLabel(selected.route.to)}</Text>
         <Ionicons name="arrow-forward" size={12} color={t.colors.text.tertiary} />
         <Ionicons name="person-circle-outline" size={16} color={t.colors.text.secondary} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }} numberOfLines={1}>{recipientName}</Text>
+      </View>}
+
+      {feeOptions && feeOption && <View style={{ marginTop: t.spacing[3], gap: t.spacing[2] }}>
+        <Text style={caption}>Network fee</Text>
+        <SegmentedTabs<RgbFeeSpeed> scrollable={false} fill value={feeSpeed} onChange={chooseSpeed}
+          options={feeOptions.map(o => ({ key: o.speed, label: `${SPEED_LABEL[o.speed]} · ${formatSats(o.feeSat)}` }))} />
+        <Text style={small}>{`About ${formatSats(feeOption.feeSat)} at ${feeOption.rate} sat/vB${feeOption.live ? '' : ' (default rate)'}. Slower costs less and takes longer to confirm.`}</Text>
       </View>}
 
       <View style={{ gap: t.spacing[2], marginTop: t.spacing[3], alignItems: 'center' }}>

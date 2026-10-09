@@ -46,3 +46,13 @@ test('the universal code shows its network when accounts span several, and its L
   fireEvent.press(screen.getByLabelText(/^Arkade/));
   expect(onLn).toHaveBeenCalledWith('ARKADE');
 });
+
+test('account rows use the account icon resolver and the Ark tab can carry both Ark icons', () => {
+  const iconFor = jest.fn((account: string) => account.toLowerCase());
+  const screen = render(<ReceiveRoutePicker
+    methods={['universal', 'ark']} method="ark" onMethod={jest.fn()}
+    destinations={lightningDestinations(accounts, {}).filter(d => d.account !== 'SPARK')} destination="ARKADE" onDestination={jest.fn()} amountSats={0}
+    iconFor={iconFor} methodIcons={{ ark: ['arkade', 'bark'] }} />);
+  expect(screen.getByText('Ark')).toBeTruthy();
+  expect(iconFor).toHaveBeenCalledWith('ARKADE');
+});
