@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Clipboard,
   Linking,
   Modal,
@@ -21,11 +20,13 @@ import Animated, {
   withTiming,
   interpolate,
   cancelAnimation,
+  useReducedMotion,
 } from 'react-native-reanimated';
 import { useSelector } from 'react-redux';
 import { theme } from '../../theme';
 import Markdown from 'react-native-markdown-display';
-import { MindAvatar } from '../MindMark';
+import { MindCharacter, MindCharacterBadge } from '../mind/MindCharacter';
+import { voiceMood, toolResultFlash, MIND_FLASH_MS, type MindFlash } from '../mind/mindMood';
 import { PayableCard } from '../chat/PayableCard';
 import FunctionResultCard from '../chat/FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
@@ -209,18 +210,50 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   }, []);
 
   const pulse = useSharedValue(0);
-  // Drive the orb animation from the current phase.
+  const micLevel = useSharedValue(0);
+  const reduceMotion = useReducedMotion();
+  const [moodFlash, setMoodFlash] = useState<MindFlash>(null);
+  const moodFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashMood = useCallback((f: MindFlash) => {
+    if (!f) return;
+    if (moodFlashTimer.current) clearTimeout(moodFlashTimer.current);
+    setMoodFlash(f);
+    moodFlashTimer.current = setTimeout(() => setMoodFlash(null), MIND_FLASH_MS);
+  }, []);
+  useEffect(() => () => {
+    if (moodFlashTimer.current) clearTimeout(moodFlashTimer.current);
+  }, []);
+  // Confirm-gate wiring for one turn that also lets Prismo react to outcomes.
+  const turnToolHooks = () => {
+    const approvals = new Map<string, boolean>();
+    return {
+      onConfirm: async (call: { name: string; arguments: Record<string, unknown> }) => {
+        const decision = await confirmGate.request(call);
+        approvals.set(call.name, decision.approved);
+        return decision;
+      },
+      onToolResult: (event: { name: string; arguments: Record<string, unknown>; result: unknown }) => {
+        confirmGate.onToolResult(event);
+        if (approvals.get(event.name) !== false) {
+          flashMood(toolResultFlash(event.result, approvals.get(event.name) === true));
+        }
+      },
+    };
+  };
+  // Drive the ring animation from the current phase.
   useEffect(() => {
     cancelAnimation(pulse);
-    if (phase === 'listening') {
+    if (reduceMotion) {
+      pulse.value = 0;
+    } else if (phase === 'listening') {
       pulse.value = withRepeat(withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) }), -1, true);
     } else if (phase === 'speaking') {
       pulse.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
     } else {
-      // idle / thinking: settle the orb; "thinking" shows a spinner inside it.
+      // idle / thinking: settle the ring; Prismo shows thinking itself.
       pulse.value = withTiming(0, { duration: 200 });
     }
-  }, [phase]);
+  }, [phase, reduceMotion]);
 
   // Clean up audio when the session unmounts (i.e. the overlay is closed).
   useEffect(
@@ -308,8 +341,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             patchBubble(assistantId, { thinking: reasoning });
             scrollToEnd();
           },
-          onConfirm: confirmGate.request,
-          onToolResult: confirmGate.onToolResult,
+          ...turnToolHooks(),
         });
         requestIdRef.current = null;
         confirmGate.reset();
@@ -417,8 +449,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           patchBubble(assistantId, { thinking: reasoning });
           scrollToEnd();
         },
-        onConfirm: confirmGate.request,
-        onToolResult: confirmGate.onToolResult,
+        ...turnToolHooks(),
       });
       requestIdRef.current = null;
       if (!aliveRef.current) return '';
@@ -474,7 +505,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   };
 
   // Pause everything: stop the spoken reply, the mic capture, and the hands-free
-  // loop, settling the orb to idle without closing the overlay. Tap the orb to
+  // loop, settling Prismo to idle without closing the overlay. Tap Prismo to
   // resume talking.
   const pauseVoice = () => {
     Haptics.selectionAsync().catch(() => {});
@@ -506,17 +537,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // Show the pause control whenever the assistant is actively doing something.
   const canPause = handsFree || phase === 'listening' || phase === 'speaking' || phase === 'thinking';
 
-  const orbStyle = useAnimatedStyle(() => ({
-    // Pulse only — NO rotation. The orb hosts the upright mic/speaker icon; the
-    // "thinking" spin lives in the ActivityIndicator inside it. Rotating the orb
-    // froze the icon at a mid-spin angle (cancelAnimation doesn't reset the
-    // value), which is why the mic/speaker glyphs looked bent.
-    transform: [
-      { scale: interpolate(pulse.value, [0, 1], [1, phase === 'listening' ? 1.18 : 1.08]) },
-    ] as const,
-  }));
   const ringStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(pulse.value, [0, 1], [0.4, 0]),
+    opacity: interpolate(pulse.value, [0, 0.1, 1], [0, 0.35, 0]),
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.8]) }],
   }));
 
@@ -550,7 +572,15 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           ? 'Thinking…'
           : phase === 'speaking'
             ? 'Speaking… tap to interrupt'
-            : 'Tap the orb and speak';
+            : 'Tap Prismo and speak';
+
+  const mood = voiceMood({
+    phase,
+    failed: aiFailed || speechFailed,
+    loading: modelLoading,
+    hasError: !!error,
+    flash: moodFlash,
+  });
 
   const orbColor =
     phase === 'thinking' ? theme.colors.secondary?.[500] ?? '#6F32FF' : theme.colors.primary[500];
@@ -562,7 +592,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
-              <MindAvatar size={28} />
+              <MindCharacterBadge size={28} mood={mood === 'sleeping' ? 'sleeping' : 'idle'} />
               <View style={{ flex: 1 }}>
                 <Text style={styles.headerTitle}>KaleidoMind</Text>
                 <Text style={styles.headerSubtitle} numberOfLines={1}>{modelSubtitle}</Text>
@@ -694,25 +724,26 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             })}
           </ScrollView>
 
-          {/* Orb */}
-          <Pressable
-            onPress={toggleListening}
-            style={styles.orbArea}
-            disabled={!voiceReady && !aiFailed && !speechFailed}
-          >
+          {/* Prismo (push-to-talk) */}
+          <View style={styles.orbArea}>
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
-            <Animated.View style={[styles.orb, { backgroundColor: orbColor }, orbStyle]}>
-              {modelLoading || phase === 'thinking' ? (
-                <ActivityIndicator color={theme.colors.text.inverse} />
-              ) : (
+            <MindCharacter
+              mood={mood}
+              size={112}
+              level={phase === 'listening' ? micLevel : undefined}
+              accessibilityLabel={`Prismo, ${statusText}`}
+              onPress={voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
+            />
+            {voiceReady && (phase === 'idle' || phase === 'listening' || phase === 'speaking') ? (
+              <View style={styles.orbChip} pointerEvents="none">
                 <Ionicons
                   name={phase === 'speaking' ? 'volume-high' : phase === 'listening' ? 'mic' : 'mic-outline'}
-                  size={30}
+                  size={14}
                   color={theme.colors.text.inverse}
                 />
-              )}
-            </Animated.View>
-          </Pressable>
+              </View>
+            ) : null}
+          </View>
           {/* Loading progress bar while the on-device model downloads/loads. */}
           {modelLoading && (
             <View style={styles.loadTrack}>
@@ -742,7 +773,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
           {/* Hands-free (continuous VAD) toggle. Needs @qvac/sdk ≥ 0.13.1 + the
               react-native-live-audio-stream native module (see services/micStream.ts);
-              the orb above is the one-shot push-to-talk path and works without them. */}
+              Prismo above is the one-shot push-to-talk path and works without them. */}
           <Pressable
             onPress={toggleHandsFree}
             disabled={!voiceReady && !aiFailed && !speechFailed}
@@ -774,6 +805,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             <VoiceInput
               ref={voiceRef}
               onStart={() => setPhase('listening')}
+              onLevel={(l) => { micLevel.value = l; }}
               onEnd={() => setPhase((p) => (p === 'listening' ? 'thinking' : p))}
               onResult={onResult}
               onPartialResult={() => {}}
@@ -868,12 +900,19 @@ const styles = StyleSheet.create({
   loadFill: { height: '100%', borderRadius: 2, backgroundColor: theme.colors.primary[500] },
   orbArea: { alignItems: 'center', justifyContent: 'center', height: 130, marginTop: 8 },
   orbRing: { position: 'absolute', width: 92, height: 92, borderRadius: 46 },
-  orb: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+  orbChip: {
+    position: 'absolute',
+    bottom: 6,
+    right: '50%',
+    marginRight: -50,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: theme.colors.primary[500],
+    borderWidth: 2,
+    borderColor: theme.colors.background.primary,
   },
   status: { textAlign: 'center', color: theme.colors.text.secondary, fontSize: 14, marginTop: 6, fontWeight: '500' },
   pauseBtn: {
