@@ -49,6 +49,7 @@ import { rgbL1FeeOptions, setRgbL1FeeSpeed, type RgbFeeSpeed } from '../services
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
 import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
+import { ExplainButton } from '../components/mind/ExplainSheet';
 
 interface Props { navigation: any; route: any }
 
@@ -688,6 +689,7 @@ export default function SendScreen({ navigation, route }: Props) {
           {!!error && <View accessibilityRole="alert" style={{ flexDirection: 'row', gap: t.spacing[2], alignItems: 'flex-start', marginBottom: t.spacing[4] }}>
             <Ionicons name="alert-circle-outline" size={18} color={t.colors.warning[500]} />
             <Text style={{ ...text, color: t.colors.warning[500], flex: 1 }}>{error}</Text>
+            <ExplainButton compact subject={{ type: 'error', context: 'send', message: error }} />
           </View>}
           {journalUnreadable && !attempt && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} style={{ marginBottom: t.spacing[4] }} />}
           {attempt ? renderResult(attempt) : preview ? renderReview() : renderInput()}

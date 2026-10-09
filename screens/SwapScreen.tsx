@@ -62,6 +62,7 @@ import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
+import { ExplainButton } from '../components/mind/ExplainSheet';
 
 interface Props {
   navigation: any;
@@ -1191,6 +1192,8 @@ export default function SwapScreen({ navigation, route }: Props) {
             <Text style={{ color: theme.colors.text.secondary, marginTop: theme.spacing[1.5], textAlign: 'center' }}>
               {swapFailure.message}
             </Text>
+            <ExplainButton style={{ marginTop: theme.spacing[3] }}
+              subject={{ type: 'error', context: 'swap', title: swapFailure.title, message: swapFailure.message }} />
           </View>
           <View style={[styles.confirmActions, { marginTop: theme.spacing[4] }]}>
             <Button title="Done" variant="secondary" onPress={closeFailure} style={styles.confirmActionButton} />
