@@ -16,6 +16,13 @@
 
 set -uo pipefail
 
+# Release and normal installs must use the pinned published package. Even a
+# sibling with the same version can contain uncommitted development changes.
+if [ "${SYNC_MIND_LOCAL:-}" != "1" ] && [ "${SYNC_MIND_FORCE:-}" != "1" ]; then
+  echo "sync-mind: using pinned published Mind (SYNC_MIND_LOCAL=1 for local development)."
+  exit 0
+fi
+
 SRC="../kaleido-mind/packages/core"
 DEST="node_modules/@kaleidorg/mind/dist"
 

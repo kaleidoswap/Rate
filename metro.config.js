@@ -17,9 +17,12 @@ const walletEngineRoot = fs.existsSync(localWalletEngine)
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
 // @kaleidorg/mind — the shared agentic engine, also published to npm as
 // @kaleidorg/mind. Linked from a sibling for fast local dev (pure JS dist/, no
-// native deps). To consume the published version instead, set its dep to
-// `^0.0.1` and drop this watchFolder.
-const kaleidoMindRoot = path.resolve(__dirname, '../kaleido-mind/packages/core');
+// native deps). Published Mind is the default; opt into sibling watching and
+// the sync-mind overlay with SYNC_MIND_LOCAL=1 (or SYNC_MIND_FORCE=1).
+const useLocalMind = process.env.SYNC_MIND_LOCAL === '1' || process.env.SYNC_MIND_FORCE === '1';
+const kaleidoMindRoot = path.resolve(__dirname, useLocalMind
+  ? '../kaleido-mind/packages/core'
+  : 'node_modules/@kaleidorg/mind');
 // The QVAC adapter ships as the @kaleidorg/mind/qvac subpath inside core, so
 // watching core covers it too — no separate watchFolder needed.
 // KaleidoPay (bitcoin++ hackathon): packages from the sibling kaleidoswap/universal-bolt12

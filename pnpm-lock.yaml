@@ -79,8 +79,8 @@ importers:
         specifier: npm:kaleido-ui@^0.1.119
         version: kaleido-ui@0.1.119(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@kaleidorg/mind':
-        specifier: ^0.10.7
-        version: 0.10.7(@qvac/sdk@0.21.0(870e029b05c8e740abd72cfad143dbc2))
+        specifier: 0.11.0
+        version: 0.11.0(@qvac/sdk@0.21.0(870e029b05c8e740abd72cfad143dbc2))
       '@kaleidorg/swap-sdk':
         specifier: ^0.7.2
         version: 0.7.2(97282afab3b61d4ec9bf2ebca2993c58)
@@ -1614,8 +1614,8 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
-  '@kaleidorg/mind@0.10.7':
-    resolution: {integrity: sha512-SGm+OylGTsOlQR5ZCwSWuEUQ10lVcj2m7HUDKqeuiUO6T1TzrsVvqN2LPVFthbgejBZpO50gp5+a+8ZkOWNY5g==}
+  '@kaleidorg/mind@0.11.0':
+    resolution: {integrity: sha512-pazcLBljfXgUDWOIGZjM91nSJ1Z5YjF0NIiKDreywCFwXSpSucZuqNr9U5DiBzdqZhp+C46KsqRWdYKKnDqKsA==}
     peerDependencies:
       '@qvac/sdk': '>=0.20.0'
     peerDependenciesMeta:
@@ -9224,7 +9224,7 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@kaleidorg/mind@0.10.7(@qvac/sdk@0.21.0(870e029b05c8e740abd72cfad143dbc2))':
+  '@kaleidorg/mind@0.11.0(@qvac/sdk@0.21.0(870e029b05c8e740abd72cfad143dbc2))':
     optionalDependencies:
       '@qvac/sdk': 0.21.0(870e029b05c8e740abd72cfad143dbc2)
 
