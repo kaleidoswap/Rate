@@ -90,6 +90,28 @@ describe('dashboard connection recovery', () => {
     expect(adapter.getBtcBalance).toHaveBeenCalled();
     expect(screen.queryByText('Balance unavailable')).toBeNull();
   });
+  it('drops RGB on this phone from the offline banner once it connects after startup', async () => {
+    mockState.wallet.activeWallet = { id: 1, encrypted_mnemonic: 'test-only-seed' };
+    let rgbL1Connected = false;
+    const spark = {
+      isConnected: () => true, getNodeInfo: jest.fn().mockResolvedValue({}),
+      getBtcBalance: jest.fn().mockResolvedValue({ confirmed: 0, unconfirmed: 0, total: 0 }),
+      listAssets: jest.fn().mockResolvedValue([]),
+    };
+    const rgbL1 = { ...spark, isConnected: () => rgbL1Connected };
+    (protocolManager.getAdapterIfAvailable as jest.Mock).mockImplementation(p => (p === 'SPARK' ? spark : p === 'RGB_L1' ? rgbL1 : undefined));
+    (initializeProtocolServices as jest.Mock).mockResolvedValue({ results: new Map<string, any>([
+      ['SPARK', { success: true }], ['RGB_L1', { success: false, error: "Couldn't restore your RGB backup (timeout)." }],
+    ]) });
+    const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
+    const banner = /^RGB on this phone is offline/;
+    await waitFor(() => expect(screen.getByText(banner)).toBeTruthy());
+    rgbL1Connected = true;
+    (initializeProtocolServices as jest.Mock).mockResolvedValue({ results: new Map([['SPARK', { success: true }], ['RGB_L1', { success: true }]]) });
+    fireEvent.press(screen.getByText(banner));
+    await waitFor(() => expect(screen.queryByText(banner)).toBeNull());
+    expect(initializeProtocolServices).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('fast first balance', () => {
