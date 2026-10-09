@@ -76,14 +76,14 @@ type RootStackParamList = {
   SecuritySetup: { walletId?: number; isInitialSetup?: boolean; mode?: 'setup' | 'pin' | 'disablePin' };
   Dashboard: undefined;
   Settings: undefined;
-  Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; resumePayment?: boolean } | undefined;
+  Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; contactName?: string; prefilledAmountSat?: number; resumePayment?: boolean } | undefined;
   MerchantOffer: undefined;
-  Receive: { selectedAsset?: any } | undefined;
+  Receive: { selectedAsset?: any; prefilledAmountSat?: number; prefilledNetwork?: 'lightning' | 'onchain'; prefilledAssetTicker?: string } | undefined;
   Bridge: undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   Assets: { issue?: boolean } | undefined;
   DesignSystem: undefined;
-  Swap: undefined;
+  Swap: { fromAsset?: string; toAsset?: string; fromAmountSat?: number; fromAmountUnits?: number } | undefined;
   NostrSettings: undefined;
   Profile: undefined;
   ProfileEdit: undefined;

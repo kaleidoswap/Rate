@@ -43,6 +43,8 @@ import {
   MainHeader
 } from '../components';
 import { Sheet } from '../components/Sheet';
+import { IntentBar } from '../components/mind/IntentBar';
+import { InsightCards } from '../components/mind/InsightCards';
 import { ProfileChip } from '../components/ProfileChip';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount } from '../utils/assetAmount';
@@ -915,7 +917,17 @@ export default function DashboardScreen({ navigation }: Props) {
           />}
         </View>
 
+        <IntentBar
+          style={styles.intentBar}
+          onReview={(target) => navigation.getParent()?.navigate(target.screen, target.params)}
+        />
 
+        <InsightCards
+          channels={channels}
+          onAction={(action) => (action.kind === 'navigate'
+            ? navigation.getParent()?.navigate(action.screen, action.params)
+            : navigation.navigate('Activity'))}
+        />
 
         <AssetList
           // BTC always leads the list; in lite mode hide USDt (it's folded into the
@@ -1001,6 +1013,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3],
     margin: theme.spacing[4], padding: theme.spacing[4],
     borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.surface.primary,
+  },
+  intentBar: {
+    marginHorizontal: theme.spacing[4],
+    marginBottom: theme.spacing[4],
   },
   walletCard: {
     // The unified balance + actions card sits just below the sticky header.

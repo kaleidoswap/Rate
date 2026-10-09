@@ -103,6 +103,7 @@ const receiveLog = (event: string, details?: Record<string, unknown>) => {
 
 interface Props {
   navigation: any;
+  route?: { params?: { selectedAsset?: any; prefilledAmountSat?: number; prefilledNetwork?: 'lightning' | 'onchain'; prefilledAssetTicker?: string } };
 }
 
 interface RGBAsset {
@@ -170,7 +171,7 @@ function formatDepositLayer(layer?: DepositLayer): string {
   }
 }
 
-export default function ReceiveScreen({ navigation }: Props) {
+export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   const dispatch = useAppDispatch();
   const theme = useAppTheme();
   const styles = useMemo(() => createReceiveStyles(theme), [theme]);
@@ -1417,6 +1418,27 @@ export default function ReceiveScreen({ navigation }: Props) {
     setArkadeSubMode('ark');
     setNetworkType('onchain');
   };
+
+  // Prefilled from KaleidoMind once: the asset, network (Advanced only) and amount asked for.
+  const appliedPrefill = useRef(false);
+  useEffect(() => {
+    const p = navRoute?.params;
+    if (appliedPrefill.current || !p || (!p.prefilledAmountSat && !p.prefilledNetwork && !p.prefilledAssetTicker)) return;
+    if (p.prefilledAssetTicker) {
+      const token = rgbAssets.find((a) => a.ticker.toUpperCase() === p.prefilledAssetTicker!.toUpperCase());
+      if (!token) return;
+      appliedPrefill.current = true;
+      receiveRgbAsset({ asset_id: token.asset_id, ticker: token.ticker, name: token.name });
+      return;
+    }
+    appliedPrefill.current = true;
+    if (p.prefilledNetwork && !isLite) {
+      restoredBtcRoute.current = true;
+      setNetworkType(p.prefilledNetwork);
+    }
+    if (Number.isSafeInteger(p.prefilledAmountSat) && p.prefilledAmountSat! > 0) setAmount(String(p.prefilledAmountSat));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navRoute?.params, rgbAssets]);
 
   const loadRgbUtxos = async () => {
     const adapter = rgbAccountAdapter();

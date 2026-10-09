@@ -62,9 +62,11 @@ import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
+import { ExplainButton } from '../components/mind/ExplainSheet';
 
 interface Props {
   navigation: any;
+  route?: { params?: { fromAsset?: string; toAsset?: string; fromAmountSat?: number; fromAmountUnits?: number } };
 }
 
 interface Asset {
@@ -76,7 +78,7 @@ interface Asset {
   precision?: number;
 }
 
-export default function SwapScreen({ navigation }: Props) {
+export default function SwapScreen({ navigation, route }: Props) {
   const dispatch = useAppDispatch();
   const { height: screenHeight } = useWindowDimensions();
   const swapState = useAppSelector((state: RootState) => state.swap);
@@ -205,6 +207,20 @@ export default function SwapScreen({ navigation }: Props) {
     // The destination comes from the loaded pairs (USDT on the RGB node, USDB on
     // Spark): presetting one here showed it for a moment, then swapped it.
   }, []);
+
+  // Prefilled from KaleidoMind: the pair and amount the user asked for; quoting and review stay here.
+  useEffect(() => {
+    const p = route?.params;
+    if (!p?.fromAsset || !p.toAsset) return;
+    dispatch(setFromAsset(p.fromAsset));
+    dispatch(setToAsset(p.toAsset));
+    if (isBtcTicker(p.fromAsset) && Number.isSafeInteger(p.fromAmountSat) && p.fromAmountSat! > 0) {
+      dispatch(setFromAmount(String(satsToBtcDisplay(p.fromAmountSat!))));
+    } else if (!isBtcTicker(p.fromAsset) && Number.isFinite(p.fromAmountUnits) && p.fromAmountUnits! > 0) {
+      dispatch(setFromAmount(String(p.fromAmountUnits)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route?.params]);
 
   // Clear polling interval on unmount
   useEffect(() => {
@@ -1176,6 +1192,8 @@ export default function SwapScreen({ navigation }: Props) {
             <Text style={{ color: theme.colors.text.secondary, marginTop: theme.spacing[1.5], textAlign: 'center' }}>
               {swapFailure.message}
             </Text>
+            <ExplainButton style={{ marginTop: theme.spacing[3] }}
+              subject={{ type: 'error', context: 'swap', title: swapFailure.title, message: swapFailure.message }} />
           </View>
           <View style={[styles.confirmActions, { marginTop: theme.spacing[4] }]}>
             <Button title="Done" variant="secondary" onPress={closeFailure} style={styles.confirmActionButton} />
