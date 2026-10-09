@@ -206,6 +206,17 @@ export function isExpiredRgbInvoice(t: Pick<RgbTransfer, 'status' | 'direction' 
   return t.status === 'failed' && t.direction === 'incoming' && !t.txid;
 }
 
+export type RgbReceiveStage = 'watching' | 'pending' | 'confirmed' | 'expired' | 'failed';
+
+/** Where an invoice's incoming transfer is, for Receive's status line. */
+export function rgbReceiveStage(t: Pick<RgbTransfer, 'status' | 'expiration'> | undefined, nowSeconds = Date.now() / 1000): { stage: RgbReceiveStage; message: string } {
+  if (!t || t.status === 'waiting-counterparty') return { stage: 'watching', message: 'Waiting for the sender to send the asset.' };
+  if (t.status === 'waiting-confirmations') return { stage: 'pending', message: 'Received. It counts once the sender’s bitcoin transaction confirms.' };
+  if (t.status === 'settled') return { stage: 'confirmed', message: 'Received and confirmed.' };
+  if (t.expiration && t.expiration < nowSeconds) return { stage: 'expired', message: 'This invoice expired before anything was sent. Make a new one.' };
+  return { stage: 'failed', message: 'The transfer didn’t go through. Nothing was received. Make a new invoice to try again.' };
+}
+
 // ── Issuance ──────────────────────────────────────────────────────────────
 
 export interface RgbIssueInput {

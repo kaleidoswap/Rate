@@ -1,6 +1,6 @@
 export type ReceiveProtocol = 'RGB' | 'SPARK' | 'ARKADE' | 'BARK';
 export type ReceiveMethodKind = 'address' | 'invoice';
-export type ReceiveMonitorKind = 'balance' | 'invoice' | 'spark-claim' | 'none';
+export type ReceiveMonitorKind = 'balance' | 'invoice' | 'spark-claim' | 'rgb-transfer' | 'none';
 export type ReceiveLayer = 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark';
 
 export interface ReceiveMethod {
@@ -12,6 +12,8 @@ export interface ReceiveMethod {
   layer: ReceiveLayer;
   monitor: ReceiveMonitorKind;
   assetId?: string;
+  /** An RGB invoice's recipient id: its transfer is watched ('rgb-transfer'). */
+  recipientId?: string;
 }
 
 export class ReceiveOperationTimeoutError extends Error {

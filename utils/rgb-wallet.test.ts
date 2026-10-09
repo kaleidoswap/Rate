@@ -1,7 +1,7 @@
 import {
   NO_RGB_WALLET_SUPPORT, canCancelRgbTransfer, findRgbTransfer, hasPendingRgbTransfers, isExpiredRgbInvoice,
   normalizeRgbTransfers, rgbTransferDirection, rgbTransferStatus, rgbTransfersSignature, rgbWalletErrorMessage,
-  rgbWalletSupport, startPolling, toBaseUnits, validateRgbIssue, type RgbIssueInput,
+  rgbWalletSupport, startPolling, toBaseUnits, validateRgbIssue, type RgbIssueInput, rgbReceiveStage, createUtxosEstimate,
 } from './rgb-wallet';
 
 const fn = () => jest.fn();
@@ -167,5 +167,24 @@ describe('startPolling', () => {
     jest.advanceTimersByTime(0); await flush();
     jest.advanceTimersByTime(100); await flush();
     expect(tick).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('rgbReceiveStage', () => {
+  it('maps the invoice’s transfer to Receive’s stages', () => {
+    expect(rgbReceiveStage(undefined).stage).toBe('watching');
+    expect(rgbReceiveStage({ status: 'waiting-counterparty' }).stage).toBe('watching');
+    expect(rgbReceiveStage({ status: 'waiting-confirmations' }).stage).toBe('pending');
+    expect(rgbReceiveStage({ status: 'settled' }).stage).toBe('confirmed');
+    expect(rgbReceiveStage({ status: 'failed', expiration: 100 }, 200).stage).toBe('expired');
+    expect(rgbReceiveStage({ status: 'failed', expiration: 300 }, 200).stage).toBe('failed');
+  });
+});
+
+describe('createUtxosEstimate', () => {
+  it('adds the outputs and a fee, and checks the plain bitcoin covers it', () => {
+    expect(createUtxosEstimate({ num: 3, size: 3000, feeRate: 2 })).toEqual({ feeSats: 478, totalSats: 9478, enough: true });
+    expect(createUtxosEstimate({ num: 3, size: 3000, feeRate: 2, bitcoinSats: 9000 }).enough).toBe(false);
+    expect(createUtxosEstimate({ num: 1, size: 1000, feeRate: 1.5, bitcoinSats: 5000 })).toEqual({ feeSats: 230, totalSats: 1230, enough: true });
   });
 });

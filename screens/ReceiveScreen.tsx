@@ -53,6 +53,8 @@ import { AmountEditorModal } from '../components/AmountEditorModal';
 import { RgbAssetSheet, type RgbAssetChoice } from '../components/receive/RgbAssetSheet';
 import { RgbReceiveAdvanced, type RgbUtxoState } from '../components/receive/RgbReceiveAdvanced';
 import { RgbUtxoSheet } from '../components/rgb/RgbUtxoSheet';
+import { refreshRgbAssets } from '../store/slices/assetsSlice';
+import { rgbWalletSupport } from '../utils/rgb-wallet';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { feedback } from '../utils/feedback';
 import {
@@ -334,15 +336,18 @@ export default function ReceiveScreen({ navigation }: Props) {
     addressGenerationRef.current += 1;
   }, []);
   const handleDepositStatus = React.useCallback((event: DepositDetectionEvent) => {
+    // An incoming RGB transfer shows as incoming in the asset's balance.
+    if (event.layer === 'rgb' && event.status === 'pending') void dispatch(refreshRgbAssets());
     setDepositMonitor({
       status: event.status,
       layer: event.layer,
       message: event.message,
       updatedAt: Date.now(),
     });
-  }, []);
+  }, [dispatch]);
   const handleDepositDetected = React.useCallback((event?: DepositDetectionEvent) => {
     feedback.receive();
+    if (event?.layer === 'rgb') void dispatch(refreshRgbAssets());
     setDepositMonitor({
       status: event?.status === 'claimed' ? 'claimed' : 'confirmed',
       layer: event?.layer ?? 'all',
@@ -350,7 +355,7 @@ export default function ReceiveScreen({ navigation }: Props) {
       updatedAt: Date.now(),
     });
     setShowDepositSuccess(true);
-  }, []);
+  }, [dispatch]);
   useDepositDetection({
     enabled: !!receiveTarget && !showDepositSuccess && isFocused && isAppActive,
     methods: receiveMethods,
@@ -844,14 +849,18 @@ export default function ReceiveScreen({ navigation }: Props) {
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>
             callAbortableAdapterMethod<any>(rgbAssetAdapter, 'createRgbInvoice', [params], signal));
           result = rgbInvoice?.invoice ?? rgbInvoice?.recipient_id;
+          // Watch the invoice's own transfer where the account lists transfers; else its balance.
+          const recipientId: string | undefined = rgbInvoice?.recipient_id ?? rgbInvoice?.recipientId;
+          const watchTransfer = !!recipientId && rgbWalletSupport(rgbAssetAdapter).listTransfers;
           methodMeta = {
             key: 'rgb-onchain',
             label: 'RGB invoice',
             protocol: 'RGB',
             kind: 'invoice',
             layer: 'rgb',
-            monitor: selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'none' : 'balance',
+            monitor: watchTransfer ? 'rgb-transfer' : selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'none' : 'balance',
             assetId: selectedAsset.asset_id,
+            ...(watchTransfer ? { recipientId } : {}),
           };
         } else {
           // RGB-over-Lightning invoice, always open-amount: the sender fills it in.

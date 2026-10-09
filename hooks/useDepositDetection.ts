@@ -15,6 +15,8 @@ import {
 } from '../utils/receive-session';
 import { decode } from 'light-bolt11-decoder';
 import { syncBarkForUpdates } from '../services/BarkService';
+import { findRgbReceive, refreshRgbTransfers } from '../services/rgbWallet';
+import { rgbReceiveStage } from '../utils/rgb-wallet';
 
 export type DepositLayer = 'all' | 'onchain' | 'lightning' | 'rgb' | 'spark' | 'arkade' | 'bark';
 export type DepositDetectionStatus = 'watching' | 'pending' | 'confirmed' | 'claimed' | 'failed' | 'expired';
@@ -38,6 +40,9 @@ const POLL_MS = 8_000;
 const INITIAL_DELAY_MS = 4_000;
 const POLL_TIMEOUT_MS = 6_000;
 const BARK_SYNC_WAIT_MS = 20_000;
+// Moving an RGB transfer forward asks the proxy and the chain: not on every tick.
+export const RGB_REFRESH_MS = 15_000;
+const RGB_REFRESH_TIMEOUT_MS = 30_000;
 
 /**
  * Bark runs without its daemon, so a receive only shows up (and a Lightning receive is
@@ -146,6 +151,37 @@ async function readInvoiceStatus(
   }
 }
 
+/**
+ * An RGB invoice's transfer: refresh it (at most every RGB_REFRESH_MS), then read
+ * where it is. Waiting for the sender, waiting for confirmations, settled or failed.
+ */
+async function readRgbTransfer(
+  method: ReceiveMethod,
+  lastRefresh: { at: number },
+  parentSignal?: AbortSignal,
+): Promise<DepositDetectionEvent | null> {
+  const adapter = getConnectedAdapter(method.protocol);
+  if (!adapter || !method.recipientId) return null;
+  try {
+    if (Date.now() - lastRefresh.at >= RGB_REFRESH_MS) {
+      lastRefresh.at = Date.now();
+      await runReceiveOperation('RGB transfer refresh', () => refreshRgbTransfers(adapter), RGB_REFRESH_TIMEOUT_MS, parentSignal)
+        .catch(() => undefined); // the last known state still reads
+    }
+    const assetId = method.assetId && method.assetId !== 'RGB_NEW' ? method.assetId : null;
+    const transfer = await runReceiveOperation(
+      'RGB transfer status',
+      () => findRgbReceive(adapter, { recipientId: method.recipientId!, assetId }),
+      RGB_REFRESH_TIMEOUT_MS,
+      parentSignal,
+    );
+    const { stage, message } = rgbReceiveStage(transfer);
+    return { layer: method.layer, status: stage, protocol: method.protocol, message, rawStatus: transfer?.status ?? 'none' };
+  } catch {
+    return null;
+  }
+}
+
 export function useDepositDetection({
   enabled,
   methods,
@@ -154,7 +190,7 @@ export function useDepositDetection({
 }: UseDepositDetectionArgs): void {
   const signature = receiveMethodsSignature(methods);
   const monitoredMethods = useMemo(
-    () => methods.filter((method) => method.monitor === 'balance' || method.monitor === 'invoice'),
+    () => methods.filter((method) => method.monitor === 'balance' || method.monitor === 'invoice' || method.monitor === 'rgb-transfer'),
     [signature],
   );
   const baselinesRef = useRef<Map<string, number>>(new Map());
@@ -176,6 +212,10 @@ export function useDepositDetection({
     let cancelled = false;
     const operationController = new AbortController();
     let nextTickTimer: ReturnType<typeof setTimeout> | null = null;
+    const rgbRefresh = { at: 0 };
+    const readStatus = (method: ReceiveMethod) => method.monitor === 'rgb-transfer'
+      ? readRgbTransfer(method, rgbRefresh, operationController.signal)
+      : readInvoiceStatus(method, operationController.signal);
     firedRef.current = false;
     baselinesRef.current = new Map();
     statusKeyRef.current = null;
@@ -208,8 +248,8 @@ export function useDepositDetection({
       for (const method of monitoredMethods) {
         if (cancelled || firedRef.current) return;
 
-        if (method.monitor === 'invoice') {
-          const event = await readInvoiceStatus(method, operationController.signal);
+        if (method.monitor === 'invoice' || method.monitor === 'rgb-transfer') {
+          const event = await readStatus(method);
           if (!event) continue;
           if (event.status === 'confirmed' || event.status === 'claimed') {
             fire(event);
@@ -237,8 +277,8 @@ export function useDepositDetection({
 
     const checkInvoicesOnce = async () => {
       for (const method of monitoredMethods) {
-        if (cancelled || firedRef.current || method.monitor !== 'invoice') continue;
-        const event = await readInvoiceStatus(method, operationController.signal);
+        if (cancelled || firedRef.current || (method.monitor !== 'invoice' && method.monitor !== 'rgb-transfer')) continue;
+        const event = await readStatus(method);
         if (!event) continue;
         if (event.status === 'confirmed' || event.status === 'claimed') {
           fire(event);
