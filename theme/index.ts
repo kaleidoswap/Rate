@@ -90,6 +90,16 @@ interface Colors {
   brand: {
     violet: string;
   };
+  // KaleidoMind character (Prismo) palette.
+  mind: {
+    green: string;
+    greenDark: string;
+    violet: string;
+    violetDeep: string;
+    amber: string;
+    ink: string;
+    highlight: string;
+  };
   // Per-network "leg" colors used to colour-code Send/Receive destinations and
   // the multi-network QR breakdown. Broader than `protocol` — note `rgb` here is
   // the pink RGB-asset leg (USD aggregator), NOT the green RGB-Lightning accent
@@ -428,6 +438,15 @@ const legacyLightTheme: ThemeType = {
     },
     brand: {
       violet: kdDark.violet, // #6F32FF — secondary brand accent (Swap action tile)
+    },
+    mind: {
+      green: '#15E99A',
+      greenDark: '#17B581',
+      violet: kdDark.violet, // #6F32FF
+      violetDeep: '#5420CC',
+      amber: '#F59E0B',
+      ink: '#0D1813',
+      highlight: '#FFFFFF',
     },
     // Per-network "leg" colors — all sourced from kaleido-ui tokens. `onchain`
     // is an alias for `bitcoin`; `unified` (all-networks) stays the brand green.
@@ -843,4 +862,10 @@ export const motion = {
   springSnappy: { damping: 16, stiffness: 320, mass: 0.5 },
   /** Delay between list rows entering, so a list reads top to bottom. */
   stagger: 28,
+  /** Brand easing curves (cubic-bezier control points) and durations. */
+  brandEase: {
+    spring: [0.16, 1, 0.3, 1],
+    standard: [0.4, 0, 0.2, 1],
+  },
+  brandDuration: { fast: 150, base: 300, slow: 500 },
 } as const;

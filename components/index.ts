@@ -31,6 +31,8 @@ export * from './NetworkStack';
 export * from './ChannelList';
 export * from './MainHeader';
 export * from './MindMark';
+export { MindCharacter, MindCharacterBadge } from './mind/MindCharacter';
+export type { MindCharacterProps, MindCharacterBadgeProps, MindMood } from './mind/MindCharacter';
 export * from './ErrorBoundary';
 export * from './Toast';
 export * from './ScreenHeader';
