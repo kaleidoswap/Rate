@@ -54,7 +54,7 @@ import { RgbAssetSheet, type RgbAssetChoice } from '../components/receive/RgbAss
 import { RgbReceiveAdvanced, type RgbUtxoState } from '../components/receive/RgbReceiveAdvanced';
 import { RgbUtxoSheet } from '../components/rgb/RgbUtxoSheet';
 import { refreshRgbAssets } from '../store/slices/assetsSlice';
-import { rgbWalletSupport } from '../utils/rgb-wallet';
+import { rgbInvoiceWatch, rgbWalletSupport } from '../utils/rgb-wallet';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { feedback } from '../utils/feedback';
 import {
@@ -850,17 +850,15 @@ export default function ReceiveScreen({ navigation }: Props) {
             callAbortableAdapterMethod<any>(rgbAssetAdapter, 'createRgbInvoice', [params], signal));
           result = rgbInvoice?.invoice ?? rgbInvoice?.recipient_id;
           // Watch the invoice's own transfer where the account lists transfers; else its balance.
-          const recipientId: string | undefined = rgbInvoice?.recipient_id ?? rgbInvoice?.recipientId;
-          const watchTransfer = !!recipientId && rgbWalletSupport(rgbAssetAdapter).listTransfers;
+          const watch = rgbInvoiceWatch(rgbInvoice, rgbWalletSupport(rgbAssetAdapter), selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'none' : 'balance');
           methodMeta = {
             key: 'rgb-onchain',
             label: 'RGB invoice',
             protocol: 'RGB',
             kind: 'invoice',
             layer: 'rgb',
-            monitor: watchTransfer ? 'rgb-transfer' : selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'none' : 'balance',
             assetId: selectedAsset.asset_id,
-            ...(watchTransfer ? { recipientId } : {}),
+            ...watch,
           };
         } else {
           // RGB-over-Lightning invoice, always open-amount: the sender fills it in.
@@ -952,6 +950,7 @@ export default function ReceiveScreen({ navigation }: Props) {
 
     let sparkAddress: string | undefined;
     let rgbInvoice: string | undefined;
+    let rgbWatch: ReturnType<typeof rgbInvoiceWatch> = { monitor: 'balance' };
 
     // The RGB USDT asset (from the loaded RGB assets), for an RGB invoice.
     const usdtRgb = rgbAssets.find((a) => /usdt/i.test(a.ticker));
@@ -973,7 +972,10 @@ export default function ReceiveScreen({ navigation }: Props) {
               ),
             );
             const invoice = inv?.invoice ?? inv?.recipient_id;
-            if (invoice) rgbInvoice = invoice;
+            if (invoice) {
+              rgbInvoice = invoice;
+              rgbWatch = rgbInvoiceWatch(inv, rgbWalletSupport(rgb));
+            }
             receiveLog('unified.usd.rgb.done', {
               generationId,
               ok: !!invoice,
@@ -1030,8 +1032,8 @@ export default function ReceiveScreen({ navigation }: Props) {
             protocol: 'RGB',
             kind: 'invoice',
             layer: 'rgb',
-            monitor: 'balance',
             assetId: usdtRgb.asset_id,
+            ...rgbWatch,
           },
           sparkAddress && {
             key: 'spark',
