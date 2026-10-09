@@ -19,7 +19,7 @@ import {
   Modal,
   Pressable,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import QVACService, { WORKLET_CRASHED_PREFIX } from '../services/QVACService';
 import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
 import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
@@ -33,7 +33,8 @@ import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, selectAiOnb
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
-import { MainHeader, MindAvatar, MindGlyph, Badge, Sheet } from '../components';
+import { MainHeader, MindCharacter, MindCharacterBadge, Badge, Sheet } from '../components';
+import { chatMood, toolResultFlash, MIND_FLASH_MS, type MindFlash } from '../components/mind/mindMood';
 import { ChatEmptyState, MessageBubble, TypingDots, buildCopyText } from '../components/chat';
 import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
@@ -185,6 +186,31 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   const [lastStats, setLastStats] = useState<ChatMsgStats | null>(null);
 
   const isEmpty = messages.length === 0;
+
+  const isFocused = useIsFocused();
+  const [replyStreaming, setReplyStreaming] = useState(false);
+  const [moodFlash, setMoodFlash] = useState<MindFlash>(null);
+  const moodFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flashMood = useCallback((f: MindFlash) => {
+    if (!f) return;
+    if (moodFlashTimer.current) clearTimeout(moodFlashTimer.current);
+    setMoodFlash(f);
+    moodFlashTimer.current = setTimeout(() => setMoodFlash(null), MIND_FLASH_MS);
+  }, []);
+  useEffect(() => () => {
+    if (moodFlashTimer.current) clearTimeout(moodFlashTimer.current);
+  }, []);
+  const liveAssistantId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (!messages[i].isUser) return messages[i].id;
+    return null;
+  }, [messages]);
+  const mood = chatMood({
+    aiEnabled,
+    llmStatus: qvac.llmStatus,
+    isGenerating: isLoading,
+    isStreamingText: replyStreaming,
+    flash: moodFlash,
+  });
 
   // Step + elapsed time under the pending reply (a model step can take a minute).
   const [progress, setProgress] = useState<{ step: string; startedAt: number } | null>(null);
@@ -485,6 +511,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     let streamingTurn = 0;
     // This turn's reasoning, streamed into the bubble (revealed on tap).
     let thinkingText = '';
+    let replyStarted = false;
+    const approvals = new Map<string, boolean>();
 
     try {
       // Full prior conversation — the agent trims it to the configured
@@ -519,6 +547,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         // A recipe step is executing (deterministic tier).
         onStep: (name) => setStep(stepForTool(name)),
         onToken: (token, turn) => {
+          if (!replyStarted) {
+            replyStarted = true;
+            setReplyStreaming(true);
+          }
           updateMessage(assistantId, (m) => {
             if (turn !== streamingTurn) {
               // New turn after a tool ran — reset to just this turn's tokens.
@@ -531,14 +563,25 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         },
         // Visible feedback while a tool runs (esp. during the payment gap).
         onToolCall: (call, info) => {
+          if (replyStarted) {
+            replyStarted = false;
+            setReplyStreaming(false);
+          }
           setStep(stepForTool(call.name, info.requiresConfirmation));
           updateMessage(assistantId, () => ({ text: '' }));
           scrollToBottom(true);
         },
         // Money tools pause here for explicit user approval.
-        onConfirm: confirm.request,
+        onConfirm: async (call) => {
+          const decision = await confirm.request(call);
+          approvals.set(call.name, decision.approved);
+          return decision;
+        },
         onToolResult: (event) => {
           confirm.onToolResult(event);
+          if (approvals.get(event.name) !== false) {
+            flashMood(toolResultFlash(event.result, approvals.get(event.name) === true));
+          }
           setStep('Thinking');
         },
       });
@@ -590,6 +633,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     } catch (error) {
       console.error('KaleidoMind chat error:', error);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      flashMood('concerned');
       // Wallet-tool errors are written for the user ("Your SPARK wallet isn't
       // connected yet.") — show them; fall back to a generic note otherwise.
       const raw = error instanceof Error && error.message ? error.message : '';
@@ -606,6 +650,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     confirm.reset();
     setStep(null);
     setActiveRequestId(null);
+    setReplyStreaming(false);
     setIsLoading(false);
   };
 
@@ -833,7 +878,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       <MainHeader
         title="KaleidoMind"
         subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
-        iconNode={<MindGlyph size={22} color={theme.colors.text.primary} />}
+        iconNode={<MindCharacterBadge size={22} color={theme.colors.text.primary} />}
         titleBadge={<Badge label="Experimental" color={theme.colors.warning[500]} size="sm" />}
         rightAction={
           // Two actions you use mid-chat (voice, new chat); the rest live in "More".
@@ -884,7 +929,11 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     style={styles.intentBar}
                     onReview={(target) => (navigation.getParent?.() ?? navigation).navigate(target.screen, target.params)}
                   />
-                  <ChatEmptyState onSuggestion={(q) => sendMessage(q)} onContacts={() => setShowContactsSelector(true)} />
+                  <ChatEmptyState
+                    onSuggestion={(q) => sendMessage(q)}
+                    onContacts={() => setShowContactsSelector(true)}
+                    hero={<MindCharacter mood={mood} size={112} paused={!isFocused} />}
+                  />
                 </>
               ) : (
                 <ScrollView
@@ -905,6 +954,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                       onOpenLink={openLink}
                       onLongPress={handleLongPressMessage}
                       statusLabel={message.streaming ? progressLabel : undefined}
+                      characterMood={message.id === liveAssistantId ? mood : 'idle'}
+                      animateCharacter={message.id === liveAssistantId && isFocused}
                       onSelectContact={(name) => {
                         setInputText(`Send to ${name} `);
                         Haptics.selectionAsync();
@@ -913,7 +964,9 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                   ))}
                   {isLoading && !messages.some((m) => m.streaming) && (
                     <View style={styles.processingRow}>
-                      <MindAvatar size={32} style={styles.processingAvatar} />
+                      <View style={styles.processingAvatar}>
+                        <MindCharacter mood={mood} size={32} paused={!isFocused} />
+                      </View>
                       <View style={styles.processingBubble}>
                         <TypingDots label={progressLabel ?? 'Thinking on-device…'} />
                       </View>

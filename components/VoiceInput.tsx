@@ -12,6 +12,7 @@ import {
 } from 'expo-audio';
 import { File } from 'expo-file-system';
 import QVACService from '../services/QVACService';
+import { meterToLevel } from './mind/mindMood';
 
 // 16 kHz mono 16-bit PCM WAV — the format Whisper expects. iOS records LINEARPCM
 // directly; Android records its default encoder into a .wav container. Channel
@@ -66,6 +67,8 @@ interface VoiceInputProps {
   onError: (error: string) => void;
   onStart: () => void;
   onEnd: () => void;
+  /** 0..1 mic loudness while recording (turns on metering only when set). */
+  onLevel?: (level: number) => void;
 }
 
 export interface VoiceInputRef {
@@ -79,8 +82,29 @@ export interface VoiceInputRef {
 }
 
 const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
-  ({ onResult, onPartialResult, onError, onStart, onEnd }, ref) => {
+  ({ onResult, onPartialResult, onError, onStart, onEnd, onLevel }, ref) => {
     const recorderRef = useRef<AudioRecorder | null>(null);
+    const onLevelRef = useRef(onLevel);
+    onLevelRef.current = onLevel;
+    const meterTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+    const stopMeter = () => {
+      if (meterTimer.current) {
+        clearInterval(meterTimer.current);
+        meterTimer.current = null;
+        onLevelRef.current?.(0);
+      }
+    };
+    const startMeter = (rec: AudioRecorder) => {
+      stopMeter();
+      if (!onLevelRef.current) return;
+      meterTimer.current = setInterval(() => {
+        try {
+          onLevelRef.current?.(meterToLevel(rec.getStatus().metering));
+        } catch {
+          stopMeter();
+        }
+      }, 80);
+    };
     const startingRef = useRef(false);
     const isRecordingRef = useRef(false);
     const [isRecording, setIsRecording] = useState(false);
@@ -111,6 +135,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
     // "Only one Recording object can be prepared at a given time."
     useEffect(
       () => () => {
+        stopMeter();
         const rec = recorderRef.current;
         recorderRef.current = null;
         isRecordingRef.current = false;
@@ -167,7 +192,9 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
           playsInSilentMode: true,
         });
 
-        recording = new AudioModule.AudioRecorder(RECORDING_OPTIONS);
+        recording = new AudioModule.AudioRecorder(
+          onLevelRef.current ? { ...RECORDING_OPTIONS, isMeteringEnabled: true } : RECORDING_OPTIONS,
+        );
         await recording.prepareToRecordAsync();
         // Let iOS actually engage the mic input route before capturing. On a cold
         // first start (just after switching the audio category, or right after the
@@ -180,6 +207,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         activeRecording = recording;
         isRecordingRef.current = true;
         setIsRecording(true);
+        startMeter(recording);
         onStart();
         console.log('🎤 QVAC VoiceInput: recording started');
       } catch (err) {
@@ -203,6 +231,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
     const cancelRecording = async () => {
       if (!isRecordingRef.current || !recorderRef.current) return;
       const recording = recorderRef.current;
+      stopMeter();
       try {
         isRecordingRef.current = false;
         setIsRecording(false);
@@ -218,6 +247,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
       if (!isRecordingRef.current || !recorderRef.current) return;
 
       const recording = recorderRef.current;
+      stopMeter();
       try {
         isRecordingRef.current = false;
         setIsRecording(false);

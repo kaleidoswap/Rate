@@ -8,7 +8,8 @@ import { ChatBubble } from '@kaleidorg/kaleido-ui/native';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { leading, type Theme } from '../../theme';
 import TypingDots from './TypingDots';
-import { MindAvatar } from '../MindMark';
+import { MindCharacter } from '../mind/MindCharacter';
+import type { MindMood } from '../mind/mindMood';
 import FunctionResultCard from './FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
 import { PayableCard } from './PayableCard';
@@ -77,6 +78,9 @@ interface MessageBubbleProps {
   onSelectContact?: (name: string) => void;
   /** Long-press a bubble to copy its text. */
   onLongPress: (message: ChatMessage) => void;
+  /** Prismo's mood beside an assistant reply. */
+  characterMood?: MindMood;
+  animateCharacter?: boolean;
 }
 
 /**
@@ -85,7 +89,16 @@ interface MessageBubbleProps {
  * web + mobile share one bubble; the app-specific content (gradient avatar,
  * markdown, thinking toggle, structured cards) is composed in here.
  */
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLink, onLongPress, onSelectContact, statusLabel }) => {
+const MessageBubble: React.FC<MessageBubbleProps> = ({
+  message,
+  onCopy,
+  onOpenLink,
+  onLongPress,
+  onSelectContact,
+  statusLabel,
+  characterMood = 'idle',
+  animateCharacter = false,
+}) => {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const mdStyles = useMemo(() => makeMarkdownStyles(theme), [theme]);
@@ -102,7 +115,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, onCopy, onOpenLi
       <Ionicons name="person" size={16} color="#fff" />
     </LinearGradient>
   ) : (
-    <MindAvatar size={32} style={styles.avatar} />
+    <View style={styles.avatar}>
+      <MindCharacter mood={characterMood} size={32} animated={animateCharacter} />
+    </View>
   );
 
   return (
