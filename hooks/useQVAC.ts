@@ -135,16 +135,17 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     setDownloadedModelIds(service.getDownloadedModelIds());
   }, [service, state.llmStatus, state.whisperStatus]);
 
+  // A user-initiated (re)try, so it also boots again after a crashed boot.
   const initialize = useMemo(
     () => async () => {
-      await service.initializeLLM();
+      await service.initializeLLM({ retry: true });
     },
     [service]
   );
 
   useEffect(() => {
-    if (autoInit) initialize();
-  }, [autoInit, initialize]);
+    if (autoInit) service.initializeLLM().catch(() => {});
+  }, [autoInit, service]);
 
   // Suspend the QVAC runtime (Hyperswarm / Corestore networking) while the app
   // is backgrounded and resume it on return, per the SDK lifecycle API. Only

@@ -20,7 +20,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import QVACService from '../services/QVACService';
+import QVACService, { WORKLET_CRASHED_PREFIX } from '../services/QVACService';
 import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
 import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
 import { Ionicons } from '@expo/vector-icons';
@@ -686,7 +686,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       );
     }
 
-    const label = isError
+    const crashed = isError && (qvac.error ?? '').startsWith(WORKLET_CRASHED_PREFIX);
+    const label = crashed
+      ? 'On-device AI closed the app last time it started. Tap Retry to try again.'
+      : isError
       ? 'On-device AI failed to load'
       : qvac.isDownloading
         ? `Downloading on-device AI… ${qvac.combinedProgress}%`

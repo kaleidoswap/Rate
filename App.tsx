@@ -184,7 +184,7 @@ function DashboardTabs() {
       />
       <Tab.Screen
         name="Mind"
-        component={AIAssistantScreen}
+        component={MindTabScreen}
         options={{
           tabBarLabel: 'Mind',
           tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
@@ -261,6 +261,15 @@ function AppNavigator() {
         <Stack.Screen name="Map" component={MapScreen} />
       </Stack.Navigator>
     </NavigationContainer>
+  );
+}
+
+/** A render error in KaleidoMind stays inside its tab instead of replacing the whole app. */
+function MindTabScreen(props: React.ComponentProps<typeof AIAssistantScreen>) {
+  return (
+    <ErrorBoundary>
+      <AIAssistantScreen {...props} />
+    </ErrorBoundary>
   );
 }
 
