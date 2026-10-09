@@ -16,6 +16,7 @@ import {
     ScrollView,
     Platform,
     Linking,
+    Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
@@ -31,6 +32,9 @@ import { preimageMatches } from '../utils/payment-proofs';
 import { chainLabel } from '../utils/orchestra-ui';
 import { formatRecordAmount } from '../utils/crosschain-history';
 import { activityExplorerUrl } from '../utils/explorer';
+import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
+import { cancelRgbTransfer } from '../services/rgbWallet';
+import { rgbAccountAdapter } from '../services/protocols';
 
 interface Props {
     item: ActivityItem | null;
@@ -78,6 +82,9 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const [checkMessage, setCheckMessage] = useState('');
     const [accelerating, setAccelerating] = useState(false);
     useEffect(() => setAccelerating(false), [item?.id]);
+    const [cancelling, setCancelling] = useState(false);
+    const [cancelMessage, setCancelMessage] = useState('');
+    useEffect(() => { setCancelling(false); setCancelMessage(''); }, [item?.id]);
     // The preimage: from the account's history, else the proof kept when this phone paid.
     const [proof, setProof] = useState<{ preimage: string; paymentHash?: string } | null>(null);
     useEffect(() => {
@@ -103,6 +110,35 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const proofVerified = !!proof && !!proofHash && preimageMatches(proof.preimage, proofHash);
     const target = accelerationTarget(item);
     const explorerUrl = activityExplorerUrl(item);
+    const rgb = item.rgbTransfer;
+    const rgbAdapter = rgb ? rgbAccountAdapter() : null;
+    const cancellable = !!rgb && canCancelRgbTransfer(rgb, rgbWalletSupport(rgbAdapter));
+    const cancelTransfer = () => {
+        if (!rgb || rgb.batchTransferIdx == null) return;
+        Alert.alert(
+            rgb.direction === 'incoming' ? 'Cancel this invoice?' : 'Cancel this transfer?',
+            rgb.direction === 'incoming'
+                ? 'Anything sent to it afterwards won’t be received. Make a new invoice if you still want the asset.'
+                : 'The recipient hasn’t accepted it yet. Cancelling frees the asset to send again.',
+            [
+                { text: 'Keep', style: 'cancel' },
+                {
+                    text: 'Cancel transfer', style: 'destructive', onPress: async () => {
+                        setCancelling(true); setCancelMessage('');
+                        try {
+                            const failed = await cancelRgbTransfer(rgbAdapter, rgb.batchTransferIdx!);
+                            setCancelMessage(failed ? 'Cancelled.' : 'This transfer can no longer be cancelled.');
+                            await onRefresh?.();
+                        } catch (e) {
+                            setCancelMessage(rgbWalletErrorMessage(e, 'cancel'));
+                        } finally {
+                            setCancelling(false);
+                        }
+                    },
+                },
+            ],
+        );
+    };
 
     return (
         <Modal
@@ -160,7 +196,14 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                         <Text style={styles.rowValue}>{item.network ?? 'Not provided'}</Text>
                     </View>
                     {item.status === 'unknown' && <Text style={styles.rowLabel}>The provider has not confirmed the outcome. Check the status before sending again.</Text>}
-                    {item.status === 'pending' && <Text style={styles.rowLabel}>Submitted and waiting for confirmation. You can leave this screen and check again later.</Text>}
+                    {rgb && (
+                        <View style={styles.row}>
+                            <Text style={styles.rowLabel}>Progress</Text>
+                            <Text style={styles.rowValue}>{RGB_TRANSFER_STATUS_LABEL[rgb.status]}</Text>
+                        </View>
+                    )}
+                    {rgb && <Text style={styles.rowLabel}>{rgbTransferStatusDetail(rgb.status, rgb.direction)}</Text>}
+                    {!rgb && item.status === 'pending' && <Text style={styles.rowLabel}>Submitted and waiting for confirmation. You can leave this screen and check again later.</Text>}
                     {/* Asset name */}
                     {!!item.assetName && (
                         <View style={styles.row}>
@@ -268,6 +311,12 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             )}
                         </View>
                     )}
+                    {cancellable && (
+                        <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={cancelTransfer} activeOpacity={0.8}>
+                            <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Cancelling…' : rgb?.direction === 'incoming' ? 'Cancel invoice' : 'Cancel transfer'}</Text>
+                        </TouchableOpacity>
+                    )}
+                    {!!cancelMessage && <Text accessibilityLiveRegion="polite" style={styles.rowLabel}>{cancelMessage}</Text>}
                     {target && (
                         <TouchableOpacity style={styles.accelerateButton} onPress={() => setAccelerating(true)} activeOpacity={0.8}>
                             <Ionicons name="rocket-outline" size={18} color={theme.colors.primary[500]} />

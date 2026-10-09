@@ -3,10 +3,17 @@ import { fireEvent, render } from '@testing-library/react-native';
 import AssetDetailScreen from './AssetDetailScreen';
 
 let mockAssets: any[] = [];
+let mockLevel = 'lite';
+const mockWatch = jest.fn();
+const mockOpenUtxos = jest.fn();
 jest.mock('../store/hooks', () => ({
   useAppDispatch: () => jest.fn(),
-  useAppSelector: (f: any) => f({ assets: { rgbAssets: mockAssets } }),
+  useAppSelector: (f: any) => f({ assets: { rgbAssets: mockAssets }, settings: { disclosureLevel: mockLevel } }),
 }));
+jest.mock('../hooks/useRgbTransferWatch', () => ({ useRgbTransferWatch: (args: any) => { mockWatch(args); return []; } }));
+jest.mock('../components/rgb/RgbWalletTools', () => ({ useRgbWalletSheets: () => ({ sheets: null, openUtxos: mockOpenUtxos, openIssue: jest.fn() }) }));
+jest.mock('../store/slices/assetsSlice', () => ({ refreshRgbAssets: () => ({ type: 'refreshRgbAssets' }) }));
+jest.mock('../services/protocols', () => ({ rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn() }) }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: 'ScreenHeader' }));
 jest.mock('../components/RecentActivityWidget', () => ({ RecentActivityWidget: 'RecentActivityWidget' }));
@@ -18,7 +25,7 @@ const usdt = {
 const open = (asset: any, navigation: any = { navigate: jest.fn(), goBack: jest.fn() }) =>
   ({ navigation, screen: render(<AssetDetailScreen navigation={navigation} route={{ params: { asset } }} />) });
 
-beforeEach(() => { mockAssets = []; });
+beforeEach(() => { mockAssets = []; mockLevel = 'lite'; mockWatch.mockClear(); });
 
 test('shows the balance in the asset unit, its breakdown and details', () => {
   const { screen } = open(usdt);
@@ -60,4 +67,29 @@ test('says each thing once: no ticker, network or balance rows repeating the her
   const { screen } = open(usdt);
   for (const repeated of ['Ticker', 'Network', 'Available to send', 'Incoming', 'Settled']) expect(screen.queryByText(repeated)).toBeNull();
   expect(screen.queryAllByText('Tether USD').length).toBe(0); // the header (mocked) carries the name
+});
+
+test('an RGB asset’s transfers are watched while open, and its history reloads when one moves', () => {
+  const { screen } = open(usdt);
+  const args = mockWatch.mock.calls.at(-1)[0];
+  expect(args).toEqual(expect.objectContaining({ assetId: usdt.asset_id, enabled: true }));
+  expect(screen.UNSAFE_getByType('RecentActivityWidget' as any).props.refreshKey).toBe(0);
+  const { act } = require('@testing-library/react-native');
+  act(() => args.onChange());
+  expect(screen.UNSAFE_getByType('RecentActivityWidget' as any).props.refreshKey).toBe(1);
+});
+
+test('bitcoin and Spark tokens are not watched as RGB', () => {
+  open({ asset_id: 'BTC', ticker: 'BTC', name: 'Bitcoin', isRGB: false, balance: 1 });
+  expect(mockWatch.mock.calls.at(-1)[0].enabled).toBe(false);
+  open({ asset_id: 'spark-usdb', ticker: 'USDB', name: 'USDB', isRGB: false, protocol: 'SPARK', balance: 1 });
+  expect(mockWatch.mock.calls.at(-1)[0].enabled).toBe(false);
+});
+
+test('Advanced opens the RGB account’s UTXOs from an RGB asset; Lite does not offer it', () => {
+  expect(open(usdt).screen.queryByLabelText('UTXOs')).toBeNull();
+  mockLevel = 'advanced';
+  const { screen } = open(usdt);
+  fireEvent.press(screen.getByLabelText('UTXOs'));
+  expect(mockOpenUtxos).toHaveBeenCalled();
 });

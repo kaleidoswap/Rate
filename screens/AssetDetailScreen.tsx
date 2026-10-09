@@ -20,6 +20,11 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { loadBtcBalance } from '../store/slices/walletSlice';
 import { feedback } from '../utils/feedback';
 import { formatAssetAmount } from '../utils/assetAmount';
+import { useRgbTransferWatch } from '../hooks/useRgbTransferWatch';
+import { useRgbWalletSheets } from '../components/rgb/RgbWalletTools';
+import { refreshRgbAssets } from '../store/slices/assetsSlice';
+import { rgbAccountAdapter } from '../services/protocols';
+import { rgbWalletSupport } from '../utils/rgb-wallet';
 
 type Protocol = 'BTC' | 'RGB' | 'SPARK' | 'ARKADE';
 
@@ -94,6 +99,17 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     try { await dispatch(loadBtcBalance() as any); } catch { /* the pull just ends */ }
     setRefreshing(false);
   }, [dispatch]);
+
+  // An RGB asset's pending transfers move forward while this screen is open; history and balance follow.
+  const advanced = useAppSelector(s => (s as any).settings?.disclosureLevel) === 'advanced';
+  const [historyKey, setHistoryKey] = useState(0);
+  const watchRgb = valid && passed!.asset_id !== 'BTC' && (passed!.isRGB ?? (passed!.protocol ?? 'RGB') === 'RGB');
+  useRgbTransferWatch({
+    assetId: passed?.asset_id ?? '',
+    enabled: !!watchRgb,
+    onChange: () => { setHistoryKey(k => k + 1); void dispatch(refreshRgbAssets() as any); },
+  });
+  const rgbSheets = useRgbWalletSheets();
 
   if (!valid || !asset) return null;
 
@@ -171,8 +187,16 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
           </View>
         </Animated.View>}
 
+        {advanced && isRGB && !isBTC && rgbWalletSupport(rgbAccountAdapter()).listUtxos && (
+          <PressableScale accessibilityRole="button" accessibilityLabel="UTXOs" onPress={() => { feedback.select(); rgbSheets.openUtxos(); }} style={[styles.group, styles.row]}>
+            <Text style={styles.rowLabel}>UTXOs holding this and other RGB assets</Text>
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
+          </PressableScale>
+        )}
+
         {/* This asset's payments, after its details. */}
-        <RecentActivityWidget assetId={isBTC ? 'BTC' : asset.asset_id} assetTicker={asset.ticker} title="History" style={styles.history} />
+        <RecentActivityWidget assetId={isBTC ? 'BTC' : asset.asset_id} assetTicker={asset.ticker} title="History" style={styles.history} refreshKey={historyKey} />
+        {rgbSheets.sheets}
       </ScrollView>
     </SafeAreaView>
   );
