@@ -33,6 +33,7 @@ export const NO_RGB_RECEIVE_SUPPORT: RgbReceiveSupport = {
 interface RgbAdapterLike {
   protocolName?: string;
   walletType?: () => string;
+  hasRlnMethod?: (method: string) => boolean;
   listUnspents?: () => Promise<unknown>;
   createRgbUtxos?: (params: { num?: number; size?: number; feeRate?: number; upTo?: boolean }) => Promise<unknown>;
   executeProtocolOperation?: (operation: string, params: unknown) => Promise<unknown>;
@@ -44,13 +45,14 @@ interface RgbAdapterLike {
  * node through the engine takes the invoice options and lists UTXOs, but creates
  * them only when privileged ops are enabled. The node paired over NWC forwards
  * the invoice call as is: only expiry and confirmations are known to pass through,
- * and NWC has no UTXO methods.
+ * and lists or creates UTXOs only when the connection advertises those methods.
  */
 export function rgbReceiveSupport(adapter: unknown): RgbReceiveSupport {
   const a = adapter as RgbAdapterLike | null | undefined;
   if (!a) return NO_RGB_RECEIVE_SUPPORT;
   if (typeof a.walletType === 'function') {
-    return { invoiceKind: false, expiry: true, minConfirmations: true, listUtxos: false, createUtxos: false };
+    const has = (m: string) => a.hasRlnMethod?.(m) === true;
+    return { invoiceKind: false, expiry: true, minConfirmations: true, listUtxos: has('rln_list_unspents'), createUtxos: has('rln_create_utxos') };
   }
   const onDevice = a.protocolName === 'RGB_L1';
   const engineNode = a.protocolName === 'RGB_LN' && typeof a.executeProtocolOperation === 'function';
@@ -98,12 +100,20 @@ export function shortContractId(id: string): string {
   return id.length > 22 ? `${id.slice(0, 12)}…${id.slice(-6)}` : id;
 }
 
+export interface RgbAllocation {
+  assetId?: string;
+  /** Base units. */
+  amount: number;
+  settled: boolean;
+}
+
 export interface RgbUtxo {
   outpoint: string;
   sats: number;
   colorable: boolean;
   allocations: number;
   pending: number;
+  assets: RgbAllocation[];
 }
 
 /** UTXOs from rgb-lib (camelCase) or the node (snake_case, possibly wrapped in `unspents`). */
@@ -112,12 +122,18 @@ export function normalizeUnspents(raw: unknown): RgbUtxo[] {
   return list.map((u: any) => {
     const utxo = u?.utxo ?? {};
     const op = utxo.outpoint;
+    const allocations: any[] = u?.rgbAllocations ?? u?.rgb_allocations ?? [];
     return {
       outpoint: typeof op === 'string' ? op : op?.txid ? `${op.txid}:${op.vout}` : '',
       sats: Number(utxo.btcAmount ?? utxo.btc_amount ?? 0),
       colorable: !!utxo.colorable,
-      allocations: (u?.rgbAllocations ?? u?.rgb_allocations ?? []).length,
+      allocations: allocations.length,
       pending: Number(u?.pendingBlinded ?? u?.pending_blinded ?? 0),
+      assets: allocations.map((a: any) => ({
+        assetId: a?.assetId ?? a?.asset_id ?? undefined,
+        amount: Number(a?.assignment?.amount ?? a?.assignment?.value ?? a?.amount ?? 0) || 0,
+        settled: a?.settled !== false,
+      })),
     };
   }).filter((u: RgbUtxo) => !!u.outpoint);
 }
@@ -126,6 +142,29 @@ export function normalizeUnspents(raw: unknown): RgbUtxo[] {
 export function utxoCounts(utxos: RgbUtxo[]): { colorable: number; free: number } {
   const colorable = utxos.filter(u => u.colorable);
   return { colorable: colorable.length, free: colorable.filter(u => u.allocations === 0 && u.pending === 0).length };
+}
+
+export type RgbUtxoClass = 'colored' | 'free' | 'bitcoin';
+
+/** Colored: holds an RGB allocation or is reserved for an incoming one. Free: colorable and empty. Bitcoin: plain sats. */
+export function classifyUtxo(u: Pick<RgbUtxo, 'colorable' | 'allocations' | 'pending'>): RgbUtxoClass {
+  if (u.allocations > 0 || u.pending > 0) return 'colored';
+  return u.colorable ? 'free' : 'bitcoin';
+}
+
+export interface RgbUtxoSummary {
+  colored: RgbUtxo[];
+  free: RgbUtxo[];
+  bitcoin: RgbUtxo[];
+  /** Sats in plain outputs: what pays fees and funds new colorable UTXOs. */
+  bitcoinSats: number;
+}
+
+export function summarizeUtxos(utxos: RgbUtxo[]): RgbUtxoSummary {
+  const out: RgbUtxoSummary = { colored: [], free: [], bitcoin: [], bitcoinSats: 0 };
+  for (const u of utxos) out[classifyUtxo(u)].push(u);
+  out.bitcoinSats = out.bitcoin.reduce((sum, u) => sum + u.sats, 0);
+  return out;
 }
 
 export async function listRgbUtxos(adapter: unknown): Promise<RgbUtxo[]> {

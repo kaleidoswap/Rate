@@ -20,7 +20,7 @@ test('choosing blinded with no free UTXO warns and offers to create some', () =>
   const onChange = jest.fn();
   const onCreate = jest.fn();
   const screen = render(<RgbReceiveAdvanced support={all} options={{ ...DEFAULT_RGB_RECEIVE_OPTIONS, kind: 'blinded' }} onChange={onChange}
-    requestExpirySeconds={3600} utxos={{ loading: false, list: [{ outpoint: 'aa:0', sats: 1000, colorable: true, allocations: 1, pending: 0 }] }}
+    requestExpirySeconds={3600} utxos={{ loading: false, list: [{ outpoint: 'aa:0', sats: 1000, colorable: true, allocations: 1, pending: 0, assets: [] }] }}
     onLoadUtxos={jest.fn()} onCreateUtxos={onCreate} />);
   fireEvent.press(screen.getByLabelText('Advanced RGB options: Blinded'));
   expect(screen.getByText('No free UTXO to receive into. Create some below, or use Witness.')).toBeTruthy();

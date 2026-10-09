@@ -89,6 +89,8 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   /** Whether the connected NWC wallet is a KaleidoSwap RGB Lightning Node
    *  (supports rln_* methods) vs a plain Lightning wallet (NIP-47 only). */
   private isRln = false;
+  /** The rln_* methods the hub advertised; null when it listed none (an older hub, probed instead). */
+  private rlnMethods: Set<string> | null = null;
 
   // ── lifecycle ──────────────────────────────────────────────────────────
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -103,7 +105,9 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     // Detect the wallet type from the standard NIP-47 get_info (works for both
     // plain Lightning wallets and RLN nodes). RLN nodes advertise rln_* methods.
     const info = await this.client.getInfo();
-    this.isRln = (info.methods ?? []).some((m) => m.startsWith('rln_'));
+    const advertised = (info.methods ?? []).filter((m) => m.startsWith('rln_'));
+    this.isRln = advertised.length > 0;
+    this.rlnMethods = advertised.length ? new Set(advertised) : null;
     this.nodePubkey = info.pubkey;
 
     // Fallback: some hubs don't list rln_* in get_info (older builds emit only
@@ -134,6 +138,16 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   /** 'rln' for a KaleidoSwap RGB Lightning Node, 'ln' for a plain LN wallet. */
   walletType(): 'ln' | 'rln' {
     return this.isRln ? 'rln' : 'ln';
+  }
+
+  /**
+   * Whether this connection may call an optional rln_* method. A hub that lists
+   * its methods is taken at its word; an older one that lists none only gets
+   * the methods every RGB node connection has had.
+   */
+  hasRlnMethod(method: string): boolean {
+    if (!this.isRln) return false;
+    return this.rlnMethods ? this.rlnMethods.has(method) : false;
   }
 
   /** Guard for RGB/RLN-only operations against a plain Lightning wallet. */
@@ -342,9 +356,50 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   }
 
   async listTransfers(options?: { asset_id?: string }): Promise<any> {
-    // Not exposed over NWC yet; return empty list rather than throwing.
-    void options;
-    return { transfers: [] };
+    if (!options?.asset_id || !this.hasRlnMethod('rln_list_transfers')) return { transfers: [] };
+    return this.c().request('rln_list_transfers', { asset_id: options.asset_id });
+  }
+
+  /** Asks the node to advance its pending RGB transfers (an incoming one settles only then). */
+  async refreshTransfers(): Promise<void> {
+    if (!this.hasRlnMethod('rln_refresh_transfers')) return;
+    await this.c().request('rln_refresh_transfers', { filter: [], skip_sync: false });
+  }
+
+  /** The node's UTXOs with their RGB allocations, when the connection allows it. */
+  async listUnspents(): Promise<any> {
+    if (!this.hasRlnMethod('rln_list_unspents')) return { unspents: [] };
+    return this.c().request('rln_list_unspents', { skip_sync: false });
+  }
+
+  async createRgbUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean } = {}): Promise<{ success: boolean }> {
+    if (!this.hasRlnMethod('rln_create_utxos')) throw new Error('This node connection cannot create UTXOs.');
+    await this.c().request('rln_create_utxos', {
+      up_to: params.upTo ?? false, num: params.num ?? 3, size: params.size ?? 3000, fee_rate: params.feeRate ?? 2, skip_sync: false,
+    });
+    return { success: true };
+  }
+
+  /** The node's on-chain bitcoin history (list_transactions over NWC is Lightning), in the adapters' shape. */
+  async listOnchainTransactions(): Promise<UnifiedTransaction[]> {
+    if (!this.hasRlnMethod('rln_list_transactions')) return [];
+    const res = anyRec(await this.c().request('rln_list_transactions', { skip_sync: false }));
+    const txs: any[] = Array.isArray(res.transactions) ? res.transactions : [];
+    return txs.map((t) => {
+      const received = Number(t.received ?? 0);
+      const sent = Number(t.sent ?? 0);
+      const time = Number(t.confirmation_time?.timestamp ?? 0);
+      return {
+        id: String(t.txid ?? ''),
+        type: received >= sent ? 'receive' : 'send',
+        status: time ? 'confirmed' : 'pending',
+        timestamp: time * 1000,
+        amount: Math.abs(received - sent),
+        amountDisplay: '',
+        asset: { ...BTC_ASSET, layer: 'BTC_L1' },
+        protocolData: t,
+      } as UnifiedTransaction;
+    });
   }
 
   // ── invoices / payments ───────────────────────────────────────────────────

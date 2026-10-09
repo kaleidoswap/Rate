@@ -1,6 +1,6 @@
 import {
   ANY_RGB_ASSET_ID, DEFAULT_RGB_RECEIVE_OPTIONS, NO_RGB_RECEIVE_SUPPORT, isDefaultRgbOptions, listRgbUtxos, normalizeUnspents,
-  parseRgbContractId, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, utxoCounts,
+  parseRgbContractId, rgbInvoiceParams, rgbReceiveErrorMessage, rgbReceiveSupport, utxoCounts, classifyUtxo, summarizeUtxos,
 } from './rgb-receive';
 
 const onDevice = { protocolName: 'RGB_L1', listUnspents: jest.fn(), createRgbUtxos: jest.fn() };
@@ -18,6 +18,10 @@ describe('rgbReceiveSupport', () => {
   });
   it('the node over NWC exposes only expiry and confirmations', () => {
     expect(rgbReceiveSupport(nwcNode)).toEqual({ invoiceKind: false, expiry: true, minConfirmations: true, listUtxos: false, createUtxos: false });
+  });
+  it('the node over NWC lists and creates UTXOs only when its connection advertises those methods', () => {
+    const advertised = { ...nwcNode, hasRlnMethod: (m: string) => m === 'rln_list_unspents' };
+    expect(rgbReceiveSupport(advertised)).toMatchObject({ invoiceKind: false, listUtxos: true, createUtxos: false });
   });
   it('no adapter, no options', () => {
     expect(rgbReceiveSupport(null)).toEqual(NO_RGB_RECEIVE_SUPPORT);
@@ -69,13 +73,29 @@ describe('UTXOs', () => {
     { utxo: { outpoint: { txid: 'cc', vout: 2 }, btcAmount: 50000, colorable: false }, rgbAllocations: [], pendingBlinded: 0 },
   ];
   it('reads rgb-lib and node shapes alike', () => {
-    expect(normalizeUnspents(rgbLib)[0]).toEqual({ outpoint: 'aa:0', sats: 1000, colorable: true, allocations: 0, pending: 0 });
+    expect(normalizeUnspents(rgbLib)[0]).toEqual({ outpoint: 'aa:0', sats: 1000, colorable: true, allocations: 0, pending: 0, assets: [] });
     expect(normalizeUnspents({ unspents: [{ utxo: { outpoint: 'dd:3', btc_amount: 3000, colorable: true }, rgb_allocations: [], pending_blinded: 1 }] }))
-      .toEqual([{ outpoint: 'dd:3', sats: 3000, colorable: true, allocations: 0, pending: 1 }]);
+      .toEqual([{ outpoint: 'dd:3', sats: 3000, colorable: true, allocations: 0, pending: 1, assets: [] }]);
     expect(normalizeUnspents(undefined)).toEqual([]);
   });
   it('counts colorable and free UTXOs', () => {
     expect(utxoCounts(normalizeUnspents(rgbLib))).toEqual({ colorable: 2, free: 1 });
+  });
+  it('reads each allocation’s asset and amount from rgb-lib and the node', () => {
+    const [u] = normalizeUnspents([{ utxo: { outpoint: 'ee:0', btcAmount: 1000, colorable: true },
+      rgbAllocations: [{ assetId: 'rgb:usdt', assignment: { type: 'FUNGIBLE', amount: 250 }, settled: false }] }]);
+    expect(u.assets).toEqual([{ assetId: 'rgb:usdt', amount: 250, settled: false }]);
+    const [n] = normalizeUnspents({ unspents: [{ utxo: { outpoint: 'ff:0', btc_amount: 3000, colorable: true },
+      rgb_allocations: [{ asset_id: 'rgb:usdt', assignment: { type: 'Fungible', value: 9 }, settled: true }] }] });
+    expect(n.assets).toEqual([{ assetId: 'rgb:usdt', amount: 9, settled: true }]);
+  });
+  it('classifies UTXOs: holding assets, free to receive, or plain bitcoin', () => {
+    expect(classifyUtxo({ colorable: true, allocations: 1, pending: 0 })).toBe('colored');
+    expect(classifyUtxo({ colorable: true, allocations: 0, pending: 1 })).toBe('colored');
+    expect(classifyUtxo({ colorable: true, allocations: 0, pending: 0 })).toBe('free');
+    expect(classifyUtxo({ colorable: false, allocations: 0, pending: 0 })).toBe('bitcoin');
+    const summary = summarizeUtxos(normalizeUnspents(rgbLib));
+    expect([summary.colored.length, summary.free.length, summary.bitcoin.length, summary.bitcoinSats]).toEqual([1, 1, 1, 50000]);
   });
   it('lists through the adapter method or the node operation', async () => {
     await expect(listRgbUtxos({ listUnspents: async () => rgbLib })).resolves.toHaveLength(3);
