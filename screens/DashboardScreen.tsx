@@ -6,6 +6,7 @@ import { receiveAccountChain } from '../services/kaleidoPay/connect';
 import { chainLabel } from '../utils/receive-routes';
 import type { AccountId } from '../utils/account-routing';
 import { toEngineProtocol } from '../utils/protocol-bridge'
+import { failedAccounts, offlineAccountNames } from '../utils/offline-accounts';
 // screens/DashboardScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
@@ -125,10 +126,6 @@ function anyAccountConnected(): boolean {
   );
 }
 
-const ACCOUNT_NAMES: Record<string, string> = {
-  RGB_LN: 'your RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark',
-};
-
 export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
   const activeWallet = useAppSelector(state => state.wallet.activeWallet);
@@ -168,8 +165,10 @@ export default function DashboardScreen({ navigation }: Props) {
   const [isConnecting, setIsConnecting] = useState(true);
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  // Accounts that failed to connect (by name), so the banner can say which one.
-  const [offlineAccounts, setOfflineAccounts] = useState<string[]>([]);
+  // Accounts that failed to connect at startup; the banner names those still not connected.
+  const [startupFailures, setStartupFailures] = useState<string[]>([]);
+  const offlineAccounts = offlineAccountNames(startupFailures, (p) =>
+    protocolManager.getAdapterIfAvailable(p as any)?.isConnected() ?? false);
   const [protocolsReady, setProtocolsReady] = useState(false);
   // Startup initializes protocols and then fetches balances in the same async
   // focus callback. React state does not update synchronously, so reading
@@ -236,9 +235,7 @@ export default function DashboardScreen({ navigation }: Props) {
       if (failed.length > 0) {
         console.warn('[Dashboard] Protocol failures:', failed.join(', '));
       }
-      setOfflineAccounts(Array.from(results.entries())
-        .filter(([, r]) => !r.success && !r.error?.startsWith('skipped:'))
-        .map(([p]) => ACCOUNT_NAMES[String(p)] ?? String(p)));
+      setStartupFailures(failedAccounts(results));
       if (skipped.length > 0) {
         console.log('[Dashboard] Protocols skipped:', skipped.join(', '));
       }
@@ -580,7 +577,7 @@ export default function DashboardScreen({ navigation }: Props) {
     if (refreshing || isConnecting || needsSetup) return;
     setRefreshing(true);
     try {
-      if (connectionError) protocolsReadyRef.current = false;
+      if (connectionError || offlineAccounts.length > 0) protocolsReadyRef.current = false;
       await connectAndLoad();
     } finally {
       setRefreshing(false);
