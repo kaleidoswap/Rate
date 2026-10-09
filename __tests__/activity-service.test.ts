@@ -12,7 +12,14 @@ jest.mock('../services/protocols', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadActivity, onchainBtcItems } from '../services/ActivityService';
+import {
+  clearActivityCache,
+  loadActivity,
+  mergeActivity,
+  onchainBtcItems,
+  streamActivity,
+  type ActivityProgress,
+} from '../services/ActivityService';
 
 describe('ActivityService', () => {
   beforeEach(() => {
@@ -243,5 +250,136 @@ describe('on-chain BTC of the RGB account', () => {
   it('counts a failed on-chain list as a failed source', async () => {
     adapters.RGB_LN = { isConnected: () => true, listPayments: async () => [], listTransactions: async () => { throw new Error('down'); } };
     expect((await loadActivity()).failedSources).toBe(1);
+  });
+});
+
+describe('streamActivity', () => {
+  const btc = { id: 'BTC', ticker: 'BTC', name: 'Bitcoin', precision: 8 };
+  const sparkTx = (id: string, timestamp: number) => ({ id, type: 'receive', status: 'confirmed', amount: 100, timestamp, asset: btc });
+  const deferred = <T,>() => {
+    let resolve!: (v: T) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+
+  beforeEach(() => {
+    for (const key of Object.keys(adapters)) delete adapters[key];
+    clearActivityCache();
+  });
+
+  it('shows swaps at once and adds each account as it answers', async () => {
+    const arkade = deferred<any[]>();
+    adapters.SPARK = { isConnected: () => true, listTransactions: async () => [sparkTx('s1', 1000)] };
+    adapters.ARKADE = { isConnected: () => true, listTransactions: () => arkade.promise };
+    const updates: ActivityProgress[] = [];
+    const { done } = streamActivity(
+      { swaps: [{ rfq_id: 'r1', status: 'completed', created_at: 500 }] },
+      (p) => updates.push(p),
+    );
+
+    expect(updates[0]).toMatchObject({ pending: 2 });
+    expect(updates[0].items.map((i) => i.id)).toEqual(['swap-r1']);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(updates.at(-1)!.pending).toBe(1);
+    expect(updates.at(-1)!.items.map((i) => i.id)).toEqual(['spark-s1', 'swap-r1']);
+
+    arkade.resolve([sparkTx('a1', 2000)]);
+    const final = await done;
+    expect(final.pending).toBe(0);
+    expect(final.items.map((i) => i.id)).toEqual(['arkade-a1', 'spark-s1', 'swap-r1']);
+  });
+
+  it('does not wait for a source that never answers', async () => {
+    adapters.SPARK = { isConnected: () => true, listTransactions: async () => [sparkTx('s1', 1000)] };
+    adapters.ARKADE = { isConnected: () => true, listTransactions: () => new Promise(() => {}) };
+    const result = await streamActivity({ timeoutMs: 30 }).done;
+    expect(result.items.map((i) => i.id)).toEqual(['spark-s1']);
+    expect(result.failedSources).toBe(1);
+  });
+
+  it('keeps the last items of a source that fails, and drops a disconnected one', async () => {
+    let arkadeDown = false;
+    adapters.SPARK = { isConnected: () => true, listTransactions: async () => [sparkTx('s1', 1000)] };
+    adapters.ARKADE = {
+      isConnected: () => true,
+      listTransactions: async () => { if (arkadeDown) throw new Error('down'); return [sparkTx('a1', 2000)]; },
+    };
+    await streamActivity({ walletId: 3, useCache: true }).done;
+
+    arkadeDown = true;
+    const updates: ActivityProgress[] = [];
+    const again = await streamActivity({ walletId: 3, useCache: true }, (p) => updates.push(p)).done;
+    expect(updates[0].items.map((i) => i.id)).toEqual(['arkade-a1', 'spark-s1']);
+    expect(again.items.map((i) => i.id)).toEqual(['arkade-a1', 'spark-s1']);
+    expect(again.failedSources).toBe(1);
+
+    delete adapters.ARKADE;
+    expect((await streamActivity({ walletId: 3, useCache: true }).done).items.map((i) => i.id)).toEqual(['spark-s1']);
+    // Another wallet starts empty.
+    expect((await streamActivity({ walletId: 4, useCache: true }).done).items.map((i) => i.id)).toEqual(['spark-s1']);
+  });
+
+  it('hides an on-chain tx once its RGB transfer arrives, whichever lands first', async () => {
+    const transfers = deferred<any[]>();
+    adapters.RGB_LN = {
+      isConnected: () => true,
+      listPayments: async () => [],
+      listTransfers: () => transfers.promise,
+      listTransactions: async () => [
+        { id: 'rgbsend', type: 'send', status: 'confirmed', amount: 1000, timestamp: 5000, asset: { id: 'BTC', layer: 'BTC_L1' } },
+      ],
+    };
+    const updates: ActivityProgress[] = [];
+    const { done } = streamActivity({ assets: [{ asset_id: 'rgb:a', ticker: 'USDT', name: 'Tether', precision: 0 }] }, (p) => updates.push(p));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(updates.at(-1)!.items.map((i) => i.id)).toEqual(['onchain-rgbsend']);
+
+    transfers.resolve([{ txid: 'rgbsend', kind: 'Send', status: 'Settled', created_at: 1, requested_assignment: { value: 5 } }]);
+    expect((await done).items.map((i) => i.id)).toEqual(['transfer-rgbsend-0']);
+  });
+
+  it('reuses a call still running from the previous load', async () => {
+    const pending = deferred<any[]>();
+    const listTransactions = jest.fn(() => pending.promise);
+    adapters.SPARK = { isConnected: () => true, listTransactions };
+    const first = streamActivity({ timeoutMs: 20 }).done;
+    await first;
+    const second = streamActivity().done;
+    pending.resolve([sparkTx('s1', 1)]);
+    expect((await second).items.map((i) => i.id)).toEqual(['spark-s1']);
+    expect(listTransactions).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries a call that looks stuck', async () => {
+    const listTransactions = jest.fn()
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValueOnce([sparkTx('s1', 1)]);
+    adapters.SPARK = { isConnected: () => true, listTransactions };
+    await streamActivity({ walletId: 9, timeoutMs: 5 }).done;
+    await new Promise((r) => setTimeout(r, 20));
+    expect((await streamActivity({ walletId: 9, timeoutMs: 5 }).done).items.map((i) => i.id)).toEqual(['spark-s1']);
+    expect(listTransactions).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops reporting once cancelled', async () => {
+    const spark = deferred<any[]>();
+    adapters.SPARK = { isConnected: () => true, listTransactions: () => spark.promise };
+    const onUpdate = jest.fn();
+    const { done, cancel } = streamActivity({}, onUpdate);
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    cancel();
+    spark.resolve([sparkTx('s1', 1)]);
+    await done;
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges like a single load', () => {
+    const item = (id: string, txid: string, timestamp?: number) => ({ id, txid, timestamp } as any);
+    expect(mergeActivity({
+      swaps: [item('swap-1', 'abc', 10)],
+      onchain: [item('onchain-abc', 'abc', 30), item('onchain-def', 'def', undefined)],
+      SPARK: [item('spark-1', 's', 20)],
+    }).map((i) => i.id)).toEqual(['spark-1', 'swap-1', 'onchain-def']);
   });
 });
