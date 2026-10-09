@@ -306,3 +306,12 @@ test('no fee speed for other accounts', async () => {
   expect(screen.queryByText('Network fee')).toBeNull();
   mockFeeOptions = null;
 });
+
+test('an amount handed over in sats is used as is, whatever the display unit', async () => {
+  mockState = { ...baseState(), settings: { bitcoinUnit: 'BTC' } };
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 2510)]);
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'spark1abc', prefilledAmountSat: 2500, contactName: 'Mario' } }} />);
+  await act(async () => {});
+  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  expect(previewInput).toHaveBeenCalledWith('spark1abc', 2500, expect.anything(), expect.anything());
+});

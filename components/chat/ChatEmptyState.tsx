@@ -12,6 +12,8 @@ interface ChatEmptyStateProps {
   onSuggestion: (query: string) => void;
   /** Open the Nostr contacts selector. */
   onContacts: () => void;
+  /** Replaces the default avatar (the Prismo character). */
+  hero?: React.ReactNode;
 }
 
 /**
@@ -20,7 +22,7 @@ interface ChatEmptyStateProps {
  * 1:1 to the on-device wallet tools. Replaces the old wall-of-text welcome
  * bubble.
  */
-const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onSuggestion, onContacts }) => {
+const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onSuggestion, onContacts, hero }) => {
   const theme = useAppTheme();
 
   const suggestions = [
@@ -73,18 +75,25 @@ const ChatEmptyState: React.FC<ChatEmptyStateProps> = ({ onSuggestion, onContact
       showsVerticalScrollIndicator={false}
       keyboardShouldPersistTaps="handled"
     >
-      <LinearGradient
-        colors={theme.colors.primary.gradient!}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={[styles.avatar, theme.shadows.lg]}
-      >
-        <Ionicons name="sparkles" size={30} color="#fff" />
-      </LinearGradient>
+      {hero ? (
+        <View style={styles.hero}>{hero}</View>
+      ) : (
+        <LinearGradient
+          colors={theme.colors.primary.gradient!}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={[styles.avatar, theme.shadows.lg]}
+        >
+          <Ionicons name="sparkles" size={30} color="#fff" />
+        </LinearGradient>
+      )}
 
       <Text style={[styles.headline, { color: theme.colors.text.primary }]}>
-        Your private AI assistant
+        {hero ? 'Hi, I’m Prismo' : 'Your private AI assistant'}
       </Text>
+      {hero ? (
+        <Text style={[styles.subhead, { color: theme.colors.text.secondary }]}>Your private AI assistant</Text>
+      ) : null}
 
       <View style={[styles.privacyPill, { backgroundColor: theme.colors.surface.highlight }]}>
         {/* primary[500] (not [600]/[700]): dark theme only overrides intent ramps at 50/100, so use the base green for on-dark visibility */}
@@ -135,6 +144,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: tokens.spacing[4],
   },
+  hero: { marginBottom: tokens.spacing[3] },
+  subhead: { fontSize: tokens.typography.fontSize.sm, marginTop: tokens.spacing[1], textAlign: 'center' },
   headline: {
     fontSize: tokens.typography.fontSize['2xl'],
     fontWeight: tokens.typography.fontWeight.bold,

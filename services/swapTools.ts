@@ -232,6 +232,19 @@ async function fetchQuote(from: string, to: string, amt: number): Promise<{ id: 
   return { id: rfqId, quote, price: resp?.price };
 }
 
+/** A read-only quote for a preview card (BTC amounts in sats). Nothing is cached or executed. */
+export async function previewSwapQuote(from: string, to: string, amount: number): Promise<{ receiveAmount: number; receiveUnit: string; fee?: number; feeUnit?: string; venue: string }> {
+  requireSwaps();
+  const { quote } = await fetchQuote(from.toUpperCase(), to.toUpperCase(), amount);
+  return {
+    receiveAmount: quote.receiveAmount,
+    receiveUnit: quote.receiveUnit,
+    fee: quote.fee,
+    feeUnit: quote.feeUnit,
+    venue: quote.venue === 'flashnet' ? 'Flashnet' : 'KaleidoSwap',
+  };
+}
+
 /** Throws when the node's channels can't carry this maker swap, before anything is locked. */
 async function assertChannelCapacity(q: CachedQuote): Promise<void> {
   const { channels, htlcMinMsat } = await loadChannelLiquidity();

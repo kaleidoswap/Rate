@@ -17,6 +17,12 @@ jest.mock('../services/protocols', () => ({
   rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listTransfers: jest.fn(), account: { failTransfer: jest.fn(), capabilities: () => mockCaps } }),
 }));
 
+jest.mock('../services/mindIntents/model', () => ({ localTextModel: () => ({ ready: () => false, complete: jest.fn() }) }));
+jest.mock('./Sheet', () => ({ Sheet: ({ visible, children, title }: any) => {
+  const { Text, View } = require('react-native');
+  return visible ? <View><Text>{title}</Text>{children}</View> : null;
+} }));
+
 import { ActivityDetailSheet } from './ActivityDetailSheet';
 import type { ActivityItem } from '../services/ActivityService';
 
@@ -68,4 +74,12 @@ test('a failed transfer can be removed from history where the wallet can, after 
   expect(onRefresh).toHaveBeenCalled();
   expect(onClose).toHaveBeenCalled();
   mockCaps = {};
+});
+
+test('Explain opens a plain explanation of this exact transfer, even with KaleidoMind off', async () => {
+  const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'incoming', batchTransferIdx: 7 })} onClose={jest.fn()} />);
+  await act(async () => { fireEvent.press(screen.getByText('Explain')); });
+  expect(screen.getByText('About this RGB transfer')).toBeTruthy();
+  expect(screen.getByText(/This is an RGB transfer of 5 USDT\. Its current step is “Waiting for the other side”/)).toBeTruthy();
+  expect(screen.getByText(/Built-in explanation/)).toBeTruthy();
 });

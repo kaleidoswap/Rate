@@ -74,7 +74,7 @@ async function ensureBtcPrice(): Promise<number> {
   return p;
 }
 /** Both local AND Nostr contacts (the screen merges them; so must the agent). */
-function contacts(): any[] {
+export function contacts(): any[] {
   const st = getStore().getState() as any;
   const local = (st?.contacts?.contacts ?? []) as any[];
   const nostr = ((st?.nostr?.contacts ?? []) as any[]).map((c) => ({
@@ -123,7 +123,7 @@ function noContactError(name: string): Error {
  * the Nostr profile when the contact came from Nostr and wasn't pre-resolved
  * (the voice/agent path never opens the contacts picker that would cache it).
  */
-async function contactLnAddress(c: any): Promise<string | undefined> {
+export async function contactLnAddress(c: any): Promise<string | undefined> {
   if (c?.lightning_address) return String(c.lightning_address);
   if (c?.pubkey) {
     try {

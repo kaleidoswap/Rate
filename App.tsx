@@ -8,10 +8,11 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Provider, useSelector } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { View, Text, ActivityIndicator, Platform, SafeAreaView, Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { WalletTabBar } from './components/WalletTabBar';
+import { MindCharacterBadge } from './components/mind/MindCharacter';
 import { ThemeProvider } from '@react-navigation/native';
 import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
@@ -77,14 +78,14 @@ type RootStackParamList = {
   SecuritySetup: { walletId?: number; isInitialSetup?: boolean; mode?: 'setup' | 'pin' | 'disablePin' };
   Dashboard: undefined;
   Settings: undefined;
-  Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; resumePayment?: boolean } | undefined;
+  Send: { selectedAsset?: any; preferredAccount?: 'BARK'; prefilledAddress?: string; contactName?: string; prefilledAmountSat?: number; resumePayment?: boolean } | undefined;
   MerchantOffer: undefined;
-  Receive: { selectedAsset?: any } | undefined;
+  Receive: { selectedAsset?: any; prefilledAmountSat?: number; prefilledNetwork?: 'lightning' | 'onchain'; prefilledAssetTicker?: string } | undefined;
   Bridge: undefined;
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   Assets: { issue?: boolean } | undefined;
   DesignSystem: undefined;
-  Swap: undefined;
+  Swap: { fromAsset?: string; toAsset?: string; fromAmountSat?: number; fromAmountUnits?: number } | undefined;
   NostrSettings: undefined;
   Profile: undefined;
   ProfileEdit: undefined;
@@ -190,8 +191,8 @@ function DashboardTabs() {
         component={MindTabScreen}
         options={{
           tabBarLabel: 'Mind',
-          tabBarIcon: ({ focused, color, size }: TabBarIconProps) => (
-            <MaterialCommunityIcons name="brain" size={24} color={color} />
+          tabBarIcon: ({ focused, color }: TabBarIconProps) => (
+            <MindCharacterBadge size={24} color={color} focused={focused} />
           ),
         }}
       />

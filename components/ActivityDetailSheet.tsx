@@ -35,6 +35,7 @@ import { activityExplorerUrl } from '../utils/explorer';
 import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, rgbOnchainKindLabel, canDeleteRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
 import { cancelRgbTransfer, deleteRgbTransfer } from '../services/rgbWallet';
 import { rgbAccountAdapter } from '../services/protocols';
+import { ExplainButton } from './mind/ExplainSheet';
 
 interface Props {
     item: ActivityItem | null;
@@ -196,6 +197,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
                         </Text>
                     )}
+                    {!item.rgbTransfer && <ExplainButton subject={{ type: 'activity', item }} />}
                 </View>
 
                     {/* Status */}
@@ -228,7 +230,10 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     {rgb && (
                         <View style={styles.row}>
                             <Text style={styles.rowLabel}>Progress</Text>
-                            <Text style={styles.rowValue}>{RGB_TRANSFER_STATUS_LABEL[rgb.status]}</Text>
+                            <View style={styles.rowWithAction}>
+                                <ExplainButton compact subject={{ type: 'rgb-transfer', item }} />
+                                <Text style={styles.rowValue}>{RGB_TRANSFER_STATUS_LABEL[rgb.status]}</Text>
+                            </View>
                         </View>
                     )}
                     {rgb && <Text style={styles.rowLabel}>{rgbTransferStatusDetail(rgb.status, rgb.direction)}</Text>}
@@ -261,7 +266,10 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     {(
                         <View style={styles.row}>
                             <Text style={styles.rowLabel}>Fee</Text>
-                            <Text style={styles.rowValue}>{item.fee != null ? `${formatBitcoinAmount(item.fee, unit)} ${unit}` : 'Not provided'}</Text>
+                            <View style={styles.rowWithAction}>
+                                {item.fee != null && <ExplainButton compact subject={{ type: 'fee', item }} />}
+                                <Text style={styles.rowValue}>{item.fee != null ? `${formatBitcoinAmount(item.fee, unit)} ${unit}` : 'Not provided'}</Text>
+                            </View>
                         </View>
                     )}
 
@@ -389,6 +397,12 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         backgroundColor: theme.colors.border.medium,
         marginTop: theme.spacing[3],
         marginBottom: theme.spacing[2],
+    },
+    rowWithAction: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[2],
+        flexShrink: 1,
     },
     header: {
         alignItems: 'center',
