@@ -1,5 +1,7 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
-import { connectRgbL1PayAccounts, rgbL1PayAdapter } from './rgbL1Pay';
+const mockFeeRates = jest.fn(async () => ({ slow: 1, normal: 2, fast: 5, live: false }));
+jest.mock('../rgbWallet', () => ({ rgbFeeRates: () => mockFeeRates() }));
+import { connectRgbL1PayAccounts, networkFeeRate, rgbL1PayAdapter } from './rgbL1Pay';
 import { currentRgbPayAdapter, registerRgbAssetPayment, rgbRequestAsset } from './rgbPay';
 import { executePaymentOffer, previewTarget, quotePaymentOffers } from './index';
 
@@ -51,4 +53,24 @@ test('no Lightning from the phone wallet; on-chain bitcoin goes through rgb-lib'
     expect(wallet.sendBtcOnchain).toHaveBeenCalledWith({ address: 'tb1qdest', amount: 10000, feeRate: 2 });
   } finally { disconnect(); }
   await expect(rgbL1PayAdapter(wallet).sendPayment({ invoice: 'x' })).rejects.toThrow(/no Lightning/);
+});
+
+test('RGB on this phone pays at the network’s normal fee rate once known, read at most every 10 minutes', async () => {
+  let t = 0;
+  mockFeeRates.mockClear();
+  mockFeeRates.mockResolvedValueOnce({ slow: 3, normal: 7, fast: 12, live: true });
+  const rate = networkFeeRate({}, () => t);
+  expect(rate()).toBeUndefined();
+  await Promise.resolve(); await Promise.resolve();
+  expect(rate()).toBe(7);
+  t = 9 * 60_000;
+  rate();
+  expect(mockFeeRates).toHaveBeenCalledTimes(1);
+  t = 11 * 60_000;
+  rate();
+  expect(mockFeeRates).toHaveBeenCalledTimes(2);
+
+  const wallet = l1();
+  await rgbL1PayAdapter(wallet, () => 7).sendAsset!({ asset_id: USDT.id, recipientId: 'rgb:invoice', amount: 1 });
+  expect(wallet.sendAsset).toHaveBeenCalledWith({ token: USDT.id, recipient: 'rgb:invoice', amount: 1, feeRate: 7 });
 });

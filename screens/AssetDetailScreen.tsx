@@ -25,6 +25,7 @@ import { useRgbWalletSheets } from '../components/rgb/RgbWalletTools';
 import { refreshRgbAssets } from '../store/slices/assetsSlice';
 import { rgbAccountAdapter } from '../services/protocols';
 import { rgbWalletSupport } from '../utils/rgb-wallet';
+import { refreshRgbTransfers } from '../services/rgbWallet';
 
 type Protocol = 'BTC' | 'RGB' | 'SPARK' | 'ARKADE';
 
@@ -94,12 +95,6 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     return live ? { ...passed, balance: live.balance ?? passed.balance } : passed;
   }, [passed, storeAssets]);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    try { await dispatch(loadBtcBalance() as any); } catch { /* the pull just ends */ }
-    setRefreshing(false);
-  }, [dispatch]);
-
   // An RGB asset's pending transfers move forward while this screen is open; history and balance follow.
   const advanced = useAppSelector(s => (s as any).settings?.disclosureLevel) === 'advanced';
   const [historyKey, setHistoryKey] = useState(0);
@@ -110,6 +105,20 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     onChange: () => { setHistoryKey(k => k + 1); void dispatch(refreshRgbAssets() as any); },
   });
   const rgbSheets = useRgbWalletSheets();
+
+  // A pull also moves an RGB asset's transfers forward and re-reads its balance and history.
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      if (watchRgb) {
+        await refreshRgbTransfers(rgbAccountAdapter()).catch(() => undefined);
+        await dispatch(refreshRgbAssets() as any);
+        setHistoryKey(k => k + 1);
+      }
+      await dispatch(loadBtcBalance() as any);
+    } catch { /* the pull just ends */ }
+    setRefreshing(false);
+  }, [dispatch, watchRgb]);
 
   if (!valid || !asset) return null;
 

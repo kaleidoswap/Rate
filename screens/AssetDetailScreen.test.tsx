@@ -13,6 +13,8 @@ jest.mock('../store/hooks', () => ({
 jest.mock('../hooks/useRgbTransferWatch', () => ({ useRgbTransferWatch: (args: any) => { mockWatch(args); return []; } }));
 jest.mock('../components/rgb/RgbWalletTools', () => ({ useRgbWalletSheets: () => ({ sheets: null, openUtxos: mockOpenUtxos, openIssue: jest.fn() }) }));
 jest.mock('../store/slices/assetsSlice', () => ({ refreshRgbAssets: () => ({ type: 'refreshRgbAssets' }) }));
+const mockRefreshTransfers = jest.fn(async () => undefined);
+jest.mock('../services/rgbWallet', () => ({ refreshRgbTransfers: () => mockRefreshTransfers() }));
 jest.mock('../services/protocols', () => ({ rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn() }) }));
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: 'ScreenHeader' }));
@@ -92,4 +94,13 @@ test('Advanced opens the RGB account’s UTXOs from an RGB asset; Lite does not 
   const { screen } = open(usdt);
   fireEvent.press(screen.getByLabelText('UTXOs'));
   expect(mockOpenUtxos).toHaveBeenCalled();
+});
+
+test('pulling an RGB asset moves its transfers forward and reloads its history', async () => {
+  const { act } = require('@testing-library/react-native');
+  const { screen } = open(usdt);
+  const scroll = screen.UNSAFE_getAllByType(require('react-native').ScrollView)[0];
+  await act(async () => { await scroll.props.refreshControl.props.onRefresh(); });
+  expect(mockRefreshTransfers).toHaveBeenCalled();
+  expect(screen.UNSAFE_getByType('RecentActivityWidget' as any).props.refreshKey).toBe(1);
 });
