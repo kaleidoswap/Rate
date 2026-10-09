@@ -51,6 +51,18 @@ overrides:
   compression@1: ^1.8.2
   decode-uri-component: 0.5.0
   image-size: 2.0.4
+  # One copy of each native addon the QVAC worker loads. The worker bundle asks
+  # for an exact addon version, but the bare-kit linker links the hoisted copy
+  # of each manifest addon by name, so a version that only exists nested
+  # (bare-ffmpeg 1.2.3 under @qvac/decoder-audio, rocksdb-native 3.18.1 under
+  # corestore) is missing from the app and the worker aborts the process with
+  # ADDON_NOT_FOUND when KaleidoMind starts. scripts/sync-qvac-bundle.js fails
+  # the install if this drifts again.
+  bare-buffer: 3.7.1
+  bare-ffmpeg: 1.6.0
+  bare-fs: 4.8.3
+  bare-os: 3.9.3
+  rocksdb-native: 3.18.1
 
 # Bark pays BOLT12 offers (payLightningOffer); remove once wallet-engine ships it.
 patchedDependencies:

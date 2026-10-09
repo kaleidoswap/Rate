@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleId": "ec382184b4f0866a5be352a5af1e9980530444c4691655effa85d2d59fb29d51",
+  "bundleId": "ab778d73987a575949037e8f3f881ffcee894943d69e4fc22c885113a0e7ccf6",
   "addons": [
     "@qvac/asr-ggml",
     "@qvac/fabric",
@@ -17,7 +17,6 @@
     "bare-hrtime",
     "bare-inspect",
     "bare-os",
-    "bare-path",
     "bare-pipe",
     "bare-signals",
     "bare-stdio",

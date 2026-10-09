@@ -64,6 +64,18 @@ async function main() {
     throw new Error('QVAC worker bundle verification failed');
   }
 
+  const manifestPath = path.join(projectRoot, 'qvac', 'addons.manifest.json');
+  if (fs.existsSync(manifestPath)) {
+    const { missingAddons } = require('./qvac-addon-coverage');
+    const missing = await missingAddons(projectRoot, result.bundlePath, manifestPath);
+    if (missing.length > 0) {
+      throw new Error(
+        `QVAC worker loads addon versions the app will not link: ${missing.join(', ')}. ` +
+          'Pin each to one version in pnpm-workspace.yaml overrides so it is hoisted.'
+      );
+    }
+  }
+
   const dest = path.join(sdkPath, 'dist', 'worker.mobile.bundle.js');
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(result.bundlePath, dest);
