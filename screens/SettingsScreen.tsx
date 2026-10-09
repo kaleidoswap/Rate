@@ -605,6 +605,7 @@ export default function SettingsScreen({ navigation }: Props) {
               const security = SecurityService.getInstance();
               if (await security.isDeviceAuthAvailable()
                 && !(await security.authenticateForReveal('Authenticate to remove this wallet'))) return;
+              await require('../services/agentWallet/lifecycle').closeAgentWallet().catch(() => {});
               const { protocolManager } = require('../services/protocols');
               await protocolManager.disconnectAll();
               const DBService = require('../services/DatabaseService').default;

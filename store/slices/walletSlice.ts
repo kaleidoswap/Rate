@@ -128,10 +128,18 @@ export const loadWallets = createAsyncThunk(
   }
 );
 
+/** The Agent wallet's account belongs to the active wallet; drop it before that changes. */
+async function closeAgentWalletQuietly(): Promise<void> {
+  try {
+    await require('../../services/agentWallet/lifecycle').closeAgentWallet();
+  } catch { /* nothing open */ }
+}
+
 export const switchWallet = createAsyncThunk(
   'wallet/switch',
   async (walletId: number, { rejectWithValue }) => {
     try {
+      await closeAgentWalletQuietly();
       const dbService = DatabaseService.getInstance();
       await dbService.setActiveWallet(walletId);
       const wallet = await dbService.getActiveWallet();
@@ -200,6 +208,7 @@ export const deleteWallet = createAsyncThunk(
   'wallet/delete',
   async (walletId: number, { rejectWithValue }) => {
     try {
+      await closeAgentWalletQuietly();
       const dbService = DatabaseService.getInstance();
       await dbService.deleteWallet(walletId);
       await clearBalanceSnapshots(walletId);

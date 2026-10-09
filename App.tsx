@@ -27,6 +27,7 @@ import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
 
 import { store, persistor } from './store';
+import { closeAgentWallet, watchAgentWalletLifecycle } from './services/agentWallet/lifecycle';
 import { selectAiMode } from './store/slices/settingsSlice';
 import QVACService from './services/QVACService';
 import { theme, createNavigationTheme } from './theme';
@@ -311,8 +312,11 @@ export default function App() {
     // Warm the UI sound cache so the first tap/chime plays without synthesis lag.
     preloadFeedback();
 
+    const stopAgentLifecycle = watchAgentWalletLifecycle(store, closeAgentWallet);
+
     return () => {
       networkService.cleanup();
+      stopAgentLifecycle();
     };
   }, []);
 

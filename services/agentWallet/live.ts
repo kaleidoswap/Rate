@@ -10,6 +10,7 @@ import type { AgentPayWallet } from './agentPay';
 import type { TransferDeps } from './transfers';
 
 let open: { walletId: number; network: string; adapter: Promise<AgentSparkAdapter> } | null = null;
+let generation = 0;
 
 function mainSpark(): any {
   const adapter: any = protocolManager.getAdapterIfAvailable('SPARK');
@@ -27,19 +28,38 @@ export async function agentStore(): Promise<AgentWalletStore | null> {
   return id ? new AgentWalletStore(id) : null;
 }
 
+const changed = () => new Error('The wallet changed. Try again.');
+
+async function teardown(): Promise<void> {
+  const current = open;
+  open = null;
+  const adapter = await current?.adapter.catch(() => null);
+  await adapter?.disconnect().catch(() => {});
+}
+
 /** The agent's Spark account for the active wallet, connecting it when needed. */
 export async function openAgentAccount(): Promise<AgentSparkAdapter> {
+  const mine = generation;
   const wallet = await DatabaseService.getInstance().getActiveWallet();
+  if (generation !== mine) throw changed();
   if (!wallet?.id || !wallet.encrypted_mnemonic) throw new Error('Unlock your wallet first.');
   const main = mainSpark();
   const network = String(main.network);
   if (open && open.walletId === wallet.id && open.network === network) {
     const adapter = await open.adapter.catch(() => null);
-    if (adapter?.isConnected()) return adapter;
+    if (adapter?.isConnected() && generation === mine) return adapter;
   }
-  await closeAgentAccount();
+  await teardown();
+  if (generation !== mine) throw changed();
   const adapter = new AgentSparkAdapter();
-  const connecting = adapter.connect({ protocol: 'SPARK', mnemonic: wallet.encrypted_mnemonic, network }).then(() => adapter);
+  const connecting = adapter.connect({ protocol: 'SPARK', mnemonic: wallet.encrypted_mnemonic, network }).then(async () => {
+    // Closed while connecting (wallet switched, removed or locked): never hand it out.
+    if (generation !== mine) {
+      await adapter.disconnect().catch(() => {});
+      throw changed();
+    }
+    return adapter;
+  });
   open = { walletId: wallet.id, network, adapter: connecting };
   try {
     return await connecting;
@@ -49,11 +69,10 @@ export async function openAgentAccount(): Promise<AgentSparkAdapter> {
   }
 }
 
+/** Disconnect the agent account and forget it; any open still in flight is discarded. */
 export async function closeAgentAccount(): Promise<void> {
-  const current = open;
-  open = null;
-  const adapter = await current?.adapter.catch(() => null);
-  await adapter?.disconnect().catch(() => {});
+  generation++;
+  await teardown();
 }
 
 export async function transferDeps(): Promise<TransferDeps> {
