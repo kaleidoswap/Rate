@@ -44,6 +44,7 @@ import {
 } from '../components';
 import { Sheet } from '../components/Sheet';
 import { IntentBar } from '../components/mind/IntentBar';
+import { InsightCards } from '../components/mind/InsightCards';
 import { ProfileChip } from '../components/ProfileChip';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
 import { formatAssetAmount } from '../utils/assetAmount';
@@ -919,6 +920,13 @@ export default function DashboardScreen({ navigation }: Props) {
         <IntentBar
           style={styles.intentBar}
           onReview={(target) => navigation.getParent()?.navigate(target.screen, target.params)}
+        />
+
+        <InsightCards
+          channels={channels}
+          onAction={(action) => (action.kind === 'navigate'
+            ? navigation.getParent()?.navigate(action.screen, action.params)
+            : navigation.navigate('Activity'))}
         />
 
         <AssetList
