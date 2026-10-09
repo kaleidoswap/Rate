@@ -12,7 +12,7 @@
 // before the L402 source was wired.
 
 import { ToolRegistry, SkillRegistry, skillsFromBundle, type SkillBundle } from '@kaleidorg/mind';
-import { buildMindToolSources } from './mindAgent';
+import { buildMindToolSources, SOUL } from './mindAgent';
 import skillBundle from '../skills.bundle.json';
 
 // Native/host deps the tool sources import — stubbed; the tests only inspect
@@ -113,5 +113,13 @@ describe('skill selection (keyword router)', () => {
 
   it.each(cases)('routes %p → %p', (query, expected) => {
     expect(registry.select(query)?.name).toBe(expected);
+  });
+});
+
+describe('persona', () => {
+  it('introduces the assistant as Prismo and keeps the spending rules', () => {
+    expect(SOUL).toContain('Prismo');
+    expect(SOUL).toMatch(/never joke about\s+money/);
+    expect(SOUL).toMatch(/exact amount/);
   });
 });
