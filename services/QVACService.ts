@@ -1,6 +1,6 @@
 // services/QVACService.ts
 import {
-  loadModel,
+  loadModel as sdkLoadModel,
   completion,
   transcribe,
   transcribeStream,
@@ -119,6 +119,17 @@ function isPhoneRuntime(): boolean {
 
 const CONFIG_KEY = 'qvac.config.v1';
 
+// Set while this app session boots the QVAC worklet (first loadModel), cleared
+// once that call returns or throws. A native abort in the worklet kills the
+// process before it is cleared, so finding another session's marker on the
+// next start means that boot crashed the app: don't boot again until the user
+// taps Retry, and show the error banner instead of crashing on every visit.
+const WORKLET_BOOT_KEY = 'qvac.workletBoot.v1';
+const SESSION_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+export const WORKLET_CRASHED_PREFIX = 'crashed:';
+const WORKLET_CRASHED_ERROR =
+  `${WORKLET_CRASHED_PREFIX} KaleidoMind closed the app the last time it started on-device AI.`;
+
 export interface QVACConfig {
   /** Selected chat model id (see qvacModels.ts). */
   modelId: string;
@@ -171,6 +182,8 @@ class QVACService {
   private config: QVACConfig = { ...DEFAULT_CONFIG };
   private configLoaded = false;
   private deviceMemBytes: number | null = null;
+  /** The worklet answered a loadModel call this session (it booted without aborting). */
+  private workletUp = false;
 
   private state: QVACState = {
     llmStatus: 'not_downloaded',
@@ -274,7 +287,7 @@ class QVACService {
 
   /** Resume QVAC runtime networking — guarded so it never boots the worklet here. */
   async resumeRuntime(): Promise<void> {
-    if (this.workletBlocked()) return;
+    if (this.workletBlocked() || !this.workletUp) return;
     try {
       await resume();
     } catch {
@@ -284,7 +297,7 @@ class QVACService {
 
   /** Suspend QVAC runtime networking — guarded so it never boots the worklet here. */
   async suspendRuntime(): Promise<void> {
-    if (this.workletBlocked()) return;
+    if (this.workletBlocked() || !this.workletUp) return;
     try {
       await suspend();
     } catch {
@@ -473,7 +486,12 @@ class QVACService {
    * half-finished download isn't reported as installed.
    */
   getDownloadedModelIds(): string[] {
-    const dir = new Directory(Paths.document, 'qvac-models');
+    let dir: Directory;
+    try {
+      dir = new Directory(Paths.document, 'qvac-models');
+    } catch {
+      return [];
+    }
     const present: string[] = [];
     const check = (id: string, name: string, expected: number) => {
       try {
@@ -563,6 +581,37 @@ class QVACService {
     return result.uri.replace('file://', '');
   }
 
+  /**
+   * True when a previous app session started booting the worklet and never
+   * finished (the process died in native code). `retry` clears the marker.
+   */
+  private async previousBootCrashed(retry = false): Promise<boolean> {
+    if (this.workletUp) return false;
+    try {
+      if (retry) {
+        await AsyncStorage.removeItem(WORKLET_BOOT_KEY);
+        return false;
+      }
+      const marker = await AsyncStorage.getItem(WORKLET_BOOT_KEY);
+      return marker != null && marker !== SESSION_ID;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Every worklet model load goes through here so a boot crash is remembered. */
+  private async bootLoad<T>(load: () => Promise<T>): Promise<T> {
+    if (this.workletUp) return load();
+    if (await this.previousBootCrashed()) throw new Error(WORKLET_CRASHED_ERROR);
+    await AsyncStorage.setItem(WORKLET_BOOT_KEY, SESSION_ID).catch(() => {});
+    try {
+      return await load();
+    } finally {
+      this.workletUp = true;
+      await AsyncStorage.removeItem(WORKLET_BOOT_KEY).catch(() => {});
+    }
+  }
+
   // --- LLM lifecycle ---
 
   // Whether to try GPU offload for local inference before CPU. Metal on iOS;
@@ -579,11 +628,11 @@ class QVACService {
   private async loadLocalLLM(modelSrc: any): Promise<string> {
     if (QVACService.PREFER_GPU) {
       try {
-        const id = await loadModel({
+        const id = await this.bootLoad(() => sdkLoadModel({
           modelSrc,
           modelType: 'llamacpp-completion',
           modelConfig: { ...LOCAL_LLM_CONFIG_GPU },
-        } as any);
+        } as any));
         console.log('[QVAC] LLM loaded with Metal/GPU offload');
         return id;
       } catch (gpuErr) {
@@ -596,16 +645,17 @@ class QVACService {
         );
       }
     }
-    const id = await loadModel({
+    const id = await this.bootLoad(() => sdkLoadModel({
       modelSrc,
       modelType: 'llamacpp-completion',
       modelConfig: { ...LOCAL_LLM_CONFIG },
-    } as any);
+    } as any));
     console.log('[QVAC] LLM loaded on CPU');
     return id;
   }
 
-  async initializeLLM(): Promise<void> {
+  /** @param opts.retry the user asked to try again after a previous boot crash. */
+  async initializeLLM(opts: { retry?: boolean } = {}): Promise<void> {
     // Hard gate: never start the Bare worklet unless AI is enabled AND the
     // runtime can actually run here. On an unsupported target (e.g. the iOS
     // Simulator) booting the worklet aborts the process, so we refuse and
@@ -623,6 +673,11 @@ class QVACService {
       return;
     }
     if (this.state.llmStatus === 'ready' || this.state.llmStatus === 'downloading' || this.state.llmStatus === 'loading') {
+      return;
+    }
+    if (await this.previousBootCrashed(opts.retry)) {
+      console.warn('[QVAC] LLM init skipped — the last worklet boot closed the app');
+      this.setState({ llmStatus: 'error', error: WORKLET_CRASHED_ERROR });
       return;
     }
 
@@ -766,7 +821,7 @@ class QVACService {
 
       const primaryLang = stt.lang === 'en' ? 'en' : deviceWhisperLanguage();
       const loadWhisper = (language: string) =>
-        loadModel({
+        this.bootLoad(() => sdkLoadModel({
           modelSrc: modelPath,
           modelType: 'whispercpp-transcription',
           modelConfig: {
@@ -775,7 +830,7 @@ class QVACService {
             audio_format: 's16le',
             ...(vadModelSrc ? { vadModelSrc } : {}),
           } as any,
-        });
+        }));
 
       console.log('[QVAC] Whisper: loadModel start', stt.id, 'lang=' + primaryLang, 'vad=' + !!vadModelSrc, modelPath);
       this.setState({ whisperStatus: 'loading', whisperDownloadProgress: 100 });
@@ -882,7 +937,7 @@ class QVACService {
         console.log('[QVAC] TTS: unloading Whisper before neural voice load');
         await this.unloadWhisper().catch(() => {});
       }
-      const id = await loadModel({
+      const id = await this.bootLoad(() => sdkLoadModel({
         modelSrc: TTS_EN_SUPERTONIC_Q4_0,
         modelType: 'tts-ggml',
         modelConfig: {
@@ -892,7 +947,7 @@ class QVACService {
           ttsSpeed: 1.05,
           ttsNumInferenceSteps: 5,
         },
-      } as any);
+      } as any));
       this.ttsModelId = id;
       console.log('[QVAC] TTS ready:', id);
       return id;
@@ -930,11 +985,11 @@ class QVACService {
     if (this.embedModelId) return this.embedModelId;
     if (!this.embedLoadPromise) {
       this.embedLoadPromise = (async () => {
-        const id: string = await loadModel({
+        const id: string = await this.bootLoad(() => sdkLoadModel({
           modelSrc: EMBEDDINGGEMMA_300M_Q4_0,
           modelType: 'embeddings',
           verbosity: VERBOSITY.ERROR,
-        } as any);
+        } as any));
         this.embedModelId = id;
         return id;
       })();
