@@ -5,20 +5,20 @@
  * on-chain, no Lightning) drives a WDK module, `@utexo/wdk-wallet-rgb`, which
  * needs a Node/Bare runtime. On the phone we hand the engine this module
  * instead (see ./wdk.ts, `registerWdkModule`): the same `WalletManagerRgb` /
- * account surface, backed by the native rgb-lib bindings in `react-native-rgb`
- * (rgb-lib-kotlin on Android, rgb-lib-swift on iOS).
+ * account surface, backed by RGB-Tools' rgb-lib bindings through the app's own
+ * Expo module, modules/kaleido-rgb (rgb-lib-kotlin on Android, rgb-lib-swift on iOS).
  *
  * Only the calls the adapter makes are implemented. rgb-lib keeps its data in
  * the app's private files; the adapter's `dataDir` names a folder inside them
  * for this wallet (see `rgbLibSubdir`), else rgb-lib's original folder.
  */
-import type * as RgbLib from 'react-native-rgb'
+import type * as RgbLib from '../../modules/kaleido-rgb'
 
 type RgbModule = typeof RgbLib
 type LibNetwork = RgbLib.BitcoinNetwork
 
 export interface RgbLibRnOptions {
-  /** App network name: 'mutinynet' and 'signet' map to rgb-lib's SIGNET. */
+  /** App network name: 'mutinynet' is rgb-lib's custom signet (SIGNET_CUSTOM), 'signet' the default one. */
   network: string
   /** A folder name keeps the wallet in its own folder; anything else ('.') uses the original one. */
   dataDir?: string
@@ -33,8 +33,8 @@ export function libNetwork(network: string): LibNetwork {
     case 'testnet': return 'TESTNET'
     case 'testnet4': return 'TESTNET4'
     case 'regtest': return 'REGTEST'
-    case 'signet':
-    case 'mutinynet': return 'SIGNET'
+    case 'signet': return 'SIGNET'
+    case 'mutinynet': return 'SIGNET_CUSTOM'
     default: throw new Error(`Unsupported RGB network: ${network}`)
   }
 }
@@ -44,10 +44,6 @@ export function rgbLibSubdir(dataDir?: string | null): string | null {
   return dataDir && /^[A-Za-z0-9_-]{1,64}$/.test(dataDir) ? dataDir : null
 }
 
-/** react-native-rgb with the `subdir` support from patches/react-native-rgb@*.patch (typed here so older typings still build). */
-type RgbModuleWithSubdir = RgbModule & { supportsSubdir?: () => boolean }
-type WalletOptionsWithSubdir = NonNullable<ConstructorParameters<RgbModule['Wallet']>[1]> & { subdir?: string }
-
 // rgb-lib only moves an incoming transfer forward (and syncs the chain) when asked;
 // reads refresh at most this often so balances stay current without hammering the indexer.
 const REFRESH_EVERY_MS = 30_000
@@ -56,6 +52,9 @@ const DEFAULT_FEE_RATE = 2
 const WITNESS_OUTPUT_SAT = 1000
 /** rgb-lib names a witness recipient `wvout:…` and a blinded UTXO `utxob:…`. */
 const isWitnessRecipient = (recipientId: string) => /^wvout:/i.test(recipientId)
+
+/** The amount a fungible (or inflation-right) assignment carries. */
+const assignmentAmount = (a: RgbLib.Assignment): number | undefined => ('amount' in a ? a.amount : undefined)
 
 /** 'RECEIVE_WITNESS' → 'ReceiveWitness', as the RGB node names transfer kinds and statuses. */
 function pascal(value: string): string {
@@ -180,7 +179,7 @@ export class RgbLibRnAccount {
       recipient_id: d.recipientId,
       transport_endpoints: d.transportEndpoints,
       expiration_timestamp: d.expirationTimestamp,
-      assignment: fungible ? { type: 'Fungible', value: d.assignment.amount } : { type: pascal(d.assignment?.type ?? 'ANY') },
+      assignment: fungible ? { type: 'Fungible', value: fungible } : { type: pascal(d.assignment?.type ?? 'ANY') },
     }
   }
 
@@ -194,7 +193,7 @@ export class RgbLibRnAccount {
   /** BTC history, with rgb-lib's confirmation time in the shape the adapter reads. */
   async listTransactions() {
     const txs = await this.wallet.listTransactions(true)
-    return txs.map((t) => ({ ...t, confirmation_time: t.confirmationTime ? { timestamp: t.confirmationTime } : undefined }))
+    return txs.map((t) => ({ ...t, confirmation_time: t.confirmationTime ? { timestamp: t.confirmationTime.timestamp } : undefined }))
   }
 
   /** Transfers in the node's shape (Activity reads `kind`, `status`, `created_at`, `requested_assignment.value`). */
@@ -206,8 +205,8 @@ export class RgbLibRnAccount {
       status: pascal(t.status),
       created_at: t.createdAt,
       updated_at: t.updatedAt,
-      requested_assignment: t.requestedAssignment ? { ...t.requestedAssignment, value: t.requestedAssignment.amount } : undefined,
-      amount: t.assignments?.reduce((sum, a) => sum + (a.amount ?? 0), 0),
+      requested_assignment: t.requestedAssignment ? { ...t.requestedAssignment, value: assignmentAmount(t.requestedAssignment) } : undefined,
+      amount: t.assignments?.reduce((sum, a) => sum + (assignmentAmount(a) ?? 0), 0),
     }))
   }
 
@@ -250,7 +249,7 @@ export class RgbLibRnAccount {
 
 /**
  * Builds the module the engine's `loadWdkModule('@utexo/wdk-wallet-rgb')` returns.
- * `load` is a lazy `require('react-native-rgb')`, so the native module is touched
+ * `load` is a lazy `require` of modules/kaleido-rgb, so the native module is touched
  * only when the RGB account connects.
  */
 export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: () => void } = {}) {
@@ -270,12 +269,11 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: 
       if (!this.options.transportEndpoint) throw new Error('RGB needs a proxy endpoint')
       const subdir = rgbLibSubdir(this.options.dataDir)
       // An older native build would open the original folder instead: never let it.
-      if (subdir && (lib as RgbModuleWithSubdir).supportsSubdir?.() !== true) {
+      if (subdir && lib.supportsSubdir() !== true) {
         throw new Error('Update the app to use RGB on this network.')
       }
       const keys = await lib.restoreKeys(network, this.mnemonic)
-      const walletOptions: WalletOptionsWithSubdir = subdir ? { network, subdir } : { network }
-      const wallet = new lib.Wallet(keys, walletOptions)
+      const wallet = new lib.Wallet(keys, subdir ? { network, subdir } : { network })
       await wallet.goOnline(this.options.indexerUrl)
       this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange)
       return this.account

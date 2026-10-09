@@ -41,7 +41,7 @@ import { connectBarkToKaleidoPay, disconnectBarkFromKaleidoPay } from '../kaleid
 import { setPayOptions, type PayOptions } from '../kaleidoPay/payOptions'
 import {
   RGB_L1_ENABLED, RGB_L1_NETWORKS, RGB_L1_NETWORK_LABEL, RGB_L1_UPDATE_TO_SWITCH, buildRgbL1Config, claimRgbL1DataFolder, isRgbLibNativeAvailable,
-  isRgbL1NetworkSwitchSupported, isRgbL1Ready, loadRgbL1Network, loadRgbL1Host, markRgbL1Ready, rgbL1Restorer, saveRgbL1Network, type RgbL1Network,
+  isRgbL1NetworkSwitchSupported, isRgbL1Ready, loadRgbL1Network, loadRgbL1Host, markRgbL1Ready, rgbL1Restorer, rgbLibModule, saveRgbL1Network, type RgbL1Network,
 } from './rgbL1'
 import { createRgbLibRnModule } from './rgbLibRn'
 import { findRgbCloudBackup, restoreRgbFromCloud, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
@@ -72,7 +72,7 @@ export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: bo
  * - Bark: ON by default. Second's Ark via the native `@secondts/bark-react-native`
  *   SDK (needs a dev build). Not a wallet NetworkType yet, so it connects from
  *   the saved wallet preference with ./bark.ts defaults. Disable with EXPO_PUBLIC_BARK=0.
- * - RGB on this phone (RGB_L1): native rgb-lib through `react-native-rgb`, opt-in per
+ * - RGB on this phone (RGB_L1): native rgb-lib through modules/kaleido-rgb, opt-in per
  *   wallet (./rgbL1.ts). Connects only when no RGB node is connected: the node is the
  *   RGB account when paired (a plain Lightning wallet over NWC is not an RGB node). Disable with EXPO_PUBLIC_RGB_L1=0.
  */
@@ -101,7 +101,7 @@ function registerWdkModuleLoaders(): void {
   // rgb-lib behind the same surface (./rgbLibRn.ts), required only on connect.
   if (RGB_L1_ENABLED) {
     // Every change (send, receive, settle) schedules the automatic cloud backup.
-    registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(() => require('react-native-rgb'), { onChange: scheduleRgbBackup }))
+    registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(rgbLibModule, { onChange: scheduleRgbBackup }))
   }
 }
 
