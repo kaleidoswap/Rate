@@ -65,7 +65,8 @@ function pascal(value: string): string {
 /** The account the adapter talks to, over one native rgb-lib wallet. */
 export class RgbLibRnAccount {
   private lastRefresh = 0
-  private refreshing: Promise<void> | null = null
+  private refreshing: Promise<boolean> | null = null
+  private queue: Promise<unknown> = Promise.resolve()
 
   constructor(
     private readonly lib: RgbModule,
@@ -75,15 +76,27 @@ export class RgbLibRnAccount {
     private readonly onChange: () => void = () => undefined,
   ) {}
 
-  /** Advance pending transfers and sync, at most every REFRESH_EVERY_MS (or now with force). */
-  private async refresh(force = false): Promise<void> {
+  /**
+   * rgb-lib keeps one local database: its calls run one at a time, in the order
+   * they were made, whichever screen or background job makes them.
+   */
+  private serial<T>(call: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(call)
+    this.queue = run.catch(() => undefined)
+    return run
+  }
+
+  /** Advance pending transfers and sync, at most every REFRESH_EVERY_MS (or now with force). True when a transfer moved. */
+  private async refresh(force = false): Promise<boolean> {
     if (this.refreshing) return this.refreshing
-    if (!force && Date.now() - this.lastRefresh < REFRESH_EVERY_MS) return
+    if (!force && Date.now() - this.lastRefresh < REFRESH_EVERY_MS) return false
     this.refreshing = (async () => {
       try {
-        const updated = await this.wallet.refresh(null, [], false)
+        const updated = await this.serial(() => this.wallet.refresh(null, [], false))
         this.lastRefresh = Date.now()
-        if (updated && Object.keys(updated).length) this.onChange() // a transfer moved: settle, receive, fail
+        const moved = !!updated && Object.keys(updated).length > 0
+        if (moved) this.onChange() // a transfer moved: settle, receive, fail
+        return moved
       } finally {
         this.refreshing = null
       }
@@ -91,29 +104,39 @@ export class RgbLibRnAccount {
     return this.refreshing
   }
 
+  /** Advance pending transfers now (Receive and the asset screen poll this). True when one moved. */
+  refreshTransfers(): Promise<boolean> {
+    return this.refresh(true)
+  }
+
   /** The adapter's readiness probe and BTC balance source: `{ address, btcBalance }`. */
   async registerWallet(): Promise<{ address: string; btcBalance: RgbLib.BtcBalance }> {
     await this.refresh().catch(() => undefined) // a failed sync still leaves the last known balance
-    const [address, btcBalance] = await Promise.all([this.wallet.getAddress(), this.wallet.getBtcBalance(true)])
+    const address = await this.serial(() => this.wallet.getAddress())
+    const btcBalance = await this.serial(() => this.wallet.getBtcBalance(true))
     return { address, btcBalance }
   }
 
   getAddress(): Promise<string> {
-    return this.wallet.getAddress()
+    return this.serial(() => this.wallet.getAddress())
   }
 
   // The adapter calls these without awaiting: never let them reject.
   refreshWallet(): Promise<void> {
-    return this.refresh(true).catch((e) => console.warn('[RGB_L1] refresh failed:', e?.message ?? e))
+    return this.refresh(true).then(() => undefined, (e) => console.warn('[RGB_L1] refresh failed:', e?.message ?? e))
   }
 
   syncWallet(): Promise<void> {
-    return this.wallet.sync().catch((e) => console.warn('[RGB_L1] sync failed:', e?.message ?? e))
+    return this.serial(() => this.wallet.sync()).catch((e) => console.warn('[RGB_L1] sync failed:', e?.message ?? e))
   }
 
+  /** Fungible assets (NIA, and CFA named by their name), all under `nia`, the list the adapter reads. */
   async listAssets(): Promise<RgbLib.Assets> {
     await this.refresh().catch(() => undefined)
-    return this.wallet.listAssets(['NIA'])
+    const assets = await this.serial(() => this.wallet.listAssets(['NIA', 'CFA']))
+      .catch(() => this.serial(() => this.wallet.listAssets(['NIA'])))
+    const cfa = (assets.cfa ?? []).map((a) => ({ ...a, ticker: a.name }))
+    return { ...assets, nia: [...(assets.nia ?? []), ...cfa] }
   }
 
   /**
@@ -134,10 +157,10 @@ export class RgbLibRnAccount {
       ? { type: 'FUNGIBLE', amount: params.amount }
       : { type: 'ANY' }
     const receive = params.witness === false ? this.wallet.blindReceive.bind(this.wallet) : this.wallet.witnessReceive.bind(this.wallet)
-    const data = await receive(
+    const data = await this.serial(() => receive(
       assetId, assignment, params.durationSeconds ?? params.duration_seconds ?? null,
       [this.transportEndpoint], params.minConfirmations ?? params.min_confirmations ?? 1,
-    )
+    ))
     this.onChange()
     return { ...data, recipient_id: data.recipientId, expiration_timestamp: data.expirationTimestamp }
   }
@@ -162,9 +185,9 @@ export class RgbLibRnAccount {
       transportEndpoints: endpoints,
       ...(witnessData ? { witnessData } : {}),
     }
-    const result = await this.wallet.send(
+    const result = await this.serial(() => this.wallet.send(
       { [params.token]: [recipient] }, false, params.feeRate ?? DEFAULT_FEE_RATE, params.minConfirmations ?? 1,
-    )
+    ))
     this.lastRefresh = 0 // the next read picks the transfer up
     this.onChange()
     return result
@@ -186,20 +209,20 @@ export class RgbLibRnAccount {
 
   /** Plain BTC on-chain send; resolves to the txid. */
   async sendTransaction(params: { to: string; value: number; feeRate?: number }): Promise<string> {
-    const txid = await this.wallet.sendBtc(params.to, params.value, params.feeRate ?? DEFAULT_FEE_RATE)
+    const txid = await this.serial(() => this.wallet.sendBtc(params.to, params.value, params.feeRate ?? DEFAULT_FEE_RATE))
     this.onChange()
     return txid
   }
 
   /** BTC history, with rgb-lib's confirmation time in the shape the adapter reads. */
   async listTransactions() {
-    const txs = await this.wallet.listTransactions(true)
+    const txs = await this.serial(() => this.wallet.listTransactions(true))
     return txs.map((t) => ({ ...t, confirmation_time: t.confirmationTime ? { timestamp: t.confirmationTime } : undefined }))
   }
 
   /** Transfers in the node's shape (Activity reads `kind`, `status`, `created_at`, `requested_assignment.value`). */
   async listTransfers(assetId: string | null) {
-    const transfers = await this.wallet.listTransfers(assetId)
+    const transfers = await this.serial(() => this.wallet.listTransfers(assetId))
     return transfers.map((t) => ({
       ...t,
       kind: pascal(t.kind),
@@ -207,44 +230,64 @@ export class RgbLibRnAccount {
       created_at: t.createdAt,
       updated_at: t.updatedAt,
       requested_assignment: t.requestedAssignment ? { ...t.requestedAssignment, value: t.requestedAssignment.amount } : undefined,
+      batch_transfer_idx: t.batchTransferIdx,
+      recipient_id: t.recipientId,
       amount: t.assignments?.reduce((sum, a) => sum + (a.amount ?? 0), 0),
     }))
   }
 
+  /**
+   * Marks a transfer still waiting for its counterparty as failed, which frees
+   * what it reserved (rgb-lib refuses any other). True when it was failed.
+   */
+  async failTransfer(batchTransferIdx: number): Promise<boolean> {
+    const failed = await this.serial(() => this.wallet.failTransfers(batchTransferIdx, false, false))
+    this.lastRefresh = 0
+    if (failed) this.onChange()
+    return failed
+  }
+
   listUnspents(): Promise<RgbLib.Unspent[]> {
-    return this.wallet.listUnspents(false, true)
+    return this.serial(() => this.wallet.listUnspents(false, true))
   }
 
   /** Colorable UTXOs for receiving assets; broadcasts a transaction. */
   async createUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean } = {}): Promise<number> {
-    const created = await this.wallet.createUtxos(params.upTo ?? true, params.num ?? 5, params.size ?? null, params.feeRate ?? DEFAULT_FEE_RATE)
+    const created = await this.serial(() => this.wallet.createUtxos(params.upTo ?? true, params.num ?? 5, params.size ?? null, params.feeRate ?? DEFAULT_FEE_RATE))
     this.lastRefresh = 0
     this.onChange()
     return created
   }
 
   signPsbt(psbt: string): Promise<string> {
-    return this.wallet.signPsbt(psbt)
+    return this.serial(() => this.wallet.signPsbt(psbt))
   }
 
   async issueAssetNia(params: { ticker: string; name: string; precision: number; amounts: number[] }): Promise<RgbLib.AssetNia> {
-    const asset = await this.wallet.issueAssetNia(params.ticker, params.name, params.precision, params.amounts)
+    const asset = await this.serial(() => this.wallet.issueAssetNia(params.ticker, params.name, params.precision, params.amounts))
+    this.onChange()
+    return asset
+  }
+
+  /** A Collectible Fungible Asset: a name and optional details, no ticker. */
+  async issueAssetCfa(params: { name: string; details?: string | null; precision: number; amounts: number[]; filePath?: string | null }): Promise<RgbLib.AssetCfa> {
+    const asset = await this.serial(() => this.wallet.issueAssetCfa(params.name, params.details || null, params.precision, params.amounts, params.filePath ?? null))
     this.onChange()
     return asset
   }
 
   /** Encrypted backup of everything the seed can't rebuild (RGB state, consignments). */
   backup(path: string, password: string): Promise<void> {
-    return this.wallet.backup(path, password)
+    return this.serial(() => this.wallet.backup(path, password))
   }
 
   /** True when the wallet changed since its last backup. */
   backupRequired(): Promise<boolean> {
-    return this.wallet.backupInfo()
+    return this.serial(() => this.wallet.backupInfo())
   }
 
   dispose(): Promise<void> {
-    return this.wallet.close()
+    return this.serial(() => this.wallet.close())
   }
 }
 

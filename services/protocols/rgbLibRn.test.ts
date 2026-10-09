@@ -157,3 +157,67 @@ test('an older native build never opens a wallet meant for its own folder', asyn
   await expect(manager.getAccount()).rejects.toThrow(/Update the app/);
   expect(lib.Wallet).not.toHaveBeenCalled();
 });
+
+test('rgb-lib calls never overlap, whichever caller makes them', async () => {
+  const { lib, wallet } = fakeLib();
+  let running = 0;
+  let maxRunning = 0;
+  const slow = <T,>(value: T) => async () => {
+    running += 1;
+    maxRunning = Math.max(maxRunning, running);
+    await new Promise((r) => setTimeout(r, 5));
+    running -= 1;
+    return value;
+  };
+  wallet.getAddress.mockImplementation(slow('tb1q'));
+  wallet.listTransfers.mockImplementation(slow([]) as any);
+  wallet.listUnspents.mockImplementation(slow([]) as any);
+  wallet.backupInfo.mockImplementation(slow(false));
+  wallet.refresh.mockImplementation(slow({}) as any);
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  await Promise.all([
+    account.getAddress(), account.listTransfers('rgb:usdt'), account.listUnspents(),
+    account.backupRequired(), account.refreshTransfers(), account.listTransfers(null),
+  ]);
+  expect(maxRunning).toBe(1);
+});
+
+test('a failed call does not block the ones queued after it', async () => {
+  const { lib, wallet } = fakeLib();
+  wallet.listUnspents.mockRejectedValueOnce(new Error('indexer down'));
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  await expect(account.listUnspents()).rejects.toThrow('indexer down');
+  await expect(account.getAddress()).resolves.toBe('tb1qrgbwallet');
+});
+
+test('transfers can be refreshed on demand and cancelled; transfers carry their batch and recipient', async () => {
+  const { lib, wallet } = fakeLib();
+  (wallet as any).failTransfers = jest.fn(async () => true);
+  const onChange = jest.fn();
+  const account = await new (createRgbLibRnModule(() => lib as any, { onChange }).WalletManagerRgb)('seed', options).getAccount();
+  wallet.refresh.mockResolvedValueOnce({ 1: { updatedStatus: 'WAITING_CONFIRMATIONS' } } as any);
+  expect(await account.refreshTransfers()).toBe(true);
+  expect(await account.refreshTransfers()).toBe(false);
+  expect(wallet.refresh).toHaveBeenCalledTimes(2); // on demand: not throttled
+  wallet.listTransfers.mockResolvedValueOnce([{ idx: 4, batchTransferIdx: 9, recipientId: 'rid', createdAt: 1, updatedAt: 1, kind: 'SEND',
+    status: 'WAITING_COUNTERPARTY', assignments: [], transportEndpoints: [] }] as any);
+  expect((await account.listTransfers('rgb:usdt'))[0]).toEqual(expect.objectContaining({ batch_transfer_idx: 9, recipient_id: 'rid' }));
+  expect(await account.failTransfer(9)).toBe(true);
+  expect((wallet as any).failTransfers).toHaveBeenCalledWith(9, false, false);
+  expect(onChange).toHaveBeenCalledTimes(2);
+});
+
+test('collectible assets are listed by name next to NIA, and issued with optional details', async () => {
+  const { lib, wallet } = fakeLib();
+  wallet.listAssets.mockResolvedValue({
+    nia: [], uda: [], ifa: [],
+    cfa: [{ assetId: 'rgb:art', name: 'Art', precision: 0, issuedSupply: 10, timestamp: 0, addedAt: 0, balance: { settled: 10, future: 10, spendable: 10 } }],
+  } as any);
+  (wallet as any).issueAssetCfa = jest.fn(async () => ({ assetId: 'rgb:art', name: 'Art' }));
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  const listed = await account.listAssets();
+  expect(wallet.listAssets).toHaveBeenCalledWith(['NIA', 'CFA']);
+  expect(listed.nia).toEqual([expect.objectContaining({ assetId: 'rgb:art', ticker: 'Art' })]);
+  await account.issueAssetCfa({ name: 'Art', details: '', precision: 0, amounts: [10] });
+  expect((wallet as any).issueAssetCfa).toHaveBeenCalledWith('Art', null, 0, [10], null);
+});
