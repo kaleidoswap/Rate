@@ -124,7 +124,14 @@ export function rgbWalletSupport(adapter: unknown): RgbWalletSupport {
 
 // ── Transfers ─────────────────────────────────────────────────────────────
 
-export type RgbTransferStatus = 'waiting-counterparty' | 'waiting-confirmations' | 'settled' | 'failed';
+/**
+ * rgb-lib's transfer steps, in order: being prepared, waiting for the other side,
+ * waiting for blocks before going on (safe height), waiting for its transaction to be
+ * broadcast, waiting for confirmations, then settled or failed.
+ */
+export type RgbTransferStatus =
+  | 'initiated' | 'waiting-counterparty' | 'waiting-safe-height' | 'waiting-broadcast'
+  | 'waiting-confirmations' | 'settled' | 'failed';
 export type RgbTransferDirection = 'incoming' | 'outgoing' | 'issuance';
 
 export interface RgbTransfer {
@@ -146,7 +153,10 @@ export interface RgbTransfer {
 /** 'WaitingCounterparty', 'WAITING_COUNTERPARTY' or 'waiting_counterparty' → one status; null when unknown. */
 export function rgbTransferStatus(raw: unknown): RgbTransferStatus | null {
   const s = String(raw ?? '').replace(/[\s_-]/g, '').toLowerCase();
+  if (s === 'initiated') return 'initiated';
   if (s === 'waitingcounterparty') return 'waiting-counterparty';
+  if (s === 'waitingsafeheight') return 'waiting-safe-height';
+  if (s === 'waitingbroadcast') return 'waiting-broadcast';
   if (s === 'waitingconfirmations') return 'waiting-confirmations';
   if (s === 'settled') return 'settled';
   if (s === 'failed') return 'failed';
@@ -161,7 +171,10 @@ export function rgbTransferDirection(kind: unknown): RgbTransferDirection {
 }
 
 export const RGB_TRANSFER_STATUS_LABEL: Record<RgbTransferStatus, string> = {
+  initiated: 'Being prepared',
   'waiting-counterparty': 'Waiting for the other side',
+  'waiting-safe-height': 'Waiting for more blocks',
+  'waiting-broadcast': 'About to be broadcast',
   'waiting-confirmations': 'Waiting for confirmations',
   settled: 'Settled',
   failed: 'Failed',
@@ -170,10 +183,20 @@ export const RGB_TRANSFER_STATUS_LABEL: Record<RgbTransferStatus, string> = {
 /** What each step means for this direction, in plain words. */
 export function rgbTransferStatusDetail(status: RgbTransferStatus, direction: RgbTransferDirection): string {
   switch (status) {
+    case 'initiated':
+      return direction === 'incoming'
+        ? 'Your invoice is being set up.'
+        : direction === 'issuance' ? 'Being prepared on this phone.' : 'Being prepared on this phone. Nothing has been sent yet.';
     case 'waiting-counterparty':
       return direction === 'incoming'
         ? 'Your invoice is open. Nothing has been sent to it yet.'
         : 'Sent to the recipient. Waiting for them to accept it.';
+    case 'waiting-safe-height':
+      return 'Waiting for a few more bitcoin blocks before it can go ahead.';
+    case 'waiting-broadcast':
+      return direction === 'incoming'
+        ? 'Accepted. Waiting for the sender’s bitcoin transaction to be broadcast.'
+        : 'Accepted. Its bitcoin transaction is about to be broadcast.';
     case 'waiting-confirmations':
       return 'In a bitcoin transaction. It counts once the transaction confirms.';
     case 'settled':
@@ -213,12 +236,24 @@ export function normalizeRgbTransfers(raw: unknown): RgbTransfer[] {
   return out;
 }
 
+/**
+ * A plain name for the RGB wallet's own bitcoin transactions that aren't a plain
+ * send or receive ('CREATE_UTXOS', the node's 'CreateUtxos', …); null otherwise
+ * (incoming ones, 'INCOMING' since rgb-lib 0.3.0-beta.6, read as a receive).
+ */
+export function rgbOnchainKindLabel(kind: unknown): string | null {
+  const k = String(kind ?? '').replace(/[\s_-]/g, '').toLowerCase();
+  if (k === 'createutxos') return 'UTXOs created';
+  if (k === 'drain') return 'Bitcoin drained';
+  return null;
+}
+
 export function findRgbTransfer(transfers: RgbTransfer[], recipientId: string | undefined): RgbTransfer | undefined {
   return recipientId ? transfers.find(t => t.recipientId === recipientId) : undefined;
 }
 
 export const isPendingRgbTransfer = (t: Pick<RgbTransfer, 'status'>) =>
-  t.status === 'waiting-counterparty' || t.status === 'waiting-confirmations';
+  t.status !== 'settled' && t.status !== 'failed';
 
 export function hasPendingRgbTransfers(transfers: Array<Pick<RgbTransfer, 'status'>>): boolean {
   return transfers.some(isPendingRgbTransfer);
@@ -258,7 +293,9 @@ export type RgbReceiveStage = 'watching' | 'pending' | 'confirmed' | 'expired' |
 
 /** Where an invoice's incoming transfer is, for Receive's status line. */
 export function rgbReceiveStage(t: Pick<RgbTransfer, 'status' | 'expiration'> | undefined, nowSeconds = Date.now() / 1000): { stage: RgbReceiveStage; message: string } {
-  if (!t || t.status === 'waiting-counterparty') return { stage: 'watching', message: 'Waiting for the sender to send the asset.' };
+  if (!t || t.status === 'initiated' || t.status === 'waiting-counterparty') return { stage: 'watching', message: 'Waiting for the sender to send the asset.' };
+  if (t.status === 'waiting-safe-height') return { stage: 'pending', message: 'Received. Waiting for a few more bitcoin blocks before it can go ahead.' };
+  if (t.status === 'waiting-broadcast') return { stage: 'pending', message: 'Received. Waiting for the sender’s bitcoin transaction to be broadcast.' };
   if (t.status === 'waiting-confirmations') return { stage: 'pending', message: 'Received. It counts once the sender’s bitcoin transaction confirms.' };
   if (t.status === 'settled') return { stage: 'confirmed', message: 'Received and confirmed.' };
   if (t.expiration && t.expiration < nowSeconds) return { stage: 'expired', message: 'This invoice expired before anything was sent. Make a new one.' };

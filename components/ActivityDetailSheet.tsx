@@ -32,7 +32,7 @@ import { preimageMatches } from '../utils/payment-proofs';
 import { chainLabel } from '../utils/orchestra-ui';
 import { formatRecordAmount } from '../utils/crosschain-history';
 import { activityExplorerUrl } from '../utils/explorer';
-import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, canDeleteRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
+import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, rgbOnchainKindLabel, canDeleteRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
 import { cancelRgbTransfer, deleteRgbTransfer } from '../services/rgbWallet';
 import { rgbAccountAdapter } from '../services/protocols';
 
@@ -56,6 +56,8 @@ function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyph
 
 function typeLabel(item: ActivityItem): string {
     if (item.crossChain) return item.crossChain.direction === 'deposit' ? 'Deposit from another chain' : 'Sent to another chain';
+    const onchainKind = item.source === 'onchain' ? rgbOnchainKindLabel(item.kind) : null;
+    if (onchainKind) return onchainKind;
     switch (item.type) {
         case 'receive': return item.status === 'confirmed' ? 'Received' : 'Receive';
         case 'send': return item.status === 'confirmed' ? 'Sent' : 'Payment';

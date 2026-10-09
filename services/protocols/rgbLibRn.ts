@@ -39,6 +39,14 @@ export function libNetwork(network: string): LibNetwork {
   }
 }
 
+/**
+ * The schemas a wallet opens with: rgb-lib's usual three, plus IFA where rgb-lib
+ * allows it (it refuses IFA on mainnet).
+ */
+export function rgbLibSchemas(network: string): RgbLib.AssetSchema[] {
+  return network === 'mainnet' ? ['NIA', 'CFA', 'UDA'] : ['NIA', 'CFA', 'UDA', 'IFA']
+}
+
 /** The folder to open the wallet in, or null for rgb-lib's original folder. */
 export function rgbLibSubdir(dataDir?: string | null): string | null {
   return dataDir && /^[A-Za-z0-9_-]{1,64}$/.test(dataDir) ? dataDir : null
@@ -54,8 +62,8 @@ const WITNESS_OUTPUT_SAT = 1000
 const isWitnessRecipient = (recipientId: string) => /^wvout:/i.test(recipientId)
 
 /**
- * What this native build offers beyond sending and receiving. Each is detected on the
- * wallet object, so a build without one leaves the feature hidden instead of failing.
+ * What the wallet offers beyond sending and receiving: each call kaleido-rgb's
+ * Wallet has, so a feature the wallet lacks stays hidden instead of failing.
  */
 export interface RgbDeviceCapabilities {
   metadata: boolean
@@ -97,7 +105,7 @@ export class RgbLibRnAccount {
   capabilities(): RgbDeviceCapabilities {
     const w = this.wallet as MaybeWallet
     const has = (name: keyof RgbLib.Wallet) => typeof w[name] === 'function'
-    const ifa = this.network !== 'mainnet'
+    const ifa = rgbLibSchemas(this.network).includes('IFA')
     return {
       metadata: has('getAssetMetadata'),
       issueUda: has('issueAssetUda'),
@@ -168,9 +176,7 @@ export class RgbLibRnAccount {
    */
   async listAssets(): Promise<RgbLib.Assets> {
     await this.refresh().catch(() => undefined)
-    const assets = await this.serial(() => this.wallet.listAssets(['NIA', 'CFA', 'IFA', 'UDA']))
-      .catch(() => this.serial(() => this.wallet.listAssets(['NIA', 'CFA'])))
-      .catch(() => this.serial(() => this.wallet.listAssets(['NIA'])))
+    const assets = await this.serial(() => this.wallet.listAssets(rgbLibSchemas(this.network)))
     const cfa = (assets.cfa ?? []).map((a) => ({ ...a, ticker: a.name }))
     const ifa = (assets.ifa ?? []).map((a) => ({ ...a, issuedSupply: a.knownCirculatingSupply ?? a.initialSupply }))
     const uda = (assets.uda ?? []).map((a) => ({ ...a, issuedSupply: 1 }))
@@ -310,9 +316,10 @@ export class RgbLibRnAccount {
   }
 
   private async assetMedia(assetId: string): Promise<RgbLib.Media | undefined> {
-    const assets = await this.serial(() => this.wallet.listAssets(['CFA', 'UDA', 'IFA']))
-    const found: any = [...(assets.cfa ?? []), ...(assets.uda ?? []), ...(assets.ifa ?? [])].find((a) => a.assetId === assetId)
-    return found?.media ?? found?.token?.media ?? undefined
+    const assets = await this.serial(() => this.wallet.listAssets(rgbLibSchemas(this.network)))
+    const found = [...(assets.cfa ?? []), ...(assets.uda ?? []), ...(assets.ifa ?? [])].find((a) => a.assetId === assetId)
+    if (!found) return undefined
+    return found.media ?? ('token' in found ? found.token?.media ?? undefined : undefined)
   }
 
   /** A Unique Digital Asset (one collectible), optionally with a media file at a local path. */
@@ -359,17 +366,9 @@ export class RgbLibRnAccount {
     return result
   }
 
-  /**
-   * Sends all plain bitcoin to `address`; outputs holding assets stay. rgb-lib up to
-   * 0.3.0-beta.5 takes `(address, destroyAssets, feeRate)` and gets false; later builds
-   * dropped `destroyAssets` and take `(address, feeRate)`.
-   */
+  /** Sends all plain bitcoin to `address`; outputs holding assets stay. */
   async drainTo(params: { address: string; feeRate?: number }): Promise<string> {
-    const feeRate = params.feeRate ?? DEFAULT_FEE_RATE
-    const drain = this.wallet.drainTo as unknown as (...args: unknown[]) => Promise<string>
-    const txid = await this.serial(() => drain.length === 2
-      ? drain.call(this.wallet, params.address, feeRate)
-      : drain.call(this.wallet, params.address, false, feeRate))
+    const txid = await this.serial(() => this.wallet.drainTo(params.address, params.feeRate ?? DEFAULT_FEE_RATE))
     this.lastRefresh = 0
     this.onChange()
     return txid
@@ -445,7 +444,8 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: 
         throw new Error('Update the app to use RGB on this network.')
       }
       const keys = await lib.restoreKeys(network, this.mnemonic)
-      const wallet = new lib.Wallet(keys, subdir ? { network, subdir } : { network })
+      const supportedSchemas = rgbLibSchemas(this.options.network)
+      const wallet = new lib.Wallet(keys, subdir ? { network, subdir, supportedSchemas } : { network, supportedSchemas })
       await wallet.goOnline(this.options.indexerUrl)
       this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange, this.options.network)
       return this.account

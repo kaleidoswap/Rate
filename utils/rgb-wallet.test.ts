@@ -3,6 +3,7 @@ import {
   normalizeRgbTransfers, rgbTransferDirection, rgbTransferStatus, rgbTransfersSignature, rgbWalletErrorMessage,
   rgbWalletSupport, startPolling, toBaseUnits, validateRgbIssue, type RgbIssueInput, rgbReceiveStage, createUtxosEstimate,
   canDeleteRgbTransfer, rgbInvoiceWatch, validateRgbInflate, validateDrainAddress, normalizeRgbAssetMetadata,
+  RGB_TRANSFER_STATUS_LABEL, isPendingRgbTransfer, rgbTransferStatusDetail, rgbOnchainKindLabel,
 } from './rgb-wallet';
 
 const fn = () => jest.fn();
@@ -45,6 +46,9 @@ describe('transfers', () => {
     expect(rgbTransferStatus('WAITING_CONFIRMATIONS')).toBe('waiting-confirmations');
     expect(rgbTransferStatus('settled')).toBe('settled');
     expect(rgbTransferStatus('Failed')).toBe('failed');
+    expect(rgbTransferStatus('Initiated')).toBe('initiated');
+    expect(rgbTransferStatus('WAITING_SAFE_HEIGHT')).toBe('waiting-safe-height');
+    expect(rgbTransferStatus('WaitingBroadcast')).toBe('waiting-broadcast');
     expect(rgbTransferStatus('Mystery')).toBeNull();
     expect(rgbTransferDirection('ReceiveWitness')).toBe('incoming');
     expect(rgbTransferDirection('RECEIVE_BLIND')).toBe('incoming');
@@ -174,10 +178,36 @@ describe('startPolling', () => {
   });
 });
 
+describe('rgb-lib 0.3 transfer steps', () => {
+  const steps = ['initiated', 'waiting-safe-height', 'waiting-broadcast'] as const;
+  it('are pending, labelled and explained in plain words, and can’t be cancelled', () => {
+    for (const status of steps) {
+      expect(isPendingRgbTransfer({ status })).toBe(true);
+      expect(RGB_TRANSFER_STATUS_LABEL[status]).toMatch(/^[A-Z][a-z ]+$/);
+      for (const direction of ['incoming', 'outgoing', 'issuance'] as const) expect(rgbTransferStatusDetail(status, direction)).toMatch(/\.$/);
+      expect(canCancelRgbTransfer({ status, batchTransferIdx: 1 }, { cancelTransfer: true })).toBe(false);
+    }
+    expect(isPendingRgbTransfer({ status: 'settled' })).toBe(false);
+    expect(normalizeRgbTransfers([{ idx: 1, kind: 'Send', status: 'WaitingBroadcast' }])[0]?.status).toBe('waiting-broadcast');
+  });
+});
+
+describe('rgbOnchainKindLabel', () => {
+  it('names UTXO creation and drains; incoming and plain sends keep their usual label', () => {
+    expect(rgbOnchainKindLabel('CREATE_UTXOS')).toBe('UTXOs created');
+    expect(rgbOnchainKindLabel('CreateUtxos')).toBe('UTXOs created');
+    expect(rgbOnchainKindLabel('DRAIN')).toBe('Bitcoin drained');
+    for (const kind of ['INCOMING', 'User', 'SEND_BTC', 'RGB_SEND', undefined]) expect(rgbOnchainKindLabel(kind)).toBeNull();
+  });
+});
+
 describe('rgbReceiveStage', () => {
   it('maps the invoice’s transfer to Receive’s stages', () => {
     expect(rgbReceiveStage(undefined).stage).toBe('watching');
     expect(rgbReceiveStage({ status: 'waiting-counterparty' }).stage).toBe('watching');
+    expect(rgbReceiveStage({ status: 'initiated' }).stage).toBe('watching');
+    expect(rgbReceiveStage({ status: 'waiting-safe-height' }).stage).toBe('pending');
+    expect(rgbReceiveStage({ status: 'waiting-broadcast' }).stage).toBe('pending');
     expect(rgbReceiveStage({ status: 'waiting-confirmations' }).stage).toBe('pending');
     expect(rgbReceiveStage({ status: 'settled' }).stage).toBe('confirmed');
     expect(rgbReceiveStage({ status: 'failed', expiration: 100 }, 200).stage).toBe('expired');

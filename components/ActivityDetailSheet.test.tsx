@@ -44,6 +44,15 @@ test('a transfer already in a transaction can’t be cancelled', () => {
   expect(screen.queryByText('Cancel invoice')).toBeNull();
 });
 
+test('rgb-lib’s newer steps read in plain words and can’t be cancelled', () => {
+  const safe = render(<ActivityDetailSheet item={item({ status: 'waiting-safe-height', direction: 'incoming', batchTransferIdx: 7 })} onClose={jest.fn()} />);
+  expect(safe.getByText('Waiting for more blocks')).toBeTruthy();
+  expect(safe.queryByText('Cancel invoice')).toBeNull();
+  const broadcast = render(<ActivityDetailSheet item={item({ status: 'waiting-broadcast', direction: 'outgoing', batchTransferIdx: 7 })} onClose={jest.fn()} />);
+  expect(broadcast.getByText('About to be broadcast')).toBeTruthy();
+  expect(broadcast.getByText(/about to be broadcast\./)).toBeTruthy();
+});
+
 test('a failed transfer can be removed from history where the wallet can, after confirming', async () => {
   const failed = item({ status: 'failed', direction: 'outgoing', batchTransferIdx: 4 });
   expect(render(<ActivityDetailSheet item={failed} onClose={jest.fn()} />).queryByText('Remove from history')).toBeNull();

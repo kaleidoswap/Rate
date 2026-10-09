@@ -1,5 +1,9 @@
+const mockNative: Record<string, jest.Mock> = {};
+jest.mock('../../modules/kaleido-rgb/src/native', () => ({ getNativeModule: () => mockNative }));
+
 import { RgbLibWdkAdapter, registerWdkModule } from '@kaleidorg/wallet-engine/adapters/wdk';
-import { createRgbLibRnModule, libNetwork, rgbLibSubdir } from './rgbLibRn';
+import * as KaleidoRgb from '../../modules/kaleido-rgb';
+import { createRgbLibRnModule, libNetwork, rgbLibSchemas, rgbLibSubdir } from './rgbLibRn';
 
 // A stand-in for modules/kaleido-rgb: records calls, returns rgb-lib shapes.
 function fakeLib() {
@@ -21,7 +25,7 @@ function fakeLib() {
     blindReceive: jest.fn(async () => ({ invoice: 'rgb:~/~/~/tb/b-invoice', recipientId: 'b-rid', expirationTimestamp: null, batchTransferIdx: 2 })),
     send: jest.fn(async () => ({ txid: 'send-txid', batchTransferIdx: 3 })),
     sendBtc: jest.fn(async () => 'btc-txid'),
-    listTransactions: jest.fn(async () => [{ transactionType: 'USER', txid: 't1', received: 10_000, sent: 0, fee: 0, confirmationTime: { height: 100, timestamp: 1_700_000_000 } }]),
+    listTransactions: jest.fn(async () => [{ transactionType: 'INCOMING', txid: 't1', received: 10_000, sent: 0, fee: 0, confirmationTime: { height: 100, timestamp: 1_700_000_000 } }]),
     listTransfers: jest.fn(async () => [{
       idx: 1, batchTransferIdx: 1, createdAt: 1_700_000_000, updatedAt: 1_700_000_100, kind: 'RECEIVE_WITNESS', status: 'WAITING_COUNTERPARTY',
       requestedAssignment: { type: 'FUNGIBLE', amount: 5_000_000 }, assignments: [{ type: 'FUNGIBLE', amount: 5_000_000 }], transportEndpoints: [],
@@ -58,7 +62,7 @@ test('the account restores keys for the network and goes online at the indexer',
   const manager = new WalletManagerRgb('seed words', options);
   const account = await manager.getAccount();
   expect(lib.restoreKeys).toHaveBeenCalledWith('SIGNET_CUSTOM', 'seed words');
-  expect(lib.Wallet).toHaveBeenCalledWith(expect.objectContaining({ mnemonic: 'seed words' }), { network: 'SIGNET_CUSTOM' });
+  expect(lib.Wallet).toHaveBeenCalledWith(expect.objectContaining({ mnemonic: 'seed words' }), { network: 'SIGNET_CUSTOM', supportedSchemas: ['NIA', 'CFA', 'UDA', 'IFA'] });
   expect(wallet.goOnline).toHaveBeenCalledWith('https://mutinynet.example/api');
   expect(await manager.getAccount()).toBe(account); // one wallet per manager
   await manager.dispose();
@@ -147,9 +151,18 @@ test('a folder name in dataDir opens the wallet in its own folder; anything else
   expect(rgbLibSubdir(undefined)).toBeNull();
   const { lib } = fakeLib();
   await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: 'rgb-mutinynet' }).getAccount();
-  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET_CUSTOM', subdir: 'rgb-mutinynet' });
+  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ network: 'SIGNET_CUSTOM', subdir: 'rgb-mutinynet' }));
   await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: '.' }).getAccount();
-  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET_CUSTOM' });
+  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), expect.not.objectContaining({ subdir: expect.anything() }));
+});
+
+test('wallets open with IFA except on mainnet, where rgb-lib refuses it', async () => {
+  expect(rgbLibSchemas('mainnet')).toEqual(['NIA', 'CFA', 'UDA']);
+  expect(rgbLibSchemas('mutinynet')).toContain('IFA');
+  const { lib, wallet } = fakeLib();
+  await (await open(lib, 'mainnet')).listAssets();
+  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'MAINNET', supportedSchemas: ['NIA', 'CFA', 'UDA'] });
+  expect(wallet.listAssets).toHaveBeenLastCalledWith(['NIA', 'CFA', 'UDA']);
 });
 
 test('a native build that can’t open other folders never opens a wallet meant for its own folder', async () => {
@@ -218,7 +231,7 @@ test('collectible assets are listed by name next to NIA, and issued with optiona
   (wallet as any).issueAssetCfa = jest.fn(async () => ({ assetId: 'rgb:art', name: 'Art' }));
   const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
   const listed = await account.listAssets();
-  expect(wallet.listAssets).toHaveBeenCalledWith(['NIA', 'CFA', 'IFA', 'UDA']);
+  expect(wallet.listAssets).toHaveBeenCalledWith(['NIA', 'CFA', 'UDA', 'IFA']);
   expect(listed.nia).toEqual([expect.objectContaining({ assetId: 'rgb:art', ticker: 'Art' })]);
   await account.issueAssetCfa({ name: 'Art', details: '', precision: 0, amounts: [10] });
   expect((wallet as any).issueAssetCfa).toHaveBeenCalledWith('Art', null, 0, [10], null);
@@ -267,16 +280,15 @@ test('UDA and IFA issuance, inflation rights and inflating', async () => {
   expect((wallet as any).inflate).toHaveBeenCalledWith('rgb:ifa', [50], 4, 1);
 });
 
-test('drain never destroys assets: false on builds that still ask, the fee rate alone on newer ones', async () => {
+test('drain sends to the address at the fee rate, the default one when none is chosen', async () => {
   const { lib, wallet } = fakeLib();
-  const legacy = jest.fn(async (_address: string, _destroyAssets: boolean, _feeRate: number) => 'drain-old');
-  (wallet as any).drainTo = legacy;
-  expect(await (await open(lib)).drainTo({ address: 'tb1qdest', feeRate: 3 })).toBe('drain-old');
-  expect(legacy).toHaveBeenCalledWith('tb1qdest', false, 3);
-  const current = jest.fn(async (_address: string, _feeRate: number) => 'drain-new');
-  (wallet as any).drainTo = current;
-  expect(await (await open(lib)).drainTo({ address: 'tb1qdest', feeRate: 3 })).toBe('drain-new');
-  expect(current).toHaveBeenCalledWith('tb1qdest', 3);
+  const drainTo = jest.fn(async (..._args: unknown[]) => 'drain-tx');
+  (wallet as any).drainTo = drainTo;
+  const account = await open(lib);
+  expect(await account.drainTo({ address: 'tb1qdest', feeRate: 3 })).toBe('drain-tx');
+  expect(drainTo).toHaveBeenCalledWith('tb1qdest', 3);
+  await account.drainTo({ address: 'tb1qdest' });
+  expect(drainTo).toHaveBeenLastCalledWith('tb1qdest', 2);
 });
 
 test('failed transfers are removed one by one or all together; collectibles are sent whole', async () => {
@@ -291,4 +303,32 @@ test('failed transfers are removed one by one or all together; collectibles are 
   expect((await account.listAssets()).nia).toEqual([expect.objectContaining({ assetId: 'rgb:nft', issuedSupply: 1 })]);
   await account.transfer({ token: 'rgb:nft', recipient: 'rgb:invoice', amount: 1 });
   expect(wallet.send.mock.calls.at(-1)![0]['rgb:nft'][0].assignment).toEqual({ type: 'NON_FUNGIBLE' });
+});
+
+test('over kaleido-rgb’s own Wallet: every feature is offered and calls reach the native module as it reads them', async () => {
+  const keys = { mnemonic: 'seed', xpub: 'x', accountXpubVanilla: 'v', accountXpubColored: 'c', masterFingerprint: 'f', witnessVersion: 'TAPROOT' };
+  Object.assign(mockNative, {
+    restoreKeys: jest.fn(async () => keys),
+    walletDirState: jest.fn(async () => ({ exists: false, hasManifest: false, hasBdkDb: false, hasLegacyBdkBackup: false })),
+    openWallet: jest.fn(async () => 3),
+    goOnline: jest.fn(async () => undefined),
+    drainTo: jest.fn(async () => 'drain-tx'),
+    issueAssetIfa: jest.fn(async () => ({ assetId: 'rgb:ifa' })),
+    inflate: jest.fn(async () => ({ txid: 'inflate-tx', batchTransferIdx: 1, entropy: '0' })),
+    deleteTransfers: jest.fn(async () => true),
+  });
+  const account = await open(KaleidoRgb);
+  expect(account.capabilities()).toEqual({ metadata: true, issueUda: true, issueIfa: true, inflate: true, drain: true, deleteTransfers: true });
+  expect(mockNative.openWallet).toHaveBeenCalledWith(expect.objectContaining({ network: 'SIGNET_CUSTOM', supportedSchemas: ['NIA', 'CFA', 'UDA', 'IFA'] }));
+  await account.drainTo({ address: 'tb1qdest', feeRate: 4 });
+  expect(mockNative.drainTo).toHaveBeenCalledWith(3, { address: 'tb1qdest', feeRate: 4 });
+  await account.issueAssetIfa({ ticker: 'IFA', name: 'Inflatable', precision: 2, amounts: [100], inflationAmounts: [500] });
+  expect(mockNative.issueAssetIfa).toHaveBeenCalledWith(3, { ticker: 'IFA', name: 'Inflatable', precision: 2, amounts: [100], inflationAmounts: [500], rejectListUrl: null });
+  await account.inflate({ assetId: 'rgb:ifa', inflationAmounts: [50] });
+  expect(mockNative.inflate).toHaveBeenCalledWith(3, { assetId: 'rgb:ifa', inflationAmounts: [50], feeRate: 2, minConfirmations: 1 });
+  await account.deleteTransfer(5);
+  expect(mockNative.deleteTransfers).toHaveBeenCalledWith(3, { batchTransferIdx: 5, noAssetOnly: false });
+  const mainnet = await open(KaleidoRgb, 'mainnet');
+  expect(mainnet.capabilities()).toEqual(expect.objectContaining({ issueIfa: false, inflate: false, drain: true }));
+  expect(mockNative.openWallet).toHaveBeenLastCalledWith(expect.objectContaining({ network: 'MAINNET', supportedSchemas: ['NIA', 'CFA', 'UDA'] }));
 });
