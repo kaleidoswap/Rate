@@ -1,54 +1,56 @@
 jest.mock('../protocols/MobileSparkAdapter', () => {
   class MobileSparkAdapter {
     account: any = null;
+    manager: any = null;
     network = 'mainnet';
     connected = false;
-    static lastConfig: any;
-    static identity: (cfg: any) => string;
-    async connect(cfg: any) {
-      MobileSparkAdapter.lastConfig = cfg;
-      this.network = cfg.network;
-      this.account = { _wallet: { id: 'agent-wallet' }, getIdentityKey: async () => MobileSparkAdapter.identity(cfg) };
-      this.connected = true;
-    }
-    async disconnect() { this.connected = false; }
+    async releasePreviousConnection() { if (this.connected) await this.disconnect(); }
+    async disconnect() { this.connected = false; this.account = null; this.manager = null; }
     isConnected() { return this.connected; }
     assertConnected() { if (!this.connected) throw new Error('not connected'); }
   }
   return { MobileSparkAdapter };
 });
-import { MobileSparkAdapter } from '../protocols/MobileSparkAdapter';
 import { AgentSparkAdapter, sparkAccount } from './account';
 import { sparkIdentityPubkey } from './derivation';
 
 const PHRASE = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about';
-const Mock = MobileSparkAdapter as any;
+
+function loaders(identity: (index: number) => string) {
+  const calls: any[] = [];
+  class WalletManagerSpark {
+    constructor(seed: Uint8Array, cfg: any) { calls.push({ seed, cfg }); }
+    async getAccount(index: number) {
+      calls.push({ index });
+      return { _wallet: { id: 'agent-wallet' }, getIdentityKey: async () => identity(index) };
+    }
+  }
+  return { calls, loaders: { walletModule: () => ({ default: WalletManagerSpark }), sparkSdk: () => ({ isValidSparkAddress: () => true }) } };
+}
 
 describe('AgentSparkAdapter', () => {
-  const glue = () => ({ adoptExternalWallet: jest.fn(), releaseExternalWallet: jest.fn() });
-
-  it('opens account index 1 and hands the shared Spark glue back to the main wallet', async () => {
-    Mock.identity = (cfg: any) => sparkIdentityPubkey(cfg.mnemonic, cfg.network, cfg.accountIndex);
-    const g = glue();
-    const main = { id: 'main-wallet' };
-    const adapter = new AgentSparkAdapter(g, () => main);
+  it('opens account index 1 of the phrase on the right Spark network', async () => {
+    const { calls, loaders: l } = loaders((i) => sparkIdentityPubkey(PHRASE, 'mainnet', i));
+    const adapter = new AgentSparkAdapter(l);
     await adapter.connect({ mnemonic: PHRASE, network: 'mainnet' });
-    expect(Mock.lastConfig.accountIndex).toBe(1);
-    expect(g.releaseExternalWallet).toHaveBeenCalledWith({ id: 'agent-wallet' });
-    expect(g.adoptExternalWallet).toHaveBeenCalledWith(main, 'mainnet');
+    expect(calls[0].cfg).toEqual({ network: 'MAINNET' });
+    expect(calls[0].seed).toBeInstanceOf(Uint8Array);
+    expect(calls[1]).toEqual({ index: 1 });
     expect(adapter.isConnected()).toBe(true);
+    expect(adapter.sparkNetwork).toBe('mainnet');
   });
 
   it('refuses to run when the opened account is not the derived agent account', async () => {
-    Mock.identity = (cfg: any) => sparkIdentityPubkey(cfg.mnemonic, cfg.network, 0);
-    const adapter = new AgentSparkAdapter(glue(), () => null);
+    const { loaders: l } = loaders(() => sparkIdentityPubkey(PHRASE, 'mainnet', 0));
+    const adapter = new AgentSparkAdapter(l);
     await expect(adapter.connect({ mnemonic: PHRASE, network: 'mainnet' })).rejects.toThrow(/own account/);
     expect(adapter.isConnected()).toBe(false);
+    expect((adapter as any).account).toBeNull();
   });
 
   it('reads the spendable balance and fails on nonsense', async () => {
-    Mock.identity = (cfg: any) => sparkIdentityPubkey(cfg.mnemonic, cfg.network, cfg.accountIndex);
-    const adapter = new AgentSparkAdapter(glue(), () => null);
+    const { loaders: l } = loaders((i) => sparkIdentityPubkey(PHRASE, 'mainnet', i));
+    const adapter = new AgentSparkAdapter(l);
     await adapter.connect({ mnemonic: PHRASE, network: 'mainnet' });
     (adapter as any).account._wallet.getBalance = async () => ({ balance: 9n, satsBalance: { available: 7n, owned: 9n } });
     expect(await adapter.spendableSats()).toBe(7);

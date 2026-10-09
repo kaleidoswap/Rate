@@ -3,7 +3,7 @@
 // balances, Send and Activity, and only the agent wallet code can move its funds.
 
 import { MobileSparkAdapter } from '../protocols/MobileSparkAdapter';
-import { AGENT_SPARK_ACCOUNT_INDEX, MAIN_SPARK_ACCOUNT_INDEX, sparkIdentityPubkey } from './derivation';
+import { AGENT_SPARK_ACCOUNT_INDEX, MAIN_SPARK_ACCOUNT_INDEX, sparkIdentityPubkey, walletSeed } from './derivation';
 import type { AgentPayWallet } from './agentPay';
 
 /** What the agent wallet code needs from a Spark account (the agent's or the main one). */
@@ -15,29 +15,52 @@ export interface SparkAccountLike {
   sendToSpark(address: string, sats: number): Promise<{ id: string; status: 'confirmed' | 'pending' | 'failed' }>;
 }
 
-type SparkGlue = { adoptExternalWallet(w: unknown, network: string): void; releaseExternalWallet(w: unknown): void };
+export interface AgentSparkLoaders {
+  /** The WDK Spark wallet manager module. */
+  walletModule: () => any;
+  /** spark-sdk, for the address helpers the adapter's send path uses. */
+  sparkSdk: () => any;
+}
+
+const DEFAULT_LOADERS: AgentSparkLoaders = {
+  walletModule: () => require('@tetherto/wdk-wallet-spark'),
+  sparkSdk: () => require('@buildonspark/spark-sdk'),
+};
+
+const SPARK_NETWORKS: Record<string, string> = { mainnet: 'MAINNET', testnet: 'TESTNET', regtest: 'REGTEST', signet: 'SIGNET' };
 
 export class AgentSparkAdapter extends MobileSparkAdapter {
-  constructor(private readonly glue: SparkGlue, private readonly mainWallet: () => unknown) {
+  constructor(private readonly loaders: AgentSparkLoaders = DEFAULT_LOADERS) {
     super();
   }
 
+  /**
+   * Opens account index 1 directly instead of through the engine's connect,
+   * which would hand the wallet to the Spark client Flashnet shares. That
+   * client never sees this wallet, not even for a moment.
+   */
   async connect(config: any): Promise<void> {
     const mnemonic = String(config?.mnemonic ?? '');
     const network = String(config?.network ?? 'mainnet');
-    await super.connect({ ...config, accountIndex: AGENT_SPARK_ACCOUNT_INDEX });
-    // The engine shares the connected Spark wallet with Flashnet; that stays the main one.
-    const mine = this.account?._wallet;
-    try { this.glue.releaseExternalWallet(mine); } catch { /* optional glue */ }
-    const main = this.mainWallet();
-    if (main && main !== mine) {
-      try { this.glue.adoptExternalWallet(main, network); } catch { /* optional glue */ }
-    }
+    await this.releasePreviousConnection();
     const expected = sparkIdentityPubkey(mnemonic, network, AGENT_SPARK_ACCOUNT_INDEX);
-    const actual = String((await this.account.getIdentityKey()) ?? '').toLowerCase();
-    if (actual !== expected || actual === sparkIdentityPubkey(mnemonic, network, MAIN_SPARK_ACCOUNT_INDEX)) {
+    const mod = this.loaders.walletModule();
+    const WalletManagerSpark = mod?.default ?? mod;
+    this.manager = new WalletManagerSpark(walletSeed(mnemonic), { network: SPARK_NETWORKS[network] ?? 'MAINNET' });
+    this.mnemonic = mnemonic;
+    this.network = network;
+    try {
+      this.account = await this.manager.getAccount(AGENT_SPARK_ACCOUNT_INDEX);
+      const actual = String((await this.account.getIdentityKey()) ?? '').toLowerCase();
+      if (actual !== expected || actual === sparkIdentityPubkey(mnemonic, network, MAIN_SPARK_ACCOUNT_INDEX)) {
+        throw new Error('The Agent wallet did not open on its own account. Nothing was changed.');
+      }
+      (this as any).identityPubKeyHex = actual;
+      (this as any).sdk = this.loaders.sparkSdk();
+      this.connected = true;
+    } catch (e) {
       await this.disconnect().catch(() => {});
-      throw new Error('The Agent wallet did not open on its own account. Nothing was changed.');
+      throw e;
     }
   }
 

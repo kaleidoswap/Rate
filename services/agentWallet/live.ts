@@ -3,7 +3,7 @@
 // opened on first use and kept for the session.
 
 import DatabaseService from '../DatabaseService';
-import { protocolManager, sparkClientManager } from '../protocols';
+import { protocolManager } from '../protocols';
 import { AgentSparkAdapter, agentPayWallet, sparkAccount } from './account';
 import { AgentWalletStore } from './store';
 import type { AgentPayWallet } from './agentPay';
@@ -38,7 +38,7 @@ export async function openAgentAccount(): Promise<AgentSparkAdapter> {
     if (adapter?.isConnected()) return adapter;
   }
   await closeAgentAccount();
-  const adapter = new AgentSparkAdapter(sparkClientManager as any, () => mainSpark().account?._wallet);
+  const adapter = new AgentSparkAdapter();
   const connecting = adapter.connect({ protocol: 'SPARK', mnemonic: wallet.encrypted_mnemonic, network }).then(() => adapter);
   open = { walletId: wallet.id, network, adapter: connecting };
   try {
