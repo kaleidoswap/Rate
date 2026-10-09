@@ -27,7 +27,7 @@ export function InsightCard({ insight, onAction, onDismiss }: {
   return (
     <Card variant="outlined" style={[styles.card, { borderColor: TONE[insight.tone] + '55' }]} testID={`insight-${insight.rule}`}>
       <View style={styles.row}>
-        <MindCharacter mood={insight.mood} size={36} />
+        <MindCharacter mood={insight.mood} size={36} animated={false} />
         <View style={styles.body}>
           <Text style={styles.title}>{insight.title}</Text>
           <Text style={styles.message}>{insight.message}</Text>

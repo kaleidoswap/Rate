@@ -22,7 +22,7 @@ export function ExplainSheet({ subject, onClose }: { subject: ExplainSubject | n
   return (
     <Sheet visible={!!subject} onClose={onClose} title={subject ? explainTitle(subject) : undefined} testID="explain-sheet">
       <View style={styles.body}>
-        <MindCharacter mood={result ? 'speaking' : 'thinking'} size={44} />
+        <MindCharacter mood={result ? 'happy' : 'thinking'} size={44} />
         <View style={styles.textCol}>
           <Text style={styles.text} accessibilityLiveRegion="polite">{result?.text ?? 'Thinking…'}</Text>
           {!!result && (
