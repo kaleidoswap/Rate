@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { SegmentedTabs } from '../SegmentedTabs';
 import { NetworkIcon } from '../NetworkIcon';
+import { NetworkStack } from '../NetworkStack';
 import { Sheet } from '../Sheet';
 import { OnchainIcon } from '../ProtocolIcons';
 import { feedback } from '../../utils/feedback';
@@ -82,9 +83,15 @@ function ChoiceRow<K extends string>({ label, title, choices, selected, onSelect
   </>;
 }
 
-function destinationChoices(destinations: ReceiveDestination[], amountSats: number, showChain: boolean, lightning: boolean): Choice<AccountId>[] {
+function MethodIcon({ icons, color, size }: { icons: string[]; color: string; size: number }) {
+  if (icons.length > 1) return <NetworkStack networks={icons} size={size} ringColor="transparent" />;
+  if (icons[0] === 'onchain') return <OnchainIcon color={color} size={size} />;
+  return <NetworkIcon network={icons[0]} size={size} />;
+}
+
+function destinationChoices(destinations: ReceiveDestination[], amountSats: number, showChain: boolean, iconOf: (account: AccountId) => string): Choice<AccountId>[] {
   return destinations.map(d => ({
-    key: d.account, title: d.label, detail: d.detail, icon: accountIcon(d.account, lightning),
+    key: d.account, title: d.label, detail: d.detail, icon: iconOf(d.account),
     badge: showChain ? chainLabel(d.chain) : undefined,
     disabled: !d.available ? d.reason ?? 'Not available' : undefined,
   })).map(c => {
@@ -100,6 +107,7 @@ function destinationChoices(destinations: ReceiveDestination[], amountSats: numb
 export function ReceiveRoutePicker({
   methods, method, onMethod, destinations, destination, onDestination, amountSats,
   chains, chain, onChain, accountLabel = (account) => account, lightningDestinations, lightningDestination, onLightningDestination,
+  iconFor, methodIcons,
 }: {
   methods: ReceiveMethodId[];
   method: ReceiveMethodId;
@@ -117,8 +125,13 @@ export function ReceiveRoutePicker({
   lightningDestinations?: ReceiveDestination[];
   lightningDestination?: AccountId | null;
   onLightningDestination?: (account: AccountId) => void;
+  /** The icon of the account a payment lands in (RGB on this phone, the RGB node, Spark…). */
+  iconFor?: (account: AccountId) => string;
+  /** Icons per method tab; Ark lists each Ark account it can land in. */
+  methodIcons?: Partial<Record<ReceiveMethodId, string[]>>;
 }) {
   const t = useAppTheme();
+  const iconOf = (lightning: boolean) => (account: AccountId) => (iconFor ? iconFor(account) : accountIcon(account, lightning));
   const showChain = new Set([...destinations, ...(lightningDestinations ?? [])].map(d => d.chain)).size > 1;
   const current = destinations.find(d => d.account === destination);
   const currentLn = lightningDestinations?.find(d => d.account === lightningDestination);
@@ -127,7 +140,9 @@ export function ReceiveRoutePicker({
     {methods.length > 1 && <SegmentedTabs<ReceiveMethodId>
       options={methods.map(m => ({
         key: m, label: METHOD_LABELS[m], icon: METHOD_ICONS[m],
-        renderIcon: m === 'onchain' ? (color, size) => <OnchainIcon color={color} size={size} /> : undefined,
+        renderIcon: methodIcons?.[m]?.length
+          ? (color, size) => <MethodIcon icons={methodIcons[m]!} color={color} size={size} />
+          : m === 'onchain' ? (color, size) => <OnchainIcon color={color} size={size} /> : undefined,
       }))}
       value={method} onChange={onMethod} />}
     {method === 'universal' && !!chains && chains.length > 1 && onChain && <ChoiceRow<ReceiveChain>
@@ -138,13 +153,13 @@ export function ReceiveRoutePicker({
       choices={chains.map(g => ({ key: g.chain, title: chainLabel(g.chain), detail: g.accounts.map(accountLabel).join(', ') }))} />}
     {method === 'universal' && !!lightningDestinations?.length && onLightningDestination && <ChoiceRow<AccountId>
       label="Lightning to" sheetTitle="Where should Lightning payments land?"
-      title={accountTitle(currentLn)} icon={currentLn ? accountIcon(currentLn.account, true) : undefined}
+      title={accountTitle(currentLn)} icon={currentLn ? iconOf(true)(currentLn.account) : undefined}
       selected={lightningDestination ?? null} onSelect={onLightningDestination}
-      choices={destinationChoices(lightningDestinations, amountSats, showChain, true)} />}
+      choices={destinationChoices(lightningDestinations, amountSats, showChain, iconOf(true))} />}
     {method !== 'universal' && destinations.length > 0 && <ChoiceRow<AccountId>
       label="Deposit to" sheetTitle={`Where should this ${METHOD_LABELS[method]} payment land?`}
-      title={accountTitle(current)} icon={current ? accountIcon(current.account, method === 'lightning') : undefined}
+      title={accountTitle(current)} icon={current ? iconOf(method === 'lightning')(current.account) : undefined}
       selected={destination} onSelect={onDestination}
-      choices={destinationChoices(destinations, amountSats, showChain, method === 'lightning')} />}
+      choices={destinationChoices(destinations, amountSats, showChain, iconOf(method === 'lightning'))} />}
   </View>;
 }

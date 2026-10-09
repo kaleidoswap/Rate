@@ -1,6 +1,7 @@
 import {
   accountLabel, accountsOnChain, arkDestinations, defaultDestination, destinationsFor, legacyRoute, lightningDestinations,
-  methodsFor, onchainDestinations, routeOf, universalChains, universalLightning, type ReceiveAccountInfo, type ReceiveMethodId,
+  methodIcons, methodsFor, onchainDestinations, receiveAccountIcon, receiveAssetLabel, receiveSummary, routeOf, universalChains,
+  universalLightning, type ReceiveAccountInfo, type ReceiveMethodId,
 } from './receive-routes';
 
 const all: ReceiveAccountInfo[] = [
@@ -27,9 +28,9 @@ describe('receive routes', () => {
   it('RGB on this phone is on-chain only: no Lightning, its own name, assets on-chain', () => {
     const caps = { rgbOnDevice: true };
     expect(lightningDestinations(all, caps).map(d => d.account)).toEqual(['SPARK', 'BARK', 'ARKADE']);
-    expect(onchainDestinations(all, caps)[0]).toMatchObject({ account: 'RGB', label: 'RGB wallet', detail: 'Your RGB wallet on this phone' });
+    expect(onchainDestinations(all, caps)[0]).toMatchObject({ account: 'RGB', label: 'RGB on this phone', detail: 'Your RGB wallet · on-chain only' });
     expect(methodsFor('RGB', all, caps)).toEqual(['onchain']);
-    expect(accountLabel('RGB', caps)).toBe('RGB wallet');
+    expect(accountLabel('RGB', caps)).toBe('RGB on this phone');
   });
 
   it('lists on-chain and Ark destinations per account', () => {
@@ -125,5 +126,44 @@ describe('receive by account', () => {
     expect(receivableAccounts(all, {})).toEqual(['SPARK', 'ARKADE', 'BARK', 'RGB']);
     expect(receivableAccounts(all, {}, 'RGB')).toEqual(['RGB']);
     expect(receivableAccounts([{ account: 'RGB', chain: 'mainnet' }], { nwcWalletType: 'ln', nwcCapabilities: [] })).toEqual([]);
+  });
+
+  it('names each account with its own icon: RGB on this phone, the RGB node, or a Lightning wallet', () => {
+    expect(receiveAccountIcon('RGB', { rgbOnDevice: true })).toBe('rgb');
+    expect(receiveAccountIcon('RGB', {})).toBe('rln');
+    expect(receiveAccountIcon('RGB', { nwcWalletType: 'ln' })).toBe('lightning');
+    expect(['SPARK', 'ARKADE', 'BARK'].map(a => receiveAccountIcon(a as any, {}))).toEqual(['spark', 'arkade', 'bark']);
+  });
+
+  it('the generic Ark method shows every Ark account it can land in', () => {
+    expect(methodIcons('ark', all, {})).toEqual(['arkade', 'bark']);
+    expect(methodIcons('ark', all.filter(a => a.account !== 'BARK'), {})).toEqual(['arkade']);
+    expect(methodIcons('onchain', all, {})).toEqual(['onchain']);
+    expect(methodIcons('universal', all, {})).toEqual([]);
+  });
+
+  it('summarises the request with the rail and the account it lands in', () => {
+    expect(receiveSummary({ method: 'onchain', account: 'SPARK', caps: {} })).toEqual({ text: 'On-chain to Spark', icons: ['onchain', 'spark'] });
+    expect(receiveSummary({ method: 'onchain', account: 'RGB', caps: { rgbOnDevice: true } })).toEqual({ text: 'On-chain to RGB on this phone', icons: ['onchain', 'rgb'] });
+    expect(receiveSummary({ method: 'onchain', account: 'RGB', caps: {} })).toEqual({ text: 'On-chain to RGB Lightning node', icons: ['onchain', 'rln'] });
+    expect(receiveSummary({ method: 'lightning', account: 'RGB', caps: {} }).icons).toEqual(['rln']);
+    expect(receiveSummary({ method: 'lightning', account: 'BARK', caps: {} })).toEqual({ text: 'Lightning to Bark', icons: ['lightning', 'bark'] });
+    expect(receiveSummary({ method: 'ark', account: 'ARKADE', caps: {} })).toEqual({ text: 'Ark to Arkade', icons: ['arkade'] });
+    expect(receiveSummary({ method: 'spark', account: 'SPARK', caps: {} })).toEqual({ text: 'Spark', icons: ['spark'] });
+    expect(receiveSummary({ method: 'universal', account: 'SPARK', caps: {}, included: ['SPARK', 'ARKADE'] }))
+      .toEqual({ text: 'Any wallet · Lightning to Spark', icons: ['spark', 'arkade'] });
+  });
+
+  it('an RGB asset never reads as landing in Arkade', () => {
+    const rgbDest = destinationsFor('onchain', all, { rgbOnDevice: true }, 'RGB');
+    expect(rgbDest.map(d => d.account)).toEqual(['RGB']);
+    expect(rgbDest.some(d => d.account === 'ARKADE')).toBe(false);
+  });
+
+  it('labels the asset in plain words', () => {
+    expect(receiveAssetLabel({ asset_id: 'RGB_NEW', ticker: 'RGB' })).toBe('Any RGB asset');
+    expect(receiveAssetLabel({ asset_id: 'BTC', ticker: 'BTC' })).toBe('Bitcoin');
+    expect(receiveAssetLabel({ asset_id: 'USD', ticker: 'USD' })).toBe('US Dollar');
+    expect(receiveAssetLabel({ asset_id: 'rgb:abc', ticker: 'TKN', name: 'Token' })).toBe('Token');
   });
 });
