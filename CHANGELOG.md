@@ -11,6 +11,9 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Added
+- **Tell KaleidoMind what to do.** A bar on the Dashboard and the Mind tab takes a typed or dictated request ("send 10€ to Mario", "swap half my BTC to USDT", "receive 50k sats on Lightning", in English or Italian) and answers with a card: amount and fiat value, recipient, route and estimated fee, from the wallet's own prices and quotes. Review opens Send, Receive or Swap filled in, where you confirm as usual. Common requests work without the model; questions like "how much did I spend this week" get a small summary from Activity.
+- **Explain.** Activity details (the payment, its fee, an RGB transfer's step), a failed swap and Send errors have an Explain button that says what happened in a few plain sentences, on this phone, with a built-in explanation when KaleidoMind is off.
+- **Insights on the Dashboard.** Small cards for things worth a look: an RGB backup that failed or never ran, little room to receive on an RGB channel, a swap or payment still unconfirmed, a large payment received, low network fees. Each has one action and can be dismissed.
 - **Lightning address (kaleidoswap.me).** Claim a permanent `name@kaleidoswap.me` from Settings → Lightning address, as in the extension: live availability check, then a signed claim with the Spark identity key. Anyone can pay it from any Lightning wallet and it lands in Spark, even when the app is closed. Share it (copy, share, QR), release it, and find it again automatically after restoring the wallet. Receive shows it under the code.
 - **Payment notifications.** "Payment received" notifications, on by default (Settings → Preferences):
   - with the app closed, kaleidoswap.me pushes to the phone when a payment to your Lightning address lands (the amount and address pass through Apple or Google);
