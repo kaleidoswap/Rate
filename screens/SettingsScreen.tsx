@@ -151,7 +151,7 @@ export default function SettingsScreen({ navigation }: Props) {
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
-    { page: 'assistant', terms: 'kaleidomind ai desktop model agent assistant personalize connection' },
+    { page: 'assistant', terms: 'kaleidomind ai desktop model agent assistant personalize connection wallet budget limit' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase' },
@@ -605,6 +605,7 @@ export default function SettingsScreen({ navigation }: Props) {
               const security = SecurityService.getInstance();
               if (await security.isDeviceAuthAvailable()
                 && !(await security.authenticateForReveal('Authenticate to remove this wallet'))) return;
+              await require('../services/agentWallet/lifecycle').closeAgentWallet().catch(() => {});
               const { protocolManager } = require('../services/protocols');
               await protocolManager.disconnectAll();
               const DBService = require('../services/DatabaseService').default;
@@ -748,7 +749,7 @@ export default function SettingsScreen({ navigation }: Props) {
         )}
 
         {/* KaleidoMind */}
-        {showSection('kaleidomind ai desktop model agent assistant personalize connection') && <>
+        {showSection('kaleidomind ai desktop model agent assistant personalize connection wallet budget limit') && <>
         <SectionLabel>KaleidoMind</SectionLabel>
         <Group>
           <Row
@@ -765,6 +766,13 @@ export default function SettingsScreen({ navigation }: Props) {
             label="Personalize assistant"
             description="Personality, memory and responses"
             onPress={() => navigation.navigate('MindSettings')}
+          />
+          <Row
+            icon="wallet-outline"
+            iconColor={theme.colors.accent[500]}
+            label="Agent wallet"
+            description="A separate budget the assistant can spend, with your limits"
+            onPress={() => navigation.navigate('AgentWallet')}
           />
         </Group>
         </>}

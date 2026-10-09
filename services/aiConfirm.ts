@@ -135,6 +135,32 @@ export function assetSendReadback(a: { asset: string; amount: number; to: string
   };
 }
 
+/** An assistant payment from the Agent wallet that its rules say to ask about. */
+export function agentPaymentReadback(a: Record<string, unknown>): ConfirmReadback {
+  const invoice = String(a.invoice ?? '').trim();
+  const sats = decodeAmount(invoice).sats;
+  if (!sats || sats !== Number(a.amount_sats)) throw new Error("The invoice amount doesn't match the payment, so it was not sent.");
+  const service = String(a.service ?? '');
+  const fee = Number(a.fee_sats);
+  const rows: ReadbackRow[] = [
+    { label: 'Service', value: service },
+    { label: 'Pays from', value: 'Agent wallet' },
+    { label: 'Fee', value: Number.isFinite(fee) && fee > 0 ? `Up to ${formatSats(fee)}` : 'None expected' },
+  ];
+  if (a.why) rows.push({ label: 'Why you are asked', value: String(a.why) });
+  rows.push({ label: 'Lightning invoice', value: invoice, copyable: true });
+  return {
+    kind: 'payment',
+    title: 'Agent wallet payment',
+    cta: 'Pay',
+    amount: formatSats(sats),
+    amountSats: sats,
+    recipientName: service,
+    rows,
+    spoken: `Pay ${formatSats(sats)} to ${service} from the Agent wallet. Tap to approve.`,
+  };
+}
+
 export function genericReadback(name: string, args: Record<string, unknown>): ConfirmReadback {
   const rows = Object.entries(args).map(([k, v]) => ({
     label: k.replace(/_/g, ' '),
@@ -180,6 +206,9 @@ export async function buildConfirmReadback(call: { name: string; arguments: Reco
         to: String(a.to ?? ''),
         network: 'RGB Lightning',
       });
+    case 'fetch_paid_resource':
+      if (a.agent_wallet !== true) return genericReadback(call.name, a);
+      return agentPaymentReadback(a);
     case 'execute_swap': {
       const q = describeSwapQuote(String(a.quote_id ?? ''));
       if (!q) throw new Error('That quote is no longer available — please get a fresh quote first.');

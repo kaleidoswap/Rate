@@ -28,6 +28,7 @@ import NetworkService from './services/NetworkService';
 import { preloadFeedback } from './utils/feedback';
 
 import { store, persistor } from './store';
+import { closeAgentWallet, watchAgentWalletLifecycle } from './services/agentWallet/lifecycle';
 import { selectAiMode } from './store/slices/settingsSlice';
 import QVACService from './services/QVACService';
 import { theme, createNavigationTheme } from './theme';
@@ -66,6 +67,7 @@ import HistoryScreen from './screens/HistoryScreen';
 import LSPScreen from './screens/LSPScreen';
 import LightningAddressScreen from './screens/LightningAddressScreen';
 import MindSettingsScreen from './screens/MindSettingsScreen';
+import AgentWalletScreen from './screens/AgentWalletScreen';
 import NWCConnectScreen from './screens/NWCConnectScreen';
 import RgbNodeScreen from './screens/RgbNodeScreen';
 
@@ -91,6 +93,7 @@ type RootStackParamList = {
   Map: undefined;
   LSP: undefined;
   MindSettings: undefined;
+  AgentWallet: undefined;
   LightningAddress: undefined;
   NWCConnect: { scanned?: string } | undefined;
   RgbNode: undefined;
@@ -243,6 +246,7 @@ function AppNavigator() {
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} />
         <Stack.Screen name="MindSettings" component={MindSettingsScreen} />
+        <Stack.Screen name="AgentWallet" component={AgentWalletScreen} />
         <Stack.Screen name="NWCConnect" component={NWCConnectScreen} />
         <Stack.Screen name="RgbNode" component={RgbNodeScreen} />
         <Stack.Screen name="LightningAddress" component={LightningAddressScreen} />
@@ -309,8 +313,11 @@ export default function App() {
     // Warm the UI sound cache so the first tap/chime plays without synthesis lag.
     preloadFeedback();
 
+    const stopAgentLifecycle = watchAgentWalletLifecycle(store, closeAgentWallet);
+
     return () => {
       networkService.cleanup();
+      stopAgentLifecycle();
     };
   }, []);
 

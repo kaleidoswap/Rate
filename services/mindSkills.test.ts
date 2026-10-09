@@ -52,7 +52,7 @@ describe('skill bundle', () => {
   it('ships the expected skills, all with names and triggers', () => {
     const names = skills.map((s) => s.name).sort();
     expect(names).toEqual([
-      'bitrefill', 'kaleido-trading',
+      'agent-wallet', 'bitrefill', 'kaleido-trading',
       'merchant-finder', 'paid-data', 'wallet-assistant',
     ]);
     for (const s of skills) {
@@ -90,7 +90,7 @@ describe('skill ↔ tool connection', () => {
       'find_merchant_locations', 'get_merchant_info',
       'kaleidoswap_get_pairs', 'kaleidoswap_get_quote', 'execute_swap',
       'kaleidoswap_atomic_status',
-      'fetch_paid_resource', 'remember', 'recall', 'search_knowledge',
+      'fetch_paid_resource', 'agent_budget_status', 'remember', 'recall', 'search_knowledge',
     ]) {
       expect(available.has(t)).toBe(true);
     }
@@ -106,6 +106,8 @@ describe('skill selection (keyword router)', () => {
     ['find a coffee shop that accepts bitcoin', 'merchant-finder'],
     ['unlock the premium data feed', 'paid-data'],
     ['buy a gift card with bitcoin', 'bitrefill'],
+    ['how much can you spend today?', 'agent-wallet'],
+    ["what's left of my agent wallet budget?", 'agent-wallet'],
     ['quote 100k sats to USDT', 'kaleido-trading'],
     ['swap btc for usdt', 'kaleido-trading'],
     ['swap btc for usdb on flashnet', 'kaleido-trading'],

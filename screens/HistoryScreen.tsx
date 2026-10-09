@@ -38,6 +38,8 @@ import {
 import { loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND } from '../services/kaleidoPay/activity';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
+import { AgentWalletStore, type AgentLedgerEntry } from '../services/agentWallet/store';
+import { AGENT_ACTIVITY_KIND, agentActivityItems } from '../services/agentWallet/activity';
 
 const FILTERS: { key: ActivityTab; label: string }[] = [
     { key: 'all', label: 'All' },
@@ -45,6 +47,7 @@ const FILTERS: { key: ActivityTab; label: string }[] = [
     { key: 'receive', label: 'Received' },
     { key: 'send', label: 'Sent' },
     { key: 'swap', label: 'Swaps' },
+    { key: 'agent', label: 'Agent' },
 ];
 
 // Per-type visual identity: icon + accent colour. Direction colours come from
@@ -92,6 +95,7 @@ function layerChipColors(layer: ActivityLayer): { bg: string; text: string } {
 }
 
 function typeLabel(item: ActivityItem): string {
+    if (item.kind === AGENT_ACTIVITY_KIND && item.assetName) return item.assetName;
     switch (item.type) {
         case 'receive': return 'Receive';
         case 'send': return 'Payment';
@@ -170,7 +174,19 @@ export default function HistoryScreen() {
         return () => { active = false; };
     }, [walletId, result]);
 
-    const items = useMemo(() => [...pendingPayment, ...feed.items], [pendingPayment, feed.items]);
+    // The Agent wallet is not a protocol account: its log is read here. Top-ups and
+    // withdrawals already show as the main wallet's Spark transfers, so only the
+    // Agent tab lists them.
+    const [agentEntries, setAgentEntries] = useState<AgentLedgerEntry[]>([]);
+    useEffect(() => {
+        let active = true;
+        if (!walletId) { setAgentEntries([]); return; }
+        new AgentWalletStore(walletId).entries().then((list) => { if (active) setAgentEntries(list); }, () => {});
+        return () => { active = false; };
+    }, [walletId, result]);
+
+    const items = useMemo(() => [...pendingPayment, ...feed.items, ...agentActivityItems(agentEntries, { spendsOnly: true })], [pendingPayment, feed.items, agentEntries]);
+    const agentItems = useMemo(() => agentActivityItems(agentEntries), [agentEntries]);
     const loadingFirst = feed.updating && items.length === 0;
 
     const softError = useMemo(() => {
@@ -198,7 +214,9 @@ export default function HistoryScreen() {
         })),
     ], [networks]);
 
-    const filtered = items.filter((it) => matchesActivityFilter(it, filter, activeNetwork));
+    const filtered = (filter === 'agent' ? agentItems : items)
+        .filter((it) => matchesActivityFilter(it, filter, activeNetwork))
+        .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
 
     // Build sections grouped by day.
     const sections = (() => {
@@ -319,8 +337,8 @@ export default function HistoryScreen() {
                     ) : (
                         <EmptyState
                             icon="receipt-outline"
-                            title={filter === 'pending' ? 'No pending payments' : 'No activity yet'}
-                            message={filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : 'Your payments and transfers will appear here.'}
+                            title={filter === 'pending' ? 'No pending payments' : filter === 'agent' ? 'No agent payments yet' : 'No activity yet'}
+                            message={filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : filter === 'agent' ? 'What the assistant pays from its Agent wallet, and your top-ups, appear here.' : 'Your payments and transfers will appear here.'}
                         />
                     )}
                 />

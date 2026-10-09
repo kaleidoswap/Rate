@@ -6,6 +6,7 @@ import {
   priceChangeWarning,
   buildConfirmReadback,
 } from './aiConfirm';
+import { makeInvoice } from './agentWallet/__fixtures__/invoice';
 import { authorizeSpend } from './spendAuth';
 import { describeSwapQuote } from './swapTools';
 import { previewSendPayment } from './walletTools';
@@ -126,5 +127,19 @@ describe('expiry + price warning', () => {
   });
   it('words a move against the user plainly', () => {
     expect(priceChangeWarning(0.016)).toBe('The price moved 1.6% against you since the quote. Check the new amounts and approve again.');
+  });
+});
+
+describe('agent wallet payment readback', () => {
+  const invoice = makeInvoice({ sats: 500, paymentHash: 'ab'.repeat(32), timestamp: 1_790_000_000, expiry: 600 });
+
+  it('shows the amount from the invoice, the service and that it pays from the Agent wallet', async () => {
+    const r = await buildConfirmReadback({ name: 'fetch_paid_resource', arguments: { agent_wallet: true, service: 'api.example.com', amount_sats: 500, fee_sats: 3, invoice, why: 'Above the limit.' } });
+    expect(r).toMatchObject({ kind: 'payment', title: 'Agent wallet payment', amount: '500 sats', amountSats: 500, recipientName: 'api.example.com' });
+    expect(r.rows).toEqual(expect.arrayContaining([{ label: 'Pays from', value: 'Agent wallet' }, { label: 'Fee', value: 'Up to 3 sats' }]));
+  });
+
+  it('refuses when the amount shown would not match the invoice', async () => {
+    await expect(buildConfirmReadback({ name: 'fetch_paid_resource', arguments: { agent_wallet: true, service: 'a.com', amount_sats: 5, invoice } })).rejects.toThrow(/doesn't match/);
   });
 });

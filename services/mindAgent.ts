@@ -34,7 +34,8 @@ import { buildWalletToolSource } from './walletTools';
 import { buildMerchantToolSource } from './merchantTools';
 import { numberWordsToDigits } from '../utils/numberWords';
 import { buildSwapToolSource } from './swapTools';
-import { buildPaidDataToolSource } from './aiPaidData';
+import { buildAgentToolSource } from './agentWallet/tools';
+import { agentConfirm, bindAgentConfirm } from './agentWallet/confirm';
 import { buildKnowledgeToolSource } from './aiKnowledge';
 import { asyncStorageMemoryIO } from './aiMemory';
 import type QVACService from './QVACService';
@@ -52,6 +53,9 @@ export const SOUL =
   'merchants nearby. Never invent a balance, address, amount or result — ' +
   'always call the relevant tool and report what it returns. Before anything ' +
   'that spends funds, show the exact amount (and fee, when known) first. ' +
+  'Paid services are paid from the separate Agent wallet within limits the ' +
+  'user set; use agent_budget_status to see what is left and explain plainly ' +
+  'when a payment is refused. ' +
   'All BTC amounts are in satoshis. Keep replies short.';
 
 /** Per-user agent settings (the persisted MindConfig satisfies this shape). */
@@ -133,7 +137,8 @@ export async function clearMindMemory(): Promise<void> {
 
 /**
  * The exact tool sources the mobile agent mounts — wallet/WDK, merchants,
- * swaps (KaleidoSwap maker + Flashnet, venue-aware), paid data (L402), memory,
+ * swaps (KaleidoSwap maker + Flashnet, venue-aware), paid services (L402, paid
+ * from the Agent wallet) and its budget, memory,
  * RAG, and the skill-reference reader. All execute ON-DEVICE. Exported so the skill-connection test asserts every bundled
  * skill scopes to tools that actually exist here (no skill can point at a
  * missing tool).
@@ -146,7 +151,10 @@ export function buildMindToolSources(qvac: QVACService): ToolSource[] {
     buildWalletToolSource(),
     buildMerchantToolSource(),
     buildSwapToolSource(),
-    buildPaidDataToolSource(),
+    buildAgentToolSource({
+      payDeps: async () => (await import('./agentWallet/live')).agentPayDeps(),
+      confirm: agentConfirm,
+    }),
     memorySource(),
     knowledgeSource(qvac),
     createSkillReferenceToolSource(new SkillRegistry(SKILLS)),
@@ -212,6 +220,7 @@ export function createMindAgent(
       // Spoken/typed number words → digits so the deterministic payment recipe
       // can extract amounts ("send Walter one satoshi" → "... 1 satoshi").
       const normalized = numberWordsToDigits(text);
+      const unbindConfirm = bindAgentConfirm(cbs.onConfirm);
       try {
         return await funnel.runTurn(normalized, {
           history: cbs.history,
@@ -223,6 +232,7 @@ export function createMindAgent(
           onConfirm: cbs.onConfirm,
         });
       } finally {
+        unbindConfirm();
         thinkingSink = undefined;
         statsSink = undefined;
       }

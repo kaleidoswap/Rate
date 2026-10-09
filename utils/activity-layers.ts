@@ -1,4 +1,5 @@
 import type { ActivityItem, ActivityLayer } from '../services/ActivityService';
+import { AGENT_ACTIVITY_KIND } from '../services/agentWallet/activity';
 
 /** How each activity layer is named in chips and details. */
 export const LAYER_LABEL: Record<ActivityLayer, string> = {
@@ -63,15 +64,16 @@ export function activityNetworks(items: { layer: ActivityLayer }[]): ActivityNet
   return NETWORK_ORDER.filter((n) => present.has(n));
 }
 
-export type ActivityTab = 'pending' | 'all' | 'receive' | 'send' | 'swap';
+export type ActivityTab = 'pending' | 'all' | 'receive' | 'send' | 'swap' | 'agent';
 
 /** Whether an item shows under a tab and a network ('all' for every network). */
 export function matchesActivityFilter(
-  item: Pick<ActivityItem, 'type' | 'status' | 'layer'>,
+  item: Pick<ActivityItem, 'type' | 'status' | 'layer'> & { kind?: string },
   tab: ActivityTab,
   network: ActivityNetwork | 'all' = 'all',
 ): boolean {
   if (network !== 'all' && activityNetwork(item.layer) !== network) return false;
+  if (tab === 'agent') return item.kind === AGENT_ACTIVITY_KIND;
   if (tab === 'pending') return item.status === 'pending' || item.status === 'unknown';
   if (tab === 'all') return true;
   return item.type === tab;

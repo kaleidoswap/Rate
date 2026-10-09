@@ -49,6 +49,7 @@ import { getModelById } from '../services/qvacModels';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
 import { useAiConfirm } from '../hooks/useAiConfirm';
+import { AgentWalletCard } from '../components/mind/AgentWalletCard';
 import { stepForTool, turnProgressLabel } from '../utils/turnProgress';
 import * as Haptics from 'expo-haptics';
 
@@ -929,6 +930,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     style={styles.intentBar}
                     onReview={(target) => (navigation.getParent?.() ?? navigation).navigate(target.screen, target.params)}
                   />
+                  {aiEnabled && <AgentWalletCard onPress={() => navigation.navigate('AgentWallet')} />}
                   <ChatEmptyState
                     onSuggestion={(q) => sendMessage(q)}
                     onContacts={() => setShowContactsSelector(true)}
@@ -1129,6 +1131,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             {([
               ...(aiEnabled ? [{ icon: 'time-outline', label: 'Chat history', onPress: () => setShowHistory(true) }] : []),
               ...(aiEnabled && !isEmpty ? [{ icon: 'copy-outline', label: 'Copy this chat', onPress: copyFullChat }] : []),
+              { icon: 'wallet-outline', label: 'Agent wallet', onPress: () => navigation.navigate('AgentWallet') },
               { icon: 'settings-outline', label: 'Models & settings', onPress: () => setShowSettings(true) },
             ] as { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }[]).map((item) => (
               <TouchableOpacity key={item.label} style={styles.menuRow} accessibilityRole="button"
