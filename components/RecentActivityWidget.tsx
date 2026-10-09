@@ -3,7 +3,7 @@
 // An activity list for one place in the app: an asset's history on its detail
 // screen (`assetId`), or the latest items with pending payments first.
 // Tapping a row opens the ActivityDetailSheet inline.
-import React, { useState, useCallback } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
     View,
     Text,
@@ -14,7 +14,6 @@ import {
     ActivityIndicator,
 } from 'react-native';
 import { useAppSelector } from '../store/hooks';
-import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
 import { theme } from '../theme';
@@ -23,13 +22,13 @@ import { NetworkIcon } from './NetworkIcon';
 import { SectionHeader } from './SectionHeader';
 import { ActivityDetailSheet } from './ActivityDetailSheet';
 import {
-    loadActivity,
     type ActivityItem,
     type ActivityItemType,
     type ActivityLayer,
     type AssetMeta,
 } from '../services/ActivityService';
 import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
+import { useActivityFeed } from '../hooks/useActivityFeed';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 
 interface Props {
@@ -81,19 +80,17 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
     const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
 
-    const [items, setItems] = useState<ActivityItem[]>([]);
-    const [loading, setLoading] = useState(true);
     const [selected, setSelected] = useState<ActivityItem | null>(null);
 
-    const fetchRecent = useCallback(async () => {
-        const assets: AssetMeta[] = (rgbAssets || []).map((a: any) => ({
+    const feedOptions = useMemo(() => ({
+        assets: (rgbAssets || []).map((a: any): AssetMeta => ({
             asset_id: a.asset_id,
             ticker: a.ticker,
             name: a.name,
             precision: a.precision ?? 0,
             protocol: a.protocol,
-        }));
-        const swaps = (swapHistory || []).map((s: any) => ({
+        })),
+        swaps: (swapHistory || []).map((s: any) => ({
             rfq_id: s.rfq_id,
             status: s.status,
             created_at: s.created_at,
@@ -103,32 +100,20 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
             from_amount: s.from_amount,
             to_amount: s.to_amount,
             venue: s.venue,
-        }));
-        try {
-            const { items: result, failedSources, hadConnectedAdapter } = await loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity(), walletId });
-            const list = assetId
-                ? result.filter(item => item.asset === assetId || (!!assetTicker && item.type === 'swap' && item.asset === assetTicker))
-                : [...result].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
-            setItems(list.slice(0, limit ?? (assetId ? 25 : MAX_ITEMS)));
-            return hadConnectedAdapter && failedSources === 0;
-        } catch {
-            return false;
-        }
-    }, [rgbAssets, swapHistory, assetId, assetTicker, limit, walletId]);
+        })),
+        loadSwapAttempts: () => loadSwapAttemptActivity(),
+        walletId,
+    }), [rgbAssets, swapHistory, walletId]);
+    // Refreshes when the screen regains focus.
+    const feed = useActivityFeed(feedOptions);
 
-    // Refresh when the Dashboard tab regains focus.
-    useFocusEffect(
-        useCallback(() => {
-            let active = true;
-            setLoading(true);
-            fetchRecent().finally(() => {
-                if (active) setLoading(false);
-            });
-            return () => {
-                active = false;
-            };
-        }, [fetchRecent])
-    );
+    const items = useMemo(() => {
+        const list = assetId
+            ? feed.items.filter(item => item.asset === assetId || (!!assetTicker && item.type === 'swap' && item.asset === assetTicker))
+            : [...feed.items].sort((a, b) => Number(['pending', 'unknown'].includes(b.status)) - Number(['pending', 'unknown'].includes(a.status)));
+        return list.slice(0, limit ?? (assetId ? 25 : MAX_ITEMS));
+    }, [feed.items, assetId, assetTicker, limit]);
+    const loading = feed.updating && items.length === 0;
 
     // Don't render the section if there's nothing to show after loading
     // (an asset's history says so instead).
@@ -205,7 +190,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
                 <View style={styles.list}>{items.map(renderRow)}</View>
             )}
 
-            <ActivityDetailSheet onRefresh={fetchRecent} item={items.find(item => item.id === selected?.id) ?? selected} onClose={() => setSelected(null)} />
+            <ActivityDetailSheet onRefresh={feed.refresh} item={items.find(item => item.id === selected?.id) ?? selected} onClose={() => setSelected(null)} />
         </View>
     );
 };

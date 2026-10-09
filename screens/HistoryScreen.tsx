@@ -12,7 +12,8 @@ import {
 import { useAppSelector } from '../store/hooks';
 import { usePolicy } from '../hooks/usePolicy';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useActivityFeed } from '../hooks/useActivityFeed';
 import { RootState } from '../store';
 import { MainHeader, SegmentedTabs } from '../components';
 import { EmptyState } from '../components/EmptyState';
@@ -28,7 +29,6 @@ import {
 } from '../utils/activity-layers';
 import { NetworkIcon } from '../components/NetworkIcon';
 import {
-    loadActivity,
     type ActivityItem,
     type ActivityItemType,
     type ActivityLayer,
@@ -132,22 +132,21 @@ export default function HistoryScreen() {
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
     const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
 
-    const [items, setItems] = useState<ActivityItem[]>([]);
-    const [loading, setLoading] = useState(true);
+    const [pendingPayment, setPendingPayment] = useState<ActivityItem[]>([]);
     const [refreshing, setRefreshing] = useState(false);
-    const [softError, setSoftError] = useState<string | null>(null);
     const [filter, setFilter] = useState<ActivityTab>('all');
     const [network, setNetwork] = useState<ActivityNetwork | 'all'>('all');
     const [selectedItem, setSelectedItem] = useState<ActivityItem | null>(null);
 
-    const fetchActivity = useCallback(async () => {
-        const assets: AssetMeta[] = (rgbAssets || []).map((a: any) => ({
+    const feedOptions = useMemo(() => ({
+        assets: (rgbAssets || []).map((a: any): AssetMeta => ({
             asset_id: a.asset_id,
             ticker: a.ticker,
             name: a.name,
             precision: a.precision ?? 0,
-        }));
-        const swaps = (swapHistory || []).map((s: any) => ({
+            protocol: a.protocol,
+        })),
+        swaps: (swapHistory || []).map((s: any) => ({
             rfq_id: s.rfq_id,
             status: s.status,
             created_at: s.created_at,
@@ -157,41 +156,35 @@ export default function HistoryScreen() {
             from_amount: s.from_amount,
             to_amount: s.to_amount,
             venue: s.venue,
-        }));
-        try {
-            const [{ items: result, failedSources, hadConnectedAdapter }, pendingPayment] = await Promise.all([
-                loadActivity({ assets, swaps, swapAttempts: await loadSwapAttemptActivity(), walletId }),
-                loadPendingPaymentActivity(walletId),
-            ]);
-            // A payment still being checked sits in the history like any other pending item.
-            setItems([...pendingPayment, ...result]);
-            if (!hadConnectedAdapter && result.length === 0) {
-                setSoftError('Wallet is offline. Connect a protocol to see your activity.');
-            } else if (failedSources > 0) {
-                setSoftError('Some accounts could not be checked. Pull to refresh.');
-            } else {
-                setSoftError(null);
-            }
-            return hadConnectedAdapter && failedSources === 0;
-        } catch (e: any) {
-            setSoftError(e?.message || 'Failed to load activity.');
-            return false;
-        }
-    }, [rgbAssets, swapHistory, walletId]);
+        })),
+        loadSwapAttempts: () => loadSwapAttemptActivity(),
+        walletId,
+    }), [rgbAssets, swapHistory, walletId]);
+    const feed = useActivityFeed(feedOptions, 15000);
+    const { result } = feed;
 
-    useFocusEffect(useCallback(() => {
+    // A payment still being checked sits in the history like any other pending item.
+    useEffect(() => {
         let active = true;
-        setLoading(true);
-        fetchActivity().finally(() => { if (active) setLoading(false); });
-        const timer = setInterval(fetchActivity, 15000);
-        return () => { active = false; clearInterval(timer); };
-    }, [fetchActivity]));
+        loadPendingPaymentActivity(walletId).then((list) => { if (active) setPendingPayment(list); }, () => {});
+        return () => { active = false; };
+    }, [walletId, result]);
+
+    const items = useMemo(() => [...pendingPayment, ...feed.items], [pendingPayment, feed.items]);
+    const loadingFirst = feed.updating && items.length === 0;
+
+    const softError = useMemo(() => {
+        if (!result) return null;
+        if (!result.hadConnectedAdapter && result.items.length === 0) return 'Wallet is offline. Connect a protocol to see your activity.';
+        if (result.failedSources > 0) return 'Some accounts could not be checked. Pull to refresh.';
+        return null;
+    }, [result]);
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await fetchActivity();
+        await feed.refresh();
         setRefreshing(false);
-    }, [fetchActivity]);
+    }, [feed.refresh]);
 
     // Which network a payment used is Advanced detail: Lite has no network filter.
     const networks = useMemo(() => (policy.showNetworks ? activityNetworks(items) : []), [items, policy.showNetworks]);
@@ -299,13 +292,14 @@ export default function HistoryScreen() {
                 </View>
             )}
 
-            {loading ? (
-                <View style={styles.loadingWrap}>
-                    <ActivityIndicator color={theme.colors.primary[500]} />
-                    <Text style={styles.loadingText}>Loading activity…</Text>
+            {feed.updating && !refreshing && items.length > 0 && (
+                <View style={styles.updatingRow}>
+                    <ActivityIndicator size="small" color={theme.colors.text.tertiary} />
+                    <Text style={styles.loadingText}>Updating…</Text>
                 </View>
-            ) : (
-                <SectionList
+            )}
+
+            <SectionList
                     sections={sections}
                     keyExtractor={(item) => item.id}
                     renderItem={renderItem}
@@ -317,17 +311,21 @@ export default function HistoryScreen() {
                     refreshControl={
                         <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary[500]} />
                     }
-                    ListEmptyComponent={
+                    ListEmptyComponent={loadingFirst ? (
+                        <View style={styles.loadingWrap}>
+                            <ActivityIndicator color={theme.colors.primary[500]} />
+                            <Text style={styles.loadingText}>Loading activity…</Text>
+                        </View>
+                    ) : (
                         <EmptyState
                             icon="receipt-outline"
                             title={filter === 'pending' ? 'No pending payments' : 'No activity yet'}
                             message={filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : 'Your payments and transfers will appear here.'}
                         />
-                    }
+                    )}
                 />
-            )}
 
-            <ActivityDetailSheet onRefresh={fetchActivity} item={items.find(item => item.id === selectedItem?.id) ?? selectedItem} onClose={() => setSelectedItem(null)} />
+            <ActivityDetailSheet onRefresh={feed.refresh} item={items.find(item => item.id === selectedItem?.id) ?? selectedItem} onClose={() => setSelectedItem(null)} />
         </View>
     );
 }
@@ -362,6 +360,13 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: theme.typography.fontSize.sm,
         color: theme.colors.text.secondary,
+    },
+    updatingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: theme.spacing[2],
+        paddingVertical: theme.spacing[1],
     },
     loadingWrap: {
         flex: 1,
