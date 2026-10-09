@@ -1,7 +1,7 @@
 import { RgbLibWdkAdapter, registerWdkModule } from '@kaleidorg/wallet-engine/adapters/wdk';
 import { createRgbLibRnModule, libNetwork, rgbLibSubdir } from './rgbLibRn';
 
-// A stand-in for react-native-rgb's native wallet: records calls, returns rgb-lib shapes.
+// A stand-in for modules/kaleido-rgb: records calls, returns rgb-lib shapes.
 function fakeLib() {
   const wallet = {
     goOnline: jest.fn(async () => undefined),
@@ -21,7 +21,7 @@ function fakeLib() {
     blindReceive: jest.fn(async () => ({ invoice: 'rgb:~/~/~/tb/b-invoice', recipientId: 'b-rid', expirationTimestamp: null, batchTransferIdx: 2 })),
     send: jest.fn(async () => ({ txid: 'send-txid', batchTransferIdx: 3 })),
     sendBtc: jest.fn(async () => 'btc-txid'),
-    listTransactions: jest.fn(async () => [{ transactionType: 'USER', txid: 't1', received: 10_000, sent: 0, fee: 0, confirmationTime: 1_700_000_000 }]),
+    listTransactions: jest.fn(async () => [{ transactionType: 'USER', txid: 't1', received: 10_000, sent: 0, fee: 0, confirmationTime: { height: 100, timestamp: 1_700_000_000 } }]),
     listTransfers: jest.fn(async () => [{
       idx: 1, batchTransferIdx: 1, createdAt: 1_700_000_000, updatedAt: 1_700_000_100, kind: 'RECEIVE_WITNESS', status: 'WAITING_COUNTERPARTY',
       requestedAssignment: { type: 'FUNGIBLE', amount: 5_000_000 }, assignments: [{ type: 'FUNGIBLE', amount: 5_000_000 }], transportEndpoints: [],
@@ -38,6 +38,7 @@ function fakeLib() {
     restoreKeys: jest.fn(async (network: string, mnemonic: string) => ({ mnemonic, network, xpub: 'x', accountXpubVanilla: 'v', accountXpubColored: 'c', masterFingerprint: 'f' })),
     decodeInvoice: jest.fn(async () => ({ recipientId: 'their-rid', transportEndpoints: ['rpcs://their-proxy'], invoice: 'i', assignment: { type: 'ANY' }, network: 'SIGNET', expirationTimestamp: null })),
     Wallet: jest.fn(() => wallet),
+    supportsSubdir: jest.fn(() => true),
   };
   return { lib, wallet };
 }
@@ -45,7 +46,8 @@ function fakeLib() {
 const options = { network: 'mutinynet', indexerUrl: 'https://mutinynet.example/api', transportEndpoint: 'rpcs://proxy.example/json-rpc' };
 
 test('maps app networks to rgb-lib networks; Mutinynet is a custom signet', () => {
-  expect(libNetwork('mutinynet')).toBe('SIGNET');
+  expect(libNetwork('mutinynet')).toBe('SIGNET_CUSTOM');
+  expect(libNetwork('signet')).toBe('SIGNET');
   expect(libNetwork('mainnet')).toBe('MAINNET');
   expect(() => libNetwork('liquid')).toThrow(/Unsupported/);
 });
@@ -55,8 +57,8 @@ test('the account restores keys for the network and goes online at the indexer',
   const { WalletManagerRgb } = createRgbLibRnModule(() => lib as any);
   const manager = new WalletManagerRgb('seed words', options);
   const account = await manager.getAccount();
-  expect(lib.restoreKeys).toHaveBeenCalledWith('SIGNET', 'seed words');
-  expect(lib.Wallet).toHaveBeenCalledWith(expect.objectContaining({ mnemonic: 'seed words' }), { network: 'SIGNET' });
+  expect(lib.restoreKeys).toHaveBeenCalledWith('SIGNET_CUSTOM', 'seed words');
+  expect(lib.Wallet).toHaveBeenCalledWith(expect.objectContaining({ mnemonic: 'seed words' }), { network: 'SIGNET_CUSTOM' });
   expect(wallet.goOnline).toHaveBeenCalledWith('https://mutinynet.example/api');
   expect(await manager.getAccount()).toBe(account); // one wallet per manager
   await manager.dispose();
@@ -144,15 +146,15 @@ test('a folder name in dataDir opens the wallet in its own folder; anything else
   expect(rgbLibSubdir('../escape')).toBeNull();
   expect(rgbLibSubdir(undefined)).toBeNull();
   const { lib } = fakeLib();
-  (lib as any).supportsSubdir = () => true;
   await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: 'rgb-mutinynet' }).getAccount();
-  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET', subdir: 'rgb-mutinynet' });
+  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET_CUSTOM', subdir: 'rgb-mutinynet' });
   await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: '.' }).getAccount();
-  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET' });
+  expect(lib.Wallet).toHaveBeenLastCalledWith(expect.anything(), { network: 'SIGNET_CUSTOM' });
 });
 
-test('an older native build never opens a wallet meant for its own folder', async () => {
+test('a native build that can’t open other folders never opens a wallet meant for its own folder', async () => {
   const { lib } = fakeLib();
+  lib.supportsSubdir.mockReturnValue(false);
   const manager = new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: 'rgb-mutinynet' });
   await expect(manager.getAccount()).rejects.toThrow(/Update the app/);
   expect(lib.Wallet).not.toHaveBeenCalled();
@@ -258,7 +260,7 @@ test('UDA and IFA issuance, inflation rights and inflating', async () => {
   await account.issueAssetUda({ ticker: 'NFT', name: 'One', details: '', mediaFilePath: '/tmp/a.png' });
   expect((wallet as any).issueAssetUda).toHaveBeenCalledWith('NFT', 'One', null, 0, '/tmp/a.png', []);
   await account.issueAssetIfa({ ticker: 'IFA', name: 'Inflatable', precision: 2, amounts: [100], inflationAmounts: [500] });
-  expect((wallet as any).issueAssetIfa).toHaveBeenCalledWith('IFA', 'Inflatable', 2, [100], [500], 0, null);
+  expect((wallet as any).issueAssetIfa).toHaveBeenCalledWith('IFA', 'Inflatable', 2, [100], [500], null);
   expect(await account.inflationRights('rgb:ifa')).toBe(500);
   expect(await account.inflationRights('rgb:none')).toBe(0);
   await account.inflate({ assetId: 'rgb:ifa', inflationAmounts: [50], feeRate: 4 });

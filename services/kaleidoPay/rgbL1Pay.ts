@@ -1,6 +1,6 @@
 /**
  * RGB on this phone as a way to pay: the engine's RGB_L1 adapter (rgb-lib through
- * react-native-rgb) seen through the same RgbPayAdapter shape the RGB node uses,
+ * modules/kaleido-rgb) seen through the same RgbPayAdapter shape the RGB node uses,
  * so Send's on-chain and RGB-asset accounts (./rgbPay.ts) work unchanged.
  *
  * No Lightning: only the on-chain bitcoin and RGB invoice accounts are registered.

@@ -11,31 +11,43 @@
  * ready flag and cloud backup. rgb-lib names a wallet's folder after the seed,
  * not the network, so the network a seed first started on keeps the original
  * folder and every other network gets a folder of its own (`rgbL1DataFolder`).
- * A native build without that support keeps the old rule: one network per seed.
+ * A native build without rgb-lib keeps the old rule: one network per seed.
+ * Mutinynet opens as rgb-lib's custom signet (SIGNET_CUSTOM), which earlier builds
+ * (rgb-lib 0.3.0-beta.4) opened as plain SIGNET: that is a different wallet, so it
+ * has its own folder, ready flag and cloud backup (`rgbL1DataId`); the SIGNET data
+ * those builds left is never touched.
  * RGB state can't be rebuilt from the seed alone: ./rgbBackup.ts uploads
  * rgb-lib's encrypted backup to VSS after every change.
  * Disable entirely with EXPO_PUBLIC_RGB_L1=0.
  */
-import { TurboModuleRegistry } from 'react-native'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import DatabaseService from '../DatabaseService'
 
 export const RGB_L1_ENABLED = process.env.EXPO_PUBLIC_RGB_L1 !== '0'
 
-/** OTA/JS updates may run on a native build that predates rgb-lib. */
+/** The app's rgb-lib module (modules/kaleido-rgb), loaded on first use. */
+export function rgbLibModule(): typeof import('../../modules/kaleido-rgb') {
+  return require('../../modules/kaleido-rgb')
+}
+
+/** A JS bundle may run on a native build without rgb-lib. */
 export function isRgbLibNativeAvailable(): boolean {
-  return !!TurboModuleRegistry?.get('Rgb')
+  try {
+    return rgbLibModule().isAvailable()
+  } catch {
+    return false
+  }
 }
 
 /**
- * Whether the native module can open a wallet in a folder of its own (the
- * patched react-native-rgb). Without it a seed's RGB stays on one network.
+ * Whether the native module can open a wallet in a folder of its own. Without
+ * it a seed's RGB stays on one network.
  */
 export function isRgbL1NetworkSwitchSupported(): boolean {
   if (!isRgbLibNativeAvailable()) return false
   try {
-    return require('react-native-rgb').supportsSubdir?.() === true
+    return rgbLibModule().supportsSubdir() === true
   } catch {
     return false
   }
@@ -116,7 +128,7 @@ export function rgbL1WalletKey(mnemonic: string): string {
 const settingKey = (mnemonic: string) => `rgb-l1-network-v1-${rgbL1WalletKey(mnemonic)}`
 const pinnedKey = (mnemonic: string) => `rgb-l1-pinned-network-v1-${rgbL1WalletKey(mnemonic)}`
 const homeKey = (mnemonic: string) => `rgb-l1-home-network-v1-${rgbL1WalletKey(mnemonic)}`
-const readyKey = (mnemonic: string, network: RgbL1Network) => `rgb-l1-ready-v1-${network}-${rgbL1WalletKey(mnemonic)}`
+const readyKey = (mnemonic: string, dataId: string) => `rgb-l1-ready-v1-${dataId}-${rgbL1WalletKey(mnemonic)}`
 const isNetwork = (v: string | null | undefined): v is RgbL1Network => !!v && (RGB_L1_NETWORKS as readonly string[]).includes(v)
 
 /**
@@ -146,16 +158,33 @@ export async function loadRgbL1Network(mnemonic: string): Promise<RgbL1Network |
  * whichever network did.
  */
 export async function rgbL1HomeNetwork(mnemonic: string): Promise<RgbL1Network | null> {
-  const saved = await DatabaseService.getInstance().getSetting(homeKey(mnemonic))
+  const db = DatabaseService.getInstance()
+  const saved = await db.getSetting(homeKey(mnemonic))
   if (isNetwork(saved)) return saved
+  // Only the networks' own wallets (mainnet, Mutinynet as SIGNET) ever used the original folder.
+  const started = async (network: RgbL1Network) => (await db.getSetting(readyKey(mnemonic, network))) === '1'
   const pinned = await pinnedRgbL1Network(mnemonic)
-  if (pinned && (await isRgbL1Ready(mnemonic, pinned))) return pinned
-  for (const network of RGB_L1_NETWORKS) if (await isRgbL1Ready(mnemonic, network)) return network
+  if (pinned && (await started(pinned))) return pinned
+  for (const network of RGB_L1_NETWORKS) if (await started(network)) return network
   return null
 }
 
-/** The folder rgb-lib keeps a network's wallet in when it isn't the seed's home network. */
-export const rgbL1Subdir = (network: RgbL1Network) => `rgb-${network}`
+/** Mutinynet's wallet as rgb-lib's custom signet. */
+export const RGB_L1_CUSTOM_SIGNET_ID = 'mutinynet-signetcustom'
+
+/**
+ * Which RGB wallet `network` opens: the network itself, or RGB_L1_CUSTOM_SIGNET_ID
+ * for Mutinynet. Keys the wallet's folder, ready flag and cloud backup.
+ */
+export function rgbL1DataId(network: RgbL1Network): string {
+  return network === 'mutinynet' ? RGB_L1_CUSTOM_SIGNET_ID : network
+}
+
+/** Mutinynet's custom-signet wallet never uses the original folder (old SIGNET data may be there). */
+const usesOwnFolder = (network: RgbL1Network) => rgbL1DataId(network) !== network
+
+/** The folder rgb-lib keeps a network's wallet in when it isn't in the original one. */
+export const rgbL1Subdir = (network: RgbL1Network) => `rgb-${rgbL1DataId(network)}`
 
 /**
  * Where `network`'s RGB data lives: null for rgb-lib's original folder (the home
@@ -163,6 +192,10 @@ export const rgbL1Subdir = (network: RgbL1Network) => `rgb-${network}`
  * a native build that can't open another folder.
  */
 export async function rgbL1DataFolder(mnemonic: string, network: RgbL1Network): Promise<string | null> {
+  if (usesOwnFolder(network)) {
+    if (!isRgbL1NetworkSwitchSupported()) throw new Error(`RGB on this phone needs an app update for ${RGB_L1_NETWORK_LABEL[network]}.`)
+    return rgbL1Subdir(network)
+  }
   const home = await rgbL1HomeNetwork(mnemonic)
   if (!home || home === network) return null
   if (!isRgbL1NetworkSwitchSupported()) {
@@ -177,18 +210,15 @@ export async function rgbL1DataFolder(mnemonic: string, network: RgbL1Network): 
  */
 export async function claimRgbL1DataFolder(mnemonic: string, network: RgbL1Network): Promise<string | null> {
   const db = DatabaseService.getInstance()
-  if (!isNetwork(await db.getSetting(homeKey(mnemonic)))) {
+  if (!usesOwnFolder(network) && !isNetwork(await db.getSetting(homeKey(mnemonic)))) {
     await db.setSetting(homeKey(mnemonic), (await rgbL1HomeNetwork(mnemonic)) ?? network)
   }
   return rgbL1DataFolder(mnemonic, network)
 }
 
-/** react-native-rgb's `restoreBackup`, into `folder` (null: the original folder). */
+/** rgb-lib's `restoreBackup`, into `folder` (null: the original folder). */
 export function rgbL1NativeRestore(folder: string | null): (path: string, password: string) => Promise<void> {
-  return (path, password) => {
-    const lib = require('react-native-rgb')
-    return folder ? lib.restoreBackup(path, password, folder) : lib.restoreBackup(path, password)
-  }
+  return (path, password) => rgbLibModule().restoreBackup(path, password, folder)
 }
 
 /** A restore for `network`'s RGB data: picks (and claims) its folder right before rgb-lib writes it. */
@@ -228,7 +258,7 @@ export async function saveRgbL1Network(mnemonic: string, network: RgbL1Network |
  * Until it has, the first start looks for a cloud backup to restore.
  */
 export async function isRgbL1Ready(mnemonic: string, network: RgbL1Network): Promise<boolean> {
-  return (await DatabaseService.getInstance().getSetting(readyKey(mnemonic, network))) === '1'
+  return (await DatabaseService.getInstance().getSetting(readyKey(mnemonic, rgbL1DataId(network)))) === '1'
 }
 
 /** The networks this seed's RGB has started on here. */
@@ -239,7 +269,7 @@ export async function readyRgbL1Networks(mnemonic: string): Promise<RgbL1Network
 
 export async function markRgbL1Ready(mnemonic: string, network: RgbL1Network): Promise<void> {
   await claimRgbL1DataFolder(mnemonic, network).catch(() => undefined) // a home network, if none yet
-  await DatabaseService.getInstance().setSetting(readyKey(mnemonic, network), '1')
+  await DatabaseService.getInstance().setSetting(readyKey(mnemonic, rgbL1DataId(network)), '1')
 }
 
 /**
@@ -259,7 +289,7 @@ export function buildRgbL1Config(mnemonic: string, host: RgbL1Host, folder: stri
     protocol: 'RGB_L1' as const,
     mnemonic,
     network: host.network,
-    // The folder inside the app's RGB data folder (react-native-rgb decides where that is).
+    // The folder inside the app's RGB data folder (modules/kaleido-rgb decides where that is).
     dataDir: folder ?? RGB_L1_BASE_FOLDER,
     indexerUrl: host.indexerUrl,
     transportEndpoint: host.transportEndpoint,
