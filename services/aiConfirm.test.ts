@@ -14,6 +14,7 @@ import { previewSendPayment } from './walletTools';
 jest.mock('./swapTools', () => ({ describeSwapQuote: jest.fn() }));
 jest.mock('./walletTools', () => ({
   previewSendPayment: jest.fn(),
+  reconcileInvoiceAmount: (_invoice: string, requested?: number) => requested,
   lightningRailLabel: jest.fn(() => 'Lightning (Spark wallet)'),
 }));
 jest.mock('./SecurityService', () => ({ __esModule: true, default: { getInstance: jest.fn() } }));
@@ -46,6 +47,12 @@ describe('swap readback', () => {
     expect(r.rows.find((x) => x.label === 'Venue')?.value).toBe('Flashnet');
     expect(r.rows.find((x) => x.label === 'Fee')?.value).toBe('Included in the price');
     expect(r.rows[0].value).toBe('20 USDB · Spark');
+  });
+
+  it('shows the floor a Flashnet swap can end at, and nothing for a fixed-terms maker swap', () => {
+    const flash = swapReadback({ ...QUOTE, venue: 'flashnet', receiveAmount: 25_000, receiveUnit: 'sats', minReceive: 24_750 });
+    expect(flash.rows.find((x) => x.label === 'At least')?.value).toBe('24,750 sats');
+    expect(swapReadback(QUOTE).rows.find((x) => x.label === 'At least')).toBeUndefined();
   });
 
   it('execute_swap builds from the cached quote and refuses a missing one', async () => {
@@ -137,6 +144,11 @@ describe('agent wallet payment readback', () => {
     const r = await buildConfirmReadback({ name: 'fetch_paid_resource', arguments: { agent_wallet: true, service: 'api.example.com', amount_sats: 500, fee_sats: 3, invoice, why: 'Above the limit.' } });
     expect(r).toMatchObject({ kind: 'payment', title: 'Agent wallet payment', amount: '500 sats', amountSats: 500, recipientName: 'api.example.com' });
     expect(r.rows).toEqual(expect.arrayContaining([{ label: 'Pays from', value: 'Agent wallet' }, { label: 'Fee', value: 'Up to 3 sats' }]));
+  });
+
+  it('shows what the daily and monthly limits leave', async () => {
+    const r = await buildConfirmReadback({ name: 'fetch_paid_resource', arguments: { agent_wallet: true, service: 'api.example.com', amount_sats: 500, fee_sats: 3, invoice, left_today_sats: 4_500, left_month_sats: 49_500 } });
+    expect(r.rows).toEqual(expect.arrayContaining([{ label: 'Budget left', value: '4,500 sats today · 49,500 sats this month' }]));
   });
 
   it('refuses when the amount shown would not match the invoice', async () => {

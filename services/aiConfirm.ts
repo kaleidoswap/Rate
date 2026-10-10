@@ -4,7 +4,7 @@
 
 import { decodeBolt11 } from '../utils/decodeInvoice';
 import { describeSwapQuote, type SwapQuoteView } from './swapTools';
-import { previewSendPayment, lightningRailLabel, type SendPreview } from './walletTools';
+import { previewSendPayment, reconcileInvoiceAmount, lightningRailLabel, type SendPreview } from './walletTools';
 
 export interface ReadbackRow {
   label: string;
@@ -71,7 +71,7 @@ export function paymentReadback(p: {
   description?: string;
 }): ConfirmReadback {
   const invoice = decodeAmount(p.preview.destination);
-  const sats = p.amountSats || invoice.sats;
+  const sats = invoice.sats ?? p.amountSats;
   const who = p.preview.recipientName ?? (p.preview.kind === 'lightning_address' ? p.preview.destination : undefined);
   const rows: ReadbackRow[] = [];
   if (p.preview.recipientName) rows.push({ label: 'Contact', value: p.preview.recipientName });
@@ -104,6 +104,7 @@ export function swapReadback(q: SwapQuoteView, warning?: string): ConfirmReadbac
     { label: 'Fee', value: q.fee != null && q.feeUnit ? unitAmount(q.fee, q.feeUnit) : 'Included in the price' },
     { label: 'Venue', value: venue },
   ];
+  if (q.minReceive != null) rows.splice(2, 0, { label: 'At least', value: unitAmount(q.minReceive, q.receiveUnit) });
   return {
     kind: 'swap',
     title: 'Confirm swap',
@@ -147,6 +148,11 @@ export function agentPaymentReadback(a: Record<string, unknown>): ConfirmReadbac
     { label: 'Pays from', value: 'Agent wallet' },
     { label: 'Fee', value: Number.isFinite(fee) && fee > 0 ? `Up to ${formatSats(fee)}` : 'None expected' },
   ];
+  const leftToday = Number(a.left_today_sats);
+  const leftMonth = Number(a.left_month_sats);
+  if (Number.isFinite(leftToday) && Number.isFinite(leftMonth)) {
+    rows.push({ label: 'Budget left', value: `${formatSats(leftToday)} today · ${formatSats(leftMonth)} this month` });
+  }
   if (a.why) rows.push({ label: 'Why you are asked', value: String(a.why) });
   rows.push({ label: 'Lightning invoice', value: invoice, copyable: true });
   return {
@@ -187,7 +193,9 @@ export async function buildConfirmReadback(call: { name: string; arguments: Reco
     case 'send_payment': {
       const preview = await previewSendPayment(a.to);
       if (preview.kind === 'onchain') throw new Error("On-chain sends from the assistant aren't supported yet — use the Send screen.");
-      return paymentReadback({ preview, amountSats: Number(a.amount_sats) || undefined, network: lightningRailLabel() });
+      const asked = Number(a.amount_sats) || undefined;
+      const amountSats = preview.kind === 'lightning_invoice' ? reconcileInvoiceAmount(preview.destination, asked) : asked;
+      return paymentReadback({ preview, amountSats, network: lightningRailLabel() });
     }
     case 'rln_pay_invoice':
     case 'spark_pay_invoice': {
@@ -195,7 +203,7 @@ export async function buildConfirmReadback(call: { name: string; arguments: Reco
       if (!invoice) throw new Error('An invoice is required.');
       return paymentReadback({
         preview: { destination: invoice, kind: 'lightning_invoice' },
-        amountSats: Number(a.amount_sats) || undefined,
+        amountSats: reconcileInvoiceAmount(invoice, Number(a.amount_sats) || undefined),
         network: lightningRailLabel(),
       });
     }

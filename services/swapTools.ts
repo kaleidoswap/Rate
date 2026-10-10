@@ -8,7 +8,7 @@
 //
 // Execution replicates rate's tested SwapScreen flows verbatim:
 //   - maker:    get_quote → initSwap → validateSwapString → whitelist → execute
-//   - flashnet: simulateSwap → executeSwap (minAmountOut floored at 95%)
+//   - flashnet: simulateSwap → executeSwap (minAmountOut floored at the shown amount less the price tolerance)
 // The execute path is the canonical `execute_swap { quote_id }` from the wallet
 // contract — a spend, so confirmation-gated — run against the cached quote of
 // whichever venue produced it. Status comes from `kaleidoswap_atomic_status`.
@@ -83,6 +83,8 @@ export interface SwapQuoteView {
   fromLayer?: string;
   toLayer?: string;
   expiresAt: number;
+  /** Flashnet: the least the user can end up with (the swap fails below it). */
+  minReceive?: number;
 }
 
 function toView(quoteId: string, q: CachedQuote): SwapQuoteView {
@@ -91,6 +93,7 @@ function toView(quoteId: string, q: CachedQuote): SwapQuoteView {
     sendAmount: q.sendAmount, receiveAmount: q.receiveAmount, receiveUnit: q.receiveUnit,
     fee: q.fee, feeUnit: q.feeUnit, fromLayer: q.fromLayer, toLayer: q.toLayer,
     expiresAt: Math.min(q.expiresAt, q.ts + QUOTE_TTL_MS),
+    minReceive: q.venue === 'flashnet' ? q.receiveAmount * FLASHNET_MIN_RECEIVE_FRACTION : undefined,
   };
 }
 
@@ -104,6 +107,8 @@ export function describeSwapQuote(quoteId: string): SwapQuoteView | null {
 export const REQUOTE_MARGIN_MS = 20_000;
 /** Largest drop in the received amount accepted without asking the user again. */
 export const PRICE_TOLERANCE = 0.01;
+/** Flashnet floor, as a share of the quoted amount: the same bound the sheet shows. */
+export const FLASHNET_MIN_RECEIVE_FRACTION = 1 - PRICE_TOLERANCE;
 
 export function quoteNeedsRefresh(q: Pick<SwapQuoteView, 'expiresAt'>, now = Date.now(), marginMs = REQUOTE_MARGIN_MS): boolean {
   return q.expiresAt - now < marginMs;
@@ -384,7 +389,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
         assetInAddress: q.fromAssetId,
         assetOutAddress: q.toAssetId,
         amountIn: String(q.rawFromAmount),
-        minAmountOut: String(Math.floor(q.rawToAmount * 0.95)), // bound slippage at 5%
+        minAmountOut: String(Math.floor(q.rawToAmount * FLASHNET_MIN_RECEIVE_FRACTION)), // same bound the sheet shows
         maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
       });
       quoteCache.delete(id);

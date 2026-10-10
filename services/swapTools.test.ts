@@ -13,7 +13,7 @@
 // real findPair/getAssetId/getQuoteLayers/validateSwapString helpers. On-device
 // end-to-end (a funded node executing a real swap) still needs a device test.
 
-import { buildSwapToolSource, describeSwapQuote, refreshSwapQuoteForConfirm, quoteNeedsRefresh, priceMove } from './swapTools';
+import { buildSwapToolSource, describeSwapQuote, FLASHNET_MIN_RECEIVE_FRACTION, refreshSwapQuoteForConfirm, quoteNeedsRefresh, priceMove } from './swapTools';
 
 const inAMinute = () => Math.floor(Date.now() / 1000) + 60;
 import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
@@ -283,7 +283,7 @@ describe('swap tools — Flashnet venue', () => {
     const res: any = await source.execute('execute_swap', { quote_id: q.quote_id });
     expect(flash.executeSwap).toHaveBeenCalledWith(expect.objectContaining({
       poolId: 'pool1', assetInAddress: 'btc-spark', assetOutAddress: 'usdb-spark',
-      amountIn: '50000', minAmountOut: String(Math.floor(36_000_000 * 0.95)),
+      amountIn: '50000', minAmountOut: String(Math.floor(36_000_000 * FLASHNET_MIN_RECEIVE_FRACTION)),
     }));
     expect(res.status).toBe('completed');
     expect(res.txid).toBe('tx1');
