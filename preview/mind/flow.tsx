@@ -1,5 +1,5 @@
 import React,{useEffect,useState} from 'react';
-import {MindCharacter, type MindCharacterState} from '../../components/mind/MindCharacter';
+import {MindCharacter, type MindCharacterState} from './prismo';
 import {theme} from '../../theme';
 import {MindIcon} from './proposal';
 import {usePrismoAudio} from './prismo-audio';

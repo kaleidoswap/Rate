@@ -10,6 +10,9 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **Prismo is the illustrated character** (the green and violet crystal with the Bitcoin coin) wherever Prismo appears: Mind tab, chat, voice, cards and sheets. It blinks, breathes, and its mouth follows the voice while it speaks. The tab bar keeps the one-colour outline.
+
 ## [0.9.0] — 2026-10-10
 
 ### Added

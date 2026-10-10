@@ -1,6 +1,6 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {theme} from '../../theme';
-import {MindCharacter, type MindCharacterState} from '../../components/mind/MindCharacter';
+import {MindCharacter, type MindCharacterState} from './prismo';
 
 type Page = 'chat' | 'settings' | 'models' | 'voice' | 'memory' | 'character';
 type Message = {id:number; role:'user'|'assistant'; text:string; kind?:'balance'|'payment'};
