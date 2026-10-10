@@ -1,6 +1,6 @@
 import { prismoAnimationHtml } from './prismoAnimationHtml';
 
-async function renderer() {
+async function renderer(pixelSize = 416) {
   let frame: ((t: number) => void) | undefined;
   const values: Record<string, number> = {};
   const gl = new Proxy({}, { get: (_, key) => {
@@ -9,16 +9,16 @@ async function renderer() {
     if (key === 'uniform1f') return (name: string, value: number) => { values[name] = value; };
     return () => ({});
   } });
-  const canvas = { getContext: () => gl, addEventListener: jest.fn() };
+  const canvas: any = { getContext: () => gl, addEventListener: jest.fn() };
   const window: any = { ReactNativeWebView: { postMessage: jest.fn() } };
   const Image = class { onload?: () => void; set src(_: string) { this.onload?.(); } };
-  const html = prismoAnimationHtml(['data:a', 'data:b']);
+  const html = prismoAnimationHtml(['data:a', 'data:b'], pixelSize);
   const script = html.split('<script type="module">')[1].split('</script>')[0];
   const AsyncFunction = new Function('return Object.getPrototypeOf(async function() {}).constructor')();
   await new AsyncFunction('document','window','Image','performance','requestAnimationFrame','cancelAnimationFrame', script)(
     { querySelector: () => canvas }, window, Image, { now: () => 0 }, (cb: any) => { frame = cb; return 1; }, jest.fn(),
   );
-  return { values, window, tick: (time: number) => { const f = frame; frame = undefined; f?.(time); }, hasFrame: () => !!frame };
+  return { values, window, canvas, tick: (time: number) => { const f = frame; frame = undefined; f?.(time); }, hasFrame: () => !!frame };
 }
 it('uses native energy for the mouth, and returns to the original smile after stop', async () => {
   const r = await renderer();
@@ -39,4 +39,13 @@ it('stops rendering in background and resumes, respecting reduced motion', async
 it('closes the mouth if the playback level stream goes stale', async () => {
   const r = await renderer(); r.window.prismoUpdate({ phase: 'speaking', level: 1 }); r.tick(50);
   r.tick(500); expect(r.values.openness).toBeLessThan(.4);
+});
+
+it('matches the visible pixel size and caps large rendering surfaces', async () => {
+  expect((await renderer(192)).canvas.width).toBe(192);
+  expect((await renderer(2000)).canvas.width).toBe(640);
+});
+it('does not redraw faster than 30 fps and rests completely with reduced motion', async () => {
+  const r = await renderer(); r.tick(10); expect(r.values.openness).toBeUndefined();
+  r.window.prismoUpdate({ reduced: true }); r.tick(50); expect(r.hasFrame()).toBe(false);
 });

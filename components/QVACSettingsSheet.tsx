@@ -13,6 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { leading, type Theme } from '../theme';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { selectMindConfig, setMindConfig, DEFAULT_MIND_CONFIG } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { QVACModel, SttModel, TtsOption, TtsEngine } from '../services/qvacModels';
 import type { QVACConfig, ModelStatus } from '../services/QVACService';
@@ -77,6 +79,8 @@ export default function QVACSettingsSheet({
   onDesignAgent,
 }: Props) {
   const theme = useAppTheme();
+  const dispatch = useAppDispatch();
+  const voiceLanguage = useAppSelector(selectMindConfig).voiceLanguage || DEFAULT_MIND_CONFIG.voiceLanguage;
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const isDownloaded = (id: string) => downloadedModelIds.includes(id);
@@ -262,6 +266,17 @@ export default function QVACSettingsSheet({
             );
           })}
 
+          <Text style={[styles.subSectionTitle, { marginTop: theme.spacing[4] }]}>Spoken language</Text>
+          <Text style={styles.modelMeta}>Choose Prismo’s voice language independently of the app language.</Text>
+          {[['it-IT', 'Italiano'], ['en-US', 'English'], ['fr-FR', 'Français'], ['de-DE', 'Deutsch'], ['es-ES', 'Español']].map(([value, label]) => (
+            <TouchableOpacity key={value} style={[styles.modelRow, voiceLanguage === value && styles.modelRowSelected]}
+              accessibilityRole="radio" accessibilityLabel={label} accessibilityState={{ checked: voiceLanguage === value }}
+              onPress={() => dispatch(setMindConfig({ voiceLanguage: value }))}>
+              <Text style={styles.modelLabel}>{label}</Text>
+              <Ionicons name={voiceLanguage === value ? 'checkmark-circle' : 'ellipse-outline'} size={22} color={theme.colors.primary[500]} />
+            </TouchableOpacity>
+          ))}
+          {!voiceLanguage?.startsWith('en') && <Text style={styles.modelMeta}>Uses an installed system voice for this language. No cloud speech service.</Text>}
           <Text style={[styles.subSectionTitle, { marginTop: theme.spacing[4] }]}>Voice output</Text>
           {ttsOptions.map((t) => {
             const selected = t.id === config.ttsEngine;

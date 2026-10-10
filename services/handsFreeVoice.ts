@@ -17,6 +17,7 @@
 import { runVoiceAssistant, type VoiceAssistantState } from '@kaleidorg/mind/qvac';
 import QVACService from './QVACService';
 import { startMicStream, type MicStream } from './micStream';
+import { requestRecordingPermissionsAsync, setAudioModeAsync } from 'expo-audio';
 
 export interface HandsFreeHandlers {
   /** Run a turn for a user utterance and return the assistant's reply text. */
@@ -43,79 +44,50 @@ export interface HandsFreeController {
  * session, streams the mic into it (gated during the assistant's own playback),
  * and runs the conversation loop. Returns a controller to stop everything.
  */
-export async function startHandsFreeVoice(handlers: HandsFreeHandlers): Promise<HandsFreeController> {
+export async function startHandsFreeVoice(handlers: HandsFreeHandlers, signal?: AbortSignal): Promise<HandsFreeController> {
+  const checkCancelled = () => {
+    if (signal?.aborted) { const error = new Error('Voice start cancelled'); error.name = 'AbortError'; throw error; }
+  };
+  checkCancelled();
   const qvac = QVACService.getInstance();
-
-  // The session needs the Whisper model resident WITH the Silero VAD submodel
-  // (emitVadEvents requires it). initializeWhisper reloads if a prior one-shot
-  // load left VAD off; openVoiceSession below also re-checks defensively.
   await qvac.initializeWhisper({ withVad: true });
-  if (qvac.getState().whisperStatus !== 'ready') {
-    throw new Error(qvac.getState().error || 'voice model failed to load');
-  }
-
+  checkCancelled();
+  if (qvac.getState().whisperStatus !== 'ready') throw new Error(qvac.getState().error || 'Voice model unavailable');
+  const permission = await requestRecordingPermissionsAsync();
+  checkCancelled();
+  if (!permission.granted) throw new Error('Microphone permission denied');
+  await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+  checkCancelled();
   const session = await qvac.openVoiceSession();
   const abort = new AbortController();
-  let micGated = false;
-  let paused = false;
-  let stopped = false;
-
-  // Drop mic frames while the assistant is speaking so it never hears itself.
-  const mic: MicStream = startMicStream((pcm) => {
-    if (micGated || paused || stopped) return;
-    try {
-      session.write(pcm);
-    } catch {
-      /* session ending — ignore late frames */
-    }
-  });
-
-  const teardown = () => {
-    try {
-      mic.stop();
-    } catch {
-      /* ignore */
-    }
-    try {
-      session.end();
-    } catch {
-      /* ignore */
-    }
+  let mic: MicStream | undefined;
+  let micGated = false, paused = false, stopped = false;
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    signal?.removeEventListener('abort', stop);
+    abort.abort();
+    try { mic?.stop(); } catch {}
+    try { session.end(); } catch {}
+    try { session.destroy(); } catch {}
   };
-
-  // Fire-and-forget: the loop runs until the session ends or `stop()` aborts it.
-  void runVoiceAssistant(
-    session,
-    {
-      respond: handlers.respond,
-      speak: handlers.speak,
-      setMicGated: (g) => {
-        micGated = g;
-      },
-      onState: handlers.onState,
-      onUserText: handlers.onUserText,
-    },
-    { signal: abort.signal },
-  )
-    .catch((err) => {
-      if (!stopped) handlers.onError?.(err);
-    })
-    .finally(teardown);
-
-  return {
-    setPaused(p: boolean) {
-      paused = p;
-    },
-    stop() {
-      if (stopped) return;
-      stopped = true;
-      abort.abort();
-      teardown();
-      try {
-        session.destroy();
-      } catch {
-        /* ignore */
-      }
-    },
-  };
+  // Cancellation can arrive while native session creation is awaiting completion.
+  signal?.addEventListener('abort', stop, { once: true });
+  if (signal?.aborted) { stop(); checkCancelled(); }
+  try {
+    mic = startMicStream(pcm => {
+      if (micGated || paused || stopped) return;
+      try { session.write(pcm); } catch {}
+    });
+    void runVoiceAssistant(session, {
+      respond: text => stopped ? Promise.resolve('') : handlers.respond(text),
+      speak: text => stopped ? Promise.resolve() : handlers.speak(text),
+      setMicGated: gated => { micGated = gated; },
+      onState: state => { if (!stopped) handlers.onState?.(state); },
+      onUserText: text => { if (!stopped) handlers.onUserText?.(text); },
+    }, { signal: abort.signal }).catch(error => {
+      if (!stopped) handlers.onError?.(error);
+    }).finally(stop);
+  } catch (error) { stop(); throw error; }
+  return { stop, setPaused: value => { paused = value; } };
 }

@@ -30,6 +30,7 @@ import { MindCharacterBadge } from '../mind/MindCharacter';
 import { voiceMood, toolResultFlash, MIND_FLASH_MS, type MindFlash } from '../mind/mindMood';
 import { PrismoAnimatedCharacter, type PrismoAnimationRef } from '../mind/PrismoAnimatedCharacter';
 import { useAppSelector } from '../../store/hooks';
+import { voiceStatus } from './voiceStatus';
 import { PayableCard } from '../chat/PayableCard';
 import FunctionResultCard from '../chat/FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
@@ -38,7 +39,7 @@ import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
 import { getModelById } from '../../services/qvacModels';
 import { startHandsFreeVoice, type HandsFreeController } from '../../services/handsFreeVoice';
-import { selectMindConfig, selectAiEnabled } from '../../store/slices/settingsSlice';
+import { selectMindConfig, selectAiEnabled, DEFAULT_MIND_CONFIG } from '../../store/slices/settingsSlice';
 import { useAiConfirm } from '../../hooks/useAiConfirm';
 import PaymentConfirmationModal from '../PaymentConfirmationModal';
 
@@ -159,7 +160,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
   const [phase, setPhase] = useState<Phase>('idle');
   const characterRef = useRef<PrismoAnimationRef>(null);
-  const speechLanguage = useAppSelector(state => state.settings.language) || 'en';
+  const speechLanguage = mindConfig.voiceLanguage || DEFAULT_MIND_CONFIG.voiceLanguage!;
   const pendingSpeech = useRef<(() => void) | null>(null);
   const onSpeechLevel = useCallback((level: number) => characterRef.current?.setLevel(level), []);
   const stopSpeak = useCallback(async () => {
@@ -190,6 +191,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // push-to-talk orb, which keeps working when this is off.
   const [handsFree, setHandsFree] = useState(false);
   const handsFreeRef = useRef<HandsFreeController | null>(null);
+  const handsFreeStart = useRef<AbortController | null>(null);
+  const [voiceStarting, setVoiceStarting] = useState(false);
   // Money actions: one shared sheet. Listening pauses while it is open; in
   // hands-free mode the readback is spoken, but approval is always a tap.
   const confirmGate = useAiConfirm({
@@ -276,6 +279,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     () => () => {
       void stopSpeak();
       voiceRef.current?.cancelListening?.();
+      handsFreeStart.current?.abort();
+      handsFreeStart.current = null;
       handsFreeRef.current?.stop();
       // Abort any in-flight inference so it can't finish + speak after close.
       if (requestIdRef.current) {
@@ -294,7 +299,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   useEffect(() => {
     if (!aiEnabled) return;
     void qvac.service?.initializeWhisper?.().catch(() => {});
-    void voiceRef.current?.warmup?.();
+    // Permission and microphone activation happen only in the cancellable start path.
   }, []);
 
   // Voice entry: begin the hands-free conversation only once BOTH the chat model and
@@ -327,7 +332,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // After a spoken reply ends, automatically listen again so the conversation
   // flows hands-free (turn-taking). Guarded so it never fires once closed.
   const resumeListening = useCallback(() => {
-    if (!aliveRef.current) return;
+    if (!aliveRef.current || AppState.currentState !== 'active') return;
     setPhase('idle');
     setError(null);
     voiceRef.current?.startListening();
@@ -423,6 +428,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       return;
     }
     if (!qvac.isReady || !qvac.isWhisperReady) return;
+    if (handsFree || voiceStarting) { pauseVoice(); return; }
     if (phase === 'listening') {
       voiceRef.current?.stopListening();
     } else if (phase === 'idle') {
@@ -492,6 +498,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   };
 
   const stopHandsFree = () => {
+    handsFreeStart.current?.abort(); handsFreeStart.current = null;
+    setVoiceStarting(false);
+    turnEpoch.current++;
+    if (requestIdRef.current) void qvac.service?.cancelRequest?.(requestIdRef.current).catch(() => {});
     void stopSpeak();
     handsFreeRef.current?.stop();
     handsFreeRef.current = null;
@@ -500,28 +510,34 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   };
 
   const startHandsFree = async () => {
-    if (handsFreeRef.current || !qvac.isReady) return;
+    if (handsFreeRef.current || handsFreeStart.current || !qvac.isReady || !qvac.isWhisperReady || AppState.currentState !== 'active') return;
+    const start = new AbortController();
+    handsFreeStart.current = start;
+    setVoiceStarting(true);
     setError(null);
     setHandsFree(true);
     void stopSpeak();
-    voiceRef.current?.stopListening?.(); // never run both mic paths at once
+    voiceRef.current?.cancelListening?.(); // discard the other recorder's clip
     try {
       const controller = await startHandsFreeVoice({
         respond: respondHandsFree,
         speak: speakHandsFree,
-        onState: (s) => setPhase(s),
+        onState: (s) => { if (!start.signal.aborted && aliveRef.current) setPhase(s); },
         onError: (e) => {
           setError(e instanceof Error ? e.message : 'Voice loop stopped.');
           stopHandsFree();
         },
-      });
-      if (!aliveRef.current) { controller.stop(); return; }
+      }, start.signal);
+      if (start.signal.aborted || !aliveRef.current || AppState.currentState !== 'active') { controller.stop(); return; }
       handsFreeRef.current = controller;
     } catch (e) {
       if (!aliveRef.current) return;
+      if (start.signal.aborted) return;
       setError(e instanceof Error ? e.message : 'Could not start hands-free voice.');
       setHandsFree(false);
       setPhase('idle');
+    } finally {
+      if (handsFreeStart.current === start) { handsFreeStart.current = null; setVoiceStarting(false); }
     }
   };
 
@@ -541,7 +557,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     // Cancel (discard) the mic clip rather than stop — a paused utterance must
     // NOT be transcribed and sent as a turn.
     voiceRef.current?.cancelListening?.();
-    if (handsFree) stopHandsFree();
+    autoStartedRef.current = true;
+    stopHandsFree();
     setPhase('idle');
   };
 
@@ -551,6 +568,9 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         turnEpoch.current++;
         void stopSpeak();
         voiceRef.current?.cancelListening?.();
+        autoStartedRef.current = true;
+        handsFreeStart.current?.abort(); handsFreeStart.current = null;
+        setVoiceStarting(false);
         handsFreeRef.current?.stop(); handsFreeRef.current = null;
         setHandsFree(false); setPhase('idle');
         if (requestIdRef.current) void qvac.service?.cancelRequest?.(requestIdRef.current).catch(() => {});
@@ -584,35 +604,15 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.8]) }],
   }));
 
-  // Which LLM is answering, shown under the header title.
-  const modelSubtitle = `${getModelById(qvac.config?.modelId)?.label ?? 'On-device AI'} · on this device`;
-
   const aiFailed = qvac.llmStatus === 'error';
   const speechFailed = qvac.whisperStatus === 'error';
-  // The mic is genuinely ready only when both reasoning and speech recognition
-  // are available. QVACService now coalesces concurrent Whisper initialization,
-  // so this cannot get stranded behind a load that another caller started.
-  const voiceReady = qvac.isReady && qvac.isWhisperReady;
+  const { subtitle: modelSubtitle, status: statusText, ready: voiceReady } = voiceStatus({
+    enabled: aiEnabled, model: getModelById(qvac.config?.modelId)?.label ?? 'Local AI',
+    llmStatus: qvac.llmStatus, whisperStatus: qvac.whisperStatus,
+    modelProgress: qvac.combinedProgress, speechProgress: qvac.whisperDownloadProgress,
+    starting: voiceStarting, phase, error,
+  });
   const modelLoading = aiEnabled && !aiFailed && !speechFailed && !voiceReady;
-  const statusText = phase === 'speaking' ? 'Prismo sta parlando…' : !aiEnabled ? 'Agent non attivo · prova della sola voce' : aiFailed
-    ? `On-device AI unavailable — ${qvac.error || 'the model could not be loaded'}`
-    : !qvac.isReady
-    ? qvac.isDownloading
-      ? `Preparing the on-device AI… ${qvac.combinedProgress}%`
-      : 'Starting the on-device AI…'
-    : !qvac.isWhisperReady
-      ? qvac.whisperStatus === 'error'
-        ? `Speech recognition unavailable — ${qvac.error || 'the voice model could not be loaded'}`
-        : qvac.whisperStatus === 'downloading'
-          ? `Preparing speech recognition… ${qvac.whisperDownloadProgress}%`
-          : 'Starting speech recognition…'
-    : error
-      ? error
-      : phase === 'listening'
-        ? 'Listening… tap to send'
-        : phase === 'thinking'
-          ? 'Thinking…'
-          : 'Tap Prismo and speak';
 
   const mood = voiceMood({
     phase,
@@ -634,7 +634,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             <View style={styles.headerTitleRow}>
               <MindCharacterBadge size={28} mood={mood === 'sleeping' ? 'sleeping' : 'idle'} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.headerTitle}>Prismo · voice</Text>
+                <Text style={styles.headerTitle}>Prismo · Talk</Text>
                 <Text style={styles.headerSubtitle} numberOfLines={1}>{modelSubtitle}</Text>
               </View>
             </View>
@@ -772,7 +772,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               phase={phase}
               size={208}
               accessibilityLabel={`Prismo, ${statusText}`}
-              onPress={voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
+              onPress={voiceStarting ? pauseVoice : voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
             />
             {voiceReady && (phase === 'idle' || phase === 'listening' || phase === 'speaking') ? (
               <View style={styles.orbChip} pointerEvents="none">

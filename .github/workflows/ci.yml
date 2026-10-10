@@ -60,7 +60,7 @@ jobs:
         run: pnpm test:dependency-security
 
       - name: Native image asset formats
-        run: node --test scripts/image-assets.test.cjs
+        run: node --test scripts/image-assets.test.cjs scripts/check-release-dependencies.test.cjs
 
       - name: Unit tests (with the coverage floor from jest.config.js)
         run: pnpm exec jest --ci --coverage --coverageReporters=text-summary
@@ -69,7 +69,10 @@ jobs:
   # catching resolution/transform breakage that tsc and Jest can't see, e.g. a
   # dependency bump Metro can't load or a missing sibling package.
   bundle:
-    name: Production bundle (Android)
+    name: Production bundle (${{ matrix.platform }})
+    strategy:
+      matrix:
+        platform: [android, ios]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -97,7 +100,10 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       # NODE_ENV=production also runs the console-stripping Babel plugin.
-      - name: Export Android bundle
-        run: pnpm exec expo export --platform android --output-dir "$RUNNER_TEMP/bundle"
+      - name: Export production bundle
+        run: pnpm exec expo export --platform ${{ matrix.platform }} --source-maps --output-dir "$RUNNER_TEMP/bundle"
         env:
           NODE_ENV: production
+
+      - name: Verify unpatched tooling dependencies stay out of the app
+        run: node scripts/check-release-dependencies.cjs "$RUNNER_TEMP/bundle"

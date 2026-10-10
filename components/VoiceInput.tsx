@@ -106,6 +106,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
       }, 80);
     };
     const startingRef = useRef(false);
+    const startGeneration = useRef(0);
     const isRecordingRef = useRef(false);
     const [isRecording, setIsRecording] = useState(false);
 
@@ -135,6 +136,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
     // "Only one Recording object can be prepared at a given time."
     useEffect(
       () => () => {
+        startGeneration.current++;
         stopMeter();
         const rec = recorderRef.current;
         recorderRef.current = null;
@@ -154,6 +156,8 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
       // recorder can't be prepared twice). The owner will finish or release it.
       if (recorderStarting) return;
 
+      const generation = ++startGeneration.current;
+      const cancelled = () => generation !== startGeneration.current;
       let recording: AudioRecorder | null = null;
       startingRef.current = true;
       recorderStarting = true;
@@ -168,6 +172,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         }
 
         const { granted } = await requestRecordingPermissionsAsync();
+        if (cancelled()) return;
         if (!granted) {
           onError('not-allowed');
           return;
@@ -180,6 +185,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         const qvac = QVACService.getInstance();
         if (qvac.getState().whisperStatus !== 'ready') {
           await qvac.initializeWhisper();
+          if (cancelled()) return;
           const voiceState = qvac.getState();
           if (voiceState.whisperStatus !== 'ready') {
             onError(voiceState.error || 'Speech recognition is not ready');
@@ -192,6 +198,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
           playsInSilentMode: true,
         });
 
+        if (cancelled()) return;
         recording = new AudioModule.AudioRecorder(
           onLevelRef.current ? { ...RECORDING_OPTIONS, isMeteringEnabled: true } : RECORDING_OPTIONS,
         );
@@ -201,6 +208,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         // mic-permission grant) `record()` can otherwise capture pure silence for
         // the whole clip — the "first recording returns no speech" bug.
         await new Promise((resolve) => setTimeout(resolve, 250));
+        if (cancelled()) { await disposeRecorder(recording); return; }
         recording.record();
 
         recorderRef.current = recording;
@@ -219,7 +227,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         isRecordingRef.current = false;
         setIsRecording(false);
         console.error('VoiceInput start error:', err);
-        onError(err instanceof Error ? err.message : 'Failed to start recording');
+        if (!cancelled()) onError(err instanceof Error ? err.message : 'Failed to start recording');
       } finally {
         startingRef.current = false;
         recorderStarting = false;
@@ -229,6 +237,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
     // Stop the mic and DISCARD the clip — no transcription, no onResult. Used by
     // the voice overlay's Pause so a captured utterance is dropped, not sent.
     const cancelRecording = async () => {
+      startGeneration.current++;
       if (!isRecordingRef.current || !recorderRef.current) return;
       const recording = recorderRef.current;
       stopMeter();
@@ -245,7 +254,9 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
 
     const stopRecording = async () => {
       if (!isRecordingRef.current || !recorderRef.current) return;
-
+      const generation = startGeneration.current;
+      const cancelled = () => generation !== startGeneration.current;
+      let clipUri: string | null | undefined;
       const recording = recorderRef.current;
       stopMeter();
       try {
@@ -257,10 +268,12 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         if (activeRecording === recording) activeRecording = null;
         // Read the file path before release() detaches the native object.
         const uri = recording.uri;
+        clipUri = uri;
         try { recording.release(); } catch { /* already freed */ }
 
         await setAudioModeAsync({ allowsRecording: false });
 
+        if (cancelled()) return;
         onEnd();
 
         if (!uri) {
@@ -277,6 +290,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         if (state.whisperStatus !== 'ready') {
           onPartialResult('Preparing voice model...');
           await qvac.initializeWhisper();
+          if (cancelled()) return;
           state = qvac.getState();
 
           if (state.whisperStatus !== 'ready') {
@@ -286,6 +300,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         }
 
         const transcription = await qvac.transcribeAudio(uri);
+        if (cancelled()) return;
         // Whisper emits non-speech markers like "[BLANK_AUDIO]", "(silence)" or
         // "[ Silence ]" for empty/quiet clips — treat those as no-speech too.
         const trimmed = transcription
@@ -300,19 +315,15 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
           onError('no-speech');
         }
 
-        try {
-          const file = new File(uri);
-          if (file.exists) file.delete();
-        } catch {
-          // ignore cleanup errors
-        }
       } catch (err) {
         isRecordingRef.current = false;
         if (activeRecording === recording) activeRecording = null;
         recorderRef.current = null;
         setIsRecording(false);
         console.error('VoiceInput stop error:', err);
-        onError(err instanceof Error ? err.message : 'Transcription failed');
+        if (!cancelled()) onError(err instanceof Error ? err.message : 'Transcription failed');
+      } finally {
+        if (clipUri) { try { const file = new File(clipUri); if (file.exists) file.delete(); } catch {} }
       }
     };
 

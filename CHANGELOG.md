@@ -10,8 +10,21 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-10-10
+
 ### Changed
-- **Prismo is the illustrated character** (the green and violet crystal with the Bitcoin coin) wherever Prismo appears: Mind tab, chat, voice, cards and sheets. It blinks, breathes, and its mouth follows the voice while it speaks. The tab bar keeps the one-colour outline.
+- **Agent experience.** One chat composer, separate dictation and Talk actions, accessible model settings and chat clearing, compact messages and payment summaries. Removed the extra Prismo input from the Dashboard.
+- **Original Prismo, animated.** The approved crystal artwork greets users on the welcome screen, blinks and breathes, and follows native speech playback in Talk. A continuous 2D mesh avoids detached hand and mouth cutouts. Rendering now follows the visible size, uses fewer triangles, respects reduced motion and pauses in the background.
+- **Profile and wallet.** More compact profile details and editing, optional profile suggestions, claimzero.me links, clearer Bitcoin allocation, relay status/reconnection improvements and cross-chain receive under additional options.
+
+### Fixed
+- Talk uses the saved voice language, with a language choice in Models & voice and a system-voice fallback for non-English speech.
+- Pause, close and backgrounding cancel pending voice startup. Late sessions are disposed of before recording; cancelled recordings cannot submit late transcriptions.
+- Talk distinguishes model download/loading, microphone startup, listening and speaking, and only reports readiness when both models are ready.
+
+### Validation
+- 1,722 unit tests passed; TypeScript and production iOS/Android JavaScript exports passed. CI now checks both mobile bundles for the three unpatched tooling dependencies flagged by Dependabot; these were absent from the inspected bundles. The tooling alerts remain open.
+- Native QVAC conversations, microphone routing and sustained performance on physical devices remain to be tested with this build; simulator speech is not a substitute for those checks.
 
 ## [0.9.0] — 2026-10-10
 
@@ -261,6 +274,7 @@ dashboard, and navigation revamp.
 
 Initial internal release.
 
-[Unreleased]: https://github.com/kaleidoswap/Rate/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/kaleidoswap/Rate/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/kaleidoswap/Rate/compare/v0.9.0...v0.9.1
 [0.2.0]: https://github.com/kaleidoswap/Rate/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/kaleidoswap/Rate/releases/tag/v0.1.0

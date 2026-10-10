@@ -1,5 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { AppState, Image, Pressable } from 'react-native';
+import { AppState, Image, PixelRatio, Pressable } from 'react-native';
 import { Asset } from 'expo-asset';
 import { File } from 'expo-file-system';
 import { WebView } from 'react-native-webview';
@@ -34,9 +34,14 @@ export const PrismoAnimatedCharacter = forwardRef<PrismoAnimationRef, Props>(fun
   } }), []);
   useEffect(() => {
     let alive = true;
-    loadImages().then(images => { if (alive) setHtml(prismoAnimationHtml(images)); }).catch(() => { if (alive) setFailed(true); });
+    loadImages().then(images => { if (alive) setHtml(prismoAnimationHtml(images, size * Math.min(2, PixelRatio.get()))); }).catch(() => { if (alive) setFailed(true); });
     return () => { alive = false; ready.current = false; };
-  }, []);
+  }, [size]);
+  useEffect(() => {
+    if (!html) return;
+    const timeout = setTimeout(() => { if (!ready.current) setFailed(true); }, 8000);
+    return () => clearTimeout(timeout);
+  }, [html]);
   useEffect(() => {
     latest.current.phase = phase; latest.current.reduced = !!reduced;
     if (phase !== 'speaking') latest.current.level = 0;
