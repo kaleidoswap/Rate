@@ -10,7 +10,12 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-10
+
 ### Added
+- **RGB on this phone.** A complete on-chain RGB wallet that runs on the phone, on the official rgb-lib 0.3.0-beta.7: receive, send, issue and see RGB assets without a node, on mainnet or Mutinynet. Receive is clearer about which way to get paid.
+- **Prismo.** KaleidoMind has a face: an animated character in the Mind tab, in chat, on the voice screen and on the cards the assistant shows. It looks, listens, thinks, speaks and reacts to what happens (a payment sent, something that needs a look).
+- **Agent wallet.** A separate wallet with its own budget that KaleidoMind can pay small services from (paid data APIs over L402 / MPP) without touching your main funds. Set a limit per payment, per day and per month, pause it, and see every payment in its log. Anything above the limits asks you first, and the sheet shows what the limits leave.
 - **Tell KaleidoMind what to do.** A bar on the Dashboard and the Mind tab takes a typed or dictated request ("send 10€ to Mario", "swap half my BTC to USDT", "receive 50k sats on Lightning", in English or Italian) and answers with a card: amount and fiat value, recipient, route and estimated fee, from the wallet's own prices and quotes. Review opens Send, Receive or Swap filled in, where you confirm as usual. Common requests work without the model; questions like "how much did I spend this week" get a small summary from Activity.
 - **Explain.** Activity details (the payment, its fee, an RGB transfer's step), a failed swap and Send errors have an Explain button that says what happened in a few plain sentences, on this phone, with a built-in explanation when KaleidoMind is off.
 - **Insights on the Dashboard.** Small cards for things worth a look: an RGB backup that failed or never ran, little room to receive on an RGB channel, a swap or payment still unconfirmed, a large payment received, low network fees. Each has one action and can be dismissed.
@@ -53,6 +58,12 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   swap fee, and the wallet claims the payment while Receive is open.
 
 ### Fixed
+- **The confirm sheet and the payment can no longer disagree.** A payment from chat or voice goes to exactly the destination the sheet showed, even if the contact's address changed in between. An invoice's own amount is the one shown and paid; a different amount from the assistant is refused. An invoice that a Lightning address returns for another amount than you approved is refused.
+- **Flashnet swaps show their floor.** The review says the least you can receive ("At least"), and the swap is bound to it: 1% below the quote instead of a hidden 5%.
+- **Assistant errors are readable.** The chat says what to do next (clear a long chat, reload the model, check the connection) and no longer prints raw technical errors.
+- Activity shows what is known at once and adds each account as it answers, instead of waiting for the slowest one.
+- RGB on this phone is no longer reported offline right after it connects.
+- KaleidoMind no longer crashes the app when the on-device model can't start.
 - Payment sounds play again: Send chimes when a payment completes (or fails), and Receive plays the received chime when a payment arrives.
 - Swap explains when trading pairs are loading, empty or failed to load, with Retry or a link to Settings.
 - The Nostr private key and NWC connection string are copied with the auto-clearing secure clipboard.
@@ -80,6 +91,7 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   automatic one.
 
 ### Removed
+- The `get_swap_quote` assistant tool, which only pointed at the Swap screen; the assistant quotes with the KaleidoSwap tools and swaps after you confirm.
 - Screens nothing opened (payment success, Nostr setup, duplicate History and
   assistant routes) and eight unused components.
 - The pre-payment "confirmation" screen for channel orders: the order's

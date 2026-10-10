@@ -16,6 +16,7 @@ import {
 import { protocolManager, type ProtocolType } from './protocols';
 import { getStore } from '../store/storeProvider';
 import { fetchBitcoinPrice } from '../store/slices/walletSlice';
+import { decodeBolt11 } from '../utils/decodeInvoice';
 import NostrService from './NostrService';
 import { resolveLightningAddressToInvoice as resolveLightningAddress } from '../utils/lnurl';
 
@@ -147,8 +148,41 @@ export interface SendPreview {
   kind: 'lightning_address' | 'lightning_invoice' | 'onchain' | 'other';
 }
 
+// What the confirm sheet showed for a `to`, kept so the payment that follows goes
+// to exactly that destination even if the contact's address changed in between.
+const PIN_TTL_MS = 5 * 60_000;
+const pinnedPreviews = new Map<string, { preview: SendPreview; ts: number }>();
+
+function takePinnedPreview(to: unknown): SendPreview | undefined {
+  const key = String(to ?? '').trim();
+  const hit = pinnedPreviews.get(key);
+  pinnedPreviews.delete(key);
+  return hit && Date.now() - hit.ts < PIN_TTL_MS ? hit.preview : undefined;
+}
+
+/**
+ * The amount a BOLT11 invoice is really for. An invoice with its own amount
+ * always wins; a different amount asked for by the model is an error, so the
+ * sheet can never show one number while another is paid.
+ */
+export function reconcileInvoiceAmount(invoice: string, requestedSats?: number): number | undefined {
+  if (!/^ln(bc|tb|bcrt)/i.test(invoice.trim())) return requestedSats;
+  const inSats = decodeBolt11(invoice).amountSats;
+  if (inSats == null) return requestedSats;
+  if (requestedSats != null && Math.round(requestedSats) !== inSats) {
+    throw new Error(`That invoice is for ${inSats.toLocaleString('en-US')} sats, not ${Math.round(requestedSats).toLocaleString('en-US')}. Nothing was sent.`);
+  }
+  return inSats;
+}
+
 /** Resolve send_payment's `to` the same way the handler does, for the confirm sheet. */
 export async function previewSendPayment(to: unknown): Promise<SendPreview> {
+  const preview = await resolveSendTarget(to);
+  pinnedPreviews.set(String(to ?? '').trim(), { preview, ts: Date.now() });
+  return preview;
+}
+
+async function resolveSendTarget(to: unknown): Promise<SendPreview> {
   const raw = String(to ?? '').trim();
   if (!raw) throw new Error('A destination (invoice, address, or contact) is required.');
   let destination = raw;
@@ -234,17 +268,6 @@ const HANDLERS: Record<string, WalletHandler> = {
     return normInvoice(r);
   },
 
-  // Swap quote — venue-aware (Flashnet on Spark · KaleidoSwap on RLN). Read-only:
-  // the live quote + atomic execution happen on the tested Swap screen, so the
-  // agent quotes + hands off rather than moving funds blind.
-  get_swap_quote: async ({ from_asset, to_asset, amount }) => {
-    const venue = adapter('RGB_LN') ? 'KaleidoSwap (RLN)' : adapter('SPARK') ? 'Flashnet (Spark)' : null;
-    if (!venue) throw new Error('Connect a Spark or RLN wallet to swap.');
-    const f = String(from_asset ?? '').toUpperCase();
-    const t = String(to_asset ?? '').toUpperCase();
-    return { from_asset: f, to_asset: t, amount, venue, note: `Swap ${amount ?? ''} ${f} → ${t} via ${venue}. Open the Swap screen to see the live quote and confirm.` };
-  },
-
   // ── Cross-cutting helpers ──
   get_price: async ({ fiat }) => {
     const price = await ensureBtcPrice();
@@ -303,14 +326,22 @@ const HANDLERS: Record<string, WalletHandler> = {
     throw new Error(`To send ${amount ?? ''} ${String(asset).toUpperCase()} to "${to}", ask them for an RGB invoice and paste it here.`);
   },
   send_payment: async ({ to, amount_sats }) => {
-    const sats = amount_sats != null ? Number(amount_sats) : undefined;
-    let { destination: target } = await previewSendPayment(to);
+    const requested = amount_sats != null ? Number(amount_sats) : undefined;
+    let { destination: target } = takePinnedPreview(to) ?? (await resolveSendTarget(to));
+    let sats = requested;
     // Lightning address (user@domain) → resolve to a BOLT11 invoice via LNURL-pay.
     if (isLightningAddress(target)) {
       if (!sats) throw new Error('I need an amount in sats to pay a Lightning address.');
       target = await resolveLightningAddress(target, sats);
+      // The service picks the invoice; it must be for what the user approved.
+      const got = decodeBolt11(target).amountSats;
+      if (got != null && got !== Math.round(sats)) {
+        throw new Error('The Lightning address returned an invoice for a different amount, so nothing was sent.');
+      }
     } else if (isOnchainAddress(target)) {
       throw new Error("On-chain sends from the assistant aren't supported yet — use the Send screen.");
+    } else {
+      sats = reconcileInvoiceAmount(target, sats);
     }
     // Pay the BOLT11 invoice on the Lightning rail (Spark preferred, RLN fallback).
     return afterSpend(await lightningAdapter().sendPayment({ invoice: target, ...(sats ? { amountSats: sats } : {}) }));
@@ -359,7 +390,6 @@ function describeWalletTool(name: string): string {
     rln_create_ln_invoice: 'Create a Lightning invoice on the RLN wallet.',
     rln_create_rgb_invoice: 'Create an RGB asset invoice on the RLN wallet.',
     create_invoice: 'Create a receive invoice for BTC or an RGB asset.',
-    get_swap_quote: 'Describe where a swap quote can be obtained.',
     get_price: 'Get the cached or freshly fetched BTC price.',
     fiat_to_sats: 'Convert a fiat amount to satoshis using the BTC price.',
     list_contacts: "List the user's saved contacts (local + Nostr) so you can ask which one to pay. Use this when the user wants to send to a friend/contact but hasn't named who, or to confirm available recipients.",
@@ -397,12 +427,6 @@ function paramsForWalletTool(name: string): Record<string, unknown> {
         amount: numberProp('Amount to receive.'),
         layer: stringProp('Optional layer: spark, rln, or arkade.'),
       });
-    case 'get_swap_quote':
-      return object({
-        from_asset: stringProp('Asset being sold.'),
-        to_asset: stringProp('Asset being bought.'),
-        amount: numberProp('Amount to quote.'),
-      }, ['from_asset', 'to_asset', 'amount']);
     case 'get_price':
       return object({ fiat: stringProp('Fiat currency, defaults to USD.') });
     case 'fiat_to_sats':

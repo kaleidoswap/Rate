@@ -46,6 +46,7 @@ import { shareLightningInvoice } from '../components/InvoiceQRCode';
 import ToastService from '../services/ToastService';
 import { useQVAC } from '../hooks/useQVAC';
 import { getModelById } from '../services/qvacModels';
+import { chatErrorMessage } from '../services/aiErrors';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
 import { useAiConfirm } from '../hooks/useAiConfirm';
@@ -635,15 +636,11 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       console.error('KaleidoMind chat error:', error);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       flashMood('concerned');
-      // Wallet-tool errors are written for the user ("Your SPARK wallet isn't
-      // connected yet.") — show them; fall back to a generic note otherwise.
-      const raw = error instanceof Error && error.message ? error.message : '';
-      // A prompt-too-long overflow is opaque to users — translate it into an action.
-      const msg = /context window|prompt tokens|exceeds the|context length|too long/i.test(raw)
-        ? 'This conversation got too long for the on-device model. Clear the chat (🗑️ in the header) to start fresh, then try again.'
-        : raw;
+      // Wallet-tool errors are written for the user and shown as is; known engine
+      // failures say what to do next; technical errors never reach the bubble.
+      const msg = chatErrorMessage(error);
       updateMessage(assistantId, () => ({
-        text: msg || "I couldn't process that on-device just now. Please try again. 🔧",
+        text: msg,
         streaming: false,
       }));
     }

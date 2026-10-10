@@ -10,6 +10,8 @@ import { protocolManager } from './protocols';
 import { getStore } from '../store/storeProvider';
 import NostrService from './NostrService';
 import { resolveLightningAddressToInvoice } from '../utils/lnurl';
+import { makeInvoice } from './agentWallet/__fixtures__/invoice';
+import { buildConfirmReadback } from './aiConfirm';
 
 jest.mock('./protocols', () => ({
   protocolManager: { getAdapterIfAvailable: jest.fn() },
@@ -417,5 +419,49 @@ describe('strict contact matching', () => {
       recipientName: 'Walter', destination: 'walter@ln.tips', kind: 'lightning_address',
     });
     await expect(previewSendPayment('lnbc10u1xyz')).resolves.toMatchObject({ destination: 'lnbc10u1xyz', kind: 'lightning_invoice' });
+  });
+});
+
+
+// ── The sheet and the payment must agree ──────────────────────────────
+
+const HASH = 'ab'.repeat(32);
+const invoiceFor = (sats: number) => makeInvoice({ sats, paymentHash: HASH, timestamp: 1_700_000_000, expiry: 3600 });
+
+describe('confirm sheet and execution agree', () => {
+  it("pays the destination the sheet showed even if the contact's address changed meanwhile", async () => {
+    const spark = makeAdapter();
+    setAdapters({ SPARK: spark });
+    setStore({ contacts: [{ name: 'Alice', lightning_address: 'alice@ln.tips' }] });
+    mockedResolveLn.mockResolvedValue(invoiceFor(2100));
+
+    const readback = await buildConfirmReadback({ name: 'send_payment', arguments: { to: 'Alice', amount_sats: 2100 } });
+    expect(readback.rows.find((r) => r.value === 'alice@ln.tips')).toBeDefined();
+
+    setStore({ contacts: [{ name: 'Alice', lightning_address: 'mallory@evil.example' }] });
+    await source().execute('send_payment', { to: 'Alice', amount_sats: 2100 });
+
+    expect(mockedResolveLn).toHaveBeenCalledWith('alice@ln.tips', 2100);
+  });
+
+  it('shows the invoice amount and refuses a different amount asked for by the model', async () => {
+    const invoice = invoiceFor(1000);
+    const readback = await buildConfirmReadback({ name: 'send_payment', arguments: { to: invoice } });
+    expect(readback.amountSats).toBe(1000);
+
+    await expect(buildConfirmReadback({ name: 'send_payment', arguments: { to: invoice, amount_sats: 50_000 } })).rejects.toThrow(/for 1,000 sats, not 50,000/);
+    await expect(buildConfirmReadback({ name: 'rln_pay_invoice', arguments: { invoice, amount_sats: 50_000 } })).rejects.toThrow(/Nothing was sent/);
+
+    setAdapters({ SPARK: makeAdapter() });
+    await expect(source().execute('send_payment', { to: invoice, amount_sats: 50_000 })).rejects.toThrow(/Nothing was sent/);
+  });
+
+  it('refuses an invoice from a Lightning address that is for a different amount', async () => {
+    const spark = makeAdapter();
+    setAdapters({ SPARK: spark });
+    mockedResolveLn.mockResolvedValue(invoiceFor(999_999));
+
+    await expect(source().execute('send_payment', { to: 'bob@ln.tips', amount_sats: 2100 })).rejects.toThrow(/different amount/);
+    expect(spark.sendPayment).not.toHaveBeenCalled();
   });
 });

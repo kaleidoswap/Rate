@@ -21,6 +21,8 @@ export function bindAgentConfirm(ask: Ask | undefined): () => void {
         fee_sats: c.feeSats,
         invoice: c.invoice,
         why: c.why,
+        left_today_sats: c.leftTodaySats,
+        left_month_sats: c.leftMonthSats,
       },
     });
     return decision?.approved === true;

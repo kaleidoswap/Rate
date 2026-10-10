@@ -34,6 +34,9 @@ export interface AgentPayConfirmation {
   invoice: string;
   reason: string;
   why: string;
+  /** What the daily and monthly limits leave, before this payment. */
+  leftTodaySats: number;
+  leftMonthSats: number;
 }
 
 export interface AgentPayRequest {
@@ -152,7 +155,11 @@ async function payNow(req: AgentPayRequest, deps: AgentPayDeps): Promise<AgentPa
   }
   if (decision.kind === 'confirm') {
     const approved = deps.confirm
-      ? await deps.confirm({ service, amountSats, feeSats, invoice, reason, why: decision.reason }).catch(() => false)
+      ? await deps.confirm({
+          service, amountSats, feeSats, invoice, reason, why: decision.reason,
+          leftTodaySats: Math.max(0, (policy?.dailySats ?? 0) - totals.todaySats),
+          leftMonthSats: Math.max(0, (policy?.monthlySats ?? 0) - totals.monthSats),
+        }).catch(() => false)
       : false;
     if (approved !== true) {
       await store.add({ kind: 'spend', amountSats, feeSats: 0, status: 'cancelled', service, reason, paymentHash: decoded.paymentHash }).catch(() => {});
