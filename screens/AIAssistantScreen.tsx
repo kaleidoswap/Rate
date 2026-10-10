@@ -1,3 +1,4 @@
+import { useAgentPaymentFeedback } from "../components/mind/useAgentPaymentFeedback";
 // screens/AIAssistantScreen.tsx
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -81,6 +82,7 @@ const skillRouteHint = (skill: Skill): string =>
     : skill.name.replace(/-/g, ' '));
 
 export default function AIAssistantScreen({ navigation, route }: Props) {
+  const paymentConfirmed = useAgentPaymentFeedback();
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
@@ -397,7 +399,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   const copyFullChat = useCallback(() => {
     const transcript = messages
       .map((m) => {
-        const who = m.isUser ? 'You' : 'KaleidoMind';
+        const who = m.isUser ? 'You' : 'Agent';
         const body = m.isUser ? (m.text?.trim() ?? '') : buildCopyText(m);
         return body ? `${who}:\n${body}` : '';
       })
@@ -699,7 +701,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             <TouchableOpacity
               onPress={openMindSetup}
               style={styles.modelRetry}
-              accessibilityLabel="Set up Mind"
+              accessibilityLabel="Set up Agent"
             >
               <Text style={styles.modelRetryText}>Set up</Text>
             </TouchableOpacity>
@@ -724,7 +726,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             <TouchableOpacity
               onPress={() => dispatch(setAiMode('off'))}
               style={[styles.modelRetry, styles.modelRetryGhost]}
-              accessibilityLabel="Turn off KaleidoMind"
+              accessibilityLabel="Turn off Agent"
             >
               <Text style={styles.modelRetryText}>Off</Text>
             </TouchableOpacity>
@@ -877,7 +879,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       />
       <VoiceAgentOverlay visible={voiceAgentOpen} autoListen={true} onClose={() => setVoiceAgentOpen(false)} />
       <MainHeader
-        title="KaleidoMind"
+        title="Agent"
         subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
         iconNode={<MindCharacterBadge size={22} color={theme.colors.text.primary} />}
         titleBadge={<Badge label="Experimental" color={theme.colors.warning[500]} size="sm" />}
@@ -903,7 +905,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       />
       <View style={styles.chatContainer}>
         <LinearGradient
-          colors={[theme.colors.background.primary, theme.colors.background.tertiary]}
+          colors={[theme.colors.background.primary, theme.colors.background.primary]}
           style={styles.background}
         >
           {/* Hidden on-device voice input (QVAC Whisper) */}
@@ -979,6 +981,11 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
               <View style={styles.inputContainer}>
                 <BlurView intensity={80} tint={theme.dark ? 'dark' : 'light'} style={styles.inputGradient}>
+                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose model and voice" onPress={() => setShowSettings(true)} style={{flexDirection:'row',alignItems:'center',gap:theme.spacing[2],minHeight:32,paddingBottom:theme.spacing[2]}}>
+                    <Ionicons name="hardware-chip-outline" size={14} color={theme.colors.text.secondary}/>
+                    <Text style={{color:theme.colors.text.secondary,fontSize:theme.typography.fontSize.xs,flexShrink:1}} numberOfLines={1}>{headerSubtitle}</Text>
+                    <Ionicons name="chevron-down" size={13} color={theme.colors.text.secondary}/>
+                  </TouchableOpacity>
                   {showActions && renderQuickActions()}
 
                   {/* Pinned-skill chip: this message routes to it; tap ✕ to clear. */}
@@ -1016,7 +1023,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                           setInputText(text);
                           if (!isListening) setBaseInputText(text);
                         }}
-                        placeholder={isListening ? 'Listening… speak now' : 'Ask about Bitcoin or payments'}
+                        placeholder={isListening ? 'Listening… speak now' : 'Ask Agent…'}
                         placeholderTextColor={theme.colors.text.tertiary}
                         multiline
                         maxLength={500}
@@ -1062,7 +1069,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                         accessibilityLabel="Send message"
                       >
                         <LinearGradient colors={theme.colors.primary.gradient!} style={styles.buttonGradient}>
-                          <Ionicons name="send" size={20} color="white" />
+                          <Ionicons name="arrow-up" size={20} color={theme.colors.text.inverse} />
                         </LinearGradient>
                       </TouchableOpacity>
                     ) : (
@@ -1074,10 +1081,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                           accessibilityLabel={isListening ? 'Stop recording' : 'Start voice input'}
                         >
                           <LinearGradient
-                            colors={isListening ? theme.colors.error.gradient! : theme.colors.accent.gradient!}
+                            colors={isListening ? theme.colors.error.gradient! : theme.colors.primary.gradient!}
                             style={styles.buttonGradient}
                           >
-                            <Ionicons name={isListening ? 'stop' : 'mic'} size={20} color="white" />
+                            <Ionicons name={isListening ? 'stop' : 'mic'} size={20} color={theme.colors.text.inverse} />
                           </LinearGradient>
                         </TouchableOpacity>
                       </Animated.View>
@@ -1127,7 +1134,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             onClose={() => setShowContactsSelector(false)}
           />
 
-          <Sheet visible={showMenu} onClose={() => setShowMenu(false)} title="KaleidoMind">
+          <Sheet visible={showMenu} onClose={() => setShowMenu(false)} title="Agent">
             {([
               ...(aiEnabled ? [{ icon: 'time-outline', label: 'Chat history', onPress: () => setShowHistory(true) }] : []),
               ...(aiEnabled && !isEmpty ? [{ icon: 'copy-outline', label: 'Copy this chat', onPress: copyFullChat }] : []),
@@ -1190,12 +1197,12 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                 </View>
                 <Text style={styles.skillsHint}>{messages.length} message{messages.length === 1 ? '' : 's'} in this chat.</Text>
                 {isEmpty ? (
-                  <Text style={styles.skillsHint}>No messages yet — ask KaleidoMind anything.</Text>
+                  <Text style={styles.skillsHint}>No messages yet — ask Agent anything.</Text>
                 ) : (
                   <ScrollView style={styles.historyList} keyboardShouldPersistTaps="handled">
                     {messages.filter((m) => m.text?.trim()).map((m) => (
                       <View key={m.id} style={styles.historyItem}>
-                        <Text style={styles.historyWho}>{m.isUser ? 'You' : 'Mind'}</Text>
+                        <Text style={styles.historyWho}>{m.isUser ? 'You' : 'Agent'}</Text>
                         <Text style={styles.historyPreview} numberOfLines={2}>{m.text.trim()}</Text>
                         <Text style={styles.historyTime}>
                           {m.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

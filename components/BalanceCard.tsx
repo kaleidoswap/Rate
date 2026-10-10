@@ -1,3 +1,5 @@
+import { useAppTheme } from '../theme/ThemeProvider';
+import { AllocationBar } from './AllocationBar';
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -91,6 +93,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     onCycleDenomination,
     footer,
 }) => {
+    const theme = useAppTheme();
+    const styles = makeStyles(theme);
     const useDenominated = primaryText !== undefined;
     // Filter to only protocols with balance data
     const activeProtocols = byProtocol
@@ -194,6 +198,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             style={styles.controlButton}
                             hitSlop={CONTROL_HIT_SLOP}
                             onPress={() => setShowBreakdown(v => !v)}
+                            accessibilityState={{ expanded: showBreakdown }}
                             accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
                         >
                             <Ionicons
@@ -278,10 +283,10 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                                 </View>
                                 <View style={styles.networkValueBlock}>
                                     <AmountText style={styles.networkValueFiat}>
-                                        {hideAmounts ? '••••' : testOf(row.key) ? 'Test' : `$${formatUSD(row.value)}`}
+                                        {hideAmounts ? '••••' : `${formatSatoshis(row.value)} ${bitcoinUnit}`}
                                     </AmountText>
                                     <AmountText style={styles.networkValueSats}>
-                                        {hideAmounts ? '••••' : `${formatSatoshis(row.value)} ${bitcoinUnit}`}
+                                        {hideAmounts ? '••••' : testOf(row.key) ? 'Test network' : `$${formatUSD(row.value)}`}
                                     </AmountText>
                                 </View>
                             </View>
@@ -343,7 +348,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     );
 };
 
-const styles = StyleSheet.create({
+const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create({
     container: {
         // Distinct rounded card surface, matching the extension's TOTAL BALANCE
         // card (#0F1C33, 16px radius, hairline border on the navy background).
@@ -445,7 +450,7 @@ const styles = StyleSheet.create({
         backgroundColor: theme.colors.surface.secondary,
     },
     networkRowDimmed: {
-        opacity: 0.45,
+        opacity: 0.75,
     },
     networkAccentBar: {
         width: 3,

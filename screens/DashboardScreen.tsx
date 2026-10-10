@@ -443,6 +443,7 @@ export default function DashboardScreen({ navigation }: Props) {
         ...balance,
         summary: summarizeBitcoinBalances(byProtocol, channelsList, rgbIsLightning, new Set(Object.keys(testNetworkLabels()))),
         networks: bitcoinByNetwork(byProtocol, channelsList, rgbIsLightning),
+        networkChains: { onchain: testNetworkLabels().RGB, lightning: testNetworkLabels().RGB, spark: testNetworkLabels().SPARK, arkade: testNetworkLabels().ARKADE, bark: testNetworkLabels().BARK },
       }));
       void saveBalanceSnapshot(walletAtStart, {
         byProtocol, assets, channels: channelsList, btcPriceUSD: btcPriceRef.current,

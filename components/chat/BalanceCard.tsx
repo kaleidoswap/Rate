@@ -1,3 +1,4 @@
+import { AllocationBar } from '../AllocationBar';
 import React, { useState } from 'react';
 import { Modal, View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +47,7 @@ export const BalanceCard: React.FC<{ data: BalanceData }> = ({ data }) => {
           {usd > 0 && <Text style={s.usd}>≈ ${usd.toFixed(2)}</Text>}
         </LinearGradient>
         <View style={s.layers}>
+          <AllocationBar items={data.layers.map(l => ({ label: meta(theme, l.layer).label, value: l.btc_sats, color: meta(theme, l.layer).color }))} />
           {data.layers.map((l) => {
             const m = meta(theme, l.layer);
             return (

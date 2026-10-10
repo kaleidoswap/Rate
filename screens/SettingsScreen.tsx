@@ -147,7 +147,7 @@ export default function SettingsScreen({ navigation }: Props) {
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'KaleidoMind', advanced: 'Advanced' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Agent', advanced: 'Advanced' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
@@ -656,7 +656,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row first icon="sparkles-outline" label="KaleidoMind" description="Private AI assistant · models, privacy and desktop pairing" onPress={() => openPage('assistant')} />
+            <Row first icon="sparkles-outline" label="Agent" description="Private AI assistant · models, privacy and desktop pairing" onPress={() => openPage('assistant')} />
             <Row icon="code-slash-outline" label="Advanced" description="Accounts and network configuration" onPress={() => openPage('advanced')} />
             {__DEV__ && <Row icon="color-palette-outline" label="Component preview" description="Review shared mobile components" onPress={() => navigation.navigate('DesignSystem')} />}
           </Group>

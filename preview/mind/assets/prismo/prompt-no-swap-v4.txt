@@ -1,0 +1,5 @@
+Tool: built-in image_gen (edit)
+Reference: prismo-kaleidoswap-bitcoin-v3.png
+Transparent background: true
+
+Precise-object-edit. Make ONE localized change to the supplied Prismo character asset: remove the two pale swap arrows on the purple facet at the viewer's left, just above the lowered arm. Fill that small area seamlessly with the existing purple crystal material, matching its texture, shading and facet lighting. Preserve EVERYTHING else exactly: silhouette, pose, face, eyes, eyebrows, smiling mouth, green and purple colors, all facets, hands and feet, orange Bitcoin medallion and white ₿, lighting, scale, framing, image dimensions, and transparent background. Do not redesign or recolor anything. No added symbols. Output the same character with only the side swap symbol removed and true alpha transparency preserved.

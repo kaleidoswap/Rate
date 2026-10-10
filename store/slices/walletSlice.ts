@@ -35,6 +35,7 @@ export interface BtcBalance {
   summary?: { total: number; available: number; unavailable: number; test: number };
   /** Bitcoin per network, as the balance card's breakdown shows it. */
   networks?: Partial<Record<BtcNetwork, number>>;
+  networkChains?: Partial<Record<BtcNetwork, string>>;
 }
 
 interface WalletState {

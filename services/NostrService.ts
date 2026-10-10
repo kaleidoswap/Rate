@@ -1,3 +1,4 @@
+import { KALEIDOSWAP_RELAY, relayKey, withDefaultRelay } from '../utils/nostrRelays';
 // services/NostrService.ts
 import NDK, {
   NDKEvent,
@@ -187,10 +188,11 @@ class NostrService {
   // Initialize NDK and connect to relays
   async initialize(settings?: NostrSettings): Promise<boolean> {
     try {
-      const relays = settings?.relays && settings.relays.length > 0
-        ? settings.relays
-        : this.defaultRelays;
+      const relays = withDefaultRelay(settings?.relays?.length ? settings.relays : this.defaultRelays);
 
+      if (this.ndk) {
+        for (const relay of this.ndk.pool.relays.values()) relay.disconnect();
+      }
       this.lastContactListEvent = null;
 
       this.ndk = new NDK({
@@ -385,6 +387,7 @@ class NostrService {
 
   // Remove a relay
   async removeRelay(url: string): Promise<boolean> {
+    if (relayKey(url) === KALEIDOSWAP_RELAY) return false;
     try {
       // Remove from NDK if connected
       if (this.ndk) {
@@ -415,13 +418,13 @@ class NostrService {
     try {
       // If NDK is connected, return the actual connected relays
       if (this.ndk && this.ndk.explicitRelayUrls) {
-        return this.ndk.explicitRelayUrls;
+        return withDefaultRelay(this.ndk.explicitRelayUrls);
       }
       
       // Fallback to stored relays
       const storedRelays = await AsyncStorage.getItem('nostr_relays');
       if (storedRelays) {
-        return JSON.parse(storedRelays);
+        return withDefaultRelay(JSON.parse(storedRelays));
       }
       return this.defaultRelays;
     } catch (error) {
@@ -1701,7 +1704,7 @@ class NostrService {
 
       // Disconnect from relays
       if (this.ndk) {
-        // NDK doesn't have explicit disconnect method, but we can clean up
+        for (const relay of this.ndk.pool.relays.values()) relay.disconnect();
         this.ndk = null;
       }
 

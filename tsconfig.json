@@ -9,6 +9,7 @@
   },
   "exclude": [
     "__tests__",
+    "preview",
     "**/*.test.ts",
     "**/*.test.tsx"
   ]

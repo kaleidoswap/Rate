@@ -16,11 +16,14 @@ export interface SpeakOptions {
   language?: string; // BCP-47, e.g. 'en-US'. Default 'en-US'.
   rate?: number; // expo-speech rate (1.0 = normal).
   pitch?: number;
+  onStart?: () => void;
+  onBoundary?: (event: { charIndex: number; charLength: number }) => void;
   onDone?: () => void;
   onStopped?: () => void;
   onError?: (e?: unknown) => void;
 }
 
+let generation = 0;
 let _voicesPromise: Promise<Speech.Voice[]> | null = null;
 const _bestVoiceCache = new Map<string, string | undefined>();
 
@@ -83,9 +86,13 @@ async function bestVoiceId(lang: string): Promise<string | undefined> {
  * if enumeration fails.
  */
 export async function speakBest(text: string, opts: SpeakOptions = {}): Promise<void> {
+  const token = ++generation;
   const language = opts.language ?? 'en-US';
   const voice = await bestVoiceId(language);
+  if (token !== generation) return;
   Speech.speak(text, {
+    onStart: opts.onStart,
+    onBoundary: opts.onBoundary,
     language,
     voice, // undefined → system default
     // A touch slower than 1.0 reads more naturally for assistant replies.
@@ -98,5 +105,6 @@ export async function speakBest(text: string, opts: SpeakOptions = {}): Promise<
 }
 
 export function stopSpeaking(): void {
+  generation++;
   Speech.stop();
 }
