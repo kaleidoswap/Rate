@@ -1,3 +1,4 @@
+import { useAppTheme } from '../theme/ThemeProvider';
 // screens/ProfileEditScreen.tsx
 //
 // The one editor for the user's Nostr profile, opened from the Profile page
@@ -9,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -34,6 +36,7 @@ import NostrService from '../services/NostrService';
 import { BLOSSOM_SERVER, base64ToBytes, serverHost, sniffImageType, uploadToBlossom } from '../utils/blossom';
 import {
   PROFILE_FORM_FIELDS,
+  suggestProfile,
   isHttpUrl,
   profileToForm,
   validateProfileForm,
@@ -49,6 +52,8 @@ interface Props {
 type PhotoField = 'picture' | 'banner';
 
 export default function ProfileEditScreen({ navigation }: Props) {
+  const theme = useAppTheme();
+  const styles = makeStyles(theme);
   const dispatch = useAppDispatch();
   const profile = useAppSelector(s => s.nostr?.profile ?? null);
   const publicKey = useAppSelector(s => s.nostr?.publicKey ?? null);
@@ -157,7 +162,7 @@ export default function ProfileEditScreen({ navigation }: Props) {
     const found = validateProfileForm(form);
     // Photo links only change through the choice sheet, which checks them;
     // an odd link set by another app shouldn't block saving other fields.
-    for (const f of ['picture', 'banner'] as const) if (!changed.includes(f)) delete found[f];
+    for (const f of ['picture', 'banner', 'website'] as const) if (!changed.includes(f)) delete found[f];
     setErrors(found);
     if (Object.keys(found).length > 0) return;
     if (changed.length === 0) {
@@ -242,6 +247,9 @@ export default function ProfileEditScreen({ navigation }: Props) {
             <Callout tone="warning" message="Nostr is offline. We'll reconnect when you save." />
           )}
 
+          <Button title="Surprise me · name & avatar" variant="secondary" disabled={saving || !!uploading} onPress={() => {
+            touched.current = true; setForm(prev => ({ ...prev, ...suggestProfile() }));
+          }} />
           <View style={styles.form}>
             <Input label="Display name" placeholder="Satoshi" value={form.display_name}
               onChangeText={set('display_name')} error={errors.display_name} />
@@ -250,9 +258,12 @@ export default function ProfileEditScreen({ navigation }: Props) {
             <Input label="About" placeholder="A few words about you" value={form.about} multiline numberOfLines={3}
               onChangeText={set('about')} error={errors.about} />
             <View>
-              <Input label="Lightning address" placeholder="you@kaleidoswap.me" value={form.lud16}
+              <Input label="Lightning address" placeholder="you@claimzero.me" value={form.lud16}
                 autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
                 onChangeText={set('lud16')} error={errors.lud16} />
+              {!form.lud16.trim() && <TouchableOpacity style={styles.suggestion} accessibilityRole="link" onPress={() => Linking.openURL('https://claimzero.me').catch(() => ToastService.getInstance().error("Couldn't open ClaimZero"))}>
+                <Text style={styles.suggestionText}>Get a Lightning address on claimzero.me ↗</Text>
+              </TouchableOpacity>}
               {!!walletAddress && walletAddress !== form.lud16.trim() && (
                 <TouchableOpacity onPress={() => set('lud16')(walletAddress)} accessibilityRole="button"
                   style={styles.suggestion}>
@@ -260,17 +271,22 @@ export default function ProfileEditScreen({ navigation }: Props) {
                 </TouchableOpacity>
               )}
             </View>
-            <Input label="Nostr address (NIP-05)" placeholder="you@example.com" value={form.nip05}
+            <Input label="Nostr address (NIP-05)" placeholder="you@claimzero.me" value={form.nip05}
               autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
               onChangeText={set('nip05')} error={errors.nip05} />
-            <Input label="Website" placeholder="https://" value={form.website} autoCapitalize="none"
-              autoCorrect={false} keyboardType="url" onChangeText={set('website')} error={errors.website} />
+            {!!form.lud16.trim().match(/^[^@]+@claimzero\.me$/i) && form.nip05 !== form.lud16 && <TouchableOpacity accessibilityRole="button" onPress={() => set('nip05')(form.lud16.trim())}>
+              <Text style={styles.suggestionText}>Use my ClaimZero address for NIP-05</Text>
+            </TouchableOpacity>}
+            <Text style={styles.hint}>Use NIP-05 after enabling it with your address provider.</Text>
           </View>
 
           <Text style={styles.hint}>Your profile is public on Nostr and updates in every Nostr app.</Text>
+
+        </ScrollView>
+        <View style={{ padding: theme.spacing[4], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light }}>
           <Button title={saving ? 'Saving…' : 'Save'} onPress={save} loading={saving}
             disabled={saving || !!uploading || changed.length === 0} />
-        </ScrollView>
+        </View>
       </KeyboardAvoidingView>
       <PhotoChoiceSheet
         visible={!!choosing}
@@ -288,13 +304,13 @@ export default function ProfileEditScreen({ navigation }: Props) {
 
 const AVATAR = 80;
 
-const styles = StyleSheet.create({
+const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background.secondary },
   flex: { flex: 1 },
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10], gap: theme.spacing[4] },
   preview: { marginBottom: AVATAR / 2 - theme.spacing[2] },
   banner: {
-    height: 110,
+    height: 64,
     borderRadius: theme.borderRadius.xl,
     overflow: 'hidden',
     backgroundColor: theme.colors.surface.primary,

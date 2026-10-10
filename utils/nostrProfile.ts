@@ -161,3 +161,15 @@ export function nostrIdentity(data: string): string | null {
   const match = NOSTR_ID.exec(data.trim());
   return match ? match[1].toLowerCase() : null;
 }
+
+/** Local draft only: claiming an address and publishing remain separate actions. */
+export function suggestProfile(seed = Math.random().toString(36).slice(2, 10)): Pick<ProfileForm, 'name' | 'display_name' | 'picture' | 'banner'> {
+  const adjectives = ['Cosmic', 'Sunny', 'Velvet', 'Lunar', 'Electric', 'Amber'];
+  const animals = ['Fox', 'Otter', 'Panda', 'Lynx', 'Koala', 'Owl'];
+  const n = Array.from(seed).reduce((a, c) => a * 31 + c.charCodeAt(0) >>> 0, 7);
+  const label = `${adjectives[n % adjectives.length]} ${animals[Math.floor(n / 7) % animals.length]}`;
+  const name = `${label.toLowerCase().replace(/ /g, '-')}-${seed.slice(0, 4)}`;
+  return { name, display_name: label,
+    picture: `https://robohash.org/${encodeURIComponent(name)}.png?set=set4&size=256x256`,
+    banner: `https://robohash.org/${encodeURIComponent(name)}.png?set=set4&bgset=bg2&size=600x600` };
+}

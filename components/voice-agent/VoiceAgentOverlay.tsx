@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
   Clipboard,
   Linking,
   Modal,
@@ -11,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { speak as qvacSpeak, stopSpeak } from '../../services/qvacTts';
+import { speak as qvacSpeak, stopSpeak as stopNativeSpeech } from '../../services/qvacTts';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -25,8 +26,10 @@ import Animated, {
 import { useSelector } from 'react-redux';
 import { theme } from '../../theme';
 import Markdown from 'react-native-markdown-display';
-import { MindCharacter, MindCharacterBadge } from '../mind/MindCharacter';
+import { MindCharacterBadge } from '../mind/MindCharacter';
 import { voiceMood, toolResultFlash, MIND_FLASH_MS, type MindFlash } from '../mind/mindMood';
+import { PrismoAnimatedCharacter, type PrismoAnimationRef } from '../mind/PrismoAnimatedCharacter';
+import { useAppSelector } from '../../store/hooks';
 import { PayableCard } from '../chat/PayableCard';
 import FunctionResultCard from '../chat/FunctionResultCard';
 import { findPayable, stripPayable } from '../../utils/decodeInvoice';
@@ -35,7 +38,7 @@ import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
 import { getModelById } from '../../services/qvacModels';
 import { startHandsFreeVoice, type HandsFreeController } from '../../services/handsFreeVoice';
-import { selectMindConfig } from '../../store/slices/settingsSlice';
+import { selectMindConfig, selectAiEnabled } from '../../store/slices/settingsSlice';
 import { useAiConfirm } from '../../hooks/useAiConfirm';
 import PaymentConfirmationModal from '../PaymentConfirmationModal';
 
@@ -139,6 +142,7 @@ export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, o
 
 const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
   const qvac = useQVAC();
+  const aiEnabled = useAppSelector(selectAiEnabled);
   // Same KaleidoMind funnel AND settings as the chat screen — fast-path,
   // recipes, contract wallet tools, memory + on-device RAG, confirm gate,
   // persona/sampling/toggles. Settings are read per turn through the ref.
@@ -154,6 +158,17 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   const scrollRef = useRef<ScrollView>(null);
 
   const [phase, setPhase] = useState<Phase>('idle');
+  const characterRef = useRef<PrismoAnimationRef>(null);
+  const speechLanguage = useAppSelector(state => state.settings.language) || 'en';
+  const pendingSpeech = useRef<(() => void) | null>(null);
+  const onSpeechLevel = useCallback((level: number) => characterRef.current?.setLevel(level), []);
+  const stopSpeak = useCallback(async () => {
+    onSpeechLevel(0);
+    const pending = pendingSpeech.current; pendingSpeech.current = null;
+    await stopNativeSpeech();
+    pending?.();
+  }, [onSpeechLevel]);
+
   const [bubbles, setBubbles] = useState<Bubble[]>([]);
   const [error, setError] = useState<string | null>(null);
   // Which assistant bubbles have their reasoning expanded (tap to reveal). A
@@ -185,7 +200,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       if (hf) {
         hf.setPaused(true);
         void stopSpeak();
-        void qvacSpeak(readback.spoken, {});
+        void qvacSpeak(readback.spoken, { language: speechLanguage, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
       }
     },
     onClose: () => handsFreeRef.current?.setPaused(false),
@@ -202,6 +217,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // overlay closes — otherwise the model keeps "thinking" in the background and
   // speaks its answer minutes later, anywhere in the app.
   const requestIdRef = useRef<string | null>(null);
+  const turnEpoch = useRef(0);
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -276,11 +292,12 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // first time") because the recording session was cold (and the mic-permission
   // prompt raced with auto-listen).
   useEffect(() => {
+    if (!aiEnabled) return;
     void qvac.service?.initializeWhisper?.().catch(() => {});
     void voiceRef.current?.warmup?.();
   }, []);
 
-  // Press-and-hold entry: begin listening only once BOTH the chat model and
+  // Voice entry: begin the hands-free conversation only once BOTH the chat model and
   // Whisper are ready. Starting the native recorder while Whisper was still
   // cold made the UI say "Listening" even though the first utterance could not
   // be consumed reliably.
@@ -290,7 +307,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       autoStartedRef.current = true;
       void stopSpeak();
       setError(null);
-      voiceRef.current?.startListening();
+      void startHandsFree();
     }
   }, [autoListen, qvac.isReady, qvac.isWhisperReady, phase]);
 
@@ -318,6 +335,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
   const runTurn = useCallback(
     async (userText: string) => {
+      const epoch = ++turnEpoch.current;
       setError(null);
       appendBubble('user', userText);
       const priorHistory = bubbles.map((b) => ({ role: b.role, content: b.text }));
@@ -346,7 +364,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         requestIdRef.current = null;
         confirmGate.reset();
         // If the overlay closed mid-turn, don't patch/speak a stale answer.
-        if (!aliveRef.current) return;
+        if (!aliveRef.current || epoch !== turnEpoch.current) return;
         // Merchant results → structured card + short spoken summary (no reading
         // the raw list aloud); everything else speaks the model's reply.
         const merchant = merchantCardFrom(res);
@@ -365,6 +383,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         setPhase('speaking');
         void stopSpeak();
         void qvacSpeak(finalText, {
+          language: speechLanguage, onLevel: onSpeechLevel,
           onDone: resumeListening,
           onError: () => setPhase('idle'),
         });
@@ -378,7 +397,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         setPhase('idle');
       }
     },
-    [bubbles, agent, resumeListening]
+    [bubbles, agent, resumeListening, speechLanguage, onSpeechLevel]
   );
 
   // VoiceInput callbacks
@@ -422,13 +441,16 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // re-gate + cooldown timing stays correct.
   const speakHandsFree = (text: string): Promise<void> =>
     new Promise((resolve) => {
-      void stopSpeak();
-      void qvacSpeak(text, { onDone: () => resolve(), onError: () => resolve() });
+      if (!aliveRef.current || AppState.currentState !== 'active' || !text.trim()) { resolve(); return; }
+      pendingSpeech.current = resolve;
+      const finish = () => { if (pendingSpeech.current === resolve) pendingSpeech.current = null; resolve(); };
+      void qvacSpeak(text, { language: speechLanguage, onLevel: onSpeechLevel, onDone: finish, onError: finish });
     });
 
   // Run one turn for a transcribed utterance and return the reply text — same
   // agent/settings/confirm-gate as chat + push-to-talk, streamed into a bubble.
   const respondHandsFree = async (transcript: string): Promise<string> => {
+    const epoch = ++turnEpoch.current;
     appendBubble('user', transcript);
     const priorHistory = bubblesRef.current.map((b) => ({ role: b.role, content: b.text }));
     const assistantId = appendBubble('assistant', '');
@@ -452,7 +474,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         ...turnToolHooks(),
       });
       requestIdRef.current = null;
-      if (!aliveRef.current) return '';
+      if (!aliveRef.current || epoch !== turnEpoch.current) return '';
       const merchant = merchantCardFrom(res);
       const finalText = merchant
         ? merchant.spoken
@@ -470,6 +492,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   };
 
   const stopHandsFree = () => {
+    void stopSpeak();
     handsFreeRef.current?.stop();
     handsFreeRef.current = null;
     setHandsFree(false);
@@ -483,7 +506,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     void stopSpeak();
     voiceRef.current?.stopListening?.(); // never run both mic paths at once
     try {
-      handsFreeRef.current = await startHandsFreeVoice({
+      const controller = await startHandsFreeVoice({
         respond: respondHandsFree,
         speak: speakHandsFree,
         onState: (s) => setPhase(s),
@@ -492,7 +515,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           stopHandsFree();
         },
       });
+      if (!aliveRef.current) { controller.stop(); return; }
+      handsFreeRef.current = controller;
     } catch (e) {
+      if (!aliveRef.current) return;
       setError(e instanceof Error ? e.message : 'Could not start hands-free voice.');
       setHandsFree(false);
       setPhase('idle');
@@ -508,6 +534,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // loop, settling Prismo to idle without closing the overlay. Tap Prismo to
   // resume talking.
   const pauseVoice = () => {
+    turnEpoch.current++;
+    if (requestIdRef.current) void qvac.service?.cancelRequest?.(requestIdRef.current).catch(() => {});
     Haptics.selectionAsync().catch(() => {});
     void stopSpeak();
     // Cancel (discard) the mic clip rather than stop — a paused utterance must
@@ -516,6 +544,20 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     if (handsFree) stopHandsFree();
     setPhase('idle');
   };
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', state => {
+      if (state !== 'active') {
+        turnEpoch.current++;
+        void stopSpeak();
+        voiceRef.current?.cancelListening?.();
+        handsFreeRef.current?.stop(); handsFreeRef.current = null;
+        setHandsFree(false); setPhase('idle');
+        if (requestIdRef.current) void qvac.service?.cancelRequest?.(requestIdRef.current).catch(() => {});
+      }
+    });
+    return () => sub.remove();
+  }, [stopSpeak, qvac.service]);
 
   // Copy the whole voice conversation (each turn's reasoning + answer) for debug.
   const copyFullChat = () => {
@@ -551,8 +593,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // are available. QVACService now coalesces concurrent Whisper initialization,
   // so this cannot get stranded behind a load that another caller started.
   const voiceReady = qvac.isReady && qvac.isWhisperReady;
-  const modelLoading = !aiFailed && !speechFailed && !voiceReady;
-  const statusText = aiFailed
+  const modelLoading = aiEnabled && !aiFailed && !speechFailed && !voiceReady;
+  const statusText = phase === 'speaking' ? 'Prismo sta parlando…' : !aiEnabled ? 'Agent non attivo · prova della sola voce' : aiFailed
     ? `On-device AI unavailable — ${qvac.error || 'the model could not be loaded'}`
     : !qvac.isReady
     ? qvac.isDownloading
@@ -570,9 +612,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         ? 'Listening… tap to send'
         : phase === 'thinking'
           ? 'Thinking…'
-          : phase === 'speaking'
-            ? 'Speaking… tap to interrupt'
-            : 'Tap Prismo and speak';
+          : 'Tap Prismo and speak';
 
   const mood = voiceMood({
     phase,
@@ -594,7 +634,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             <View style={styles.headerTitleRow}>
               <MindCharacterBadge size={28} mood={mood === 'sleeping' ? 'sleeping' : 'idle'} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.headerTitle}>KaleidoMind</Text>
+                <Text style={styles.headerTitle}>Prismo · voice</Text>
                 <Text style={styles.headerSubtitle} numberOfLines={1}>{modelSubtitle}</Text>
               </View>
             </View>
@@ -604,7 +644,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                   <Ionicons name="copy-outline" size={18} color={theme.colors.text.secondary} />
                 </Pressable>
               )}
-              <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn}>
+              <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Back to chat">
                 <Ionicons name="close" size={20} color={theme.colors.text.secondary} />
               </Pressable>
             </View>
@@ -727,10 +767,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           {/* Prismo (push-to-talk) */}
           <View style={styles.orbArea}>
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
-            <MindCharacter
-              mood={mood}
-              size={112}
-              level={phase === 'listening' ? micLevel : undefined}
+            <PrismoAnimatedCharacter
+              ref={characterRef}
+              phase={phase}
+              size={208}
               accessibilityLabel={`Prismo, ${statusText}`}
               onPress={voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
             />
@@ -744,6 +784,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               </View>
             ) : null}
           </View>
+          {__DEV__ && !voiceReady && <Pressable accessibilityRole="button" accessibilityLabel="Prova voce italiana" style={styles.pauseBtn} onPress={() => {
+            const text = 'Ciao! Sono Prismo. Questa è una prova della voce italiana. Quando parlo, la mia bocca segue le parole. Ogni pagamento richiede sempre la tua conferma.';
+            appendBubble('assistant', text);
+            void qvacSpeak(text, { language: 'it-IT', onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
+          }}><Text style={styles.pauseBtnText}>Prova voce italiana · sviluppo</Text></Pressable>}
           {/* Loading progress bar while the on-device model downloads/loads. */}
           {modelLoading && (
             <View style={styles.loadTrack}>
@@ -865,7 +910,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: theme.colors.surface.secondary,
   },
-  convo: { flex: 1, minHeight: 240, marginTop: 8 },
+  convo: { flex: 1, minHeight: 80, marginTop: 8 },
   hint: { color: theme.colors.text.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', paddingHorizontal: 12 },
   bubble: { maxWidth: '85%', paddingVertical: 9, paddingHorizontal: 13, borderRadius: 16 },
   bubbleUser: { alignSelf: 'flex-end', backgroundColor: theme.colors.primary[500], borderBottomRightRadius: 5 },
@@ -898,7 +943,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 40,
   },
   loadFill: { height: '100%', borderRadius: 2, backgroundColor: theme.colors.primary[500] },
-  orbArea: { alignItems: 'center', justifyContent: 'center', height: 130, marginTop: 8 },
+  orbArea: { alignItems: 'center', justifyContent: 'center', height: 208, marginTop: 8 },
   orbRing: { position: 'absolute', width: 92, height: 92, borderRadius: 46 },
   orbChip: {
     position: 'absolute',

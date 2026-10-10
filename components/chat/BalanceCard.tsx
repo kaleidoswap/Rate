@@ -2,7 +2,6 @@ import { AllocationBar } from '../AllocationBar';
 import React, { useState } from 'react';
 import { Modal, View, Text, Pressable, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import type { Theme } from '../../theme';
 import { RgbNodeIcon } from '../ProtocolIcons';
@@ -38,29 +37,27 @@ export const BalanceCard: React.FC<{ data: BalanceData }> = ({ data }) => {
   return (
     <>
       <Pressable onPress={() => setOpen(true)} style={({ pressed }) => [s.card, pressed && s.pressed]} accessibilityRole="button" accessibilityLabel="Open balance details">
-        <LinearGradient colors={gradient(theme)} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={s.gradient}>
+        <View style={s.summary}>
           <View style={s.headRow}>
             <Text style={s.capLabel}>Total balance</Text>
-            <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.7)" />
+            <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
           </View>
           <Text style={s.total}>{data.total_sats.toLocaleString()} sats</Text>
           {usd > 0 && <Text style={s.usd}>≈ ${usd.toFixed(2)}</Text>}
-        </LinearGradient>
-        <View style={s.layers}>
-          <AllocationBar items={data.layers.map(l => ({ label: meta(theme, l.layer).label, value: l.btc_sats, color: meta(theme, l.layer).color }))} />
-          {data.layers.map((l) => {
-            const m = meta(theme, l.layer);
-            return (
-              <View key={l.layer} style={s.layerRow}>
+          <View style={s.layers}>
+            {data.layers.slice(0, 2).map((l) => {
+              const m = meta(theme, l.layer);
+              return <View key={l.layer} style={s.layerRow}>
                 <View style={[s.dot, { backgroundColor: m.color }]} />
                 <Text style={s.layerName}>{m.label}</Text>
                 <Text style={s.layerSats}>{l.btc_sats.toLocaleString()} sats</Text>
-              </View>
-            );
-          })}
+              </View>;
+            })}
+            {data.layers.length > 2 && <Text style={s.usd}>+{data.layers.length - 2} more · View details</Text>}
+          </View>
         </View>
       </Pressable>
-      <BalanceDetailModal visible={open} data={data} onClose={() => setOpen(false)} />
+      {open && <BalanceDetailModal visible data={data} onClose={() => setOpen(false)} />}
     </>
   );
 };
@@ -74,13 +71,14 @@ const BalanceDetailModal: React.FC<{ visible: boolean; data: BalanceData; onClos
       <Pressable style={s.backdrop} onPress={onClose}>
         <Pressable style={s.sheet} onPress={() => {}}>
           <View style={s.handle} />
-          <Pressable style={s.close} onPress={onClose} hitSlop={10}>
+          <Pressable style={s.close} onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close balance details">
             <Ionicons name="close" size={22} color={tx(theme, 'secondary')} />
           </Pressable>
           <Text style={s.sheetTitle}>Balance</Text>
           <Text style={s.sheetTotal}>{data.total_sats.toLocaleString()} sats</Text>
           {usd > 0 && <Text style={s.sheetUsd}>≈ ${usd.toFixed(2)}{data.priceUsd ? ` · BTC $${Math.round(data.priceUsd).toLocaleString()}` : ''}</Text>}
           <ScrollView style={{ alignSelf: 'stretch', marginTop: 16 }}>
+            <AllocationBar items={data.layers.map(l => ({ label: meta(theme, l.layer).label, value: l.btc_sats, color: meta(theme, l.layer).color }))} />
             {data.layers.map((l) => {
               const m = meta(theme, l.layer);
               const assets = (l.assets ?? []).filter((a) => a?.ticker && assetAmt(a) > 0);
@@ -114,24 +112,22 @@ const BalanceDetailModal: React.FC<{ visible: boolean; data: BalanceData; onClos
 };
 
 const tx = (t: Theme, k: 'primary' | 'secondary' | 'tertiary') => (t as any)?.colors?.text?.[k] ?? (k === 'primary' ? '#fff' : '#9aa0a6');
-const gradient = (t: Theme): [string, string] => (t as any)?.colors?.primary?.gradient ?? ['#7c5cff', '#5b8cff'];
 
 const makeStyles = (t: Theme) => {
   const c = (t as any)?.colors ?? {};
   return StyleSheet.create({
-    card: { marginTop: t.spacing[2], borderRadius: t.borderRadius.lg, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: c?.border?.subtle ?? c?.border?.medium },
-    pressed: { opacity: 0.9, transform: [{ scale: 0.99 }] },
-    gradient: { padding: t.spacing[3.5] },
-    headRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    // White-on-green-gradient header: these literal whites are intentional — text/icons sit on the brand-green fill, where text.inverse (dark navy) would be unreadable.
-    capLabel: { color: 'rgba(255,255,255,0.8)', fontSize: t.typography.fontSize.xs, fontWeight: t.typography.fontWeight.semibold, letterSpacing: 0.3 },
-    total: { color: '#fff', fontSize: t.typography.fontSize['2xl'], fontWeight: t.typography.fontWeight.extrabold, marginTop: t.spacing[1] },
-    usd: { color: 'rgba(255,255,255,0.85)', fontSize: t.typography.fontSize.sm, marginTop: 2 },
-    layers: { backgroundColor: c?.surface?.elevated, paddingHorizontal: t.spacing[3.5], paddingVertical: t.spacing[2] },
-    layerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 5 },
+    card: { borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: t.colors.border.light, backgroundColor: t.colors.surface.primary, minWidth: 220 },
+    pressed: { opacity: 0.9 },
+    summary: { padding: 14 },
+    headRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+    capLabel: { color: tx(t, 'secondary'), fontSize: 12, fontWeight: '500' },
+    total: { color: tx(t, 'primary'), fontSize: 26, fontWeight: '700', marginTop: 4 },
+    usd: { color: tx(t, 'secondary'), fontSize: 12, marginTop: 4 },
+    layers: { marginTop: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: t.colors.border.light, paddingTop: 6 },
+    layerRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 3 },
     dot: { width: 8, height: 8, borderRadius: t.borderRadius.full, marginRight: t.spacing[2] },
-    layerName: { color: tx(t, 'secondary'), fontSize: t.typography.fontSize.sm, flex: 1 },
-    layerSats: { color: tx(t, 'primary'), fontSize: t.typography.fontSize.sm, fontWeight: t.typography.fontWeight.semibold },
+    layerName: { color: tx(t, 'secondary'), fontSize: 12, flex: 1, marginRight: 8 },
+    layerSats: { color: tx(t, 'primary'), fontSize: 12, fontWeight: t.typography.fontWeight.semibold },
     // modal
     backdrop: { flex: 1, backgroundColor: c?.background?.backdrop ?? 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
     sheet: { backgroundColor: c?.background?.primary, borderTopLeftRadius: t.borderRadius.xl, borderTopRightRadius: t.borderRadius.xl, paddingHorizontal: t.spacing[5], paddingTop: t.spacing[3], paddingBottom: t.spacing[8], alignItems: 'center', maxHeight: '80%' },

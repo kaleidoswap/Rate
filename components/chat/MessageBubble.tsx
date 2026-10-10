@@ -2,7 +2,6 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import Markdown from 'react-native-markdown-display';
 import { ChatBubble } from '@kaleidorg/kaleido-ui/native';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -104,19 +103,17 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const mdStyles = useMemo(() => makeMarkdownStyles(theme), [theme]);
 
   const [showThinking, setShowThinking] = useState(false);
+  const [showStats, setShowStats] = useState(false);
 
   const isUser = message.isUser;
   const hasThinking = !isUser && !!message.thinking?.trim();
   // Detect a Lightning invoice / address / RGB invoice in an AI reply → render a card.
   const payable = useMemo(() => (!isUser && !message.streaming ? findPayable(message.text) : null), [isUser, message.streaming, message.text]);
 
-  const avatar = isUser ? (
-    <LinearGradient colors={theme.colors.warning.gradient!} style={styles.avatar}>
-      <Ionicons name="person" size={16} color="#fff" />
-    </LinearGradient>
-  ) : (
+  const balanceCard = !isUser && message.card?.type === 'balance';
+  const avatar = isUser ? undefined : (
     <View style={styles.avatar}>
-      <MindCharacter mood={characterMood} size={32} animated={animateCharacter} />
+      <MindCharacter mood={characterMood} size={28} animated={animateCharacter} />
     </View>
   );
 
@@ -124,7 +121,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     <ChatBubble
       role={isUser ? 'user' : 'assistant'}
       avatar={avatar}
-      time={formatTime(message.timestamp)}
+      time={isUser ? formatTime(message.timestamp) : undefined}
+      maxWidth={isUser ? '85%' : '88%'}
+      style={balanceCard ? styles.cardShell : styles.bubble}
       onLongPress={() => onLongPress(message)}
     >
       {isUser ? (
@@ -176,13 +175,20 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               onSelectContact={onSelectContact}
             />
           ) : null}
-          {!message.streaming && message.stats && (
+          {!message.streaming && showStats && message.stats && (
             <StatsFooter stats={message.stats} styles={styles} theme={theme} />
           )}
           {/* Discoverable copy on a settled assistant reply — copies the answer
               plus its reasoning when present (long-press the bubble also works). */}
           {!message.streaming && !!message.text?.trim() && (
             <View style={styles.copyRow}>
+              <Text style={styles.messageTime}>{formatTime(message.timestamp)}</Text>
+              {!!message.stats && <TouchableOpacity style={styles.copyBtn} hitSlop={8}
+                accessibilityRole="button" accessibilityLabel="Response details" accessibilityState={{ expanded: showStats }}
+                onPress={() => setShowStats(v => !v)}>
+                <Ionicons name="information-circle-outline" size={14} color={theme.colors.text.tertiary} />
+                <Text style={styles.copyBtnText}>Details</Text>
+              </TouchableOpacity>}
               <TouchableOpacity
                 onPress={() => onCopy(buildCopyText(message), 'Message')}
                 style={styles.copyBtn}
@@ -214,6 +220,7 @@ const makeMarkdownStyles = (theme: Theme) => ({
     fontSize: theme.typography.fontSize.base,
     lineHeight: leading(theme.typography.fontSize.base, theme.typography.lineHeight.normal),
   },
+  paragraph: { marginTop: 2, marginBottom: 4 },
   code_inline: {
     backgroundColor: theme.colors.surface.secondary,
     color: theme.colors.primary[400] ?? theme.colors.primary[500],
@@ -233,13 +240,16 @@ const makeMarkdownStyles = (theme: Theme) => ({
 
 const makeStyles = (theme: Theme) =>
   StyleSheet.create({
+    bubble: { padding: 12, borderRadius: 18 },
+    cardShell: { padding: 0, borderRadius: 0, backgroundColor: 'transparent', shadowOpacity: 0, elevation: 0 },
+    messageTime: { color: theme.colors.text.secondary, fontSize: 11, marginRight: 'auto' },
     avatar: {
-      width: 32,
-      height: 32,
+      width: 28,
+      height: 28,
       borderRadius: theme.borderRadius.full,
       justifyContent: 'center',
       alignItems: 'center',
-      marginHorizontal: theme.spacing[3],
+      marginRight: 8,
       marginBottom: theme.spacing[1],
     },
     userText: {
@@ -281,15 +291,15 @@ const makeStyles = (theme: Theme) =>
     },
     statChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     statText: { fontSize: 11, color: theme.colors.text.tertiary, fontWeight: theme.typography.fontWeight.medium },
-    copyRow: { flexDirection: 'row', marginTop: theme.spacing[1.5] ?? 6 },
+    copyRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
     copyBtn: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 4,
-      paddingVertical: 3,
+      minHeight: 36,
+      paddingVertical: 6,
       paddingHorizontal: 8,
       borderRadius: theme.borderRadius.full ?? 999,
-      backgroundColor: theme.colors.surface.secondary,
     },
     copyBtnText: { fontSize: 11, color: theme.colors.text.tertiary, fontWeight: theme.typography.fontWeight.medium },
   });

@@ -18,6 +18,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 import { CopyButton } from './CopyButton';
+import { PaymentSummary, isPaymentCostRow } from './payments/PaymentSummary';
 import { haptic } from '../utils/haptics';
 import SecurityService from '../services/SecurityService';
 import { authorizeSpend } from '../services/spendAuth';
@@ -192,22 +193,27 @@ function SheetBody({
       ? `≈ $${((readback.amountSats / 1e8) * (priceUsd as number)).toFixed(2)} USD`
       : undefined;
   const busy = loading || !!busyLabel || authorizing;
+  const isPayment = readback.kind === 'payment';
+  const detailRows = isPayment ? readback.rows.filter(r => !isPaymentCostRow(r) && !(r.label === 'Contact' && r.value === readback.recipientName)) : readback.rows;
 
   return (
     <View style={styles.modal}>
       <View style={styles.handleBar} />
       <View style={styles.headerContent}>
-        <View style={styles.iconCircle}>
-          <Ionicons name={readback.kind === 'swap' ? 'swap-horizontal' : 'shield-checkmark'} size={22} color={theme.colors.primary[500]} />
+        <View style={styles.titleRow}>
+          <Ionicons name={readback.kind === 'swap' ? 'swap-horizontal' : 'shield-checkmark'} size={20} color={theme.colors.primary[500]} />
+          <Text style={styles.title}>{readback.title}</Text>
         </View>
-        <Text style={styles.title}>{readback.title}</Text>
-        {!!readback.amount && <Text style={styles.amount} testID="confirm-amount">{readback.amount}</Text>}
-        {!!fiat && <Text style={styles.amountUsd}>{fiat}</Text>}
-        {!!readback.recipientName && <Text style={styles.recipient}>to {readback.recipientName}</Text>}
+        {!isPayment && <>
+          {!!readback.amount && <Text style={styles.amount} testID="confirm-amount">{readback.amount}</Text>}
+          {!!fiat && <Text style={styles.amountUsd}>{fiat}</Text>}
+          {!!readback.recipientName && <Text style={styles.recipient}>to {readback.recipientName}</Text>}
+        </>}
       </View>
+      {isPayment && <PaymentSummary readback={readback} fiat={fiat} />}
 
-      <ScrollView style={styles.rows} contentContainerStyle={{ gap: theme.spacing[3] }}>
-        {readback.rows.map((r) => {
+      <ScrollView style={styles.rows} contentContainerStyle={{ gap: theme.spacing[2] }}>
+        {detailRows.map((r) => {
           const open = !!expanded[r.label];
           return (
             <View key={r.label} style={styles.detailRow}>
@@ -238,7 +244,7 @@ function SheetBody({
         </View>
       )}
 
-      <View style={styles.notice}>
+      <View style={styles.footnote}>
         <Ionicons name="information-circle" size={16} color={theme.colors.primary[500]} />
         <Text style={styles.noticeText}>
           This can't be undone. Check the details{requireAuth ? '; you will also confirm with biometrics or your PIN' : ''}.
@@ -340,7 +346,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface.primary,
     borderTopLeftRadius: theme.borderRadius.xl,
     borderTopRightRadius: theme.borderRadius.xl,
-    paddingHorizontal: theme.spacing[5],
+    paddingHorizontal: theme.spacing[4],
     paddingTop: theme.spacing[3],
     paddingBottom: 36,
     maxHeight: '90%',
@@ -351,9 +357,11 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.gray[300],
     borderRadius: 2,
     alignSelf: 'center',
-    marginBottom: theme.spacing[4],
+    marginBottom: theme.spacing[3],
   },
-  headerContent: { alignItems: 'center', marginBottom: theme.spacing[4] },
+  headerContent: { alignItems: 'center', marginBottom: theme.spacing[3] },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  footnote: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
   iconCircle: {
     width: 48,
     height: 48,
@@ -412,7 +420,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: 'row', gap: theme.spacing[3] },
   cancelButton: {
     flex: 1,
-    paddingVertical: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
+    minHeight: 48,
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.surface.secondary,
     alignItems: 'center',
@@ -424,7 +433,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: theme.spacing[2],
-    paddingVertical: theme.spacing[4],
+    paddingVertical: theme.spacing[3],
+    minHeight: 48,
     borderRadius: theme.borderRadius.md,
     backgroundColor: theme.colors.primary[600],
     overflow: 'hidden',

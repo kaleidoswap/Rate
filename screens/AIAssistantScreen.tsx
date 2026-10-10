@@ -1,3 +1,5 @@
+import { PrismoAnimatedCharacter } from '../components/mind/PrismoAnimatedCharacter';
+import { VoiceModeIcon } from '../components/mind/VoiceModeIcon';
 import { useAgentPaymentFeedback } from "../components/mind/useAgentPaymentFeedback";
 // screens/AIAssistantScreen.tsx
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -30,16 +32,15 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState } from '../store';
-import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, selectAiOnboarded, setAiOnboarded } from '../store/slices/settingsSlice';
+import { selectAiEnabled, selectAiMode, setAiMode, selectMindConfig, setAiOnboarded } from '../store/slices/settingsSlice';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { Theme } from '../theme';
 import { leading } from '../theme';
-import { MainHeader, MindCharacter, MindCharacterBadge, Badge, Sheet } from '../components';
+import { MainHeader, MindCharacter, MindCharacterBadge } from '../components';
 import { chatMood, toolResultFlash, MIND_FLASH_MS, type MindFlash } from '../components/mind/mindMood';
 import { ChatEmptyState, MessageBubble, TypingDots, buildCopyText } from '../components/chat';
 import type { ChatMessage, ChatMsgStats } from '../components/chat';
 import VoiceInput, { VoiceInputRef } from '../components/VoiceInput';
-import { IntentBar } from '../components/mind/IntentBar';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import QVACSettingsSheet from '../components/QVACSettingsSheet';
@@ -51,7 +52,6 @@ import { chatErrorMessage } from '../services/aiErrors';
 import type { Message as MindMessage, Skill } from '@kaleidorg/mind';
 import { createMindAgent } from '../services/mindAgent';
 import { useAiConfirm } from '../hooks/useAiConfirm';
-import { AgentWalletCard } from '../components/mind/AgentWalletCard';
 import { stepForTool, turnProgressLabel } from '../utils/turnProgress';
 import * as Haptics from 'expo-haptics';
 
@@ -105,11 +105,13 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
   // Collapsible quick actions (hidden by default once a chat is going).
   const [showActions, setShowActions] = useState(false);
+  const [showSkills, setShowSkills] = useState(false);
 
   // Nostr contacts state
   const [showContactsSelector, setShowContactsSelector] = useState(false);
 
   const scrollViewRef = useRef<ScrollView>(null);
+  const followingLatest = useRef(true);
   const voiceInputRef = useRef<VoiceInputRef>(null);
   // Most recent successfully generated invoice — lets "share" act on it.
   const lastInvoiceRef = useRef<{ invoice: string; amount: number; description?: string } | null>(null);
@@ -131,7 +133,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   const btcPriceUSD = useSelector((s: any) => s?.wallet?.btcPriceUSD) || 0;
   const mindConfig = useSelector(selectMindConfig);
   const dispatch = useDispatch();
-  const aiOnboarded = useSelector(selectAiOnboarded);
   const [mindOnboardingOpen, setMindOnboardingOpen] = useState(false);
   const [mindAvailability, setMindAvailability] = useState<MindAvailability | null>(null);
   const [voiceAgentOpen, setVoiceAgentOpen] = useState(false);
@@ -141,14 +142,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     setMindOnboardingOpen(true);
   }, []);
   useFocusEffect(useCallback(() => {
-    let active = true;
-    if (!aiOnboarded) {
-      QVACService.getInstance().getAvailability().catch(() => null).then((availability) => {
-        if (active) { setMindAvailability(availability); setMindOnboardingOpen(true); }
-      });
-    }
-    return () => { active = false; setMindOnboardingOpen(false); setVoiceAgentOpen(false); };
-  }, [aiOnboarded]));
+    return () => { setMindOnboardingOpen(false); setVoiceAgentOpen(false); };
+  }, []));
   const finishMindSetup = () => {
     dispatch(setAiOnboarded(true));
     setMindOnboardingOpen(false);
@@ -186,6 +181,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // Conversation history panel (desktop-parity: current conversation + new/clear).
   const [showHistory, setShowHistory] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
+  const [designPreview, setDesignPreview] = useState(false);
   // Latest turn's real inference stats (tok/s + backend) for the header chip.
   const [lastStats, setLastStats] = useState<ChatMsgStats | null>(null);
 
@@ -263,7 +259,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
 
   const scrollToBottom = useCallback((animated: boolean = true) => {
-    if (!scrollViewRef.current) return;
+    if (!scrollViewRef.current || !followingLatest.current) return;
     requestAnimationFrame(() => {
       scrollViewRef.current?.scrollToEnd({ animated });
     });
@@ -433,7 +429,13 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // ---- Send ----
   const sendMessage = async (text: string) => {
     const raw = (text || inputText).trim();
-    if (!raw) return;
+    if (!raw || isLoading) return;
+    if (!aiEnabled) {
+      setInputText(raw);
+      setShowSettings(true);
+      return;
+    }
+    followingLatest.current = true;
 
     // `/skill-name ...` — pin a skill for this message (Claude-style). A leading
     // slash command matching a skill sets it as the active skill; the rest is the
@@ -670,14 +672,17 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // One-tap "new chat" — clears the conversation and resets per-chat state. No
   // confirm dialog (the desktop/Claude pattern: starting fresh is cheap & common).
   const newChat = useCallback(() => {
+    if (isLoading) return;
+    followingLatest.current = true;
     setMessages([]);
     setLastStats(null);
     setShowHistory(false);
     lastInvoiceRef.current = null;
     Haptics.selectionAsync().catch(() => {});
-  }, []);
+  }, [isLoading]);
 
   const clearChatHistory = () => {
+    if (isLoading) return;
     Alert.alert('Clear chat', 'Clear this conversation? This cannot be undone.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Clear', style: 'destructive', onPress: newChat },
@@ -693,7 +698,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           <View style={styles.modelBannerRow}>
             <Ionicons name="sparkles-outline" size={18} color={theme.colors.primary[600]} />
             <Text style={styles.modelBannerText}>
-              Ask about your wallet or pay by voice. Turn on on-device AI to get started.
+              Choose a local model to start chatting with Prismo.
             </Text>
             <TouchableOpacity
               onPress={openMindSetup}
@@ -769,65 +774,52 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   const QUICK_ACTIONS: {
     icon: keyof typeof Ionicons.glyphMap;
     label: string;
-    gradient: [string, string];
+    description: string;
     onPress: () => void;
   }[] = [
     {
       icon: 'wallet',
       label: 'Balance',
-      gradient: theme.colors.primary.gradient!,
+      description: 'See your available bitcoin',
       onPress: () => sendMessage("What's my balance?"),
     },
     {
       icon: 'receipt',
       label: 'Invoice',
-      gradient: theme.colors.success.gradient!,
-      onPress: () => setInputText('Generate an invoice for 1000 sats'),
+      description: 'Choose an amount to receive',
+      onPress: () => setInputText('Create an invoice for '),
     },
     {
       icon: 'people',
       label: 'Contacts',
-      gradient: [theme.colors.brand.violet, theme.colors.protocol.arkade],
+      description: 'Choose who you want to pay',
       onPress: () => setShowContactsSelector(true),
     },
     {
       icon: 'storefront',
       label: 'Merchants',
-      gradient: theme.colors.warning.gradient!,
+      description: 'Find places that accept bitcoin',
       onPress: () => sendMessage('Find Bitcoin-accepting merchants near me'),
     },
   ];
 
   const renderQuickActions = () => (
     <View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.quickActionsContainer}
-        contentContainerStyle={styles.quickActionsContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        {QUICK_ACTIONS.map((a) => (
-          <TouchableOpacity
-            key={a.label}
-            style={styles.quickActionButton}
-            onPress={() => {
-              setShowActions(false);
-              a.onPress();
-            }}
-            accessibilityRole="button"
-            accessibilityLabel={a.label}
-          >
-            <LinearGradient colors={a.gradient} style={styles.quickActionGradient}>
-              <Ionicons name={a.icon} size={16} color="white" />
-              <Text style={styles.quickActionText}>{a.label}</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      <View style={{ padding: 12, gap: 4 }}>
+        <Text style={{ color: theme.colors.text.secondary, fontSize: 12, marginBottom: 4 }}>Wallet actions</Text>
+        {QUICK_ACTIONS.map(a => <TouchableOpacity key={a.label} accessibilityRole="button" accessibilityLabel={a.label}
+          onPress={() => { setShowActions(false); a.onPress(); }}
+          style={{ minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 }}>
+          <Ionicons name={a.icon} size={21} color={theme.colors.text.secondary} />
+          <View style={{ flex: 1 }}><Text style={{ color: theme.colors.text.primary, fontSize: 15 }}>{a.label}</Text>
+          <Text style={{ color: theme.colors.text.secondary, fontSize: 12, marginTop: 3 }}>{a.description}</Text></View>
+          <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
+        </TouchableOpacity>)}
+        {skills.length > 0 && <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showSkills }} onPress={() => setShowSkills(!showSkills)} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: theme.colors.text.secondary }}>{showSkills ? 'Hide advanced skills' : 'Advanced skills'}</Text></TouchableOpacity>}
+      </View>
 
       {/* Pin a skill for the next message (like a /command). */}
-      {skills.length > 0 && (
+      {showSkills && skills.length > 0 && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -866,40 +858,54 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
   const canSend = !!inputText.trim() && !isListening;
 
+  if (__DEV__ && designPreview) {
+    const Preview = require('../components/mind/PrismoDesignPreview').default;
+    return <Preview onClose={() => setDesignPreview(false)} />;
+  }
   return (
     <View style={styles.container}>
-      <KaleidoMindOnboarding
+      {mindOnboardingOpen && <KaleidoMindOnboarding
         visible={mindOnboardingOpen}
         availability={mindAvailability}
         onSelectLocal={() => { dispatch(setAiMode('local')); finishMindSetup(); }}
         onSkip={() => { finishMindSetup(); }}
-      />
+      />}
       <VoiceAgentOverlay visible={voiceAgentOpen} autoListen={true} onClose={() => setVoiceAgentOpen(false)} />
       <MainHeader
         title="Agent"
-        subtitle={aiEnabled ? headerSubtitle : 'On-device AI · off'}
         iconNode={<MindCharacterBadge size={22} color={theme.colors.text.primary} />}
-        titleBadge={<Badge label="Experimental" color={theme.colors.warning[500]} size="sm" />}
         rightAction={
-          // Two actions you use mid-chat (voice, new chat); the rest live in "More".
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {aiEnabled && (
+            {!isEmpty && (
               <TouchableOpacity style={styles.headerBtn} accessibilityRole="button"
-                accessibilityLabel="Start a voice conversation" onPress={() => setVoiceAgentOpen(true)}>
-                <Ionicons name="mic-outline" size={20} color={theme.colors.text.primary} />
+                onPress={clearChatHistory} disabled={isLoading} accessibilityLabel="Clear chat">
+                <Ionicons name="trash-outline" size={20} color={isLoading ? theme.colors.text.tertiary : theme.colors.text.secondary} />
               </TouchableOpacity>
             )}
-            {aiEnabled && !isEmpty && (
-              <TouchableOpacity style={styles.headerBtn} accessibilityRole="button" onPress={newChat} accessibilityLabel="New chat">
-                <Ionicons name="create-outline" size={20} color={theme.colors.text.primary} />
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity style={styles.headerBtn} accessibilityRole="button" onPress={() => setShowMenu(true)} accessibilityLabel="More">
+            <TouchableOpacity style={styles.headerBtn} accessibilityRole="button" onPress={() => setShowMenu(v => !v)} accessibilityState={{ expanded: showMenu }} accessibilityLabel="More">
               <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.text.primary} />
             </TouchableOpacity>
           </View>
         }
       />
+          {showMenu && <View style={styles.agentMenu}>
+            {([
+              { icon: 'time-outline', label: 'Conversation', onPress: () => setShowHistory(true) },
+              ...(!isEmpty ? [{ icon: 'copy-outline', label: 'Copy this chat', onPress: copyFullChat }] : []),
+              { icon: 'wallet-outline', label: 'Agent wallet', onPress: () => navigation.navigate('AgentWallet') },
+              { icon: 'settings-outline', label: 'Models & settings', onPress: () => setShowSettings(true) },
+              ...(__DEV__ ? [{ icon: 'headset-outline', label: 'Talk · verifica integrazione', onPress: () => setVoiceAgentOpen(true) }, { icon: 'play-circle-outline', label: 'Design preview · demo', onPress: () => setDesignPreview(true) }] : []),
+            ] as { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }[]).map((item) => (
+              <TouchableOpacity key={item.label} style={styles.menuRow} accessibilityRole="button"
+                onPress={() => { setShowMenu(false); item.onPress(); }}>
+                <Ionicons name={item.icon} size={20} color={theme.colors.text.secondary} />
+                <Text style={styles.menuLabel}>{item.label}</Text>
+                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
+              </TouchableOpacity>
+            ))}
+            <Text style={{ color: theme.colors.text.secondary, fontSize: 12, paddingVertical: 12 }}>Agent is experimental. Review important details.</Text>
+          </View>}
+
       <View style={styles.chatContainer}>
         <LinearGradient
           colors={[theme.colors.background.primary, theme.colors.background.primary]}
@@ -921,19 +927,18 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             keyboardVerticalOffset={Platform.OS === 'ios' ? headerOffset : 0}
           >
             <View style={styles.contentInner}>
-              {renderModelStatus()}
+              {(aiEnabled || !isEmpty) && renderModelStatus()}
 
               {isEmpty ? (
                 <>
-                  <IntentBar
-                    style={styles.intentBar}
-                    onReview={(target) => (navigation.getParent?.() ?? navigation).navigate(target.screen, target.params)}
-                  />
-                  {aiEnabled && <AgentWalletCard onPress={() => navigation.navigate('AgentWallet')} />}
                   <ChatEmptyState
+                    needsSetup={!aiEnabled}
+                    onSetup={openMindSetup}
                     onSuggestion={(q) => sendMessage(q)}
                     onContacts={() => setShowContactsSelector(true)}
-                    hero={<MindCharacter mood={mood} size={112} paused={!isFocused} />}
+                    hero={isFocused && !voiceAgentOpen && !showSettings && !mindOnboardingOpen
+                      ? <PrismoAnimatedCharacter phase="idle" size={96} accessibilityLabel="Prismo ti saluta" />
+                      : <MindCharacter mood="idle" size={96} paused />}
                   />
                 </>
               ) : (
@@ -945,7 +950,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                   keyboardShouldPersistTaps="handled"
                   keyboardDismissMode="interactive"
                   scrollEventThrottle={16}
-                  onContentSizeChange={() => scrollToBottom(true)}
+                  onScroll={({ nativeEvent: { contentOffset, contentSize, layoutMeasurement } }) => {
+                    followingLatest.current = contentSize.height - layoutMeasurement.height - contentOffset.y < 100;
+                  }}
+                  onContentSizeChange={() => scrollToBottom(false)}
                 >
                   {messages.map((message) => (
                     <MessageBubble
@@ -976,11 +984,11 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                 </ScrollView>
               )}
 
-              <View style={styles.inputContainer}>
+              {(aiEnabled || !isEmpty) && <View style={styles.inputContainer}>
                 <BlurView intensity={80} tint={theme.dark ? 'dark' : 'light'} style={styles.inputGradient}>
                   <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose model and voice" onPress={() => setShowSettings(true)} style={{flexDirection:'row',alignItems:'center',gap:theme.spacing[2],minHeight:32,paddingBottom:theme.spacing[2]}}>
                     <Ionicons name="hardware-chip-outline" size={14} color={theme.colors.text.secondary}/>
-                    <Text style={{color:theme.colors.text.secondary,fontSize:theme.typography.fontSize.xs,flexShrink:1}} numberOfLines={1}>{headerSubtitle}</Text>
+                    <Text style={{color:theme.colors.text.secondary,fontSize:theme.typography.fontSize.xs,flexShrink:1}} numberOfLines={1}>{aiEnabled ? headerSubtitle : 'Choose a model · AI is off'}</Text>
                     <Ionicons name="chevron-down" size={13} color={theme.colors.text.secondary}/>
                   </TouchableOpacity>
                   {showActions && renderQuickActions()}
@@ -1020,7 +1028,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                           setInputText(text);
                           if (!isListening) setBaseInputText(text);
                         }}
-                        placeholder={isListening ? 'Listening… speak now' : 'Ask Agent…'}
+                        accessibilityLabel="Message Prismo"
+                        placeholder={isListening ? 'Listening… speak now' : 'Ask Prismo…'}
                         placeholderTextColor={theme.colors.text.tertiary}
                         multiline
                         maxLength={500}
@@ -1072,19 +1081,27 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     ) : (
                       <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
                         <TouchableOpacity
-                          style={[styles.roundButton, (!isVoiceAvailable || !qvac.isReady) && styles.disabledButton]}
-                          onPress={startListening}
-                          disabled={!isVoiceAvailable || !qvac.isReady}
-                          accessibilityLabel={isListening ? 'Stop recording' : 'Start voice input'}
+                          style={styles.roundButton}
+                          onPress={() => qvac.isReady ? startListening() : setShowSettings(true)}
+                          accessibilityRole="button"
+                          accessibilityHint="Transcribe speech into your message before sending"
+                          accessibilityLabel={isListening ? 'Stop recording' : 'Dictate message'}
                         >
                           <LinearGradient
-                            colors={isListening ? theme.colors.error.gradient! : theme.colors.primary.gradient!}
+                            colors={isListening ? theme.colors.error.gradient! : [theme.colors.surface.secondary, theme.colors.surface.secondary]}
                             style={styles.buttonGradient}
                           >
-                            <Ionicons name={isListening ? 'stop' : 'mic'} size={20} color={theme.colors.text.inverse} />
+                            <Ionicons name={isListening ? 'stop' : 'mic-outline'} size={20} color={isListening ? theme.colors.text.inverse : theme.colors.text.primary} />
                           </LinearGradient>
                         </TouchableOpacity>
                       </Animated.View>
+                    )}
+                    {!isLoading && !isListening && !canSend && (
+                      <TouchableOpacity style={styles.voiceConversationButton} accessibilityRole="button"
+                        accessibilityLabel="Talk to Prismo" accessibilityHint="Start a voice conversation with spoken replies"
+                        onPress={() => { Keyboard.dismiss(); aiEnabled ? setVoiceAgentOpen(true) : setShowSettings(true); }}>
+                        <VoiceModeIcon color={theme.colors.text.inverse} />
+                      </TouchableOpacity>
                     )}
                   </View>
 
@@ -1108,7 +1125,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     </Animated.View>
                   )}
                 </BlurView>
-              </View>
+              </View>}
             </View>
           </KeyboardAvoidingView>
 
@@ -1131,24 +1148,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             onClose={() => setShowContactsSelector(false)}
           />
 
-          <Sheet visible={showMenu} onClose={() => setShowMenu(false)} title="Agent">
-            {([
-              ...(aiEnabled ? [{ icon: 'time-outline', label: 'Chat history', onPress: () => setShowHistory(true) }] : []),
-              ...(aiEnabled && !isEmpty ? [{ icon: 'copy-outline', label: 'Copy this chat', onPress: copyFullChat }] : []),
-              { icon: 'wallet-outline', label: 'Agent wallet', onPress: () => navigation.navigate('AgentWallet') },
-              { icon: 'settings-outline', label: 'Models & settings', onPress: () => setShowSettings(true) },
-            ] as { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }[]).map((item) => (
-              <TouchableOpacity key={item.label} style={styles.menuRow} accessibilityRole="button"
-                onPress={() => { setShowMenu(false); item.onPress(); }}>
-                <Ionicons name={item.icon} size={20} color={theme.colors.text.secondary} />
-                <Text style={styles.menuLabel}>{item.label}</Text>
-                <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
-              </TouchableOpacity>
-            ))}
-          </Sheet>
-
           {/* AI settings: model selection */}
-          <QVACSettingsSheet
+          {showSettings && <QVACSettingsSheet
             visible={showSettings}
             onClose={() => setShowSettings(false)}
             catalog={qvac.catalog}
@@ -1167,10 +1168,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             ttsOptions={qvac.ttsOptions}
             onSetSttModel={(id) => qvac.setSttModel(id)}
             onSetTtsEngine={(engine) => qvac.setTtsEngine(engine)}
-          />
+          />}
 
           {/* Conversation history — current chat (desktop parity) + new/clear. */}
-          <Modal visible={showHistory} transparent animationType="slide" onRequestClose={() => setShowHistory(false)}>
+          {showHistory && <Modal visible transparent animationType="slide" onRequestClose={() => setShowHistory(false)}>
             <Pressable style={styles.skillsBackdrop} onPress={() => setShowHistory(false)}>
               <Pressable style={styles.skillsSheet} onPress={() => {}}>
                 <View style={styles.skillsHandle} />
@@ -1183,7 +1184,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.historyAction}
-                      onPress={() => { newChat(); }}
+                      onPress={clearChatHistory}
                       accessibilityLabel="Clear conversation"
                       disabled={isEmpty}
                     >
@@ -1210,7 +1211,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                 )}
               </Pressable>
             </Pressable>
-          </Modal>
+          </Modal>}
         </LinearGradient>
       </View>
     </View>
@@ -1221,7 +1222,8 @@ const makeStyles = (theme: Theme) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: theme.colors.background.primary },
     chatContainer: { flex: 1 },
-    intentBar: { marginHorizontal: theme.spacing[4], marginTop: theme.spacing[3] },
+    agentMenu: { paddingHorizontal: theme.spacing[4], backgroundColor: theme.colors.surface.primary, borderBottomWidth: 1, borderColor: theme.colors.border.light },
+    voiceConversationButton: { height: 44, width: 44, justifyContent: 'center', borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.colors.primary[500] },
     background: { flex: 1 },
     skillsBackdrop: { flex: 1, backgroundColor: theme.colors.background.backdrop, justifyContent: 'flex-end' },
     skillsSheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: theme.borderRadius.xl, borderTopRightRadius: theme.borderRadius.xl, padding: theme.spacing[5], paddingBottom: theme.spacing[9] },
@@ -1320,9 +1322,9 @@ const makeStyles = (theme: Theme) =>
     },
     inputRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2] },
     plusButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       justifyContent: 'center',
       alignItems: 'center',
       backgroundColor: theme.colors.surface.primary,
@@ -1344,7 +1346,7 @@ const makeStyles = (theme: Theme) =>
       paddingVertical: theme.spacing[2],
       fontSize: theme.typography.fontSize.base,
       maxHeight: 90,
-      minHeight: 40,
+      minHeight: 44,
       color: theme.colors.text.primary,
       lineHeight: 20,
     },
@@ -1367,7 +1369,7 @@ const makeStyles = (theme: Theme) =>
       fontSize: theme.typography.fontSize.xs,
       color: theme.colors.text.tertiary,
     },
-    roundButton: { width: 40, height: 40, borderRadius: 20, overflow: 'hidden' },
+    roundButton: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden' },
     buttonGradient: { width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
     disabledButton: { opacity: 0.5 },
 
@@ -1433,15 +1435,17 @@ const makeStyles = (theme: Theme) =>
     modelBannerText: {
       flex: 1,
       fontSize: theme.typography.fontSize.sm,
-      color: theme.colors.primary[700] ?? theme.colors.primary[600],
+      color: theme.colors.text.secondary,
       fontWeight: '600',
     },
     modelBannerTextError: { color: theme.colors.error[700] ?? theme.colors.error[600] },
     modelRetry: {
       paddingVertical: theme.spacing[1],
       paddingHorizontal: theme.spacing[3],
-      backgroundColor: theme.colors.error[600],
-      borderRadius: theme.borderRadius.sm,
+      backgroundColor: theme.colors.primary[500],
+      borderRadius: theme.borderRadius.md,
+      minHeight: 44,
+      justifyContent: 'center',
     },
     modelRetryGhost: {
       backgroundColor: 'transparent',

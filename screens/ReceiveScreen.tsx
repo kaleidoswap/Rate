@@ -1,3 +1,4 @@
+import { BridgeEntryCard } from '../components/receive/BridgeEntryCard';
 import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnectionNotice';
 import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
@@ -1905,6 +1906,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
           <Text style={styles.optionsCaption}>Asset</Text>
           {renderAssetTabs()}
           {renderRgbEntry()}
+          <BridgeEntryCard onPress={() => afterOptions(() => { cancelReceiveWork(); navigation.navigate('Bridge'); })} />
           <Text style={styles.optionsCaption}>How they pay</Text>
           <ReceiveRoutePicker
             methods={receiveMethodIds}

@@ -67,3 +67,22 @@ describe('PaymentConfirmationModal', () => {
     expect(view.queryByTestId('hold-to-confirm')).toBeNull();
   });
 });
+
+it('keeps payment amount, recipient and fee visible without duplicating the fee', () => {
+  const view = render(<PaymentConfirmationModal inline visible readback={{
+    kind: 'payment', title: 'Confirm payment', cta: 'Send', amount: '1,000 sats', recipientName: 'Alice', spoken: '',
+    rows: [{ label: 'Contact', value: 'Alice' }, { label: 'Fee', value: 'Up to 3 sats' }, { label: 'Network', value: 'Spark' }],
+  }} onConfirm={jest.fn()} onCancel={jest.fn()} />);
+  expect(view.getByText('1,000 sats')).toBeTruthy();
+  expect(view.getAllByText('Alice')).toHaveLength(1);
+  expect(view.getAllByText('Up to 3 sats')).toHaveLength(1);
+  expect(view.getByText('Spark')).toBeTruthy();
+});
+it('does not imply a free payment when legacy callers have no fee', () => {
+  const view = render(<PaymentConfirmationModal inline visible paymentDetails={{
+    type: 'lightning_address', recipient: 'alice@example.com', amount: 1000,
+  }} onConfirm={jest.fn()} onCancel={jest.fn()} />);
+  expect(view.getByText('Fee')).toBeTruthy();
+  expect(view.getByText('Not available yet')).toBeTruthy();
+  expect(view.queryByText('0 sats')).toBeNull();
+});

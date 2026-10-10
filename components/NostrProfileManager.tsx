@@ -17,6 +17,7 @@ import * as SecureStore from 'expo-secure-store';
 import { RootState } from '../store';
 import {
   initializeNostr,
+  restoreNostrConnection,
   loadNostrProfile,
   setKeys,
   clearKeys,
@@ -76,6 +77,12 @@ export default function NostrProfileManager({ navigation }: Props) {
 
   const relays = React.useMemo(() => withDefaultRelay(savedRelays), [savedRelays]);
   const [relaysExpanded, setRelaysExpanded] = useState(false);
+
+  useEffect(() => {
+    if (isConnected && !NostrService.getInstance().getRelayStatus().length) {
+      dispatch(restoreNostrConnection() as any);
+    }
+  }, [dispatch, isConnected]);
 
   // NostrService exposes no relay connect/disconnect event, so poll the pool
   // while connected; a one-shot read per render went stale between renders.
@@ -329,7 +336,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   const walletLabel = connectedWallet ? (nwcWalletType === 'rln' ? 'RGB Lightning node' : 'Lightning wallet') : null;
 
   const reconnect = async () => {
-    await dispatch(initializeNostr({ privateKey: nostrState.privateKey!, relays }) as any);
+    await dispatch(restoreNostrConnection() as any);
   };
 
   const Row = ({ icon, iconNode, tint, label, detail, onPress, danger, last, right }: {
@@ -378,7 +385,7 @@ export default function NostrProfileManager({ navigation }: Props) {
             <Text style={styles.handle} numberOfLines={1}>@{profile.name}</Text>
           )}
           <View style={styles.statusRow}>
-            <View style={[styles.statusDot, { backgroundColor: isConnected ? theme.colors.success[500] : theme.colors.warning[500] }]} />
+            <View style={[styles.statusDot, { backgroundColor: relaysUp > 0 ? theme.colors.success[500] : theme.colors.warning[500] }]} />
             <Text style={styles.statusText}>
               {relaysUp > 0 ? `Online · ${relaysUp}/${relays.length} relays` : isInitializing ? 'Connecting…' : 'Offline'}
             </Text>
@@ -400,15 +407,14 @@ export default function NostrProfileManager({ navigation }: Props) {
         </View>
       )}
 
-      {isConnected ? (
+      {(
         <View style={styles.identityActions}>
           <Button title="Edit profile" variant="secondary" size="sm" onPress={() => navigation?.navigate('ProfileEdit')} style={styles.flex} />
           <Button title="Share" variant="secondary" size="sm" style={styles.flex}
             onPress={() => { if (npub) Share.share({ message: `Follow me on Nostr: ${npub}`, title: 'My Nostr profile' }); }} />
         </View>
-      ) : (
-        <Button title="Reconnect" onPress={reconnect} loading={isInitializing} size="sm" style={styles.reconnectBtn} />
       )}
+      {relaysUp === 0 && <Button title="Reconnect" onPress={reconnect} loading={isInitializing} size="sm" style={styles.reconnectBtn} />}
     </View>
   );
 

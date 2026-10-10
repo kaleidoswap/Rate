@@ -232,3 +232,12 @@ it('an odd photo link from another app does not block saving other fields', asyn
   fireEvent.changeText(screen.getByLabelText('About'), 'Hi');
   expect(await savedEdits(screen)).toEqual({ about: 'Hi' });
 });
+
+it('offers a draft identity without publishing and hides Website', () => {
+  const screen = render(<ProfileEditScreen navigation={navigation} />);
+  expect(screen.queryByLabelText('Website')).toBeNull();
+  fireEvent.press(screen.getByText('Surprise me · name & avatar'));
+  expect(screen.getByLabelText('Display name').props.value).not.toBe('Satoshi');
+  expect(mockDispatch.mock.calls.some(c => c[0].type === 'update')).toBe(false);
+  expect(screen.getByText('Get a Lightning address on claimzero.me ↗')).toBeTruthy();
+});

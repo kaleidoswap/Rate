@@ -1,10 +1,11 @@
+import { useAppTheme } from '../theme/ThemeProvider';
 // screens/ProfileScreen.tsx
 //
 // The user's Nostr profile as others see it, opened from the Dashboard: banner,
 // photo, names and links, plus a QR of the npub that friends scan to add them.
 // Editing happens one step further, on ProfileEdit.
-import React, { useEffect, useMemo } from 'react';
-import { Image, Linking, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { nip19 } from 'nostr-tools';
 import { theme } from '../theme';
@@ -27,6 +28,9 @@ function npubOf(npub: string | null, publicKey: string | null): string {
 }
 
 export default function ProfileScreen({ navigation }: Props) {
+  const theme = useAppTheme();
+  const styles = makeStyles(theme);
+  const [showCode, setShowCode] = useState(false);
   const dispatch = useAppDispatch();
   const profile = useAppSelector(s => s.nostr?.profile ?? null);
   const publicKey = useAppSelector(s => s.nostr?.publicKey ?? null);
@@ -58,7 +62,6 @@ export default function ProfileScreen({ navigation }: Props) {
   const nip05 = formatNip05(profile?.nip05);
   const about = (profile?.about ?? '').trim();
   const lud16 = (profile?.lud16 ?? '').trim();
-  const website = (profile?.website ?? '').trim();
   const banner = (profile?.banner ?? '').trim();
   const picture = (profile?.picture ?? '').trim();
   const code = `nostr:${npub}`;
@@ -69,7 +72,14 @@ export default function ProfileScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Profile" showBack />
+      <ScreenHeader title="Profile" showBack rightAction={
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Edit profile"
+          onPress={() => navigation.navigate('ProfileEdit')}
+          style={{ minHeight: 44, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Ionicons name="create-outline" size={18} color={theme.colors.primary[500]} />
+          <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Edit</Text>
+        </TouchableOpacity>
+      } />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
           <View style={styles.banner}>
@@ -85,17 +95,17 @@ export default function ProfileScreen({ navigation }: Props) {
           {!!username && username !== name && <Text style={styles.username} numberOfLines={1}>@{username}</Text>}
           {!!nip05 && (
             <View style={styles.inline}>
-              <Ionicons name="checkmark-circle" size={14} color={theme.colors.primary[500]} />
+              <Ionicons name="at-outline" size={14} color={theme.colors.primary[500]} />
               <Text style={styles.meta} numberOfLines={1}>{nip05}</Text>
             </View>
           )}
           {!!about && <Text style={styles.about}>{about}</Text>}
         </View>
 
-        {(!!lud16 || !!website) && (
+        {!!lud16 && (
           <View style={styles.card}>
             {!!lud16 && (
-              <View style={[styles.row, !!website && styles.rowDivider]}>
+              <View style={styles.row}>
                 <Ionicons name="flash" size={16} color={theme.colors.warning[500]} />
                 <View style={styles.rowText}>
                   <Text style={styles.rowLabel}>Lightning address</Text>
@@ -104,31 +114,19 @@ export default function ProfileScreen({ navigation }: Props) {
                 <CopyButton value={lud16} size={16} />
               </View>
             )}
-            {!!website && (
-              <TouchableOpacity
-                style={styles.row}
-                disabled={!isHttpUrl(website)}
-                onPress={() => Linking.openURL(website).catch(() => undefined)}
-                accessibilityRole="link"
-                accessibilityLabel={`Website ${website}`}
-              >
-                <Ionicons name="globe-outline" size={16} color={theme.colors.text.secondary} />
-                <View style={styles.rowText}>
-                  <Text style={styles.rowLabel}>Website</Text>
-                  <Text style={styles.rowValue} numberOfLines={1}>{website.replace(/^https?:\/\//i, '')}</Text>
-                </View>
-                {isHttpUrl(website) && <Ionicons name="open-outline" size={16} color={theme.colors.text.tertiary} />}
-              </TouchableOpacity>
-            )}
+
           </View>
         )}
 
-        <Button title="Edit profile" variant="secondary" onPress={() => navigation.navigate('ProfileEdit')} />
 
         <View style={[styles.card, styles.qrCard]}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Show Nostr QR code" accessibilityState={{ expanded: showCode }} onPress={() => setShowCode(v => !v)} style={styles.qrActions}>
+            <Ionicons name="qr-code-outline" size={20} color={theme.colors.primary[500]} /><Text style={styles.qrTitle}>{showCode ? 'Hide QR code' : 'Show QR code'}</Text>
+          </TouchableOpacity>
+          {showCode && <>
           <Text style={styles.qrTitle}>Your Nostr code</Text>
           <Text style={styles.qrHint}>Friends can scan this to add you</Text>
-          <ReceiveQr value={code} size={QR} label="Nostr code" />
+          <ReceiveQr value={code} size={QR} label="Nostr code" /></>}
           <Text style={styles.npub} numberOfLines={1} selectable>{shortNpub(npub)}</Text>
           <View style={styles.qrActions}>
             <CopyButton value={npub} label="Copy" size={16} color={theme.colors.primary[500]} />
@@ -138,20 +136,21 @@ export default function ProfileScreen({ navigation }: Props) {
             </TouchableOpacity>
           </View>
         </View>
+        <Button title="Nostr & relay connections" variant="ghost" onPress={() => navigation.navigate('NostrSettings')} />
       </ScrollView>
     </View>
   );
 }
 
-const AVATAR = 88;
+const AVATAR = 56;
 const QR = 200;
 
-const styles = StyleSheet.create({
+const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background.secondary },
   content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10], gap: theme.spacing[4] },
   hero: { marginBottom: AVATAR / 2 - theme.spacing[2] },
   banner: {
-    height: 120,
+    height: 56,
     borderRadius: theme.borderRadius.xl,
     overflow: 'hidden',
     backgroundColor: theme.colors.surface.primary,
@@ -201,7 +200,7 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, minWidth: 0 },
   rowLabel: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary },
   rowValue: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, fontWeight: theme.typography.fontWeight.medium },
-  qrCard: { alignItems: 'center', padding: theme.spacing[5], gap: theme.spacing[2] },
+  qrCard: { alignItems: 'center', padding: theme.spacing[3], gap: theme.spacing[2] },
   qrTitle: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.primary },
   qrHint: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, marginBottom: theme.spacing[2] },
   npub: { marginTop: theme.spacing[1], fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },

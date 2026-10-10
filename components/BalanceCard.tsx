@@ -265,6 +265,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                 <View style={styles.breakdownSection}>
                     <View style={styles.breakdownHairline} />
                     {breakdownRows.length > 0 && <Text style={styles.breakdownEyebrow}>Bitcoin</Text>}
+                    <AllocationBar hideAmounts={hideAmounts} items={breakdownRows.filter(row => !testOf(row.key)).map(row => ({ label: row.name, value: row.value, color: row.accent }))} />
                     <View style={styles.breakdownList}>
                         {breakdownRows.map((row) => (
                             <View
@@ -278,7 +279,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                                 <View style={styles.networkTextBlock}>
                                     <Text style={styles.networkName}>{row.name}</Text>
                                     <Text style={styles.networkSubtitle}>
-                                        {testOf(row.key) ? `${row.subtitle} · ${testOf(row.key)} test network` : row.subtitle}
+                                        {testOf(row.key) ? `${testOf(row.key)} · Test network` : row.subtitle}
                                     </Text>
                                 </View>
                                 <View style={styles.networkValueBlock}>
@@ -286,7 +287,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                                         {hideAmounts ? '••••' : `${formatSatoshis(row.value)} ${bitcoinUnit}`}
                                     </AmountText>
                                     <AmountText style={styles.networkValueSats}>
-                                        {hideAmounts ? '••••' : testOf(row.key) ? 'Test network' : `$${formatUSD(row.value)}`}
+                                        {hideAmounts ? '••••' : testOf(row.key) ? 'Test' : `$${formatUSD(row.value)}`}
                                     </AmountText>
                                 </View>
                             </View>

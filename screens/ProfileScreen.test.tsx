@@ -11,7 +11,7 @@ jest.mock('../store/hooks', () => ({
 }));
 jest.mock('../store/slices/nostrSlice', () => ({ loadNostrProfile: jest.fn(() => ({ type: 'load' })) }));
 jest.mock('nostr-tools', () => ({ nip19: { npubEncode: (hex: string) => `npub1${hex}` } }));
-jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: () => null }));
+jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: ({ rightAction }: any) => rightAction ?? null }));
 jest.mock('../components/ProfileAvatar', () => ({ ProfileAvatar: () => null }));
 jest.mock('../components/receive/ReceiveQr', () => {
   const { Text } = require('react-native');
@@ -53,19 +53,20 @@ it('shows a recap of the Nostr profile', () => {
   expect(screen.getByText('alice.example')).toBeTruthy();
   expect(screen.getByText('Bitcoin and coffee')).toBeTruthy();
   expect(screen.getByText('alice@kaleidoswap.me')).toBeTruthy();
-  expect(screen.getByText('alice.example/blog')).toBeTruthy();
+  expect(screen.queryByText('alice.example/blog')).toBeNull();
   expect(mockDispatch).toHaveBeenCalledWith({ type: 'load' });
 });
 
 it('Edit profile opens the editor', () => {
   const screen = render(<ProfileScreen navigation={navigation} />);
-  fireEvent.press(screen.getByText('Edit profile'));
+  fireEvent.press(screen.getByLabelText('Edit profile'));
   expect(navigation.navigate).toHaveBeenCalledWith('ProfileEdit');
 });
 
 it('shows the npub as a nostr: QR, with copy and share', () => {
   const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
   const screen = render(<ProfileScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
   expect(screen.getByTestId('qr').props.children).toBe(`nostr:${NPUB}`);
   expect(screen.getByText('Friends can scan this to add you')).toBeTruthy();
   expect(screen.getByText(`Copy ${NPUB}`)).toBeTruthy();
@@ -76,15 +77,17 @@ it('shows the npub as a nostr: QR, with copy and share', () => {
 it('derives the npub from the public key when it was not stored', () => {
   mockState.nostr.npub = null;
   const screen = render(<ProfileScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
   expect(screen.getByTestId('qr').props.children).toBe('nostr:npub1ab');
 });
 
-it('opens the website', () => {
-  const open = jest.fn(async () => true);
-  (require('react-native') as any).Linking = { openURL: open };
+it('keeps the QR collapsed until requested', () => {
   const screen = render(<ProfileScreen navigation={navigation} />);
-  fireEvent.press(screen.getByLabelText('Website https://alice.example/blog'));
-  expect(open).toHaveBeenCalledWith('https://alice.example/blog');
+  expect(screen.queryByTestId('qr')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
+  expect(screen.getByTestId('qr')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
+  expect(screen.queryByTestId('qr')).toBeNull();
 });
 
 it('sends people without a Nostr identity to setup', () => {

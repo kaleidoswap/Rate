@@ -180,7 +180,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const canInflate = advanced && rights > 0 && rgbWalletSupport(rgbAccountAdapter()).inflate;
 
   return (
-    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <ScreenHeader title={asset.name} showBack onBack={() => navigation.goBack()} />
       <ScrollView
         contentContainerStyle={styles.content}

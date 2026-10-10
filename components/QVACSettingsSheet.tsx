@@ -1,5 +1,5 @@
 // components/QVACSettingsSheet.tsx
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Modal,
   View,
@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { theme, leading } from '../theme';
+import { leading, type Theme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 import type { QVACModel, SttModel, TtsOption, TtsEngine } from '../services/qvacModels';
 import type { QVACConfig, ModelStatus } from '../services/QVACService';
 import type { AiMode } from '../store/slices/settingsSlice';
@@ -75,6 +76,8 @@ export default function QVACSettingsSheet({
   onSetTtsEngine,
   onDesignAgent,
 }: Props) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   const busy = llmStatus === 'downloading' || llmStatus === 'loading';
   const isDownloaded = (id: string) => downloadedModelIds.includes(id);
 
@@ -93,8 +96,8 @@ export default function QVACSettingsSheet({
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Text style={styles.title}>AI Settings</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={10}>
+          <Text style={styles.title}>Models & voice</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close model settings">
             <Ionicons name="close" size={26} color={theme.colors.text.primary} />
           </TouchableOpacity>
         </View>
@@ -289,7 +292,7 @@ export default function QVACSettingsSheet({
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (theme: Theme) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background.primary },
   header: {
     flexDirection: 'row',
