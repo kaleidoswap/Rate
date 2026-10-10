@@ -321,6 +321,9 @@ const HANDLERS: Record<string, WalletHandler> = {
 function afterSpend<T>(result: T): T {
   // Optional-chained so it's a harmless no-op under the jest RN mock.
   DeviceEventEmitter?.emit?.('rate.refreshBalance');
+  if ((result as {status?: string} | null)?.status === 'confirmed') {
+    DeviceEventEmitter?.emit?.('rate.agentPaymentConfirmed');
+  }
   return result;
 }
 

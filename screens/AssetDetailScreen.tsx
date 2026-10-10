@@ -3,6 +3,8 @@
 // One asset: what you hold (big, with its dollar value), what you can do with it
 // (Receive / Send / Swap), then its balance breakdown and details as grouped lists
 // in the same style as the Dashboard asset list.
+import { AllocationBar } from '../components/AllocationBar';
+import { protocolColor } from '../theme';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -44,6 +46,7 @@ interface AssetParam {
   unit?: string;
   /** USD value of the balance, when known. */
   fiatValue?: number;
+  locations?: Array<{ label: string; amount: number; unit?: string }>;
 }
 
 interface Props {
@@ -82,6 +85,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const passed = route?.params?.asset;
   const dispatch = useAppDispatch();
   const storeAssets = useAppSelector(s => (s as any).assets?.rgbAssets) as AssetParam[] | undefined;
+  const btc = useAppSelector(s => s.wallet?.btcBalance);
   const [refreshing, setRefreshing] = useState(false);
   const valid = !!passed?.asset_id && !!passed?.ticker && !!passed?.name;
 
@@ -143,10 +147,14 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   const precision = asset.precision ?? 0;
   const unit = asset.unit ?? asset.ticker;
   const fmt = (baseUnits: number) => grouped(formatAssetAmount(baseUnits, precision));
-  const bal = readBalance(asset.balance);
+  const bal = readBalance(isBTC && btc?.summary ? { spendable: btc.summary.total } : asset.balance);
   const fiat = asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
-  const subtitle = isBTC ? 'Spark, Arkade, Lightning & on-chain' : `${NETWORK_LABEL[protocol]} asset`;
+  const subtitle = isBTC ? 'Bitcoin across your accounts' : `${NETWORK_LABEL[protocol]} asset`;
 
+  const networkNames: Record<string, string> = { onchain: 'Bitcoin on-chain', lightning: 'Lightning', spark: 'Spark', arkade: 'Arkade', bark: 'Bark' };
+  const locations = isBTC && btc?.networks
+    ? Object.entries(btc.networks).map(([key, amount]) => ({ label: `${networkNames[key] || key}${btc.networkChains?.[key as keyof typeof btc.networkChains] ? ` · ${btc.networkChains[key as keyof typeof btc.networkChains]} (test)` : ''}`, amount: amount ?? 0, unit: 'sats' }))
+    : asset.locations ?? (isBTC ? [] : [{ label: NETWORK_LABEL[protocol], amount: bal.available / 10 ** precision, unit }]);
   const selectedAsset = { asset_id: asset.asset_id, ticker: asset.ticker, name: asset.name, isRGB };
   const actions: Array<{ key: string; label: string; icon: keyof typeof Ionicons.glyphMap; tint: string; onPress: () => void }> = [
     { key: 'receive', label: 'Receive', icon: 'arrow-down', tint: theme.colors.success[500], onPress: () => navigation.navigate('Receive', { selectedAsset }) },
@@ -208,6 +216,17 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
           ))}
         </Animated.View>
 
+        <View style={styles.group}>
+          <View style={styles.row}><Text style={styles.rowValue}>Where this asset is</Text></View>
+          {locations.length ? <>
+            <View style={{ paddingHorizontal: theme.spacing[4] }}><AllocationBar hideAmounts={isBTC && (btc?.summary?.test ?? 0) > 0} items={locations.map(l => ({ label: l.label, value: l.amount, color: protocolColor(l.label.toUpperCase()) }))} /></View>
+            {locations.map((l, i) => <View key={`${l.label}-${i}`} style={[styles.row, styles.rowDivider]}>
+              <Text style={styles.rowLabel}>{l.label}</Text><AmountText style={styles.rowValue}>{l.amount.toLocaleString(undefined, { maximumFractionDigits: 8 })} {l.unit || unit}</AmountText>
+            </View>)}
+          </> : <View style={styles.row}><Text style={styles.rowLabel}>Account breakdown is not available yet.</Text></View>}
+        </View>
+
+        {!isBTC && locations.length > 1 && <Text style={styles.heroSub}>Receive and Send use {NETWORK_LABEL[protocol]}. Related holdings on other networks are shown above.</Text>}
         {detailRows.length > 0 && <Animated.View entering={FadeInDown.delay(motion.stagger * 2).duration(motion.duration.base)}>
           <View style={styles.group}>
             {detailRows.map((d, i) => (

@@ -14,6 +14,8 @@ export type AiMode = 'off' | 'local';
 // User-tunable KaleidoMind agent configuration (persisted). Lets the user shape
 // the agent's behaviour, sampling, context window, and knowledge/memory.
 export interface MindConfig {
+  /** Language of Prismo’s spoken replies. */
+  voiceLanguage?: string;
   /** Extra instructions appended to the agent's system prompt (its "persona"). */
   persona: string;
   /** Sampling temperature 0..1 (lower = more deterministic). */
@@ -36,6 +38,7 @@ export interface MindConfig {
 
 export const DEFAULT_MIND_CONFIG: MindConfig = {
   persona: '',
+  voiceLanguage: 'it-IT',
   temperature: 0.6,
   maxTokens: 512,
   historyLength: 8,

@@ -1,4 +1,6 @@
+import { useAppTheme } from '../theme/ThemeProvider';
 // components/NostrProfileManager.tsx
+import { KALEIDOSWAP_RELAY, relayKey, withDefaultRelay } from '../utils/nostrRelays';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -44,6 +46,8 @@ interface Props {
 }
 
 export default function NostrProfileManager({ navigation }: Props) {
+  const theme = useAppTheme();
+  const styles = makeStyles(theme);
   const dispatch = useDispatch();
   const nostrState = useSelector((state: RootState) => state.nostr);
   const [showKeyImport, setShowKeyImport] = useState(false);
@@ -65,18 +69,17 @@ export default function NostrProfileManager({ navigation }: Props) {
     error,
     walletConnectEnabled,
     nwcConnectionString,
-    relays,
+    relays: savedRelays,
     connectedWallet,
     nwcWalletType,
   } = nostrState;
 
+  const relays = React.useMemo(() => withDefaultRelay(savedRelays), [savedRelays]);
+  const [relaysExpanded, setRelaysExpanded] = useState(false);
+
   // NostrService exposes no relay connect/disconnect event, so poll the pool
   // while connected; a one-shot read per render went stale between renders.
   useEffect(() => {
-    if (!isConnected) {
-      setRelayStatus([]);
-      return;
-    }
     const read = () => setRelayStatus(NostrService.getInstance().getRelayStatus());
     read();
     const id = setInterval(read, 3000);
@@ -319,7 +322,7 @@ export default function NostrProfileManager({ navigation }: Props) {
     );
   };
 
-  const relayUp = (url: string) => relayStatus.find(r => r.url === url)?.connected ?? false;
+  const relayUp = (url: string) => relayStatus.find(r => relayKey(r.url) === relayKey(url))?.connected ?? false;
   const relaysUp = relays.filter(relayUp).length;
   const shortNpub = npub ? `${npub.slice(0, 14)}…${npub.slice(-8)}` : '';
   const name = profile?.display_name || profile?.name || 'Your profile';
@@ -377,7 +380,7 @@ export default function NostrProfileManager({ navigation }: Props) {
           <View style={styles.statusRow}>
             <View style={[styles.statusDot, { backgroundColor: isConnected ? theme.colors.success[500] : theme.colors.warning[500] }]} />
             <Text style={styles.statusText}>
-              {isConnected ? `Online · ${relaysUp}/${relays.length} relays` : 'Offline'}
+              {relaysUp > 0 ? `Online · ${relaysUp}/${relays.length} relays` : isInitializing ? 'Connecting…' : 'Offline'}
             </Text>
           </View>
         </View>
@@ -411,11 +414,12 @@ export default function NostrProfileManager({ navigation }: Props) {
 
   const renderRelays = () => (
     <>
-      <View style={styles.sectionHead}>
+      <TouchableOpacity style={styles.sectionHead} accessibilityRole="button" accessibilityLabel="Relay connections"
+        accessibilityState={{ expanded: relaysExpanded }} onPress={() => setRelaysExpanded(v => !v)}>
         <Text style={styles.sectionLabel}>Relays</Text>
-        <Text style={styles.sectionMeta}>{relaysUp}/{relays.length} connected</Text>
-      </View>
-      <View style={styles.card}>
+        <Text style={styles.sectionMeta}>{relaysUp}/{relays.length} connected {relaysExpanded ? '⌃' : '⌄'}</Text>
+      </TouchableOpacity>
+      {relaysExpanded && <View style={styles.card}>
         {relays.map((relay: string) => {
           const up = relayUp(relay);
           return (
@@ -424,10 +428,10 @@ export default function NostrProfileManager({ navigation }: Props) {
               <Text style={[styles.relayText, !up && styles.relayDown]} numberOfLines={1}>
                 {relay.replace(/^wss?:\/\//, '')}
               </Text>
-              <TouchableOpacity onPress={() => handleRemoveRelay(relay)} disabled={isRemovingRelay}
+              {relayKey(relay) === KALEIDOSWAP_RELAY ? <Text style={styles.sectionMeta}>Default</Text> : <TouchableOpacity onPress={() => handleRemoveRelay(relay)} disabled={isRemovingRelay}
                 accessibilityLabel={`Remove ${relay}`} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
                 <Ionicons name="remove-circle-outline" size={18} color={theme.colors.text.tertiary} />
-              </TouchableOpacity>
+              </TouchableOpacity>}
             </View>
           );
         })}
@@ -445,7 +449,7 @@ export default function NostrProfileManager({ navigation }: Props) {
           <Button title="Add" size="sm" onPress={handleAddRelay} loading={isAddingRelay}
             disabled={isAddingRelay || !relayInput.trim()} />
         </View>
-      </View>
+      </View>}
     </>
   );
 
@@ -461,7 +465,7 @@ export default function NostrProfileManager({ navigation }: Props) {
 
       {publicKey ? renderIdentity() : renderOnboarding()}
 
-      {isConnected && renderRelays()}
+      {!!publicKey && renderRelays()}
 
       <Text style={styles.sectionLabel}>Wallet</Text>
       <View style={styles.card}>
@@ -515,7 +519,7 @@ export default function NostrProfileManager({ navigation }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create({
   flex: { flex: 1, minWidth: 0 },
   card: {
     backgroundColor: theme.colors.surface.primary,

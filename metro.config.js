@@ -70,7 +70,12 @@ const blockedUtexoRgbModules = ['@utexo/wdk-wallet-rgb', '@utexo/rgb-lib-wasm'].
       `node_modules\\/(?:\\.pnpm\\/[^/]+\\/node_modules\\/)?${escapePath(name)}\\/.*`
     )
 );
-config.resolver.blockList = exclusionList([...blockedLinkedModules, ...blockedUtexoRgbModules]);
+// Environment files are build inputs, never JavaScript modules or app assets.
+config.resolver.blockList = exclusionList([
+  ...blockedLinkedModules,
+  ...blockedUtexoRgbModules,
+  /[\\/]\.env(?:\.[^\\/]*)?$/,
+]);
 
 // Force all shared deps to resolve from rate's node_modules (single copy, correct platform entries)
 config.resolver.extraNodeModules = {

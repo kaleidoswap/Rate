@@ -110,7 +110,7 @@ export default function QVACSettingsSheet({
 
         <ScrollView contentContainerStyle={styles.content}>
           {/* ---- KaleidoMind mode ---- */}
-          <Text style={styles.sectionTitle}>KaleidoMind</Text>
+          <Text style={styles.sectionTitle}>Agent</Text>
           <Text style={styles.sectionHint}>
             Choose how the assistant runs. You can change this anytime.
           </Text>

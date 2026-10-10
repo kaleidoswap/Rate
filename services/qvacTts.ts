@@ -39,6 +39,8 @@ function pcmToWav(samples: number[], sampleRate: number): Uint8Array {
 }
 
 let currentSound: AudioPlayer | null = null;
+let generation = 0;
+let cancelPlayback: (() => void) | null = null;
 
 const LIGHTNING_INVOICE_RE = /\b(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{40,}\b/gi;
 const LNURL_RE = /\blnurl[0-9a-z]{40,}\b/gi;
@@ -93,98 +95,104 @@ async function setSpeakerPlaybackMode(): Promise<void> {
 
 /** Stop any in-flight QVAC TTS playback. */
 export async function stopQvacSpeak(): Promise<void> {
-  const s = currentSound;
+  cancelPlayback?.();
+  cancelPlayback = null;
+  const sound = currentSound;
   currentSound = null;
-  if (s) {
-    // expo-audio: pause() halts playback, remove() frees the native player.
-    try { s.pause(); } catch { /* ignore */ }
-    try { s.remove(); } catch { /* ignore */ }
-  }
-}
-
-/**
- * Speak `text` with on-device QVAC TTS, resolving when playback finishes.
- * Returns false if QVAC TTS isn't available (so the caller can fall back).
- */
-async function qvacSpeak(text: string): Promise<boolean> {
-  const speakable = sanitizeForSupertonic(text);
-  if (!speakable) return false;
-
-  const synth = await QVACService.getInstance().synthesizeSpeech(speakable);
-  if (!synth || !synth.pcm?.length) return false;
-
-  const wav = pcmToWav(synth.pcm, synth.sampleRate);
-
-  const dir = new Directory(Paths.cache, 'qvac-tts');
-  try { if (!dir.exists) dir.create({ intermediates: true } as any); } catch { /* exists */ }
-  const file = new File(dir, 'speech.wav');
-  try { if (file.exists) file.delete(); } catch { /* ignore */ }
-  file.write(wav);
-
-  await setSpeakerPlaybackMode();
-  await stopQvacSpeak();
-
-  const sound = createAudioPlayer({ uri: file.uri });
-  currentSound = sound;
-  sound.play();
-
-  return new Promise<boolean>((resolve) => {
-    const sub = sound.addListener('playbackStatusUpdate', (status) => {
-      if (!status.isLoaded) return;
-      if (status.didJustFinish) {
-        sub.remove();
-        try { sound.remove(); } catch { /* already freed */ }
-        if (currentSound === sound) currentSound = null;
-        resolve(true);
-      }
-    });
-  });
+  try { sound?.pause(); } catch {}
+  try { sound?.remove(); } catch {}
 }
 
 export interface SpeakCallbacks {
+  language?: string;
+  onStart?: () => void;
+  /** Audio energy (QVAC) or a word-boundary pulse (system voice), 0…1. */
+  onLevel?: (level: number) => void;
   onDone?: () => void;
   onError?: () => void;
 }
 
-/**
- * Speak with QVAC on-device TTS; transparently fall back to the best system
- * voice if QVAC TTS is unavailable or errors. Always invokes onDone when audio
- * finishes (either path).
- */
-export async function speak(text: string, cb: SpeakCallbacks = {}): Promise<void> {
-  const done = () => cb.onDone?.();
-  // Route to the loud speaker (not the earpiece) before anything plays — covers
-  // both the SUPERTONIC path and the system-voice fallback below.
-  await setSpeakerPlaybackMode();
-  // Honour the user's TTS engine choice: 'system' skips the neural voice
-  // entirely (no download, instant) and goes straight to the OS synthesiser.
-  const engine = QVACService.getInstance().getTtsEngine();
-  if (engine !== 'system') {
-    try {
-      const ok = await qvacSpeak(text);
-      if (ok) {
-        done();
-        return;
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      if (message.includes('text preprocessing failed') || message.includes('unsupported character')) {
-        console.log('[QVAC] TTS: Supertonic rejected text; using system voice for this reply');
-      } else {
-        console.warn('[QVAC] TTS failed, using system voice:', message);
-      }
-    }
-  }
-  // Fallback: system voice.
-  try {
-    await speakBest(text, { onDone: done, onStopped: done, onError: done });
-  } catch {
-    done();
-  }
+async function qvacSpeak(text: string, token: number, cb: SpeakCallbacks): Promise<boolean> {
+  const speakable = sanitizeForSupertonic(text);
+  if (!speakable) return false;
+  const synth = await QVACService.getInstance().synthesizeSpeech(speakable);
+  if (token !== generation) return true;
+  if (!synth?.pcm?.length) return false;
+  const wav = pcmToWav(synth.pcm, synth.sampleRate);
+  const dir = new Directory(Paths.cache, 'qvac-tts');
+  if (!dir.exists) dir.create({ intermediates: true });
+  const file = new File(dir, `speech-${token}.wav`);
+  file.write(wav);
+  const sound = createAudioPlayer({ uri: file.uri }, { updateInterval: 40 });
+  currentSound = sound;
+  return new Promise<boolean>((resolve, reject) => {
+    let settled = false, started = false;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true; sub.remove(); clearTimeout(watchdog);
+      if (currentSound === sound) { currentSound = null; cancelPlayback = null; }
+      try { sound.pause(); sound.remove(); } catch {}
+      try { file.delete(); } catch {}
+      cb.onLevel?.(0);
+      if (error) reject(error); else resolve(true);
+    };
+    const sub = sound.addListener('playbackStatusUpdate', status => {
+      if (token !== generation) { finish(); return; }
+      if (status.playing) {
+        if (!started) { started = true; cb.onStart?.(); }
+        const start = Math.floor(status.currentTime * synth.sampleRate);
+        const end = Math.min(synth.pcm.length, start + Math.ceil(synth.sampleRate * .025));
+        let energy = 0;
+        for (let i = start; i < end; i++) energy += (synth.pcm[i] / 32768) ** 2;
+        const rms = Math.sqrt(energy / Math.max(1, end - start));
+        cb.onLevel?.(Math.min(1, Math.max(0, (rms - .006) * 12)));
+      } else cb.onLevel?.(0);
+      if (status.didJustFinish) finish();
+    });
+    const watchdog = setTimeout(() => finish(new Error('TTS playback timed out')), synth.pcm.length / synth.sampleRate * 1000 + 15000);
+    cancelPlayback = () => finish();
+    try { sound.play(); } catch (error) { finish(error); }
+  });
 }
 
-/** Stop both QVAC and system-voice playback. */
+/** On-device playback; non-English uses the installed system voice because
+ * the bundled QVAC Supertonic model is English-only. No cloud calls. */
+export async function speak(text: string, cb: SpeakCallbacks = {}): Promise<void> {
+  const token = ++generation;
+  stopSpeaking();
+  await stopQvacSpeak();
+  await setSpeakerPlaybackMode();
+  if (token !== generation) return;
+  const live = () => token === generation;
+  const done = () => { if (live()) { cb.onLevel?.(0); cb.onDone?.(); } };
+  const language = cb.language ?? 'en-US';
+  const engine = QVACService.getInstance().getTtsEngine();
+  if (engine !== 'system' && language.toLowerCase().startsWith('en')) {
+    try {
+      if (await qvacSpeak(text, token, { ...cb, onLevel: n => { if(live()) cb.onLevel?.(n); }, onStart: () => {if(live())cb.onStart?.();} })) { done(); return; }
+    } catch { /* Use system synthesis when the local model/player fails. */ }
+  }
+  if (!live()) return;
+  let boundaryTimer: ReturnType<typeof setTimeout> | undefined;
+  const finish = () => { clearTimeout(boundaryTimer); done(); };
+  try {
+    await speakBest(redactMachineReadablePaymentText(text), {
+      language,
+      onStart: () => {if(live())cb.onStart?.();},
+      onBoundary: event => {
+        if (!live()) return;
+        clearTimeout(boundaryTimer); cb.onLevel?.(.75);
+        boundaryTimer = setTimeout(() => {if(live())cb.onLevel?.(0);}, Math.min(180, Math.max(70,event.charLength*25)));
+      },
+      onDone: finish,
+      onStopped: finish,
+      onError: () => {clearTimeout(boundaryTimer);if(live()){cb.onLevel?.(0);cb.onError?.();}},
+    });
+  } catch { if(live()){cb.onLevel?.(0);cb.onError?.();} }
+}
+
 export async function stopSpeak(): Promise<void> {
+  generation++;
   stopSpeaking();
   await stopQvacSpeak();
 }

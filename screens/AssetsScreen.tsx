@@ -140,6 +140,7 @@ export default function AssetsScreen({ navigation, route }: Props) {
         balance: token.balanceDetail ?? token.balance,
         isRGB: family === 'RGB',
         protocol: family,
+        locations: item.holdings.map(h => ({ label: networkLabel(h.network), amount: h.amount, unit: item.ticker })),
         fiatValue: item.unitUsd !== undefined ? (dominantHolding(item)?.amount ?? 0) * item.unitUsd : undefined,
       },
     });

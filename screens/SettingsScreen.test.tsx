@@ -39,7 +39,7 @@ test('home shows categories and keeps sensitive and technical actions in their s
   expect(screen.queryByText('Daily wallet')).toBeNull();
   expect(screen.queryByText('Your wallet')).toBeNull();
   expect(screen.queryByText('Sats')).toBeNull();
-  expect(screen.getByLabelText('KaleidoMind')).toBeTruthy();
+  expect(screen.getByLabelText('Agent')).toBeTruthy();
   expect(screen.getByLabelText('Preferences')).toBeTruthy();
   expect(screen.queryByText('View recovery phrase')).toBeNull();
   expect(screen.queryByText('Remove Wallet')).toBeNull();
