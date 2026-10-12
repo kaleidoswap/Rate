@@ -1,7 +1,7 @@
 import { useAppTheme } from '../theme/ThemeProvider';
 import { AllocationBar } from './AllocationBar';
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme, protocolColor } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
@@ -30,6 +30,7 @@ interface BalanceCardProps {
     assetRows?: BreakdownAssetRow[];
     /** Showing the last known balance while the live one loads. */
     updating?: boolean;
+    pendingAccounts?: string[];
     rgbBalanceIsLightning?: boolean;
     bitcoinUnit: string;
     onRefresh: () => void;
@@ -82,6 +83,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     testNetworks = {},
     assetRows = [],
     updating = false,
+    pendingAccounts = [],
     rgbBalanceIsLightning = false,
     bitcoinUnit,
     onRefresh,
@@ -99,6 +101,14 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 }) => {
     const theme = useAppTheme();
     const styles = makeStyles(theme);
+    const [slow, setSlow] = useState(false);
+    const syncing = !!(updating || loading || pendingAccounts.length);
+    useEffect(() => {
+        setSlow(false);
+        if (!syncing) return;
+        const timer = setTimeout(() => setSlow(true), 12_000);
+        return () => clearTimeout(timer);
+    }, [syncing]);
     const useDenominated = primaryText !== undefined;
     // Filter to only protocols with balance data
     const activeProtocols = byProtocol
@@ -176,10 +186,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         <View style={styles.container}>
             <View style={styles.cardHeader}>
                 <View style={styles.labelRow}>
-                    <Text style={styles.balanceLabel}>Total balance</Text>
-                    {updating && (
-                        <Text style={styles.updatingText} accessibilityLabel="Showing your last balance, updating">Updating…</Text>
-                    )}
+                    <Text style={styles.balanceLabel}>{syncing && !loading ? 'Balance so far' : 'Total balance'}</Text>
+                    {syncing && <ActivityIndicator size="small" accessibilityLabel="Updating balance" color={theme.colors.text.secondary} />}
                 </View>
                 {/* Refresh and balance details stay separate from denomination. */}
                 <View style={styles.topControls}>
@@ -226,7 +234,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             next to the figure; no separate picker row below it. */}
                         <TouchableOpacity style={styles.primaryBalance} onPress={onCycleDenomination} disabled={!onCycleDenomination}
                             accessibilityRole="button"
-                            accessibilityLabel={`Total balance ${primaryText} ${primaryUnitLabel ?? ''}.${onCycleDenomination ? ' Tap to change unit.' : ''}`}>
+                            accessibilityLabel={`${syncing ? 'Balance so far' : 'Total balance'} ${primaryText} ${primaryUnitLabel ?? ''}.${onCycleDenomination ? ' Tap to change unit.' : ''}`}>
                             <View style={styles.balanceRow}>
                                 <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{primaryText}</AmountText>
                                 {/* Fiat figures already carry their symbol, so only sats/BTC get a unit label. */}
@@ -251,6 +259,9 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     </>
                 )}
                 {/* Incoming funds and test sats are always visible, never folded into the total. */}
+                {syncing && <Text accessibilityLiveRegion="polite" style={styles.subLine}>
+                    {slow ? 'Still syncing' : 'Updating…'}{pendingAccounts.length ? ` · ${pendingAccounts.join(', ')}` : ''}
+                </Text>}
                 {!loading && availableBtc !== undefined && (showBreakdown || pendingBtc > 0) && (
                     <View style={{ gap: theme.spacing[2], marginTop: theme.spacing[3] }}>
                         {showBreakdown && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
@@ -264,7 +275,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         {pendingBtc > 0 && showBreakdown && <Text style={styles.subLine}>Awaiting confirmation or temporarily unavailable in an account.</Text>}
                     </View>
                 )}
-                {!loading && (stale || (showBreakdown && lastUpdatedAt)) && <Text accessibilityLiveRegion="polite" style={[styles.subLine, stale && { color: theme.colors.warning[500] }]}>
+                {!loading && !syncing && (stale || (showBreakdown && lastUpdatedAt)) && <Text accessibilityLiveRegion="polite" style={[styles.subLine, stale && { color: theme.colors.warning[500] }]}>
                     {stale ? 'Balance may be incomplete' : 'Updated'}{lastUpdatedAt && showBreakdown ? ` · ${new Date(lastUpdatedAt).toLocaleString()}` : ''}
                 </Text>}
                 {!loading && testBtc > 0 && (

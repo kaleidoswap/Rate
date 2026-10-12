@@ -1,3 +1,4 @@
+import { NetworkIcon } from '../components/NetworkIcon';
 import { BridgeEntryCard } from '../components/receive/BridgeEntryCard';
 import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnectionNotice';
 import { receiveAmountSats } from '../utils/receive-request';
@@ -242,6 +243,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   // Request (a one-off code) or My address (the reusable ones).
   const [receiveTab, setReceiveTab] = useState<'request' | 'address'>('request');
   const [showOptions, setShowOptions] = useState(false);
+  const [showOtherAssets, setShowOtherAssets] = useState(false);
   // What the request is for: the Lightning invoice description.
   const [note, setNote] = useState('');
   // Who the request is for (optional): it goes into that contact's history.
@@ -683,7 +685,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
               kind: 'address',
               layer: 'spark',
               monitor: 'balance',
-              assetId: selectedAsset.asset_id,
+              assetId: selectedAsset.asset_id === 'BTC' ? 'SPARK_ALL' : selectedAsset.asset_id,
             };
           }
         } catch (err: any) {
@@ -1926,8 +1928,26 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <Text style={styles.optionsCaption}>Asset</Text>
           {renderAssetTabs()}
-          {renderRgbEntry()}
-          <BridgeEntryCard onPress={() => afterOptions(() => { cancelReceiveWork(); navigation.navigate('Bridge'); })} />
+          <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showOtherAssets }} onPress={() => setShowOtherAssets(v => !v)} style={styles.rgbEntry}>
+            <Text style={[styles.rgbEntryTitle, { flex: 1 }]}>Other assets & networks</Text>
+            <Ionicons name={showOtherAssets ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.secondary} />
+          </TouchableOpacity>
+          {showOtherAssets && <View>
+            {renderRgbEntry()}
+            <BridgeEntryCard onPress={() => afterOptions(() => { cancelReceiveWork(); navigation.navigate('Bridge'); })} />
+            {(['SPARK', 'ARKADE'] as const).map(account => <TouchableOpacity key={account} accessibilityRole="button"
+              onPress={() => {
+                if (!receiveAccounts.some(a => a.account === account)) { afterOptions(() => navigation.navigate('Settings')); return; }
+                setSelectedAsset(btcAsset()); setAmount('');
+                selectRoute(account === 'SPARK' ? 'spark' : 'ark', account);
+                setShowOptions(false);
+              }} style={styles.rgbEntry}>
+              <NetworkIcon network={account === 'SPARK' ? 'spark' : 'arkade'} size={20} />
+              <View style={{ flex: 1 }}><Text style={styles.rgbEntryTitle}>{account === 'SPARK' ? 'Spark' : 'Arkade'}</Text>
+                <Text style={styles.rgbEntryDetail}>{receiveAccounts.some(a => a.account === account) ? (account === 'SPARK' ? 'Native address · BTC and tokens' : 'Native Ark address · Bitcoin') : 'Connect in Settings'}</Text></View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
+            </TouchableOpacity>)}
+          </View>}
           <Text style={styles.optionsCaption}>How they pay</Text>
           <ReceiveRoutePicker
             methods={receiveMethodIds}

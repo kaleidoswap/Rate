@@ -21,11 +21,12 @@ test('Lightning lets the user choose the account it lands in', () => {
   expect(onDestination).toHaveBeenCalledWith('ARKADE');
 });
 
-test('switching method goes through the tabs', () => {
+test('switching method uses a vertical choice sheet', () => {
   const onMethod = jest.fn();
   const screen = render(<ReceiveRoutePicker
     methods={['universal', 'lightning', 'onchain']} method="universal" onMethod={onMethod}
     destinations={[]} destination={null} onDestination={jest.fn()} amountSats={0} />);
+  fireEvent.press(screen.getByLabelText('Payment method: Any wallet. Change'));
   fireEvent.press(screen.getByText('On-chain'));
   expect(onMethod).toHaveBeenCalledWith('onchain');
 });

@@ -33,12 +33,12 @@ jest.mock('../utils/bitcoinUnits', () => ({
 }));
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('../components', () => ({
-  BalanceCard: ({ loading, updating, byProtocol }: any) => {
+  BalanceCard: ({ loading, updating, byProtocol, pendingAccounts }: any) => {
     const { createElement: h, Fragment } = require('react');
     const { Text } = require('react-native');
     const accounts = Object.entries(byProtocol ?? {}).map(([k, b]: any) => `${k} ${b.total}`).join(', ');
     return h(Fragment, {}, h(Text, {}, loading ? 'Loading balance' : 'Balance ready'), updating ? h(Text, {}, 'Updating') : null,
-      h(Text, {}, `Accounts: ${accounts || 'none'}`));
+      h(Text, {}, `Accounts: ${accounts || 'none'}`), h(Text, {}, `Waiting: ${(pendingAccounts ?? []).join(', ')}`));
   },
   ActionButtons: () => null, AssetList: () => null, ChannelList: () => null, MainHeader: ({ leftNode }: any) => leftNode ?? null,
 }));
@@ -137,6 +137,7 @@ describe('fast first balance', () => {
     const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(screen.getByText('Accounts: SPARK 2500')).toBeTruthy(), { timeout: 5000 });
     expect(spark.getBtcBalance).toHaveBeenCalled();
+    expect(screen.getByText('Updating')).toBeTruthy();
     screen.unmount();
   });
 
@@ -171,7 +172,11 @@ describe('fast first balance', () => {
     (initializeProtocolServices as jest.Mock).mockResolvedValue({ results: new Map([['SPARK', { success: true }], ['ARKADE', { success: true }]]) });
     const screen = render(<DashboardScreen navigation={{ navigate: jest.fn() }} />);
     await waitFor(() => expect(screen.getByText('Accounts: SPARK 500')).toBeTruthy());
+    expect(screen.getByText('Updating')).toBeTruthy();
+    expect(screen.getByText('Waiting: Arkade')).toBeTruthy();
     finishArkade({ confirmed: 300, unconfirmed: 0, total: 300 });
     await waitFor(() => expect(screen.getByText('Accounts: SPARK 500, ARKADE 300')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByText('Updating')).toBeNull());
+    screen.unmount();
   });
 });

@@ -66,9 +66,7 @@ it('Edit profile opens the editor', () => {
 it('shows the npub as a nostr: QR, with copy and share', () => {
   const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
   const screen = render(<ProfileScreen navigation={navigation} />);
-  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
   expect(screen.getByTestId('qr').props.children).toBe(`nostr:${NPUB}`);
-  expect(screen.getByText('Friends can scan this to add you')).toBeTruthy();
   expect(screen.getByText(`Copy ${NPUB}`)).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Share'));
   expect(share).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining(`nostr:${NPUB}`) }));
@@ -77,17 +75,16 @@ it('shows the npub as a nostr: QR, with copy and share', () => {
 it('derives the npub from the public key when it was not stored', () => {
   mockState.nostr.npub = null;
   const screen = render(<ProfileScreen navigation={navigation} />);
-  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
   expect(screen.getByTestId('qr').props.children).toBe('nostr:npub1ab');
 });
 
-it('keeps the QR collapsed until requested', () => {
+it('keeps the QR visible and settings directly accessible', () => {
   const screen = render(<ProfileScreen navigation={navigation} />);
-  expect(screen.queryByTestId('qr')).toBeNull();
-  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
   expect(screen.getByTestId('qr')).toBeTruthy();
-  fireEvent.press(screen.getByLabelText('Show Nostr QR code'));
-  expect(screen.queryByTestId('qr')).toBeNull();
+  fireEvent.press(screen.getByText('Settings'));
+  expect(navigation.navigate).toHaveBeenCalledWith('Settings');
+  fireEvent.press(screen.getByText('Nostr & relays'));
+  expect(navigation.navigate).toHaveBeenCalledWith('NostrSettings');
 });
 
 it('sends people without a Nostr identity to setup', () => {

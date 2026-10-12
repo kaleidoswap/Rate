@@ -1,3 +1,4 @@
+import { runReceiveOperation as boundedBalanceRead } from '../utils/receive-session';
 import { WalletSetupPrompt } from '../components/WalletSetupPrompt';
 import { useAppSelector } from '../store/hooks';
 import { bitcoinByNetwork, btcBalanceFromProtocols, summarizeBitcoinBalances, withProtocolBalance } from '../utils/wallet-balance-summary';
@@ -185,12 +186,15 @@ export default function DashboardScreen({ navigation }: Props) {
   // Denomination-aware formatter for the headline balance (tap to cycle sats/BTC/fiat).
   const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
   const [loading, setLoading] = useState(true);
+  const [pendingBalanceAccounts, setPendingBalanceAccounts] = useState<string[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [btcBalance, setBtcBalanceState] = useState<{
     vanilla: { settled: number; future: number; spendable: number };
     colored: { settled: number; future: number; spendable: number };
     byProtocol?: Record<string, { confirmed: number; unconfirmed: number; total: number }>;
   }>(EMPTY_BTC_BALANCE);
+  const balanceStateRef = useRef(btcBalance);
+  balanceStateRef.current = btcBalance;
   // Live assets are in redux (the asset inventory every screen reads); the
   // last known ones stand in here until this wallet's accounts answer.
   const liveAssets = useAppSelector(state => state.assets.rgbAssets) as InventoryRecord[];
@@ -358,13 +362,14 @@ export default function DashboardScreen({ navigation }: Props) {
       // wasn't asked, so it isn't a missing balance.
       const requestedProtocols = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).map(([, proto]) => proto);
       const connectedCount = requestedProtocols.length;
+      if (current()) setPendingBalanceAccounts(requestedProtocols);
       const balancesTask = Promise.all(
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
           try {
             // A failed sync (server unreachable) must not hide the last known Bark balance.
-            if (proto === 'BARK') await syncBarkForUpdates().catch((e) => console.warn('Bark sync failed:', e));
-            const btc = await adapter.getBtcBalance();
+            if (proto === 'BARK') await boundedBalanceRead('Bark sync', () => syncBarkForUpdates(), 20_000).catch((e) => console.warn('Bark sync failed:', e));
+            const btc = await boundedBalanceRead<any>(`${proto} balance`, () => adapter.getBtcBalance(), 60_000);
             if (current()) {
               liveDataRef.current = true;
               setBtcBalanceState(prev => withProtocolBalance(prev as any, proto, btc));
@@ -373,6 +378,8 @@ export default function DashboardScreen({ navigation }: Props) {
           } catch (e) {
             console.warn('Balance fetch error:', e);
             return null;
+          } finally {
+            if (current()) setPendingBalanceAccounts(accounts => accounts.filter(p => p !== proto));
           }
         })
       );
@@ -385,7 +392,7 @@ export default function DashboardScreen({ navigation }: Props) {
         adapterMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return [] as InventoryRecord[];
           try {
-            const unifiedAssets = await adapter.listAssets();
+            const unifiedAssets = await boundedBalanceRead<any[]>(`${proto} assets`, () => adapter.listAssets(), 60_000);
             const mapped = unifiedAssets
               .map((a: any) => assetRecordFromUnified(a, proto))
               .filter((r: InventoryRecord | null): r is InventoryRecord => r !== null);
@@ -408,7 +415,7 @@ export default function DashboardScreen({ navigation }: Props) {
       const connectedWalletType = (rgbAdapter as any)?.walletType?.() ?? nwcWalletType;
       const canManageChannels = connectedWalletType == null || nwcCapabilities.includes('manageChannels');
       const channelsTask: Promise<any[]> = rgbAdapter?.isConnected() && connectedWalletType !== 'ln' && canManageChannels
-        ? Promise.resolve().then(() => rgbAdapter.listChannels()).catch(() => [] as any[])
+        ? boundedBalanceRead<any[]>('Lightning channels', () => rgbAdapter.listChannels(), 60_000).catch(() => [] as any[])
         : Promise.resolve([]);
 
       const [balanceResults, assetResults, channelsList] = await Promise.all([balancesTask, assetsTask, channelsTask]);
@@ -417,7 +424,7 @@ export default function DashboardScreen({ navigation }: Props) {
       const okBalances = balanceResults.filter(Boolean) as Array<{ proto: string; btc: { confirmed: number; unconfirmed: number; total: number } }>;
       // Bark recovery (moved from the old Bark screen): an incomplete restore can
       // omit funds, so say so next to the total rather than on a separate page.
-      const barkRecovery = await readBarkRecovery().catch(() => null);
+      const barkRecovery = await boundedBalanceRead('Bark recovery', () => readBarkRecovery(), 10_000).catch(() => null);
       setBalanceWarning(
         barkRecovery === 'failed' || barkRecovery === 'incomplete'
           ? 'Bark recovery is incomplete, so its balance may omit funds.'
@@ -433,7 +440,7 @@ export default function DashboardScreen({ navigation }: Props) {
       // rather than replacing them with zero.
       if (connectedCount > 0 && okBalances.length === 0) return;
 
-      const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = {};
+      const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = { ...balanceStateRef.current.byProtocol };
       // Bark is a layer like Arkade/Spark: counted in the total and shown in the breakdown.
       for (const r of okBalances) byProtocol[r.proto] = r.btc;
       const balance = btcBalanceFromProtocols(byProtocol);
@@ -448,7 +455,7 @@ export default function DashboardScreen({ navigation }: Props) {
         networks: bitcoinByNetwork(byProtocol, channelsList, rgbIsLightning),
         networkChains: { onchain: testNetworkLabels().RGB, lightning: testNetworkLabels().RGB, spark: testNetworkLabels().SPARK, arkade: testNetworkLabels().ARKADE, bark: testNetworkLabels().BARK },
       }));
-      void saveBalanceSnapshot(walletAtStart, {
+      if (connectedCount > 0 && okBalances.length === connectedCount && offlineAccounts.length === 0) void saveBalanceSnapshot(walletAtStart, {
         byProtocol, assets, channels: channelsList, btcPriceUSD: btcPriceRef.current,
       });
     } catch (error) {
@@ -553,6 +560,7 @@ export default function DashboardScreen({ navigation }: Props) {
     walletKeyRef.current = walletKey;
     liveDataRef.current = false;
     setBtcBalanceState(EMPTY_BTC_BALANCE);
+    setPendingBalanceAccounts([]);
     setSnapshotAssets([]);
     // Redux must not keep the previous wallet's assets either.
     dispatch(setRgbAssets([]));
@@ -922,7 +930,8 @@ export default function DashboardScreen({ navigation }: Props) {
             byProtocol={(btcBalance as any)?.byProtocol}
             // Shimmer the balance while first connecting (before any data lands).
             loading={(isConnecting || loading) && totalBalance === 0 && !refreshing && !showingSnapshot}
-            updating={showingSnapshot && (isConnecting || isUpdating || loading)}
+            updating={isConnecting || isUpdating || loading}
+            pendingAccounts={pendingBalanceAccounts.map(p => ({ RGB: 'RGB', LN: 'Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[p] ?? p))}
             footer={
               <ActionButtons
                 onSend={() => navigation.getParent()?.navigate('Send')}

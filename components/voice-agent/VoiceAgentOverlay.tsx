@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
+  Alert,
   Clipboard,
+  Share,
   Linking,
   Modal,
   Pressable,
@@ -11,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { voiceDiagnosticReport, type VoiceStage } from '../../services/voiceDiagnostics';
 import * as Haptics from 'expo-haptics';
 import { speak as qvacSpeak, stopSpeak as stopNativeSpeech } from '../../services/qvacTts';
 import Animated, {
@@ -160,6 +163,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
   const [phase, setPhase] = useState<Phase>('idle');
   const characterRef = useRef<PrismoAnimationRef>(null);
+  const [voiceFailure, setVoiceFailure] = useState<string | null>(null);
+  const onVoiceFallback = (detail: string) => setVoiceFailure(detail);
+  const onVoiceStage = (stage: VoiceStage) => setVoiceEngine(stage === 'loading' ? 'Loading voice · first use may take a few minutes' : 'Generating voice…');
+  const onVoicePreparing = () => { setVoiceFailure(null); setVoiceEngine('Preparing Supertonic 3…'); };
   const [voiceEngine, setVoiceEngine] = useState('');
   const onVoiceEngine = (engine: 'supertonic' | 'system', reason?: 'language' | 'unavailable') => setVoiceEngine(engine === 'supertonic' ? 'Supertonic 3' : reason === 'unavailable' ? 'System voice · Supertonic unavailable' : 'System voice');
   const pendingSpeech = useRef<(() => void) | null>(null);
@@ -204,7 +211,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       if (hf) {
         hf.setPaused(true);
         void stopSpeak();
-        void qvacSpeak(readback.spoken, { onEngine: onVoiceEngine, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
+        void qvacSpeak(readback.spoken, { onEngine: onVoiceEngine, onFallback: onVoiceFallback, onPreparing: onVoicePreparing, onStage: onVoiceStage, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
       }
     },
     onClose: () => handsFreeRef.current?.setPaused(false),
@@ -389,7 +396,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         setPhase('speaking');
         void stopSpeak();
         void qvacSpeak(finalText, {
-          onEngine: onVoiceEngine, onLevel: onSpeechLevel,
+          onEngine: onVoiceEngine, onFallback: onVoiceFallback, onPreparing: onVoicePreparing, onStage: onVoiceStage, onLevel: onSpeechLevel,
           onDone: resumeListening,
           onError: () => setPhase('idle'),
         });
@@ -451,7 +458,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       if (!aliveRef.current || AppState.currentState !== 'active' || !text.trim()) { resolve(); return; }
       pendingSpeech.current = resolve;
       const finish = () => { if (pendingSpeech.current === resolve) pendingSpeech.current = null; resolve(); };
-      void qvacSpeak(text, { onEngine: onVoiceEngine, onLevel: onSpeechLevel, onDone: finish, onError: finish });
+      void qvacSpeak(text, { onEngine: onVoiceEngine, onFallback: onVoiceFallback, onPreparing: onVoicePreparing, onStage: onVoiceStage, onLevel: onSpeechLevel, onDone: finish, onError: finish });
     });
 
   // Run one turn for a transcribed utterance and return the reply text — same
@@ -763,7 +770,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           </ScrollView>
 
           {phase === 'speaking' && !!bubbles.filter(b => b.role === 'assistant').at(-1)?.text && <View style={[styles.bubble, styles.bubbleAssistant, { alignSelf: 'center', marginTop: 8, backgroundColor: theme.colors.background.primary, borderWidth: 1, borderColor: theme.colors.border.light }]}>
-            <Text style={styles.bubbleAssistantText} numberOfLines={3}>{bubbles.filter(b => b.role === 'assistant').at(-1)?.text}</Text>
+            <ScrollView style={{ maxHeight: 144 }} nestedScrollEnabled><Text selectable style={styles.bubbleAssistantText}>{bubbles.filter(b => b.role === 'assistant').at(-1)?.text}</Text></ScrollView>
           </View>}
           {/* Prismo follows real playback energy. */}
           <View style={styles.orbArea}>
@@ -771,7 +778,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             <PrismoAnimatedCharacter
               ref={characterRef}
               phase={phase}
-              size={248}
+              size={184}
               accessibilityLabel={`Prismo, ${statusText}`}
               onPress={voiceStarting ? pauseVoice : voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
             />
@@ -788,7 +795,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           {__DEV__ && !voiceReady && <Pressable accessibilityRole="button" accessibilityLabel="Prova voce italiana" style={styles.pauseBtn} onPress={() => {
             const text = 'Ciao! Sono Prismo. Questa è una prova della voce italiana. Quando parlo, la mia bocca segue le parole. Ogni pagamento richiede sempre la tua conferma.';
             appendBubble('assistant', text);
-            void qvacSpeak(text, { language: 'it-IT', onEngine: onVoiceEngine, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
+            void qvacSpeak(text, { language: 'it-IT', onEngine: onVoiceEngine, onFallback: onVoiceFallback, onPreparing: onVoicePreparing, onStage: onVoiceStage, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
           }}><Text style={styles.pauseBtnText}>Prova voce italiana · sviluppo</Text></Pressable>}
           {/* Loading progress bar while the on-device model downloads/loads. */}
           {modelLoading && (
@@ -810,6 +817,21 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           <Text style={styles.status}>{statusText}</Text>
 
           {!!voiceEngine && <Text style={styles.hint}>{voiceEngine}</Text>}
+          {!voiceFailure && <Pressable accessibilityRole="button" onPress={() => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); }}><Text style={styles.pauseBtnText}>Export voice diagnostics</Text></Pressable>}
+          {!!voiceFailure && <Pressable accessibilityRole="button" onPress={() => Alert.alert('Supertonic 3', voiceFailure, [
+            { text: 'Close', style: 'cancel' },
+            { text: 'Export diagnostics', onPress: () => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); } },
+            { text: 'Retry voice', onPress: () => {
+              pauseVoice();
+              void stopSpeak().then(() => {
+                if (!aliveRef.current) return;
+                setPhase('speaking');
+                const text = 'Ciao! Sono Prismo. Proviamo la voce italiana.';
+                appendBubble('assistant', text);
+                void qvacSpeak(text, { onEngine: onVoiceEngine, onFallback: onVoiceFallback, onPreparing: onVoicePreparing, onStage: onVoiceStage, onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
+              });
+            } },
+          ])}><Text style={styles.pauseBtnText}>Voice details & retry</Text></Pressable>}
           <Pressable accessibilityRole="button" accessibilityLabel={canPause || voiceStarting ? 'Pause voice' : 'Start listening'}
             accessibilityState={{ disabled: !canPause && !voiceReady && !aiFailed && !speechFailed }}
             disabled={!canPause && !voiceReady && !aiFailed && !speechFailed}
@@ -916,7 +938,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 40,
   },
   loadFill: { height: '100%', borderRadius: 2, backgroundColor: theme.colors.primary[500] },
-  orbArea: { alignItems: 'center', justifyContent: 'center', height: 248, marginTop: 8 },
+  orbArea: { alignItems: 'center', justifyContent: 'center', height: 184, marginTop: 4 },
   orbRing: { position: 'absolute', width: 92, height: 92, borderRadius: 46 },
   orbChip: {
     position: 'absolute',

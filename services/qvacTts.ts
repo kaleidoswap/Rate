@@ -10,6 +10,7 @@ import { File, Directory, Paths } from 'expo-file-system';
 import { Buffer } from 'buffer';
 import { sanitizeForSupertonic } from './supertonicText';
 import { speechLanguage } from './speechLanguage';
+import { recordVoiceDiagnostic, type VoiceStage } from './voiceDiagnostics';
 import QVACService from './QVACService';
 import { speakBest, stopSpeaking } from './speech';
 
@@ -42,6 +43,7 @@ function pcmToWav(samples: number[], sampleRate: number): Uint8Array {
 
 let currentSound: AudioPlayer | null = null;
 let generation = 0;
+let synthesisController: AbortController | null = null;
 let cancelPlayback: (() => void) | null = null;
 
 const LIGHTNING_INVOICE_RE = /\b(?:lightning:)?ln(?:bc|tb|bcrt)[a-z0-9]{40,}\b/gi;
@@ -83,6 +85,8 @@ async function setSpeakerPlaybackMode(): Promise<void> {
 
 /** Stop any in-flight QVAC TTS playback. */
 export async function stopQvacSpeak(): Promise<void> {
+  synthesisController?.abort();
+  synthesisController = null;
   cancelPlayback?.();
   cancelPlayback = null;
   const sound = currentSound;
@@ -93,6 +97,9 @@ export async function stopQvacSpeak(): Promise<void> {
 
 export interface SpeakCallbacks {
   language?: string;
+  onPreparing?: () => void;
+  onStage?: (stage: VoiceStage) => void;
+  onFallback?: (detail: string) => void;
   onEngine?: (engine: 'supertonic' | 'system', reason?: 'language' | 'unavailable') => void;
   onStart?: () => void;
   /** Audio energy (QVAC) or a word-boundary pulse (system voice), 0…1. */
@@ -104,9 +111,13 @@ export interface SpeakCallbacks {
 async function qvacSpeak(text: string, token: number, cb: SpeakCallbacks): Promise<boolean> {
   const speakable = sanitizeForSupertonic(text);
   if (!speakable) return false;
-  const synth = await QVACService.getInstance().synthesizeSpeech(speakable);
+  const controller = new AbortController();
+  synthesisController = controller;
+  let synth;
+  try { synth = await QVACService.getInstance().synthesizeSpeech(speakable, { signal: controller.signal, onStage: cb.onStage }); }
+  finally { if (synthesisController === controller) synthesisController = null; }
   if (token !== generation) return true;
-  if (!synth?.pcm?.length) return false;
+  if (!synth?.pcm?.length) throw new Error('QVAC returned no audio. Check that Agent is enabled and the native voice model is available.');
   const wav = pcmToWav(synth.pcm, synth.sampleRate);
   const dir = new Directory(Paths.cache, 'qvac-tts');
   if (!dir.exists) dir.create({ intermediates: true });
@@ -128,7 +139,7 @@ async function qvacSpeak(text: string, token: number, cb: SpeakCallbacks): Promi
     const sub = sound.addListener('playbackStatusUpdate', status => {
       if (token !== generation) { finish(); return; }
       if (status.playing) {
-        if (!started) { started = true; cb.onEngine?.('supertonic'); cb.onStart?.(); }
+        if (!started) { started = true; recordVoiceDiagnostic('playing'); cb.onEngine?.('supertonic'); cb.onStart?.(); }
         const start = Math.floor(status.currentTime * synth.sampleRate);
         const end = Math.min(synth.pcm.length, start + Math.ceil(synth.sampleRate * .025));
         let energy = 0;
@@ -157,8 +168,11 @@ export async function speak(text: string, cb: SpeakCallbacks = {}): Promise<void
   const engine = QVACService.getInstance().getTtsEngine();
   if (engine !== 'system') {
     try {
+      cb.onPreparing?.();
       if (await qvacSpeak(text, token, { ...cb, onLevel: n => { if(live()) cb.onLevel?.(n); }, onStart: () => {if(live())cb.onStart?.();} })) { done(); return; }
-    } catch { /* Use system synthesis when the local model/player fails. */ }
+    } catch (error) {
+      if (live()) { recordVoiceDiagnostic('system_fallback'); cb.onFallback?.(error instanceof Error ? error.message : 'QVAC voice synthesis or playback failed.'); }
+    }
   }
   if (!live()) return;
   cb.onEngine?.('system', engine === 'system' ? undefined : 'unavailable');

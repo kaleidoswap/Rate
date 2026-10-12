@@ -3,8 +3,8 @@
 // Your kaleidoswap.me Lightning address: claim a name, share it, get notified
 // when it's paid, or give it back. Payments to it land in Spark, even with the
 // app closed. Same registry and signed messages as the Rate extension.
-import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Share, Switch, Text, TextInput, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, Share, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInDown } from 'react-native-reanimated';
@@ -18,7 +18,6 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import { motion } from '../theme';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { updateNostrProfile, restoreNostrConnection } from '../store/slices/nostrSlice';
-import { setTransactionNotifications } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
 import {
   KALEIDOSWAP_ME_DOMAIN, checkName, claimHandle, getStoredHandle, nameProblem, normalizeName, releaseHandle, sparkSigner,
@@ -39,7 +38,6 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
   const [check, setCheck] = useState<Check>({ state: 'idle' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [pushNote, setPushNote] = useState('');
 
   let sparkProblem = '';
   try { sparkSigner(); } catch (e) { sparkProblem = e instanceof Error ? e.message : 'Connect your Spark account first.'; }
@@ -61,10 +59,6 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
     return () => { live = false; clearTimeout(timer); };
   }, [name]);
 
-  const describePush = useCallback((outcome: Awaited<ReturnType<typeof syncPaymentPush>>) => {
-    setPushNote(outcome === 'no-permission' ? 'Allow notifications for KaleidoSwap in your phone settings to get them.' : '');
-  }, []);
-
   const claim = async () => {
     if (!walletId || busy) return;
     setBusy(true); setError('');
@@ -79,7 +73,7 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
           await dispatch(updateNostrProfile({ name: claimed.name, lud16: claimed.lightningAddress })).unwrap();
         } catch { setError('Address ready. Update your Nostr profile when connected.'); }
       }
-      if (notificationsOn) describePush(await syncPaymentPush(walletId, true).catch(() => 'unchanged' as const));
+      if (notificationsOn) await syncPaymentPush(walletId, true).catch(() => undefined);
     } catch (e) {
       feedback.error();
       setError(e instanceof Error ? e.message : 'Could not claim the name. Try again.');
@@ -89,11 +83,11 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
   const release = () => {
     if (!walletId || !handle) return;
     Alert.alert(
-      `Release ${handle.lightningAddress}?`,
+      'Change Lightning address?',
       'Payments to this address will stop working and anyone can claim the name. You can claim a new name afterwards.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Release', style: 'destructive', onPress: async () => {
+        { text: 'Release & choose new', style: 'destructive', onPress: async () => {
           setBusy(true); setError('');
           try {
             await syncPaymentPush(walletId, false).catch(() => undefined);
@@ -105,13 +99,6 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
         } },
       ],
     );
-  };
-
-  const toggleNotifications = async (on: boolean) => {
-    dispatch(setTransactionNotifications(on));
-    if (!walletId) return;
-    try { describePush(await syncPaymentPush(walletId, on)); }
-    catch (e) { setPushNote(e instanceof Error ? e.message : 'Could not update notifications.'); }
   };
 
   const text = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base };
@@ -148,17 +135,8 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
               </View>
             </View>
 
-            <View style={[card, { flexDirection: 'row', alignItems: 'center' }]}>
-              <Ionicons name="notifications-outline" size={22} color={t.colors.primary[500]} />
-              <View style={{ flex: 1, gap: 2 }}>
-                <Text style={{ ...text, fontWeight: '600' }}>Payment notifications</Text>
-                <Text style={muted}>{pushNote || 'A notification when a payment lands, even with the app closed. The amount and your address pass through Apple or Google to reach your phone.'}</Text>
-              </View>
-              <Switch accessibilityLabel="Payment notifications" value={notificationsOn} onValueChange={v => void toggleNotifications(v)}
-                trackColor={{ true: t.colors.primary[500], false: t.colors.gray[300] }} />
-            </View>
-
-            <Button title="Release this name" variant="secondary" onPress={release} loading={busy} disabled={busy || !!sparkProblem} />
+            <Text style={muted}>To change your username, release this address and choose a new one. The old address will stop receiving payments.</Text>
+            <Button title="Change username…" variant="secondary" onPress={release} loading={busy} disabled={busy || !!sparkProblem} />
             {!!sparkProblem && <Text style={muted}>{sparkProblem}</Text>}
           </Animated.View>
         ) : (

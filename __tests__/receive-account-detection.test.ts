@@ -110,3 +110,14 @@ it('detects a receive after spending reduced the monitored balance', async () =>
   expect(onDetected).toHaveBeenCalledTimes(1);
   unmount();
 });
+
+it('detects a new non-USD Spark token at the native reusable address', async () => {
+  const onDetected = jest.fn();
+  mockAdapter.listAssets.mockResolvedValue([{ id: 'BTC', ticker: 'BTC', balance: { total: 100 } }]);
+  const { unmount } = renderHook(() => useDepositDetection({ enabled: true, methods: [method({ assetId: 'SPARK_ALL' })], onDetected }));
+  await jest.advanceTimersByTimeAsync(0);
+  mockAdapter.listAssets.mockResolvedValue([{ id: 'BTC', ticker: 'BTC', balance: { total: 100 } }, { id: 'token', ticker: 'TOKEN', balance: { total: 10 } }]);
+  await jest.advanceTimersByTimeAsync(8000);
+  expect(onDetected).toHaveBeenCalledTimes(1);
+  unmount();
+});

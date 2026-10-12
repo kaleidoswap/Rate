@@ -2,11 +2,8 @@ import React, { useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
-import { SegmentedTabs } from '../SegmentedTabs';
 import { NetworkIcon } from '../NetworkIcon';
-import { NetworkStack } from '../NetworkStack';
 import { Sheet } from '../Sheet';
-import { OnchainIcon } from '../ProtocolIcons';
 import { feedback } from '../../utils/feedback';
 import type { AccountId } from '../../utils/account-routing';
 import {
@@ -15,9 +12,6 @@ import {
 
 const METHOD_LABELS: Record<ReceiveMethodId, string> = {
   universal: 'Any wallet', lightning: 'Lightning', onchain: 'On-chain', spark: 'Spark', ark: 'Ark',
-};
-const METHOD_ICONS: Record<ReceiveMethodId, 'qr-code-outline' | 'flash-outline' | 'logo-bitcoin' | 'sparkles-outline' | 'planet-outline'> = {
-  universal: 'qr-code-outline', lightning: 'flash-outline', onchain: 'logo-bitcoin', spark: 'sparkles-outline', ark: 'planet-outline',
 };
 const ACCOUNT_ICON: Record<AccountId, string> = { RGB: 'rgb', SPARK: 'spark', ARKADE: 'arkade', BARK: 'bark' };
 /** Lightning into the RGB account lands on the RGB Lightning Node. */
@@ -83,12 +77,6 @@ function ChoiceRow<K extends string>({ label, title, choices, selected, onSelect
   </>;
 }
 
-function MethodIcon({ icons, color, size }: { icons: string[]; color: string; size: number }) {
-  if (icons.length > 1) return <NetworkStack networks={icons} size={size} ringColor="transparent" />;
-  if (icons[0] === 'onchain') return <OnchainIcon color={color} size={size} />;
-  return <NetworkIcon network={icons[0]} size={size} />;
-}
-
 function destinationChoices(destinations: ReceiveDestination[], amountSats: number, showChain: boolean, iconOf: (account: AccountId) => string): Choice<AccountId>[] {
   return destinations.map(d => ({
     key: d.account, title: d.label, detail: d.detail, icon: iconOf(d.account),
@@ -101,7 +89,7 @@ function destinationChoices(destinations: ReceiveDestination[], amountSats: numb
 }
 
 /**
- * How the payment arrives (the method tabs) and where it lands (the account). The
+ * How the payment arrives (a vertical method picker) and where it lands (the account). The
  * universal code also shows which network it is for when accounts span several.
  */
 export function ReceiveRoutePicker({
@@ -137,14 +125,9 @@ export function ReceiveRoutePicker({
   const currentLn = lightningDestinations?.find(d => d.account === lightningDestination);
   const accountTitle = (d?: ReceiveDestination) => (d ? `${d.label}${showChain ? ` · ${chainLabel(d.chain)}` : ''}` : 'Choose an account');
   return <View style={{ gap: t.spacing[3], marginBottom: t.spacing[4] }}>
-    {methods.length > 1 && <SegmentedTabs<ReceiveMethodId>
-      options={methods.map(m => ({
-        key: m, label: METHOD_LABELS[m], icon: METHOD_ICONS[m],
-        renderIcon: methodIcons?.[m]?.length
-          ? (color, size) => <MethodIcon icons={methodIcons[m]!} color={color} size={size} />
-          : m === 'onchain' ? (color, size) => <OnchainIcon color={color} size={size} /> : undefined,
-      }))}
-      value={method} onChange={onMethod} />}
+    <ChoiceRow<ReceiveMethodId> label="Payment method" sheetTitle="How they pay"
+      title={METHOD_LABELS[method]} selected={method} onSelect={onMethod}
+      choices={methods.map(m => ({ key: m, title: METHOD_LABELS[m], icon: methodIcons?.[m]?.[0] }))} />
     {method === 'universal' && !!chains && chains.length > 1 && onChain && <ChoiceRow<ReceiveChain>
       label="Network" sheetTitle="Which network is this code for?"
       title={`${chainLabel(chain ?? chains[0].chain)} · ${(chains.find(g => g.chain === chain) ?? chains[0]).accounts.length} accounts`}

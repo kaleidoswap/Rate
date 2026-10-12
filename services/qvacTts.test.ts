@@ -1,5 +1,6 @@
 import { speak, stopSpeak } from './qvacTts';
 import { speakBest } from './speech';
+jest.mock('react-native-device-info', () => ({ __esModule: true, default: {} }));
 const mockSynth = jest.fn();
 let mockEngine = 'system';
 const mockRemove = jest.fn();
@@ -45,7 +46,7 @@ it('synthesizes Italian with Supertonic 3 and preserves accents without system f
   const onEngine = jest.fn();
   const pending = speak('Ciao, il tuo pagamento è stato ricevuto.', { onEngine });
   for (let i = 0; i < 8; i++) await Promise.resolve();
-  expect(mockSynth).toHaveBeenCalledWith('Ciao, il tuo pagamento è stato ricevuto.');
+  expect(mockSynth).toHaveBeenCalledWith('Ciao, il tuo pagamento è stato ricevuto.', expect.objectContaining({ signal: expect.anything() }));
   mockPlayback({ playing: true, currentTime: 0 });
   mockPlayback({ playing: false, currentTime: .01, didJustFinish: true });
   await pending;
@@ -58,4 +59,33 @@ it('reports a synthesis failure instead of silently presenting the fallback as S
   await speak('Your payment is confirmed.', { onEngine });
   expect(mockSynth).toHaveBeenCalled();
   expect(onEngine).toHaveBeenCalledWith('system', 'unavailable');
+});
+
+it('reports the neural failure before falling back, and retries on the next utterance', async () => {
+  mockEngine = 'supertonic';
+  const onFallback = jest.fn();
+  const onPreparing = jest.fn();
+  mockSynth.mockRejectedValueOnce(new Error('Supertonic model download/load: offline'));
+  await speak('Ciao!', { onFallback, onPreparing });
+  expect(onPreparing).toHaveBeenCalledTimes(1);
+  expect(onFallback).toHaveBeenCalledWith('Supertonic model download/load: offline');
+  mockSynth.mockRejectedValueOnce(new Error('retry failed'));
+  await speak('Riproviamo.', { onFallback });
+  expect(mockSynth).toHaveBeenCalledTimes(2);
+});
+
+it('aborts pending synthesis on stop and never falls back for the cancelled turn', async () => {
+  mockEngine = 'supertonic';
+  let signal: AbortSignal;
+  mockSynth.mockImplementationOnce((_: string, options: any) => new Promise((_, reject) => {
+    signal = options.signal;
+    signal.addEventListener('abort', () => reject(new Error('Voice cancelled')));
+  }));
+  const fallback = jest.fn();
+  const pending = speak('Ciao', { onFallback: fallback });
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  await stopSpeak(); await pending;
+  expect(signal!.aborted).toBe(true);
+  expect(fallback).not.toHaveBeenCalled();
+  expect(speakBest).not.toHaveBeenCalled();
 });

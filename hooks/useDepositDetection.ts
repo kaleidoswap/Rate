@@ -108,13 +108,13 @@ async function readMethodBalance(
 
 /** Track USD tokens separately: new token holdings count, BTC changes do not. */
 async function readMethodBalances(method: ReceiveMethod, signal: AbortSignal): Promise<Record<string, number> | null> {
-  if (method.protocol === 'SPARK' && method.assetId === 'USD') {
+  if (method.protocol === 'SPARK' && (method.assetId === 'USD' || method.assetId === 'SPARK_ALL')) {
     const adapter = getConnectedAdapter(method.protocol);
     if (!adapter) return null;
     try {
       const assets = await runReceiveOperation<any[]>('Spark USD balances',
         s => callAbortableAdapterMethod(adapter, 'listAssets', [], s), POLL_TIMEOUT_MS, signal);
-      return Object.fromEntries(assets.filter(a => /^usd/i.test(a.ticker ?? ''))
+      return Object.fromEntries(assets.filter(a => method.assetId === 'SPARK_ALL' || /^usd/i.test(a.ticker ?? ''))
         .map(a => [a.id, Number(a.balance?.total ?? 0)]).filter(([, value]) => Number.isFinite(value)));
     } catch { return null; }
   }

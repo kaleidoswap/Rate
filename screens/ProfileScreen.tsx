@@ -4,7 +4,7 @@ import { useAppTheme } from '../theme/ThemeProvider';
 // The user's Nostr profile as others see it, opened from the Dashboard: banner,
 // photo, names and links, plus a QR of the npub that friends scan to add them.
 // Editing happens one step further, on ProfileEdit.
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { nip19 } from 'nostr-tools';
@@ -30,7 +30,6 @@ function npubOf(npub: string | null, publicKey: string | null): string {
 export default function ProfileScreen({ navigation }: Props) {
   const theme = useAppTheme();
   const styles = makeStyles(theme);
-  const [showCode, setShowCode] = useState(false);
   const dispatch = useAppDispatch();
   const profile = useAppSelector(s => s.nostr?.profile ?? null);
   const publicKey = useAppSelector(s => s.nostr?.publicKey ?? null);
@@ -80,6 +79,10 @@ export default function ProfileScreen({ navigation }: Props) {
           <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Edit</Text>
         </TouchableOpacity>
       } />
+      <View style={{ flexDirection: 'row', paddingHorizontal: theme.spacing[4], gap: theme.spacing[2] }}>
+        <Button title="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1 }} />
+        <Button title="Nostr & relays" variant="ghost" onPress={() => navigation.navigate('NostrSettings')} style={{ flex: 1 }} />
+      </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
           <View style={styles.banner}>
@@ -102,31 +105,18 @@ export default function ProfileScreen({ navigation }: Props) {
           {!!about && <Text style={styles.about}>{about}</Text>}
         </View>
 
-        {!!lud16 && (
-          <View style={styles.card}>
-            {!!lud16 && (
-              <View style={styles.row}>
-                <Ionicons name="flash" size={16} color={theme.colors.warning[500]} />
-                <View style={styles.rowText}>
-                  <Text style={styles.rowLabel}>Lightning address</Text>
-                  <Text style={styles.rowValue} numberOfLines={1}>{lud16}</Text>
-                </View>
-                <CopyButton value={lud16} size={16} />
-              </View>
-            )}
-
+        {!!lud16 && <View style={styles.card}>
+          <View style={styles.row}>
+            <Ionicons name="flash" size={16} color={theme.colors.warning[500]} />
+            <View style={styles.rowText}>
+              <Text style={styles.meta} numberOfLines={1} selectable>{lud16}</Text>
+            </View>
+            <CopyButton value={lud16} size={16} />
           </View>
-        )}
-
+        </View>}
 
         <View style={[styles.card, styles.qrCard]}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Show Nostr QR code" accessibilityState={{ expanded: showCode }} onPress={() => setShowCode(v => !v)} style={styles.qrActions}>
-            <Ionicons name="qr-code-outline" size={20} color={theme.colors.primary[500]} /><Text style={styles.qrTitle}>{showCode ? 'Hide QR code' : 'Show QR code'}</Text>
-          </TouchableOpacity>
-          {showCode && <>
-          <Text style={styles.qrTitle}>Your Nostr code</Text>
-          <Text style={styles.qrHint}>Friends can scan this to add you</Text>
-          <ReceiveQr value={code} size={QR} label="Nostr code" /></>}
+          <ReceiveQr value={code} size={QR} label="Nostr code" />
           <Text style={styles.npub} numberOfLines={1} selectable>{shortNpub(npub)}</Text>
           <View style={styles.qrActions}>
             <CopyButton value={npub} label="Copy" size={16} color={theme.colors.primary[500]} />
@@ -136,18 +126,17 @@ export default function ProfileScreen({ navigation }: Props) {
             </TouchableOpacity>
           </View>
         </View>
-        <Button title="Nostr & relay connections" variant="ghost" onPress={() => navigation.navigate('NostrSettings')} />
       </ScrollView>
     </View>
   );
 }
 
 const AVATAR = 56;
-const QR = 200;
+const QR = 168;
 
 const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create({
   container: { flex: 1, backgroundColor: theme.colors.background.secondary },
-  content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10], gap: theme.spacing[4] },
+  content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10], gap: theme.spacing[2] },
   hero: { marginBottom: AVATAR / 2 - theme.spacing[2] },
   banner: {
     height: 56,

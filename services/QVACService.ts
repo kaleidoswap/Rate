@@ -5,6 +5,7 @@ import {
   transcribe,
   transcribeStream,
   textToSpeech,
+  subscribeServerLogs,
   unloadModel,
   cancel,
   resume,
@@ -39,6 +40,7 @@ import {
   createQvacProvider,
   createQvacVoice,
 } from '@kaleidorg/mind/qvac';
+import { recordVoiceDiagnostic, diagnosticError, waitForVoice, type VoiceStage } from './voiceDiagnostics';
 import { sanitizeForSupertonic } from './supertonicText';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 
@@ -922,14 +924,18 @@ class QVACService {
    * Load the QVAC GGML Supertonic TTS model and keep it resident.
    * Idempotent + single-flighted so concurrent speak calls share one load.
    */
-  private async ensureTtsLoaded(): Promise<string> {
+  private async ensureTtsLoaded(signal?: AbortSignal): Promise<string> {
     if (this.ttsModelId) return this.ttsModelId;
     if (this.ttsLoadPromise) return this.ttsLoadPromise;
 
     this.ttsLoadPromise = (async () => {
       console.log('[QVAC] TTS: loading Supertonic GGML model');
       // Keep Whisper resident: an open hands-free session resumes it after playback.
-      const id = await this.bootLoad(() => sdkLoadModel({
+      const id = await this.bootLoad(async () => {
+        const operation = sdkLoadModel({
+        onProgress: (progress: { percentage?: number }) => {
+          if (Number.isFinite(progress.percentage)) recordVoiceDiagnostic('download_progress', `${Math.round(progress.percentage!)}%`);
+        },
         modelSrc: TTS_MULTILINGUAL_SUPERTONIC3_Q8_0,
         modelType: 'tts-ggml',
         modelConfig: {
@@ -939,7 +945,13 @@ class QVACService {
           ttsSpeed: 1,
           ttsNumInferenceSteps: 8,
         },
-      } as any));
+      } as any);
+        // Dispose a late load if cancellation was ignored by the native engine.
+        let abandoned = false;
+        void operation.then(id => { if (abandoned) void unloadModel({ modelId: id, clearStorage: false }).catch(() => {}); }, () => {});
+        try { return await waitForVoice(operation, operation.requestId, signal, 300000, 'loading', requestId => cancel({ requestId })); }
+        catch (error) { abandoned = true; throw error; }
+      });
       this.ttsModelId = id;
       console.log('[QVAC] TTS ready:', id);
       return id;
@@ -949,7 +961,7 @@ class QVACService {
       return await this.ttsLoadPromise;
     } catch (e) {
       this.ttsLoadPromise = null; // allow a retry
-      throw e;
+      throw new Error(`Supertonic model download/load: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -958,18 +970,46 @@ class QVACService {
    * sample rate, or null when on-device AI is unavailable (caller falls back to
    * the system voice). Throws on a genuine synthesis error.
    */
-  async synthesizeSpeech(text: string): Promise<{ pcm: number[]; sampleRate: number } | null> {
-    if (this.workletBlocked()) return null;
+  async synthesizeSpeech(text: string, options: { signal?: AbortSignal; onStage?: (stage: VoiceStage) => void } = {}): Promise<{ pcm: number[]; sampleRate: number } | null> {
+    if (this.workletBlocked()) {
+      recordVoiceDiagnostic('unavailable', !this.enabled ? 'agent_disabled' : 'worklet_blocked');
+      throw new Error(!this.enabled ? 'Enable Agent before using Supertonic.' : 'This build cannot run QVAC neural speech on this device.');
+    }
     const speakable = sanitizeForSupertonic(text);
     if (!speakable) return null;
-    const modelId = await this.ensureTtsLoaded();
-    // The older shared Mind helper strips non-ASCII; call QVAC directly so
-    // Italian accents survive and playback uses the engine's actual sample rate.
-    const result = textToSpeech({ modelId, text: speakable, inputType: 'text', stream: false });
-    const pcm = await result.buffer;
-    const sampleRate = (await result.sampleRate) ?? 44100;
-    if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new Error('Invalid speech sample rate');
-    return { pcm: Array.from(pcm), sampleRate };
+    if (options.signal?.aborted) throw new Error('Voice cancelled');
+    const started = Date.now();
+    let unsubscribe: (() => void) | undefined;
+    try {
+      // Keep only TTS warnings/errors and redact utterances before export.
+      unsubscribe = subscribeServerLogs?.(log => {
+        if (/tts|supertonic/i.test(log.namespace) && (log.level === 'error' || log.level === 'warn')) recordVoiceDiagnostic('sdk_log', `${log.level}: ${diagnosticError(log.message, [text, speakable])}`);
+      });
+      options.onStage?.('loading');
+      recordVoiceDiagnostic('loading');
+      const modelId = await this.ensureTtsLoaded(options.signal);
+      if (options.signal?.aborted) throw new Error('Voice cancelled');
+      options.onStage?.('generating');
+      recordVoiceDiagnostic('generating');
+      const result = textToSpeech({ modelId, text: speakable, inputType: 'text', stream: false });
+      const [pcm, rate] = await waitForVoice(Promise.all([result.buffer, result.sampleRate]), result.requestId,
+        options.signal, 90000, 'generating', requestId => cancel({ requestId }));
+      const sampleRate = rate ?? 44100;
+      if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new Error('Invalid speech sample rate');
+      if (!pcm.length) throw new Error('Supertonic returned empty audio');
+      recordVoiceDiagnostic('audio_ready', `samples=${pcm.length}; rate=${sampleRate}; elapsedMs=${Date.now() - started}`);
+      return { pcm: Array.from(pcm), sampleRate };
+    } catch (error) {
+      // Classify without leaking arbitrary native messages into exported reports.
+      const message = error instanceof Error ? error.message : '';
+      const category = /timeout|timed out/i.test(message) ? 'timeout' : /cancel/i.test(message) ? 'cancelled'
+        : /download|network|fetch|offline/i.test(message) ? 'download_or_network'
+        : /memory|alloc/i.test(message) ? 'memory' : /addon|binding|native/i.test(message) ? 'native_runtime'
+        : /load/i.test(message) ? 'model_load' : 'synthesis';
+      recordVoiceDiagnostic('failure', `${category}: ${diagnosticError(message, [text, speakable])}`);
+      throw error;
+    } finally { unsubscribe?.(); }
+
   }
 
   // --- Embeddings (for on-device RAG) ---
