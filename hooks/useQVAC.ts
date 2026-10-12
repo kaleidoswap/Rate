@@ -46,6 +46,7 @@ export interface UseQVACResult extends QVACState {
   setSttModel: (id: string) => Promise<void>;
   /** Switch the text-to-speech engine. */
   setTtsEngine: (engine: TtsEngine) => Promise<void>;
+  setTtsVoice: (voice: 'F1' | 'M1') => Promise<void>;
   /** Ids of models whose weights are fully downloaded on this device. */
   downloadedModelIds: string[];
   /** Delete a downloaded model's weights from disk. */
@@ -98,6 +99,11 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
 
   const setTtsEngine = useCallback(async (engine: TtsEngine) => {
     await service.setTtsEngine(engine);
+    setConfig(service.getConfig());
+  }, [service]);
+
+  const setTtsVoice = useCallback(async (voice: 'F1' | 'M1') => {
+    await service.setTtsVoice(voice);
     setConfig(service.getConfig());
   }, [service]);
 
@@ -193,6 +199,7 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
     ttsOptions: QVAC_TTS_OPTIONS,
     setSttModel,
     setTtsEngine,
+    setTtsVoice,
     downloadedModelIds,
     deleteModel,
   };

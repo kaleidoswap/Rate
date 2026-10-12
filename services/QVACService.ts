@@ -110,6 +110,7 @@ export interface QVACConfig {
   ttsEngine: TtsEngine;
   /** True once the user explicitly chose a TTS engine in settings. */
   ttsEngineUserSelected?: boolean;
+  ttsVoice?: 'F1' | 'M1';
 }
 
 const DEFAULT_CONFIG: QVACConfig = {
@@ -133,6 +134,8 @@ type StateListener = (state: QVACState) => void;
 class QVACService {
   private static instance: QVACService;
 
+  private changingModel = false;
+  private llmLoadPromise: Promise<void> | null = null;
   private llmModelId: string | null = null;
   private whisperModelId: string | null = null;
   // Coalesce cold-start callers (voice overlay pre-warm, auto-listen, and
@@ -148,6 +151,7 @@ class QVACService {
   private vadModelPath: string | null = null;
   private ttsModelId: string | null = null;
   private ttsLanguage: string | null = null;
+  private ttsQueue: Promise<void> = Promise.resolve();
   private embedModelId: string | null = null;
   private embedLoadPromise: Promise<string> | null = null;
   private ttsLoadPromise: Promise<string> | null = null;
@@ -384,10 +388,20 @@ class QVACService {
 
   /** Switch the active chat model and reload it. */
   async setModelId(id: string): Promise<void> {
-    if (id === this.config.modelId) return;
-    this.config = { ...this.config, modelId: id };
-    await this.saveConfig();
-    await this.reloadLLM();
+    if (this.changingModel || this.llmLoadPromise || ['downloading', 'loading'].includes(this.state.llmStatus)) {
+      throw new Error('Wait for the current model to finish loading.');
+    }
+    const model = QVAC_MODELS.find(m => m.id === id);
+    if (!model?.localCapable || model.tier !== 'phone') throw new Error('This model is not supported on this phone.');
+    this.changingModel = true;
+    try {
+      await this.loadConfig();
+      if (id === this.config.modelId && this.state.llmStatus !== 'error') return;
+      this.config = { ...this.config, modelId: id };
+      await this.saveConfig();
+      await this.reloadLLM();
+      if (this.state.llmStatus === 'error') throw new Error(this.state.error || 'Unable to load model. Try again.');
+    } finally { this.changingModel = false; }
   }
 
   /**
@@ -405,15 +419,17 @@ class QVACService {
     const wasActive =
       !!this.llmModelId ||
       this.state.llmStatus === 'ready' ||
+      this.state.llmStatus === 'error' ||
       this.state.llmStatus === 'loading' ||
       this.state.llmStatus === 'downloading';
-    await this.unloadLLM().catch(() => {});
+    await this.unloadLLM();
     this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, error: null });
     if (wasActive) await this.initializeLLM();
   }
 
   /** Switch the speech-to-text (Whisper) model and reload it if it was active. */
   async setSttModel(id: string): Promise<void> {
+    if (this.whisperLoadPromise || ['loading', 'downloading'].includes(this.state.whisperStatus)) throw new Error('Wait for speech recognition to finish loading.');
     await this.loadConfig();
     if (id === this.config.sttModelId) return;
     this.config = { ...this.config, sttModelId: id };
@@ -435,6 +451,18 @@ class QVACService {
     await this.saveConfig();
     // Free the neural TTS weights when switching to the system voice.
     if (engine === 'system') await this.unloadTts().catch(() => {});
+  }
+
+  async setTtsVoice(voice: 'F1' | 'M1'): Promise<void> {
+    if (voice !== 'F1' && voice !== 'M1') throw new Error('Unsupported voice');
+    return this.queueTts(async () => {
+      await this.loadConfig();
+      if ((this.config.ttsVoice ?? 'F1') === voice) return;
+      await this.unloadTtsModel();
+      this.config = { ...this.config, ttsVoice: voice };
+      await this.saveConfig();
+      recordVoiceDiagnostic('voice_selected', voice);
+    });
   }
 
   /** Engine currently selected for speech output. */
@@ -490,7 +518,7 @@ class QVACService {
     if (!name) return;
     // Unload if it's the active chat or STT model.
     const chat = QVAC_MODELS.find((m) => m.id === id);
-    if (chat && this.config.modelId === id) await this.unloadLLM().catch(() => {});
+    if (chat && this.config.modelId === id) await this.unloadLLM();
     const stt = QVAC_STT_MODELS.find((m) => m.id === id);
     if (stt && this.config.sttModelId === id) await this.unloadWhisper().catch(() => {});
     try {
@@ -629,6 +657,12 @@ class QVACService {
 
   /** @param opts.retry the user asked to try again after a previous boot crash. */
   async initializeLLM(opts: { retry?: boolean } = {}): Promise<void> {
+    if (this.llmLoadPromise) return this.llmLoadPromise;
+    this.llmLoadPromise = this.initializeLLMOnce(opts);
+    try { await this.llmLoadPromise; } finally { this.llmLoadPromise = null; }
+  }
+
+  private async initializeLLMOnce(opts: { retry?: boolean }): Promise<void> {
     // Hard gate: never start the Bare worklet unless AI is enabled AND the
     // runtime can actually run here. On an unsupported target (e.g. the iOS
     // Simulator) booting the worklet aborts the process, so we refuse and
@@ -902,7 +936,10 @@ class QVACService {
   private async ensureTtsLoaded(language: string, signal?: AbortSignal): Promise<string> {
     if (this.ttsLoadPromise && !this.ttsModelId) await this.ttsLoadPromise;
     if (signal?.aborted) throw new Error('Voice cancelled');
-    if (this.ttsModelId && this.ttsLanguage !== language) await this.unloadTts();
+    if (this.ttsModelId && this.ttsLanguage !== language) {
+      recordVoiceDiagnostic('language_change', `${this.ttsLanguage} -> ${language}`);
+      await this.unloadTtsModel();
+    }
     if (this.ttsModelId) return this.ttsModelId;
     if (this.ttsLoadPromise) return this.ttsLoadPromise;
 
@@ -919,7 +956,7 @@ class QVACService {
         modelConfig: {
           ttsEngine: 'supertonic',
           language, // Concrete ISO code required by the QVAC 0.21 SDK schema.
-          voice: 'F1',
+          voice: this.config.ttsVoice ?? 'F1',
           ttsSpeed: 1,
           ttsNumInferenceSteps: 8,
         },
@@ -932,6 +969,7 @@ class QVACService {
       });
       this.ttsModelId = id;
       this.ttsLanguage = language;
+      recordVoiceDiagnostic('model_loaded', `language=${language}; voice=${this.config.ttsVoice ?? 'F1'}`);
       console.log('[QVAC] TTS ready:', id);
       return id;
     })();
@@ -949,7 +987,17 @@ class QVACService {
    * sample rate, or null when on-device AI is unavailable (caller falls back to
    * the system voice). Throws on a genuine synthesis error.
    */
+  private queueTts<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.ttsQueue.then(operation);
+    this.ttsQueue = pending.then(() => {}, () => {});
+    return pending;
+  }
+
   async synthesizeSpeech(text: string, options: { signal?: AbortSignal; onStage?: (stage: VoiceStage) => void } = {}): Promise<{ pcm: number[]; sampleRate: number } | null> {
+    return this.queueTts(() => this.synthesizeSpeechQueued(text, options));
+  }
+
+  private async synthesizeSpeechQueued(text: string, options: { signal?: AbortSignal; onStage?: (stage: VoiceStage) => void }): Promise<{ pcm: number[]; sampleRate: number } | null> {
     if (this.workletBlocked()) {
       recordVoiceDiagnostic('unavailable', !this.enabled ? 'agent_disabled' : 'worklet_blocked');
       throw new Error(!this.enabled ? 'Enable Agent before using Supertonic.' : 'This build cannot run QVAC neural speech on this device.');
@@ -970,9 +1018,9 @@ class QVACService {
       const modelId = await this.ensureTtsLoaded(language, options.signal);
       if (options.signal?.aborted) throw new Error('Voice cancelled');
       options.onStage?.('generating');
-      recordVoiceDiagnostic('generating');
+      recordVoiceDiagnostic('generating', `language=${language}`);
       const result = textToSpeech({ modelId, text: speakable, inputType: 'text', stream: false });
-      const [pcm, rate] = await waitForVoice(Promise.all([result.buffer, result.sampleRate]), result.requestId,
+      const [pcm, rate] = await waitForVoice(Promise.all([result.buffer, result.sampleRate, result.done]), result.requestId,
         options.signal, 90000, 'generating', requestId => cancel({ requestId }));
       const sampleRate = rate ?? 44100;
       if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new Error('Invalid speech sample rate');
@@ -1037,11 +1085,18 @@ class QVACService {
   }
 
   async unloadTts(): Promise<void> {
+    return this.queueTts(() => this.unloadTtsModel());
+  }
+
+  private async unloadTtsModel(): Promise<void> {
     if (this.ttsModelId) {
+      recordVoiceDiagnostic('model_unloading', `language=${this.ttsLanguage}`);
       try {
         await unloadModel({ modelId: this.ttsModelId, clearStorage: false });
-      } catch {
-        /* ignore */
+        recordVoiceDiagnostic('model_unloaded');
+      } catch (error) {
+        recordVoiceDiagnostic('model_unload_failed');
+        throw new Error(`Supertonic model unload failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       this.ttsModelId = null;
       this.ttsLanguage = null;

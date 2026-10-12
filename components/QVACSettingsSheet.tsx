@@ -1,7 +1,8 @@
 // components/QVACSettingsSheet.tsx
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
   Modal,
+  Platform,
   View,
   Text,
   ScrollView,
@@ -16,6 +17,8 @@ import { leading, type Theme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import type { QVACModel, SttModel, TtsOption, TtsEngine } from '../services/qvacModels';
 import type { QVACConfig, ModelStatus } from '../services/QVACService';
+import { speak, stopSpeak } from '../services/qvacTts';
+import { getAppLanguage } from '../localization/language';
 import type { AiMode } from '../store/slices/settingsSlice';
 
 interface Props {
@@ -48,6 +51,7 @@ interface Props {
   onSetTtsEngine: (engine: TtsEngine) => void;
   /** Open the "Design your agent" screen (personality, connectors, context). */
   onDesignAgent?: () => void;
+  onSetTtsVoice?: (voice: 'F1' | 'M1') => Promise<void>;
 }
 
 const TIER_LABEL: Record<string, string> = {
@@ -75,10 +79,37 @@ export default function QVACSettingsSheet({
   onSetSttModel,
   onSetTtsEngine,
   onDesignAgent,
+  onSetTtsVoice,
 }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
-  const busy = llmStatus === 'downloading' || llmStatus === 'loading';
+  const [openingPersonalization, setOpeningPersonalization] = useState(false);
+  const [tab, setTab] = useState<'Model' | 'Voice'>('Model');
+  const [pending, setPending] = useState(false);
+  const actionLock = useRef(false);
+  const [error, setError] = useState('');
+  const [preview, setPreview] = useState(false);
+  const previewActive = useRef(false);
+  const [recognition, setRecognition] = useState(false);
+  useEffect(() => () => { if (previewActive.current) void stopSpeak(); }, []);
+  const act = async (action: () => unknown) => {
+    if (actionLock.current) return;
+    actionLock.current = true; setPending(true); setError('');
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to apply changes. Try again.'); }
+    finally { actionLock.current = false; setPending(false); }
+  };
+  const listen = async () => {
+    if (previewActive.current) { previewActive.current = false; setPreview(false); await stopSpeak(); return; }
+    previewActive.current = true; setPreview(true); setError('');
+    try {
+      await speak(getAppLanguage() === 'it' ? 'Ciao, sono Prismo. Come posso aiutarti oggi?' : 'Hi, I am Prismo. How can I help you today?', {
+        onFallback: () => setError('Supertonic is unavailable. This preview uses the system voice.'),
+        onDone: () => { previewActive.current = false; setPreview(false); },
+        onError: () => { previewActive.current = false; setPreview(false); setError('Unable to play voice. Try again.'); },
+      });
+    } catch { previewActive.current = false; setPreview(false); setError('Unable to play voice. Try again.'); }
+  };
+  const busy = pending || llmStatus === 'downloading' || llmStatus === 'loading';
   const isDownloaded = (id: string) => downloadedModelIds.includes(id);
 
   const confirmDelete = (id: string, label: string) => {
@@ -87,16 +118,16 @@ export default function QVACSettingsSheet({
       `Remove “${label}” from this device? You can download it again later.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => onDeleteModel(id) },
+        { text: 'Delete', style: 'destructive', onPress: () => { void act(() => onDeleteModel(id)); } },
       ]
     );
   };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible && !openingPersonalization} onDismiss={() => { if (openingPersonalization) onDesignAgent?.(); }} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Text style={styles.title}>Models & voice</Text>
+          <Text style={styles.title}>Prismo settings</Text>
           <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close model settings">
             <Ionicons name="close" size={26} color={theme.colors.text.primary} />
           </TouchableOpacity>
@@ -106,12 +137,20 @@ export default function QVACSettingsSheet({
           <View style={styles.busyBar}>
             <ActivityIndicator size="small" color={theme.colors.primary[500]} />
             <Text style={styles.busyText}>
-              {llmStatus === 'downloading' ? `Downloading model… ${combinedProgress}%` : 'Loading model…'}
+              {llmStatus === 'downloading' ? `Downloading model… ${combinedProgress}%` : 'Applying changes…'}
             </Text>
           </View>
         )}
 
+        {!!error && <Text accessibilityRole="alert" style={[styles.sectionHint, { color: theme.colors.error[500], padding: theme.spacing[4] }]}>{error}</Text>}
         <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.modeGroup}>
+            {(['Model', 'Voice'] as const).map(item => <TouchableOpacity key={item}
+              accessibilityRole="tab" accessibilityState={{ selected: tab === item }}
+              style={[styles.modeBtn, tab === item && styles.modeBtnActive]} onPress={() => setTab(item)}>
+              <Text style={[styles.modeBtnLabel, tab === item && styles.modeBtnLabelActive]}>{item}</Text>
+            </TouchableOpacity>)}
+          </View>
           {/* ---- KaleidoMind mode ---- */}
           <Text style={styles.sectionTitle}>Agent</Text>
           <Text style={styles.sectionHint}>
@@ -127,7 +166,8 @@ export default function QVACSettingsSheet({
                 <TouchableOpacity
                   key={m.key}
                   style={[styles.modeBtn, active && styles.modeBtnActive]}
-                  onPress={() => onSetAiMode(m.key)}
+                  disabled={busy || preview}
+                  onPress={() => { void act(() => onSetAiMode(m.key)); }}
                   activeOpacity={0.85}
                 >
                   <Ionicons
@@ -142,11 +182,11 @@ export default function QVACSettingsSheet({
           </View>
 
           {onDesignAgent && aiMode !== 'off' && (
-            <TouchableOpacity style={styles.designRow} onPress={onDesignAgent} activeOpacity={0.85}>
+            <TouchableOpacity style={styles.designRow} onPress={() => { if (Platform.OS === 'ios') setOpeningPersonalization(true); else onDesignAgent?.(); }} activeOpacity={0.85}>
               <Ionicons name="construct-outline" size={18} color={theme.colors.primary[500]} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.designLabel}>Design your agent</Text>
-                <Text style={styles.designHint}>Personality, connectors, context & memory</Text>
+                <Text style={styles.designLabel}>Personalize Prismo</Text>
+                <Text style={styles.designHint}>Personality, payments & memory</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
             </TouchableOpacity>
@@ -154,12 +194,12 @@ export default function QVACSettingsSheet({
 
           {aiMode === 'off' && (
             <Text style={styles.disabledNote}>
-              KaleidoMind is off. Pick “On this device” to use it.
+              Prismo is off. Pick “On this device” to use it.
             </Text>
           )}
 
           {/* ---- Model picker (on-device mode only) ---- */}
-          {aiMode === 'local' && (
+          {aiMode === 'local' && tab === 'Model' && (
           <>
           <Text style={styles.sectionTitle}>On-device model</Text>
           <Text style={styles.sectionHint}>
@@ -168,20 +208,22 @@ export default function QVACSettingsSheet({
               : 'Smaller models run faster and use less memory.'}
           </Text>
 
-          {catalog.filter((m) => m.localCapable).map((m) => {
+          {catalog.filter((m) => m.localCapable && m.tier === 'phone').map((m) => {
             const selected = m.id === config.modelId;
             const recommended = m.id === recommendedModelId;
             return (
               <TouchableOpacity
                 key={m.id}
                 style={[styles.modelRow, selected && styles.modelRowSelected]}
-                onPress={() => onSelectModel(m.id)}
+                disabled={busy || preview}
+                accessibilityRole="radio" accessibilityState={{ selected, disabled: busy || preview }}
+                onPress={() => { void act(() => onSelectModel(m.id)); }}
               >
                 <View style={styles.modelInfo}>
                   <View style={styles.modelLabelRow}>
                     <Text style={styles.modelLabel}>
                       {m.label}
-                      {m.supportsTools ? '  🛠' : ''}
+
                     </Text>
                     {recommended && (
                       <View style={styles.recPill}>
@@ -195,7 +237,7 @@ export default function QVACSettingsSheet({
                   </Text>
                 </View>
                 <View style={styles.modelRight}>
-                  {isDownloaded(m.id) && !(selected && busy) && (
+                  {isDownloaded(m.id) && !selected && !busy && (
                     <TouchableOpacity
                       onPress={() => confirmDelete(m.id, m.label)}
                       hitSlop={10}
@@ -218,21 +260,64 @@ export default function QVACSettingsSheet({
           )}
 
           {/* ---- Voice mode: STT + TTS (on-device mode only) ---- */}
-          {aiMode === 'local' && (
+          {aiMode === 'local' && tab === 'Voice' && (
           <>
           <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Voice mode</Text>
           <Text style={styles.sectionHint}>
             Speech recognition and the spoken reply run on-device.
           </Text>
 
+          <Text style={[styles.subSectionTitle, { marginTop: theme.spacing[4] }]}>Voice output</Text>
+          {ttsOptions.map((t) => {
+            const selected = t.id === config.ttsEngine;
+            return (
+              <TouchableOpacity
+                key={t.id}
+                style={[styles.modelRow, selected && styles.modelRowSelected]}
+                disabled={busy || preview}
+                onPress={() => { void act(() => onSetTtsEngine(t.id)); }}
+              >
+                <View style={styles.modelInfo}>
+                  <Text style={styles.modelLabel}>{t.label}</Text>
+                  <Text style={styles.modelMeta}>{t.hint}</Text>
+                </View>
+                {selected ? (
+                  <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[500]} />
+                ) : (
+                  <Ionicons name="ellipse-outline" size={22} color={theme.colors.border.medium} />
+                )}
+              </TouchableOpacity>
+            );
+          })}
+          {config.ttsEngine === 'supertonic' && onSetTtsVoice && <>
+            <Text style={styles.subSectionTitle}>Prismo’s voice</Text>
+            <View style={styles.modeGroup}>
+              {(['F1', 'M1'] as const).map(voice => <TouchableOpacity key={voice} disabled={busy || preview}
+                accessibilityRole="radio" accessibilityState={{ selected: (config.ttsVoice ?? 'F1') === voice, disabled: busy || preview }}
+                style={[styles.modeBtn, (config.ttsVoice ?? 'F1') === voice && styles.modeBtnActive]}
+                onPress={() => { void act(() => onSetTtsVoice(voice)); }}>
+                <Text style={[styles.modeBtnLabel, (config.ttsVoice ?? 'F1') === voice && styles.modeBtnLabelActive]}>{voice === 'F1' ? 'Feminine · F1' : 'Masculine · M1'}</Text>
+              </TouchableOpacity>)}
+            </View>
+          </>}
+          <TouchableOpacity style={styles.designRow} disabled={busy} accessibilityRole="button" onPress={() => { void listen(); }}>
+            <Ionicons name={preview ? 'stop-circle-outline' : 'play-circle-outline'} size={24} color={theme.colors.primary[500]} />
+            <Text style={styles.designLabel}>{preview ? 'Stop preview' : 'Listen to voice'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.designRow} accessibilityRole="button" accessibilityState={{ expanded: recognition }} onPress={() => setRecognition(!recognition)}>
+            <Text style={[styles.designLabel, { flex: 1 }]}>Speech recognition</Text>
+            <Ionicons name={recognition ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
+          </TouchableOpacity>
+          {recognition && <>
           <Text style={styles.subSectionTitle}>Speech-to-text (Whisper)</Text>
-          {sttCatalog.map((s) => {
+          {sttCatalog.filter(s => s.id !== 'whisper-large-v3-turbo' && (s.lang !== 'en' || getAppLanguage() === 'en')).map((s) => {
             const selected = s.id === config.sttModelId;
             return (
               <TouchableOpacity
                 key={s.id}
                 style={[styles.modelRow, selected && styles.modelRowSelected]}
-                onPress={() => onSetSttModel(s.id)}
+                disabled={busy || preview}
+                onPress={() => { void act(() => onSetSttModel(s.id)); }}
               >
                 <View style={styles.modelInfo}>
                   <Text style={styles.modelLabel}>{s.label}</Text>
@@ -242,7 +327,7 @@ export default function QVACSettingsSheet({
                   </Text>
                 </View>
                 <View style={styles.modelRight}>
-                  {isDownloaded(s.id) && (
+                  {isDownloaded(s.id) && !selected && !busy && (
                     <TouchableOpacity
                       onPress={() => confirmDelete(s.id, s.label)}
                       hitSlop={10}
@@ -262,27 +347,7 @@ export default function QVACSettingsSheet({
             );
           })}
 
-          <Text style={[styles.subSectionTitle, { marginTop: theme.spacing[4] }]}>Voice output</Text>
-          {ttsOptions.map((t) => {
-            const selected = t.id === config.ttsEngine;
-            return (
-              <TouchableOpacity
-                key={t.id}
-                style={[styles.modelRow, selected && styles.modelRowSelected]}
-                onPress={() => onSetTtsEngine(t.id)}
-              >
-                <View style={styles.modelInfo}>
-                  <Text style={styles.modelLabel}>{t.label}</Text>
-                  <Text style={styles.modelMeta}>{t.hint}</Text>
-                </View>
-                {selected ? (
-                  <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[500]} />
-                ) : (
-                  <Ionicons name="ellipse-outline" size={22} color={theme.colors.border.medium} />
-                )}
-              </TouchableOpacity>
-            );
-          })}
+          </>}
           </>
           )}
 

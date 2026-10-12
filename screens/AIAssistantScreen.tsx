@@ -1156,7 +1156,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             config={qvac.config}
             llmStatus={qvac.llmStatus}
             combinedProgress={qvac.combinedProgress}
-            onSelectModel={(id) => qvac.setModel(id)}
+            onSelectModel={async (id) => {
+              if (isLoading) throw new Error('Stop the current response before changing models.');
+              await qvac.setModel(id);
+            }}
             onDesignAgent={() => { setShowSettings(false); navigation.navigate('MindSettings'); }}
             deviceMemGb={qvac.deviceMemGb}
             recommendedModelId={qvac.recommendedModelId}
@@ -1168,6 +1171,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             ttsOptions={qvac.ttsOptions}
             onSetSttModel={(id) => qvac.setSttModel(id)}
             onSetTtsEngine={(engine) => qvac.setTtsEngine(engine)}
+            onSetTtsVoice={qvac.setTtsVoice}
           />}
 
           {/* Conversation history — current chat (desktop parity) + new/clear. */}

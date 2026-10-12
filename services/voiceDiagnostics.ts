@@ -1,10 +1,20 @@
 import { Platform } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 
+let selectedVoice = 'F1';
 const events: Array<{ at: string; stage: string; detail: string }> = [];
 // Bounded diagnostic buffer; strip utterances, URLs and long identifiers from errors.
 export function recordVoiceDiagnostic(stage: string, detail = ''): void {
-  events.push({ at: new Date().toISOString(), stage, detail: detail.slice(0, 240) });
+  if (stage === 'voice_selected') selectedVoice = detail;
+  if (stage === 'model_loaded') selectedVoice = /voice=(F1|M1)/.exec(detail)?.[1] ?? selectedVoice;
+  const event = { at: new Date().toISOString(), stage, detail: detail.slice(0, 240) };
+  // A download can emit thousands of callbacks. Keep its latest progress without
+  // evicting the language/configuration and earlier failure events.
+  if (stage === 'download_progress' && events[events.length - 1]?.stage === stage) {
+    events[events.length - 1] = event;
+    return;
+  }
+  events.push(event);
   if (events.length > 150) events.shift();
 }
 export function diagnosticError(message: string, utterances: string[]): string {
@@ -19,7 +29,7 @@ export function voiceDiagnosticReport(): string {
   return JSON.stringify({
     exportedAt: new Date().toISOString(), platform: Platform.OS, os: Platform.Version,
     app: DeviceInfo.getVersion?.(), build: DeviceInfo.getBuildNumber?.(),
-    device: DeviceInfo.getModel?.(), model: 'Supertonic 3 Q8_0', voice: 'F1',
+    device: DeviceInfo.getModel?.(), model: 'Supertonic 3 Q8_0', voice: selectedVoice,
     events,
   }, null, 2);
 }

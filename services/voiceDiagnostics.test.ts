@@ -26,3 +26,12 @@ it('exports bounded metadata and removes spoken text and URLs from errors', () =
   const report = JSON.parse(voiceDiagnosticReport());
   expect(report.events).toHaveLength(150); expect(report.build).toBe('1');
 });
+it('retains the selected language and failures when download progress floods the report', () => {
+  recordVoiceDiagnostic('loading', 'language=it');
+  for (let i = 0; i < 2000; i++) recordVoiceDiagnostic('download_progress', `${Math.min(100, Math.floor(i / 10))}%`);
+  recordVoiceDiagnostic('failure', 'model_load');
+  const report = JSON.parse(voiceDiagnosticReport());
+  expect(report.events.slice(-3).map((event: any) => [event.stage, event.detail])).toEqual([
+    ['loading', 'language=it'], ['download_progress', '100%'], ['failure', 'model_load'],
+  ]);
+});

@@ -165,3 +165,82 @@ it('reloads Whisper when the app language changes and uses a multilingual model 
   expect(sdk.loadModel).toHaveBeenCalledTimes(2);
   gate.mockRestore(); config.mockRestore(); boot.mockRestore(); download.mockRestore();
 });
+
+it('waits for native synthesis completion before unloading for a language switch', async () => {
+  const svc = service() as any;
+  const sdk = require('@qvac/sdk');
+  const provider = require('../store/storeProvider');
+  let language = 'en';
+  provider.getStore.mockReturnValue({ getState: () => ({ settings: { language } }) });
+  svc.ttsModelId = 'english-model'; svc.ttsLanguage = 'en'; svc.ttsLoadPromise = null;
+  const gate = jest.spyOn(svc, 'workletBlocked').mockReturnValue(false);
+  const boot = jest.spyOn(svc, 'bootLoad').mockImplementation((fn: any) => fn());
+  let finish!: () => void;
+  const done = new Promise<void>(resolve => { finish = resolve; });
+  sdk.unloadModel.mockClear(); sdk.unloadModel.mockResolvedValue(undefined);
+  sdk.textToSpeech.mockReturnValueOnce({ buffer: Promise.resolve([1]), sampleRate: Promise.resolve(44100), done });
+  const first = svc.synthesizeSpeech('Hello');
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  language = 'it';
+  sdk.loadModel.mockResolvedValue('italian-model');
+  sdk.textToSpeech.mockReturnValueOnce({ buffer: Promise.resolve([2]), sampleRate: Promise.resolve(44100), done: Promise.resolve(true) });
+  const second = svc.synthesizeSpeech('Ciao');
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(sdk.unloadModel).not.toHaveBeenCalled();
+  finish();
+  expect(await first).toEqual({ pcm: [1], sampleRate: 44100 });
+  expect(await second).toEqual({ pcm: [2], sampleRate: 44100 });
+  expect(sdk.unloadModel).toHaveBeenCalledTimes(1);
+  expect(svc.ttsLanguage).toBe('it');
+  gate.mockRestore(); boot.mockRestore();
+});
+
+
+describe('model selection safeguards', () => {
+  it('rejects a model change during an existing load without changing selection', async () => {
+    const svc: any = QVACService.getInstance();
+    const previous = svc.config.modelId;
+    const state = svc.state;
+    svc.state = { ...state, llmStatus: 'loading' };
+    try {
+      await expect(svc.setModelId('different')).rejects.toThrow('Wait');
+      expect(svc.config.modelId).toBe(previous);
+    } finally { svc.state = state; }
+  });
+  it('rejects an unknown voice before unloading the current one', async () => {
+    await expect(QVACService.getInstance().setTtsVoice('unknown' as any)).rejects.toThrow('Unsupported voice');
+  });
+});
+
+it('reloads Supertonic with the chosen voice and retains its selection', async () => {
+  const svc: any = service();
+  const sdk = require('@qvac/sdk');
+  const gate = jest.spyOn(svc, 'workletBlocked').mockReturnValue(false);
+  const config = jest.spyOn(svc, 'loadConfig').mockResolvedValue(svc.config);
+  const boot = jest.spyOn(svc, 'bootLoad').mockImplementation((fn: any) => fn());
+  svc.config = { ...svc.config, ttsVoice: 'F1' };
+  svc.ttsModelId = 'feminine-model'; svc.ttsLoadPromise = null;
+  sdk.unloadModel.mockResolvedValue(undefined);
+  sdk.loadModel.mockResolvedValue('masculine-model');
+  sdk.textToSpeech.mockReturnValue({ buffer: Promise.resolve([2]), sampleRate: Promise.resolve(44100), done: Promise.resolve(true) });
+  try {
+    await svc.setTtsVoice('M1');
+    await svc.synthesizeSpeech('Ciao');
+    expect(svc.getConfig().ttsVoice).toBe('M1');
+    expect(sdk.loadModel).toHaveBeenLastCalledWith(expect.objectContaining({ modelConfig: expect.objectContaining({ voice: 'M1' }) }));
+  } finally { gate.mockRestore(); config.mockRestore(); boot.mockRestore(); }
+});
+
+it('coalesces simultaneous initialization and blocks selection before download starts', async () => {
+  const svc: any = QVACService.getInstance();
+  let finish!: () => void;
+  const init = jest.spyOn(svc, 'initializeLLMOnce').mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  try {
+    const first = svc.initializeLLM();
+    const second = svc.initializeLLM();
+    await expect(svc.setModelId('different')).rejects.toThrow('Wait');
+    expect(init).toHaveBeenCalledTimes(1);
+    finish();
+    await Promise.all([first, second]);
+  } finally { init.mockRestore(); }
+});

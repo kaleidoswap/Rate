@@ -4,7 +4,7 @@
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, Switch, Pressable, Alert } from 'react-native';
 import { Sheet } from '../components/Sheet';
-import { useSelector, useDispatch } from 'react-redux';
+import { useAppSelector, useAppDispatch } from '../store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { skillsFromBundle } from '@kaleidorg/mind';
 import { theme, leading } from '../theme';
@@ -24,9 +24,9 @@ const AUTH_OPTS = [{ label: 'Always', value: 0 }, { label: '10k sats', value: 10
 const HIST_OPTS = [{ label: 'Short', value: 4 }, { label: 'Medium', value: 8 }, { label: 'Long', value: 12 }];
 
 export default function MindSettingsScreen() {
-  const dispatch = useDispatch();
-  const cfg = useSelector(selectMindConfig);
-  const [persona, setPersona] = useState(cfg.persona);
+  const dispatch = useAppDispatch();
+  const cfg = useAppSelector(selectMindConfig);
+  const persona = cfg.persona;
   const [mcpOpen, setMcpOpen] = useState(false);
 
   const update = (patch: Partial<MindConfig>) => dispatch(setMindConfig(patch));
@@ -43,17 +43,17 @@ export default function MindSettingsScreen() {
   const clearMemory = () =>
     Alert.alert('Clear memory', "This erases everything the agent has remembered. This can't be undone.", [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: async () => { try { await clearMindMemory(); } catch {} } },
+      { text: 'Clear', style: 'destructive', onPress: async () => { try { await clearMindMemory(); } catch { Alert.alert('Unable to clear memory', 'Please try again.'); } } },
     ]);
   const resetAll = () =>
     Alert.alert('Reset to defaults', 'Restore the default agent configuration?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: () => { dispatch(resetMindConfig()); setPersona(''); } },
+      { text: 'Reset', style: 'destructive', onPress: () => { dispatch(resetMindConfig());  } },
     ]);
 
   return (
     <View style={styles.container}>
-      <ScreenHeader title="Chat settings" subtitle="Design your agent" showBack />
+      <ScreenHeader title="Personalize Prismo" subtitle="Changes apply automatically" showBack />
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
         {/* ── Personality (compact) ── */}
@@ -61,24 +61,31 @@ export default function MindSettingsScreen() {
           <TextInput
             style={styles.input}
             value={persona}
-            onChangeText={setPersona}
-            onEndEditing={() => update({ persona: persona.trim() })}
-            onBlur={() => update({ persona: persona.trim() })}
-            placeholder="How should it behave? e.g. Reply in Italian, keep it short."
+            onChangeText={(persona) => update({ persona })}
+            placeholder="How should Prismo help you? e.g. Keep answers short."
             placeholderTextColor={theme.colors.text.tertiary}
             multiline
           />
           <View style={styles.chips}>
             {TONES.map((t) => (
-              <Pressable key={t.label} style={styles.chip} onPress={() => { setPersona(t.text); update({ persona: t.text }); }}>
+              <Pressable key={t.label} accessibilityRole="radio" accessibilityState={{ selected: persona === t.text }} style={[styles.chip, persona === t.text && { borderWidth: 1, borderColor: theme.colors.primary[500] }]} onPress={() => { update({ persona: t.text }); }}>
                 <Text style={styles.chipText}>{t.label}</Text>
               </Pressable>
             ))}
           </View>
         </Section>
 
+        {/* ── Responses ── */}
+        <Section title="Responses">
+          <Segmented label="Style" options={TEMP_OPTS} value={cfg.temperature} onChange={(v) => update({ temperature: v })} />
+        </Section>
+
+        <Section title="Payments">
+          <Segmented label="Ask for biometrics or PIN from" options={AUTH_OPTS} value={cfg.confirmAuthThresholdSats} onChange={(v) => update({ confirmAuthThresholdSats: v })} />
+        </Section>
+
         {/* ── Connectors ── */}
-        <Section title="Connectors" hint="Skills and MCP servers the agent can use.">
+        <Section collapsible title="Connected tools" hint="Skills and MCP servers the agent can use.">
           {skills.map((s, i) => (
             <View key={s.name} style={[styles.row, i > 0 && styles.rowBorder]}>
               <View style={styles.skillIcon}><Ionicons name="extension-puzzle-outline" size={16} color={theme.colors.primary[500]} /></View>
@@ -105,17 +112,8 @@ export default function MindSettingsScreen() {
           </Pressable>
         </Section>
 
-        {/* ── Responses ── */}
-        <Section title="Responses">
-          <Segmented label="Style" options={TEMP_OPTS} value={cfg.temperature} onChange={(v) => update({ temperature: v })} />
-        </Section>
-
-        <Section title="Payments">
-          <Segmented label="Ask for biometrics or PIN from" options={AUTH_OPTS} value={cfg.confirmAuthThresholdSats} onChange={(v) => update({ confirmAuthThresholdSats: v })} />
-        </Section>
-
         {/* ── Context ── */}
-        <Section title="Context & memory">
+        <Section collapsible title="Context & memory">
           <Segmented label="History kept" options={HIST_OPTS} value={cfg.historyLength} onChange={(v) => update({ historyLength: v })} />
           <ToggleRow icon="bookmark-outline" label="Long-term memory" desc="Remember your preferences." value={cfg.memoryEnabled} onChange={(v) => update({ memoryEnabled: v })} />
           <ToggleRow icon="library-outline" label="Knowledge base (RAG)" desc="Ground answers in on-device docs." value={cfg.ragEnabled} onChange={(v) => update({ ragEnabled: v })} />
@@ -152,13 +150,18 @@ const AddMcpModal: React.FC<{ visible: boolean; onClose: () => void; onAdd: (nam
   );
 };
 
-const Section: React.FC<{ title: string; hint?: string; children: React.ReactNode }> = ({ title, hint, children }) => (
-  <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    {!!hint && <Text style={styles.sectionHint}>{hint}</Text>}
-    <View style={styles.card}>{children}</View>
-  </View>
-);
+const Section: React.FC<{ title: string; hint?: string; collapsible?: boolean; children: React.ReactNode }> = ({ title, hint, collapsible, children }) => {
+  const [expanded, setExpanded] = useState(!collapsible);
+  return <View style={styles.section}>
+    <Pressable disabled={!collapsible} accessibilityRole={collapsible ? 'button' : undefined}
+      accessibilityState={collapsible ? { expanded } : undefined}
+      style={styles.row} onPress={() => setExpanded(!expanded)}>
+      <Text style={[styles.sectionTitle, { flex: 1 }]}>{title}</Text>
+      {collapsible && <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />}
+    </Pressable>
+    {expanded && <>{!!hint && <Text style={styles.sectionHint}>{hint}</Text>}<View style={styles.card}>{children}</View></>}
+  </View>;
+};
 const Segmented: React.FC<{ label: string; options: Array<{ label: string; value: number }>; value: number; onChange: (v: number) => void }> = ({ label, options, value, onChange }) => (
   <View style={styles.segRow}>
     <Text style={styles.segLabel}>{label}</Text>
