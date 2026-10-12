@@ -188,3 +188,23 @@ describe('Spark tokens', () => {
     unregister(); off();
   });
 });
+
+test('an unknown send with a reference is followed until settled, including after account recreation', async () => {
+  const s = spark();
+  s.sendPayment.mockResolvedValueOnce({ paymentHash: 'recoverable-ref', status: 'unrecognized' });
+  const account = createSparkLightningAccount(s, 'signet');
+  const quote = await account.quote(lnPreview('fixed'), lnRoute);
+  await expect(account.execute!(lnPreview('fixed'), lnRoute, quote, 'unknown-with-ref')).resolves.toEqual({ status: 'unknown', reference: 'recoverable-ref' });
+  const restored = createSparkLightningAccount(s, 'signet');
+  s.getPaymentStatus.mockResolvedValueOnce({ status: 'unknown' });
+  await expect(restored.status!('unknown-with-ref')).resolves.toEqual({ status: 'unknown', reference: 'recoverable-ref' });
+  s.getPaymentStatus.mockResolvedValueOnce({ status: 'pending' });
+  await expect(restored.status!('unknown-with-ref')).resolves.toEqual({ status: 'pending', reference: 'recoverable-ref' });
+  s.getPaymentStatus.mockRejectedValueOnce(new Error('offline'));
+  await expect(restored.status!('unknown-with-ref')).rejects.toThrow('offline');
+  await expect(restored.status!('unknown-with-ref')).resolves.toEqual({ status: 'completed', reference: 'recoverable-ref' });
+  const checks = s.getPaymentStatus.mock.calls.length;
+  await expect(restored.status!('unknown-with-ref')).resolves.toEqual({ status: 'completed', reference: 'recoverable-ref' });
+  expect(s.getPaymentStatus).toHaveBeenCalledTimes(checks);
+  expect(s.sendPayment).toHaveBeenCalledTimes(1);
+});

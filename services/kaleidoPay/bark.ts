@@ -208,11 +208,15 @@ export function createBarkPayAccount(bark: BarkPaySender, network: Network): Pay
       const raw = await AsyncStorage.getItem(offerRef(attemptId));
       if (!raw) return swap.status!(attemptId);
       const saved = JSON.parse(raw) as { paymentHash: string; status: string };
-      if (saved.status !== 'pending') return resultOf(saved);
+      if (saved.status === 'confirmed' || saved.status === 'completed' || saved.status === 'failed') return resultOf(saved);
       // Bark reported the payment in flight without a hash to follow it by: its outcome
       // can only be read from Bark's activity, so it needs checking rather than staying pending.
       if (!saved.paymentHash) return { status: 'unknown' };
-      return resultOf({ paymentHash: saved.paymentHash, status: (await paymentStatus(saved.paymentHash)).status });
+      const next = { paymentHash: saved.paymentHash, status: (await paymentStatus(saved.paymentHash)).status };
+      const result = resultOf(next);
+      // Keep terminal evidence across restarts and transient later lookup failures.
+      if (result.status !== 'unknown') await AsyncStorage.setItem(offerRef(attemptId), JSON.stringify(next));
+      return result.status === 'unknown' ? resultOf(saved) : result;
     },
   };
 }

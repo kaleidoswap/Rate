@@ -137,12 +137,12 @@ export function createDirectAccount<T>(cfg: DirectAccountConfig<T>): PayAccount 
       const raw = await AsyncStorage.getItem(key(attemptId));
       if (!raw) return { status: 'unknown' };
       const saved = JSON.parse(raw) as PaymentResult;
-      if (saved.status !== 'pending' || !saved.reference || !cfg.follow || !cfg.isConnected()) return saved;
+      if ((saved.status !== 'pending' && saved.status !== 'unknown') || !saved.reference || !cfg.follow || !cfg.isConnected()) return saved;
       const next = await cfg.follow(saved.reference);
       // A failed lookup leaves the payment pending rather than unknown.
       if (next.status === 'unknown') return saved;
       const updated: PaymentResult = { status: next.status, reference: saved.reference };
-      if (updated.status !== 'pending') await AsyncStorage.setItem(key(attemptId), JSON.stringify(updated));
+      if (updated.status !== saved.status) await AsyncStorage.setItem(key(attemptId), JSON.stringify(updated));
       return updated;
     },
   };

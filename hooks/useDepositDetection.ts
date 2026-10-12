@@ -15,7 +15,7 @@ import {
   type ReceiveProtocol,
 } from '../utils/receive-session';
 import { decode } from 'light-bolt11-decoder';
-import { syncBarkForUpdates } from '../services/BarkService';
+import { readBarkOnchain, syncBarkForUpdates } from '../services/BarkService';
 import { findRgbReceive, refreshRgbTransfers } from '../services/rgbWallet';
 import { rgbReceiveStage } from '../utils/rgb-wallet';
 
@@ -72,7 +72,12 @@ async function readMethodBalance(
   await syncIfBark(method);
 
   try {
-    if (!method.assetId || method.assetId === 'BTC' || method.assetId === 'USD' || method.assetId === 'RGB_NEW') {
+    if (method.protocol === 'BARK' && method.layer === 'onchain') {
+      const balance = await runReceiveOperation('Bark on-chain balance', () => readBarkOnchain(), BARK_SYNC_WAIT_MS, parentSignal);
+      // Celebrate only confirmed funds; a mempool deposit is not settled.
+      return balance.confirmedSats;
+    }
+    if (!method.assetId || method.assetId === 'BTC' || method.assetId === 'RGB_NEW') {
       const balance = await runReceiveOperation<any>(
         `${method.protocol} receive balance`,
         (signal) => callAbortableAdapterMethod(adapter, 'getBtcBalance', [], signal),
@@ -99,6 +104,22 @@ async function readMethodBalance(
   } catch {
     return null;
   }
+}
+
+/** Track USD tokens separately: new token holdings count, BTC changes do not. */
+async function readMethodBalances(method: ReceiveMethod, signal: AbortSignal): Promise<Record<string, number> | null> {
+  if (method.protocol === 'SPARK' && method.assetId === 'USD') {
+    const adapter = getConnectedAdapter(method.protocol);
+    if (!adapter) return null;
+    try {
+      const assets = await runReceiveOperation<any[]>('Spark USD balances',
+        s => callAbortableAdapterMethod(adapter, 'listAssets', [], s), POLL_TIMEOUT_MS, signal);
+      return Object.fromEntries(assets.filter(a => /^usd/i.test(a.ticker ?? ''))
+        .map(a => [a.id, Number(a.balance?.total ?? 0)]).filter(([, value]) => Number.isFinite(value)));
+    } catch { return null; }
+  }
+  const balance = await readMethodBalance(method, signal);
+  return balance != null && Number.isFinite(balance) ? { balance } : null;
 }
 
 /** Payment hash of a BOLT11 invoice, or null if it can't be decoded. */
@@ -195,7 +216,7 @@ export function useDepositDetection({
     [signature],
   );
   const sessionSignatureRef = useRef<string | null>(null);
-  const baselinesRef = useRef<Map<string, number>>(new Map());
+  const baselinesRef = useRef<Map<string, Record<string, number>>>(new Map());
   const firedRef = useRef(false);
   const statusKeyRef = useRef<string | null>(null);
   const onDetectedRef = useRef(onDetected);
@@ -238,7 +259,7 @@ export function useDepositDetection({
       for (const method of monitoredMethods) {
         if (cancelled) return;
         if (method.monitor !== 'balance' || baselinesRef.current.has(method.key)) continue;
-        const balance = await readMethodBalance(method, operationController.signal);
+        const balance = await readMethodBalances(method, operationController.signal);
         if (cancelled) return;
         if (balance != null) baselinesRef.current.set(method.key, balance);
       }
@@ -259,18 +280,22 @@ export function useDepositDetection({
           continue;
         }
 
-        const balance = await readMethodBalance(method, operationController.signal);
+        const balance = await readMethodBalances(method, operationController.signal);
         if (cancelled || firedRef.current || balance == null) continue;
         const baseline = baselinesRef.current.get(method.key);
         if (baseline == null) {
           baselinesRef.current.set(method.key, balance);
-        } else if (balance > baseline) {
+        } else if (Object.entries(balance).some(([asset, value]) => value > (baseline[asset] ?? 0))) {
           fire({
             layer: method.layer,
             status: 'confirmed',
             protocol: method.protocol,
           });
           return;
+        } else {
+          // Follow outgoing funds too, so the next incoming payment is not hidden
+          // by spending that happened while this receive request stayed open.
+          baselinesRef.current.set(method.key, balance);
         }
       }
     };

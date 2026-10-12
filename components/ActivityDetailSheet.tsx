@@ -104,6 +104,8 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
 
     const v = typeVisual(item.type);
     const st = ACTIVITY_STATUS_VISUAL[item.status];
+    const onchain = item.source === 'onchain' || item.layer === 'L1' || item.layer === 'RGB-L1';
+    const statusLabel = onchain && item.status === 'pending' ? 'Awaiting confirmation' : onchain && item.status === 'confirmed' ? 'Confirmed on-chain' : st.label;
     const hasAmount = item.amount !== '';
     const isIncoming = item.type === 'receive' || item.type === 'issuance';
     const txLabel = item.crossChain ? 'Order ID' : item.paymentHash ? 'Payment hash' : 'Transaction ID';
@@ -205,7 +207,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                         <Text style={styles.rowLabel}>Status</Text>
                         <View style={styles.statusBadge}>
                             <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                            <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
+                            <Text style={[styles.statusText, { color: st.color }]}>{statusLabel}</Text>
                         </View>
                     </View>
 

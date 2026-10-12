@@ -343,3 +343,19 @@ test('on-chain sends plan from the network-free btc rail', () => {
   const plan = planRoutes({ id: 'r', network: 'mainnet', networks: ['mainnet'], amountSat: 1000, acceptedRails: ['btc'] }, [account.source]);
   expect(plan.route).toMatchObject({ kind: 'direct', sourceId: 'bark-onchain', from: 'btc:mainnet', to: 'btc:mainnet' });
 });
+
+test('rechecks an unknown Bark payment by its hash and persists completion', async () => {
+  const b = bark(15);
+  const hash = 'ab'.repeat(32);
+  b.sendPayment.mockResolvedValueOnce({ paymentHash: hash, status: 'unknown' });
+  const account = createBarkPayAccount(b, 'signet');
+  const p = preview(openOffer, 1200);
+  const quote = await account.quote(p, directRoute);
+  await expect(account.execute!(p, directRoute, quote, 'bark-unknown')).resolves.toMatchObject({ status: 'unknown' });
+  await expect(account.status!('bark-unknown')).resolves.toEqual({ status: 'completed', reference: hash });
+  b.getPaymentStatus.mockRejectedValueOnce(new Error('offline'));
+  const restored = createBarkPayAccount(b, 'signet');
+  await expect(restored.status!('bark-unknown')).resolves.toEqual({ status: 'completed', reference: hash });
+  expect(b.getPaymentStatus).toHaveBeenCalledTimes(1);
+  expect(b.sendPayment).toHaveBeenCalledTimes(1);
+});

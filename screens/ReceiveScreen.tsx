@@ -403,6 +403,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       } catch { /* the next pass retries */ } finally { running = false; }
     };
     const timer = setInterval(() => { void tick(); }, 5_000);
+    void tick();
     return stop;
   }, [arkadeReceive, isFocused, isAppActive, showDepositSuccess, handleDepositDetected, handleDepositStatus]);
   const fiatRates = useFiatRates();
@@ -666,7 +667,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
               protocol: 'SPARK',
               kind: 'invoice',
               layer: 'spark',
-              monitor: 'invoice',
+              monitor: 'balance',
               assetId: selectedAsset.asset_id,
             };
           } else {
@@ -747,7 +748,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
               protocol: 'BARK',
               kind: 'address',
               layer: 'onchain',
-              monitor: 'none',
+              monitor: 'balance',
               assetId: selectedAsset.asset_id,
             };
           } else {
@@ -1046,7 +1047,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
             protocol: 'SPARK',
             kind: 'address',
             layer: 'spark',
-            monitor: 'none',
+            monitor: 'balance',
             assetId: 'USD',
           },
         ].filter(Boolean) as ReceiveMethod[],

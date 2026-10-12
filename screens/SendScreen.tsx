@@ -1,3 +1,5 @@
+import { awaitingOnchainConfirmation, paymentPresentation } from '../utils/payment-presentation';
+import { checkOnchainConfirmation } from '../services/kaleidoPay/onchainConfirmation';
 import { PaymentReceiptDetails } from '../components/PaymentReceiptDetails';
 // screens/SendScreen.tsx
 //
@@ -164,7 +166,7 @@ export default function SendScreen({ navigation, route }: Props) {
     setJournalReady(false); setJournalUnreadable(false); setAttempt(null);
     if (!walletId) { setJournalReady(true); return; }
     loadPaymentAttempt(walletId)
-      .then(saved => { if (active) { if (unresolvedAttempt(saved)) setAttempt(saved); setJournalReady(true); } })
+      .then(saved => { if (active) { if (unresolvedAttempt(saved) || awaitingOnchainConfirmation(saved)) setAttempt(saved); setJournalReady(true); } })
       .catch(() => { if (active) { setJournalUnreadable(true); setError('Could not read your previous payment record. Check your wallet activity before paying again.'); } });
     return () => { active = false; revision.current++; };
   }, [walletId]);
@@ -184,7 +186,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const checkStatusRef = useRef<(quiet?: boolean) => Promise<void>>(async () => {});
   const attemptRef = useRef(attempt);
   useEffect(() => {
-    if (!journalReady || !unresolvedAttempt(attempt)) return;
+    if (!journalReady || (!unresolvedAttempt(attempt) && !awaitingOnchainConfirmation(attempt))) return;
     let active = true;
     setStatusTimedOut(false);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -201,7 +203,7 @@ export default function SendScreen({ navigation, route }: Props) {
     void prepareKaleidoPay().then(() => { if (active) void poll(0); }).catch(() => { if (active) void poll(0); });
     return () => { active = false; clearTimeout(timer); clearTimeout(deadlineTimer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [attempt?.id, attempt?.status, attempt?.dismissedAt, journalReady]);
+  }, [attempt?.id, attempt?.status, attempt?.dismissedAt, attempt?.onchainConfirmed, journalReady]);
 
   const selected = offers.find(o => o.id === selectedId);
   const quote = selected?.quote;
@@ -298,7 +300,7 @@ export default function SendScreen({ navigation, route }: Props) {
     if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || quote.expiresAt * 1000 <= Date.now() || !selected.executable || unresolvedAttempt(attempt)) return;
     paying.current = true; setBusy(true); setError('');
     const recipient = preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat);
-    const next: PaymentAttempt = { recipientName, feeDisplay: spend ? displaySpend(spend.fee, spend.asset) : undefined, accountName: selected.accountName || selected.provider, id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
+    const next: PaymentAttempt = { destinationRail: selected.route.to, network: preview.request.network, recipientName, feeDisplay: spend ? displaySpend(spend.fee, spend.asset) : undefined, accountName: selected.accountName || selected.provider, id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
     try {
       await beginPaymentAttempt(walletId, next); // No send unless the recovery record is durable.
     } catch {
@@ -351,9 +353,10 @@ export default function SendScreen({ navigation, route }: Props) {
     lock.current = true; setStatusChecking(true);
     if (!quiet) { setBusy(true); setError(''); }
     try {
-      const result = await readPaymentStatus(attempt.sourceId, attempt.id);
+      const providerResult = attempt.status === 'completed' ? attempt : await readPaymentStatus(attempt.sourceId, attempt.id);
+      const result = await checkOnchainConfirmation({ ...attempt, ...(attempt.status === 'completed' ? {} : providerResult) });
       // A background result is dropped when nothing changed, or the record changed meanwhile (checked, dismissed).
-      if (attemptRef.current !== attempt || (quiet && result.status === attempt.status && result.reference === attempt.reference)) return;
+      if (attemptRef.current !== attempt || (quiet && result.status === attempt.status && result.reference === attempt.reference && result.onchainConfirmed === attempt.onchainConfirmed)) return;
       const updated = { ...attempt, ...result };
       if (!await updatePaymentAttempt(walletId, updated)) return;
       if (attemptRef.current !== attempt) return;
@@ -658,19 +661,21 @@ export default function SendScreen({ navigation, route }: Props) {
   };
 
   const shareReceipt = (a: PaymentAttempt) => {
-    void Share.share({ message: [`Payment completed`, `Amount ${a.recipient}`, `Recipient ${a.recipientName || 'Not recorded'}`, `Quoted fees ${a.feeDisplay ?? 'Not recorded'}`, `Quoted total ${a.total}`, `From ${a.accountName || a.provider}`, `Requested ${new Date(a.createdAt).toLocaleString()}`, a.reference && `Reference ${a.reference}`].filter(Boolean).join('\n') });
+    void Share.share({ message: [paymentPresentation(a).title, paymentPresentation(a).detail, `Amount ${a.recipient}`, `Recipient ${a.recipientName || 'Not recorded'}`, `Quoted fees ${a.feeDisplay ?? 'Not recorded'}`, `Quoted total ${a.total}`, `From ${a.accountName || a.provider}`, `Requested ${new Date(a.createdAt).toLocaleString()}`, a.reference && `Reference ${a.reference}`].filter(Boolean).join('\n') });
   };
 
   const renderResult = (a: PaymentAttempt) => {
     const done = a.status === 'completed';
+    const chainWaiting = awaitingOnchainConfirmation(a);
+    const presentation = paymentPresentation(a);
     const failed = a.status === 'failed';
-    const tone = done ? t.colors.primary[500] : failed ? t.colors.error[500] : t.colors.warning[500];
-    const title = done ? 'Payment completed' : failed ? 'Payment failed' : busy && !statusChecking ? 'Sending payment' : statusTimedOut ? 'Confirmation is taking longer' : 'Confirming payment';
+    const tone = done && !chainWaiting ? t.colors.primary[500] : failed ? t.colors.error[500] : t.colors.warning[500];
+    const title = done ? presentation.title : failed ? 'Payment failed' : busy && !statusChecking ? 'Sending payment' : statusTimedOut ? 'Confirmation is taking longer' : presentation.title;
     return <View style={{ gap: t.spacing[4] }}>
       <View style={{ alignItems: 'center', gap: t.spacing[2], paddingTop: t.spacing[6] }}>
-        <Animated.View key={done ? 'completed' : failed ? 'failed' : 'checking'} entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
+        <Animated.View key={a.onchainConfirmed ? 'chain-confirmed' : done ? 'completed' : failed ? 'failed' : 'checking'} entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
           style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: tone + '26' }}>
-          {busy || (unresolvedAttempt(a) && !statusTimedOut) ? <ActivityIndicator accessibilityLabel="Checking payment automatically" color={tone} /> : <Ionicons name={done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={40} color={tone} />}
+          {busy || (unresolvedAttempt(a) && !statusTimedOut) ? <ActivityIndicator accessibilityLabel="Checking payment automatically" color={tone} /> : <Ionicons name={chainWaiting ? 'time-outline' : done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={40} color={tone} />}
         </Animated.View>
         <Text accessibilityRole="header" style={{ ...muted }}>{title}</Text>
         <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '700' }}>{a.recipient}</AmountText>
@@ -679,7 +684,8 @@ export default function SendScreen({ navigation, route }: Props) {
       {KALEIDOPAY_DEMO && done && <Text style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>Simulated in this demo build. No funds moved.</Text>}
       <PaymentReceiptDetails details={{ amount: a.recipient, recipient: a.recipientName, fees: a.feeDisplay, total: a.total, account: a.accountName || a.provider, reference: a.reference, createdAt: a.createdAt }} />
       <Text style={small}>Fees and total are from the quote you approved. Final fees may differ where the provider supplies an estimate.</Text>
-      <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>{unresolvedAttempt(a) ? (statusTimedOut ? 'No final result yet. Check again later; do not send it again.' : 'Checking automatically. Do not send again.') : failed ? 'This payment was not sent, or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
+      <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>{unresolvedAttempt(a) ? (statusTimedOut ? 'No final result yet. Check again later; do not send it again.' : presentation.detail) : presentation.detail}</Text>
+      {chainWaiting && <Button title="Check confirmation" variant="secondary" onPress={() => void checkStatus()} loading={statusChecking} disabled={statusChecking || busy} />}
       {unresolvedAttempt(a) ? <>
         <Button title="Verify payment" onPress={() => void checkStatus()} loading={busy || statusChecking} disabled={busy || statusChecking} />
         {a.status === 'unknown' && !busy && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} />}

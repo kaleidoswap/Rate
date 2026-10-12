@@ -335,3 +335,14 @@ test('pay again requests a fresh amount and quote, and saving opens the contact 
   expect(screen.queryByText('Pay 1010 sats')).toBeNull();
   expect(executePaymentOffer).toHaveBeenCalledTimes(1);
 });
+
+test.each([[false, 'Sent to the network'], [true, 'Confirmed on-chain']] as const)('on-chain receipt uses block confirmation evidence (%s)', async (confirmed, title) => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('bark-onchain', 1010)]);
+  (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'completed', reference: 'provider-receipt', onchainConfirmed: confirmed });
+  const screen = await reviewed();
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  expect(screen.getByText(title)).toBeTruthy();
+  expect(screen.queryByText('Payment completed')).toBeNull();
+  if (!confirmed) expect(screen.getByText('Waiting for a Bitcoin block confirmation. Do not send again.')).toBeTruthy();
+  screen.unmount();
+});

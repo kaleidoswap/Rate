@@ -3,6 +3,7 @@ import type { PaymentResult } from './index';
 export interface PaymentAttempt extends PaymentResult {
   id: string; sourceId: string; provider: string; total: string; recipient: string; createdAt: number;
   /** Display metadata captured before sending; optional for older records. Never store an invoice or secret. */
+  destinationRail?: string; network?: string; onchainConfirmed?: boolean;
   recipientName?: string; feeDisplay?: string; accountName?: string;
   /** Set when the user chose to move on from a payment whose outcome could not be determined. */
   dismissedAt?: number;
@@ -16,7 +17,8 @@ export async function loadPaymentAttempt(walletId: number): Promise<PaymentAttem
     || !['pending', 'unknown', 'failed', 'completed'].includes(value.status)
     || typeof value.provider !== 'string' || typeof value.total !== 'string' || typeof value.recipient !== 'string'
     || !Number.isSafeInteger(value.createdAt)
-    || ['recipientName', 'feeDisplay', 'accountName'].some(field => value[field] !== undefined && typeof value[field] !== 'string')
+    || ['recipientName', 'feeDisplay', 'accountName', 'destinationRail', 'network'].some(field => value[field] !== undefined && typeof value[field] !== 'string')
+    || (value.onchainConfirmed !== undefined && typeof value.onchainConfirmed !== 'boolean')
     || (value.dismissedAt !== undefined && !Number.isSafeInteger(value.dismissedAt))) throw new Error('Payment recovery record is unreadable.');
   return value;
 }
@@ -35,7 +37,7 @@ export const updatePaymentAttempt = (walletId: number, attempt: PaymentAttempt):
   const current = await loadPaymentAttempt(walletId);
   if (!current || current.id !== attempt.id || current.dismissedAt
     || (['completed', 'failed'].includes(current.status) && current.status !== attempt.status)) return false;
-  await write(walletId, { ...current, ...attempt, reference: attempt.reference ?? current.reference });
+  await write(walletId, { ...current, ...attempt, reference: attempt.reference ?? current.reference, ...(current.onchainConfirmed ? { onchainConfirmed: true } : {}) });
   return true;
 });
 export const unresolvedAttempt = (attempt: PaymentAttempt | null) => !attempt?.dismissedAt && (attempt?.status === 'pending' || attempt?.status === 'unknown');

@@ -10,6 +10,19 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-10-12
+
+### Fixed
+- Receive now monitors Bark's separate on-chain wallet, native Spark requests with an amount, and USD token balances on Spark. Arkade Lightning claims are checked immediately on reopening Receive. Balance watchers follow outgoing funds so a later incoming payment is not hidden by an older baseline.
+- Pending and unknown sends with a provider reference continue to be checked without resubmitting. Bark preserves a confirmed Lightning result across restarts and later lookup failures.
+
+### Changed
+- On-chain payment results and shared receipts distinguish **Sent to the network** from **Confirmed on-chain**. Block inclusion is checked using the transaction ID and recorded network; unavailable checks never imply confirmation. Activity details explicitly label pending and confirmed on-chain transactions.
+- On-chain sends awaiting block confirmation resume checking when Send is reopened. Older receipts without enough information remain unconfirmed rather than guessing their outcome.
+
+### Validation
+- 1,779 tests passed across 238 suites; TypeScript passed. End-to-end payments on physical devices remain to be verified with this release.
+
 ## [0.9.2] — 2026-10-12
 
 ### Added
