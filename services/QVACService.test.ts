@@ -113,12 +113,30 @@ describe('Supertonic 3 mobile integration', () => {
     sdk.textToSpeech.mockReturnValue({ buffer: Promise.resolve([1, 2]), sampleRate: Promise.resolve(24000) });
     expect(await svc.synthesizeSpeech('Il pagamento è pronto.')).toEqual({ pcm: [1, 2], sampleRate: 24000 });
     await svc.synthesizeSpeech('Grazie!');
+    expect(sdk.loadModel).toHaveBeenCalledTimes(1);
     expect(sdk.loadModel).toHaveBeenCalledWith(expect.objectContaining({
       modelSrc: sdk.TTS_MULTILINGUAL_SUPERTONIC3_Q8_0,
-      modelConfig: expect.objectContaining({ language: 'na', voice: 'F1', ttsNumInferenceSteps: 8 }),
+      modelConfig: expect.objectContaining({ language: 'it', voice: 'F1', ttsNumInferenceSteps: 8 }),
     }));
     expect(sdk.textToSpeech).toHaveBeenCalledWith(expect.objectContaining({ text: 'Il pagamento è pronto.' }));
+    // Validate the actual app config against the installed SDK, not a mocked loadModel.
+    const { execFileSync } = require('node:child_process');
+    const { pathToFileURL } = require('node:url');
+    const { dirname, join } = require('node:path');
+    const schemaUrl = pathToFileURL(join(dirname(require.resolve('@qvac/inference/package')), 'dist/schemas/text-to-speech.js')).href;
+    const validation = execFileSync(process.execPath, ['--input-type=module', '-e', `
+      import { readFileSync } from 'node:fs';
+      const { ttsSupertonicLoadConfigSchema: schema } = await import(${JSON.stringify(schemaUrl)});
+      schema.parse(JSON.parse(readFileSync(0, 'utf8')));
+      process.stdout.write('valid');
+    `], { input: JSON.stringify(sdk.loadModel.mock.calls[0][0].modelConfig), encoding: 'utf8' });
+    expect(validation).toBe('valid');
+
     expect(unloadWhisper).not.toHaveBeenCalled();
     expect(svc.whisperModelId).toBe('active-whisper');
+    sdk.unloadModel.mockResolvedValue(undefined);
+    await svc.synthesizeSpeech('Hello, your payment was received.');
+    expect(sdk.unloadModel).toHaveBeenCalledWith({ modelId: 'supertonic3', clearStorage: false });
+    expect(sdk.loadModel).toHaveBeenLastCalledWith(expect.objectContaining({ modelConfig: expect.objectContaining({ language: 'en' }) }));
   });
 });

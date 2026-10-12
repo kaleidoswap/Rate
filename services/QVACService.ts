@@ -41,6 +41,7 @@ import {
   createQvacVoice,
 } from '@kaleidorg/mind/qvac';
 import { recordVoiceDiagnostic, diagnosticError, waitForVoice, type VoiceStage } from './voiceDiagnostics';
+import { supertonicLanguage } from './speechLanguage';
 import { sanitizeForSupertonic } from './supertonicText';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 
@@ -174,6 +175,7 @@ class QVACService {
   private whisperHasVad = false;
   private vadModelPath: string | null = null;
   private ttsModelId: string | null = null;
+  private ttsLanguage: string | null = null;
   private embedModelId: string | null = null;
   private embedLoadPromise: Promise<string> | null = null;
   private ttsLoadPromise: Promise<string> | null = null;
@@ -924,7 +926,10 @@ class QVACService {
    * Load the QVAC GGML Supertonic TTS model and keep it resident.
    * Idempotent + single-flighted so concurrent speak calls share one load.
    */
-  private async ensureTtsLoaded(signal?: AbortSignal): Promise<string> {
+  private async ensureTtsLoaded(language: string, signal?: AbortSignal): Promise<string> {
+    if (this.ttsLoadPromise && !this.ttsModelId) await this.ttsLoadPromise;
+    if (signal?.aborted) throw new Error('Voice cancelled');
+    if (this.ttsModelId && this.ttsLanguage !== language) await this.unloadTts();
     if (this.ttsModelId) return this.ttsModelId;
     if (this.ttsLoadPromise) return this.ttsLoadPromise;
 
@@ -940,7 +945,7 @@ class QVACService {
         modelType: 'tts-ggml',
         modelConfig: {
           ttsEngine: 'supertonic',
-          language: 'na', // Supertonic 3 infers the language from Unicode text.
+          language, // Concrete ISO code required by the QVAC 0.21 SDK schema.
           voice: 'F1',
           ttsSpeed: 1,
           ttsNumInferenceSteps: 8,
@@ -953,6 +958,7 @@ class QVACService {
         catch (error) { abandoned = true; throw error; }
       });
       this.ttsModelId = id;
+      this.ttsLanguage = language;
       console.log('[QVAC] TTS ready:', id);
       return id;
     })();
@@ -986,8 +992,9 @@ class QVACService {
         if (/tts|supertonic/i.test(log.namespace) && (log.level === 'error' || log.level === 'warn')) recordVoiceDiagnostic('sdk_log', `${log.level}: ${diagnosticError(log.message, [text, speakable])}`);
       });
       options.onStage?.('loading');
-      recordVoiceDiagnostic('loading');
-      const modelId = await this.ensureTtsLoaded(options.signal);
+      const language = supertonicLanguage(speakable);
+      recordVoiceDiagnostic('loading', `language=${language}`);
+      const modelId = await this.ensureTtsLoaded(language, options.signal);
       if (options.signal?.aborted) throw new Error('Voice cancelled');
       options.onStage?.('generating');
       recordVoiceDiagnostic('generating');
@@ -1002,8 +1009,8 @@ class QVACService {
     } catch (error) {
       // Classify without leaking arbitrary native messages into exported reports.
       const message = error instanceof Error ? error.message : '';
-      const category = /timeout|timed out/i.test(message) ? 'timeout' : /cancel/i.test(message) ? 'cancelled'
-        : /download|network|fetch|offline/i.test(message) ? 'download_or_network'
+      const category = /invalid request|invalid option|validation/i.test(message) ? 'invalid_configuration' : /timeout|timed out/i.test(message) ? 'timeout' : /cancel/i.test(message) ? 'cancelled'
+        : /network|fetch|offline|ENOTFOUND|ECONN|HTTP [45]/i.test(message) ? 'download_or_network'
         : /memory|alloc/i.test(message) ? 'memory' : /addon|binding|native/i.test(message) ? 'native_runtime'
         : /load/i.test(message) ? 'model_load' : 'synthesis';
       recordVoiceDiagnostic('failure', `${category}: ${diagnosticError(message, [text, speakable])}`);
@@ -1064,6 +1071,7 @@ class QVACService {
         /* ignore */
       }
       this.ttsModelId = null;
+      this.ttsLanguage = null;
       this.ttsLoadPromise = null;
     }
   }

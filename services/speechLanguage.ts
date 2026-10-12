@@ -13,3 +13,10 @@ export function speechLanguage(text: string): string {
   if (ranked[0].score > 0 && ranked[0].score > ranked[1].score) return ranked[0].language;
   return Intl.DateTimeFormat().resolvedOptions().locale || 'en-US';
 }
+
+// QVAC 0.21's Supertonic schema rejects the native engine's language-agnostic `na`.
+const SUPERTONIC_LANGUAGES = new Set('en ko ja ar bg cs da de el es et fi fr hi hr hu id it lt lv nl pl pt ro ru sk sl sv tr uk vi'.split(' '));
+export function supertonicLanguage(text: string): string {
+  const language = speechLanguage(text).split(/[-_]/)[0].toLowerCase();
+  return SUPERTONIC_LANGUAGES.has(language) ? language : 'en';
+}
