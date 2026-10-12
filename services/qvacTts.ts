@@ -9,7 +9,7 @@ import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-aud
 import { File, Directory, Paths } from 'expo-file-system';
 import { Buffer } from 'buffer';
 import { sanitizeForSupertonic } from './supertonicText';
-import { speechLanguage } from './speechLanguage';
+import { getAppLanguage } from '../localization/language';
 import { recordVoiceDiagnostic, type VoiceStage } from './voiceDiagnostics';
 import QVACService from './QVACService';
 import { speakBest, stopSpeaking } from './speech';
@@ -164,7 +164,7 @@ export async function speak(text: string, cb: SpeakCallbacks = {}): Promise<void
   if (token !== generation) return;
   const live = () => token === generation;
   const done = () => { if (live()) { cb.onLevel?.(0); cb.onDone?.(); } };
-  const language = cb.language ?? speechLanguage(text);
+  const language = getAppLanguage();
   const engine = QVACService.getInstance().getTtsEngine();
   if (engine !== 'system') {
     try {

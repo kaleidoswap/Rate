@@ -1,3 +1,4 @@
+jest.mock('../localization/language', () => ({ getAppLanguage: () => 'it' }));
 jest.mock('react-native-device-info', () => ({ __esModule: true, default: {} }));
 const mockSynth = jest.fn();
 const mockSystem = jest.fn();
@@ -18,7 +19,7 @@ test('Italian preserves accents in the system fallback when neural synthesis is 
  await speak('È già pronto, perché sì.',{language:'it-IT',onLevel:level,onDone:done});
  expect(mockSynth).toHaveBeenCalledWith('È già pronto, perché sì.', expect.objectContaining({ signal: expect.anything() }));
  expect(mockSystem.mock.calls[0][0]).toBe('È già pronto, perché sì.');
- const options=mockSystem.mock.calls[0][1];expect(options.language).toBe('it-IT');
+ const options=mockSystem.mock.calls[0][1];expect(options.language).toBe('it');
  options.onBoundary({charLength:4,charIndex:0});expect(level).toHaveBeenLastCalledWith(.75);
  jest.advanceTimersByTime(200);expect(level).toHaveBeenLastCalledWith(0);
  options.onDone();expect(done).toHaveBeenCalledTimes(1);

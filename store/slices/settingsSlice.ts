@@ -104,7 +104,7 @@ const initialState: SettingsState = {
   bitcoinUnit: 'sats',
   displayDenomination: 'sats',
   theme: 'dark',
-  language: 'en',
+  language: 'system',
   notifications: true,
   transactionNotifications: true,
   priceAlerts: false,

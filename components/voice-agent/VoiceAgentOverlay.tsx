@@ -1,3 +1,4 @@
+import { useAppLanguage } from '../../localization/useAppLanguage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
@@ -163,9 +164,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
   const [phase, setPhase] = useState<Phase>('idle');
   const characterRef = useRef<PrismoAnimationRef>(null);
+  const { t } = useAppLanguage();
   const [voiceFailure, setVoiceFailure] = useState<string | null>(null);
   const onVoiceFallback = (detail: string) => setVoiceFailure(detail);
-  const onVoiceStage = (stage: VoiceStage) => setVoiceEngine(stage === 'loading' ? 'Loading voice · first use may take a few minutes' : 'Generating voice…');
+  const onVoiceStage = (stage: VoiceStage) => setVoiceEngine(t(stage === 'loading' ? 'Loading voice · first use may take a few minutes' : 'Generating voice…'));
   const onVoicePreparing = () => { setVoiceFailure(null); setVoiceEngine('Preparing Supertonic 3…'); };
   const [voiceEngine, setVoiceEngine] = useState('');
   const onVoiceEngine = (engine: 'supertonic' | 'system', reason?: 'language' | 'unavailable') => setVoiceEngine(engine === 'supertonic' ? 'Supertonic 3' : reason === 'unavailable' ? 'System voice · Supertonic unavailable' : 'System voice');
@@ -817,7 +819,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           <Text style={styles.status}>{statusText}</Text>
 
           {!!voiceEngine && <Text style={styles.hint}>{voiceEngine}</Text>}
-          {!voiceFailure && <Pressable accessibilityRole="button" onPress={() => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); }}><Text style={styles.pauseBtnText}>Export voice diagnostics</Text></Pressable>}
+          {!voiceFailure && <Pressable accessibilityRole="button" onPress={() => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); }}><Text style={styles.pauseBtnText}>{t('Export voice diagnostics')}</Text></Pressable>}
           {!!voiceFailure && <Pressable accessibilityRole="button" onPress={() => Alert.alert('Supertonic 3', voiceFailure, [
             { text: 'Close', style: 'cancel' },
             { text: 'Export diagnostics', onPress: () => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); } },
@@ -831,7 +833,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                 void qvacSpeak(text, { onEngine: onVoiceEngine, onFallback: onVoiceFallback, onPreparing: onVoicePreparing, onStage: onVoiceStage, onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
               });
             } },
-          ])}><Text style={styles.pauseBtnText}>Voice details & retry</Text></Pressable>}
+          ])}><Text style={styles.pauseBtnText}>{t('Voice details & retry')}</Text></Pressable>}
           <Pressable accessibilityRole="button" accessibilityLabel={canPause || voiceStarting ? 'Pause voice' : 'Start listening'}
             accessibilityState={{ disabled: !canPause && !voiceReady && !aiFailed && !speechFailed }}
             disabled={!canPause && !voiceReady && !aiFailed && !speechFailed}
