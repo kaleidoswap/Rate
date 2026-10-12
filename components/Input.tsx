@@ -156,7 +156,7 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
       paddingVertical: theme.spacing[2],
       paddingHorizontal: theme.spacing[3],
       fontSize: theme.typography.fontSize.sm,
-      minHeight: 40,
+      minHeight: 44,
     },
 
     md: {

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Switch } from 'react-native';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { Button } from './Button';
 import DatabaseService from '../services/DatabaseService';
 import { currentBarkHost } from '../services/protocols/barkPreferences';
 import { getDefaultArkadeServerUrl, NETWORK_LABEL, type ProtocolNetwork } from '../services/protocols/networkConfig';
@@ -17,9 +18,9 @@ type Props = {
   children?: React.ReactNode;
 };
 const USE_TEXT: Record<Props['account'], string> = {
-  SPARK: 'Bitcoin, Lightning and tokens. Turning it off hides its balance until you turn it on again.',
-  ARKADE: 'Low-fee off-chain bitcoin. Turning it off hides its balance until you turn it on again.',
-  BARK: 'Bitcoin on Second’s Ark network. Turning it off hides its balance until you turn it on again.',
+  SPARK: 'Bitcoin, Lightning and tokens.',
+  ARKADE: 'Low-fee off-chain bitcoin.',
+  BARK: 'Bitcoin on Second’s Ark network.',
 };
 export function AccountSettings(props: Props) {
   const theme = useAppTheme();
@@ -47,7 +48,7 @@ export function AccountSettings(props: Props) {
     error: { color: theme.colors.error[500], fontSize: 14 },
     switchRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], minHeight: 48 },
   });
-  const action = (label: string, onPress: () => void, disabled = props.busy) => <TouchableOpacity accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} style={[styles.action, disabled && { opacity: 0.5 }]} onPress={onPress}><Text style={styles.link}>{label}</Text></TouchableOpacity>;
+  const action = (label: string, onPress: () => void, disabled = props.busy) => <Button title={label} variant={label === 'Save and reconnect' ? 'primary' : 'secondary'} onPress={onPress} disabled={disabled} />;
   const host = props.account === 'BARK' ? currentBarkHost() : null;
   const off = props.onEnabled && props.enabled === false;
   return <>
@@ -67,12 +68,12 @@ export function AccountSettings(props: Props) {
       <Text style={styles.text}>Network: {props.account === 'BARK' && props.network === 'signet' ? 'Signet' : NETWORK_LABEL[props.network as ProtocolNetwork] ?? props.network}</Text>
       {!!props.error && <Text accessibilityRole="alert" style={styles.error}>{props.error}</Text>}
       {action('Change network', props.onNetwork)}
-      <Text style={styles.text}>Each network has its own balance. Mainnet uses real bitcoin; test networks use test bitcoin.</Text>
+      <Text style={styles.text}>Mainnet uses real bitcoin. Test networks have separate balances.</Text>
       {action('Reconnect account', props.onReconnect)}
-      <Text style={styles.text}>Reconnect using the saved configuration if this account is offline or out of sync.</Text>
+
     </View>}
-    {!off && props.account === 'SPARK' && <View style={styles.card}><Text style={styles.title}>Spark connection</Text><Text style={styles.text}>Spark selects its service endpoints automatically for the chosen network. Custom servers are not supported by this connection.</Text></View>}
-    {!off && props.account === 'BARK' && <View style={styles.card}><Text style={styles.title}>Connection details</Text><Text style={styles.text}>Current connection: {host?.network ?? 'Not configured'}</Text><Text style={styles.text}>Ark server</Text><Text selectable style={styles.text}>{host?.arkServerUrl || 'Not configured'}</Text><Text style={styles.text}>Bitcoin explorer</Text><Text selectable style={styles.text}>{host?.esploraUrl || 'Not configured'}</Text><Text style={styles.text}>These endpoints are managed by the Bark wallet. Reconnect retries the saved connection.</Text></View>}
+    {!off && props.account === 'SPARK' && <View style={styles.card}><Text style={styles.title}>Spark connection</Text><Text style={styles.text}>Servers are managed automatically.</Text></View>}
+    {!off && props.account === 'BARK' && <View style={styles.card}><Text style={styles.title}>Connection details</Text><Text style={styles.text}>Current connection: {host?.network ?? 'Not configured'}</Text><Text style={styles.text}>Ark server</Text><Text selectable style={styles.text}>{host?.arkServerUrl || 'Not configured'}</Text><Text style={styles.text}>Bitcoin explorer</Text><Text selectable style={styles.text}>{host?.esploraUrl || 'Not configured'}</Text><Text style={styles.text}>Servers are managed by Bark.</Text></View>}
     {!off && props.account === 'ARKADE' && <View style={styles.card}>
       <Text style={styles.title}>Server settings</Text><Text style={styles.text}>Use endpoints for the selected network. Saving reconnects this account.</Text>
       <Text style={styles.text}>Ark server</Text><TextInput accessibilityLabel="Ark server URL" style={styles.input} value={server} onChangeText={setServer} editable={ready && !props.busy} autoCapitalize="none" autoCorrect={false} keyboardType="url" />

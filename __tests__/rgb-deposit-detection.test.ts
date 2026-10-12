@@ -1,3 +1,4 @@
+beforeAll(() => { (require('react-native') as any).AppState = { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) }; });
 import { renderHook } from '@testing-library/react-native'
 
 // RGB on this phone: the invoice's transfer moves only when refreshed.

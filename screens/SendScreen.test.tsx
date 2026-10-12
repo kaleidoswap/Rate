@@ -27,10 +27,11 @@ jest.mock('../services/kaleidoPay/connect', () => ({
   usePayAccounts: () => {}, prepareRgbRequest: jest.fn(),
   prepareSparkTokenRequest: jest.fn(), sendableSparkTokens: jest.fn(async () => [mockUsdb]),
 }));
-jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
+jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), updatePaymentAttempt: jest.fn(async () => true), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
 jest.mock('../services/kaleidoPay', () => ({
   PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   decodeTarget: (text: string) => {
+    if (text === 'alice@example.com') return { kind: 'lnurl', raw: text, lnurl: text };
     if (text.startsWith('spark1')) return { kind: 'spark', raw: text, sparkAddress: text };
     if (!text.startsWith('ln')) throw new Error('not payable');
     return { kind: 'bolt11', raw: text, invoice: text, amountSat: 1000 };
@@ -79,7 +80,7 @@ test('one flow: decode, compare ways to pay, and pay only the reviewed total', a
   fireEvent.press(screen.getByLabelText(/^Bark\. Total you pay/));
   await act(async () => { pay(screen, 'Pay 1020 sats'); });
   expect(executePaymentOffer).toHaveBeenCalledWith(mockPreview, expect.objectContaining({ id: 'Bark' }), expect.any(String));
-  expect(screen.getByText('Check status')).toBeTruthy();
+  expect(screen.getByText('Verify payment')).toBeTruthy();
   expect(mockDispatch).toHaveBeenCalledWith({ type: 'loadBtcBalance' });
 });
 
@@ -99,6 +100,9 @@ test('a completed payment can be closed and refreshes balances', async () => {
   const screen = await reviewed(navigation);
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
   expect(screen.getByText('Payment completed')).toBeTruthy();
+  expect(screen.queryByText('Pay again')).toBeNull();
+  expect(require('../services/kaleidoPay/attempts').beginPaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ recipientName: expect.any(String), feeDisplay: '10 sats', accountName: 'Account Spark' }));
+  expect(screen.getByText('Quoted fees')).toBeTruthy();
   expect(screen.getByText('View in Activity')).toBeTruthy();
   expect(mockFeedback.send).toHaveBeenCalledTimes(1);
   fireEvent.press(screen.getByText('Done'));
@@ -110,7 +114,7 @@ test('an unresolved payment is shown instead of a new review', async () => {
   loadPaymentAttempt.mockResolvedValueOnce({ id: 'pending', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending' });
   const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
   await act(async () => {});
-  expect(screen.getByText('Check status')).toBeTruthy();
+  expect(screen.getByText('Verify payment')).toBeTruthy();
   expect(quotePaymentOffers).not.toHaveBeenCalled();
 });
 
@@ -123,7 +127,7 @@ test('a payment in progress is re-checked on its own until it settles', async ()
   jest.useFakeTimers();
   try {
     await act(async () => { pay(screen, 'Pay 1010 sats'); });
-    expect(screen.getByText('Payment in progress')).toBeTruthy();
+    expect(screen.getByText('Confirming payment')).toBeTruthy();
     await act(async () => { jest.advanceTimersByTime(3_000); });
     expect(checkPaymentStatus).toHaveBeenCalledWith('Spark', expect.any(String));
     const calls = (checkPaymentStatus as jest.Mock).mock.calls.length;
@@ -131,7 +135,7 @@ test('a payment in progress is re-checked on its own until it settles', async ()
     await act(async () => { jest.advanceTimersByTime(5_000); });
     expect((checkPaymentStatus as jest.Mock).mock.calls.length).toBe(calls + 1);
     expect(screen.getByText('Payment completed')).toBeTruthy();
-    expect(screen.queryByText('Check status')).toBeNull();
+    expect(screen.queryByText('Verify payment')).toBeNull();
     await act(async () => { jest.advanceTimersByTime(60_000); });
     expect((checkPaymentStatus as jest.Mock).mock.calls.length).toBe(calls + 1);
   } finally { jest.useRealTimers(); }
@@ -150,7 +154,7 @@ test('an unresolved payment stops being re-checked when Send closes', async () =
     expect(checkPaymentStatus).toHaveBeenCalledTimes(1);
     await act(async () => { jest.advanceTimersByTime(3_000); });
     expect(checkPaymentStatus).toHaveBeenCalledTimes(2);
-    expect(screen.getByText('Check status')).toBeTruthy();
+    expect(screen.getByText('Verify payment')).toBeTruthy();
     screen.unmount();
     await act(async () => { jest.advanceTimersByTime(60_000); });
     expect(checkPaymentStatus).toHaveBeenCalledTimes(2);
@@ -180,7 +184,7 @@ test('a failed payment plays the error cue, a pending one stays silent until it 
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
   expect(mockFeedback.send).not.toHaveBeenCalled();
   (checkPaymentStatus as jest.Mock).mockResolvedValueOnce({ status: 'completed' });
-  await act(async () => { fireEvent.press(screen.getByText('Check status')); });
+  await act(async () => { fireEvent.press(screen.getByText('Verify payment')); });
   expect(mockFeedback.send).toHaveBeenCalledTimes(1);
 });
 
@@ -196,7 +200,7 @@ test('a payment that needs checking can be moved past only after confirming the 
   const buttons = alert.mock.calls[0][2] as any[];
   await act(async () => { await buttons.find(b => b.style === 'destructive').onPress(); });
   expect(dismissPaymentAttempt).toHaveBeenCalledWith(1, unknown);
-  expect(screen.queryByText('Check status')).toBeNull();
+  expect(screen.queryByText('Verify payment')).toBeNull();
   alert.mockRestore();
 });
 
@@ -216,7 +220,7 @@ test('Lite leaves Bark out unless it holds funds', async () => {
   expect(screen.queryByLabelText(/^Pay from Bark/)).toBeNull();
   expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
   screen.unmount();
-  mockState = { ...mockState, wallet: { activeWallet: { id: 1 }, btcBalance: { byProtocol: { BARK: { total: 5000 } } } } };
+  mockState = { ...mockState, wallet: { activeWallet: { id: 1 }, btcBalance: { byProtocol: { BARK: { confirmed: 5000, unconfirmed: 2000, total: 7000 } } } } };
   screen = await reviewed();
   expect(screen.getByLabelText(/^Pay from Bark, balance 5,000 sats/)).toBeTruthy();
 });
@@ -314,4 +318,20 @@ test('an amount handed over in sats is used as is, whatever the display unit', a
   await act(async () => {});
   await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   expect(previewInput).toHaveBeenCalledWith('spark1abc', 2500, expect.anything(), expect.anything());
+});
+
+test('pay again requests a fresh amount and quote, and saving opens the contact form', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'completed' });
+  const navigation = nav();
+  const screen = render(<SendScreen navigation={navigation} route={{ params: { prefilledAddress: 'alice@example.com', prefilledAmountSat: 1000 } }} />);
+  await act(async () => {});
+  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  fireEvent.press(screen.getByText('Save contact'));
+  expect(navigation.navigate).toHaveBeenCalledWith('Dashboard', { screen: 'Contacts', params: { scannedContact: 'alice@example.com' } });
+  fireEvent.press(screen.getByText('Pay again'));
+  expect(screen.queryByText('Payment completed')).toBeNull();
+  expect(screen.queryByText('Pay 1010 sats')).toBeNull();
+  expect(executePaymentOffer).toHaveBeenCalledTimes(1);
 });

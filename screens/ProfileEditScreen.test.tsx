@@ -239,5 +239,5 @@ it('offers a draft identity without publishing and hides Website', () => {
   fireEvent.press(screen.getByText('Surprise me · name & avatar'));
   expect(screen.getByLabelText('Display name').props.value).not.toBe('Satoshi');
   expect(mockDispatch.mock.calls.some(c => c[0].type === 'update')).toBe(false);
-  expect(screen.getByText('Get a Lightning address on claimzero.me ↗')).toBeTruthy();
+  expect(screen.getByText('Get your kaleidoswap.me address')).toBeTruthy();
 });

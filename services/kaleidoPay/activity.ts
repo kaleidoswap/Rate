@@ -66,6 +66,7 @@ export async function loadPendingPaymentActivity(walletId: number | undefined): 
     : source.startsWith('ark') ? 'Arkade' : source.startsWith('rgb') ? 'RGB-LN' : 'LN';
   return [{
     id: `payment-attempt-${attempt.id}`,
+    contactName: attempt.recipientName,
     type: 'send',
     source: 'payment',
     asset: 'BTC',

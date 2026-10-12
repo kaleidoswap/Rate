@@ -23,3 +23,10 @@ test('a send’s later outcome updates its entry', async () => {
   await updateContactEventStatus(9, 'missing', 'failed'); // not to a contact: nothing happens
   expect((await contactEvents(9, ['carol@x.com']))[0].status).toBe('completed');
 });
+
+test('status checks keep the provider reference even when the status is unchanged', async () => {
+  const { recordContactEvent, updateContactEventStatus, walletContactEvents } = require('./contactHistory');
+  await recordContactEvent(55, { id: 'p1', contactKey: 'alice@example.com', contactName: 'Alice', direction: 'sent', amount: '100 sats', status: 'completed', createdAt: 1, attemptId: 'p1' });
+  await updateContactEventStatus(55, 'p1', 'completed', 'provider-ref');
+  expect(await walletContactEvents(55)).toEqual([expect.objectContaining({ reference: 'provider-ref', contactName: 'Alice' })]);
+});

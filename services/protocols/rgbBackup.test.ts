@@ -1,3 +1,4 @@
+jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 const mockDownload = jest.fn(async (): Promise<any> => undefined);
 const mockWrites: Uint8Array[] = [];
 const mockManifest = jest.fn(async (): Promise<any> => undefined);
@@ -21,7 +22,8 @@ import { restoreRgbFromCloud, rgbBackupStatus, rgbBackupStoreId, runRgbBackup, s
 let changed = true;
 const account = { backupRequired: jest.fn(async () => changed), backup: jest.fn(async () => { changed = false; }) };
 
-beforeEach(() => {
+beforeEach(async () => {
+  await require('@react-native-async-storage/async-storage').clear();
   jest.clearAllMocks();
   changed = true;
   setRgbBackupContext({ mnemonic: 'seed', network: 'mutinynet', account: () => account });
@@ -125,4 +127,19 @@ describe('looking for a cloud backup', () => {
 
 test('each network of a seed has its own cloud backup', () => {
   expect(rgbBackupStoreId('seed', 'mainnet')).not.toBe(rgbBackupStoreId('seed', 'mutinynet'));
+});
+
+test('retries a failed cloud upload even after rgb-lib cleared its dirty flag', async () => {
+  mockUpload.mockRejectedValueOnce(new Error('offline'));
+  await runRgbBackup();
+  expect(changed).toBe(false);
+  expect(rgbBackupStatus().state).toBe('failed');
+  // A newly connected context still sees the durable retry flag.
+  setRgbBackupContext(null);
+  setRgbBackupContext({ mnemonic: 'seed', network: 'mutinynet', account: () => account });
+  await runRgbBackup();
+  expect(mockUpload).toHaveBeenCalledTimes(2);
+  expect(rgbBackupStatus().state).toBe('done');
+  await runRgbBackup();
+  expect(mockUpload).toHaveBeenCalledTimes(2);
 });

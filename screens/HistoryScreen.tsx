@@ -1,3 +1,7 @@
+import { reconcilePendingActivity } from '../utils/activity-reconciliation';
+import { ActivitySearchControls } from '../components/ActivitySearchControls';
+import { matchesActivitySearch, type ActivityPeriod } from '../utils/activity-search';
+import { walletContactEvents, type ContactEvent } from '../services/contactHistory';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     View,
@@ -15,7 +19,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useActivityFeed } from '../hooks/useActivityFeed';
 import { RootState } from '../store';
-import { MainHeader, SegmentedTabs } from '../components';
+import { MainHeader } from '../components/MainHeader';
+import { Sheet } from '../components/Sheet';
+import { Button } from '../components/Button';
+import { SegmentedTabs } from '../components/SegmentedTabs';
 import { EmptyState } from '../components/EmptyState';
 import { theme } from '../theme';
 import {
@@ -129,7 +136,12 @@ function sectionTitle(ts?: number): string {
     return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-export default function HistoryScreen() {
+export default function HistoryScreen({ previewItems, previewQuery, previewPeriod }: { previewItems?: ActivityItem[]; previewQuery?: string; previewPeriod?: ActivityPeriod } = {}) {
+    const demo = __DEV__ ? previewItems : undefined;
+    const [query, setQuery] = useState('');
+    const [period, setPeriod] = useState<ActivityPeriod>('all');
+    useEffect(() => { if (demo) { setQuery(previewQuery ?? ''); setPeriod(previewPeriod ?? 'all'); } }, [demo, previewQuery, previewPeriod]);
+    const [contactEvents, setContactEvents] = useState<ContactEvent[]>([]);
     const navigation = useNavigation<any>();
     const policy = usePolicy();
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
@@ -138,6 +150,7 @@ export default function HistoryScreen() {
 
     const [pendingPayment, setPendingPayment] = useState<ActivityItem[]>([]);
     const [refreshing, setRefreshing] = useState(false);
+    const [filtersVisible, setFiltersVisible] = useState(false);
     const [filter, setFilter] = useState<ActivityTab>('all');
     const [network, setNetwork] = useState<ActivityNetwork | 'all'>('all');
     const [selectedItem, setSelectedItem] = useState<ActivityItem | null>(null);
@@ -185,22 +198,32 @@ export default function HistoryScreen() {
         return () => { active = false; };
     }, [walletId, result]);
 
-    const items = useMemo(() => [...pendingPayment, ...feed.items, ...agentActivityItems(agentEntries, { spendsOnly: true })], [pendingPayment, feed.items, agentEntries]);
+    useEffect(() => {
+        let active = true;
+        if (walletId != null) void walletContactEvents(walletId).then(events => { if (active) setContactEvents(events); });
+        return () => { active = false; };
+    }, [walletId, result]);
+    useEffect(() => { setContactEvents([]); setSelectedItem(null); setPendingPayment([]); setAgentEntries([]); }, [walletId]);
+    const items = useMemo(() => demo ?? [...reconcilePendingActivity(pendingPayment, feed.items), ...agentActivityItems(agentEntries, { spendsOnly: true })].map(item => {
+        const contact = contactEvents.find(event => item.type === 'send' && event.direction === 'sent' && (
+            (event.reference && [item.txid, item.paymentHash, item.requestId].includes(event.reference)) ||
+            (event.attemptId && item.id === `payment-attempt-${event.attemptId}`)));
+        return contact ? { ...item, contactName: contact.contactName } : item;
+    }), [demo, pendingPayment, feed.items, agentEntries, contactEvents]);
     const agentItems = useMemo(() => agentActivityItems(agentEntries), [agentEntries]);
-    const loadingFirst = feed.updating && items.length === 0;
+    const loadingFirst = !demo && feed.updating && items.length === 0;
 
     const softError = useMemo(() => {
-        if (!result) return null;
+        if (demo || !result) return null;
         if (!result.hadConnectedAdapter && result.items.length === 0) return 'Wallet is offline. Connect a protocol to see your activity.';
         if (result.failedSources > 0) return 'Some accounts could not be checked. Pull to refresh.';
         return null;
-    }, [result]);
+    }, [result, demo]);
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await feed.refresh();
-        setRefreshing(false);
-    }, [feed.refresh]);
+        try { if (!demo) await feed.refresh(); } finally { setRefreshing(false); }
+    }, [feed.refresh, demo]);
 
     // Which network a payment used is Advanced detail: Lite has no network filter.
     const networks = useMemo(() => (policy.showNetworks ? activityNetworks(items) : []), [items, policy.showNetworks]);
@@ -215,7 +238,7 @@ export default function HistoryScreen() {
     ], [networks]);
 
     const filtered = (filter === 'agent' ? agentItems : items)
-        .filter((it) => matchesActivityFilter(it, filter, activeNetwork))
+        .filter((it) => matchesActivityFilter(it, filter, activeNetwork) && matchesActivitySearch(it, query, period))
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
 
     // Build sections grouped by day.
@@ -235,14 +258,14 @@ export default function HistoryScreen() {
         const chip = layerChipColors(item.layer);
         const hasAmount = item.amount !== '';
         return (
-            <TouchableOpacity activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true }) : setSelectedItem(item)}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true }) : setSelectedItem(item)}>
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={20} color={v.color} />
                 </View>
 
                 <View style={styles.rowBody}>
                     <View style={styles.rowTopLine}>
-                        <Text style={styles.rowTitle} numberOfLines={1}>{typeLabel(item)}</Text>
+                        <Text style={styles.rowTitle} numberOfLines={1}>{item.contactName ? `${typeLabel(item)} · ${item.contactName}` : typeLabel(item)}</Text>
                         {hasAmount && (
                             <Text
                                 style={[
@@ -283,25 +306,29 @@ export default function HistoryScreen() {
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            <MainHeader title="Activity" />
+            {!demo && <MainHeader title="Activity" />}
 
-            {/* Filter tabs */}
-            <SegmentedTabs
-                options={FILTERS}
-                value={filter}
-                onChange={(key) => setFilter(key)}
-                scrollable
-                style={styles.filterBar}
-            />
-            {networks.length > 1 && (
-                <SegmentedTabs<ActivityNetwork | 'all'>
-                    options={networkOptions}
-                    value={activeNetwork}
-                    onChange={setNetwork}
-                    scrollable
-                    style={styles.networkBar}
-                />
-            )}
+            {demo && <Text style={[styles.loadingText, { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[2], color: theme.colors.warning[500] }]}>PREVIEW · Example activity</Text>}
+            <ActivitySearchControls query={query} onQuery={setQuery}
+                activeCount={Number(period !== 'all') + Number(filter !== 'all') + Number(activeNetwork !== 'all')}
+                onOpenFilters={() => setFiltersVisible(true)} />
+            <Sheet visible={filtersVisible} onClose={() => setFiltersVisible(false)} title="Filters"
+                footer={<View style={{ gap: theme.spacing[2] }}>
+                    <Button title="Show results" onPress={() => setFiltersVisible(false)} />
+                    <Button title="Reset filters" variant="ghost" onPress={() => { setPeriod('all'); setFilter('all'); setNetwork('all'); }} />
+                </View>}>
+                <View style={{ gap: theme.spacing[4], paddingBottom: theme.spacing[4] }}>
+                    <Text style={styles.filterLabel}>Activity type</Text>
+                    <SegmentedTabs options={FILTERS} value={filter} onChange={setFilter} />
+                    <Text style={styles.filterLabel}>Period</Text>
+                    <SegmentedTabs<ActivityPeriod> value={period} onChange={setPeriod}
+                        options={[{ key: 'all', label: 'Any time' }, { key: '7d', label: '7 days' }, { key: '30d', label: '30 days' }, { key: '90d', label: '90 days' }]} />
+                    {networks.length > 1 && <>
+                        <Text style={styles.filterLabel}>Network</Text>
+                        <SegmentedTabs<ActivityNetwork | 'all'> options={networkOptions} value={activeNetwork} onChange={setNetwork} />
+                    </>}
+                </View>
+            </Sheet>
 
             {softError && (
                 <View style={styles.errorBanner}>
@@ -310,7 +337,7 @@ export default function HistoryScreen() {
                 </View>
             )}
 
-            {feed.updating && !refreshing && items.length > 0 && (
+            {!demo && feed.updating && !refreshing && items.length > 0 && (
                 <View style={styles.updatingRow}>
                     <ActivityIndicator size="small" color={theme.colors.text.tertiary} />
                     <Text style={styles.loadingText}>Updating…</Text>
@@ -318,6 +345,8 @@ export default function HistoryScreen() {
             )}
 
             <SectionList
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                     sections={sections}
                     keyExtractor={(item) => item.id}
                     renderItem={renderItem}
@@ -337,13 +366,15 @@ export default function HistoryScreen() {
                     ) : (
                         <EmptyState
                             icon="receipt-outline"
-                            title={filter === 'pending' ? 'No pending payments' : filter === 'agent' ? 'No agent payments yet' : 'No activity yet'}
-                            message={filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : filter === 'agent' ? 'What the assistant pays from its Agent wallet, and your top-ups, appear here.' : 'Your payments and transfers will appear here.'}
+                            actionLabel={query || period !== 'all' || filter !== 'all' || activeNetwork !== 'all' ? 'Reset filters' : undefined}
+                            onAction={() => { setQuery(''); setPeriod('all'); setFilter('all'); setNetwork('all'); }}
+                            title={query || period !== 'all' ? 'No matching activity' : filter === 'pending' ? 'No pending payments' : filter === 'agent' ? 'No agent payments yet' : 'No activity yet'}
+                            message={query || period !== 'all' ? 'Try another name, amount or reference, or choose a wider period.' : filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : filter === 'agent' ? 'What the assistant pays from its Agent wallet, and your top-ups, appear here.' : 'Your payments and transfers will appear here.'}
                         />
                     )}
                 />
 
-            <ActivityDetailSheet onRefresh={feed.refresh} item={items.find(item => item.id === selectedItem?.id) ?? selectedItem} onClose={() => setSelectedItem(null)} />
+            <ActivityDetailSheet onRefresh={demo ? undefined : feed.refresh} item={items.find(item => item.id === selectedItem?.id) ?? selectedItem} onClose={() => setSelectedItem(null)} />
         </View>
     );
 }
@@ -353,14 +384,10 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: theme.colors.background.secondary,
     },
-    filterBar: {
-        paddingHorizontal: theme.spacing[4],
-        paddingTop: theme.spacing[3],
-        paddingBottom: theme.spacing[2],
-    },
-    networkBar: {
-        paddingHorizontal: theme.spacing[4],
-        paddingBottom: theme.spacing[2],
+    filterLabel: {
+        color: theme.colors.text.secondary,
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: '600',
     },
     errorBanner: {
         flexDirection: 'row',

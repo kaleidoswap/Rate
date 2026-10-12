@@ -10,6 +10,24 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-10-12
+
+### Added
+- **Supertonic 3 through QVAC.** On-device multilingual speech, including Italian, using the Q8 model downloaded on first use. Preserves accented text, detects language automatically, and drives Prismo's mouth from audio playback. System speech remains a fallback if neural speech is unavailable.
+- **Quick profile setup.** Create a Nostr profile during onboarding with an identity derived from the wallet recovery phrase, and optionally claim a username at kaleidoswap.me.
+
+### Changed
+- Simplified Face ID setup, compact account settings under Connections, and clearer backup, balance, payment receipts, Activity filters and Receive flows.
+- Larger animated Prismo, a prominent microphone and spoken reply bubble in Talk, with continuous conversation enabled by default.
+
+### Fixed
+- Automatic payment status reconciliation, including Arkade provider queries, and protection against stale payment results overwriting newer states.
+- Incoming-payment detection after returning to the app, recovery-word validation and persistent retry tracking for RGB backups.
+- Neural voice selection now supports Italian without forcing system speech, and starting speech no longer unloads the active transcription model.
+
+### Validation
+- 1,761 tests passed across 236 suites. Supertonic 3 Italian synthesis was verified with the native QVAC runtime on macOS; physical-device voice performance and microphone routing remain to be checked with this release.
+
 ## [0.9.1] — 2026-10-10
 
 ### Changed

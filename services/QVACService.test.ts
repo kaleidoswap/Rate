@@ -21,7 +21,7 @@ jest.mock('@qvac/sdk', () => ({
   suspend: jest.fn(),
   embed: jest.fn(),
   VERBOSITY: { ERROR: 0 },
-  TTS_EN_SUPERTONIC_Q4_0: {},
+  TTS_MULTILINGUAL_SUPERTONIC3_Q8_0: { modelName: 'supertonic3-q8_0' },
   EMBEDDINGGEMMA_300M_Q4_0: {},
   VAD_SILERO_5_1_2: {},
 }));
@@ -97,5 +97,28 @@ describe('QVACService.runProviderTurn', () => {
 
     expect(out.text).toBe('Partial');
     expect(out.inference?.status).toBe('cancelled');
+  });
+});
+
+describe('Supertonic 3 mobile integration', () => {
+  afterEach(() => jest.restoreAllMocks());
+  it('loads the multilingual model once, preserves Italian and keeps the listening session alive', async () => {
+    const svc = service() as any;
+    svc.ttsModelId = null; svc.ttsLoadPromise = null; svc.whisperModelId = 'active-whisper';
+    jest.spyOn(svc, 'workletBlocked').mockReturnValue(false);
+    jest.spyOn(svc, 'bootLoad').mockImplementation((load: any) => load());
+    const unloadWhisper = jest.spyOn(svc, 'unloadWhisper');
+    const sdk = require('@qvac/sdk');
+    sdk.loadModel.mockResolvedValue('supertonic3');
+    sdk.textToSpeech.mockReturnValue({ buffer: Promise.resolve([1, 2]), sampleRate: Promise.resolve(24000) });
+    expect(await svc.synthesizeSpeech('Il pagamento è pronto.')).toEqual({ pcm: [1, 2], sampleRate: 24000 });
+    await svc.synthesizeSpeech('Grazie!');
+    expect(sdk.loadModel).toHaveBeenCalledWith(expect.objectContaining({
+      modelSrc: sdk.TTS_MULTILINGUAL_SUPERTONIC3_Q8_0,
+      modelConfig: expect.objectContaining({ language: 'na', voice: 'F1', ttsNumInferenceSteps: 8 }),
+    }));
+    expect(sdk.textToSpeech).toHaveBeenCalledWith(expect.objectContaining({ text: 'Il pagamento è pronto.' }));
+    expect(unloadWhisper).not.toHaveBeenCalled();
+    expect(svc.whisperModelId).toBe('active-whisper');
   });
 });

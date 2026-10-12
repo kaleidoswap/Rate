@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 /**
  * Automatic cloud backup for RGB on this phone
  * -------------------------------------------
@@ -69,12 +70,16 @@ export function scheduleRgbBackup(): void {
 /** Back up now if the wallet changed since the last backup (or always with `force`). */
 export async function runRgbBackup(force = false): Promise<void> {
   if (running) { again = true; return running; }
-  running = (async () => {
+  running = Promise.resolve().then(async () => {
     try {
       const ctx = context;
       const account = ctx?.account();
       if (!ctx || !account) return;
-      if (!force && !(await account.backupRequired())) return;
+      const retryKey = `rgb-backup-pending-${rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network))}`;
+      if (!force && await AsyncStorage.getItem(retryKey) !== '1' && !(await account.backupRequired())) return;
+      // rgb-lib clears its dirty flag when creating a file, before the cloud upload succeeds.
+      // Persist retry intent first so a failed upload is retried even after restarting.
+      await AsyncStorage.setItem(retryKey, '1');
       setStatus({ ...status, state: 'backing-up', error: undefined });
       const file = new File(Paths.cache, `rgb-backup-${Date.now()}.rgbbackup`);
       try {
@@ -82,6 +87,7 @@ export async function runRgbBackup(force = false): Promise<void> {
         const data = await file.bytes();
         const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network)), vssSigningKey(ctx.mnemonic));
         const manifest = await uploadBackupFile(client, PREFIX, data);
+        await AsyncStorage.removeItem(retryKey);
         setStatus({ state: 'done', lastBackupAt: manifest.createdAt });
       } finally {
         try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
@@ -93,7 +99,7 @@ export async function runRgbBackup(force = false): Promise<void> {
       running = null;
       if (again) { again = false; scheduleRgbBackup(); }
     }
-  })();
+  });
   return running;
 }
 

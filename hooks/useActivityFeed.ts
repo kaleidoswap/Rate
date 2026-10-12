@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
+import { AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   streamActivity,
@@ -50,8 +51,10 @@ export function useActivityFeed(options: LoadActivityOptions, pollMs?: number): 
 
   useFocusEffect(useCallback(() => {
     load(true);
-    const timer = pollMs ? setInterval(() => { void load(false); }, pollMs) : undefined;
+    const subscription = AppState.addEventListener('change', state => { if (state === 'active') void load(true); });
+    const timer = pollMs ? setInterval(() => { if (AppState.currentState !== 'background' && AppState.currentState !== 'inactive') void load(false); }, pollMs) : undefined;
     return () => {
+      subscription.remove();
       clearInterval(timer);
       run.current?.cancel();
       run.current = null;

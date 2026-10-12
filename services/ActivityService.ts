@@ -44,6 +44,7 @@ import type { ActivityStatus } from '../utils/paymentStatus';
 export type { ActivityStatus } from '../utils/paymentStatus';
 
 export interface ActivityItem {
+  contactName?: string;
   id: string;
   type: ActivityItemType;
   source: 'payment' | 'onchain' | 'transfer' | 'swap' | 'crosschain';

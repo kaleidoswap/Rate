@@ -2,7 +2,10 @@ import { BridgeEntryCard } from '../components/receive/BridgeEntryCard';
 import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnectionNotice';
 import { receiveAmountSats } from '../utils/receive-request';
 import { useReceiveGeneration } from '../hooks/useReceiveGeneration';
-import { InvoiceExpiry } from '../components/payments/InvoiceExpiry';
+import { ReceiveOutcomeCard } from '../components/receive/ReceiveOutcomeCard';
+import { receivePresentation } from '../utils/receive-presentation';
+import { useForegroundClock } from '../hooks/useForegroundClock';
+import { InvoiceExpiry, invoiceExpiry } from '../components/payments/InvoiceExpiry';
 // screens/ReceiveScreen.tsx
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -1400,6 +1403,15 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   const isGeneratingReceive =
     (networkType === 'unified' && unifiedLoading && !unifiedUri) ||
     (networkType !== 'unified' && loading && !address);
+  const deadlines = useMemo(() => receiveMethods.map(method => invoiceExpiry(method.value)).filter((deadline): deadline is number => deadline !== null), [receiveMethods]);
+  const requestNow = useForegroundClock(isFocused && deadlines.length > 0);
+  const requestPresentation = receivePresentation(depositMonitor.status, deadlines.some(deadline => deadline <= requestNow));
+  const showOutcome = ['expired', 'pending', 'confirmed', 'claimed', 'failed'].includes(requestPresentation);
+  const refreshRequest = () => {
+    setDepositMonitor({ status: 'idle' });
+    if (networkType === 'unified') void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' });
+    else void generateAddress();
+  };
   const monitorStatus: DepositMonitorStatus =
     isGeneratingReceive ? 'generating' : depositMonitor.status === 'idle' ? 'watching' : depositMonitor.status;
   const monitorVisible =
@@ -1659,10 +1671,16 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   const claimsOnDevice = receiveMethods.some((m) => m.layer === 'lightning' && (m.protocol === 'ARKADE' || m.protocol === 'BARK'));
   const renderStatus = () => (
     <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message}
-      hint={claimsOnDevice ? 'Keep the app open until it arrives' : undefined} />
+      hint={claimsOnDevice ? 'Keep this screen open until it arrives' : undefined} />
   );
 
+  const renderOutcome = () => <ReceiveOutcomeCard status={requestPresentation} onRefresh={refreshRequest}
+    requestedAmount={!selectedAsset.isRGB && (networkType !== 'unified' || unifiedAsset === 'BTC') && currentAmountSats > 0 ? `${currentAmountSats.toLocaleString()} sats` : undefined}
+    onActivity={claimsOnDevice && requestPresentation === 'pending' ? undefined : () => navigation.navigate('Dashboard', { screen: 'Activity' })}
+    hint={claimsOnDevice ? 'Keep this screen open until the payment arrives.' : undefined} />;
+
   const renderUnifiedBody = () => {
+    if (showOutcome && unifiedUri) return unifiedLoading ? renderQrLoading() : renderOutcome();
     const accent = theme.colors.networks.unified;
     // Show the loader until the complete request is ready to be published.
     if (unifiedLoading && !unifiedUri) {
@@ -1747,6 +1765,8 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     if (networkType === 'unified') {
       return renderUnifiedBody();
     }
+
+    if (showOutcome && address && !loading) return renderOutcome();
 
     if (awaitingAmount && routeTarget) {
       return (
@@ -1983,6 +2003,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         visible={showDepositSuccess}
         ticker={selectedAsset?.ticker || 'BTC'}
         network={depositMonitor.layer ? formatDepositLayer(depositMonitor.layer) : networkType === 'unified' ? undefined : networkType}
+        onActivity={() => { setShowDepositSuccess(false); cancelReceiveWork(); navigation.navigate('Dashboard', { screen: 'Activity' }); }}
         onDone={() => {
           setShowDepositSuccess(false);
           setDepositMonitor({ status: 'idle' });

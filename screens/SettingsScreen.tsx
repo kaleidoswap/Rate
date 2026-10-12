@@ -144,19 +144,20 @@ export default function SettingsScreen({ navigation }: Props) {
   );
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const [settingsQuery, setSettingsQuery] = useState('');
-  type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
+  type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Agent', advanced: 'Advanced' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Agent' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
-    ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
+    ...(!RGB_VIA_NWC ? [{ page: 'connections', terms: 'direct node connectivity url' }] : []),
     { page: 'assistant', terms: 'kaleidomind ai desktop model agent assistant personalize connection wallet budget limit' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase' },
-    { page: 'preferences', terms: 'preferences display detail mode bitcoin balance unit sound sounds payment currency fiat notifications' },
-    { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
+    { page: 'preferences', terms: 'preferences bitcoin balance unit sound sounds payment currency fiat notifications' },
+    { page: 'connections', terms: 'display detail mode lite advanced' },
+    { page: 'connections', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
     { page: 'security', terms: 'danger remove delete wallet' },
   ];
   const query = settingsQuery.trim().toLowerCase();
@@ -648,21 +649,20 @@ export default function SettingsScreen({ navigation }: Props) {
         {atHome && <>
           <Group>
             <Row first icon="flash-outline" iconColor={theme.colors.networks.lightning} label="Lightning address"
-              description={lightningAddress ?? 'Get a name@kaleidoswap.me anyone can pay'} value={lightningAddress ? undefined : 'Get one'}
+              description={lightningAddress ?? undefined} value={lightningAddress ? undefined : 'Get one'}
               onPress={() => navigation.navigate('LightningAddress')} />
-            <Row icon="options-outline" label="Preferences" description="Units, currency, sounds and notifications" onPress={() => openPage('preferences')} />
-            <Row icon="shield-checkmark-outline" label="Security & backup" description="App lock, recovery phrase and device data" onPress={() => openPage('security')} />
-            <Row icon="link-outline" label="Connections" description="Lightning wallets and Nostr" onPress={() => openPage('connections')} />
+            <Row icon="options-outline" label="Preferences" onPress={() => openPage('preferences')} />
+            <Row icon="shield-checkmark-outline" label="Security & backup" onPress={() => openPage('security')} />
+            <Row icon="link-outline" label="Connections" onPress={() => openPage('connections')} />
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row first icon="sparkles-outline" label="Agent" description="Private AI assistant · models, privacy and desktop pairing" onPress={() => openPage('assistant')} />
-            <Row icon="code-slash-outline" label="Advanced" description="Accounts and network configuration" onPress={() => openPage('advanced')} />
-            {__DEV__ && <Row icon="color-palette-outline" label="Component preview" description="Review shared mobile components" onPress={() => navigation.navigate('DesignSystem')} />}
+            <Row first icon="sparkles-outline" label="Agent" onPress={() => openPage('assistant')} />
+
+
           </Group>
         </>}
-        {page === 'advanced' && !account && <Text style={styles.pageDescription}>Manage the networks used by your wallet accounts. Test networks use separate test funds.</Text>}
-        {page === 'security' && <Text style={styles.pageDescription}>Lock the app on this phone and keep your recovery phrase private. The phrase gives access to your funds.</Text>}
+        {page === 'security' && !account && <Text style={styles.pageDescription}>Lock the app on this phone and keep your recovery phrase private. The phrase gives access to your funds.</Text>}
 
 
         {!hasSettingsSearchResults && (
@@ -681,7 +681,7 @@ export default function SettingsScreen({ navigation }: Props) {
             first
             iconNode={<NostrIcon size={20} />}
             label="Profile, relays &amp; keys"
-            description={nostrState.isConnected ? 'Connected to relays' : 'Not connected'}
+            description={nostrState.isConnected ? 'Connected to relays' : 'Open to check your relay connections'}
             right={
               <View style={styles.rowRight}>
                 <View style={[styles.statusPill, { backgroundColor: (nostrState.isConnected ? theme.colors.success[500] : theme.colors.gray[400]) + '22' }]}>
@@ -849,18 +849,22 @@ export default function SettingsScreen({ navigation }: Props) {
             icon="key-outline"
             iconColor={theme.colors.warning[500]}
             label="View recovery phrase"
-            description="Authenticate to view your backup"
+            description="Your private words restore your wallet keys"
             value={isWalletUnlocked ? 'Unlocked' : 'Locked'}
             onPress={handleRecoverMnemonic}
           />
+          {activeWallet?.id != null && <Row icon="cloud-upload-outline" label="RGB data backup"
+            description="RGB assets need an encrypted data backup as well as your recovery phrase. Check the last backup, retry or export a copy."
+            onPress={() => setAccount('RGB')} />}
         </Group>
+        <Text style={styles.pageDescription}>Keep both your recovery phrase and any required account backups. A connected Lightning node has its own backup procedure.</Text>
         </>}
 
         {/* Preferences */}
-        {showSection('preferences display detail mode bitcoin balance unit sound sounds payment currency fiat notifications') && <>
+        {showSection('preferences bitcoin balance unit sound sounds payment currency fiat notifications') && <>
         <SectionLabel>Preferences</SectionLabel>
         <Group>
-          <Row first icon="options-outline" label="Display detail" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
+
           <Row icon="logo-bitcoin" iconColor={theme.colors.warning[500]} label="Balance unit" description="Sats, BTC or local currency" value={denominationLabel[displayDenomination]} onPress={() => setActiveSheet('unit')} />
           {/* Theme picker intentionally omitted: the app is dark-only for now —
               screens import the static dark theme, so a Light/System toggle had
@@ -915,6 +919,13 @@ export default function SettingsScreen({ navigation }: Props) {
           onSave={patch => { if (account === 'ARKADE') changeProtocolNetwork(account, (protoNetworks.arkade ?? 'signet') as ProtocolNetwork, patch); }}
         />}
 
+        {showSection('display detail mode lite advanced') && <>
+          <SectionLabel>Interface detail</SectionLabel>
+          <Group>
+          <Row first icon="options-outline" label="Display detail" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
+          </Group>
+        </>}
+
         {/* Network changes live in the explicit Advanced section in both display modes. */}
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark') && (
           <>
@@ -952,7 +963,7 @@ export default function SettingsScreen({ navigation }: Props) {
             return (
               <TouchableOpacity key={proto} activeOpacity={0.7} accessibilityRole="button"
                 accessibilityLabel={`${labels[proto]} account settings`} accessibilityHint={`${status}${networkLabel ? ` · ${networkLabel}` : ''}`}
-                onPress={() => { setSettingsQuery(''); setPage('advanced'); setAccount(proto); }}
+                onPress={() => { setSettingsQuery(''); setPage('connections'); setAccount(proto); }}
                 style={[styles.row, idx > 0 && styles.rowDivider]}>
                 <View style={[styles.rowIcon, { backgroundColor: colors[proto] + '1A', opacity: connected ? 1 : 0.5 }]}>
                   {proto === 'RGB' && rgbNodeConnected() ? <RgbNodeIcon size={18} /> : <NetworkIcon network={proto} size={18} color={colors[proto]} />}
@@ -979,6 +990,15 @@ export default function SettingsScreen({ navigation }: Props) {
         )}
 
         {/* Remove from this device */}
+        {page === 'connections' && !account && __DEV__ && <>
+          <SectionLabel>Developer previews</SectionLabel>
+          <Group>
+            {__DEV__ && <Row icon="receipt-outline" label="Activity & Receive review" description="Search, periods and incoming payment states" onPress={() => navigation.navigate('WalletFlowsReview')} />}
+            {__DEV__ && <Row icon="flask-outline" label="Wallet review" description="Backup, balance and payment examples" onPress={() => navigation.navigate('WalletReview')} />}
+            {__DEV__ && <Row icon="color-palette-outline" label="Component preview" description="Review shared mobile components" onPress={() => navigation.navigate('DesignSystem')} />}
+          </Group>
+        </>}
+
         {showSection('danger remove delete wallet') && <>
         <SectionLabel tone="danger">Remove from this device</SectionLabel>
         <Group>

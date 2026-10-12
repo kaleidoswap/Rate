@@ -19,6 +19,7 @@ import {
   Dimensions,
   StatusBar,
   DeviceEventEmitter,
+  AppState,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
@@ -164,6 +165,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
+  const [balanceUpdatedAt, setBalanceUpdatedAt] = useState<number | undefined>();
   const [balanceWarning, setBalanceWarning] = useState<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   // Accounts that failed to connect at startup; the banner names those still not connected.
@@ -354,7 +356,8 @@ export default function DashboardScreen({ navigation }: Props) {
       ];
       // Counted now, not after the fetch: an account that connects meanwhile
       // wasn't asked, so it isn't a missing balance.
-      const connectedCount = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).length;
+      const requestedProtocols = adapterProtoMap.filter(([adapter]) => adapter?.isConnected()).map(([, proto]) => proto);
+      const connectedCount = requestedProtocols.length;
       const balancesTask = Promise.all(
         adapterProtoMap.map(async ([adapter, proto]) => {
           if (!adapter?.isConnected()) return null;
@@ -419,7 +422,7 @@ export default function DashboardScreen({ navigation }: Props) {
         barkRecovery === 'failed' || barkRecovery === 'incomplete'
           ? 'Bark recovery is incomplete, so its balance may omit funds.'
           : okBalances.length < connectedCount
-            ? 'Some balances are unavailable. Your total may be incomplete.' : null);
+            ? `Could not refresh ${requestedProtocols.filter(proto => !okBalances.some(b => b.proto === proto)).join(', ')}. Your total may be incomplete.` : null);
 
       const assets = assetResults.flat();
       setChannels(channelsList);
@@ -434,6 +437,7 @@ export default function DashboardScreen({ navigation }: Props) {
       // Bark is a layer like Arkade/Spark: counted in the total and shown in the breakdown.
       for (const r of okBalances) byProtocol[r.proto] = r.btc;
       const balance = btcBalanceFromProtocols(byProtocol);
+      if (connectedCount > 0 && okBalances.length === connectedCount) setBalanceUpdatedAt(Date.now());
       liveDataRef.current = true;
       setBtcBalanceState(balance);
       setShowingSnapshot(false);
@@ -556,6 +560,7 @@ export default function DashboardScreen({ navigation }: Props) {
     setChannelsLive(false);
     setSnapshotChannels([]);
     setShowingSnapshot(false);
+    setBalanceUpdatedAt(undefined);
     if (!walletKey || needsSetup) return;
     let cancelled = false;
     void loadBalanceSnapshot(activeWalletRef.current).then((snap) => {
@@ -564,14 +569,20 @@ export default function DashboardScreen({ navigation }: Props) {
       setSnapshotAssets(snap.assets as InventoryRecord[]);
       setSnapshotChannels(snap.channels);
       setSnapshotPrice(snap.btcPriceUSD);
+      setBalanceUpdatedAt(snap.savedAt);
       setShowingSnapshot(true);
     });
     return () => { cancelled = true; };
   }, [walletKey, needsSetup]);
 
+  const resumeRefreshRef = useRef<() => Promise<void>>(async () => {});
   useFocusEffect(
     useCallback(() => {
       void connectAndLoad();
+      const subscription = AppState?.addEventListener('change', state => {
+        if (state === 'active') void resumeRefreshRef.current();
+      });
+      return () => subscription?.remove();
     }, [activeWallet])
   );
 
@@ -585,6 +596,8 @@ export default function DashboardScreen({ navigation }: Props) {
       setRefreshing(false);
     }
   };
+
+  resumeRefreshRef.current = onRefresh;
 
   const formatSatoshis = (satoshis: number): string => {
     return formatBitcoinAmount(satoshis, bitcoinUnit);
@@ -885,6 +898,9 @@ export default function DashboardScreen({ navigation }: Props) {
           <BalanceCard
             totalBalance={totalBalance}
             pendingBtc={pendingBtc}
+            availableBtc={availableBtc}
+            stale={!!connectionError || !!balanceWarning || offlineAccounts.length > 0 || showingSnapshot}
+            lastUpdatedAt={balanceUpdatedAt}
             testBtc={bitcoinSummary.test}
             testNetworks={testNetworks}
             assetRows={breakdownAssetRows(tokens, liteUsdAssetIds, { foldDollars: isLite })}

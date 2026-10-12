@@ -19,6 +19,9 @@ interface BalanceCardProps {
     totalBalance: number;
     hideAmounts?: boolean;
     pendingBtc?: number;
+    availableBtc?: number;
+    stale?: boolean;
+    lastUpdatedAt?: number;
     /** Sats on test networks: no value, never part of the total. */
     testBtc?: number;
     /** Accounts on a test network, with the network's name. */
@@ -60,8 +63,6 @@ interface BalanceCardProps {
     footer?: React.ReactNode;
 }
 
-// The round controls are drawn at 34pt; hit slop keeps a 44pt touch target.
-const CONTROL_HIT_SLOP = { top: 5, bottom: 5, left: 5, right: 5 };
 
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
     { key: 'RGB', label: 'Lightning', color: protocolColor('RGB') },
@@ -74,6 +75,9 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     totalBalance,
     hideAmounts = false,
     pendingBtc = 0,
+    availableBtc,
+    stale = false,
+    lastUpdatedAt,
     testBtc = 0,
     testNetworks = {},
     assetRows = [],
@@ -100,7 +104,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     const activeProtocols = byProtocol
         ? PROTOCOL_DISPLAY.filter(p => byProtocol[p.key as keyof typeof byProtocol])
         : [];
-    const hasBreakdown = activeProtocols.length > 0 || assetRows.length > 0;
+    const hasBreakdown = activeProtocols.length > 0 || assetRows.length > 0 || availableBtc !== undefined || !!lastUpdatedAt;
     // Per-network balances are collapsed behind a chevron (extension parity).
     const [showBreakdown, setShowBreakdown] = useState(false);
     // The on-chain row belongs to the RGB node's wallet.
@@ -181,7 +185,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                 <View style={styles.topControls}>
                     <TouchableOpacity
                         style={styles.controlButton}
-                        hitSlop={CONTROL_HIT_SLOP}
+                        accessibilityRole="button"
                         onPress={onRefresh}
                         disabled={refreshing}
                         accessibilityLabel="Refresh balance"
@@ -196,7 +200,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     {hasBreakdown && (
                         <TouchableOpacity
                             style={styles.controlButton}
-                            hitSlop={CONTROL_HIT_SLOP}
+                            accessibilityRole="button"
                             onPress={() => setShowBreakdown(v => !v)}
                             accessibilityState={{ expanded: showBreakdown }}
                             accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
@@ -247,11 +251,22 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     </>
                 )}
                 {/* Incoming funds and test sats are always visible, never folded into the total. */}
-                {!loading && pendingBtc > 0 && (
-                    <Text style={styles.subLine} accessibilityLabel={hideAmounts ? 'Incoming payment pending' : `Incoming ${formatSatoshis(pendingBtc)} ${bitcoinUnit}, pending`}>
-                        Incoming · {hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`} pending
-                    </Text>
+                {!loading && availableBtc !== undefined && (showBreakdown || pendingBtc > 0) && (
+                    <View style={{ gap: theme.spacing[2], marginTop: theme.spacing[3] }}>
+                        {showBreakdown && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
+                            <Text style={styles.subLine}>{stale || updating ? 'Last known available BTC' : 'Available bitcoin'}</Text>
+                            <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(availableBtc)} ${bitcoinUnit}`}</AmountText>
+                        </View>}
+                        {pendingBtc > 0 && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
+                            <Text style={styles.subLine}>Not yet available</Text>
+                            <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</AmountText>
+                        </View>}
+                        {pendingBtc > 0 && showBreakdown && <Text style={styles.subLine}>Awaiting confirmation or temporarily unavailable in an account.</Text>}
+                    </View>
                 )}
+                {!loading && (stale || (showBreakdown && lastUpdatedAt)) && <Text accessibilityLiveRegion="polite" style={[styles.subLine, stale && { color: theme.colors.warning[500] }]}>
+                    {stale ? 'Balance may be incomplete' : 'Updated'}{lastUpdatedAt && showBreakdown ? ` · ${new Date(lastUpdatedAt).toLocaleString()}` : ''}
+                </Text>}
                 {!loading && testBtc > 0 && (
                     <Text style={styles.subLine}>
                         Test funds · {hideAmounts ? '••••' : `${formatSatoshis(testBtc)} ${bitcoinUnit}`} · no real value
@@ -415,8 +430,8 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         gap: theme.spacing[2],
     },
     controlButton: {
-        width: 34,
-        height: 34,
+        width: 44,
+        height: 44,
         borderRadius: theme.borderRadius.full,
         backgroundColor: theme.colors.surface.secondary,
         justifyContent: 'center',

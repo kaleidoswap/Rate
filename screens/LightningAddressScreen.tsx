@@ -17,6 +17,7 @@ import { ReceiveQr } from '../components/receive/ReceiveQr';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { motion } from '../theme';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { updateNostrProfile, restoreNostrConnection } from '../store/slices/nostrSlice';
 import { setTransactionNotifications } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
 import {
@@ -31,6 +32,7 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
   const t = useAppTheme();
   const dispatch = useAppDispatch();
   const walletId = useAppSelector(s => s.wallet?.activeWallet?.id);
+  const nostrPublicKey = useAppSelector(s => s.nostr?.publicKey);
   const notificationsOn = useAppSelector(s => s.settings?.transactionNotifications ?? true);
   const [handle, setHandle] = useState<StoredHandle | null | undefined>(undefined);
   const [name, setName] = useState('');
@@ -67,10 +69,16 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
     if (!walletId || busy) return;
     setBusy(true); setError('');
     try {
-      const claimed = await claimHandle(walletId, name);
+      const claimed = await claimHandle(walletId, name, { nostrPubkey: nostrPublicKey ?? undefined });
       feedback.success();
       setHandle(claimed);
       setName('');
+      if (nostrPublicKey) {
+        try {
+          await dispatch(restoreNostrConnection()).unwrap();
+          await dispatch(updateNostrProfile({ name: claimed.name, lud16: claimed.lightningAddress })).unwrap();
+        } catch { setError('Address ready. Update your Nostr profile when connected.'); }
+      }
       if (notificationsOn) describePush(await syncPaymentPush(walletId, true).catch(() => 'unchanged' as const));
     } catch (e) {
       feedback.error();
@@ -158,7 +166,7 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
             <View style={{ alignItems: 'center', gap: t.spacing[2], paddingVertical: t.spacing[3] }}>
               {lightningChip(56)}
               <Text accessibilityRole="header" style={{ ...text, fontSize: t.typography.fontSize.xl, fontWeight: '700' }}>Get your Lightning address</Text>
-              <Text style={{ ...muted, textAlign: 'center' }}>A permanent name@{KALEIDOSWAP_ME_DOMAIN} anyone can pay from any Lightning wallet. Payments land in Spark, even when the app is closed.</Text>
+              <Text style={{ ...muted, textAlign: 'center' }}>Your username for Lightning. Payments arrive in Spark.</Text>
             </View>
 
             {sparkProblem ? <Callout tone="warning" message={sparkProblem} /> : <>
@@ -176,7 +184,7 @@ export default function LightningAddressScreen({ navigation }: { navigation: any
                   : <><Ionicons name="close-circle" size={16} color={t.colors.warning[500]} /><Text style={{ ...muted, color: t.colors.warning[500] }}>{check.result.error ?? 'That name is taken.'}</Text></>)}
               </View>
               <Button title={busy ? 'Claiming…' : available ? `Claim ${n}@${KALEIDOSWAP_ME_DOMAIN}` : 'Claim'} onPress={() => void claim()} loading={busy} disabled={!available || busy} />
-              <Text style={{ ...muted, textAlign: 'center' }}>Free. One name per wallet, 5 to 32 characters. You can release it later.</Text>
+              <Text style={{ ...muted, textAlign: 'center' }}>Free · 5–32 characters</Text>
             </>}
           </View>
         )}

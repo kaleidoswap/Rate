@@ -11,7 +11,7 @@ import {
   suspend,
   VERBOSITY,
   embed,
-  TTS_EN_SUPERTONIC_Q4_0,
+  TTS_MULTILINGUAL_SUPERTONIC3_Q8_0,
   EMBEDDINGGEMMA_300M_Q4_0,
   VAD_SILERO_5_1_2,
 } from '@qvac/sdk';
@@ -38,8 +38,8 @@ import type { TurnInput, TurnOutput } from '@kaleidorg/mind';
 import {
   createQvacProvider,
   createQvacVoice,
-  sanitizeForSupertonic,
 } from '@kaleidorg/mind/qvac';
+import { sanitizeForSupertonic } from './supertonicText';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 
 // CPU baseline config for the local llamacpp model. Used as the GPU fallback
@@ -113,9 +113,6 @@ function deviceWhisperLanguage(): string {
 function isPhoneRuntime(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
-
-// `sanitizeForSupertonic` lives in @kaleidorg/mind/qvac (imported above) — one
-// implementation, shared with desktop.
 
 const CONFIG_KEY = 'qvac.config.v1';
 
@@ -914,7 +911,7 @@ class QVACService {
     return this.state.whisperStatus === 'ready' && !!this.whisperModelId;
   }
 
-  // --- Text-to-speech (on-device, QVAC SUPERTONIC-2) ---
+  // --- Text-to-speech (on-device, QVAC Supertonic 3) ---
 
   /** True once the TTS model is resident. */
   isTtsReady(): boolean {
@@ -931,21 +928,16 @@ class QVACService {
 
     this.ttsLoadPromise = (async () => {
       console.log('[QVAC] TTS: loading Supertonic GGML model');
-      // Free the Whisper weights first so the phone never holds both neural
-      // voices in RAM at once.
-      if (this.whisperModelId) {
-        console.log('[QVAC] TTS: unloading Whisper before neural voice load');
-        await this.unloadWhisper().catch(() => {});
-      }
+      // Keep Whisper resident: an open hands-free session resumes it after playback.
       const id = await this.bootLoad(() => sdkLoadModel({
-        modelSrc: TTS_EN_SUPERTONIC_Q4_0,
+        modelSrc: TTS_MULTILINGUAL_SUPERTONIC3_Q8_0,
         modelType: 'tts-ggml',
         modelConfig: {
           ttsEngine: 'supertonic',
-          language: 'en',
+          language: 'na', // Supertonic 3 infers the language from Unicode text.
           voice: 'F1',
-          ttsSpeed: 1.05,
-          ttsNumInferenceSteps: 5,
+          ttsSpeed: 1,
+          ttsNumInferenceSteps: 8,
         },
       } as any));
       this.ttsModelId = id;
@@ -968,14 +960,16 @@ class QVACService {
    */
   async synthesizeSpeech(text: string): Promise<{ pcm: number[]; sampleRate: number } | null> {
     if (this.workletBlocked()) return null;
-    // Early-out before loading the TTS model: the shared helper sanitizes +
-    // refuses unspeakable input internally, but we check here too so we never
-    // spin up the neural voice for empty/redacted text.
-    if (!sanitizeForSupertonic(text)) return null;
-    await this.ensureTtsLoaded();
-    // sanitize + U+0060 refusal + textToSpeech → 16-bit PCM live in the helper
-    // (44.1 kHz SUPERTONIC default).
-    return this.mindVoice.synthesizeSpeech(text);
+    const speakable = sanitizeForSupertonic(text);
+    if (!speakable) return null;
+    const modelId = await this.ensureTtsLoaded();
+    // The older shared Mind helper strips non-ASCII; call QVAC directly so
+    // Italian accents survive and playback uses the engine's actual sample rate.
+    const result = textToSpeech({ modelId, text: speakable, inputType: 'text', stream: false });
+    const pcm = await result.buffer;
+    const sampleRate = (await result.sampleRate) ?? 44100;
+    if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new Error('Invalid speech sample rate');
+    return { pcm: Array.from(pcm), sampleRate };
   }
 
   // --- Embeddings (for on-device RAG) ---

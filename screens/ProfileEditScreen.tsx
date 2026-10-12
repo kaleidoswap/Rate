@@ -258,11 +258,11 @@ export default function ProfileEditScreen({ navigation }: Props) {
             <Input label="About" placeholder="A few words about you" value={form.about} multiline numberOfLines={3}
               onChangeText={set('about')} error={errors.about} />
             <View>
-              <Input label="Lightning address" placeholder="you@claimzero.me" value={form.lud16}
+              <Input label="Lightning address" placeholder="you@kaleidoswap.me" value={form.lud16}
                 autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
                 onChangeText={set('lud16')} error={errors.lud16} />
-              {!form.lud16.trim() && <TouchableOpacity style={styles.suggestion} accessibilityRole="link" onPress={() => Linking.openURL('https://claimzero.me').catch(() => ToastService.getInstance().error("Couldn't open ClaimZero"))}>
-                <Text style={styles.suggestionText}>Get a Lightning address on claimzero.me ↗</Text>
+              {!form.lud16.trim() && <TouchableOpacity style={styles.suggestion} accessibilityRole="button" onPress={() => navigation.navigate('LightningAddress')}>
+                <Text style={styles.suggestionText}>Get your kaleidoswap.me address</Text>
               </TouchableOpacity>}
               {!!walletAddress && walletAddress !== form.lud16.trim() && (
                 <TouchableOpacity onPress={() => set('lud16')(walletAddress)} accessibilityRole="button"
@@ -271,12 +271,10 @@ export default function ProfileEditScreen({ navigation }: Props) {
                 </TouchableOpacity>
               )}
             </View>
-            <Input label="Nostr address (NIP-05)" placeholder="you@claimzero.me" value={form.nip05}
+            <Input label="Nostr address (NIP-05)" placeholder="you@kaleidoswap.me" value={form.nip05}
               autoCapitalize="none" autoCorrect={false} keyboardType="email-address"
               onChangeText={set('nip05')} error={errors.nip05} />
-            {!!form.lud16.trim().match(/^[^@]+@claimzero\.me$/i) && form.nip05 !== form.lud16 && <TouchableOpacity accessibilityRole="button" onPress={() => set('nip05')(form.lud16.trim())}>
-              <Text style={styles.suggestionText}>Use my ClaimZero address for NIP-05</Text>
-            </TouchableOpacity>}
+
             <Text style={styles.hint}>Use NIP-05 after enabling it with your address provider.</Text>
           </View>
 

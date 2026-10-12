@@ -14,7 +14,7 @@ const mockSecurity = {
 };
 jest.mock('../services/SecurityService', () => ({ __esModule: true, default: { getInstance: () => mockSecurity } }));
 jest.mock('../components', () => ({
-  Button: () => null,
+  Button: ({ title, onPress, disabled }: any) => { const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity disabled={disabled} onPress={onPress}><Text>{title}</Text></TouchableOpacity>; },
   ScreenHeader: ({ title, onBack }: any) => { const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity accessibilityLabel="Back" onPress={onBack}><Text>{title}</Text></TouchableOpacity>; },
 }));
 
@@ -90,4 +90,25 @@ test('setting a first PIN goes straight to the new PIN', async () => {
   await typePin(screen, '123123');
   expect(mockSecurity.verifyPin).not.toHaveBeenCalled();
   expect(mockSecurity.savePin).toHaveBeenCalledWith('123123');
+});
+
+test('initial Face ID authenticates and saves in one action before opening profile', async () => {
+  const auth = require('expo-local-authentication');
+  auth.hasHardwareAsync.mockResolvedValue(true); auth.isEnrolledAsync.mockResolvedValue(true);
+  auth.supportedAuthenticationTypesAsync.mockResolvedValue([auth.AuthenticationType.FACIAL_RECOGNITION]);
+  auth.authenticateAsync.mockResolvedValue({ success: true });
+  const screen = render(<SecuritySetupScreen navigation={navigation} route={{ params: { isInitialSetup: true } }} />);
+  await act(async () => {});
+  await act(async () => { fireEvent.press(screen.getByText('Enable Face ID')); });
+  expect(mockSecurity.setBiometricEnabled).toHaveBeenCalledWith(true);
+  expect(navigation.replace).toHaveBeenCalledWith('OnboardingProfile');
+});
+test('cancelling biometric authentication never enables the lock or advances', async () => {
+  const auth = require('expo-local-authentication');
+  auth.authenticateAsync.mockResolvedValue({ success: false, error: 'user_cancel' });
+  const screen = render(<SecuritySetupScreen navigation={navigation} route={{ params: { isInitialSetup: true } }} />);
+  await act(async () => {});
+  await act(async () => { fireEvent.press(screen.getByText('Enable Face ID')); });
+  expect(mockSecurity.setBiometricEnabled).not.toHaveBeenCalled();
+  expect(navigation.replace).not.toHaveBeenCalled();
 });

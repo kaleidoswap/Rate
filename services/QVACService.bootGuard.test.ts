@@ -17,7 +17,7 @@ jest.mock('@qvac/sdk', () => ({
   suspend: jest.fn(async () => undefined),
   embed: jest.fn(),
   VERBOSITY: { ERROR: 0 },
-  TTS_EN_SUPERTONIC_Q4_0: {},
+  TTS_MULTILINGUAL_SUPERTONIC3_Q8_0: { modelName: 'supertonic3-q8_0' },
   EMBEDDINGGEMMA_300M_Q4_0: {},
   VAD_SILERO_5_1_2: {},
 }));

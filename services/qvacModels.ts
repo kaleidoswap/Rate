@@ -167,7 +167,7 @@ export function getSttModelById(id: string | undefined | null): SttModel {
 
 // ---------------------------------------------------------------------------
 // Text-to-speech engine options for the voice/vocal mode.
-//  - 'supertonic': on-device neural SUPERTONIC-2 (natural, ~slower first load).
+//  - 'supertonic': on-device multilingual Supertonic 3 Q8 (127 MB download).
 //  - 'system':     the OS speech synthesiser (instant, robotic, no download).
 // ---------------------------------------------------------------------------
 export type TtsEngine = 'supertonic' | 'system';
@@ -179,7 +179,7 @@ export interface TtsOption {
 }
 
 export const QVAC_TTS_OPTIONS: TtsOption[] = [
-  { id: 'supertonic', label: 'Natural (on-device)', hint: 'Neural SUPERTONIC voice — best quality, downloads ~80 MB once.' },
+  { id: 'supertonic', label: 'Supertonic 3', hint: 'Natural multilingual voice, including Italian. Downloads ~127 MB once.' },
   { id: 'system', label: 'System voice', hint: 'Instant, uses your phone’s built-in voice. No download.' },
 ];
 

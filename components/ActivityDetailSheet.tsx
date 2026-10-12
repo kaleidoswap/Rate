@@ -209,6 +209,10 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                         </View>
                     </View>
 
+                    {!!item.contactName && <View style={styles.row}>
+                        <Text style={styles.rowLabel}>{item.type === 'receive' ? 'From' : 'Recipient'}</Text>
+                        <Text style={styles.rowValue}>{item.contactName}</Text>
+                    </View>}
                     {/* Network layer */}
                     <View style={styles.row}>
                         <Text style={styles.rowLabel}>Payment method</Text>

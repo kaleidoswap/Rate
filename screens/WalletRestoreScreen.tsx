@@ -154,8 +154,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
           dispatch(setUnlocked(true));
 
           // Show success screen
-          setStep('success');
-          animateSuccess();
+          navigation.replace('SecuritySetup', { walletId: wallet.id, isInitialSetup: true });
         }
       } else {
         throw new Error('Failed to restore wallet');
@@ -345,11 +344,11 @@ export default function WalletRestoreScreen({ navigation }: Props) {
 
       <Text style={styles.successTitle}>Wallet Restored!</Text>
       <Text style={styles.successDesc}>
-        Your wallet "{name}" has been successfully restored.
+        Wallet keys restored. Balances update after connecting.
       </Text>
 
       <Text style={styles.successDesc}>
-        Protect it with a PIN code or Face ID / fingerprint.
+        Had RGB assets? Restore their data backup in Settings → Security & backup.
       </Text>
       <Button
         title="Set Up Security"

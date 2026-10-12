@@ -198,13 +198,13 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
       minHeight: 44,
     },
     md: {
-      paddingVertical: theme.spacing[4],
-      paddingHorizontal: theme.spacing[6],
+      paddingVertical: theme.spacing[3],
+      paddingHorizontal: theme.spacing[4],
       minHeight: 48,
     },
     lg: {
-      paddingVertical: theme.spacing[5],
-      paddingHorizontal: theme.spacing[8],
+      paddingVertical: theme.spacing[4],
+      paddingHorizontal: theme.spacing[5],
       minHeight: 56,
     },
 

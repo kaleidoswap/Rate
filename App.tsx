@@ -49,6 +49,8 @@ import BridgeScreen from './screens/BridgeScreen';
 import MerchantOfferScreen from './screens/MerchantOfferScreen';
 import {useAppSelector} from './store/hooks';
 import {isReceiverLink,canOpenReceiver} from './utils/receiver-link';
+import WalletFlowsReviewScreen from './screens/WalletFlowsReviewScreen';
+import WalletReviewScreen from './screens/WalletReviewScreen';
 import DesignSystemScreen from './screens/DesignSystemScreen';
 import QRScannerScreen from './screens/QRScannerScreen';
 import AssetsScreen from './screens/AssetsScreen';
@@ -59,6 +61,7 @@ import ContactsScreen from './screens/ContactsScreen';
 import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
+import OnboardingProfileScreen from './screens/OnboardingProfileScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AssetDetailScreen from './screens/AssetDetailScreen';
@@ -85,10 +88,13 @@ type RootStackParamList = {
   QRScanner: { mode?: 'payment' | 'contact'; returnScreen?: string } | undefined;
   Assets: { issue?: boolean } | undefined;
   DesignSystem: undefined;
+  WalletReview: undefined;
+  WalletFlowsReview: { page?: string; state?: string; query?: string; period?: string } | undefined;
   Swap: { fromAsset?: string; toAsset?: string; fromAmountSat?: number; fromAmountUnits?: number } | undefined;
   NostrSettings: undefined;
   Profile: undefined;
   ProfileEdit: undefined;
+  OnboardingProfile: { preview?: boolean } | undefined;
   AssetDetail: { asset: any };
   Map: undefined;
   LSP: undefined;
@@ -203,17 +209,25 @@ function DashboardTabs() {
 function AppNavigator() {
   const receiverNavigation = React.useRef(createNavigationContainerRef<RootStackParamList>()).current;
   const pendingReceiverLink = React.useRef(false);
+  const pendingReviewLink = React.useRef<string | null>(null);
   const initialized = useAppSelector(s => s.wallet.isInitialized);
   const unlocked = useAppSelector(s => s.wallet.isUnlocked);
   const openPendingReceiver = React.useCallback(() => {
     const route = receiverNavigation.getCurrentRoute()?.name;
+    if (__DEV__ && pendingReviewLink.current && receiverNavigation.isReady() && initialized && unlocked) {
+      const link = new URL(pendingReviewLink.current);
+      pendingReviewLink.current = null;
+      if (link.searchParams.get('page') === 'profile') { receiverNavigation.navigate('OnboardingProfile', { preview: true }); return; }
+      receiverNavigation.navigate('WalletFlowsReview', { page: link.searchParams.get('page') ?? undefined, state: link.searchParams.get('state') ?? undefined, query: link.searchParams.get('query')?.slice(0, 80), period: link.searchParams.get('period') ?? undefined });
+      return;
+    }
     if (!pendingReceiverLink.current || !receiverNavigation.isReady() || !canOpenReceiver(initialized, unlocked, route)) return;
     pendingReceiverLink.current = false;
     if (route !== 'MerchantOffer') receiverNavigation.navigate('MerchantOffer');
   }, [initialized, unlocked, receiverNavigation]);
   React.useEffect(() => {
     let active = true;
-    const accept = (url: string | null) => { if (active && url && isReceiverLink(url)) { pendingReceiverLink.current = true; openPendingReceiver(); } };
+    const accept = (url: string | null) => { if (__DEV__ && active && url && /^com\.kaleidoswap\.wallet:\/\/preview\/wallet-flows(?:\?|$)/.test(url)) { pendingReviewLink.current = url; openPendingReceiver(); return; } if (active && url && isReceiverLink(url)) { pendingReceiverLink.current = true; openPendingReceiver(); } };
     const subscription = Linking.addEventListener('url', event => accept(event.url));
     void Linking.getInitialURL().then(accept).catch(() => {});
     openPendingReceiver();
@@ -249,8 +263,11 @@ function AppNavigator() {
         <Stack.Screen name="AgentWallet" component={AgentWalletScreen} />
         <Stack.Screen name="NWCConnect" component={NWCConnectScreen} />
         <Stack.Screen name="RgbNode" component={RgbNodeScreen} />
+        <Stack.Screen name="OnboardingProfile" component={OnboardingProfileScreen} />
         <Stack.Screen name="LightningAddress" component={LightningAddressScreen} />
         <Stack.Screen name="LSP" component={LSPScreen} />
+        {__DEV__ && <Stack.Screen name="WalletFlowsReview" component={WalletFlowsReviewScreen} />}
+        {__DEV__ && <Stack.Screen name="WalletReview" component={WalletReviewScreen} />}
         {__DEV__ && <Stack.Screen name="DesignSystem" component={DesignSystemScreen} />}
         {/* Short flows: full screen, slide up from the bottom, close button. */}
         <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={FLOW_OPTIONS} />

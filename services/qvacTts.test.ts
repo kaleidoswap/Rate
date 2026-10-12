@@ -40,3 +40,22 @@ it('uses PCM energy at the playback position, then releases the player', async (
   mockPlayback({ playing: false, currentTime: .2, didJustFinish: true }); await promise;
   expect(onLevel).toHaveBeenLastCalledWith(0); expect(onDone).toHaveBeenCalledTimes(1); expect(mockRemove).toHaveBeenCalled();
 });
+it('synthesizes Italian with Supertonic 3 and preserves accents without system fallback', async () => {
+  mockEngine = 'supertonic'; mockSynth.mockResolvedValue({ sampleRate: 24000, pcm: [0, 1000, 0] });
+  const onEngine = jest.fn();
+  const pending = speak('Ciao, il tuo pagamento è stato ricevuto.', { onEngine });
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  expect(mockSynth).toHaveBeenCalledWith('Ciao, il tuo pagamento è stato ricevuto.');
+  mockPlayback({ playing: true, currentTime: 0 });
+  mockPlayback({ playing: false, currentTime: .01, didJustFinish: true });
+  await pending;
+  expect(speakBest).not.toHaveBeenCalled();
+  expect(onEngine).toHaveBeenCalledWith('supertonic');
+});
+it('reports a synthesis failure instead of silently presenting the fallback as Supertonic', async () => {
+  mockEngine = 'supertonic'; mockSynth.mockRejectedValue(new Error('unavailable'));
+  const onEngine = jest.fn();
+  await speak('Your payment is confirmed.', { onEngine });
+  expect(mockSynth).toHaveBeenCalled();
+  expect(onEngine).toHaveBeenCalledWith('system', 'unavailable');
+});

@@ -39,7 +39,7 @@ import { useQVAC } from '../../hooks/useQVAC';
 import { createMindAgent } from '../../services/mindAgent';
 import { getModelById } from '../../services/qvacModels';
 import { startHandsFreeVoice, type HandsFreeController } from '../../services/handsFreeVoice';
-import { selectMindConfig, selectAiEnabled, DEFAULT_MIND_CONFIG } from '../../store/slices/settingsSlice';
+import { selectMindConfig, selectAiEnabled } from '../../store/slices/settingsSlice';
 import { useAiConfirm } from '../../hooks/useAiConfirm';
 import PaymentConfirmationModal from '../PaymentConfirmationModal';
 
@@ -160,7 +160,8 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
   const [phase, setPhase] = useState<Phase>('idle');
   const characterRef = useRef<PrismoAnimationRef>(null);
-  const speechLanguage = mindConfig.voiceLanguage || DEFAULT_MIND_CONFIG.voiceLanguage!;
+  const [voiceEngine, setVoiceEngine] = useState('');
+  const onVoiceEngine = (engine: 'supertonic' | 'system', reason?: 'language' | 'unavailable') => setVoiceEngine(engine === 'supertonic' ? 'Supertonic 3' : reason === 'unavailable' ? 'System voice · Supertonic unavailable' : 'System voice');
   const pendingSpeech = useRef<(() => void) | null>(null);
   const onSpeechLevel = useCallback((level: number) => characterRef.current?.setLevel(level), []);
   const stopSpeak = useCallback(async () => {
@@ -203,7 +204,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       if (hf) {
         hf.setPaused(true);
         void stopSpeak();
-        void qvacSpeak(readback.spoken, { language: speechLanguage, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
+        void qvacSpeak(readback.spoken, { onEngine: onVoiceEngine, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
       }
     },
     onClose: () => handsFreeRef.current?.setPaused(false),
@@ -388,7 +389,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         setPhase('speaking');
         void stopSpeak();
         void qvacSpeak(finalText, {
-          language: speechLanguage, onLevel: onSpeechLevel,
+          onEngine: onVoiceEngine, onLevel: onSpeechLevel,
           onDone: resumeListening,
           onError: () => setPhase('idle'),
         });
@@ -402,7 +403,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
         setPhase('idle');
       }
     },
-    [bubbles, agent, resumeListening, speechLanguage, onSpeechLevel]
+    [bubbles, agent, resumeListening, onSpeechLevel]
   );
 
   // VoiceInput callbacks
@@ -450,7 +451,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
       if (!aliveRef.current || AppState.currentState !== 'active' || !text.trim()) { resolve(); return; }
       pendingSpeech.current = resolve;
       const finish = () => { if (pendingSpeech.current === resolve) pendingSpeech.current = null; resolve(); };
-      void qvacSpeak(text, { language: speechLanguage, onLevel: onSpeechLevel, onDone: finish, onError: finish });
+      void qvacSpeak(text, { onEngine: onVoiceEngine, onLevel: onSpeechLevel, onDone: finish, onError: finish });
     });
 
   // Run one turn for a transcribed utterance and return the reply text — same
@@ -541,10 +542,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     }
   };
 
-  const toggleHandsFree = () => {
-    if (handsFree) stopHandsFree();
-    else void startHandsFree();
-  };
+
 
   // Pause everything: stop the spoken reply, the mic capture, and the hands-free
   // loop, settling Prismo to idle without closing the overlay. Tap Prismo to
@@ -662,7 +660,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                 Try: "What's my balance?" · "Create an invoice for 5000 sats" · "Show my receive address"
               </Text>
             )}
-            {bubbles.map((b) => {
+            {bubbles.filter(b => phase !== 'speaking' || b.id !== bubbles.filter(item => item.role === 'assistant').at(-1)?.id).map((b) => {
               const hasThinking = b.role === 'assistant' && !!b.thinking?.trim();
               const hasText = !!b.text?.trim();
               if (!hasText && !hasThinking) return null;
@@ -764,13 +762,16 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             })}
           </ScrollView>
 
-          {/* Prismo (push-to-talk) */}
+          {phase === 'speaking' && !!bubbles.filter(b => b.role === 'assistant').at(-1)?.text && <View style={[styles.bubble, styles.bubbleAssistant, { alignSelf: 'center', marginTop: 8, backgroundColor: theme.colors.background.primary, borderWidth: 1, borderColor: theme.colors.border.light }]}>
+            <Text style={styles.bubbleAssistantText} numberOfLines={3}>{bubbles.filter(b => b.role === 'assistant').at(-1)?.text}</Text>
+          </View>}
+          {/* Prismo follows real playback energy. */}
           <View style={styles.orbArea}>
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
             <PrismoAnimatedCharacter
               ref={characterRef}
               phase={phase}
-              size={208}
+              size={248}
               accessibilityLabel={`Prismo, ${statusText}`}
               onPress={voiceStarting ? pauseVoice : voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
             />
@@ -787,7 +788,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           {__DEV__ && !voiceReady && <Pressable accessibilityRole="button" accessibilityLabel="Prova voce italiana" style={styles.pauseBtn} onPress={() => {
             const text = 'Ciao! Sono Prismo. Questa è una prova della voce italiana. Quando parlo, la mia bocca segue le parole. Ogni pagamento richiede sempre la tua conferma.';
             appendBubble('assistant', text);
-            void qvacSpeak(text, { language: 'it-IT', onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
+            void qvacSpeak(text, { language: 'it-IT', onEngine: onVoiceEngine, onStart: () => setPhase('speaking'), onLevel: onSpeechLevel, onDone: () => setPhase('idle'), onError: () => setPhase('idle') });
           }}><Text style={styles.pauseBtnText}>Prova voce italiana · sviluppo</Text></Pressable>}
           {/* Loading progress bar while the on-device model downloads/loads. */}
           {modelLoading && (
@@ -808,41 +809,13 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
           )}
           <Text style={styles.status}>{statusText}</Text>
 
-          {/* Pause — stop listening/speaking/hands-free without leaving voice. */}
-          {canPause && (
-            <Pressable onPress={pauseVoice} style={styles.pauseBtn} hitSlop={8} accessibilityLabel="Pause voice">
-              <Ionicons name="pause" size={16} color={theme.colors.text.primary} />
-              <Text style={styles.pauseBtnText}>Pause</Text>
-            </Pressable>
-          )}
-
-          {/* Hands-free (continuous VAD) toggle. Needs @qvac/sdk ≥ 0.13.1 + the
-              react-native-live-audio-stream native module (see services/micStream.ts);
-              Prismo above is the one-shot push-to-talk path and works without them. */}
-          <Pressable
-            onPress={toggleHandsFree}
-            disabled={!voiceReady && !aiFailed && !speechFailed}
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              marginTop: 10,
-              opacity: voiceReady ? 1 : 0.4,
-            }}
-          >
-            <Ionicons
-              name={handsFree ? 'infinite' : 'infinite-outline'}
-              size={16}
-              color={handsFree ? theme.colors.brand.violet : theme.colors.text.secondary}
-            />
-            <Text
-              style={{
-                fontSize: 13,
-                color: handsFree ? theme.colors.brand.violet : theme.colors.text.secondary,
-              }}
-            >
-              {handsFree ? 'Hands-free on' : 'Hands-free'}
-            </Text>
+          {!!voiceEngine && <Text style={styles.hint}>{voiceEngine}</Text>}
+          <Pressable accessibilityRole="button" accessibilityLabel={canPause || voiceStarting ? 'Pause voice' : 'Start listening'}
+            accessibilityState={{ disabled: !canPause && !voiceReady && !aiFailed && !speechFailed }}
+            disabled={!canPause && !voiceReady && !aiFailed && !speechFailed}
+            onPress={() => { if (canPause || voiceStarting) pauseVoice(); else if (voiceReady) void startHandsFree(); else toggleListening(); }}
+            style={{ width: 76, height: 76, borderRadius: 38, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginTop: 12, backgroundColor: theme.colors.primary[500], opacity: canPause || voiceReady || aiFailed || speechFailed ? 1 : .4 }}>
+            <Ionicons name={phase === 'speaking' || phase === 'thinking' ? 'stop' : 'mic'} size={32} color={theme.colors.text.inverse} />
           </Pressable>
 
           {/* Hidden recorder */}
@@ -893,7 +866,7 @@ const styles = StyleSheet.create({
     paddingTop: 14,
     paddingBottom: 36,
     maxHeight: '94%',
-    minHeight: '70%',
+    height: '94%',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderColor: theme.colors.border.light,
   },
@@ -910,7 +883,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: theme.colors.surface.secondary,
   },
-  convo: { flex: 1, minHeight: 80, marginTop: 8 },
+  convo: { flex: 1, minHeight: 0, marginTop: 8 },
   hint: { color: theme.colors.text.muted, fontSize: 13, lineHeight: 19, textAlign: 'center', paddingHorizontal: 12 },
   bubble: { maxWidth: '85%', paddingVertical: 9, paddingHorizontal: 13, borderRadius: 16 },
   bubbleUser: { alignSelf: 'flex-end', backgroundColor: theme.colors.primary[500], borderBottomRightRadius: 5 },
@@ -943,7 +916,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 40,
   },
   loadFill: { height: '100%', borderRadius: 2, backgroundColor: theme.colors.primary[500] },
-  orbArea: { alignItems: 'center', justifyContent: 'center', height: 208, marginTop: 8 },
+  orbArea: { alignItems: 'center', justifyContent: 'center', height: 248, marginTop: 8 },
   orbRing: { position: 'absolute', width: 92, height: 92, borderRadius: 46 },
   orbChip: {
     position: 'absolute',

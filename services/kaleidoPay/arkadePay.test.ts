@@ -146,3 +146,13 @@ test('a unified code with an Ark address is paid off-chain from Arkade, not by a
     expect(arkade.best.route).toMatchObject({ sourceId: 'arkade', to: 'ark:mutinynet' });
   } finally { off(); }
 });
+
+test('refreshes an older unknown direct payment from the adapter instead of replaying the cached status', async () => {
+  mockStorage.set('kaleidopay-arkade-ark-older', JSON.stringify({ status: 'unknown', reference: 'real-tx' }));
+  const adapter = { ...makeAdapter(), getPaymentStatus: jest.fn(async () => ({ status: 'confirmed' })) };
+  const account = createArkadeAccount(adapter, 'mainnet');
+  expect(await account.status!('older')).toEqual({ status: 'completed', reference: 'real-tx' });
+  expect(adapter.getPaymentStatus).toHaveBeenCalledWith('real-tx');
+  expect(await account.status!('older')).toEqual({ status: 'completed', reference: 'real-tx' });
+  expect(adapter.getPaymentStatus).toHaveBeenCalledTimes(1);
+});

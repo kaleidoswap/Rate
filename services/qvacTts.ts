@@ -8,6 +8,8 @@
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { File, Directory, Paths } from 'expo-file-system';
 import { Buffer } from 'buffer';
+import { sanitizeForSupertonic } from './supertonicText';
+import { speechLanguage } from './speechLanguage';
 import QVACService from './QVACService';
 import { speakBest, stopSpeaking } from './speech';
 
@@ -53,20 +55,6 @@ function redactMachineReadablePaymentText(text: string): string {
     .replace(/\b(?:invoice|payment request|qr_data|qr code)\s*[:=]\s*["']?Lightning payment link["']?/gi, 'payment link');
 }
 
-function sanitizeForSupertonic(text: string): string {
-  return redactMachineReadablePaymentText(text)
-    // Strip Markdown/code formatting characters that Supertonic rejects or
-    // reads awkwardly. U+0060 (`) is a known native preprocessing failure.
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/[`*_~#<>|[\]{}]/g, ' ')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[•·]/g, '. ')
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
 /**
  * Force the iOS/Android audio session into PLAYBACK-to-SPEAKER mode.
@@ -105,6 +93,7 @@ export async function stopQvacSpeak(): Promise<void> {
 
 export interface SpeakCallbacks {
   language?: string;
+  onEngine?: (engine: 'supertonic' | 'system', reason?: 'language' | 'unavailable') => void;
   onStart?: () => void;
   /** Audio energy (QVAC) or a word-boundary pulse (system voice), 0…1. */
   onLevel?: (level: number) => void;
@@ -139,7 +128,7 @@ async function qvacSpeak(text: string, token: number, cb: SpeakCallbacks): Promi
     const sub = sound.addListener('playbackStatusUpdate', status => {
       if (token !== generation) { finish(); return; }
       if (status.playing) {
-        if (!started) { started = true; cb.onStart?.(); }
+        if (!started) { started = true; cb.onEngine?.('supertonic'); cb.onStart?.(); }
         const start = Math.floor(status.currentTime * synth.sampleRate);
         const end = Math.min(synth.pcm.length, start + Math.ceil(synth.sampleRate * .025));
         let energy = 0;
@@ -155,8 +144,7 @@ async function qvacSpeak(text: string, token: number, cb: SpeakCallbacks): Promi
   });
 }
 
-/** On-device playback; non-English uses the installed system voice because
- * the bundled QVAC Supertonic model is English-only. No cloud calls. */
+/** Multilingual Supertonic 3 playback, with an explicit system fallback on failure. */
 export async function speak(text: string, cb: SpeakCallbacks = {}): Promise<void> {
   const token = ++generation;
   stopSpeaking();
@@ -165,14 +153,15 @@ export async function speak(text: string, cb: SpeakCallbacks = {}): Promise<void
   if (token !== generation) return;
   const live = () => token === generation;
   const done = () => { if (live()) { cb.onLevel?.(0); cb.onDone?.(); } };
-  const language = cb.language ?? 'en-US';
+  const language = cb.language ?? speechLanguage(text);
   const engine = QVACService.getInstance().getTtsEngine();
-  if (engine !== 'system' && language.toLowerCase().startsWith('en')) {
+  if (engine !== 'system') {
     try {
       if (await qvacSpeak(text, token, { ...cb, onLevel: n => { if(live()) cb.onLevel?.(n); }, onStart: () => {if(live())cb.onStart?.();} })) { done(); return; }
     } catch { /* Use system synthesis when the local model/player fails. */ }
   }
   if (!live()) return;
+  cb.onEngine?.('system', engine === 'system' ? undefined : 'unavailable');
   let boundaryTimer: ReturnType<typeof setTimeout> | undefined;
   const finish = () => { clearTimeout(boundaryTimer); done(); };
   try {

@@ -77,7 +77,7 @@ test('Bark’s network is changed from its account page, which describes real ve
   const alert = jest.spyOn(Alert, 'alert');
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Connections'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   expect(alert).toHaveBeenCalledWith('Bark network', expect.stringContaining('real bitcoin'), expect.arrayContaining([
@@ -93,7 +93,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
   const { protocolManager, initializeProtocols } = require('../services/protocols');
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Connections'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   const choices = alert.mock.calls[0][2];
@@ -106,7 +106,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
 test('account pages expose supported controls and back returns to the account list', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Advanced'));
+  fireEvent.press(screen.getByLabelText('Connections'));
   fireEvent.press(screen.getByLabelText('Spark account settings'));
   expect(screen.getByText('Reconnect account')).toBeTruthy();
   expect(screen.getByLabelText('Use this account')).toBeTruthy();
@@ -209,4 +209,21 @@ test('search finds the app lock settings', async () => {
   expect(screen.getByText('App lock')).toBeTruthy();
   fireEvent.changeText(screen.getByLabelText('Search settings'), 'auto-lock');
   expect(screen.getByText('App lock')).toBeTruthy();
+});
+
+test('security explains both recovery requirements and opens RGB backup management', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Security & backup'));
+  expect(screen.getByText(/Keep both your recovery phrase/)).toBeTruthy();
+  expect(screen.getByLabelText('RGB data backup')).toBeTruthy();
+});
+
+test('keeps technical interface options inside Advanced and searchable', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  expect(screen.queryByLabelText('Display detail')).toBeNull();
+  expect(screen.queryByLabelText('Component preview')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Connections'));
+  expect(screen.getByLabelText('Display detail')).toBeTruthy();
 });

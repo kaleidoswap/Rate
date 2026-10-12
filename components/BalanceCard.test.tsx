@@ -88,3 +88,27 @@ describe('balance disclosure', () => {
     expect(screen.getByText('5.00 USD')).toBeTruthy();
   });
 });
+
+test('distinguishes unavailable funds from incoming payments and flags old availability', () => {
+  const ui = render(<BalanceCard {...props} availableBtc={1000} stale />);
+  fireEvent.press(ui.getByLabelText('Show network balances'));
+  expect(ui.getByText('Last known available BTC')).toBeTruthy();
+  expect(ui.getByText('Not yet available')).toBeTruthy();
+  expect(ui.getByText('Balance may be incomplete')).toBeTruthy();
+  expect(ui.queryByText(/Incoming/)).toBeNull();
+});
+test('hides available and unavailable amounts, including accessibility text', () => {
+  const ui = render(<BalanceCard {...props} availableBtc={1000} hideAmounts primaryText="••••" />);
+  expect(ui.queryByText('1000 sats')).toBeNull();
+  expect(ui.queryByText('500 sats')).toBeNull();
+  expect(ui.queryByLabelText(/1000|500 sats/)).toBeNull();
+});
+
+test('keeps fresh availability and timestamp in the expandable details', () => {
+  const ui = render(<BalanceCard {...props} pendingBtc={0} availableBtc={1500} lastUpdatedAt={123456789} />);
+  expect(ui.queryByText('Available bitcoin')).toBeNull();
+  expect(ui.queryByText(/Updated ·/)).toBeNull();
+  fireEvent.press(ui.getByLabelText('Show network balances'));
+  expect(ui.getByText('Available bitcoin')).toBeTruthy();
+  expect(ui.getByText(/Updated ·/)).toBeTruthy();
+});

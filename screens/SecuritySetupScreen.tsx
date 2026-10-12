@@ -212,28 +212,23 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
     }
   };
 
+  const [securityBusy, setSecurityBusy] = useState(false);
+  const biometricBusyRef = useRef(false);
   const handleEnableBiometric = async () => {
+    if (biometricBusyRef.current) return;
+    biometricBusyRef.current = true; setSecurityBusy(true);
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to enable biometric login',
-        fallbackLabel: 'Use PIN instead',
-        disableDeviceFallback: false,
+        promptMessage: 'Enable ' + getBiometricLabel(),
+        disableDeviceFallback: true,
       });
-
-      if (result.success) {
-        handleSaveAndComplete();
-      } else {
-        Alert.alert('Authentication Failed', 'Would you like to try again?', [
-          { text: 'Skip', onPress: handleSaveAndComplete, style: 'cancel' },
-          { text: 'Try Again', onPress: handleEnableBiometric },
-        ]);
-      }
-    } catch (error) {
-      handleSaveAndComplete();
-    }
+      if (result.success) await handleSaveAndComplete(true);
+    } catch {
+      Alert.alert('Security unavailable', 'Try again or use a PIN.');
+    } finally { biometricBusyRef.current = false; setSecurityBusy(false); }
   };
 
-  const handleSaveAndComplete = async () => {
+  const handleSaveAndComplete = async (authenticatedBiometric = false) => {
     try {
       const securityService = SecurityService.getInstance();
       
@@ -247,11 +242,11 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       }
       
       // Save biometric preference if enabled
-      if (enableBiometric) {
+      if (authenticatedBiometric) {
         const biometricSaved = await securityService.setBiometricEnabled(true);
         if (!biometricSaved) {
-          console.warn('Failed to save biometric preference');
-          // Don't block on biometric save failure, continue anyway
+          Alert.alert('Security unavailable', 'Could not save Face ID. Please try again.');
+          return;
         }
       }
       
@@ -260,6 +255,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
         navigation.goBack();
         return;
       }
+      if (isInitialSetup) { navigation.replace('OnboardingProfile'); return; }
       setStep('complete');
       animateComplete();
     } catch (error) {
@@ -282,7 +278,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       handleSaveAndComplete(); // Skip biometric
     } else if (step === 'options') {
       if (isInitialSetup) {
-        navigation.replace('Dashboard');
+        navigation.replace('OnboardingProfile');
       } else {
         navigation.goBack();
       }
@@ -301,7 +297,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
 
   const handleFinish = () => {
     if (isInitialSetup) {
-      navigation.replace('Dashboard');
+      navigation.replace('OnboardingProfile');
     } else {
       navigation.goBack();
     }
@@ -392,7 +388,18 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const renderOptionsStep = () => (
+  const renderOptionsStep = () => isInitialSetup ? (
+    <View style={styles.stepContent}>
+      <View style={styles.optionsHeader}>
+        <Ionicons name="shield-checkmark" size={48} color={theme.colors.primary[500]} />
+        <Text style={styles.stepTitle}>Protect your wallet</Text>
+        <Text style={styles.stepDescription}>Choose how to unlock it.</Text>
+      </View>
+      {biometricAvailable && <Button title={`Enable ${getBiometricLabel()}`} loading={securityBusy} disabled={securityBusy} onPress={handleEnableBiometric} />}
+      <Button title="Use a PIN" variant={biometricAvailable ? 'secondary' : 'primary'} disabled={securityBusy} onPress={() => { setEnablePin(true); animateTransition('pin'); }} />
+      <Button title="Not now" variant="ghost" disabled={securityBusy} onPress={() => navigation.replace('OnboardingProfile')} />
+    </View>
+  ) : (
     <View style={styles.stepContent}>
       <View style={styles.optionsHeader}>
         <View style={styles.shieldIcon}>
@@ -454,7 +461,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
           style={styles.continueButton}
         />
         {isInitialSetup && (
-          <TouchableOpacity style={styles.skipLink} onPress={() => navigation.replace('Dashboard')}>
+          <TouchableOpacity style={styles.skipLink} onPress={() => navigation.replace('OnboardingProfile')}>
             <Text style={styles.skipLinkText}>Skip for now</Text>
           </TouchableOpacity>
         )}
@@ -507,7 +514,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
         style={styles.biometricButton}
       />
       
-      <TouchableOpacity style={styles.skipLink} onPress={handleSaveAndComplete}>
+      <TouchableOpacity style={styles.skipLink} onPress={() => void handleSaveAndComplete()}>
         <Text style={styles.skipLinkText}>Skip</Text>
       </TouchableOpacity>
     </View>

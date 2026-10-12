@@ -5,6 +5,7 @@ import { toEngineProtocol } from '../utils/protocol-bridge'
 // every adapter call in the current cycle has completed.
 
 import { useEffect, useMemo, useRef } from 'react';
+import { AppState } from 'react-native';
 import { protocolManager } from '../services/protocols';
 import {
   callAbortableAdapterMethod,
@@ -37,7 +38,7 @@ interface UseDepositDetectionArgs {
 }
 
 const POLL_MS = 8_000;
-const INITIAL_DELAY_MS = 4_000;
+const INITIAL_DELAY_MS = 0;
 const POLL_TIMEOUT_MS = 6_000;
 const BARK_SYNC_WAIT_MS = 20_000;
 // Moving an RGB transfer forward asks the proxy and the chain: not on every tick.
@@ -193,6 +194,7 @@ export function useDepositDetection({
     () => methods.filter((method) => method.monitor === 'balance' || method.monitor === 'invoice' || method.monitor === 'rgb-transfer'),
     [signature],
   );
+  const sessionSignatureRef = useRef<string | null>(null);
   const baselinesRef = useRef<Map<string, number>>(new Map());
   const firedRef = useRef(false);
   const statusKeyRef = useRef<string | null>(null);
@@ -202,12 +204,13 @@ export function useDepositDetection({
   onStatusRef.current = onStatus;
 
   useEffect(() => {
-    if (!enabled || monitoredMethods.length === 0) {
+    if (sessionSignatureRef.current !== signature) {
+      sessionSignatureRef.current = signature;
       baselinesRef.current = new Map();
       firedRef.current = false;
       statusKeyRef.current = null;
-      return;
     }
+    if (!enabled || monitoredMethods.length === 0) return;
 
     let cancelled = false;
     const operationController = new AbortController();
@@ -216,9 +219,6 @@ export function useDepositDetection({
     const readStatus = (method: ReceiveMethod) => method.monitor === 'rgb-transfer'
       ? readRgbTransfer(method, rgbRefresh, operationController.signal)
       : readInvoiceStatus(method, operationController.signal);
-    firedRef.current = false;
-    baselinesRef.current = new Map();
-    statusKeyRef.current = null;
 
     const emitStatus = (event: DepositDetectionEvent) => {
       if (cancelled || firedRef.current) return;
@@ -237,7 +237,7 @@ export function useDepositDetection({
     const captureBaselines = async () => {
       for (const method of monitoredMethods) {
         if (cancelled) return;
-        if (method.monitor !== 'balance') continue;
+        if (method.monitor !== 'balance' || baselinesRef.current.has(method.key)) continue;
         const balance = await readMethodBalance(method, operationController.signal);
         if (cancelled) return;
         if (balance != null) baselinesRef.current.set(method.key, balance);
@@ -288,24 +288,42 @@ export function useDepositDetection({
       }
     };
 
-    const scheduleTick = () => {
-      nextTickTimer = setTimeout(() => {
-        if (cancelled || firedRef.current) return;
-        void tick().finally(() => {
-          if (!cancelled && !firedRef.current) scheduleTick();
-        });
-      }, POLL_MS);
+    let running = false;
+    let initialized = false;
+    let resumeRequested = false;
+    let foreground = AppState.currentState !== 'background' && AppState.currentState !== 'inactive';
+    const run = async () => {
+      if (cancelled || firedRef.current || !foreground) return;
+      if (running) { resumeRequested = true; return; }
+      running = true;
+      try {
+        if (!initialized) {
+          const resuming = baselinesRef.current.size > 0;
+          await captureBaselines();
+          initialized = true;
+          if (resuming) await tick(); else await checkInvoicesOnce();
+        } else await tick();
+      } finally {
+        running = false;
+        if (!cancelled && !firedRef.current && foreground) {
+          const delay = resumeRequested ? 0 : POLL_MS;
+          resumeRequested = false;
+          nextTickTimer = setTimeout(() => void run(), delay);
+        }
+      }
     };
-
-    const startTimer = setTimeout(() => {
-      if (cancelled) return;
-      void captureBaselines().then(checkInvoicesOnce).finally(() => {
-        if (!cancelled && !firedRef.current) scheduleTick();
-      });
-    }, INITIAL_DELAY_MS);
+    const startTimer = setTimeout(() => void run(), INITIAL_DELAY_MS);
+    const subscription = AppState.addEventListener('change', state => {
+      foreground = state === 'active';
+      clearTimeout(startTimer);
+      if (nextTickTimer) clearTimeout(nextTickTimer);
+      // Keep the original baselines across backgrounding so incoming funds are not missed.
+      if (foreground) void run();
+    });
 
     return () => {
       cancelled = true;
+      subscription.remove();
       operationController.abort(new Error('Deposit monitoring stopped'));
       clearTimeout(startTimer);
       if (nextTickTimer) clearTimeout(nextTickTimer);

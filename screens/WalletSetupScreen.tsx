@@ -16,7 +16,8 @@ import {
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
-import { useDispatch } from 'react-redux';
+import { useAppDispatch } from '../store/hooks';
+import { BackupWordCheck, backupWordsMatch } from '../components/BackupWordCheck';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -66,14 +67,15 @@ type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confi
 export default function WalletSetupScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
-  const dispatch = useDispatch();
+  const dispatch = useAppDispatch();
   const [step, setStep] = useState<SetupStep>('welcome');
   // No screenshots / recordings while the new recovery phrase is on screen.
   useScreenCaptureProtection(step === 'backup' || step === 'confirmBackup');
   const [name, setName] = useState('My wallet');
   const [createdWalletId, setCreatedWalletId] = useState<number | null>(null);
   const [generatedMnemonic, setGeneratedMnemonic] = useState<string>('');
-  const [backupConfirmed, setBackupConfirmed] = useState(false);
+  const [backupAnswers, setBackupAnswers] = useState(['', '', '']);
+  const backupConfirmed = backupWordsMatch(generatedMnemonic, backupAnswers);
   const [mnemonicCopied, setMnemonicCopied] = useState(false);
 
   // Disclosure level chosen at creation (default 'lite', reversible in Settings).
@@ -296,7 +298,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
 
   const handleCreate = async () => {
     if (generatedMnemonic) { animateTransition('backup'); return; }
-    setBackupConfirmed(false);
+    setBackupAnswers(['', '', '']);
     try {
       // Generate mnemonic
       const bip39 = require('bip39');
@@ -312,6 +314,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const handleProceedWithBackup = () => {
+    setBackupAnswers(['', '', '']);
     animateTransition('confirmBackup');
   };
 
@@ -320,12 +323,14 @@ export default function WalletSetupScreen({ navigation }: Props) {
     if (!backupConfirmed) {
       Alert.alert(
         'Backup Required', 
-        'Please confirm that you have safely stored your recovery phrase before continuing.'
+        'The words do not match yet. Check your saved recovery phrase and try again.'
       );
       return;
     }
 
     creatingRef.current = true;
+    Keyboard.dismiss();
+    setBackupAnswers(['', '', '']);
     animateTransition('creating');
 
     try {
@@ -357,7 +362,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           dispatch(setInitialized(true));
           dispatch(setUnlocked(true));
 
-          showStep('success');
+          navigation.replace('SecuritySetup', { walletId: wallet.id, isInitialSetup: true });
           animateSuccess();
           return;
         }
@@ -375,7 +380,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   };
 
   const handleSkipSecurity = () => {
-    navigation.replace('Dashboard');
+    navigation.replace('OnboardingProfile');
   };
 
   const renderStepIndicator = () => {
@@ -691,36 +696,22 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <Text style={styles.stepTitle}>Confirm Backup</Text>
-      <Text style={styles.stepDescription}>
-        Please confirm that you have safely stored your recovery phrase.
-      </Text>
-
+      <Text style={styles.stepTitle}>Check your backup</Text>
       <Card style={styles.confirmCard}>
-        <TouchableOpacity
-          style={styles.checkboxRow}
-          onPress={() => setBackupConfirmed(!backupConfirmed)}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.checkbox, backupConfirmed && styles.checkboxChecked]}>
-            {backupConfirmed && (
-              <Ionicons name="checkmark" size={18} color="white" />
-            )}
-          </View>
-          <Text style={styles.checkboxText}>
-            I have written down my 12-word recovery phrase and stored it in a safe place
-          </Text>
-        </TouchableOpacity>
+        <BackupWordCheck answers={backupAnswers} onChange={setBackupAnswers} />
       </Card>
+      <Text accessibilityLiveRegion="polite" style={styles.stepDescription}>
+        {backupConfirmed ? 'All three words match. Your backup is checked.' : backupAnswers.every(a => a.trim()) ? 'The words do not match yet. Check your saved copy.' : 'You can go back to review your phrase.'}
+      </Text>
 
       <AlertBanner variant="warning" style={styles.reminderBox}>
         <Ionicons name="information-circle" size={24} color={theme.colors.warning[500]} />
         <View style={styles.reminderContent}>
           <Text style={styles.reminderTitle}>Important Reminder</Text>
           <Text style={styles.reminderText}>
-            • Your recovery phrase is the ONLY way to restore your wallet{'\n'}
+            • Your recovery phrase restores your wallet keys{'\n'}
             • KaleidoSwap cannot recover your wallet if you lose this phrase{'\n'}
-            • Keep it private and secure at all times
+            • RGB assets also need their encrypted data backup; manage it in Security & backup
           </Text>
         </View>
       </AlertBanner>

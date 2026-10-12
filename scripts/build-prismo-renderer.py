@@ -21,7 +21,8 @@ function render(now){
  const dt=Math.min(.05,(now-last)/1000);last=now;time+=dt;
  const energy=now-lastLevel<350?level:0;
  mouth=smooth(mouth,phase==='speaking'?energy:1,dt,20);
- const greeting=time<3.5&&!reduced?ease(time/.8)*ease((3.5-time)/.9)*Math.sin(time*5.8)*.10:0;
+ const greetingTime=time%18;
+ const greeting=phase==='idle'&&greetingTime<3.5&&!reduced?ease(greetingTime/.8)*ease((3.5-greetingTime)/.9)*Math.sin(greetingTime*5.8)*.10:0;
  wave=smooth(wave,greeting,dt,13);
  const bt=time%3.7-3.2;
  const blink=reduced||bt<0||bt>.34?0:bt<.12?Math.sin(bt/.12*Math.PI/2):bt<.17?1:Math.cos((bt-.17)/.17*Math.PI/2);

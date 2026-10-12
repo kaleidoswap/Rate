@@ -20,6 +20,7 @@ export interface ContactEvent {
   createdAt: number;
   /** Payment attempt behind a send, to update its status later. */
   attemptId?: string;
+  reference?: string;
 }
 
 const MAX_EVENTS = 200;
@@ -50,10 +51,14 @@ export async function contactEvents(walletId: number, identifiers: Array<string 
 }
 
 /** A send's later outcome (Send re-checks unresolved payments). No-op if it wasn't to a contact. */
-export async function updateContactEventStatus(walletId: number, id: string, status: ContactEvent['status']): Promise<void> {
+export async function updateContactEventStatus(walletId: number, id: string, status: ContactEvent['status'], reference?: string): Promise<void> {
   const list = await load(walletId);
   const event = list.find((e) => e.id === id);
-  if (!event || event.status === status) return;
+  if (!event || (event.status === status && (!reference || event.reference === reference))) return;
+  if (reference) event.reference = reference;
   event.status = status;
   await AsyncStorage.setItem(key(walletId), JSON.stringify(list));
 }
+
+/** Only exact provider references identify a contact; amounts and dates are never used as guesses. */
+export async function walletContactEvents(walletId: number): Promise<ContactEvent[]> { return (await load(walletId)).filter(event => event && typeof event.contactName === 'string' && typeof event.contactKey === 'string'); }

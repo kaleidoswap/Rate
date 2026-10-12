@@ -1,3 +1,4 @@
+import { PaymentReceiptDetails } from '../components/PaymentReceiptDetails';
 // screens/SendScreen.tsx
 //
 // The one way to pay. Whatever is entered (Lightning invoice or address, BOLT12
@@ -22,6 +23,7 @@ import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
 import { SendDestinationsHint } from '../components/payments/SendDestinationsHint';
 import { CrossChainSendPanel } from '../components/payments/CrossChainSendPanel';
+import { LIGHTNING_ADDRESS } from '../utils/account-routing';
 import { detectCrossChainAddress } from '../utils/crosschain';
 import { isUnresolved, unwrapCrossChainUri } from '../utils/crosschain-send';
 import { loadCrossChainSession } from '../services/crosschainSend';
@@ -47,7 +49,7 @@ import type { SparkToken } from '../services/kaleidoPay/sparkPay';
 import type { RgbRequestAsset } from '../services/kaleidoPay/connect';
 import { rgbL1FeeOptions, setRgbL1FeeSpeed, type RgbFeeSpeed } from '../services/kaleidoPay/rgbL1Pay';
 import { SegmentedTabs } from '../components/SegmentedTabs';
-import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
+import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, updatePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
 import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
 import { ExplainButton } from '../components/mind/ExplainSheet';
 
@@ -83,8 +85,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const byProtocol = useAppSelector(s => s.wallet.btcBalance?.byProtocol);
   const balancesSat = useMemo(() => {
     const out: Partial<Record<PayAccountId, number>> = {};
-    // Spark's total includes transfers not yet claimed; only the confirmed part can pay.
-    for (const k of ['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]) { const b = byProtocol?.[k]; if (b) out[k] = k === 'SPARK' ? b.confirmed : b.total; }
+    // Adapters expose spendable funds as confirmed; total includes locked/pending funds.
+    for (const k of ['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]) { const b = byProtocol?.[k]; if (b) out[k] = b.confirmed; }
     return out;
   }, [byProtocol]);
   const contacts = useAppSelector(s => s.contacts?.contacts);
@@ -113,6 +115,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const [reviewUpdated, setReviewUpdated] = useState(false);
   const [previousTotal, setPreviousTotal] = useState('');
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
+  const [statusTimedOut, setStatusTimedOut] = useState(false);
+  const [statusChecking, setStatusChecking] = useState(false);
   const [journalReady, setJournalReady] = useState(false);
   const [journalUnreadable, setJournalUnreadable] = useState(false);
   const [feeSpeed, setFeeSpeed] = useState<RgbFeeSpeed>('normal');
@@ -157,7 +161,7 @@ export default function SendScreen({ navigation, route }: Props) {
   // The payment journal: an unresolved payment is shown before anything new can be paid.
   useEffect(() => {
     let active = true;
-    setJournalReady(false); setAttempt(null);
+    setJournalReady(false); setJournalUnreadable(false); setAttempt(null);
     if (!walletId) { setJournalReady(true); return; }
     loadPaymentAttempt(walletId)
       .then(saved => { if (active) { if (unresolvedAttempt(saved)) setAttempt(saved); setJournalReady(true); } })
@@ -182,15 +186,20 @@ export default function SendScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!journalReady || !unresolvedAttempt(attempt)) return;
     let active = true;
+    setStatusTimedOut(false);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const until = Date.now() + STATUS_POLL_LIMIT_MS;
+    const deadlineTimer = setTimeout(() => {
+      if (active) { active = false; clearTimeout(timer); setStatusTimedOut(true); }
+    }, STATUS_POLL_LIMIT_MS);
     const poll = async (round: number) => {
       await checkStatusRef.current(round > 0);
-      if (!active || Date.now() >= until) return;
+      if (!active) return;
+      if (Date.now() >= until) { setStatusTimedOut(true); return; }
       timer = setTimeout(() => void poll(round + 1), STATUS_POLL_DELAYS_MS[Math.min(round, STATUS_POLL_DELAYS_MS.length - 1)]);
     };
-    void prepareKaleidoPay().then(() => { if (active) void poll(0); });
-    return () => { active = false; clearTimeout(timer); };
+    void prepareKaleidoPay().then(() => { if (active) void poll(0); }).catch(() => { if (active) void poll(0); });
+    return () => { active = false; clearTimeout(timer); clearTimeout(deadlineTimer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attempt?.id, attempt?.status, attempt?.dismissedAt, journalReady]);
 
@@ -289,7 +298,7 @@ export default function SendScreen({ navigation, route }: Props) {
     if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || quote.expiresAt * 1000 <= Date.now() || !selected.executable || unresolvedAttempt(attempt)) return;
     paying.current = true; setBusy(true); setError('');
     const recipient = preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat);
-    const next: PaymentAttempt = { id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
+    const next: PaymentAttempt = { recipientName, feeDisplay: spend ? displaySpend(spend.fee, spend.asset) : undefined, accountName: selected.accountName || selected.provider, id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
     try {
       await beginPaymentAttempt(walletId, next); // No send unless the recovery record is durable.
     } catch {
@@ -299,9 +308,9 @@ export default function SendScreen({ navigation, route }: Props) {
     setAttempt(next);
     // A payment to a picked contact goes into that contact's history too.
     const toContact = contactName && input.trim() ? { contactKey: contactKeyFor(input), contactName } : null;
-    const logForContact = (status: PaymentAttempt['status']) => {
+    const logForContact = (status: PaymentAttempt['status'], reference?: string) => {
       if (!toContact) return;
-      void recordContactEvent(walletId, { id: next.id, ...toContact, direction: 'sent', amount: recipient, status, createdAt: next.createdAt, attemptId: next.id }).catch(() => {});
+      void recordContactEvent(walletId, { id: next.id, ...toContact, direction: 'sent', amount: recipient, status, createdAt: next.createdAt, attemptId: next.id, reference }).catch(() => {});
     };
     logForContact('pending');
     try {
@@ -309,14 +318,14 @@ export default function SendScreen({ navigation, route }: Props) {
       const updated = { ...next, ...result };
       setAttempt(updated);
       resultCue(updated.status);
-      logForContact(updated.status);
+      logForContact(updated.status, updated.reference);
       try { await savePaymentAttempt(walletId, updated); }
       catch { setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
     } catch (e) {
       const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown' };
       setAttempt(updated);
       resultCue(updated.status);
-      logForContact(updated.status);
+      logForContact(updated.status, updated.reference);
       setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.');
       try { await savePaymentAttempt(walletId, updated); } catch { /* The durable pending record forces a status check on reopen. */ }
     } finally {
@@ -325,23 +334,35 @@ export default function SendScreen({ navigation, route }: Props) {
     }
   }
 
+  async function readPaymentStatus(sourceId: string, id: string) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        checkPaymentStatus(sourceId, id),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Status check timed out')), 20_000); }),
+      ]);
+    } finally { clearTimeout(timer); }
+  }
+
   // `quiet`: a background re-check, which neither blocks the screen nor reports its own failure.
   async function checkStatus(quiet = false) {
-    if (!attempt || !walletId || paying.current || (quiet && checking.current)) return;
+    if (!attempt || !walletId || paying.current || checking.current) return;
     const lock = quiet ? checking : paying;
-    lock.current = true;
+    lock.current = true; setStatusChecking(true);
     if (!quiet) { setBusy(true); setError(''); }
     try {
-      const result = await checkPaymentStatus(attempt.sourceId, attempt.id);
+      const result = await readPaymentStatus(attempt.sourceId, attempt.id);
       // A background result is dropped when nothing changed, or the record changed meanwhile (checked, dismissed).
-      if (quiet && (attemptRef.current !== attempt || (result.status === attempt.status && result.reference === attempt.reference))) return;
+      if (attemptRef.current !== attempt || (quiet && result.status === attempt.status && result.reference === attempt.reference)) return;
       const updated = { ...attempt, ...result };
-      await savePaymentAttempt(walletId, updated); setAttempt(updated);
+      if (!await updatePaymentAttempt(walletId, updated)) return;
+      if (attemptRef.current !== attempt) return;
+      setAttempt(updated);
       if (updated.status !== attempt.status) resultCue(updated.status);
-      void updateContactEventStatus(walletId, attempt.id, updated.status).catch(() => {});
+      void updateContactEventStatus(walletId, attempt.id, updated.status, updated.reference).catch(() => {});
       if (result.status === 'completed') void dispatch(loadBtcBalance());
     } catch { if (!quiet) setError('Could not update payment status. Check again before making another payment.'); }
-    finally { lock.current = false; if (!quiet) setBusy(false); }
+    finally { lock.current = false; setStatusChecking(false); if (!quiet) setBusy(false); }
   }
   checkStatusRef.current = checkStatus;
   attemptRef.current = attempt;
@@ -356,7 +377,7 @@ export default function SendScreen({ navigation, route }: Props) {
         { text: 'Start a new payment', style: 'destructive', onPress: async () => {
           try {
             await dismissPaymentAttempt(walletId, journalUnreadable ? null : attempt);
-            setAttempt(null); setJournalUnreadable(false); setError(''); setJournalReady(true);
+            attemptRef.current = null; setAttempt(null); setJournalUnreadable(false); setError(''); setJournalReady(true);
           } catch { setError('Could not update the payment record. Try again.'); }
         } },
       ],
@@ -381,7 +402,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const card = { padding: t.spacing[4], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: t.colors.border.light, gap: t.spacing[3] };
   const row = (label: string, value: string) => <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}><Text style={muted}>{label}</Text><AmountText style={{ ...text, textAlign: 'right', flexShrink: 1 }}>{value}</AmountText></View>;
   const railIcon = (r: string) => ({ ln: 'lightning', btc: 'onchain', ark: 'arkade', spark: 'spark', rgb: 'rgb' } as Record<string, string>)[railOf(r)] ?? railOf(r);
-  const recipientName = preview?.code.label || contactName || target?.label || 'Recipient';
+  const recipientName = preview?.code.label || contactName || target?.label || (input.trim().length > 52 ? `${input.trim().slice(0, 18)}…${input.trim().slice(-10)}` : input.trim()) || 'Recipient';
   const feeText = (fee: number, asset: Parameters<typeof displaySpend>[1]) => fee === 0 ? 'No fee' : `+${displaySpend(fee, asset)}`;
 
   // Pay from: the ways to pay grouped by the account they spend from.
@@ -607,6 +628,8 @@ export default function SendScreen({ navigation, route }: Props) {
         <Ionicons name="person-circle-outline" size={16} color={t.colors.text.secondary} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }} numberOfLines={1}>{recipientName}</Text>
       </View>}
 
+      {spend && <View style={{ marginTop: t.spacing[3] }}><PaymentReceiptDetails details={{ amount: amountLabel, recipient: recipientName, fees: displaySpend(spend.fee, spend.asset), total, account: selected?.accountName || selected?.provider }} /></View>}
+
       {feeOptions && feeOption && <View style={{ marginTop: t.spacing[3], gap: t.spacing[2] }}>
         <Text style={caption}>Network fee</Text>
         <SegmentedTabs<RgbFeeSpeed> scrollable={false} fill value={feeSpeed} onChange={chooseSpeed}
@@ -635,38 +658,45 @@ export default function SendScreen({ navigation, route }: Props) {
   };
 
   const shareReceipt = (a: PaymentAttempt) => {
-    void Share.share({ message: [`Paid ${a.recipient}${preview ? ` to ${recipientName}` : ''}`, `Total ${a.total}`, `From ${a.provider}`, a.reference && `Reference ${a.reference}`].filter(Boolean).join('\n') });
+    void Share.share({ message: [`Payment completed`, `Amount ${a.recipient}`, `Recipient ${a.recipientName || 'Not recorded'}`, `Quoted fees ${a.feeDisplay ?? 'Not recorded'}`, `Quoted total ${a.total}`, `From ${a.accountName || a.provider}`, `Requested ${new Date(a.createdAt).toLocaleString()}`, a.reference && `Reference ${a.reference}`].filter(Boolean).join('\n') });
   };
 
   const renderResult = (a: PaymentAttempt) => {
     const done = a.status === 'completed';
     const failed = a.status === 'failed';
     const tone = done ? t.colors.primary[500] : failed ? t.colors.error[500] : t.colors.warning[500];
-    const title = done ? 'Payment completed' : failed ? 'Payment failed' : busy ? 'Sending payment' : a.status === 'unknown' ? 'Payment needs checking' : 'Payment in progress';
+    const title = done ? 'Payment completed' : failed ? 'Payment failed' : busy && !statusChecking ? 'Sending payment' : statusTimedOut ? 'Confirmation is taking longer' : 'Confirming payment';
     return <View style={{ gap: t.spacing[4] }}>
       <View style={{ alignItems: 'center', gap: t.spacing[2], paddingTop: t.spacing[6] }}>
-        <Animated.View entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
+        <Animated.View key={done ? 'completed' : failed ? 'failed' : 'checking'} entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
           style={{ width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', backgroundColor: tone + '26' }}>
-          {busy ? <ActivityIndicator color={tone} /> : <Ionicons name={done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={40} color={tone} />}
+          {busy || (unresolvedAttempt(a) && !statusTimedOut) ? <ActivityIndicator accessibilityLabel="Checking payment automatically" color={tone} /> : <Ionicons name={done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={40} color={tone} />}
         </Animated.View>
         <Text accessibilityRole="header" style={{ ...muted }}>{title}</Text>
         <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '700' }}>{a.recipient}</AmountText>
-        {!!preview && <Text style={muted}>{done ? 'sent to' : 'to'} {recipientName}</Text>}
+        {!!a.recipientName && <Text style={muted}>{done ? 'sent to' : 'to'} {a.recipientName}</Text>}
       </View>
       {KALEIDOPAY_DEMO && done && <Text style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>Simulated in this demo build. No funds moved.</Text>}
-      <View style={card}>
-        {row('Total', a.total)}{row('Paid with', a.provider)}
-        {!!a.reference && <Text selectable style={{ ...small, color: t.colors.text.secondary }}>Reference: {a.reference}</Text>}
-      </View>
-      <Text style={{ ...muted, textAlign: 'center' }}>{unresolvedAttempt(a) ? 'Your payment is still being checked. You can leave and come back to check its status. Do not send it again.' : failed ? 'This payment was not sent, or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
+      <PaymentReceiptDetails details={{ amount: a.recipient, recipient: a.recipientName, fees: a.feeDisplay, total: a.total, account: a.accountName || a.provider, reference: a.reference, createdAt: a.createdAt }} />
+      <Text style={small}>Fees and total are from the quote you approved. Final fees may differ where the provider supplies an estimate.</Text>
+      <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>{unresolvedAttempt(a) ? (statusTimedOut ? 'No final result yet. Check again later; do not send it again.' : 'Checking automatically. Do not send again.') : failed ? 'This payment was not sent, or the provider confirmed it failed. Review a new quote before trying again.' : 'Your payment is complete.'}</Text>
       {unresolvedAttempt(a) ? <>
-        <Button title="Check status" onPress={() => void checkStatus()} loading={busy} disabled={busy} />
+        <Button title="Verify payment" onPress={() => void checkStatus()} loading={busy || statusChecking} disabled={busy || statusChecking} />
         {a.status === 'unknown' && !busy && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} />}
       </> : <>
         {done && <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
           <Button title="View in Activity" variant="secondary" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} style={{ flex: 1 }} />
           <Button title="Share receipt" variant="secondary" onPress={() => shareReceipt(a)} style={{ flex: 1 }} />
         </View>}
+        {done && target?.kind === 'lnurl' && target.lnurl && LIGHTNING_ADDRESS.test(target.lnurl) && <>
+          <Button title="Pay again" variant="secondary" onPress={() => {
+            requestId.current = Crypto.randomUUID(); revision.current++;
+            attemptRef.current = null; setAttempt(null); setPreview(null); setOffers([]); setSelectedId(undefined);
+            setAmountSat(undefined); setAssetAmount(''); setError(''); setReviewUpdated(false); setPreviousTotal('');
+          }} />
+          {!contacts?.some(c => c.lightning_address?.toLowerCase() === target.lnurl?.toLowerCase()) && <Button title="Save contact" variant="ghost"
+            onPress={() => navigation.navigate('Dashboard', { screen: 'Contacts', params: { scannedContact: target.lnurl } })} />}
+        </>}
         <Button title={failed ? 'Review a new quote' : 'Done'} onPress={() => { if (done) navigation.goBack(); else { setAttempt(null); if (preview) void getOffers(true); } }} />
       </>}
     </View>;

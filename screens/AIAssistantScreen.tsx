@@ -937,8 +937,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     onSuggestion={(q) => sendMessage(q)}
                     onContacts={() => setShowContactsSelector(true)}
                     hero={isFocused && !voiceAgentOpen && !showSettings && !mindOnboardingOpen
-                      ? <PrismoAnimatedCharacter phase="idle" size={96} accessibilityLabel="Prismo ti saluta" />
-                      : <MindCharacter mood="idle" size={96} paused />}
+                      ? <PrismoAnimatedCharacter phase="idle" size={152} accessibilityLabel="Prismo ti saluta" />
+                      : <MindCharacter mood="idle" size={152} paused />}
                   />
                 </>
               ) : (

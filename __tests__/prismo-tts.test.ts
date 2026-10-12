@@ -11,10 +11,11 @@ import {speak,stopSpeak} from '../services/qvacTts';
 const flush=async()=>{for(let i=0;i<12;i++)await Promise.resolve()};
 beforeEach(()=>{jest.useFakeTimers();jest.clearAllMocks();mockSystem.mockResolvedValue(undefined)});
 afterEach(async()=>{await stopSpeak();jest.useRealTimers()});
-test('Italian preserves accents and uses system voice and word events',async()=>{
+test('Italian preserves accents in the system fallback when neural synthesis is unavailable',async()=>{
+ mockSynth.mockResolvedValue(null);
  const level=jest.fn(),done=jest.fn();
  await speak('È già pronto, perché sì.',{language:'it-IT',onLevel:level,onDone:done});
- expect(mockSynth).not.toHaveBeenCalled();
+ expect(mockSynth).toHaveBeenCalledWith('È già pronto, perché sì.');
  expect(mockSystem.mock.calls[0][0]).toBe('È già pronto, perché sì.');
  const options=mockSystem.mock.calls[0][1];expect(options.language).toBe('it-IT');
  options.onBoundary({charLength:4,charIndex:0});expect(level).toHaveBeenLastCalledWith(.75);

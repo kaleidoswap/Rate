@@ -17,9 +17,10 @@ interface Props {
   network?: string;
   amountLabel?: string; // optional "0.001 BTC" style summary
   onDone: () => void;
+  onActivity?: () => void;
 }
 
-export default function DepositSuccessOverlay({ visible, ticker, network, amountLabel, onDone }: Props) {
+export default function DepositSuccessOverlay({ visible, ticker, network, amountLabel, onDone, onActivity }: Props) {
   const scale = useRef(new Animated.Value(0)).current;
   const ring = useRef(new Animated.Value(0)).current;
   const fade = useRef(new Animated.Value(0)).current;
@@ -59,6 +60,7 @@ export default function DepositSuccessOverlay({ visible, ticker, network, amount
           {network ? ` · ${network}` : ''}
         </Text>
 
+        {onActivity && <Button title="View in Activity" variant="secondary" onPress={onActivity} />}
         <Button title="Done" variant="primary" fullWidth onPress={onDone} style={styles.button} />
       </View>
     </Animated.View>

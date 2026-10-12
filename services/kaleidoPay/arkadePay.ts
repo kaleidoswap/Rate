@@ -19,6 +19,7 @@ import type { ArkadeSwapStore } from '@kaleidorg/swap-sdk/arkade';
 /** The ArkadeWdkAdapter surface used here. `arkInfo`, `arkSdk` and `rawWallet` are adapter internals. */
 export interface ArkadePayAdapter {
   sendPayment(request: { invoice: string; amount?: number }): Promise<any>;
+  getPaymentStatus?(reference: string): Promise<{ status?: string; amount?: number }>;
   offboard?(address: string, amount?: number): Promise<{ txid: string }>;
   getBtcBalance(): Promise<{ confirmed: number }>;
   isConnected?(): boolean;
@@ -200,12 +201,20 @@ export function createArkadeAccount(adapter: ArkadePayAdapter, network: Network,
       // An out-of-round Ark payment is final once the server cosigns it, which is when the call returns.
       const txid = txidOf(sent);
       const result: PaymentResult = sent?.status === 'failed' ? { status: 'failed' }
-        : txid && Number(sent?.amount) === accepted.recipientSat ? { status: 'completed', reference: txid } : { status: 'unknown', reference: txid };
+        : sent?.status === 'pending' ? { status: 'pending', reference: txid }
+        : txid && (['confirmed', 'completed', 'settled', 'success'].includes(sent?.status) || (sent?.status == null && Number(sent?.amount) === accepted.recipientSat)) ? { status: 'completed', reference: txid } : { status: 'unknown', reference: txid };
       return persist(ref(attemptId), result);
     },
     async status(attemptId) {
       const direct = await saved(ref(attemptId));
-      return direct.status !== 'unknown' || direct.reference ? direct : intents.status(attemptId);
+      if (direct.status === 'completed' || direct.status === 'failed') return direct;
+      if (direct.reference && adapter.getPaymentStatus) {
+        const current = await adapter.getPaymentStatus(direct.reference);
+        const status = ['confirmed', 'completed', 'settled', 'success'].includes(current.status ?? '') ? 'completed'
+          : current.status === 'failed' ? 'failed' : current.status === 'pending' ? 'pending' : 'unknown';
+        return persist(ref(attemptId), { status, reference: direct.reference });
+      }
+      return direct.reference ? direct : intents.status(attemptId);
     },
   };
 }
