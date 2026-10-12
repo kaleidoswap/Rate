@@ -16,7 +16,7 @@ import {
   EMBEDDINGGEMMA_300M_Q4_0,
   VAD_SILERO_5_1_2,
 } from '@qvac/sdk';
-import { NativeModules, Platform } from 'react-native';
+import { Platform } from 'react-native';
 import { File, Directory, Paths } from 'expo-file-system';
 import { createDownloadResumable } from 'expo-file-system/legacy';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -41,7 +41,7 @@ import {
   createQvacVoice,
 } from '@kaleidorg/mind/qvac';
 import { recordVoiceDiagnostic, diagnosticError, waitForVoice, type VoiceStage } from './voiceDiagnostics';
-import { supertonicLanguage } from './speechLanguage';
+import { getAppLanguage } from '../localization/language';
 import { sanitizeForSupertonic } from './supertonicText';
 import { isLikelyValueMovingToolName } from '../utils/toolSafety';
 
@@ -83,35 +83,6 @@ const LOCAL_LLM_CONFIG_GPU = {
  * the bare worklet on iOS. Once the file is on disk we hand the local path to
  * `loadModel`, which mmaps it directly (no worklet networking involved).
  */
-
-// Whisper languages we'll request directly from the device locale. whisper.cpp
-// supports far more, but the QVAC handler rejects "auto"/detect_language for
-// these tiny models, so we pass a concrete code (and fall back to 'en').
-const WHISPER_LANGS = new Set([
-  'en', 'it', 'es', 'fr', 'de', 'pt', 'nl', 'ru', 'pl', 'uk', 'tr', 'ar',
-  'zh', 'ja', 'ko', 'hi', 'id', 'sv', 'no', 'da', 'fi', 'cs', 'ro', 'el',
-  'he', 'th', 'vi', 'hu', 'ca',
-]);
-
-/**
- * Best-effort 2-letter language code from the OS locale (e.g. "it-IT" → "it"),
- * restricted to codes Whisper handles well. Falls back to 'en'.
- */
-function deviceWhisperLanguage(): string {
-  try {
-    let loc = 'en';
-    if (Platform.OS === 'ios') {
-      const s: any = NativeModules.SettingsManager?.settings;
-      loc = s?.AppleLocale || (Array.isArray(s?.AppleLanguages) ? s.AppleLanguages[0] : '') || 'en';
-    } else {
-      loc = NativeModules.I18nManager?.localeIdentifier || 'en';
-    }
-    const code = String(loc).split(/[-_]/)[0].toLowerCase();
-    return WHISPER_LANGS.has(code) ? code : 'en';
-  } catch {
-    return 'en';
-  }
-}
 
 function isPhoneRuntime(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
@@ -173,6 +144,7 @@ class QVACService {
   // which the hands-free streaming session (emitVadEvents) requires. A plain
   // one-shot Whisper load has no VAD, so we reload before opening a voice session.
   private whisperHasVad = false;
+  private whisperLanguage: string | null = null;
   private vadModelPath: string | null = null;
   private ttsModelId: string | null = null;
   private ttsLanguage: string | null = null;
@@ -763,7 +735,7 @@ class QVACService {
     }
 
     // Already loaded with the capabilities this caller needs.
-    if (this.whisperStatusReady() && (!withVad || this.whisperHasVad)) {
+    if (this.whisperStatusReady() && this.whisperLanguage === getAppLanguage() && (!withVad || this.whisperHasVad)) {
       return;
     }
 
@@ -791,19 +763,19 @@ class QVACService {
       // memory-safe. whisper-large-v3-turbo is ~1.6 GB; loading neural TTS right
       // after it on iOS can get the app jetsammed before JS can catch anything.
       const selectedStt = getSttModelById(this.config.sttModelId);
-      const stt = isPhoneRuntime() && selectedStt.id === 'whisper-large-v3-turbo'
+      const stt = (isPhoneRuntime() && selectedStt.id === 'whisper-large-v3-turbo') || (selectedStt.lang === 'en' && getAppLanguage() !== 'en')
         ? getSttModelById(DEFAULT_STT_MODEL_ID)
         : selectedStt;
       if (stt.id !== selectedStt.id) {
-        console.warn(`[QVAC] Whisper model '${selectedStt.id}' is too large for phone voice mode; using '${stt.id}'`);
+        console.warn(`[QVAC] Whisper model '${selectedStt.id}' does not fit this voice session (memory or language); using '${stt.id}'`);
       }
       const modelPath = await this.ensureLocalModel(
         { url: stt.url, name: stt.name, size: stt.size },
         (pct) => this.setState({ whisperDownloadProgress: pct })
       );
 
-      // English-only variants are pinned to 'en'; multilingual variants use the
-      // device locale (e.g. Italian) so non-English speech transcribes instead
+      // English-only variants are replaced above when the app uses Italian.
+      // Multilingual variants use the app language (e.g. Italian) so non-English speech transcribes instead
       // of being force-decoded as English → empty. The QVAC whisper handler
       // rejects "auto"/detect_language for these tiny models, so we always pass
       // a concrete code and fall back to 'en' if the chosen one won't load.
@@ -820,7 +792,7 @@ class QVACService {
         }
       }
 
-      const primaryLang = stt.lang === 'en' ? 'en' : deviceWhisperLanguage();
+      const primaryLang = getAppLanguage();
       const loadWhisper = (language: string) =>
         this.bootLoad(() => sdkLoadModel({
           modelSrc: modelPath,
@@ -845,6 +817,7 @@ class QVACService {
         this.whisperModelId = await loadWhisper('en');
       }
 
+      this.whisperLanguage = primaryLang;
       this.whisperHasVad = !!vadModelSrc;
       this.setState({ whisperStatus: 'ready' });
       console.log('QVAC Whisper ready:', this.whisperModelId);
@@ -873,7 +846,7 @@ class QVACService {
     // The shared provider runs completion + streams tokens (contentDelta →
     // onToken, thinkingDelta → onThinking) + parses the final frame. It reads the
     // model id via the `getModelId` closure above, so this stays a thin binding.
-    return this.mindProvider.runTurn(input);
+    return this.mindProvider.runTurn({ ...input, system: `${input.system ?? ''}\nThe app language is ${getAppLanguage() === 'it' ? 'Italian' : 'English'}. Respond in that language unless the user explicitly requests another language.` });
   }
 
   /** Cancel an in-flight completion by its requestId (for a stop button). */
@@ -992,7 +965,7 @@ class QVACService {
         if (/tts|supertonic/i.test(log.namespace) && (log.level === 'error' || log.level === 'warn')) recordVoiceDiagnostic('sdk_log', `${log.level}: ${diagnosticError(log.message, [text, speakable])}`);
       });
       options.onStage?.('loading');
-      const language = supertonicLanguage(speakable);
+      const language = getAppLanguage();
       recordVoiceDiagnostic('loading', `language=${language}`);
       const modelId = await this.ensureTtsLoaded(language, options.signal);
       if (options.signal?.aborted) throw new Error('Voice cancelled');
@@ -1089,6 +1062,7 @@ class QVACService {
       await unloadModel({ modelId: this.whisperModelId, clearStorage: false });
       this.whisperModelId = null;
       this.whisperHasVad = false;
+      this.whisperLanguage = null;
       this.setState({ whisperStatus: 'not_downloaded' });
     }
   }

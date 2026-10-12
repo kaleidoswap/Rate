@@ -227,3 +227,13 @@ test('keeps technical interface options inside Advanced and searchable', async (
   fireEvent.press(screen.getByLabelText('Connections'));
   expect(screen.getByLabelText('Display detail')).toBeTruthy();
 });
+
+test('offers one persisted language preference for the app and Prismo', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Preferences'));
+  fireEvent.press(screen.getByLabelText('Language'));
+  fireEvent.press(screen.getByText('Language: Italiano'));
+  expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'settings/setLanguage', payload: 'it' }));
+  expect(screen.queryByText('Language: Italiano')).toBeNull();
+});

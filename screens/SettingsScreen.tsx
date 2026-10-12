@@ -1,3 +1,4 @@
+import { useAppLanguage } from '../localization/useAppLanguage';
 import { AccountSettings } from '../components/AccountSettings';
 import { BARK_ENABLED } from '../services/protocols/bark';
 import { loadRgbL1Network } from '../services/protocols/rgbL1';
@@ -18,6 +19,7 @@ import { NostrIcon, RgbNodeIcon } from '../components/ProtocolIcons';
 import { RootState } from '../store';
 import {
   setCurrency,
+  setLanguage,
   setNodeType,
   setRemoteNodeUrl,
   setUnitPreference,
@@ -81,8 +83,9 @@ function biometricLabel(type: SecuritySettings['biometricType']): string {
 // ---------------------------------------------------------------------------
 
 const SectionLabel: React.FC<{ children: React.ReactNode; tone?: 'default' | 'danger' }> = ({ children, tone = 'default' }) => {
+  const { t } = useAppLanguage();
   const theme = useAppTheme(); const styles = useMemo(() => createStyles(theme), [theme]);
-  return <Text accessibilityRole="header" style={[styles.sectionLabel, tone === 'danger' && { color: theme.colors.error[500] }]}>{children}</Text>;
+  return <Text accessibilityRole="header" style={[styles.sectionLabel, tone === 'danger' && { color: theme.colors.error[500] }]}>{typeof children === 'string' ? t(children) : children}</Text>;
 };
 
 const Group: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -102,6 +105,7 @@ const Row: React.FC<{
   right?: React.ReactNode;
   first?: boolean;
 }> = ({ icon, iconNode, iconColor, label, description, value, onPress, right, first }) => {
+  const { t } = useAppLanguage();
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const content = (
@@ -112,8 +116,8 @@ const Row: React.FC<{
         </View>
       )}
       <View style={styles.rowText}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        {description && <Text style={styles.rowDescription}>{description}</Text>}
+        <Text style={styles.rowLabel}>{t(label)}</Text>
+        {description && <Text style={styles.rowDescription}>{t(description)}</Text>}
       </View>
       {right ?? (
         <View style={styles.rowRight}>
@@ -125,7 +129,7 @@ const Row: React.FC<{
   );
   if (onPress) {
     return (
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={label} activeOpacity={0.7} onPress={onPress}>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={t(label)} activeOpacity={0.7} onPress={onPress}>
         {content}
       </TouchableOpacity>
     );
@@ -134,6 +138,7 @@ const Row: React.FC<{
 };
 
 export default function SettingsScreen({ navigation }: Props) {
+  const { t, preference } = useAppLanguage();
   const theme = useAppTheme();
   const styles = useMemo(() => createStyles(theme), [theme]);
   const dispatch = useAppDispatch();
@@ -155,7 +160,7 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase' },
-    { page: 'preferences', terms: 'preferences bitcoin balance unit sound sounds payment currency fiat notifications' },
+    { page: 'preferences', terms: 'preferences bitcoin balance unit sound sounds payment currency fiat notifications language lingua italiano english' },
     { page: 'connections', terms: 'display detail mode lite advanced' },
     { page: 'connections', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
     { page: 'security', terms: 'danger remove delete wallet' },
@@ -556,7 +561,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   // Which settings selector sheet is open (one bottom sheet at a time).
-  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'display' | 'autoLock'>(null);
+  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'display' | 'autoLock' | 'language'>(null);
   const btcPrice = useBitcoinPriceIn(settings.currency);
 
   // Live previews for the unit selector (sample = 1,234,567 sats), matching
@@ -631,13 +636,13 @@ export default function SettingsScreen({ navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <MainHeader title={account ? ({ RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : query ? 'Search settings' : page ? titles[page] : 'Settings'} onBack={goBack} />
+      <MainHeader title={account ? ({ RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[account]) : t(query ? 'Search settings' : page ? titles[page] : 'Settings')} onBack={goBack} />
       <ScrollView key={account ?? page ?? 'home'} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={styles.scrollView} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
 
         {!page && <Input
           value={settingsQuery}
           onChangeText={setSettingsQuery}
-          placeholder="Search settings"
+          placeholder={t("Search settings")}
           autoCapitalize="none"
           autoCorrect={false}
           style={styles.searchInput}
@@ -861,10 +866,11 @@ export default function SettingsScreen({ navigation }: Props) {
         </>}
 
         {/* Preferences */}
-        {showSection('preferences bitcoin balance unit sound sounds payment currency fiat notifications') && <>
+        {showSection('preferences bitcoin balance unit sound sounds payment currency fiat notifications language lingua italiano english') && <>
         <SectionLabel>Preferences</SectionLabel>
         <Group>
 
+          <Row icon="language-outline" label="Language" description="App and Prismo voice" value={preference === 'it' ? 'Italiano' : preference === 'en' ? 'English' : t('System language')} onPress={() => setActiveSheet('language')} />
           <Row icon="logo-bitcoin" iconColor={theme.colors.warning[500]} label="Balance unit" description="Sats, BTC or local currency" value={denominationLabel[displayDenomination]} onPress={() => setActiveSheet('unit')} />
           {/* Theme picker intentionally omitted: the app is dark-only for now —
               screens import the static dark theme, so a Light/System toggle had
@@ -1021,6 +1027,9 @@ export default function SettingsScreen({ navigation }: Props) {
       </ScrollView>
 
       {/* Settings selectors */}
+      <OptionSheet visible={activeSheet === 'language'} title={t('Language')}
+        options={[{ id: 'system', label: t('System language') }, { id: 'it', label: 'Italiano' }, { id: 'en', label: 'English' }]}
+        selectedId={preference} onSelect={id => { dispatch(setLanguage(id)); setActiveSheet(null); }} onClose={() => setActiveSheet(null)} />
       <OptionSheet
         visible={activeSheet === 'unit'}
         title="Balance unit"

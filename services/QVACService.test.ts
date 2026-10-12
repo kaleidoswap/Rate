@@ -103,6 +103,8 @@ describe('QVACService.runProviderTurn', () => {
 describe('Supertonic 3 mobile integration', () => {
   afterEach(() => jest.restoreAllMocks());
   it('loads the multilingual model once, preserves Italian and keeps the listening session alive', async () => {
+    const storeProvider = require('../store/storeProvider');
+    storeProvider.getStore.mockReturnValue({ getState: () => ({ settings: { language: 'it' } }) });
     const svc = service() as any;
     svc.ttsModelId = null; svc.ttsLoadPromise = null; svc.whisperModelId = 'active-whisper';
     jest.spyOn(svc, 'workletBlocked').mockReturnValue(false);
@@ -135,8 +137,31 @@ describe('Supertonic 3 mobile integration', () => {
     expect(unloadWhisper).not.toHaveBeenCalled();
     expect(svc.whisperModelId).toBe('active-whisper');
     sdk.unloadModel.mockResolvedValue(undefined);
+    storeProvider.getStore.mockReturnValue({ getState: () => ({ settings: { language: 'en' } }) });
     await svc.synthesizeSpeech('Hello, your payment was received.');
     expect(sdk.unloadModel).toHaveBeenCalledWith({ modelId: 'supertonic3', clearStorage: false });
     expect(sdk.loadModel).toHaveBeenLastCalledWith(expect.objectContaining({ modelConfig: expect.objectContaining({ language: 'en' }) }));
   });
+});
+
+it('reloads Whisper when the app language changes and uses a multilingual model for Italian', async () => {
+  const svc = service() as any;
+  const sdk = require('@qvac/sdk');
+  const provider = require('../store/storeProvider');
+  let language = 'it';
+  provider.getStore.mockReturnValue({ getState: () => ({ settings: { language } }) });
+  svc.whisperModelId = null; svc.whisperLoadPromise = null;
+  svc.config.sttModelId = 'whisper-base-en';
+  const gate = jest.spyOn(svc, 'workletBlocked').mockReturnValue(false);
+  const config = jest.spyOn(svc, 'loadConfig').mockResolvedValue(undefined);
+  const boot = jest.spyOn(svc, 'bootLoad').mockImplementation((fn: any) => fn());
+  const download = jest.spyOn(svc, 'ensureLocalModel').mockResolvedValue('/model.bin');
+  sdk.loadModel.mockClear(); sdk.loadModel.mockResolvedValue('whisper'); sdk.unloadModel.mockResolvedValue(undefined);
+  await svc.initializeWhisper();
+  expect(sdk.loadModel).toHaveBeenLastCalledWith(expect.objectContaining({ modelConfig: expect.objectContaining({ language: 'it' }) }));
+  expect(download).toHaveBeenCalledWith(expect.objectContaining({ name: 'ggml-base-q8_0.bin' }), expect.any(Function));
+  language = 'en'; await svc.initializeWhisper();
+  expect(sdk.loadModel).toHaveBeenLastCalledWith(expect.objectContaining({ modelConfig: expect.objectContaining({ language: 'en' }) }));
+  expect(sdk.loadModel).toHaveBeenCalledTimes(2);
+  gate.mockRestore(); config.mockRestore(); boot.mockRestore(); download.mockRestore();
 });

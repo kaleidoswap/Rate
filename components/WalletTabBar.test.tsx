@@ -1,3 +1,6 @@
+let mockLanguage = 'en';
+jest.mock('../store/hooks', () => ({ useAppSelector: (selector: any) => selector({ settings: { language: mockLanguage } }) }));
+beforeEach(() => { mockLanguage = 'en'; });
 import React from 'react';
 import { render, fireEvent } from '@testing-library/react-native';
 import { WalletTabBar } from './WalletTabBar';
@@ -28,4 +31,12 @@ describe('wallet navigation', () => {
     fireEvent.press(screen.getByLabelText('Mind'));
     expect(p.navigation.navigate).not.toHaveBeenCalled();
   });
+});
+
+it('updates tab labels from the shared app language', () => {
+  mockLanguage = 'it';
+  const screen = render(<WalletTabBar {...props()} />);
+  expect(screen.getByText('Portafoglio')).toBeTruthy();
+  expect(screen.getByText('Attività')).toBeTruthy();
+  expect(screen.getByText('Scansiona')).toBeTruthy();
 });

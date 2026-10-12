@@ -1,3 +1,4 @@
+jest.mock('../localization/language', () => ({ getAppLanguage: () => 'it' }));
 import { speak, stopSpeak } from './qvacTts';
 import { speakBest } from './speech';
 jest.mock('react-native-device-info', () => ({ __esModule: true, default: {} }));
@@ -17,7 +18,7 @@ it('drives the Italian mouth from actual word callbacks and closes between words
   const onLevel = jest.fn(), onDone = jest.fn();
   await speak('Ciao Prismo', { language: 'it-IT', onLevel, onDone });
   const options = (speakBest as jest.Mock).mock.calls[0][1];
-  expect(options.language).toBe('it-IT'); expect(onLevel).not.toHaveBeenCalled();
+  expect(options.language).toBe('it'); expect(onLevel).not.toHaveBeenCalled();
   options.onBoundary({ charIndex: 0, charLength: 4 }); expect(onLevel).toHaveBeenLastCalledWith(.75);
   jest.advanceTimersByTime(100); expect(onLevel).toHaveBeenLastCalledWith(0);
   options.onDone(); expect(onDone).toHaveBeenCalledTimes(1);

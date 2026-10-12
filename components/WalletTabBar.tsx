@@ -1,3 +1,4 @@
+import { useAppLanguage } from '../localization/useAppLanguage';
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,6 +9,7 @@ import { useAppTheme } from '../theme/ThemeProvider';
 
 /** Stable, in-flow navigation keeps every screen above the home indicator. */
 export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+  const { t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const theme = useAppTheme();
   const renderItem = (route: typeof state.routes[number], index: number) => {
@@ -18,7 +20,7 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
       <TouchableOpacity
         key={route.key}
         accessibilityRole="tab"
-        accessibilityLabel={String(options.tabBarLabel ?? route.name)}
+        accessibilityLabel={t(String(options.tabBarLabel ?? route.name))}
         accessibilityState={{ selected: focused }}
         onPress={() => {
           const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
@@ -27,7 +29,7 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
         style={tabStyles.item}
       >
         {options.tabBarIcon?.({ focused, color, size: 22 })}
-        <Text style={[tabStyles.label, { color }]}>{String(options.tabBarLabel ?? route.name)}</Text>
+        <Text style={[tabStyles.label, { color }]}>{t(String(options.tabBarLabel ?? route.name))}</Text>
       </TouchableOpacity>
     );
   };
@@ -50,7 +52,7 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
         <View style={[tabStyles.scan, { backgroundColor: theme.colors.primary[500] }]}>
           <Ionicons name="scan" size={24} color={theme.colors.text.inverse} />
         </View>
-        <Text style={[tabStyles.label, { color: theme.colors.text.primary }]}>Scan</Text>
+        <Text style={[tabStyles.label, { color: theme.colors.text.primary }]}>{t('Scan')}</Text>
       </TouchableOpacity>
       {state.routes.slice(2).map((r, i) => renderItem(r, i + 2))}
     </View>
