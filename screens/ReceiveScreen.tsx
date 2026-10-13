@@ -2035,7 +2035,9 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
       <DepositSuccessOverlay
         visible={showDepositSuccess}
-        ticker={depositMonitor.assetId === 'MULTIPLE' ? 'Multiple assets' : depositMonitor.assetId === 'BTC' ? 'BTC' : rgbAssets.find(a => a.asset_id === depositMonitor.assetId)?.ticker ?? (depositMonitor.assetId && depositMonitor.assetId !== selectedAsset.asset_id ? depositMonitor.assetId : selectedAsset.ticker)}
+        // A newly received RGB asset is named once the asset list refreshes; never show its raw id meanwhile.
+        ticker={depositMonitor.assetId === 'MULTIPLE' ? 'Multiple assets' : depositMonitor.assetId === 'BTC' ? 'BTC' : rgbAssets.find(a => a.asset_id === depositMonitor.assetId)?.ticker
+          ?? (depositMonitor.assetId?.startsWith('rgb:') ? 'RGB asset' : depositMonitor.assetId && depositMonitor.assetId !== selectedAsset.asset_id ? depositMonitor.assetId : selectedAsset.ticker)}
         amountLabel={detectedAmount}
         amountIsBalanceChange={depositMonitor.amountSource === 'balance'}
         account={depositMonitor.protocol === 'RGB' ? rgbLabel : depositMonitor.protocol === 'ARKADE' ? 'Arkade' : depositMonitor.protocol === 'SPARK' ? 'Spark' : depositMonitor.protocol === 'BARK' ? 'Bark' : undefined}

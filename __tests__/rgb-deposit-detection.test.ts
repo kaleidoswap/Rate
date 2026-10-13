@@ -96,3 +96,17 @@ it('sees a bitcoin deposit to the RGB wallet while it is in the mempool, then wh
   await jest.advanceTimersByTimeAsync(8_000)
   expect(onDetected).toHaveBeenCalledWith(expect.objectContaining({ layer: 'onchain', status: 'confirmed', amount: 25_000 }))
 })
+
+it('a deposit already waiting, or this wallet’s own change, is not a new payment', async () => {
+  const sync = mockRgb.account.syncedBtcBalance as jest.Mock
+  sync.mockReset()
+  sync.mockResolvedValueOnce({ vanilla: { settled: 50_000, future: 60_000, spendable: 50_000 } }) // 10k already pending
+    .mockResolvedValueOnce({ vanilla: { settled: 50_000, future: 60_000, spendable: 50_000 } })
+    .mockResolvedValue({ vanilla: { settled: 20_000, future: 49_000, spendable: 20_000 } }) // a spend: change of 19k pending
+  const onStatus = jest.fn()
+  const btc = [{ key: 'onchain-rgb', label: 'Bitcoin on-chain', protocol: 'RGB', kind: 'address', layer: 'onchain', monitor: 'balance', value: 'tb1qrgb', assetId: 'BTC' }] as any
+  renderHook(() => useDepositDetection({ enabled: true, methods: btc, onDetected: jest.fn(), onStatus }))
+  await jest.advanceTimersByTimeAsync(1_000)
+  await jest.advanceTimersByTimeAsync(16_000)
+  expect(onStatus).not.toHaveBeenCalledWith(expect.objectContaining({ layer: 'onchain', status: 'pending' }))
+})

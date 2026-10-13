@@ -319,8 +319,11 @@ export function useDepositDetection({
         const balance = await readMethodBalances(method, operationController.signal);
         if (cancelled || firedRef.current || balance == null) continue;
         const baseline = baselinesRef.current.get(method.key);
-        if (method.protocol === 'RGB' && method.layer === 'onchain' && balance._pending > 0) {
-          emitStatus({ layer: 'onchain', protocol: 'RGB', status: 'pending', assetId: 'BTC', amount: balance._pending,
+        // Only bitcoin that started pending since the screen opened: not a deposit already waiting,
+        // and not this wallet's own change (a spend lowers the confirmed balance in the same read).
+        const newlyPending = baseline ? balance._pending - (baseline._pending ?? 0) : 0;
+        if (method.protocol === 'RGB' && method.layer === 'onchain' && newlyPending > 0 && balance.balance >= baseline!.balance) {
+          emitStatus({ layer: 'onchain', protocol: 'RGB', status: 'pending', assetId: 'BTC', amount: newlyPending,
             message: 'Bitcoin received. Waiting for block confirmation.' });
         }
         if (method.protocol === 'ARKADE' && method.layer === 'onchain' && (balance._boardingPending > 0 || balance._boardingReady > 0)) {
