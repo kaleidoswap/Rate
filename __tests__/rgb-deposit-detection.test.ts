@@ -9,8 +9,13 @@ const mockRgb = {
   protocolName: 'RGB_L1',
   isConnected: () => true,
   listUnspents: jest.fn(),
-  listTransfers: jest.fn(async () => ({ transfers: [{ idx: 1, kind: 'ReceiveWitness', status: STAGES[mockStage], recipient_id: 'rid-1' }] })),
-  account: { refreshTransfers: mockRefresh, listTransfers: jest.fn(async () => []) },
+  listTransfers: jest.fn(async () => ({ transfers: [{ idx: 1, kind: 'ReceiveWitness', status: STAGES[mockStage], recipient_id: 'rid-1',
+    assignments: mockStage > 0 ? [{ type: 'FUNGIBLE', amount: 100_000_000 }] : [] }] })),
+  listAssets: jest.fn(async () => [{ id: 'BTC' }, { id: 'rgb:usdt' }]),
+  account: {
+    refreshTransfers: mockRefresh, listTransfers: jest.fn(async () => []),
+    syncedBtcBalance: jest.fn(async () => ({ vanilla: { settled: 0, future: 0, spendable: 0 } })),
+  } as any,
   getAssetBalance: jest.fn(async () => ({ total: 0 })),
   getBtcBalance: jest.fn(async () => ({ total: 0 })),
 }
@@ -30,7 +35,7 @@ it('follows the invoice’s transfer: waiting for the sender, confirming, then r
   renderHook(() => useDepositDetection({ enabled: true, methods, onDetected, onStatus }))
   await jest.advanceTimersByTimeAsync(4_000) // first check refreshes once: now waiting for confirmations
   expect(mockRefresh).toHaveBeenCalledTimes(1)
-  expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ layer: 'rgb', status: 'pending', message: expect.stringMatching(/confirms/) }))
+  expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ layer: 'rgb', status: 'pending', assetId: 'rgb:usdt', amount: 100_000_000, message: expect.stringMatching(/confirms/) }))
   await jest.advanceTimersByTimeAsync(8_000) // 8s after: too soon to refresh again
   expect(mockRefresh).toHaveBeenCalledTimes(1)
   expect(onDetected).not.toHaveBeenCalled()
@@ -64,4 +69,30 @@ it('the unified USD code follows its RGB USDT invoice’s transfer, not the USDT
   expect(mockRgb.listTransfers).toHaveBeenCalledWith({ asset_id: 'rgb:usdt' })
   expect(mockRgb.getAssetBalance).not.toHaveBeenCalled()
   expect(onDetected).toHaveBeenCalledWith(expect.objectContaining({ layer: 'rgb', status: 'confirmed' }))
+})
+
+it('an any-asset invoice names the asset and amount that arrived', async () => {
+  const onStatus = jest.fn()
+  const anyAsset = [{ ...methods[0], assetId: 'RGB_NEW' }]
+  mockStage = 1 // the sender's transfer is accepted, waiting for confirmations
+  renderHook(() => useDepositDetection({ enabled: true, methods: anyAsset, onDetected: jest.fn(), onStatus }))
+  await jest.advanceTimersByTimeAsync(4_000)
+  expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'pending', assetId: 'rgb:usdt', amount: 100_000_000 }))
+})
+
+it('sees a bitcoin deposit to the RGB wallet while it is in the mempool, then when it confirms', async () => {
+  const sync = mockRgb.account.syncedBtcBalance as jest.Mock
+  sync.mockResolvedValueOnce({ vanilla: { settled: 1_000, future: 1_000, spendable: 1_000 } }) // baseline
+    .mockResolvedValueOnce({ vanilla: { settled: 1_000, future: 26_000, spendable: 1_000 } }) // in the mempool
+    .mockResolvedValue({ vanilla: { settled: 26_000, future: 26_000, spendable: 26_000 } }) // confirmed
+  const onDetected = jest.fn()
+  const onStatus = jest.fn()
+  const btc = [{ key: 'onchain-rgb', label: 'Bitcoin on-chain', protocol: 'RGB', kind: 'address', layer: 'onchain', monitor: 'balance', value: 'tb1qrgb', assetId: 'BTC' }] as any
+  renderHook(() => useDepositDetection({ enabled: true, methods: btc, onDetected, onStatus }))
+  await jest.advanceTimersByTimeAsync(1_000) // baseline
+  await jest.advanceTimersByTimeAsync(8_000)
+  expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ layer: 'onchain', status: 'pending', assetId: 'BTC', amount: 25_000 }))
+  expect(onDetected).not.toHaveBeenCalled()
+  await jest.advanceTimersByTimeAsync(8_000)
+  expect(onDetected).toHaveBeenCalledWith(expect.objectContaining({ layer: 'onchain', status: 'confirmed', amount: 25_000 }))
 })

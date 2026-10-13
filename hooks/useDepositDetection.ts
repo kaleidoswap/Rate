@@ -117,10 +117,16 @@ async function readMethodBalances(method: ReceiveMethod, signal: AbortSignal): P
     const adapter = getConnectedAdapter(method.protocol);
     if (!adapter) return null;
     try {
-      // Native rgb-lib needs a chain sync before reading registerWallet's balance.
+      // RGB on this phone: one chain sync and balance read. Syncing takes longer than the
+      // usual poll timeout, and a read that always timed out never saw the mempool deposit.
+      if (adapter.account?.syncedBtcBalance) {
+        const b = await runReceiveOperation<any>('RGB Bitcoin balance', () => adapter.account.syncedBtcBalance(), RGB_REFRESH_TIMEOUT_MS, signal);
+        const v = b?.vanilla ?? {};
+        const settled = Number(v.settled ?? 0);
+        return { balance: settled, _pending: Math.max(0, Number(v.future ?? settled) - settled) };
+      }
       const b = await runReceiveOperation<any>('RGB Bitcoin balance', async () => {
-        if (adapter.account?.syncWallet) await adapter.account.syncWallet();
-        else await adapter.refreshBalances?.();
+        await adapter.refreshBalances?.();
         return adapter.getBtcBalance();
       }, POLL_TIMEOUT_MS, signal);
       return { balance: Number(b.confirmed ?? 0), _pending: Number(b.unconfirmed ?? 0) };
@@ -226,7 +232,8 @@ async function readRgbTransfer(
       parentSignal,
     );
     const { stage, message } = rgbReceiveStage(transfer);
-    return { layer: method.layer, status: stage, protocol: method.protocol, assetId: method.assetId, amount: transfer?.amount, amountSource: 'payment', message, rawStatus: transfer?.status ?? 'none' };
+    // An any-asset invoice learns its asset from the transfer: name it so the amount can show.
+    return { layer: method.layer, status: stage, protocol: method.protocol, assetId: transfer?.assetId ?? method.assetId, amount: transfer?.amount || undefined, amountSource: 'payment', message, rawStatus: transfer?.status ?? 'none' };
   } catch {
     return null;
   }
@@ -271,7 +278,8 @@ export function useDepositDetection({
 
     const emitStatus = (event: DepositDetectionEvent) => {
       if (cancelled || firedRef.current) return;
-      const key = `${event.layer}:${event.status}:${event.protocol ?? ''}:${event.rawStatus ?? ''}`;
+      // The amount too: an incoming transfer or mempool deposit learns or changes it while pending.
+      const key = `${event.layer}:${event.status}:${event.protocol ?? ''}:${event.rawStatus ?? ''}:${event.assetId ?? ''}:${event.amount ?? ''}`;
       if (statusKeyRef.current === key) return;
       statusKeyRef.current = key;
       onStatusRef.current?.(event);

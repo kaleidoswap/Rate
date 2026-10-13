@@ -57,18 +57,22 @@ export async function listRgbTransfers(adapter: any, assetId: string | null): Pr
 }
 
 /**
- * The transfer behind an invoice. Without an asset id the invoice takes any asset:
- * look among receives of unknown assets, then in each asset the account holds.
+ * The transfer behind an invoice, with the asset it moves once that is known. Without an
+ * asset id the invoice takes any asset: look among receives of unknown assets, then in
+ * each asset the account holds (where it moves once the sender's transfer is accepted).
  */
-export async function findRgbReceive(adapter: any, { recipientId, assetId }: { recipientId: string; assetId: string | null }): Promise<RgbTransfer | undefined> {
-  if (assetId) return findRgbTransfer(await listRgbTransfers(adapter, assetId), recipientId);
+export async function findRgbReceive(adapter: any, { recipientId, assetId }: { recipientId: string; assetId: string | null }): Promise<(RgbTransfer & { assetId?: string }) | undefined> {
+  if (assetId) {
+    const found = findRgbTransfer(await listRgbTransfers(adapter, assetId), recipientId);
+    return found && { ...found, assetId };
+  }
   const unknown = findRgbTransfer(await listRgbTransfers(adapter, null), recipientId);
   if (unknown) return unknown;
   const assets: any[] = (await adapter.listAssets?.()) ?? [];
   for (const asset of assets) {
     if (!asset?.id || asset.id === 'BTC') continue;
     const found = findRgbTransfer(await listRgbTransfers(adapter, asset.id), recipientId);
-    if (found) return found;
+    if (found) return { ...found, assetId: asset.id };
   }
   return undefined;
 }

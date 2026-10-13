@@ -3,8 +3,12 @@ import { View, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { Button } from '../Button';
-export function ReceiveOutcomeCard({ status, onRefresh, onActivity, hint, requestedAmount }: {
+export function ReceiveOutcomeCard({ status, onRefresh, onActivity, hint, requestedAmount, detectedAmount, message }: {
   status: string; onRefresh?: () => void; onActivity?: () => void; hint?: string; requestedAmount?: string;
+  /** What arrived, e.g. "100 USDT" or "12,000 sats", once the watcher knows it. */
+  detectedAmount?: string;
+  /** Where a detected payment stands, e.g. waiting for the sender's transaction to confirm. */
+  message?: string;
 }) {
   const t = useAppTheme();
   const received = status === 'confirmed' || status === 'claimed';
@@ -14,7 +18,8 @@ export function ReceiveOutcomeCard({ status, onRefresh, onActivity, hint, reques
   return <View style={{ alignSelf: 'stretch', padding: t.spacing[5], gap: t.spacing[4], borderRadius: t.borderRadius.xl, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: t.colors.border.light }}>
     <Ionicons name={received ? 'checkmark-circle' : pending ? 'time-outline' : 'alert-circle-outline'} size={40} color={color} />
     <Text accessibilityRole="header" accessibilityLiveRegion="polite" style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.xl, fontWeight: '600' }}>{received ? 'Payment received' : pending ? 'Payment detected' : expired ? 'Refresh your request' : 'Payment needs checking'}</Text>
-    {!received && <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.base }}>{pending ? 'Confirming. The sender does not need to pay again.' : expired ? 'Invoice expired. Create a new request.' : 'Check Activity before asking the sender to pay again.'}</Text>}
+    {!!detectedAmount && (received || pending) && <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.xl, fontWeight: '600', fontVariant: ['tabular-nums'] }}>+{detectedAmount}</Text>}
+    {!received && <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.base }}>{pending ? (message || 'Confirming. The sender does not need to pay again.') : expired ? 'Invoice expired. Create a new request.' : 'Check Activity before asking the sender to pay again.'}</Text>}
     {!!requestedAmount && <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.base }}>Requested · {requestedAmount}</Text>}
     {pending && !!hint && <Text style={{ color: t.colors.warning[500] }}>{hint}</Text>}
     {expired && onRefresh && <Button title="Create a fresh request" onPress={onRefresh} />}
