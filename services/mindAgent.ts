@@ -28,6 +28,8 @@ import {
   type Skill,
   type SkillBundle,
   type ToolSource,
+  type FastIntent,
+  WALLET_FAST_INTENTS,
 } from '@kaleidorg/mind';
 import type { QvacTurnStats } from '@kaleidorg/mind/qvac';
 import skillBundle from '../skills.bundle.json';
@@ -37,7 +39,7 @@ import { numberWordsToDigits } from '../utils/numberWords';
 import { buildSwapToolSource } from './swapTools';
 import { buildAgentToolSource } from './agentWallet/tools';
 import { agentConfirm, bindAgentConfirm } from './agentWallet/confirm';
-import { buildKnowledgeToolSource } from './aiKnowledge';
+import { buildKnowledge, type Knowledge } from './aiKnowledge';
 import { asyncStorageMemoryIO } from './aiMemory';
 import type QVACService from './QVACService';
 
@@ -57,7 +59,20 @@ export const SOUL =
   'Paid services are paid from the separate Agent wallet within limits the ' +
   'user set; use agent_budget_status to see what is left and explain plainly ' +
   'when a payment is refused. ' +
+  'You also explain Bitcoin, Lightning and RGB (and the Spark and Ark layers) ' +
+  'when asked what something is or how it works: answer from the Relevant ' +
+  'context when it is given, otherwise call search_knowledge first; explain ' +
+  'in two or three simple sentences and do not call wallet tools for it. ' +
   'All BTC amounts are in satoshis. Keep replies short.';
+
+/**
+ * A question about what assets ARE ("what are RGB assets?", "cosa sono i token?")
+ * is a concept to explain, not a request to list the wallet's own.
+ */
+const ASKS_DEFINITION = /\b(what (is|are) (an? |the )?(rgb )?(assets?|tokens?)\b(?! do i| i (have|hold|own))|explain|how do(es)? .*\bwork|cos['’ ]?[eè] (un |una |l['’])?(rgb |asset|token)|cosa sono|spiega|come funzion)/i;
+/** The shared fast intents, minus the asset listing for definition questions. */
+export const MIND_FAST_INTENTS: FastIntent[] = WALLET_FAST_INTENTS.map((intent) =>
+  intent.name === 'assets' ? { ...intent, match: (t: string) => !ASKS_DEFINITION.test(t) && intent.match(t) } : intent);
 
 /** Per-user agent settings (the persisted MindConfig satisfies this shape). */
 export interface MindAgentSettings {
@@ -116,7 +131,7 @@ export interface MindAgent {
 // key). The RAG source is memoized too so its on-device index is built once.
 let sharedMemory: ToolSource | null = null;
 let sharedMemoryStore: InMemoryMemoryStore | null = null;
-let sharedKnowledge: ToolSource | null = null;
+let sharedKnowledge: Knowledge | null = null;
 function memorySource(): ToolSource {
   if (!sharedMemory) {
     sharedMemoryStore = new InMemoryMemoryStore({ io: asyncStorageMemoryIO() });
@@ -124,8 +139,8 @@ function memorySource(): ToolSource {
   }
   return sharedMemory;
 }
-function knowledgeSource(qvac: QVACService): ToolSource {
-  if (!sharedKnowledge) sharedKnowledge = buildKnowledgeToolSource(qvac);
+function knowledge(qvac: QVACService): Knowledge {
+  if (!sharedKnowledge) sharedKnowledge = buildKnowledge(qvac);
   return sharedKnowledge;
 }
 
@@ -166,7 +181,7 @@ export function buildMindToolSources(qvac: QVACService): ToolSource[] {
       confirm: agentConfirm,
     }),
     memorySource(),
-    knowledgeSource(qvac),
+    knowledge(qvac).source,
     createSkillReferenceToolSource(new SkillRegistry(SKILLS)),
   ];
 }
@@ -207,6 +222,11 @@ export function createMindAgent(
     tools,
     skills: SKILLS,
     system: SOUL,
+    fastIntents: MIND_FAST_INTENTS,
+    // Concept questions get the knowledge passages in the prompt: the small model
+    // rarely chooses to call search_knowledge on its own. Other turns skip it.
+    retriever: knowledge(qvac).retriever,
+    topKRag: 3,
     maxTurns: getSettings().maxTurns ?? 5,
     // Read fresh each turn — persona/history/memory/RAG/disabled-skill toggles
     // take effect immediately without rebuilding the funnel or the RAG index.

@@ -112,7 +112,7 @@ const mdStyles = {
 };
 
 /** Shown when the model returns nothing — far friendlier than a blunt "Done." */
-const NO_ANSWER_FALLBACK = "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.";
+const NO_ANSWER_FALLBACK = "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, Bitcoin merchants, or how Bitcoin, Lightning and RGB work.";
 
 /** Turn a raw model/runtime error into something a person can act on. */
 function friendlyError(err: unknown): string {
