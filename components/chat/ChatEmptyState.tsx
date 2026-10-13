@@ -1,3 +1,4 @@
+import { prismoText } from '../../localization/prismo';
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,39 +17,39 @@ interface ChatEmptyStateProps {
 export default function ChatEmptyState({ onSuggestion, onContacts, hero, needsSetup = false, onSetup }: ChatEmptyStateProps) {
   const theme = useAppTheme();
   const suggestions = [
-    { icon: 'wallet-outline' as const, label: 'Check my balance', action: () => onSuggestion("What's my balance?") },
-    { icon: 'people-outline' as const, label: 'Pay a contact', action: onContacts },
-    { icon: 'download-outline' as const, label: 'Receive bitcoin', action: () => onSuggestion('Show my receive address') },
+    { icon: 'wallet-outline' as const, label: prismoText("Check my balance"), action: () => onSuggestion(prismoText("What's my balance?")) },
+    { icon: 'people-outline' as const, label: prismoText("Pay a contact"), action: onContacts },
+    { icon: 'download-outline' as const, label: prismoText("Receive bitcoin"), action: () => onSuggestion(prismoText("Show my receive address")) },
   ];
   return (
     <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       <View style={styles.hero}>{hero}</View>
-      <Text style={[styles.title, { color: theme.colors.text.primary }]}>{needsSetup ? 'Meet Prismo' : 'How can I help?'}</Text>
+      <Text style={[styles.title, { color: theme.colors.text.primary }]}>{needsSetup ? prismoText("Meet Prismo") : prismoText('How can I help?')}</Text>
       <Text style={[styles.subtitle, { color: theme.colors.text.secondary }]}>
-        {needsSetup ? 'Your wallet, one conversation away.\nCheck balances, receive bitcoin and prepare payments.' : 'Ask about your wallet, or start with a suggestion.'}
+        {needsSetup ? prismoText('Your wallet, one conversation away.\nCheck balances, receive bitcoin and prepare payments.') : prismoText("Ask about your wallet, or start with a suggestion.")}
       </Text>
       {needsSetup ? (
         <View style={styles.actions}>
-          <TouchableOpacity onPress={onSetup} accessibilityRole="button" accessibilityLabel="Set up Prismo"
+          <TouchableOpacity onPress={onSetup} accessibilityRole="button" accessibilityLabel={prismoText("Set up Prismo")}
             style={[styles.primary, { backgroundColor: theme.colors.primary[500] }]}>
-            <Text style={[styles.primaryLabel, { color: theme.colors.text.inverse }]}>Set up Prismo</Text>
+            <Text style={[styles.primaryLabel, { color: theme.colors.text.inverse }]}>{prismoText("Set up Prismo")}</Text>
             <Ionicons name="arrow-forward" size={18} color={theme.colors.text.inverse} />
           </TouchableOpacity>
-          <Text style={[styles.note, { color: theme.colors.text.secondary }]}>We’ll check your device and help you get started.</Text>
+          <Text style={[styles.note, { color: theme.colors.text.secondary }]}>{prismoText("We’ll check your device and help you get started.")}</Text>
         </View>
       ) : (
         <View style={styles.actions}>
           {suggestions.map(item => <TouchableOpacity key={item.label} onPress={item.action} accessibilityRole="button"
             style={[styles.suggestion, { backgroundColor: theme.colors.surface.primary, borderColor: theme.colors.border.light }]}>
             <Ionicons name={item.icon} size={20} color={theme.colors.text.secondary} />
-            <Text style={[styles.suggestionLabel, { color: theme.colors.text.primary }]}>{item.label}</Text>
+            <Text style={[styles.suggestionLabel, { color: theme.colors.text.primary }]}>{prismoText(item.label)}</Text>
             <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
           </TouchableOpacity>)}
         </View>
       )}
       <View style={styles.reassurance}>
         <Ionicons name="shield-checkmark-outline" size={15} color={theme.colors.text.secondary} />
-        <Text style={[styles.note, { color: theme.colors.text.secondary }]}>You review payments before they’re sent.</Text>
+        <Text style={[styles.note, { color: theme.colors.text.secondary }]}>{prismoText("You review payments before they’re sent.")}</Text>
       </View>
     </ScrollView>
   );

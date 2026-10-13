@@ -1,3 +1,4 @@
+import { prismoText } from '../localization/prismo';
 import { PrismoAnimatedCharacter } from '../components/mind/PrismoAnimatedCharacter';
 import { VoiceModeIcon } from '../components/mind/VoiceModeIcon';
 import { useAgentPaymentFeedback } from "../components/mind/useAgentPaymentFeedback";
@@ -105,7 +106,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
   // Collapsible quick actions (hidden by default once a chat is going).
   const [showActions, setShowActions] = useState(false);
-  const [showSkills, setShowSkills] = useState(false);
 
   // Nostr contacts state
   const [showContactsSelector, setShowContactsSelector] = useState(false);
@@ -164,7 +164,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // the funnel to that skill so the model gets its instructions for the turn.
   const skills = useMemo<Skill[]>(() => {
     try { return agent.listSkills(); } catch { return []; }
-  }, [agent]);
+  }, [agent, mindConfig.disabledSkills]);
   const [activeSkill, setActiveSkill] = useState<Skill | null>(null);
 
   // requestId of the in-flight completion, used to cancel via the stop button
@@ -350,14 +350,14 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       errorMessage = 'Speech recognition is not supported on this device.';
       setIsVoiceAvailable(false);
     }
-    Alert.alert('Voice Recognition Error', errorMessage);
+    Alert.alert(prismoText('Voice Recognition Error'), prismoText(errorMessage));
   };
 
   const startListening = () => {
     if (!isVoiceAvailable) {
       Alert.alert(
-        'Voice Recognition Unavailable',
-        'Speech recognition is not available. Please type your message instead.',
+        prismoText('Voice Recognition Unavailable'),
+        prismoText('Speech recognition is not available. Please type your message instead.'),
         [{ text: 'OK' }],
       );
       return;
@@ -381,7 +381,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   }, []);
 
   const openLink = useCallback((url: string) => {
-    Linking.openURL(url).catch(() => toast().error('Could not open link'));
+    Linking.openURL(url).catch(() => toast().error(prismoText('Could not open link')));
   }, []);
 
   const handleLongPressMessage = useCallback((message: ChatMessage) => {
@@ -389,7 +389,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     if (!text) return;
     Haptics.selectionAsync();
     Clipboard.setString(text);
-    toast().success('Message copied');
+    toast().success(prismoText('Message copied'));
   }, []);
 
   // Copy the entire conversation (each turn's reasoning + answer) as plain text.
@@ -405,13 +405,13 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
     if (!transcript) return;
     Clipboard.setString(transcript);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-    toast().success('Full chat copied');
+    toast().success(prismoText('Full chat copied'));
   }, [messages]);
 
   // ---- Contacts ----
   const handleContactSelection = (contact: Contact) => {
     if (!contact.lightning_address) {
-      Alert.alert('No Lightning Address', "This contact doesn't have a Lightning address set up.");
+      Alert.alert(prismoText('No Lightning Address'), "This contact doesn't have a Lightning address set up.");
       return;
     }
     setShowContactsSelector(false);
@@ -683,9 +683,9 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
   const clearChatHistory = () => {
     if (isLoading) return;
-    Alert.alert('Clear chat', 'Clear this conversation? This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: newChat },
+    Alert.alert(prismoText('Clear chat'), prismoText('Clear this conversation? This cannot be undone.'), [
+      { text: prismoText('Cancel'), style: 'cancel' },
+      { text: prismoText('Clear'), style: 'destructive', onPress: newChat },
     ]);
   };
 
@@ -703,9 +703,9 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             <TouchableOpacity
               onPress={openMindSetup}
               style={styles.modelRetry}
-              accessibilityLabel="Set up Agent"
+              accessibilityLabel={prismoText("Set up Agent")}
             >
-              <Text style={styles.modelRetryText}>Set up</Text>
+              <Text style={styles.modelRetryText}>{prismoText("Set up")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -728,9 +728,9 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             <TouchableOpacity
               onPress={() => dispatch(setAiMode('off'))}
               style={[styles.modelRetry, styles.modelRetryGhost]}
-              accessibilityLabel="Turn off Agent"
+              accessibilityLabel={prismoText("Turn off Agent")}
             >
-              <Text style={styles.modelRetryText}>Off</Text>
+              <Text style={styles.modelRetryText}>{prismoText("Off")}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -754,10 +754,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           ) : (
             <ActivityIndicator size="small" color={theme.colors.primary[600]} />
           )}
-          <Text style={[styles.modelBannerText, isError && styles.modelBannerTextError]}>{label}</Text>
+          <Text style={[styles.modelBannerText, isError && styles.modelBannerTextError]}>{prismoText(label)}</Text>
           {isError && (
-            <TouchableOpacity onPress={qvac.initialize} style={styles.modelRetry} accessibilityLabel="Retry loading AI">
-              <Text style={styles.modelRetryText}>Retry</Text>
+            <TouchableOpacity onPress={qvac.initialize} style={styles.modelRetry} accessibilityLabel={prismoText("Retry loading AI")}>
+              <Text style={styles.modelRetryText}>{prismoText("Retry")}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -787,7 +787,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       icon: 'receipt',
       label: 'Invoice',
       description: 'Choose an amount to receive',
-      onPress: () => setInputText('Create an invoice for '),
+      onPress: () => setInputText(prismoText('Create an invoice for ')),
     },
     {
       icon: 'people',
@@ -799,60 +799,26 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       icon: 'storefront',
       label: 'Merchants',
       description: 'Find places that accept bitcoin',
-      onPress: () => sendMessage('Find Bitcoin-accepting merchants near me'),
+      onPress: () => sendMessage(prismoText('Find Bitcoin-accepting merchants near me')),
     },
   ];
 
   const renderQuickActions = () => (
     <View>
       <View style={{ padding: 12, gap: 4 }}>
-        <Text style={{ color: theme.colors.text.secondary, fontSize: 12, marginBottom: 4 }}>Wallet actions</Text>
-        {QUICK_ACTIONS.map(a => <TouchableOpacity key={a.label} accessibilityRole="button" accessibilityLabel={a.label}
+        <Text style={{ color: theme.colors.text.secondary, fontSize: 12, marginBottom: 4 }}>{prismoText("Wallet actions")}</Text>
+        {QUICK_ACTIONS.map(a => <TouchableOpacity key={a.label} accessibilityRole="button" accessibilityLabel={prismoText(a.label)}
           onPress={() => { setShowActions(false); a.onPress(); }}
           style={{ minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 6 }}>
           <Ionicons name={a.icon} size={21} color={theme.colors.text.secondary} />
-          <View style={{ flex: 1 }}><Text style={{ color: theme.colors.text.primary, fontSize: 15 }}>{a.label}</Text>
-          <Text style={{ color: theme.colors.text.secondary, fontSize: 12, marginTop: 3 }}>{a.description}</Text></View>
+          <View style={{ flex: 1 }}><Text style={{ color: theme.colors.text.primary, fontSize: 15 }}>{prismoText(a.label)}</Text>
+          <Text style={{ color: theme.colors.text.secondary, fontSize: 12, marginTop: 3 }}>{prismoText(a.description)}</Text></View>
           <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
         </TouchableOpacity>)}
-        {skills.length > 0 && <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showSkills }} onPress={() => setShowSkills(!showSkills)} style={{ minHeight: 44, justifyContent: 'center' }}><Text style={{ color: theme.colors.text.secondary }}>{showSkills ? 'Hide advanced skills' : 'Advanced skills'}</Text></TouchableOpacity>}
+
       </View>
 
-      {/* Pin a skill for the next message (like a /command). */}
-      {showSkills && skills.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.skillRowContainer}
-          contentContainerStyle={styles.quickActionsContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          <View style={styles.skillRowLabel}>
-            <Ionicons name="sparkles-outline" size={13} color={theme.colors.text.tertiary} />
-            <Text style={styles.skillRowLabelText}>Skills</Text>
-          </View>
-          {skills.map((s) => {
-            const on = activeSkill?.name === s.name;
-            return (
-              <TouchableOpacity
-                key={s.name}
-                style={[styles.skillChip, on && styles.skillChipActive]}
-                onPress={() => {
-                  setActiveSkill(on ? null : s);
-                  setShowActions(false);
-                  Haptics.selectionAsync();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`Use skill ${s.name}`}
-              >
-                <Text style={[styles.skillChipText, on && styles.skillChipTextActive]}>
-                  /{skillSlug(s.name)}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      )}
+
     </View>
   );
 
@@ -870,7 +836,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         onSelectLocal={() => { dispatch(setAiMode('local')); finishMindSetup(); }}
         onSkip={() => { finishMindSetup(); }}
       />}
-      <VoiceAgentOverlay visible={voiceAgentOpen} autoListen={true} onClose={() => setVoiceAgentOpen(false)} />
+      <VoiceAgentOverlay messages={messages} onMessagesChange={setMessages} visible={voiceAgentOpen} autoListen={true} onClose={() => setVoiceAgentOpen(false)} />
       <MainHeader
         title="Agent"
         iconNode={<MindCharacterBadge size={22} color={theme.colors.text.primary} />}
@@ -878,7 +844,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             {!isEmpty && (
               <TouchableOpacity style={styles.headerBtn} accessibilityRole="button"
-                onPress={clearChatHistory} disabled={isLoading} accessibilityLabel="Clear chat">
+                onPress={clearChatHistory} disabled={isLoading} accessibilityLabel={prismoText("Clear chat")}>
                 <Ionicons name="trash-outline" size={20} color={isLoading ? theme.colors.text.tertiary : theme.colors.text.secondary} />
               </TouchableOpacity>
             )}
@@ -890,20 +856,20 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       />
           {showMenu && <View style={styles.agentMenu}>
             {([
-              { icon: 'time-outline', label: 'Conversation', onPress: () => setShowHistory(true) },
+              { icon: 'time-outline', label: prismoText("Conversation"), onPress: () => setShowHistory(true) },
               ...(!isEmpty ? [{ icon: 'copy-outline', label: 'Copy this chat', onPress: copyFullChat }] : []),
               { icon: 'wallet-outline', label: 'Agent wallet', onPress: () => navigation.navigate('AgentWallet') },
-              { icon: 'settings-outline', label: 'Models & settings', onPress: () => setShowSettings(true) },
+              { icon: 'settings-outline', label: prismoText("Prismo settings"), onPress: () => { if (isLoading) { Alert.alert(prismoText('Prismo settings'), prismoText('Stop the current response before changing models.')); return; } navigation.navigate('MindSettings'); } },
               ...(__DEV__ ? [{ icon: 'headset-outline', label: 'Talk · verifica integrazione', onPress: () => setVoiceAgentOpen(true) }, { icon: 'play-circle-outline', label: 'Design preview · demo', onPress: () => setDesignPreview(true) }] : []),
             ] as { icon: keyof typeof Ionicons.glyphMap; label: string; onPress: () => void }[]).map((item) => (
               <TouchableOpacity key={item.label} style={styles.menuRow} accessibilityRole="button"
                 onPress={() => { setShowMenu(false); item.onPress(); }}>
                 <Ionicons name={item.icon} size={20} color={theme.colors.text.secondary} />
-                <Text style={styles.menuLabel}>{item.label}</Text>
+                <Text style={styles.menuLabel}>{prismoText(item.label)}</Text>
                 <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
               </TouchableOpacity>
             ))}
-            <Text style={{ color: theme.colors.text.secondary, fontSize: 12, paddingVertical: 12 }}>Agent is experimental. Review important details.</Text>
+            <Text style={{ color: theme.colors.text.secondary, fontSize: 12, paddingVertical: 12 }}>{prismoText("Agent is experimental. Review important details.")}</Text>
           </View>}
 
       <View style={styles.chatContainer}>
@@ -977,7 +943,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                         <MindCharacter mood={mood} size={32} paused={!isFocused} />
                       </View>
                       <View style={styles.processingBubble}>
-                        <TypingDots label={progressLabel ?? 'Thinking on-device…'} />
+                        <TypingDots label={progressLabel ?? prismoText("Thinking on-device…")} />
                       </View>
                     </View>
                   )}
@@ -986,11 +952,6 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
               {(aiEnabled || !isEmpty) && <View style={styles.inputContainer}>
                 <BlurView intensity={80} tint={theme.dark ? 'dark' : 'light'} style={styles.inputGradient}>
-                  <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose model and voice" onPress={() => setShowSettings(true)} style={{flexDirection:'row',alignItems:'center',gap:theme.spacing[2],minHeight:32,paddingBottom:theme.spacing[2]}}>
-                    <Ionicons name="hardware-chip-outline" size={14} color={theme.colors.text.secondary}/>
-                    <Text style={{color:theme.colors.text.secondary,fontSize:theme.typography.fontSize.xs,flexShrink:1}} numberOfLines={1}>{aiEnabled ? headerSubtitle : 'Choose a model · AI is off'}</Text>
-                    <Ionicons name="chevron-down" size={13} color={theme.colors.text.secondary}/>
-                  </TouchableOpacity>
                   {showActions && renderQuickActions()}
 
                   {/* Pinned-skill chip: this message routes to it; tap ✕ to clear. */}
@@ -999,7 +960,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                       <View style={styles.activeSkillChip}>
                         <Ionicons name="sparkles" size={12} color={theme.colors.primary[500]} />
                         <Text style={styles.activeSkillText}>/{skillSlug(activeSkill.name)}</Text>
-                        <TouchableOpacity onPress={() => setActiveSkill(null)} hitSlop={8} accessibilityLabel="Clear skill">
+                        <TouchableOpacity onPress={() => setActiveSkill(null)} hitSlop={8} accessibilityLabel={prismoText("Clear skill")}>
                           <Ionicons name="close" size={14} color={theme.colors.text.secondary} />
                         </TouchableOpacity>
                       </View>
@@ -1028,8 +989,8 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                           setInputText(text);
                           if (!isListening) setBaseInputText(text);
                         }}
-                        accessibilityLabel="Message Prismo"
-                        placeholder={isListening ? 'Listening… speak now' : 'Ask Prismo…'}
+                        accessibilityLabel={prismoText("Message Prismo")}
+                        placeholder={isListening ? prismoText("Listening… speak now") : prismoText("Ask Prismo…")}
                         placeholderTextColor={theme.colors.text.tertiary}
                         multiline
                         maxLength={500}
@@ -1062,7 +1023,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                       <TouchableOpacity
                         style={styles.roundButton}
                         onPress={stopGeneration}
-                        accessibilityLabel="Stop generating"
+                        accessibilityLabel={prismoText("Stop generating")}
                       >
                         <LinearGradient colors={theme.colors.error.gradient!} style={styles.buttonGradient}>
                           <Ionicons name="stop" size={20} color="white" />
@@ -1072,7 +1033,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                       <TouchableOpacity
                         style={styles.roundButton}
                         onPress={() => sendMessage(inputText)}
-                        accessibilityLabel="Send message"
+                        accessibilityLabel={prismoText("Send message")}
                       >
                         <LinearGradient colors={theme.colors.primary.gradient!} style={styles.buttonGradient}>
                           <Ionicons name="arrow-up" size={20} color={theme.colors.text.inverse} />
@@ -1084,7 +1045,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                           style={styles.roundButton}
                           onPress={() => qvac.isReady ? startListening() : setShowSettings(true)}
                           accessibilityRole="button"
-                          accessibilityHint="Transcribe speech into your message before sending"
+                          accessibilityHint={prismoText("Transcribe speech into your message before sending")}
                           accessibilityLabel={isListening ? 'Stop recording' : 'Dictate message'}
                         >
                           <LinearGradient
@@ -1098,7 +1059,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                     )}
                     {!isLoading && !isListening && !canSend && (
                       <TouchableOpacity style={styles.voiceConversationButton} accessibilityRole="button"
-                        accessibilityLabel="Talk to Prismo" accessibilityHint="Start a voice conversation with spoken replies"
+                        disabled={isLoading} accessibilityLabel={prismoText("Talk to Prismo")} accessibilityHint={prismoText("Start a voice conversation with spoken replies")}
                         onPress={() => { Keyboard.dismiss(); aiEnabled ? setVoiceAgentOpen(true) : setShowSettings(true); }}>
                         <VoiceModeIcon color={theme.colors.text.inverse} />
                       </TouchableOpacity>
@@ -1119,7 +1080,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                           Listening… {formatRecordingDuration(recordingDuration)}
                         </Text>
                         <TouchableOpacity style={styles.stopRecordingButton} onPress={stopListening} hitSlop={8}>
-                          <Text style={styles.stopRecordingText}>Stop</Text>
+                          <Text style={styles.stopRecordingText}>{prismoText("Stop")}</Text>
                         </TouchableOpacity>
                       </View>
                     </Animated.View>
@@ -1180,26 +1141,26 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
               <Pressable style={styles.skillsSheet} onPress={() => {}}>
                 <View style={styles.skillsHandle} />
                 <View style={styles.historyHeaderRow}>
-                  <Text style={styles.skillsTitle}>Conversation</Text>
+                  <Text style={styles.skillsTitle}>{prismoText("Conversation")}</Text>
                   <View style={styles.historyActions}>
-                    <TouchableOpacity style={styles.historyAction} onPress={newChat} accessibilityLabel="New chat">
+                    <TouchableOpacity style={styles.historyAction} onPress={newChat} accessibilityLabel={prismoText("New chat")}>
                       <Ionicons name="create-outline" size={15} color={theme.colors.primary[500]} />
-                      <Text style={styles.historyActionText}>New</Text>
+                      <Text style={styles.historyActionText}>{prismoText("New")}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.historyAction}
                       onPress={clearChatHistory}
-                      accessibilityLabel="Clear conversation"
+                      accessibilityLabel={prismoText("Clear conversation")}
                       disabled={isEmpty}
                     >
                       <Ionicons name="trash-outline" size={15} color={isEmpty ? theme.colors.text.tertiary : theme.colors.error[500]} />
-                      <Text style={[styles.historyActionText, { color: isEmpty ? theme.colors.text.tertiary : theme.colors.error[500] }]}>Clear</Text>
+                      <Text style={[styles.historyActionText, { color: isEmpty ? theme.colors.text.tertiary : theme.colors.error[500] }]}>{prismoText("Clear")}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
                 <Text style={styles.skillsHint}>{messages.length} message{messages.length === 1 ? '' : 's'} in this chat.</Text>
                 {isEmpty ? (
-                  <Text style={styles.skillsHint}>No messages yet — ask Agent anything.</Text>
+                  <Text style={styles.skillsHint}>{prismoText("No messages yet — ask Agent anything.")}</Text>
                 ) : (
                   <ScrollView style={styles.historyList} keyboardShouldPersistTaps="handled">
                     {messages.filter((m) => m.text?.trim()).map((m) => (

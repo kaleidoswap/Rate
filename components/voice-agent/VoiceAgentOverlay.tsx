@@ -1,3 +1,6 @@
+import { prismoText } from '../../localization/prismo';
+import { toVoiceMessage, toChatMessage, type VoiceMessage } from '../../services/prismoConversation';
+import type { ChatMessage } from '../chat/MessageBubble';
 import { useAppLanguage } from '../../localization/useAppLanguage';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -48,17 +51,7 @@ import { useAiConfirm } from '../../hooks/useAiConfirm';
 import PaymentConfirmationModal from '../PaymentConfirmationModal';
 
 type Phase = 'idle' | 'listening' | 'thinking' | 'speaking';
-interface Bubble {
-  id: string;
-  role: 'user' | 'assistant';
-  text: string;
-  /** The model's chain-of-thought for this turn (shown on demand). */
-  thinking?: string;
-  /** A structured tool result (e.g. merchants) rendered as a rich card instead
-   *  of having the model read the raw data aloud. */
-  functionCalled?: string;
-  functionResult?: any;
-}
+type Bubble = VoiceMessage;
 
 /** Tool results that get a structured card (and a short spoken summary) in voice. */
 const MERCHANT_TOOLS = ['find_merchant_locations', 'get_merchant_info'];
@@ -133,6 +126,10 @@ function friendlyError(err: unknown): string {
 
 interface VoiceAgentOverlayProps {
   visible: boolean;
+  /** Development-only visual review; never starts native audio or inference. */
+  preview?: boolean;
+  messages?: ChatMessage[];
+  onMessagesChange?: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   onClose: () => void;
   /** Start listening as soon as the on-device AI is ready (press-and-hold entry). */
   autoListen?: boolean;
@@ -142,11 +139,12 @@ interface VoiceAgentOverlayProps {
  * Wrapper: only mount the session (and its QVAC/audio init) once opened, so the
  * dashboard stays light and nothing audio-related runs until the user taps the mic.
  */
-export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, onClose, autoListen }) =>
-  visible ? <VoiceAgentSession onClose={onClose} autoListen={autoListen} /> : null;
+export const VoiceAgentOverlay: React.FC<VoiceAgentOverlayProps> = ({ visible, ...props }) =>
+  visible ? <VoiceAgentSession {...props} /> : null;
 
-const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }> = ({ onClose, autoListen }) => {
-  const qvac = useQVAC();
+const VoiceAgentSession: React.FC<Omit<VoiceAgentOverlayProps, 'visible'>> = ({ onClose, autoListen, messages, onMessagesChange, preview }) => {
+  const isPreview = __DEV__ && preview === true;
+  const qvac = useQVAC(!isPreview);
   const aiEnabled = useAppSelector(selectAiEnabled);
   // Same KaleidoMind funnel AND settings as the chat screen — fast-path,
   // recipes, contract wallet tools, memory + on-device RAG, confirm gate,
@@ -168,9 +166,9 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   const [voiceFailure, setVoiceFailure] = useState<string | null>(null);
   const onVoiceFallback = (detail: string) => setVoiceFailure(detail);
   const onVoiceStage = (stage: VoiceStage) => setVoiceEngine(t(stage === 'loading' ? 'Loading voice · first use may take a few minutes' : 'Generating voice…'));
-  const onVoicePreparing = () => { setVoiceFailure(null); setVoiceEngine('Preparing Supertonic 3…'); };
+  const onVoicePreparing = () => { setVoiceFailure(null); setVoiceEngine(prismoText("Preparing Supertonic 3…")); };
   const [voiceEngine, setVoiceEngine] = useState('');
-  const onVoiceEngine = (engine: 'supertonic' | 'system', reason?: 'language' | 'unavailable') => setVoiceEngine(engine === 'supertonic' ? 'Supertonic 3' : reason === 'unavailable' ? 'System voice · Supertonic unavailable' : 'System voice');
+  const onVoiceEngine = (engine: 'supertonic' | 'system', reason?: 'language' | 'unavailable') => setVoiceEngine(engine === 'supertonic' ? 'Supertonic 3' : reason === 'unavailable' ? prismoText("System voice · Supertonic unavailable") : prismoText("System voice"));
   const pendingSpeech = useRef<(() => void) | null>(null);
   const onSpeechLevel = useCallback((level: number) => characterRef.current?.setLevel(level), []);
   const stopSpeak = useCallback(async () => {
@@ -180,7 +178,12 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     pending?.();
   }, [onSpeechLevel]);
 
-  const [bubbles, setBubbles] = useState<Bubble[]>([]);
+  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
+  const bubbles = useMemo(() => (messages ?? localMessages).map(toVoiceMessage), [messages, localMessages]);
+  const setBubbles = (update: (previous: Bubble[]) => Bubble[]) => {
+    if (!aliveRef.current) return;
+    (onMessagesChange ?? setLocalMessages)(previous => update(previous.map(toVoiceMessage)).map(toChatMessage));
+  };
   const [error, setError] = useState<string | null>(null);
   // Which assistant bubbles have their reasoning expanded (tap to reveal). A
   // value of `undefined` means "auto" — expanded live while reasoning, then
@@ -307,7 +310,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // first time") because the recording session was cold (and the mic-permission
   // prompt raced with auto-listen).
   useEffect(() => {
-    if (!aiEnabled) return;
+    if (!aiEnabled || isPreview) return;
     void qvac.service?.initializeWhisper?.().catch(() => {});
     // Permission and microphone activation happen only in the cancellable start path.
   }, []);
@@ -318,7 +321,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   // be consumed reliably.
   const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (autoListen && qvac.isReady && qvac.isWhisperReady && phase === 'idle' && !autoStartedRef.current) {
+    if (!isPreview && autoListen && qvac.isReady && qvac.isWhisperReady && phase === 'idle' && !autoStartedRef.current) {
       autoStartedRef.current = true;
       void stopSpeak();
       setError(null);
@@ -328,7 +331,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
 
   const appendBubble = (role: Bubble['role'], text: string) => {
     const id = nextId();
-    setBubbles((p) => [...p, { id, role, text }]);
+    setBubbles((p) => [...p, { id, role, text, isUser: role === 'user', timestamp: new Date() }]);
     requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
     return id;
   };
@@ -426,6 +429,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
   };
 
   const toggleListening = () => {
+    if (isPreview) {
+      appendBubble('user', 'E quanto posso spendere?');
+      appendBubble('assistant', 'Nella demo hai 120.000 sats disponibili. Questa risposta rimane anche nella chat.');
+      return;
+    }
     if (qvac.llmStatus === 'error') {
       // Retry model init.
       setError(null);
@@ -611,11 +619,11 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
     transform: [{ scale: interpolate(pulse.value, [0, 1], [1, 1.8]) }],
   }));
 
-  const aiFailed = qvac.llmStatus === 'error';
-  const speechFailed = qvac.whisperStatus === 'error';
+  const aiFailed = !isPreview && qvac.llmStatus === 'error';
+  const speechFailed = !isPreview && qvac.whisperStatus === 'error';
   const { subtitle: modelSubtitle, status: statusText, ready: voiceReady } = voiceStatus({
-    enabled: aiEnabled, model: getModelById(qvac.config?.modelId)?.label ?? 'Local AI',
-    llmStatus: qvac.llmStatus, whisperStatus: qvac.whisperStatus,
+    enabled: isPreview || aiEnabled, model: getModelById(qvac.config?.modelId)?.label ?? 'Local AI',
+    llmStatus: isPreview ? 'ready' : qvac.llmStatus, whisperStatus: isPreview ? 'ready' : qvac.whisperStatus,
     modelProgress: qvac.combinedProgress, speechProgress: qvac.whisperDownloadProgress,
     starting: voiceStarting, phase, error,
   });
@@ -641,17 +649,17 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             <View style={styles.headerTitleRow}>
               <MindCharacterBadge size={28} mood={mood === 'sleeping' ? 'sleeping' : 'idle'} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.headerTitle}>Prismo · Talk</Text>
-                <Text style={styles.headerSubtitle} numberOfLines={1}>{modelSubtitle}</Text>
+                <Text style={styles.headerTitle}>{prismoText("Prismo · Talk")}</Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>{isPreview ? "ANTEPRIMA" : prismoText("Local AI")}</Text>
               </View>
             </View>
             <View style={styles.headerActions}>
               {bubbles.length > 0 && (
-                <Pressable onPress={copyFullChat} hitSlop={10} style={styles.closeBtn} accessibilityLabel="Copy full chat">
+                <Pressable onPress={copyFullChat} hitSlop={10} style={styles.closeBtn} accessibilityLabel={prismoText("Copy full chat")}>
                   <Ionicons name="copy-outline" size={18} color={theme.colors.text.secondary} />
                 </Pressable>
               )}
-              <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel="Back to chat">
+              <Pressable onPress={onClose} hitSlop={10} style={styles.closeBtn} accessibilityRole="button" accessibilityLabel={prismoText("Back to chat")}>
                 <Ionicons name="close" size={20} color={theme.colors.text.secondary} />
               </Pressable>
             </View>
@@ -664,9 +672,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
             contentContainerStyle={{ paddingVertical: 12, gap: 10 }}
             showsVerticalScrollIndicator={false}
           >
+            {isPreview && <Text style={styles.hint}>ANTEPRIMA · Tocca il microfono per aggiungere uno scambio di esempio.</Text>}
             {bubbles.length === 0 && (
               <Text style={styles.hint}>
-                Try: "What's my balance?" · "Create an invoice for 5000 sats" · "Show my receive address"
+                {prismoText("What's my balance?")}
               </Text>
             )}
             {bubbles.filter(b => phase !== 'speaking' || b.id !== bubbles.filter(item => item.role === 'assistant').at(-1)?.id).map((b) => {
@@ -677,7 +686,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               // Live reasoning, no answer yet → show it expanded (Claude-style);
               // once the answer streams in, auto-collapse. A manual tap overrides.
               const thinkingLive = isActive && hasThinking && !hasText;
-              const open = openThinking[b.id] ?? thinkingLive;
+              const open = openThinking[b.id] ?? false;
               return (
                 <Pressable
                   key={b.id}
@@ -704,7 +713,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                         <Text
                           style={[styles.thinkToggleText, thinkingLive && { color: theme.colors.primary[500] }]}
                         >
-                          {thinkingLive ? 'Thinking…' : open ? 'Hide thinking' : 'Show thinking'}
+                          {thinkingLive ? 'Thinking…' : open ? prismoText("Hide thinking") : prismoText("Show thinking")}
                         </Text>
                         <Ionicons
                           name={open ? 'chevron-up' : 'chevron-down'}
@@ -721,7 +730,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                           {!thinkingLive && (
                             <Pressable onPress={() => copyText(b.thinking!.trim())} style={styles.copyBtn} hitSlop={8}>
                               <Ionicons name="copy-outline" size={12} color={theme.colors.text.muted} />
-                              <Text style={styles.copyBtnText}>Copy thinking</Text>
+                              <Text style={styles.copyBtnText}>{prismoText("Copy thinking")}</Text>
                             </Pressable>
                           )}
                         </View>
@@ -763,7 +772,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
                   {b.role === 'assistant' && hasText && !isActive && (
                     <Pressable onPress={() => copyText(b.text)} style={styles.copyBtn} hitSlop={8}>
                       <Ionicons name="copy-outline" size={13} color={theme.colors.text.muted} />
-                      <Text style={styles.copyBtnText}>Copy</Text>
+                      <Text style={styles.copyBtnText}>{prismoText("Copy")}</Text>
                     </Pressable>
                   )}
                 </Pressable>
@@ -784,15 +793,7 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               accessibilityLabel={`Prismo, ${statusText}`}
               onPress={voiceStarting ? pauseVoice : voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
             />
-            {voiceReady && (phase === 'idle' || phase === 'listening' || phase === 'speaking') ? (
-              <View style={styles.orbChip} pointerEvents="none">
-                <Ionicons
-                  name={phase === 'speaking' ? 'volume-high' : phase === 'listening' ? 'mic' : 'mic-outline'}
-                  size={14}
-                  color={theme.colors.text.inverse}
-                />
-              </View>
-            ) : null}
+
           </View>
           {__DEV__ && !voiceReady && <Pressable accessibilityRole="button" accessibilityLabel="Prova voce italiana" style={styles.pauseBtn} onPress={() => {
             const text = 'Ciao! Sono Prismo. Questa è una prova della voce italiana. Quando parlo, la mia bocca segue le parole. Ogni pagamento richiede sempre la tua conferma.';
@@ -816,14 +817,14 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               />
             </View>
           )}
-          <Text style={styles.status}>{statusText}</Text>
+          <Text style={styles.status}>{prismoText(statusText)}</Text>
 
-          {!!voiceEngine && <Text style={styles.hint}>{voiceEngine}</Text>}
-          {!voiceFailure && <Pressable accessibilityRole="button" onPress={() => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); }}><Text style={styles.pauseBtnText}>{t('Export voice diagnostics')}</Text></Pressable>}
+          {!!voiceEngine && <Text style={styles.hint}>{prismoText(voiceEngine)}</Text>}
+
           {!!voiceFailure && <Pressable accessibilityRole="button" onPress={() => Alert.alert('Supertonic 3', voiceFailure, [
-            { text: 'Close', style: 'cancel' },
-            { text: 'Export diagnostics', onPress: () => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); } },
-            { text: 'Retry voice', onPress: () => {
+            { text: prismoText('Close'), style: 'cancel' },
+            { text: prismoText('Export diagnostics'), onPress: () => { void Share.share({ title: 'Prismo voice diagnostics', message: voiceDiagnosticReport() }).catch(() => Alert.alert('Export failed', 'Please try again.')); } },
+            { text: prismoText('Retry voice'), onPress: () => {
               pauseVoice();
               void stopSpeak().then(() => {
                 if (!aliveRef.current) return;
@@ -834,10 +835,10 @@ const VoiceAgentSession: React.FC<{ onClose: () => void; autoListen?: boolean }>
               });
             } },
           ])}><Text style={styles.pauseBtnText}>{t('Voice details & retry')}</Text></Pressable>}
-          <Pressable accessibilityRole="button" accessibilityLabel={canPause || voiceStarting ? 'Pause voice' : 'Start listening'}
+          <Pressable accessibilityRole="button" accessibilityLabel={canPause || voiceStarting ? prismoText('Pause voice') : prismoText('Start listening')}
             accessibilityState={{ disabled: !canPause && !voiceReady && !aiFailed && !speechFailed }}
             disabled={!canPause && !voiceReady && !aiFailed && !speechFailed}
-            onPress={() => { if (canPause || voiceStarting) pauseVoice(); else if (voiceReady) void startHandsFree(); else toggleListening(); }}
+            onPress={() => { if (isPreview) toggleListening(); else if (canPause || voiceStarting) pauseVoice(); else if (voiceReady) void startHandsFree(); else toggleListening(); }}
             style={{ width: 76, height: 76, borderRadius: 38, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginTop: 12, backgroundColor: theme.colors.primary[500], opacity: canPause || voiceReady || aiFailed || speechFailed ? 1 : .4 }}>
             <Ionicons name={phase === 'speaking' || phase === 'thinking' ? 'stop' : 'mic'} size={32} color={theme.colors.text.inverse} />
           </Pressable>

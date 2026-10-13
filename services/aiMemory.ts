@@ -21,11 +21,7 @@ export function asyncStorageMemoryIO(): MemoryIO {
       }
     },
     async save(items: MemoryItem[]): Promise<void> {
-      try {
-        await AsyncStorage.setItem(KEY, JSON.stringify(items));
-      } catch {
-        /* best-effort — memory is a convenience, never block the agent on it */
-      }
+      await AsyncStorage.setItem(KEY, JSON.stringify(items));
     },
   };
 }

@@ -1,3 +1,5 @@
+import { voiceDiagnosticReport } from '../services/voiceDiagnostics';
+import { prismoText } from '../localization/prismo';
 // components/QVACSettingsSheet.tsx
 import React, { useMemo, useRef, useState, useEffect } from 'react';
 import {
@@ -10,6 +12,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   Alert,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +26,7 @@ import type { AiMode } from '../store/slices/settingsSlice';
 
 interface Props {
   visible: boolean;
+  initialTab?: 'Model' | 'Voice';
   onClose: () => void;
   catalog: QVACModel[];
   config: QVACConfig;
@@ -62,6 +66,7 @@ const TIER_LABEL: Record<string, string> = {
 
 export default function QVACSettingsSheet({
   visible,
+  initialTab = 'Model',
   onClose,
   catalog,
   config,
@@ -84,7 +89,7 @@ export default function QVACSettingsSheet({
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [openingPersonalization, setOpeningPersonalization] = useState(false);
-  const [tab, setTab] = useState<'Model' | 'Voice'>('Model');
+  const [tab, setTab] = useState<'Model' | 'Voice'>(initialTab);
   const [pending, setPending] = useState(false);
   const actionLock = useRef(false);
   const [error, setError] = useState('');
@@ -95,7 +100,7 @@ export default function QVACSettingsSheet({
   const act = async (action: () => unknown) => {
     if (actionLock.current) return;
     actionLock.current = true; setPending(true); setError('');
-    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'Unable to apply changes. Try again.'); }
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : prismoText("Unable to apply changes. Try again.")); }
     finally { actionLock.current = false; setPending(false); }
   };
   const listen = async () => {
@@ -103,22 +108,22 @@ export default function QVACSettingsSheet({
     previewActive.current = true; setPreview(true); setError('');
     try {
       await speak(getAppLanguage() === 'it' ? 'Ciao, sono Prismo. Come posso aiutarti oggi?' : 'Hi, I am Prismo. How can I help you today?', {
-        onFallback: () => setError('Supertonic is unavailable. This preview uses the system voice.'),
+        onFallback: () => setError(prismoText("Supertonic is unavailable. This preview uses the system voice.")),
         onDone: () => { previewActive.current = false; setPreview(false); },
-        onError: () => { previewActive.current = false; setPreview(false); setError('Unable to play voice. Try again.'); },
+        onError: () => { previewActive.current = false; setPreview(false); setError(prismoText("Unable to play voice. Try again.")); },
       });
-    } catch { previewActive.current = false; setPreview(false); setError('Unable to play voice. Try again.'); }
+    } catch { previewActive.current = false; setPreview(false); setError(prismoText("Unable to play voice. Try again.")); }
   };
   const busy = pending || llmStatus === 'downloading' || llmStatus === 'loading';
   const isDownloaded = (id: string) => downloadedModelIds.includes(id);
 
   const confirmDelete = (id: string, label: string) => {
     Alert.alert(
-      'Delete model?',
-      `Remove “${label}” from this device? You can download it again later.`,
+      prismoText('Delete model?'),
+      prismoText('Remove this model? You can download it again later.'),
       [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => { void act(() => onDeleteModel(id)); } },
+        { text: prismoText('Cancel'), style: 'cancel' },
+        { text: prismoText('Delete'), style: 'destructive', onPress: () => { void act(() => onDeleteModel(id)); } },
       ]
     );
   };
@@ -127,8 +132,8 @@ export default function QVACSettingsSheet({
     <Modal visible={visible && !openingPersonalization} onDismiss={() => { if (openingPersonalization) onDesignAgent?.(); }} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Text style={styles.title}>Prismo settings</Text>
-          <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Close model settings">
+          <Text style={styles.title}>{prismoText("Prismo settings")}</Text>
+          <TouchableOpacity onPress={onClose} hitSlop={10} accessibilityRole="button" accessibilityLabel={prismoText("Close model settings")}>
             <Ionicons name="close" size={26} color={theme.colors.text.primary} />
           </TouchableOpacity>
         </View>
@@ -137,29 +142,29 @@ export default function QVACSettingsSheet({
           <View style={styles.busyBar}>
             <ActivityIndicator size="small" color={theme.colors.primary[500]} />
             <Text style={styles.busyText}>
-              {llmStatus === 'downloading' ? `Downloading model… ${combinedProgress}%` : 'Applying changes…'}
+              {llmStatus === 'downloading' ? `${prismoText("Downloading model…")} ${combinedProgress}%` : prismoText("Applying changes…")}
             </Text>
           </View>
         )}
 
-        {!!error && <Text accessibilityRole="alert" style={[styles.sectionHint, { color: theme.colors.error[500], padding: theme.spacing[4] }]}>{error}</Text>}
+        {!!error && <Text accessibilityRole="alert" style={[styles.sectionHint, { color: theme.colors.error[500], padding: theme.spacing[4] }]}>{prismoText(error)}</Text>}
         <ScrollView contentContainerStyle={styles.content}>
           <View style={styles.modeGroup}>
             {(['Model', 'Voice'] as const).map(item => <TouchableOpacity key={item}
               accessibilityRole="tab" accessibilityState={{ selected: tab === item }}
               style={[styles.modeBtn, tab === item && styles.modeBtnActive]} onPress={() => setTab(item)}>
-              <Text style={[styles.modeBtnLabel, tab === item && styles.modeBtnLabelActive]}>{item}</Text>
+              <Text style={[styles.modeBtnLabel, tab === item && styles.modeBtnLabelActive]}>{prismoText(item)}</Text>
             </TouchableOpacity>)}
           </View>
           {/* ---- KaleidoMind mode ---- */}
           <Text style={styles.sectionTitle}>Agent</Text>
           <Text style={styles.sectionHint}>
-            Choose how the assistant runs. You can change this anytime.
+            {prismoText("Choose how the assistant runs. You can change this anytime.")}
           </Text>
           <View style={styles.modeGroup}>
             {([
               { key: 'off', icon: 'moon-outline', label: 'Off' },
-              { key: 'local', icon: 'phone-portrait-outline', label: 'On this device' },
+              { key: 'local', icon: 'phone-portrait-outline', label: prismoText("On this device") },
             ] as { key: AiMode; icon: keyof typeof Ionicons.glyphMap; label: string }[]).map((m) => {
               const active = aiMode === m.key;
               return (
@@ -175,7 +180,7 @@ export default function QVACSettingsSheet({
                     size={20}
                     color={active ? theme.colors.text.inverse : theme.colors.text.secondary}
                   />
-                  <Text style={[styles.modeBtnLabel, active && styles.modeBtnLabelActive]}>{m.label}</Text>
+                  <Text style={[styles.modeBtnLabel, active && styles.modeBtnLabelActive]}>{prismoText(m.label)}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -185,8 +190,8 @@ export default function QVACSettingsSheet({
             <TouchableOpacity style={styles.designRow} onPress={() => { if (Platform.OS === 'ios') setOpeningPersonalization(true); else onDesignAgent?.(); }} activeOpacity={0.85}>
               <Ionicons name="construct-outline" size={18} color={theme.colors.primary[500]} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.designLabel}>Personalize Prismo</Text>
-                <Text style={styles.designHint}>Personality, payments & memory</Text>
+                <Text style={styles.designLabel}>{prismoText("Personalize Prismo")}</Text>
+                <Text style={styles.designHint}>{prismoText("Personality, payments & memory")}</Text>
               </View>
               <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
             </TouchableOpacity>
@@ -194,18 +199,18 @@ export default function QVACSettingsSheet({
 
           {aiMode === 'off' && (
             <Text style={styles.disabledNote}>
-              Prismo is off. Pick “On this device” to use it.
+              {prismoText('Prismo is off. Pick “On this device” to use it.')}
             </Text>
           )}
 
           {/* ---- Model picker (on-device mode only) ---- */}
           {aiMode === 'local' && tab === 'Model' && (
           <>
-          <Text style={styles.sectionTitle}>On-device model</Text>
+          <Text style={styles.sectionTitle}>{prismoText("On-device model")}</Text>
           <Text style={styles.sectionHint}>
             {deviceMemGb
-              ? `Your device has ~${deviceMemGb} GB RAM. The recommended model fits it best; smaller models run faster.`
-              : 'Smaller models run faster and use less memory.'}
+              ? `${prismoText("Device RAM")}: ${deviceMemGb} GB`
+              : prismoText("Smaller models run faster and use less memory.")}
           </Text>
 
           {catalog.filter((m) => m.localCapable && m.tier === 'phone').map((m) => {
@@ -227,13 +232,13 @@ export default function QVACSettingsSheet({
                     </Text>
                     {recommended && (
                       <View style={styles.recPill}>
-                        <Text style={styles.recPillText}>Recommended</Text>
+                        <Text style={styles.recPillText}>{prismoText("Recommended")}</Text>
                       </View>
                     )}
                   </View>
                   <Text style={styles.modelMeta}>
-                    {m.params} · {m.sizeMB < 1024 ? `${Math.round(m.sizeMB)} MB` : `${(m.sizeMB / 1024).toFixed(1)} GB`} · {TIER_LABEL[m.tier]}
-                    {isDownloaded(m.id) ? ' · ✓ Downloaded' : ''}
+                    {m.params} · {m.sizeMB < 1024 ? `${Math.round(m.sizeMB)} MB` : `${(m.sizeMB / 1024).toFixed(1)} GB`} · {prismoText(TIER_LABEL[m.tier])}
+                    {isDownloaded(m.id) ? ` · ✓ ${prismoText('Downloaded')}` : ''}
                   </Text>
                 </View>
                 <View style={styles.modelRight}>
@@ -260,14 +265,14 @@ export default function QVACSettingsSheet({
           )}
 
           {/* ---- Voice mode: STT + TTS (on-device mode only) ---- */}
-          {aiMode === 'local' && tab === 'Voice' && (
+          {tab === 'Voice' && (
           <>
-          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>Voice mode</Text>
+          <Text style={[styles.sectionTitle, { marginTop: theme.spacing[6] }]}>{prismoText("Voice mode")}</Text>
           <Text style={styles.sectionHint}>
-            Speech recognition and the spoken reply run on-device.
+            {prismoText("Speech recognition and the spoken reply run on-device.")}
           </Text>
 
-          <Text style={[styles.subSectionTitle, { marginTop: theme.spacing[4] }]}>Voice output</Text>
+          <Text style={[styles.subSectionTitle, { marginTop: theme.spacing[4] }]}>{prismoText("Voice output")}</Text>
           {ttsOptions.map((t) => {
             const selected = t.id === config.ttsEngine;
             return (
@@ -278,8 +283,8 @@ export default function QVACSettingsSheet({
                 onPress={() => { void act(() => onSetTtsEngine(t.id)); }}
               >
                 <View style={styles.modelInfo}>
-                  <Text style={styles.modelLabel}>{t.label}</Text>
-                  <Text style={styles.modelMeta}>{t.hint}</Text>
+                  <Text style={styles.modelLabel}>{prismoText(t.label)}</Text>
+                  <Text style={styles.modelMeta}>{prismoText(t.hint)}</Text>
                 </View>
                 {selected ? (
                   <Ionicons name="checkmark-circle" size={22} color={theme.colors.primary[500]} />
@@ -290,26 +295,26 @@ export default function QVACSettingsSheet({
             );
           })}
           {config.ttsEngine === 'supertonic' && onSetTtsVoice && <>
-            <Text style={styles.subSectionTitle}>Prismo’s voice</Text>
+            <Text style={styles.subSectionTitle}>{prismoText("Prismo’s voice")}</Text>
             <View style={styles.modeGroup}>
               {(['F1', 'M1'] as const).map(voice => <TouchableOpacity key={voice} disabled={busy || preview}
                 accessibilityRole="radio" accessibilityState={{ selected: (config.ttsVoice ?? 'F1') === voice, disabled: busy || preview }}
                 style={[styles.modeBtn, (config.ttsVoice ?? 'F1') === voice && styles.modeBtnActive]}
                 onPress={() => { void act(() => onSetTtsVoice(voice)); }}>
-                <Text style={[styles.modeBtnLabel, (config.ttsVoice ?? 'F1') === voice && styles.modeBtnLabelActive]}>{voice === 'F1' ? 'Feminine · F1' : 'Masculine · M1'}</Text>
+                <Text style={[styles.modeBtnLabel, (config.ttsVoice ?? 'F1') === voice && styles.modeBtnLabelActive]}>{voice === 'F1' ? prismoText("Feminine · F1") : prismoText("Masculine · M1")}</Text>
               </TouchableOpacity>)}
             </View>
           </>}
-          <TouchableOpacity style={styles.designRow} disabled={busy} accessibilityRole="button" onPress={() => { void listen(); }}>
+          <TouchableOpacity style={[styles.designRow, aiMode === 'off' && styles.modelRowDisabled]} disabled={busy || aiMode === 'off'} accessibilityRole="button" accessibilityState={{ disabled: busy || aiMode === 'off' }} onPress={() => { void listen(); }}>
             <Ionicons name={preview ? 'stop-circle-outline' : 'play-circle-outline'} size={24} color={theme.colors.primary[500]} />
-            <Text style={styles.designLabel}>{preview ? 'Stop preview' : 'Listen to voice'}</Text>
+            <Text style={styles.designLabel}>{preview ? prismoText("Stop preview") : prismoText("Listen to voice")}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.designRow} accessibilityRole="button" accessibilityState={{ expanded: recognition }} onPress={() => setRecognition(!recognition)}>
-            <Text style={[styles.designLabel, { flex: 1 }]}>Speech recognition</Text>
+            <Text style={[styles.designLabel, { flex: 1 }]}>{prismoText("Speech recognition")}</Text>
             <Ionicons name={recognition ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />
           </TouchableOpacity>
           {recognition && <>
-          <Text style={styles.subSectionTitle}>Speech-to-text (Whisper)</Text>
+          <Text style={styles.subSectionTitle}>{prismoText("Speech-to-text (Whisper)")}</Text>
           {sttCatalog.filter(s => s.id !== 'whisper-large-v3-turbo' && (s.lang !== 'en' || getAppLanguage() === 'en')).map((s) => {
             const selected = s.id === config.sttModelId;
             return (
@@ -322,8 +327,8 @@ export default function QVACSettingsSheet({
                 <View style={styles.modelInfo}>
                   <Text style={styles.modelLabel}>{s.label}</Text>
                   <Text style={styles.modelMeta}>
-                    {s.lang === 'en' ? 'English only' : 'Multilingual'} · {s.sizeMB} MB
-                    {isDownloaded(s.id) ? ' · ✓ Downloaded' : ''}
+                    {s.lang === 'en' ? prismoText("English only") : prismoText("Multilingual")} · {s.sizeMB} MB
+                    {isDownloaded(s.id) ? ` · ✓ ${prismoText('Downloaded')}` : ''}
                   </Text>
                 </View>
                 <View style={styles.modelRight}>
@@ -351,6 +356,7 @@ export default function QVACSettingsSheet({
           </>
           )}
 
+          {tab === 'Model' && <TouchableOpacity style={styles.designRow} accessibilityRole="button" onPress={() => { void Share.share({ message: voiceDiagnosticReport() }).catch(() => setError(prismoText('Unable to apply changes. Try again.'))); }}><Ionicons name="share-outline" size={20} color={theme.colors.primary[500]} /><Text style={styles.designLabel}>{prismoText('Export voice diagnostics')}</Text></TouchableOpacity>}
         </ScrollView>
       </SafeAreaView>
     </Modal>

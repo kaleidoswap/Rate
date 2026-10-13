@@ -1,25 +1,22 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 import MindSettingsScreen from './MindSettingsScreen';
-import { DEFAULT_MIND_CONFIG, setMindConfig } from '../store/slices/settingsSlice';
+import { setMindConfig } from '../store/slices/settingsSlice';
 const mockDispatch = jest.fn();
-jest.mock('../store/hooks', () => ({ useAppDispatch: () => mockDispatch, useAppSelector: () => require('../store/slices/settingsSlice').DEFAULT_MIND_CONFIG }));
+jest.mock('../store/hooks', () => ({ useAppDispatch: () => mockDispatch, useAppSelector: (fn: any) => fn({ settings: { mindConfig: require('../store/slices/settingsSlice').DEFAULT_MIND_CONFIG, aiMode: 'off', language: 'en' } }) }));
 jest.mock('../components', () => ({ ScreenHeader: () => null }));
-jest.mock('../components/Sheet', () => ({ Sheet: () => null }));
-jest.mock('../services/mindAgent', () => ({ clearMindMemory: jest.fn() }));
-jest.mock('@kaleidorg/mind', () => ({ skillsFromBundle: () => [] }));
+jest.mock('../components/QVACSettingsSheet', () => () => null);
+jest.mock('../hooks/useQVAC', () => ({ useQVAC: () => ({ config: { ttsEngine: 'supertonic' } }) }));
+jest.mock('../services/mindAgent', () => ({ clearMindMemory: jest.fn(), listMindMemory: jest.fn(async () => []), removeMindMemory: jest.fn() }));
 beforeEach(() => mockDispatch.mockClear());
-it('saves personality as it is edited without requiring a blur event', () => {
+it('saves personality while editing without requiring blur', () => {
   const screen = render(<MindSettingsScreen />);
-  fireEvent.changeText(screen.getByDisplayValue(DEFAULT_MIND_CONFIG.persona), 'Keep answers short.');
+  fireEvent.press(screen.getByText('Responses'));
+  fireEvent.changeText(screen.getByLabelText('Personal instructions'), 'Keep answers short.');
   expect(mockDispatch).toHaveBeenCalledWith(setMindConfig({ persona: 'Keep answers short.' }));
 });
-it('keeps technical controls collapsed until requested', () => {
+it('shows five focused categories and no inactive or technical controls', () => {
   const screen = render(<MindSettingsScreen />);
-  expect(screen.queryByText('Knowledge base (RAG)')).toBeNull();
-  fireEvent.press(screen.getByText('Context & memory'));
-  expect(screen.getByText('Knowledge base (RAG)')).toBeTruthy();
-  expect(screen.queryByText('Add MCP server')).toBeNull();
-  fireEvent.press(screen.getByText('Connected tools'));
-  expect(screen.getByText('Add MCP server')).toBeTruthy();
+  for (const label of ['Voice', 'Responses', 'Memory & privacy', 'Payments & permissions', 'On this device']) expect(screen.getByText(label)).toBeTruthy();
+  for (const label of ['Add MCP server', 'Connected tools', 'Creative', 'History kept', 'Knowledge base (RAG)']) expect(screen.queryByText(label)).toBeNull();
 });

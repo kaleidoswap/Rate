@@ -1,225 +1,93 @@
-// screens/MindSettingsScreen.tsx
-// Chat settings — design the on-device KaleidoMind agent: personality,
-// connectors (skills + MCP), context, memory and the RAG knowledge base.
 import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, Switch, Pressable, Alert } from 'react-native';
-import { Sheet } from '../components/Sheet';
-import { useAppSelector, useAppDispatch } from '../store/hooks';
+import { View, Text, ScrollView, TextInput, Switch, Pressable, Alert, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { skillsFromBundle } from '@kaleidorg/mind';
-import { theme, leading } from '../theme';
 import { ScreenHeader } from '../components';
-import { selectMindConfig, setMindConfig, resetMindConfig, type MindConfig } from '../store/slices/settingsSlice';
-import { clearMindMemory } from '../services/mindAgent';
-import skillBundle from '../skills.bundle.json';
+import { useAppTheme } from '../theme/ThemeProvider';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { selectMindConfig, setMindConfig, selectAiMode, setAiMode } from '../store/slices/settingsSlice';
+import { useAppLanguage } from '../localization/useAppLanguage';
+import { useQVAC } from '../hooks/useQVAC';
+import QVACSettingsSheet from '../components/QVACSettingsSheet';
+import { clearMindMemory, listMindMemory, removeMindMemory } from '../services/mindAgent';
+import type { MemoryItem } from '@kaleidorg/mind';
 
-const TONES: Array<{ label: string; text: string }> = [
-  { label: 'Concise', text: 'Be concise and direct.' },
-  { label: 'Friendly', text: 'Be warm and friendly; explain simply.' },
-  { label: 'Expert', text: 'Be precise and technically accurate.' },
-  { label: 'Cautious', text: 'Be extra careful with money; double-check amounts and recipients.' },
-];
-const TEMP_OPTS = [{ label: 'Precise', value: 0.2 }, { label: 'Balanced', value: 0.6 }, { label: 'Creative', value: 0.9 }];
-const AUTH_OPTS = [{ label: 'Always', value: 0 }, { label: '10k sats', value: 10_000 }, { label: '50k sats', value: 50_000 }, { label: '250k sats', value: 250_000 }];
-const HIST_OPTS = [{ label: 'Short', value: 4 }, { label: 'Medium', value: 8 }, { label: 'Long', value: 12 }];
-
-export default function MindSettingsScreen() {
+export default function MindSettingsScreen({ navigation }: { navigation?: any }) {
+  const theme = useAppTheme();
+  const { t } = useAppLanguage();
   const dispatch = useAppDispatch();
   const cfg = useAppSelector(selectMindConfig);
-  const persona = cfg.persona;
-  const [mcpOpen, setMcpOpen] = useState(false);
-
-  const update = (patch: Partial<MindConfig>) => dispatch(setMindConfig(patch));
-
-  const skills = useMemo(() => {
-    try { return skillsFromBundle(skillBundle as any).map((s: any) => ({ name: s.name as string, description: String(s.description ?? '') })); }
-    catch { return []; }
-  }, []);
-  const skillEnabled = (name: string) => !cfg.disabledSkills.includes(name);
-  const toggleSkill = (name: string, on: boolean) =>
-    update({ disabledSkills: on ? cfg.disabledSkills.filter((n) => n !== name) : [...cfg.disabledSkills, name] });
-  const removeMcp = (url: string) => update({ mcpServers: cfg.mcpServers.filter((m) => m.url !== url) });
-
-  const clearMemory = () =>
-    Alert.alert('Clear memory', "This erases everything the agent has remembered. This can't be undone.", [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Clear', style: 'destructive', onPress: async () => { try { await clearMindMemory(); } catch { Alert.alert('Unable to clear memory', 'Please try again.'); } } },
-    ]);
-  const resetAll = () =>
-    Alert.alert('Reset to defaults', 'Restore the default agent configuration?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Reset', style: 'destructive', onPress: () => { dispatch(resetMindConfig());  } },
-    ]);
-
-  return (
-    <View style={styles.container}>
-      <ScreenHeader title="Personalize Prismo" subtitle="Changes apply automatically" showBack />
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-
-        {/* ── Personality (compact) ── */}
-        <Section title="Personality">
-          <TextInput
-            style={styles.input}
-            value={persona}
-            onChangeText={(persona) => update({ persona })}
-            placeholder="How should Prismo help you? e.g. Keep answers short."
-            placeholderTextColor={theme.colors.text.tertiary}
-            multiline
-          />
-          <View style={styles.chips}>
-            {TONES.map((t) => (
-              <Pressable key={t.label} accessibilityRole="radio" accessibilityState={{ selected: persona === t.text }} style={[styles.chip, persona === t.text && { borderWidth: 1, borderColor: theme.colors.primary[500] }]} onPress={() => { update({ persona: t.text }); }}>
-                <Text style={styles.chipText}>{t.label}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </Section>
-
-        {/* ── Responses ── */}
-        <Section title="Responses">
-          <Segmented label="Style" options={TEMP_OPTS} value={cfg.temperature} onChange={(v) => update({ temperature: v })} />
-        </Section>
-
-        <Section title="Payments">
-          <Segmented label="Ask for biometrics or PIN from" options={AUTH_OPTS} value={cfg.confirmAuthThresholdSats} onChange={(v) => update({ confirmAuthThresholdSats: v })} />
-        </Section>
-
-        {/* ── Connectors ── */}
-        <Section collapsible title="Connected tools" hint="Skills and MCP servers the agent can use.">
-          {skills.map((s, i) => (
-            <View key={s.name} style={[styles.row, i > 0 && styles.rowBorder]}>
-              <View style={styles.skillIcon}><Ionicons name="extension-puzzle-outline" size={16} color={theme.colors.primary[500]} /></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowLabel}>{s.name}</Text>
-                {!!s.description && <Text style={styles.rowDesc} numberOfLines={2}>{s.description}</Text>}
-              </View>
-              <Switch value={skillEnabled(s.name)} onValueChange={(v) => { toggleSkill(s.name, v); }} trackColor={{ true: theme.colors.primary[500], false: theme.colors.border.light }} thumbColor="#fff" />
-            </View>
-          ))}
-          {cfg.mcpServers.map((m) => (
-            <View key={m.url} style={[styles.row, styles.rowBorder]}>
-              <View style={styles.skillIcon}><Ionicons name="server-outline" size={16} color={theme.colors.accent[500]} /></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowLabel}>{m.name}</Text>
-                <Text style={styles.rowDesc} numberOfLines={1}>{m.url}</Text>
-              </View>
-              <Pressable onPress={() => removeMcp(m.url)} hitSlop={8}><Ionicons name="close-circle" size={20} color={theme.colors.text.tertiary} /></Pressable>
-            </View>
-          ))}
-          <Pressable style={[styles.row, styles.rowBorder, styles.addRow]} onPress={() => setMcpOpen(true)}>
-            <Ionicons name="add-circle-outline" size={18} color={theme.colors.primary[500]} />
-            <Text style={styles.addText}>Add MCP server</Text>
-          </Pressable>
-        </Section>
-
-        {/* ── Context ── */}
-        <Section collapsible title="Context & memory">
-          <Segmented label="History kept" options={HIST_OPTS} value={cfg.historyLength} onChange={(v) => update({ historyLength: v })} />
-          <ToggleRow icon="bookmark-outline" label="Long-term memory" desc="Remember your preferences." value={cfg.memoryEnabled} onChange={(v) => update({ memoryEnabled: v })} />
-          <ToggleRow icon="library-outline" label="Knowledge base (RAG)" desc="Ground answers in on-device docs." value={cfg.ragEnabled} onChange={(v) => update({ ragEnabled: v })} />
-          <Pressable style={styles.dangerRow} onPress={clearMemory}>
-            <Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} />
-            <Text style={styles.dangerText}>Clear memory</Text>
-          </Pressable>
-        </Section>
-
-        <Pressable style={styles.resetBtn} onPress={resetAll}>
-          <Ionicons name="refresh-outline" size={16} color={theme.colors.text.secondary} />
-          <Text style={styles.resetText}>Reset to defaults</Text>
-        </Pressable>
-        <View style={{ height: 32 }} />
-      </ScrollView>
-
-      <AddMcpModal visible={mcpOpen} onClose={() => setMcpOpen(false)} onAdd={(name, url) => { update({ mcpServers: [...cfg.mcpServers, { name, url }] }); setMcpOpen(false); }} />
-    </View>
-  );
-}
-
-const AddMcpModal: React.FC<{ visible: boolean; onClose: () => void; onAdd: (name: string, url: string) => void }> = ({ visible, onClose, onAdd }) => {
-  const [name, setName] = useState('');
-  const [url, setUrl] = useState('');
-  const valid = name.trim().length > 0 && /^https?:\/\//i.test(url.trim());
-  return (
-    <Sheet visible={visible} onClose={onClose} title="Add MCP server" subtitle="Connect an external tool server (Streamable HTTP / SSE).">
-          <TextInput style={styles.modalInput} value={name} onChangeText={setName} placeholder="Name (e.g. Bitrefill)" placeholderTextColor={theme.colors.text.tertiary} autoCapitalize="none" />
-          <TextInput style={styles.modalInput} value={url} onChangeText={setUrl} placeholder="https://server.example.com/mcp" placeholderTextColor={theme.colors.text.tertiary} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
-          <Pressable style={[styles.addBtn, !valid && { opacity: 0.5 }]} disabled={!valid} onPress={() => { onAdd(name.trim(), url.trim()); setName(''); setUrl(''); }}>
-            <Text style={styles.addBtnText}>Add connector</Text>
-          </Pressable>
-    </Sheet>
-  );
-};
-
-const Section: React.FC<{ title: string; hint?: string; collapsible?: boolean; children: React.ReactNode }> = ({ title, hint, collapsible, children }) => {
-  const [expanded, setExpanded] = useState(!collapsible);
-  return <View style={styles.section}>
-    <Pressable disabled={!collapsible} accessibilityRole={collapsible ? 'button' : undefined}
-      accessibilityState={collapsible ? { expanded } : undefined}
-      style={styles.row} onPress={() => setExpanded(!expanded)}>
-      <Text style={[styles.sectionTitle, { flex: 1 }]}>{title}</Text>
-      {collapsible && <Ionicons name={expanded ? 'chevron-up' : 'chevron-down'} size={20} color={theme.colors.text.secondary} />}
+  const aiMode = useAppSelector(selectAiMode);
+  const qvac = useQVAC(false);
+  const [panel, setPanel] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<'Model' | 'Voice' | null>(null);
+  const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [memoryError, setMemoryError] = useState('');
+  const styles = useMemo(() => StyleSheet.create({
+    screen: { flex: 1, backgroundColor: theme.colors.background.primary },
+    content: { padding: theme.spacing[4], gap: theme.spacing[3], paddingBottom: theme.spacing[10] },
+    row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], minHeight: 64, padding: theme.spacing[4] },
+    card: { backgroundColor: theme.colors.surface.primary, borderRadius: theme.borderRadius.lg, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, overflow: 'hidden' },
+    body: { padding: theme.spacing[4], paddingTop: 0, gap: theme.spacing[3] },
+    label: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base, fontWeight: '600' },
+    hint: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm },
+    input: { minHeight: 88, padding: theme.spacing[3], borderRadius: theme.borderRadius.md, color: theme.colors.text.primary, backgroundColor: theme.colors.background.secondary, textAlignVertical: 'top' },
+    choices: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing[2] },
+    choice: { padding: theme.spacing[3], borderRadius: theme.borderRadius.md, borderWidth: 1, borderColor: theme.colors.border.medium },
+  }), [theme]);
+  const refreshMemory = async () => {
+    try { setMemories(await listMindMemory()); setMemoryError(''); }
+    catch { setMemoryError(t('Unable to read memory. Try again.')); }
+  };
+  const confirmClear = () => Alert.alert(t('Clear memory'), t('Delete all saved memories? Your conversation stays unchanged.'), [
+    { text: t('Cancel'), style: 'cancel' },
+    { text: t('Delete'), style: 'destructive', onPress: async () => {
+      try { await clearMindMemory(); await refreshMemory(); } catch { setMemoryError(t('Unable to clear memory. Try again.')); }
+    } },
+  ]);
+  const section = (key: string, icon: keyof typeof Ionicons.glyphMap, title: string, detail: string, children?: React.ReactNode) => <View key={key} style={styles.card}>
+    <Pressable style={styles.row} accessibilityRole="button" accessibilityState={children ? { expanded: panel === key } : undefined}
+      onPress={() => { if (key === 'voice' || key === 'device') setSheet(key === 'voice' ? 'Voice' : 'Model'); else { setPanel(panel === key ? null : key); if (key === 'memory') void refreshMemory(); } }}>
+      <Ionicons name={icon} size={22} color={theme.colors.primary[500]} />
+      <View style={{ flex: 1, gap: theme.spacing[1] }}><Text style={styles.label}>{t(title)}</Text><Text style={styles.hint}>{detail}</Text></View>
+      <Ionicons name={panel === key ? 'chevron-up' : 'chevron-forward'} size={18} color={theme.colors.text.secondary} />
     </Pressable>
-    {expanded && <>{!!hint && <Text style={styles.sectionHint}>{hint}</Text>}<View style={styles.card}>{children}</View></>}
+    {panel === key && children && <View style={styles.body}>{children}</View>}
   </View>;
-};
-const Segmented: React.FC<{ label: string; options: Array<{ label: string; value: number }>; value: number; onChange: (v: number) => void }> = ({ label, options, value, onChange }) => (
-  <View style={styles.segRow}>
-    <Text style={styles.segLabel}>{label}</Text>
-    <View style={styles.segTrack}>
-      {options.map((o) => {
-        const active = o.value === value;
-        return (
-          <Pressable key={o.label} style={[styles.segItem, active && styles.segItemActive]} onPress={() => onChange(o.value)}>
-            <Text style={[styles.segItemText, active && styles.segItemTextActive]}>{o.label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  </View>
-);
-const ToggleRow: React.FC<{ icon: any; label: string; desc?: string; value: boolean; onChange: (v: boolean) => void }> = ({ icon, label, desc, value, onChange }) => (
-  <View style={styles.toggleRow}>
-    <View style={styles.skillIcon}><Ionicons name={icon} size={16} color={theme.colors.primary[500]} /></View>
-    <View style={{ flex: 1 }}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      {!!desc && <Text style={styles.rowDesc}>{desc}</Text>}
-    </View>
-    <Switch value={value} onValueChange={onChange} trackColor={{ true: theme.colors.primary[500], false: theme.colors.border.light }} thumbColor="#fff" />
-  </View>
-);
-
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background.primary },
-  content: { padding: theme.spacing[4] },
-  section: { marginBottom: theme.spacing[5] },
-  sectionTitle: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.bold, marginBottom: theme.spacing[1] },
-  sectionHint: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginBottom: theme.spacing[2.5] },
-  card: { backgroundColor: theme.colors.surface.primary, borderRadius: theme.borderRadius.md, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light, padding: theme.spacing[3.5] },
-  input: { minHeight: 52, color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, backgroundColor: theme.colors.background.secondary, borderRadius: theme.borderRadius.base, padding: theme.spacing[3] },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing[2], marginTop: theme.spacing[2.5] },
-  chip: { paddingVertical: theme.spacing[1.5], paddingHorizontal: theme.spacing[3], borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.primary[100] },
-  chipText: { color: theme.colors.primary[500], fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.semibold },
-  row: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingVertical: theme.spacing[2.5] },
-  rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
-  skillIcon: { width: 32, height: 32, borderRadius: theme.borderRadius.base, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primary[50] },
-  rowLabel: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold, textTransform: 'capitalize' },
-  rowDesc: { color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 2, lineHeight: leading(theme.typography.fontSize.xs, theme.typography.lineHeight.snug) },
-  addRow: { justifyContent: 'flex-start' },
-  addText: { color: theme.colors.primary[500], fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
-  segRow: { marginBottom: theme.spacing[1] },
-  segLabel: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, marginBottom: theme.spacing[2] },
-  segTrack: { flexDirection: 'row', backgroundColor: theme.colors.background.secondary, borderRadius: theme.borderRadius.base, padding: 3 },
-  segItem: { flex: 1, paddingVertical: theme.spacing[2], borderRadius: theme.borderRadius.sm, alignItems: 'center' },
-  segItemActive: { backgroundColor: theme.colors.primary[500] },
-  segItemText: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
-  segItemTextActive: { color: '#fff' }, // literal white: text sits on the green primary fill (text.inverse is dark navy)
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3], paddingVertical: theme.spacing[2], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
-  dangerRow: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], marginTop: theme.spacing[2], paddingTop: theme.spacing[3], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.colors.border.light },
-  dangerText: { color: theme.colors.error[500], fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
-  resetBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: theme.spacing[1.5], paddingVertical: theme.spacing[3] },
-  resetText: { color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold },
-  // modal
-  modalInput: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.sm, backgroundColor: theme.colors.background.secondary, borderRadius: theme.borderRadius.base, padding: theme.spacing[3], marginBottom: theme.spacing[2.5], borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light },
-  addBtn: { backgroundColor: theme.colors.primary[500], borderRadius: theme.borderRadius.md, paddingVertical: theme.spacing[3.5], alignItems: 'center', marginTop: theme.spacing[1.5] },
-  addBtnText: { color: '#fff', fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.bold }, // literal white on green primary fill
-});
+  return <View style={styles.screen}>
+    <ScreenHeader title={t('Prismo settings')} showBack />
+    <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      {section('voice', 'volume-high-outline', 'Voice', qvac.config.ttsEngine === 'system' ? t('System voice') : `Supertonic 3 · ${qvac.config.ttsVoice ?? 'F1'}`)}
+      {section('responses', 'chatbubble-outline', 'Responses', t('Tone and personal instructions'), <>
+        <View style={styles.choices}>{[
+          ['Concise', 'Be concise and direct.'], ['Friendly', 'Be warm and friendly; explain simply.'], ['Expert', 'Be precise and technically accurate.'],
+        ].map(([label, persona]) => <Pressable key={label} accessibilityRole="radio" accessibilityState={{ selected: cfg.persona === persona }}
+          style={[styles.choice, cfg.persona === persona && { borderColor: theme.colors.primary[500] }]}
+          onPress={() => dispatch(setMindConfig({ persona }))}><Text style={styles.label}>{t(label)}</Text></Pressable>)}</View>
+        <TextInput accessibilityLabel={t('Personal instructions')} multiline value={t(cfg.persona)} style={styles.input}
+          placeholder={t('How should Prismo help you?')} placeholderTextColor={theme.colors.text.tertiary}
+          onChangeText={persona => dispatch(setMindConfig({ persona }))} />
+        <Text style={styles.hint}>{t('Changes apply to your next message.')}</Text>
+      </>)}
+      {section('memory', 'bookmark-outline', 'Memory & privacy', t('See and delete saved memories'), <>
+        <View style={[styles.row, { padding: 0 }]}><Text style={[styles.label, { flex: 1 }]}>{t('Remember my preferences')}</Text><Switch accessibilityLabel={t('Remember my preferences')} value={cfg.memoryEnabled} onValueChange={memoryEnabled => { dispatch(setMindConfig({ memoryEnabled })); }} /></View>
+        <Text style={styles.hint}>{t('Turning memory off does not delete saved memories.')}</Text>
+        {!!memoryError && <Text accessibilityRole="alert" style={styles.hint}>{memoryError}</Text>}
+        {memories.length === 0 && !memoryError && <Text style={styles.hint}>{t('No saved memories yet.')}</Text>}
+        {memories.map(memory => <View key={memory.id} style={[styles.row, { padding: 0 }]}><Text style={[styles.hint, { flex: 1 }]}>{memory.text}</Text>
+          <Pressable accessibilityLabel={t('Delete memory')} style={styles.choice} onPress={async () => { try { await removeMindMemory(memory.id); await refreshMemory(); } catch { setMemoryError(t('Unable to clear memory. Try again.')); } }}><Ionicons name="trash-outline" size={18} color={theme.colors.error[500]} /></Pressable></View>)}
+        {memories.length > 0 && <Pressable style={styles.choice} onPress={confirmClear}><Text style={[styles.label, { color: theme.colors.error[500] }]}>{t('Clear memory')}</Text></Pressable>}
+      </>)}
+      {section('payments', 'shield-checkmark-outline', 'Payments & permissions', t('Confirmations and agent budget'), <>
+        <Text style={styles.hint}>{t('You review wallet payments before sending. Require biometrics or PIN from:')}</Text>
+        <View style={styles.choices}>{[[t('Always'), 0], ['10k sats', 10000], ['50k sats', 50000], ['250k sats', 250000]].map(([label, value]) => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ selected: cfg.confirmAuthThresholdSats === value }} style={[styles.choice, cfg.confirmAuthThresholdSats === value && { borderColor: theme.colors.primary[500] }]} onPress={() => dispatch(setMindConfig({ confirmAuthThresholdSats: Number(value) }))}><Text style={styles.label}>{label}</Text></Pressable>)}</View>
+        <Pressable style={styles.choice} onPress={() => navigation?.navigate('AgentWallet')}><Text style={styles.label}>{t('Agent wallet')}</Text></Pressable>
+      </>)}
+      {section('device', 'phone-portrait-outline', 'On this device', aiMode === 'off' ? t('Prismo is off') : t('Model, downloads and diagnostics'))}
+    </ScrollView>
+    {sheet && <QVACSettingsSheet visible initialTab={sheet} onClose={() => setSheet(null)} catalog={qvac.catalog} config={qvac.config}
+      llmStatus={qvac.llmStatus} combinedProgress={qvac.combinedProgress} onSelectModel={qvac.setModel} deviceMemGb={qvac.deviceMemGb}
+      recommendedModelId={qvac.recommendedModelId} aiMode={aiMode} onSetAiMode={mode => { dispatch(setAiMode(mode)); }}
+      downloadedModelIds={qvac.downloadedModelIds} onDeleteModel={qvac.deleteModel} sttCatalog={qvac.sttCatalog} ttsOptions={qvac.ttsOptions}
+      onSetSttModel={qvac.setSttModel} onSetTtsEngine={qvac.setTtsEngine} onSetTtsVoice={qvac.setTtsVoice} />}
+  </View>;
+}

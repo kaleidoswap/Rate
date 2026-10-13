@@ -1,3 +1,4 @@
+import { prismoText } from '../localization/prismo';
 // What the chat says when a turn fails: wallet errors are already written for the
 // user and pass through; known engine failures become a next step; anything that
 // looks technical is replaced by a calm sentence instead of a raw error string.
@@ -23,9 +24,9 @@ const TECHNICAL = /\b(TypeError|ReferenceError|SyntaxError|undefined|NaN|ERR_[A-
 
 export function chatErrorMessage(error: unknown): string {
   const raw = error instanceof Error && error.message ? error.message.trim() : '';
-  if (!raw) return FALLBACK;
+  if (!raw) return prismoText(FALLBACK);
   const known = KNOWN.find(([re]) => re.test(raw));
-  if (known) return known[1];
+  if (known) return prismoText(known[1]);
   const readable = /^[A-Z"'“].*[.!?…"”]$/.test(raw) && raw.length <= 240 && !TECHNICAL.test(raw);
-  return readable ? raw : FALLBACK;
+  return prismoText(readable ? raw : FALLBACK);
 }

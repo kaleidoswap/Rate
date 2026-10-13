@@ -1,3 +1,4 @@
+jest.mock('../services/voiceDiagnostics', () => ({ voiceDiagnosticReport: () => '{}' }));
 import React from 'react';
 import { fireEvent, render, waitFor } from '@testing-library/react-native';
 import QVACSettingsSheet from './QVACSettingsSheet';
@@ -38,4 +39,10 @@ it('offers a second voice and hides recognition details initially', async () => 
   expect(screen.queryByText('Speech-to-text (Whisper)')).toBeNull();
   fireEvent.press(screen.getByText('Masculine · M1'));
   await waitFor(() => expect(onSetTtsVoice).toHaveBeenCalledWith('M1'));
+});
+it('allows configuring a voice while Agent is off but prevents playback', () => {
+  const screen = render(<QVACSettingsSheet {...props} aiMode="off" initialTab="Voice" config={{ ttsEngine: 'supertonic' }} onSetTtsVoice={jest.fn()} />);
+  expect(screen.getByText('Masculine · M1')).toBeTruthy();
+  fireEvent.press(screen.getByText('Listen to voice'));
+  expect(require('../services/qvacTts').speak).not.toHaveBeenCalled();
 });

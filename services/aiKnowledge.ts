@@ -35,7 +35,7 @@ export function buildKnowledgeToolSource(qvac: QVACService): ToolSource {
     listTools: () => inner.listTools(),
     has: (name) => inner.has(name),
     execute: async (name, args) => {
-      if (!ingested) ingested = retriever.ingest(BITCOIN_COPILOT_DOCS).catch(() => undefined);
+      if (!ingested) ingested = retriever.ingest(BITCOIN_COPILOT_DOCS).catch(error => { ingested = null; throw error; });
       await ingested;
       return inner.execute(name, args);
     },

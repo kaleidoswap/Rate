@@ -49,6 +49,7 @@ import BridgeScreen from './screens/BridgeScreen';
 import MerchantOfferScreen from './screens/MerchantOfferScreen';
 import {useAppSelector} from './store/hooks';
 import {isReceiverLink,canOpenReceiver} from './utils/receiver-link';
+import PrismoReviewScreen from './screens/PrismoReviewScreen';
 import WalletFlowsReviewScreen from './screens/WalletFlowsReviewScreen';
 import WalletReviewScreen from './screens/WalletReviewScreen';
 import DesignSystemScreen from './screens/DesignSystemScreen';
@@ -89,6 +90,7 @@ type RootStackParamList = {
   Assets: { issue?: boolean } | undefined;
   DesignSystem: undefined;
   WalletReview: undefined;
+  PrismoReview: { state?: string } | undefined;
   WalletFlowsReview: { page?: string; state?: string; query?: string; period?: string } | undefined;
   Swap: { fromAsset?: string; toAsset?: string; fromAmountSat?: number; fromAmountUnits?: number } | undefined;
   NostrSettings: undefined;
@@ -217,6 +219,7 @@ function AppNavigator() {
     if (__DEV__ && pendingReviewLink.current && receiverNavigation.isReady() && initialized && unlocked) {
       const link = new URL(pendingReviewLink.current);
       pendingReviewLink.current = null;
+      if (link.searchParams.get('page') === 'prismo') { receiverNavigation.navigate('PrismoReview', { state: link.searchParams.get('state') ?? undefined }); return; }
       if (link.searchParams.get('page') === 'profile') { receiverNavigation.navigate('OnboardingProfile', { preview: true }); return; }
       receiverNavigation.navigate('WalletFlowsReview', { page: link.searchParams.get('page') ?? undefined, state: link.searchParams.get('state') ?? undefined, query: link.searchParams.get('query')?.slice(0, 80), period: link.searchParams.get('period') ?? undefined });
       return;
@@ -266,6 +269,7 @@ function AppNavigator() {
         <Stack.Screen name="OnboardingProfile" component={OnboardingProfileScreen} />
         <Stack.Screen name="LightningAddress" component={LightningAddressScreen} />
         <Stack.Screen name="LSP" component={LSPScreen} />
+        {__DEV__ && <Stack.Screen name="PrismoReview" component={PrismoReviewScreen} />}
         {__DEV__ && <Stack.Screen name="WalletFlowsReview" component={WalletFlowsReviewScreen} />}
         {__DEV__ && <Stack.Screen name="WalletReview" component={WalletReviewScreen} />}
         {__DEV__ && <Stack.Screen name="DesignSystem" component={DesignSystemScreen} />}

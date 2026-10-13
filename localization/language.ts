@@ -1,3 +1,4 @@
+import { prismoItalian } from './prismoItalian';
 import { NativeModules, Platform } from 'react-native';
 import { getStore } from '../store/storeProvider';
 export type AppLanguage = 'en' | 'it';
@@ -39,5 +40,5 @@ const italian: Record<string, string> = {
   'Loading voice · first use may take a few minutes': 'Caricamento voce · il primo avvio può richiedere alcuni minuti',
 };
 export function translate(language: AppLanguage, text: string): string {
-  return language === 'it' ? italian[text] ?? text : text;
+  return language === 'it' ? prismoItalian[text] ?? italian[text] ?? text : text;
 }

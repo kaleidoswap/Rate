@@ -1,3 +1,4 @@
+import { localizePrismoReply } from './prismoReplies';
 // KaleidoMind agent — rate's host binding over the shared core Funnel.
 //
 // The tier routing (T0 fast-path → T2 recipe → T1 skill-scoped agentic), the
@@ -135,6 +136,15 @@ export async function clearMindMemory(): Promise<void> {
   else await asyncStorageMemoryIO().save([]);
 }
 
+export async function listMindMemory() {
+  memorySource();
+  return sharedMemoryStore!.all();
+}
+export async function removeMindMemory(id: string): Promise<void> {
+  memorySource();
+  await sharedMemoryStore!.remove(id);
+}
+
 /**
  * The exact tool sources the mobile agent mounts — wallet/WDK, merchants,
  * swaps (KaleidoSwap maker + Flashnet, venue-aware), paid services (L402, paid
@@ -222,7 +232,7 @@ export function createMindAgent(
       const normalized = numberWordsToDigits(text);
       const unbindConfirm = bindAgentConfirm(cbs.onConfirm);
       try {
-        return await funnel.runTurn(normalized, {
+        return localizePrismoReply(await funnel.runTurn(normalized, {
           history: cbs.history,
           onStart: cbs.onStart,
           onToken: cbs.onToken,
@@ -230,7 +240,7 @@ export function createMindAgent(
           onToolCall: cbs.onToolCall,
           onToolResult: cbs.onToolResult,
           onConfirm: cbs.onConfirm,
-        });
+        }));
       } finally {
         unbindConfirm();
         thinkingSink = undefined;

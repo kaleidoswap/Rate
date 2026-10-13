@@ -1,3 +1,4 @@
+import { prismoText } from '../../localization/prismo';
 // components/chat/MessageBubble.tsx
 import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, TouchableOpacity } from 'react-native';
@@ -141,7 +142,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               >
                 <Ionicons name="sparkles-outline" size={13} color={theme.colors.text.tertiary} />
                 <Text style={styles.thinkToggleText}>
-                  {showThinking ? 'Hide thinking' : 'Show thinking'}
+                  {showThinking ? prismoText("Hide thinking") : prismoText("Show thinking")}
                 </Text>
                 <Ionicons
                   name={showThinking ? 'chevron-up' : 'chevron-down'}
@@ -184,19 +185,19 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             <View style={styles.copyRow}>
               <Text style={styles.messageTime}>{formatTime(message.timestamp)}</Text>
               {!!message.stats && <TouchableOpacity style={styles.copyBtn} hitSlop={8}
-                accessibilityRole="button" accessibilityLabel="Response details" accessibilityState={{ expanded: showStats }}
+                accessibilityRole="button" accessibilityLabel={prismoText("Response details")} accessibilityState={{ expanded: showStats }}
                 onPress={() => setShowStats(v => !v)}>
                 <Ionicons name="information-circle-outline" size={14} color={theme.colors.text.tertiary} />
-                <Text style={styles.copyBtnText}>Details</Text>
+                <Text style={styles.copyBtnText}>{prismoText("Details")}</Text>
               </TouchableOpacity>}
               <TouchableOpacity
                 onPress={() => onCopy(buildCopyText(message), 'Message')}
                 style={styles.copyBtn}
                 hitSlop={8}
-                accessibilityLabel="Copy message"
+                accessibilityLabel={prismoText("Copy message")}
               >
                 <Ionicons name="copy-outline" size={13} color={theme.colors.text.tertiary} />
-                <Text style={styles.copyBtnText}>Copy</Text>
+                <Text style={styles.copyBtnText}>{prismoText("Copy")}</Text>
               </TouchableOpacity>
             </View>
           )}

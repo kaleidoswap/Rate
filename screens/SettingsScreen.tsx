@@ -757,28 +757,7 @@ export default function SettingsScreen({ navigation }: Props) {
         {showSection('kaleidomind ai desktop model agent assistant personalize connection wallet budget limit') && <>
         <SectionLabel>KaleidoMind</SectionLabel>
         <Group>
-          <Row
-            first
-            icon="hardware-chip-outline"
-            iconColor={theme.colors.accent[500]}
-            label="Models & privacy"
-            description="On-device models, voice and when the assistant runs"
-            onPress={() => navigation.navigate('Dashboard', { screen: 'Mind', params: { openSettings: true } })}
-          />
-          <Row
-            icon="construct-outline"
-            iconColor={theme.colors.accent[500]}
-            label="Personalize assistant"
-            description="Personality, memory and responses"
-            onPress={() => navigation.navigate('MindSettings')}
-          />
-          <Row
-            icon="wallet-outline"
-            iconColor={theme.colors.accent[500]}
-            label="Agent wallet"
-            description="A separate budget the assistant can spend, with your limits"
-            onPress={() => navigation.navigate('AgentWallet')}
-          />
+          <Row first icon="sparkles-outline" label="Prismo settings" description="Voice, responses, memory and payments" onPress={() => navigation.navigate('MindSettings')} />
         </Group>
         </>}
 

@@ -1,3 +1,4 @@
+import { prismoText } from '../../localization/prismo';
 export interface VoiceStatusInput {
   enabled: boolean;
   model: string;
@@ -27,5 +28,5 @@ export function voiceStatus(s: VoiceStatusInput) {
   else if (s.phase === 'listening') status = 'Listening…';
   else if (s.phase === 'thinking') status = 'Preparing a reply…';
   else status = 'Tap Prismo to speak';
-  return { subtitle, status, ready };
+  return { subtitle, status: prismoText(status), ready };
 }

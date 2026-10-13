@@ -1,3 +1,4 @@
+import { prismoText } from '../../localization/prismo';
 import React from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -47,7 +48,7 @@ const Option: React.FC<OptionProps> = ({ icon, title, subtitle, badge, disabled,
         <Text style={styles.optionTitle}>{title}</Text>
         {recommended && (
           <View style={styles.recPill}>
-            <Text style={styles.recPillText}>Recommended</Text>
+            <Text style={styles.recPillText}>{prismoText("Recommended")}</Text>
           </View>
         )}
         {badge && (
@@ -86,15 +87,13 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
               <Ionicons name="sparkles" size={30} color={theme.colors.primary[500]} />
             </View>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>Meet KaleidoMind</Text>
+              <Text style={styles.title}>{prismoText("Meet KaleidoMind")}</Text>
               <View style={styles.experimentalBadge}>
-                <Text style={styles.experimentalText}>Experimental</Text>
+                <Text style={styles.experimentalText}>{prismoText("Experimental")}</Text>
               </View>
             </View>
             <Text style={styles.subtitle}>
-              A private AI assistant that can check balances, create invoices and send payments by
-              voice or chat — all without your keys leaving the wallet. It's experimental — it can
-              make mistakes, so review actions before confirming. Choose how it runs.
+              {prismoText('Private AI for your wallet. Your keys stay on this device.')}
             </Text>
           </View>
 
@@ -102,36 +101,35 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
             <View style={styles.notice}>
               <Ionicons name="information-circle" size={18} color={theme.colors.warning[500]} />
               <Text style={styles.noticeText}>
-                On-device AI isn’t available here (it needs a physical device). You can set it up
-                later on a phone.
+                {prismoText('On-device AI needs a physical phone. You can set it up there.')}
               </Text>
             </View>
           )}
 
           <Option
             icon="phone-portrait-outline"
-            title="Run on this device"
+            title={prismoText("Run on this device")}
             subtitle={
               runtimeAvailable
                 ? localCapable
-                  ? 'Fully private — the model runs locally. Downloads 0.5–1.3 GB once, depending on your phone.'
-                  : `This device has ~${availability?.deviceMemGb ?? '?'} GB RAM; a small model will run but may be slow.`
-                : 'Not available on this device.'
+                  ? prismoText('The model runs on your phone. First download: 0.5–1.3 GB.')
+                  : prismoText('Limited memory: the model may be slow.')
+                : prismoText('Not available on this device.')
             }
             recommended={localRecommended}
             disabled={!runtimeAvailable}
-            badge={!runtimeAvailable ? 'Unavailable' : undefined}
+            badge={!runtimeAvailable ? prismoText('Unavailable') : undefined}
             onPress={onSelectLocal}
           />
 
           <Option
             icon="moon-outline"
-            title="Not now"
-            subtitle="Keep KaleidoMind off. You can turn it on anytime from Settings."
+            title={prismoText("Not now")}
+            subtitle={prismoText("Keep KaleidoMind off. You can turn it on anytime from Settings.")}
             onPress={onSkip}
           />
 
-          <Text style={styles.footnote}>You can change this later in the KaleidoMind settings.</Text>
+          <Text style={styles.footnote}>{prismoText("You can change this later in the KaleidoMind settings.")}</Text>
         </ScrollView>
       </SafeAreaView>
     </Modal>

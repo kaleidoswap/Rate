@@ -1,3 +1,4 @@
+import { prismoText } from '../localization/prismo';
 // components/PaymentConfirmationModal.tsx
 //
 // The one confirm sheet for money-moving actions, used by the assistant chat,
@@ -127,7 +128,7 @@ function HoldButton({ label, onComplete, disabled }: { label: string; onComplete
     >
       <Animated.View style={[styles.holdFill, { width }]} />
       <Ionicons name="finger-print" size={18} color="white" />
-      <Text style={styles.confirmText}>Hold to {label.toLowerCase()}</Text>
+      <Text style={styles.confirmText}>{prismoText('Hold to')} {prismoText(label).toLowerCase()}</Text>
     </Pressable>
   );
 }
@@ -202,12 +203,12 @@ function SheetBody({
       <View style={styles.headerContent}>
         <View style={styles.titleRow}>
           <Ionicons name={readback.kind === 'swap' ? 'swap-horizontal' : 'shield-checkmark'} size={20} color={theme.colors.primary[500]} />
-          <Text style={styles.title}>{readback.title}</Text>
+          <Text style={styles.title}>{prismoText(readback.title)}</Text>
         </View>
         {!isPayment && <>
           {!!readback.amount && <Text style={styles.amount} testID="confirm-amount">{readback.amount}</Text>}
           {!!fiat && <Text style={styles.amountUsd}>{fiat}</Text>}
-          {!!readback.recipientName && <Text style={styles.recipient}>to {readback.recipientName}</Text>}
+          {!!readback.recipientName && <Text style={styles.recipient}>{prismoText('to')} {readback.recipientName}</Text>}
         </>}
       </View>
       {isPayment && <PaymentSummary readback={readback} fiat={fiat} />}
@@ -217,7 +218,7 @@ function SheetBody({
           const open = !!expanded[r.label];
           return (
             <View key={r.label} style={styles.detailRow}>
-              <Text style={styles.detailLabel}>{r.label}</Text>
+              <Text style={styles.detailLabel}>{prismoText(r.label)}</Text>
               <View style={styles.detailValueWrap}>
                 {r.copyable ? (
                   <>
@@ -247,7 +248,7 @@ function SheetBody({
       <View style={styles.footnote}>
         <Ionicons name="information-circle" size={16} color={theme.colors.primary[500]} />
         <Text style={styles.noticeText}>
-          This can't be undone. Check the details{requireAuth ? '; you will also confirm with biometrics or your PIN' : ''}.
+          {prismoText('This cannot be undone. Check the details.')} {requireAuth ? prismoText('You will also confirm with biometrics or your PIN.') : ''}
         </Text>
       </View>
 
@@ -257,7 +258,7 @@ function SheetBody({
             style={styles.pinInput}
             value={pin}
             onChangeText={setPin}
-            placeholder="Wallet PIN"
+            placeholder={prismoText('Wallet PIN')}
             placeholderTextColor={theme.colors.text.tertiary}
             secureTextEntry
             keyboardType="number-pad"
@@ -270,16 +271,16 @@ function SheetBody({
           </TouchableOpacity>
         </View>
       )}
-      {!!authError && <Text style={styles.authError}>{authError}</Text>}
+      {!!authError && <Text style={styles.authError}>{prismoText(authError)}</Text>}
 
       <View style={styles.actions}>
         <TouchableOpacity style={styles.cancelButton} onPress={onCancel} disabled={loading} accessibilityRole="button">
-          <Text style={styles.cancelText}>Cancel</Text>
+          <Text style={styles.cancelText}>{prismoText('Cancel')}</Text>
         </TouchableOpacity>
         {busy ? (
           <View style={[styles.holdButton, styles.buttonDisabled]} accessibilityLiveRegion="polite">
             <ActivityIndicator size="small" color="white" />
-            <Text style={styles.confirmText}>{loading ? 'Processing…' : busyLabel || 'Checking…'}</Text>
+            <Text style={styles.confirmText}>{loading ? prismoText('Processing…') : prismoText(busyLabel || 'Checking…')}</Text>
           </View>
         ) : (
           <HoldButton label={readback.cta} onComplete={approve} disabled={askPin} />

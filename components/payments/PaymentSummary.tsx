@@ -1,3 +1,4 @@
+import { prismoText } from '../../localization/prismo';
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useAppTheme } from '../../theme/ThemeProvider';
@@ -12,17 +13,17 @@ export function PaymentSummary({ readback, fiat }: { readback: ConfirmReadback; 
   const recipient = readback.recipientName || readback.rows.find(r => /^(contact|recipient|destination|lightning address|nostr contact|bitcoin address)$/i.test(r.label))?.value;
   const hasFee = costs.some(r => /^fees?$/i.test(r.label.trim()));
   return <View style={[styles.card, { backgroundColor: t.colors.surface.secondary, borderColor: t.colors.border.light }]}>
-    <Text style={[styles.caption, { color: t.colors.text.secondary }]}>Amount</Text>
-    <Text testID="confirm-amount" style={[styles.amount, { color: t.colors.text.primary }]}>{readback.amount || 'See payment details'}</Text>
+    <Text style={[styles.caption, { color: t.colors.text.secondary }]}>{prismoText('Amount')}</Text>
+    <Text testID="confirm-amount" style={[styles.amount, { color: t.colors.text.primary }]}>{readback.amount || prismoText('See payment details')}</Text>
     {!!fiat && <Text style={[styles.caption, { color: t.colors.text.secondary }]}>{fiat}</Text>}
     <View style={styles.row}>
-      <Text style={[styles.label, { color: t.colors.text.secondary }]}>To</Text>
-      <Text selectable style={[styles.value, { color: t.colors.text.primary }]}>{recipient || 'See destination below'}</Text>
+      <Text style={[styles.label, { color: t.colors.text.secondary }]}>{prismoText('To')}</Text>
+      <Text selectable style={[styles.value, { color: t.colors.text.primary }]}>{recipient || prismoText('See destination below')}</Text>
     </View>
     <View style={[styles.costs, { borderTopColor: t.colors.border.light }]}>
-      {!hasFee && <View style={styles.row}><Text style={[styles.label, { color: t.colors.text.secondary }]}>Fee</Text><Text style={[styles.value, { color: t.colors.text.primary }]}>Not available yet</Text></View>}
+      {!hasFee && <View style={styles.row}><Text style={[styles.label, { color: t.colors.text.secondary }]}>{prismoText('Fee')}</Text><Text style={[styles.value, { color: t.colors.text.primary }]}>{prismoText('Not available yet')}</Text></View>}
       {costs.map(row => <View key={row.label} style={styles.row}>
-        <Text style={[styles.label, { color: t.colors.text.secondary }]}>{row.label}</Text>
+        <Text style={[styles.label, { color: t.colors.text.secondary }]}>{prismoText(row.label)}</Text>
         <Text style={[styles.value, { color: t.colors.text.primary }]}>{row.value}</Text>
       </View>)}
     </View>

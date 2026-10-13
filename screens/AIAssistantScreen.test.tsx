@@ -23,8 +23,8 @@ jest.mock('../services/mindAgent', () => ({ createMindAgent: () => ({ listSkills
 jest.mock('../hooks/useAiConfirm', () => ({ useAiConfirm: () => ({ state: null }) }));
 jest.mock('../components/mind/KaleidoMindOnboarding', () => ({ KaleidoMindOnboarding: () => null }));
 jest.mock('../components/voice-agent/VoiceAgentOverlay', () => {
-  const { Text } = require('react-native');
-  return { VoiceAgentOverlay: ({ visible }: any) => visible ? <Text>Voice conversation</Text> : null };
+  const { Text, TouchableOpacity, View } = require('react-native');
+  return { VoiceAgentOverlay: ({ visible, messages, onMessagesChange, onClose }: any) => visible ? <View><Text>Voice conversation</Text><Text>{`Voice history: ${messages.length}`}</Text><TouchableOpacity onPress={() => { onMessagesChange((p: any[]) => [...p, { id: 'voice-test', text: 'Reply from Talk', isUser: false, timestamp: new Date() }]); onClose(); }}><Text>Finish voice turn</Text></TouchableOpacity></View> : null };
 });
 jest.mock('../components/VoiceInput', () => {
   const React = require('react');
@@ -57,23 +57,20 @@ it('uses one composer with separate dictation and conversation actions when enab
   expect(screen.getByLabelText('Dictate message')).toBeTruthy();
   expect(screen.getByLabelText('Talk to Prismo')).toBeTruthy();
 });
-it('opens settings both from the model chip and the menu', () => {
+it('has a single settings entry and no permanent model chip', () => {
   mockEnabled = true;
   const screen = render(<AIAssistantScreen navigation={navigation} />);
-  fireEvent.press(screen.getByLabelText('Choose model and voice'));
-  fireEvent.press(screen.getByText('Model settings'));
+  expect(screen.queryByLabelText('Choose model and voice')).toBeNull();
   fireEvent.press(screen.getByLabelText('More'));
-  fireEvent.press(screen.getByText('Models & settings'));
-  expect(screen.getByText('Model settings')).toBeTruthy();
-  expect(screen.queryByText('Models & settings')).toBeNull();
+  fireEvent.press(screen.getByText('Prismo settings'));
+  expect(navigation.navigate).toHaveBeenCalledWith('MindSettings');
 });
-it('hides the composer before setup but keeps model settings accessible', () => {
+it('keeps settings accessible before setup', () => {
   const screen = render(<AIAssistantScreen navigation={navigation} />);
   expect(screen.queryByLabelText('Message Prismo')).toBeNull();
-  expect(screen.queryByLabelText('Talk to Prismo')).toBeNull();
   fireEvent.press(screen.getByLabelText('More'));
-  fireEvent.press(screen.getByText('Models & settings'));
-  expect(screen.getByText('Model settings')).toBeTruthy();
+  fireEvent.press(screen.getByText('Prismo settings'));
+  expect(navigation.navigate).toHaveBeenCalledWith('MindSettings');
 });
 it('opens the voice conversation when Agent is enabled', () => {
   mockEnabled = true;
@@ -114,4 +111,15 @@ it('prioritizes send while drafting and restores Talk when the draft is cleared'
   fireEvent.changeText(screen.getByLabelText('Message Prismo'), '');
   expect(screen.getByLabelText('Talk to Prismo')).toBeTruthy();
   expect(screen.getByLabelText('Dictate message')).toBeTruthy();
+});
+
+it('retains Talk replies in chat and passes them into the next Talk session', () => {
+  mockEnabled = true;
+  const screen = render(<AIAssistantScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Talk to Prismo'));
+  expect(screen.getByText('Voice history: 0')).toBeTruthy();
+  fireEvent.press(screen.getByText('Finish voice turn'));
+  expect(screen.getByText('Reply from Talk')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Talk to Prismo'));
+  expect(screen.getByText('Voice history: 1')).toBeTruthy();
 });

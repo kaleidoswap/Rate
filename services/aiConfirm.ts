@@ -1,3 +1,4 @@
+import { getAppLanguage } from '../localization/language';
 // What the assistant's confirm sheet shows (and speaks) before a tool moves
 // funds, built from the tool call plus the app's own state: the cached swap
 // quote, the resolved contact, the decoded invoice. Shared by chat and voice.
@@ -89,7 +90,7 @@ export function paymentReadback(p: {
     amountSats: sats,
     recipientName: who,
     rows,
-    spoken: `Send ${sats ? formatSats(sats) : 'this payment'}${who ? ` to ${who}` : ''}. Tap to approve.`,
+    spoken: getAppLanguage() === 'it' ? `Invia ${sats ? formatSats(sats) : 'questo pagamento'}${who ? ` a ${who}` : ''}. Tocca per approvare.` : `Send ${sats ? formatSats(sats) : 'this payment'}${who ? ` to ${who}` : ''}. Tap to approve.`,
   };
 }
 
@@ -116,7 +117,7 @@ export function swapReadback(q: SwapQuoteView, warning?: string): ConfirmReadbac
     quoteId: q.quoteId,
     shownReceive: q.receiveAmount,
     warning,
-    spoken: `Swap ${send} for ${receive} on ${venue}. Tap to approve.`,
+    spoken: getAppLanguage() === 'it' ? `Scambia ${send} con ${receive} su ${venue}. Tocca per approvare.` : `Swap ${send} for ${receive} on ${venue}. Tap to approve.`,
   };
 }
 
@@ -132,7 +133,7 @@ export function assetSendReadback(a: { asset: string; amount: number; to: string
       { label: 'Asset', value: a.asset },
       { label: 'Network', value: a.network },
     ],
-    spoken: `Send ${amount} to the RGB invoice you gave. Tap to approve.`,
+    spoken: getAppLanguage() === 'it' ? `Invia ${amount} alla fattura RGB indicata. Tocca per approvare.` : `Send ${amount} to the RGB invoice you gave. Tap to approve.`,
   };
 }
 
@@ -163,7 +164,7 @@ export function agentPaymentReadback(a: Record<string, unknown>): ConfirmReadbac
     amountSats: sats,
     recipientName: service,
     rows,
-    spoken: `Pay ${formatSats(sats)} to ${service} from the Agent wallet. Tap to approve.`,
+    spoken: getAppLanguage() === 'it' ? `Paga ${formatSats(sats)} a ${service} dal portafoglio Agent. Tocca per approvare.` : `Pay ${formatSats(sats)} to ${service} from the Agent wallet. Tap to approve.`,
   };
 }
 
@@ -178,7 +179,7 @@ export function genericReadback(name: string, args: Record<string, unknown>): Co
     title: 'Confirm action',
     cta: 'Approve',
     rows,
-    spoken: `Approve ${name.replace(/_/g, ' ')}? Tap to approve.`,
+    spoken: getAppLanguage() === 'it' ? `Vuoi approvare ${name.replace(/_/g, ' ')}? Tocca per approvare.` : `Approve ${name.replace(/_/g, ' ')}? Tap to approve.`,
   };
 }
 
