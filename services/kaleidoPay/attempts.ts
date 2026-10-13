@@ -7,6 +7,7 @@ export interface PaymentAttempt extends PaymentResult {
   recipientName?: string; feeDisplay?: string; accountName?: string;
   /** Set when the user chose to move on from a payment whose outcome could not be determined. */
   dismissedAt?: number;
+  lastCheckedAt?: number; checkFailed?: boolean;
 }
 const key = (walletId: number) => `kaleidopay-attempt-v1-${walletId}`;
 export async function loadPaymentAttempt(walletId: number): Promise<PaymentAttempt | null> {
@@ -17,7 +18,9 @@ export async function loadPaymentAttempt(walletId: number): Promise<PaymentAttem
     || !['pending', 'unknown', 'failed', 'completed'].includes(value.status)
     || typeof value.provider !== 'string' || typeof value.total !== 'string' || typeof value.recipient !== 'string'
     || !Number.isSafeInteger(value.createdAt)
-    || ['recipientName', 'feeDisplay', 'accountName', 'destinationRail', 'network'].some(field => value[field] !== undefined && typeof value[field] !== 'string')
+    || ['recipientName', 'feeDisplay', 'accountName', 'destinationRail', 'network', 'detail'].some(field => value[field] !== undefined && typeof value[field] !== 'string')
+    || (value.lastCheckedAt !== undefined && !Number.isSafeInteger(value.lastCheckedAt))
+    || (value.checkFailed !== undefined && typeof value.checkFailed !== 'boolean')
     || (value.onchainConfirmed !== undefined && typeof value.onchainConfirmed !== 'boolean')
     || (value.dismissedAt !== undefined && !Number.isSafeInteger(value.dismissedAt))) throw new Error('Payment recovery record is unreadable.');
   return value;

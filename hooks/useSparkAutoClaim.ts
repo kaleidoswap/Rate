@@ -87,7 +87,9 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
         );
         if (!cancelled && res.claimedTxids.length > 0) {
           const event: DepositDetectionEvent = {
-            layer: 'spark',
+            layer: 'onchain',
+            protocol: 'SPARK',
+            assetId: 'BTC',
             status: 'claimed',
             message: 'Recovered a pending Spark deposit',
           };
@@ -135,7 +137,9 @@ export function useSparkAutoClaim({ address, enabled, onClaimed, onStatus }: Use
           claimedRef.current = address;
           if (nextTickTimer) clearTimeout(nextTickTimer);
           const event: DepositDetectionEvent = {
-            layer: 'spark',
+            layer: 'onchain',
+            protocol: 'SPARK',
+            assetId: 'BTC',
             status: 'claimed',
             message: 'Claimed Spark on-chain deposit',
           };

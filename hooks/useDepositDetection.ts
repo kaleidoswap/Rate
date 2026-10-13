@@ -1,3 +1,4 @@
+import { arkadeBalance } from '../services/protocols/arkadeBalance';
 import { normalizeDepositStatus } from '../utils/deposit-status';
 import { toEngineProtocol } from '../utils/protocol-bridge'
 // Monitor only the receive methods actually encoded in the visible QR.
@@ -28,6 +29,9 @@ export interface DepositDetectionEvent {
   protocol?: ReceiveProtocol;
   message?: string;
   rawStatus?: string;
+  assetId?: string;
+  amount?: number; // atomic units; balance changes may aggregate multiple deposits
+  amountSource?: 'balance' | 'payment';
 }
 
 interface UseDepositDetectionArgs {
@@ -85,7 +89,8 @@ async function readMethodBalance(
         parentSignal,
       );
       if (!balance) return null;
-      return Number(balance.total ?? (balance.confirmed ?? 0) + (balance.unconfirmed ?? 0));
+      // Boarding and recoverable funds are not an available Arkade receipt.
+      return method.protocol === 'ARKADE' ? Number(balance.confirmed) : Number(balance.total ?? (balance.confirmed ?? 0) + (balance.unconfirmed ?? 0));
     }
 
     const balance = await runReceiveOperation<any>(
@@ -108,6 +113,15 @@ async function readMethodBalance(
 
 /** Track USD tokens separately: new token holdings count, BTC changes do not. */
 async function readMethodBalances(method: ReceiveMethod, signal: AbortSignal): Promise<Record<string, number> | null> {
+  if (method.protocol === 'ARKADE' && method.layer === 'onchain') {
+    const adapter = getConnectedAdapter(method.protocol);
+    if (!adapter?.rawWallet) return null;
+    try {
+      const raw = await runReceiveOperation<any>('Arkade boarding', () => adapter.rawWallet.getBalance(), POLL_TIMEOUT_MS, signal);
+      const b = arkadeBalance(raw);
+      return { balance: b.available, _boardingPending: b.boardingUnconfirmed, _boardingReady: b.boardingConfirmed };
+    } catch { return null; }
+  }
   if (method.protocol === 'SPARK' && (method.assetId === 'USD' || method.assetId === 'SPARK_ALL')) {
     const adapter = getConnectedAdapter(method.protocol);
     if (!adapter) return null;
@@ -166,6 +180,7 @@ async function readInvoiceStatus(
           status,
           protocol: method.protocol,
           rawStatus: String(rawStatus ?? ''),
+          assetId: method.assetId ?? 'BTC',
         }
       : null;
   } catch {
@@ -198,7 +213,7 @@ async function readRgbTransfer(
       parentSignal,
     );
     const { stage, message } = rgbReceiveStage(transfer);
-    return { layer: method.layer, status: stage, protocol: method.protocol, message, rawStatus: transfer?.status ?? 'none' };
+    return { layer: method.layer, status: stage, protocol: method.protocol, assetId: method.assetId, amount: transfer?.amount, amountSource: 'payment', message, rawStatus: transfer?.status ?? 'none' };
   } catch {
     return null;
   }
@@ -283,10 +298,20 @@ export function useDepositDetection({
         const balance = await readMethodBalances(method, operationController.signal);
         if (cancelled || firedRef.current || balance == null) continue;
         const baseline = baselinesRef.current.get(method.key);
+        if (method.protocol === 'ARKADE' && method.layer === 'onchain' && (balance._boardingPending > 0 || balance._boardingReady > 0)) {
+          emitStatus({ layer: method.layer, protocol: 'ARKADE', status: 'pending',
+            rawStatus: balance._boardingReady > 0 ? 'boarding_ready' : 'boarding_confirming',
+            message: balance._boardingReady > 0 ? 'Bitcoin confirmed. Arkade is preparing the available balance. Keep the app open.' : 'Bitcoin deposit detected. Waiting for block confirmation.' });
+        }
         if (baseline == null) {
           baselinesRef.current.set(method.key, balance);
-        } else if (Object.entries(balance).some(([asset, value]) => value > (baseline[asset] ?? 0))) {
+        } else if (Object.entries(balance).some(([asset, value]) => !asset.startsWith('_') && value > (baseline[asset] ?? 0))) {
+          const increases = Object.entries(balance).filter(([asset, value]) => !asset.startsWith('_') && value > (baseline[asset] ?? 0));
+          const [asset, value] = increases[0];
           fire({
+            assetId: increases.length > 1 ? 'MULTIPLE' : asset === 'balance' ? (method.assetId ?? 'BTC') : asset,
+            amount: increases.length === 1 ? value - (baseline[asset] ?? 0) : undefined,
+            amountSource: 'balance',
             layer: method.layer,
             status: 'confirmed',
             protocol: method.protocol,

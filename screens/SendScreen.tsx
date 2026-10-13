@@ -1,4 +1,4 @@
-import { awaitingOnchainConfirmation, paymentPresentation } from '../utils/payment-presentation';
+import { paymentPollingRemaining, awaitingOnchainConfirmation, paymentPresentation } from '../utils/payment-presentation';
 import { checkOnchainConfirmation } from '../services/kaleidoPay/onchainConfirmation';
 import { PaymentReceiptDetails } from '../components/PaymentReceiptDetails';
 // screens/SendScreen.tsx
@@ -188,12 +188,14 @@ export default function SendScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (!journalReady || (!unresolvedAttempt(attempt) && !awaitingOnchainConfirmation(attempt))) return;
     let active = true;
-    setStatusTimedOut(false);
+    const remaining = paymentPollingRemaining(attempt!.createdAt, Date.now(), STATUS_POLL_LIMIT_MS);
+    setStatusTimedOut(remaining === 0);
+    if (remaining === 0) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const until = Date.now() + STATUS_POLL_LIMIT_MS;
+    const until = Date.now() + remaining;
     const deadlineTimer = setTimeout(() => {
       if (active) { active = false; clearTimeout(timer); setStatusTimedOut(true); }
-    }, STATUS_POLL_LIMIT_MS);
+    }, remaining);
     const poll = async (round: number) => {
       await checkStatusRef.current(round > 0);
       if (!active) return;
@@ -356,8 +358,9 @@ export default function SendScreen({ navigation, route }: Props) {
       const providerResult = attempt.status === 'completed' ? attempt : await readPaymentStatus(attempt.sourceId, attempt.id);
       const result = await checkOnchainConfirmation({ ...attempt, ...(attempt.status === 'completed' ? {} : providerResult) });
       // A background result is dropped when nothing changed, or the record changed meanwhile (checked, dismissed).
-      if (attemptRef.current !== attempt || (quiet && result.status === attempt.status && result.reference === attempt.reference && result.onchainConfirmed === attempt.onchainConfirmed)) return;
-      const updated = { ...attempt, ...result };
+      if (attemptRef.current !== attempt) return;
+      if (!quiet && result.status === 'unknown') setError(result.detail || 'No payment receipt is available yet. Check Activity; do not send again.');
+      const updated = { ...attempt, ...result, lastCheckedAt: Date.now(), checkFailed: false };
       if (!await updatePaymentAttempt(walletId, updated)) return;
       if (attemptRef.current !== attempt) return;
       setAttempt(updated);
@@ -685,6 +688,9 @@ export default function SendScreen({ navigation, route }: Props) {
       <PaymentReceiptDetails details={{ amount: a.recipient, recipient: a.recipientName, fees: a.feeDisplay, total: a.total, account: a.accountName || a.provider, reference: a.reference, createdAt: a.createdAt }} />
       <Text style={small}>Fees and total are from the quote you approved. Final fees may differ where the provider supplies an estimate.</Text>
       <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>{unresolvedAttempt(a) ? (statusTimedOut ? 'No final result yet. Check again later; do not send it again.' : presentation.detail) : presentation.detail}</Text>
+      {!!a.lastCheckedAt && unresolvedAttempt(a) && <Text style={small}>Last checked: {new Date(a.lastCheckedAt).toLocaleTimeString()}{a.checkFailed ? ' · Connection unavailable' : ''}</Text>}
+      {!!a.detail && unresolvedAttempt(a) && <Text style={muted}>{a.detail}</Text>}
+      {unresolvedAttempt(a) && <Button title="View in Activity" variant="secondary" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} />}
       {chainWaiting && <Button title="Check confirmation" variant="secondary" onPress={() => void checkStatus()} loading={statusChecking} disabled={statusChecking || busy} />}
       {unresolvedAttempt(a) ? <>
         <Button title="Verify payment" onPress={() => void checkStatus()} loading={busy || statusChecking} disabled={busy || statusChecking} />

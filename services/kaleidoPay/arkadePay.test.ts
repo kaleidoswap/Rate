@@ -80,7 +80,7 @@ test('refuses an Ark address of another server so another account (Bark) can tak
     const preview = previewTarget(arkTarget(BARK_ARK), 5_000, 'a2');
     const [offer] = (await quotePaymentOffers(preview)).filter(o => o.route.sourceId === 'arkade');
     expect(offer.quote).toBeUndefined();
-    expect(offer.unavailable).toContain('different Ark server');
+    expect(offer.unavailable).toContain('does not recognize');
     await expect(executePaymentOffer(preview, offer, 'att-2')).rejects.toBeInstanceOf(PaymentNotSentError);
     expect(adapter.sendPayment).not.toHaveBeenCalled();
   } finally { off(); }
@@ -155,4 +155,36 @@ test('refreshes an older unknown direct payment from the adapter instead of repl
   expect(adapter.getPaymentStatus).toHaveBeenCalledWith('real-tx');
   expect(await account.status!('older')).toEqual({ status: 'completed', reference: 'real-tx' });
   expect(adapter.getPaymentStatus).toHaveBeenCalledTimes(1);
+});
+
+test.each(['MIGRATABLE', 'DUE_NOW'])('accepts a rotated recipient key still allowed by the SDK (%s)', async (status) => {
+  const adapter: any = makeAdapter();
+  adapter.arkSdk.classifyContractSigner = jest.fn(() => ({ status }));
+  const account = createArkadeAccount(adapter, 'mutinynet');
+  const preview = previewTarget(arkTarget(BARK_ARK), 5000, `rotation-${status}`);
+  const options = await account.quoteOptions!(preview, { kind: 'direct', sourceId: 'arkade', from: 'ark:mutinynet', to: 'ark:mutinynet' });
+  expect(options[0].quote).toBeDefined();
+  expect(adapter.sendPayment).not.toHaveBeenCalled();
+});
+test('an expired operator key asks for a fresh address before any send', async () => {
+  const adapter: any = makeAdapter();
+  adapter.arkSdk.classifyContractSigner = jest.fn(() => ({ status: 'EXPIRED' }));
+  const account = createArkadeAccount(adapter, 'mutinynet');
+  const options = await account.quoteOptions!(previewTarget(arkTarget(BARK_ARK), 5000, 'expired-key'), { kind: 'direct', sourceId: 'arkade', from: 'ark:mutinynet', to: 'ark:mutinynet' });
+  expect(options[0].unavailable).toContain('new receive address');
+  expect(adapter.sendPayment).not.toHaveBeenCalled();
+});
+
+test('a lost send response persists a safe explanation and never resends during verification', async () => {
+  const adapter = makeAdapter();
+  adapter.sendPayment.mockRejectedValueOnce(new Error('Network request failed: secret-provider-payload'));
+  const account = createArkadeAccount(adapter, 'mutinynet');
+  const preview = previewTarget(arkTarget(OWN_ARK), 10, 'lost-reply');
+  const route = { kind: 'direct' as const, sourceId: 'arkade', from: 'ark:mutinynet', to: 'ark:mutinynet' };
+  const quote = await account.quote!(preview, route);
+  const result = await account.execute!(preview, route, quote, 'lost-reply');
+  expect(result).toMatchObject({ status: 'unknown', detail: expect.stringContaining('connection to Arkade was interrupted') });
+  expect(result.detail).not.toContain('secret-provider-payload');
+  expect(await account.status!('lost-reply')).toEqual(result);
+  expect(adapter.sendPayment).toHaveBeenCalledTimes(1);
 });

@@ -145,7 +145,7 @@ test('an unresolved payment stops being re-checked when Send closes', async () =
   const { checkPaymentStatus } = require('../services/kaleidoPay');
   const { loadPaymentAttempt } = require('../services/kaleidoPay/attempts');
   (checkPaymentStatus as jest.Mock).mockResolvedValue({ status: 'pending' });
-  loadPaymentAttempt.mockResolvedValueOnce({ id: 'p', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending', createdAt: 1 });
+  loadPaymentAttempt.mockResolvedValueOnce({ id: 'p', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending', createdAt: Date.now() });
   jest.useFakeTimers();
   try {
     const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
@@ -345,4 +345,16 @@ test.each([[false, 'Sent to the network'], [true, 'Confirmed on-chain']] as cons
   expect(screen.queryByText('Payment completed')).toBeNull();
   if (!confirmed) expect(screen.getByText('Waiting for a Bitcoin block confirmation. Do not send again.')).toBeTruthy();
   screen.unmount();
+});
+
+test('a reopened 26-minute-old unknown payment does not restart automatic checking', async () => {
+  const { loadPaymentAttempt } = require('../services/kaleidoPay/attempts');
+  const { checkPaymentStatus } = require('../services/kaleidoPay');
+  loadPaymentAttempt.mockResolvedValueOnce({ id: 'old-arkade', sourceId: 'arkade', provider: 'Arkade', total: '10 sats', recipient: '10 sats', status: 'unknown', createdAt: Date.now() - 26 * 60_000 });
+  const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+  await act(async () => {});
+  expect(screen.getByText('Confirmation is taking longer')).toBeTruthy();
+  expect(screen.queryByLabelText('Checking payment automatically')).toBeNull();
+  expect(checkPaymentStatus).not.toHaveBeenCalled();
+  expect(screen.getByText('View in Activity')).toBeTruthy();
 });

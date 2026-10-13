@@ -71,7 +71,15 @@ export function buildNetworkConfig(
   const switched = typeof previous.network === 'string' && previous.network !== config.network;
 
   if (type === 'arkade') {
-    if (switched) delete config.esploraUrl;
+    if (switched) {
+      delete config.esploraUrl;
+      delete config.delegatorUrl;
+      if (config.arkadeConfig && typeof config.arkadeConfig === 'object') {
+        const nested = { ...(config.arkadeConfig as Record<string, unknown>) };
+        delete nested.delegatorUrl;
+        config.arkadeConfig = nested;
+      }
+    }
     const previousUrl = typeof previous.arkServerUrl === 'string' ? previous.arkServerUrl : undefined;
     const knownDefault = switched || !previousUrl
       || previousUrl === getDefaultArkadeServerUrl('mainnet')

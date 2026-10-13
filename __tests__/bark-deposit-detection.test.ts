@@ -20,7 +20,7 @@ it('syncs Bark before each balance read, so an incoming Ark payment is detected'
   await jest.advanceTimersByTimeAsync(4_000) // baseline (sync 1)
   await jest.advanceTimersByTimeAsync(8_000) // first poll (sync 2) sees the receive
   expect(mockSync.mock.calls.length).toBeGreaterThanOrEqual(2)
-  expect(onDetected).toHaveBeenCalledWith(expect.objectContaining({ layer: 'bark', status: 'confirmed' }))
+  expect(onDetected).toHaveBeenCalledWith(expect.objectContaining({ layer: 'bark', status: 'confirmed', protocol: 'BARK', assetId: 'BTC', amount: 500, amountSource: 'balance' }))
   jest.useRealTimers()
 })
 

@@ -57,6 +57,7 @@ function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyph
 
 function typeLabel(item: ActivityItem): string {
     if (item.crossChain) return item.crossChain.direction === 'deposit' ? 'Deposit from another chain' : 'Sent to another chain';
+    if (item.kind === 'unilateral_exit') return 'Exit to Bitcoin';
     const onchainKind = item.source === 'onchain' ? rgbOnchainKindLabel(item.kind) : null;
     if (onchainKind) return onchainKind;
     switch (item.type) {

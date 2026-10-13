@@ -102,6 +102,7 @@ function layerChipColors(layer: ActivityLayer): { bg: string; text: string } {
 }
 
 function typeLabel(item: ActivityItem): string {
+    if (item.kind === 'unilateral_exit') return 'Exit to Bitcoin';
     if (item.kind === AGENT_ACTIVITY_KIND && item.assetName) return item.assetName;
     switch (item.type) {
         case 'receive': return 'Receive';

@@ -1,3 +1,4 @@
+import lightningPreviewCard from './arkadeLightningSolver.json';
 /**
  * Arkade -> Lightning through Arkade Intents (RFQ solvers), as a KaleidoPay swap.
  *
@@ -242,7 +243,15 @@ function createProviderSource(opts: ProviderSourceOptions, accept: (m: IntentsMa
 
   async function registryProviders(): Promise<IntentsProvider[]> {
     const { swap, nostr } = load();
+    // Official mainnet Lightning preview is deliberately absent from the registry.
+    // Source: https://docs.arkadeos.com/intents/developer-preview#lightning-solver-card
+    // Pinned 2026-10-13; review this signed card against the docs before releases.
+    // Discovery validates its schema; binding RFQ terms remain checked before funding.
+    const discoveryNetwork = registryNetwork(opts.arkNetwork(), network);
     const markets = await swap.discoverMarkets({
+      localCards: discoveryNetwork === 'bitcoin'
+        ? [{ card: lightningPreviewCard, network: 'bitcoin', label: 'Arkade official Lightning preview' }]
+        : [],
       network: registryNetwork(opts.arkNetwork(), network) as any,
       registryUrl: `${opts.registryUrl ?? ARKADE_SOLVER_REGISTRY}/${registryNetwork(opts.arkNetwork(), network)}.json`,
       fetchImpl,
@@ -254,7 +263,7 @@ function createProviderSource(opts: ProviderSourceOptions, accept: (m: IntentsMa
       if (!key || !/^[0-9a-f]{64}$/.test(key) || !relays.length || !accept(market)) continue;
       if (out.some(p => p.id === `solver:${key}`)) continue; // markets come ranked; keep the best per solver
       out.push({
-        id: `solver:${key}`, name: market.solver ? `${market.solver}` : 'Arkade solver', detail: `Arkade Intents solver ${short(key)}`,
+        id: `solver:${key}`, name: key === lightningPreviewCard.discovery_pubkey ? 'Arkade Lightning · Beta' : market.solver ? `${market.solver}` : 'Arkade solver', detail: `Arkade Intents solver ${short(key)}`,
         market, transport: () => nostr.nostrRfqTransport({ relays, solverPubkey: key }),
       });
     }

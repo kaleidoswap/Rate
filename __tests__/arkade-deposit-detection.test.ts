@@ -1,0 +1,26 @@
+import { renderHook } from '@testing-library/react-native';
+import { useDepositDetection } from '../hooks/useDepositDetection';
+let mockBalance: any;
+const mockAdapter = { isConnected: () => true, rawWallet: { getBalance: async () => mockBalance } };
+jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: () => mockAdapter } }));
+beforeAll(() => { (require('react-native') as any).AppState = { currentState: 'active', addEventListener: jest.fn(() => ({ remove: jest.fn() })) }; });
+test('boarding must progress through confirmations and settlement before celebrating available funds', async () => {
+  jest.useFakeTimers();
+  mockBalance = { available: 1000, total: 1000, boarding: { confirmed: 0, unconfirmed: 0 } };
+  const onDetected = jest.fn(); const onStatus = jest.fn();
+  const methods: any = [{ key: 'arkade-board', label: 'Arkade', protocol: 'ARKADE', kind: 'address', layer: 'onchain', monitor: 'balance', value: 'bc1test', assetId: 'BTC' }];
+  const { unmount } = renderHook(() => useDepositDetection({ enabled: true, methods, onDetected, onStatus }));
+  await jest.advanceTimersByTimeAsync(0);
+  mockBalance = { available: 1000, total: 6000, boarding: { confirmed: 0, unconfirmed: 5000 } };
+  await jest.advanceTimersByTimeAsync(8000);
+  expect(onDetected).not.toHaveBeenCalled();
+  expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ rawStatus: 'boarding_confirming', status: 'pending' }));
+  mockBalance.boarding = { confirmed: 5000, unconfirmed: 0 };
+  await jest.advanceTimersByTimeAsync(8000);
+  expect(onDetected).not.toHaveBeenCalled();
+  expect(onStatus).toHaveBeenLastCalledWith(expect.objectContaining({ rawStatus: 'boarding_ready', status: 'pending' }));
+  mockBalance = { available: 6000, total: 6000, boarding: { confirmed: 0, unconfirmed: 0 } };
+  await jest.advanceTimersByTimeAsync(8000);
+  expect(onDetected).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'BTC', amount: 5000, status: 'confirmed', amountSource: 'balance' }));
+  unmount(); jest.useRealTimers();
+});

@@ -164,9 +164,10 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         breakdownRows.push({
             key: 'ARKADE',
             name: 'BTC on Arkade',
-            subtitle: 'Arkade balance',
+            subtitle: (byProtocol?.ARKADE?.unconfirmed ?? 0) > 0 && !hideAmounts
+                ? `Available · ${formatSatoshis(byProtocol.ARKADE!.unconfirmed)} ${bitcoinUnit} unavailable` : 'Available on Arkade',
             accent: protocolColor('ARKADE'),
-            value: byProtocol?.ARKADE?.total ?? 0,
+            value: byProtocol?.ARKADE?.confirmed ?? 0,
         });
     }
     if (byProtocol && 'BARK' in byProtocol) {

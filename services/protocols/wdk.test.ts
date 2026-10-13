@@ -1,3 +1,5 @@
+jest.mock('./arkadeBalance', () => ({ withArkadeBalance: (a: any) => a }));
+jest.mock('./arkadeExit', () => ({ withArkadeExitGuard: (a: any) => a }));
 const mockEvents: string[] = [];
 const mockConnected = new Set<string>();
 const mockDelays: Record<string, number> = {};

@@ -1,129 +1,56 @@
-// components/DepositSuccessOverlay.tsx
-//
-// Full-screen "Deposit received!" confirmation, the React Native counterpart of
-// rate-extension's DepositSuccessScreen. A spring-scaled checkmark with an
-// expanding ring gives the same celebratory beat the extension shows when an
-// incoming deposit is detected.
-
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, ScrollView, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { theme } from '../theme';
-import { Button } from './';
+import { useAppTheme } from '../theme/ThemeProvider';
+import { useAppLanguage } from '../localization/useAppLanguage';
+import { Button } from './Button';
 
 interface Props {
   visible: boolean;
   ticker: string;
   network?: string;
-  amountLabel?: string; // optional "0.001 BTC" style summary
+  account?: string;
+  amountLabel?: string;
+  amountIsBalanceChange?: boolean;
   onDone: () => void;
   onActivity?: () => void;
 }
 
-export default function DepositSuccessOverlay({ visible, ticker, network, amountLabel, onDone, onActivity }: Props) {
-  const scale = useRef(new Animated.Value(0)).current;
-  const ring = useRef(new Animated.Value(0)).current;
+export default function DepositSuccessOverlay({ visible, ticker, network, account, amountLabel, amountIsBalanceChange, onDone, onActivity }: Props) {
+  const theme = useAppTheme();
+  const { language } = useAppLanguage();
+  const it = language === 'it';
   const fade = useRef(new Animated.Value(0)).current;
-
   useEffect(() => {
-    if (!visible) {
-      scale.setValue(0);
-      ring.setValue(0);
-      fade.setValue(0);
-      return;
-    }
-    Animated.parallel([
-      Animated.timing(fade, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, friction: 5, tension: 120, useNativeDriver: true }),
-      Animated.timing(ring, { toValue: 1, duration: 700, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-    ]).start();
-  }, [visible]);
-
+    const animation = Animated.timing(fade, { toValue: visible ? 1 : 0, duration: 220, useNativeDriver: true });
+    animation.start();
+    return () => animation.stop();
+  }, [visible, fade]);
   if (!visible) return null;
-
-  const ringScale = ring.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.8] });
-  const ringOpacity = ring.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
-
-  return (
-    <Animated.View style={[styles.overlay, { opacity: fade }]} pointerEvents="auto">
-      <View style={styles.card}>
-        <View style={styles.badgeWrap}>
-          <Animated.View style={[styles.ring, { transform: [{ scale: ringScale }], opacity: ringOpacity }]} />
-          <Animated.View style={[styles.badge, { transform: [{ scale }] }]}>
-            <Ionicons name="checkmark" size={48} color="#FFFFFF" />
-          </Animated.View>
+  const row = (label: string, value: string) => <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[4] }}>
+    <Text style={{ flex: 1, color: theme.colors.text.secondary }}>{label}</Text>
+    <Text selectable style={{ flex: 2, textAlign: 'right', color: theme.colors.text.primary, fontWeight: '600' }}>{value}</Text>
+  </View>;
+  return <Animated.View accessibilityViewIsModal style={{ position: 'absolute', inset: 0, zIndex: 2000, backgroundColor: theme.colors.background.backdrop, justifyContent: 'center', padding: theme.spacing[5], opacity: fade }}>
+    <ScrollView bounces={false} style={{ flexGrow: 0, maxHeight: '95%', borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary }} contentContainerStyle={{ padding: theme.spacing[6], gap: theme.spacing[5] }}>
+      <View style={{ alignItems: 'center', gap: theme.spacing[3] }}>
+        <View style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.success[500] }}>
+          <Ionicons name="checkmark" size={32} color={theme.colors.text.inverse} />
         </View>
-
-        <Text style={styles.title}>Deposit received!</Text>
-        <Text style={styles.subtitle}>
-          {amountLabel ? `${amountLabel}` : `Your ${ticker} arrived`}
-          {network ? ` · ${network}` : ''}
-        </Text>
-
-        {onActivity && <Button title="View in Activity" variant="secondary" onPress={onActivity} />}
-        <Button title="Done" variant="primary" fullWidth onPress={onDone} style={styles.button} />
+        <Text accessibilityRole="header" style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.xl, fontWeight: '600' }}>{it ? 'Pagamento ricevuto' : 'Payment received'}</Text>
+        <Text accessibilityLiveRegion="polite" style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize['3xl'], fontWeight: '700', textAlign: 'center' }}>{amountLabel ? `+${amountLabel}` : ticker}</Text>
+        {amountLabel && amountIsBalanceChange && <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{it ? 'Aumento del saldo rilevato' : 'Detected balance increase'}</Text>}
+        {!amountLabel && <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{it ? 'Importo nei dettagli attività' : 'See Activity for the amount'}</Text>}
       </View>
-    </Animated.View>
-  );
+      <View style={{ padding: theme.spacing[4], gap: theme.spacing[3], borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.background.primary }}>
+        {row(it ? 'Asset' : 'Asset', ticker)}
+        {row(it ? 'Accreditato su' : 'Received in', account ?? (it ? 'Vedi attività' : 'See Activity'))}
+        {!!network && network !== 'all layers' && row(it ? 'Tramite' : 'Via', network)}
+      </View>
+      <View style={{ gap: theme.spacing[2] }}>
+        <Button title={it ? 'Fatto' : 'Done'} fullWidth onPress={onDone} />
+        {!!onActivity && <Button title={it ? 'Vedi attività' : 'View in Activity'} variant="ghost" fullWidth onPress={onActivity} />}
+      </View>
+    </ScrollView>
+  </Animated.View>;
 }
-
-const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: theme.colors.background.backdrop,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 2000,
-  },
-  card: {
-    backgroundColor: theme.colors.surface.primary,
-    borderRadius: theme.borderRadius.xl,
-    paddingVertical: theme.spacing[8],
-    paddingHorizontal: theme.spacing[6],
-    margin: theme.spacing[5],
-    width: '88%',
-    alignItems: 'center',
-  },
-  badgeWrap: {
-    width: 120,
-    height: 120,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[5],
-  },
-  ring: {
-    position: 'absolute',
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: theme.colors.success[500],
-  },
-  badge: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: theme.colors.success[500],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: theme.typography.fontSize.base,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing[6],
-    textAlign: 'center',
-  },
-  button: {
-    width: '100%',
-  },
-});

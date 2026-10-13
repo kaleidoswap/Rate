@@ -18,7 +18,7 @@ test('sweeps old deposits and claims the address on screen with the adapter’s 
   await jest.advanceTimersByTimeAsync(10_000); // first claim poll
   jest.useRealTimers();
   await waitFor(() => expect(mockAdapter.claimSparkL1Deposit).toHaveBeenCalledWith({ address: 'bc1qdeposit' }));
-  await waitFor(() => expect(onClaimed).toHaveBeenCalledWith(expect.objectContaining({ layer: 'spark', status: 'claimed' })));
+  await waitFor(() => expect(onClaimed).toHaveBeenCalledWith(expect.objectContaining({ layer: 'onchain', protocol: 'SPARK', status: 'claimed' })));
 });
 
 test('does nothing without a Spark deposit address', async () => {

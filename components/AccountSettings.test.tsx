@@ -1,3 +1,7 @@
+jest.mock('./ArkadeExitSettings', () => ({ ArkadeExitSettings: () => null }));
+jest.mock('../services/protocols/arkadeDiagnostics', () => ({ shareArkadeDiagnostics: jest.fn() }));
+jest.mock('../localization/useAppLanguage', () => ({ useAppLanguage: () => ({ language: 'en' }) }));
+jest.mock('../services/protocols/arkadeMaintenance', () => ({ readArkadeHealth: jest.fn().mockRejectedValue(new Error('Offline')), maintainArkade: jest.fn() }));
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { AccountSettings } from './AccountSettings';

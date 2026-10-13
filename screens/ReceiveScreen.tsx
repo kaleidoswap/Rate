@@ -1,3 +1,4 @@
+import { depositAmountLabel } from '../utils/deposit-receipt';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { BridgeEntryCard } from '../components/receive/BridgeEntryCard';
 import { ReceiveConnectionNotice } from '../components/receive/ReceiveConnectionNotice';
@@ -154,6 +155,10 @@ interface DepositMonitorState {
   layer?: DepositLayer;
   message?: string;
   updatedAt?: number;
+  protocol?: DepositDetectionEvent['protocol'];
+  assetId?: string;
+  amount?: number;
+  amountSource?: DepositDetectionEvent['amountSource'];
 }
 
 function formatDepositLayer(layer?: DepositLayer): string {
@@ -169,7 +174,9 @@ function formatDepositLayer(layer?: DepositLayer): string {
     case 'spark':
       return 'Spark';
     case 'arkade':
-      return 'Arkade';
+      return 'Ark';
+    case 'bark':
+      return 'Ark';
     default:
       return 'all layers';
   }
@@ -345,6 +352,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     // An incoming RGB transfer shows as incoming in the asset's balance.
     if (event.layer === 'rgb' && event.status === 'pending') void dispatch(refreshRgbAssets());
     setDepositMonitor({
+      ...event,
       status: event.status,
       layer: event.layer,
       message: event.message,
@@ -355,6 +363,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     feedback.receive();
     if (event?.layer === 'rgb') void dispatch(refreshRgbAssets());
     setDepositMonitor({
+      ...event,
       status: event?.status === 'claimed' ? 'claimed' : 'confirmed',
       layer: event?.layer ?? 'all',
       message: event?.message,
@@ -2022,7 +2031,10 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
       <DepositSuccessOverlay
         visible={showDepositSuccess}
-        ticker={selectedAsset?.ticker || 'BTC'}
+        ticker={depositMonitor.assetId === 'MULTIPLE' ? 'Multiple assets' : depositMonitor.assetId === 'BTC' ? 'BTC' : rgbAssets.find(a => a.asset_id === depositMonitor.assetId)?.ticker ?? (depositMonitor.assetId && depositMonitor.assetId !== selectedAsset.asset_id ? depositMonitor.assetId : selectedAsset.ticker)}
+        amountLabel={depositAmountLabel(depositMonitor.amount, depositMonitor.assetId, rgbAssets)}
+        amountIsBalanceChange={depositMonitor.amountSource === 'balance'}
+        account={depositMonitor.protocol === 'RGB' ? rgbLabel : depositMonitor.protocol === 'ARKADE' ? 'Arkade' : depositMonitor.protocol === 'SPARK' ? 'Spark' : depositMonitor.protocol === 'BARK' ? 'Bark' : undefined}
         network={depositMonitor.layer ? formatDepositLayer(depositMonitor.layer) : networkType === 'unified' ? undefined : networkType}
         onActivity={() => { setShowDepositSuccess(false); cancelReceiveWork(); navigation.navigate('Dashboard', { screen: 'Activity' }); }}
         onDone={() => {

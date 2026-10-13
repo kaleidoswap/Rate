@@ -1,3 +1,6 @@
+import { withArkadeExitGuard } from './arkadeExit';
+import { withArkadeBalance } from './arkadeBalance';
+import { arkadeLifecycleConfig } from './arkadeLifecycleConfig';
 import { loadBarkHost, barkConnectionMatches, recordBarkConnection, clearBarkConnection, isBarkOff } from './barkPreferences'
 import { withPaymentProofs } from '../paymentProofs'
 /**
@@ -125,7 +128,7 @@ export function getWdkProtocolManager(): ProtocolManager {
     }
     // Liquid is not part of the app: its native library alone was ~175 MB of the APK.
     // Wallets saved with a Liquid network skip it (no LIQUID case below).
-    if (ARKADE_ENABLED) register(new ArkadeWdkAdapter())
+    if (ARKADE_ENABLED) register(withArkadeExitGuard(withArkadeBalance(new ArkadeWdkAdapter())))
     if (BARK_ENABLED) register(new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } }))
     if (RGB_L1_ENABLED) register(new RgbLibWdkAdapter())
   }
@@ -187,6 +190,7 @@ export async function initializeWdkProtocols(
               // (matches rate-extension's ARKADE_SERVER_URLS.signet).
               arkServerUrl: parsed.arkServerUrl || getDefaultArkadeServerUrl(arkadeNetwork),
               esploraUrl: parsed.esploraUrl,
+              ...arkadeLifecycleConfig(arkadeNetwork, parsed.arkServerUrl || getDefaultArkadeServerUrl(arkadeNetwork), parsed),
               ...(arkadeStorage ? { storage: arkadeStorage } : {}),
             },
           } as ArkadeAdapterConfig

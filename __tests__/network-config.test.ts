@@ -34,3 +34,10 @@ test('changing an Arkade account’s network starts from that network’s server
   expect(moved.arkServerUrl).toBe('https://arkade.computer');
   expect(moved.esploraUrl).toBeUndefined();
 });
+
+test('switching Arkade network drops delegate endpoints but preserves opt-out', () => {
+  const next = JSON.parse(buildNetworkConfig('arkade', 'signet', { network: 'mainnet', delegationEnabled: false, delegatorUrl: 'https://delegate.arkade.money', arkadeConfig: { delegatorUrl: 'https://delegate.arkade.money' } }));
+  expect(next.delegatorUrl).toBeUndefined();
+  expect(next.arkadeConfig.delegatorUrl).toBeUndefined();
+  expect(next.delegationEnabled).toBe(false);
+});

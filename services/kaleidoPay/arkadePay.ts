@@ -1,3 +1,5 @@
+import { recoverArkadePending } from '../protocols/arkadePending';
+import { arkadeSendFailure } from './arkadeSendFailure';
 /**
  * Arkade as KaleidoPay accounts:
  *  - `arkade`: pays an Ark address on this wallet's own Ark server directly, and pays
@@ -25,8 +27,8 @@ export interface ArkadePayAdapter {
   isConnected?(): boolean;
 }
 interface ArkadeInternals {
-  arkInfo?: { signerPubkey?: string; network?: string; fees?: { txFeeRate?: string; intentFee?: Record<string, string | undefined> } } | null;
-  arkSdk?: { ArkAddress?: { decode(address: string): { serverPubKey: Uint8Array } }; Estimator?: new (config: Record<string, unknown>) => { evalOnchainOutput(o: { amount: bigint; script: string }): { satoshis: number } } } | null;
+  arkInfo?: { signerPubkey?: string; deprecatedSigners?: { pubkey: string; cutoffDate: bigint }[]; network?: string; fees?: { txFeeRate?: string; intentFee?: Record<string, string | undefined> } } | null;
+  arkSdk?: { classifyContractSigner?: (key: string, info: any) => { status: string }; ArkAddress?: { decode(address: string): { serverPubKey: Uint8Array } }; Estimator?: new (config: Record<string, unknown>) => { evalOnchainOutput(o: { amount: bigint; script: string }): { satoshis: number } } } | null;
   rawWallet?: any;
 }
 
@@ -105,7 +107,15 @@ export function assertOwnArkServer(adapter: ArkadePayAdapter, address: string): 
   try { server = toHex(arkSdk.ArkAddress.decode(address).serverPubKey).toLowerCase(); }
   catch { throw new Error('This is not a valid Ark address.'); }
   const signerXOnly = /^0[23][0-9a-f]{64}$/.test(signer) ? signer.slice(2) : signer;
-  if (server !== signerXOnly) throw new Error('This Ark address belongs to a different Ark server, so Arkade cannot pay it directly.');
+  // The SDK accepts the operator's previous signer until its rotation cutoff.
+  // Comparing only today's key incorrectly rejects still-valid recipient addresses.
+  const classification = arkSdk.classifyContractSigner?.(server, arkInfo);
+  if (classification?.status === 'EXPIRED') {
+    throw new Error('This Arkade address has expired after an operator key rotation. Ask the recipient for a new receive address.');
+  }
+  if (classification ? !['CURRENT', 'MIGRATABLE', 'DUE_NOW'].includes(classification.status) : server !== signerXOnly) {
+    throw new Error('This address uses an Arkade operator key this wallet does not recognize. Ask the recipient for a fresh Arkade address or use Lightning.');
+  }
 }
 
 async function persist(key: string, result: PaymentResult): Promise<PaymentResult> {
@@ -197,7 +207,14 @@ export function createArkadeAccount(adapter: ArkadePayAdapter, network: Network,
       if (fee === null || fee > accepted.feeSat!) throw new PaymentNotSentError('The Arkade fee changed. Review the payment again.');
       if (balance === null || accepted.totalSat! > balance) throw new PaymentNotSentError('Insufficient Arkade balance. Nothing was sent.');
       quotes.delete(accepted);
-      const sent = await adapter.sendPayment({ invoice: address, amount: accepted.recipientSat });
+      // Keep an explicit direct-send record even if the SDK throws or the response
+      // is lost. An absent txid cannot be recovered by querying the Intents swap store.
+      await persist(ref(attemptId), { status: 'unknown', detail: 'Arkade has not returned a payment receipt. Check Activity before trying again.' });
+      let sent: any;
+      try { sent = await adapter.sendPayment({ invoice: address, amount: accepted.recipientSat }); }
+      catch (error) {
+        return persist(ref(attemptId), { status: 'unknown', detail: `${arkadeSendFailure(error)} The payment outcome is unverified; check Activity before trying again.` });
+      }
       // An out-of-round Ark payment is final once the server cosigns it, which is when the call returns.
       const txid = txidOf(sent);
       const result: PaymentResult = sent?.status === 'failed' ? { status: 'failed' }
@@ -214,7 +231,7 @@ export function createArkadeAccount(adapter: ArkadePayAdapter, network: Network,
           : current.status === 'failed' ? 'failed' : current.status === 'pending' ? 'pending' : 'unknown';
         return persist(ref(attemptId), { status, reference: direct.reference });
       }
-      return direct.reference ? direct : intents.status(attemptId);
+      return direct.reference || direct.detail ? direct : intents.status(attemptId);
     },
   };
 }
@@ -288,5 +305,7 @@ export function connectArkadePayAccounts(adapter: ArkadePayAdapter, network: Net
   const account = createArkadeAccount(adapter, network, options);
   const unregister = [registerKaleidoPayAccount(account), registerKaleidoPayAccount(createArkadeOnchainAccount(adapter, network))];
   void account.recover().catch(() => undefined);
+  const wallet = rawWallet(adapter);
+  if (wallet?.finalizePendingTxs) void recoverArkadePending(wallet).catch(() => undefined);
   return () => unregister.forEach(u => u());
 }

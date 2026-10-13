@@ -1,3 +1,4 @@
+import { useArkadePaymentRecovery } from './hooks/useArkadePaymentRecovery';
 // App.tsx
 import 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -209,6 +210,7 @@ function DashboardTabs() {
 }
 
 function AppNavigator() {
+  useArkadePaymentRecovery();
   const receiverNavigation = React.useRef(createNavigationContainerRef<RootStackParamList>()).current;
   const pendingReceiverLink = React.useRef(false);
   const pendingReviewLink = React.useRef<string | null>(null);

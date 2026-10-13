@@ -18,5 +18,12 @@ export function paymentPresentation(a: PaymentAttempt): { title: string; detail:
   }
   return a.status === 'completed' ? { title: 'Payment completed', detail: 'Your payment is complete.' }
     : a.status === 'failed' ? { title: 'Payment failed', detail: 'This payment was not sent, or the provider confirmed it failed. Review a new quote before trying again.' }
+    : a.status === 'unknown' ? { title: 'Payment outcome unknown', detail: 'We have no confirmation that this payment completed. Do not send again.' }
     : { title: 'Confirming payment', detail: 'Checking automatically. Do not send again.' };
+}
+
+/** Bound polling to the original attempt, including after app restarts. */
+export function paymentPollingRemaining(createdAt: number, now: number, limit: number): number {
+  if (!Number.isFinite(createdAt)) return 0;
+  return Math.max(0, Math.min(limit, createdAt + limit - now));
 }

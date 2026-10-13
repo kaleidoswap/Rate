@@ -59,7 +59,7 @@ const mockHttpTransport = jest.fn((root: string) => ({ kind: 'http', root, close
 const mockMarkets: any[] = [];
 jest.mock('@arkade-os/swap', () => ({
   httpTransport: (root: string) => mockHttpTransport(root),
-  discoverMarkets: jest.fn(async () => mockMarkets),
+  discoverMarkets: jest.fn(async (options: any) => [...mockMarkets, ...(options.localCards ?? []).flatMap(({ card }: any) => card.markets.map((m: any) => ({ ...m, solver: card.name, discovery_pubkey: card.discovery_pubkey, transports: card.transports })))]),
 }));
 const mockNostrTransport = jest.fn((o: any) => ({ kind: 'nostr', ...o, close: jest.fn(async () => {}) }));
 jest.mock('@arkade-os/swap/nostr', () => ({ nostrRfqTransport: (o: any) => mockNostrTransport(o) }));
@@ -243,4 +243,23 @@ describe('Lightning into Arkade', () => {
     await expect(claimArkadeLightningReceive(wallet, base.arkServerUrl, 'rfq-recv-1')).resolves.toBe('settled');
     expect(mockVenue.claim).toHaveBeenCalledWith('rfq-recv-1', { waitSeconds: 0 });
   });
+});
+
+test('mainnet discovery includes the official Lightning solver missing from the public registry', async () => {
+  const { discoverMarkets } = require('@arkade-os/swap');
+  const card = require('./arkadeLightningSolver.json');
+  discoverMarkets.mockClear();
+  mockMarkets.length = 0; // current public mainnet registry
+  const swap = createArkadeIntentsSwap({
+    sourceId: 'arkade-mainnet', rail: 'ark', network: 'mainnet', wallet: () => wallet,
+    arkServerUrl: () => 'https://arkade.computer', arkNetwork: () => 'bitcoin',
+    fundingFee: () => 0, balance: async () => 100_000, fetchImpl,
+  });
+  const preview = previewTarget({ ...invoiceTarget(), networks: ['mainnet'] }, undefined, 'mainnet-discovery');
+  const options = await swap.quoteOptions(preview, { kind: 'swap', sourceId: 'arkade-mainnet', from: 'ark:mainnet', to: 'ln:mainnet', providerId: 'arkade-intents' });
+  expect(options).toEqual([expect.objectContaining({ name: 'Arkade Lightning · Beta', quote: expect.objectContaining({ recipientSat: 10_000, totalSat: 10_031 }) })]);
+  expect(discoverMarkets).toHaveBeenLastCalledWith(expect.objectContaining({ localCards: [expect.objectContaining({ card, network: 'bitcoin' })] }));
+  expect(estimateLightningSend(card.markets[0], 10_000)).toEqual({ feeSat: 31 });
+  expect(estimateLightningSend(card.markets[0], 499)).toHaveProperty('unavailable');
+  expect(estimateLightningSend(card.markets[0], 50_001)).toHaveProperty('unavailable');
 });
