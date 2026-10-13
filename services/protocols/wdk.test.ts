@@ -94,9 +94,13 @@ beforeEach(() => {
 });
 
 test('accounts connect at the same time, not one after another', async () => {
+  jest.useFakeTimers();
   mockDelays.SPARK = 30;
   mockDelays.ARKADE = 10;
-  const results = await initializeWdkProtocols('seed', configs('spark', 'arkade'));
+  const connecting = initializeWdkProtocols('seed', configs('spark', 'arkade'));
+  await jest.advanceTimersByTimeAsync(30);
+  const results = await connecting;
+  jest.useRealTimers();
   expect(mockEvents.slice(0, 2)).toEqual(['start SPARK', 'start ARKADE']);
   expect(mockEvents.indexOf('done ARKADE')).toBeLessThan(mockEvents.indexOf('done SPARK'));
   expect(results.get('SPARK' as any)).toEqual({ success: true });

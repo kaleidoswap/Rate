@@ -30,5 +30,5 @@ it('keeps Lightning completion and legacy on-chain receipts distinct', () => {
   expect(paymentPresentation({ ...sent, sourceId: 'spark-ln', destinationRail: 'ln:mainnet' }).title).toBe('Payment completed');
   expect(paymentPresentation({ ...sent, destinationRail: undefined, network: undefined }).title).toBe('Sent to the network');
   expect(paymentPresentation({ ...sent, sourceId: 'rgb-btc', status: 'pending' }).title).toBe('Sent to the network');
-  expect(paymentPresentation({ ...sent, status: 'unknown' }).title).toBe('Confirming payment');
+  expect(paymentPresentation({ ...sent, status: 'unknown' }).title).toBe('Payment outcome unknown');
 });

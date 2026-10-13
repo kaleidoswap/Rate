@@ -21,7 +21,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   (AppState as any).currentState = 'active';
   AppState.addEventListener = jest.fn(() => ({ remove: jest.fn() }));
-  mockAdapter.getBtcBalance.mockResolvedValue({ total: 100 });
+  mockAdapter.getBtcBalance.mockResolvedValue({ total: 100, confirmed: 100 });
   mockAdapter.getInvoiceStatus.mockResolvedValue({ status: 'Pending' });
 });
 afterEach(() => jest.useRealTimers());
@@ -35,7 +35,7 @@ it.each(['SPARK', 'ARKADE', 'BARK', 'RGB'] as const)('detects a native balance r
   const { unmount } = renderHook(() => useDepositDetection({ enabled: true, methods: [method({ protocol })], onDetected }));
   await jest.advanceTimersByTimeAsync(0);
   expect(onDetected).not.toHaveBeenCalled();
-  mockAdapter.getBtcBalance.mockResolvedValue({ total: 125 });
+  mockAdapter.getBtcBalance.mockResolvedValue({ total: 125, confirmed: 125 });
   await jest.advanceTimersByTimeAsync(24000);
   expect(onDetected).toHaveBeenCalledTimes(1);
   unmount();
