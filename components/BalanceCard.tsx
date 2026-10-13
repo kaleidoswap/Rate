@@ -216,14 +216,16 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         style={styles.controlButton}
                         accessibilityRole="button"
                         onPress={onRefresh}
-                        disabled={refreshing}
+                        disabled={refreshing || syncing}
                         accessibilityLabel="Refresh balance"
+                        accessibilityState={{ disabled: refreshing || syncing }}
                     >
-                        {refreshing ? <ActivityIndicator size="small" color={theme.colors.text.secondary} /> : <Ionicons
+                        {/* One indicator for an update (next to the label): the button only dims meanwhile. */}
+                        <Ionicons
                             name="refresh"
                             size={16}
-                            color={theme.colors.text.secondary}
-                        />}
+                            color={refreshing || syncing ? theme.colors.text.tertiary : theme.colors.text.secondary}
+                        />
                     </TouchableOpacity>
                     {hasBreakdown && (
                         <TouchableOpacity
@@ -279,8 +281,9 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     </>
                 )}
                 {/* Incoming funds and test sats are always visible, never folded into the total. */}
-                {syncing && <Text accessibilityLiveRegion="polite" style={styles.subLine}>
-                    {slow ? 'Still syncing' : 'Updating…'}{pendingAccounts.length ? ` · ${pendingAccounts.join(', ')}` : ''}
+                {/* The spinner by the label says it's updating; words only when it's slow, naming who. */}
+                {syncing && slow && <Text accessibilityLiveRegion="polite" style={styles.subLine}>
+                    Still syncing{pendingAccounts.length ? ` · ${pendingAccounts.join(', ')}` : ''}
                 </Text>}
                 {!loading && availableBtc !== undefined && (showBreakdown || pendingBtc > 0) && (
                     <View style={{ gap: theme.spacing[2], marginTop: theme.spacing[3] }}>

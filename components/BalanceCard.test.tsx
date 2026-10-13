@@ -45,11 +45,13 @@ describe('balance disclosure', () => {
     expect(screen.getByText('700 sats')).toBeTruthy();
   });
 
-  it('no longer spells out the dollar-token share, and says it is updating', () => {
-    const screen = render(<BalanceCard {...props} updating />);
+  it('no longer spells out the dollar-token share, and shows one updating indicator', () => {
+    const screen = render(<BalanceCard {...props} updating refreshing />);
     expect(screen.getByText('Balance so far')).toBeTruthy();
     expect(screen.queryByText(/in dollar tokens/)).toBeNull();
-    expect(screen.getByText('Updating…')).toBeTruthy();
+    expect(screen.getAllByLabelText('Updating balance')).toHaveLength(1);
+    expect(screen.queryByText(/Updating…/)).toBeNull();
+    expect(screen.getByLabelText('Refresh balance').props.accessibilityState).toMatchObject({ disabled: true });
   });
 
   const assetRows = [
@@ -118,7 +120,7 @@ it('keeps partial amounts visible and names slow accounts until syncing finishes
   const screen = render(<BalanceCard {...props} updating pendingAccounts={['Arkade', 'Bark']} />);
   expect(screen.getByText('1500')).toBeTruthy();
   expect(screen.getByText('Balance so far')).toBeTruthy();
-  expect(screen.getByText('Updating… · Arkade, Bark')).toBeTruthy();
+  expect(screen.queryByText(/Arkade, Bark/)).toBeNull(); // the spinner alone, until it is slow
   expect(screen.getByLabelText('Updating balance')).toBeTruthy();
   act(() => jest.advanceTimersByTime(12000));
   expect(screen.getByText('Still syncing · Arkade, Bark')).toBeTruthy();
