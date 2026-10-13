@@ -115,6 +115,7 @@ test('account pages expose supported controls and back returns to the account li
   fireEvent.press(screen.getByLabelText('Back'));
   fireEvent.press(screen.getByLabelText('Arkade account settings'));
   await act(async () => {});
+  fireEvent.press(screen.getByText('Server settings'));
   fireEvent.changeText(screen.getByLabelText('Ark server URL'), 'http://unsafe.example');
   fireEvent.press(screen.getByText('Save and reconnect'));
   expect(screen.getByText('Use an HTTPS URL without credentials, query parameters or a fragment.')).toBeTruthy();

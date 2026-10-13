@@ -9,7 +9,7 @@ import { quoteSpend } from '../services/kaleidoPay';
 export type PayAccountId = 'SPARK' | 'ARKADE' | 'BARK' | 'RGB';
 
 export const PAY_ACCOUNT_NAME: Record<PayAccountId, string> = {
-  SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark', RGB: 'RGB Lightning node',
+  SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark', RGB: 'RGB',
 };
 
 /** The account an offer spends from, read from its source id (`spark-ln`, `arkade-onchain`, `bark`, `rgb-ln`, …). */

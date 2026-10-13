@@ -110,10 +110,10 @@ export function rgbInvoiceWallet(): RgbPayAdapter | null {
  * Reads an RGB invoice's asset through the RGB wallet and registers the per-payment
  * asset account, so the request can be planned and quoted in that asset.
  */
-export async function prepareRgbRequest(invoice: string, amount?: number): Promise<RgbRequestAsset> {
+export async function prepareRgbRequest(invoice: string, amount?: number, chosenAssetId?: string): Promise<RgbRequestAsset> {
   const adapter = rgbInvoiceWallet();
   if (!adapter) throw new Error('Turn on RGB in Settings, or connect your RGB node, to pay RGB invoices.');
-  const asset = await rgbRequestAsset(adapter, invoice, amount);
+  const asset = await rgbRequestAsset(adapter, invoice, amount, chosenAssetId);
   rgbAssetRegistration?.();
   rgbAssetRegistration = registerRgbAssetPayment({ id: asset.id, ticker: asset.ticker, precision: asset.precision });
   return asset.amount > 0 ? asset : { id: asset.id, ticker: asset.ticker, precision: asset.precision };
@@ -163,4 +163,17 @@ export function arkadeReceiveOptions(): ArkadeLightningReceiveOptions | null {
     network, wallet, arkServerUrl, arkNetwork: adapter.arkInfo?.network,
     makerUrl: kaleidoswapMakerUrl(network, getPayOptions().makerUrl),
   };
+}
+
+/** Read the request before the user enters review; blank-asset invoices need an explicit choice. */
+export async function inspectRgbRequest(invoice: string): Promise<{ asset: RgbRequestAsset | null; choices: RgbRequestAsset[] }> {
+  const adapter = rgbInvoiceWallet();
+  if (!adapter?.decodeRgbInvoice) throw new Error('Connect your RGB wallet to read this invoice.');
+  const decoded = await adapter.decodeRgbInvoice({ invoice });
+  if (decoded?.asset_id) return { asset: await prepareRgbRequest(invoice), choices: [] };
+  const assets = await adapter.listAssets?.() ?? [];
+  const choices = assets.filter(a => a.id !== 'BTC' && Number(a.balance?.available ?? a.balance?.spendable ?? 0) > 0)
+    .map(a => ({ id: a.id, ticker: a.ticker || 'RGB', precision: a.precision ?? 0,
+      ...(decoded?.assignment?.type === 'Fungible' && Number(decoded.assignment.value) > 0 ? { amount: Number(decoded.assignment.value) } : {}) }));
+  return { asset: null, choices };
 }

@@ -1,10 +1,11 @@
 import React from 'react';
 import { render, fireEvent, act } from '@testing-library/react-native';
-import { Clipboard, Animated } from 'react-native';
+import { Clipboard, Animated, AppState } from 'react-native';
 import { useCameraPermissions, scanFromURLAsync } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import QRScannerScreen from './QRScannerScreen';
-jest.mock('@react-navigation/native', () => ({ useFocusEffect: (cb: any) => require('react').useEffect(cb, [cb]) }));
+let mockFocused = true;
+jest.mock('@react-navigation/native', () => ({ useIsFocused: () => mockFocused, useFocusEffect: (cb: any) => require('react').useEffect(() => mockFocused ? cb() : undefined, [cb, mockFocused]) }));
 jest.mock('react-redux', () => ({ useSelector: (cb: any) => cb({ settings: { bitcoinUnit: 'sats' } }) }));
 jest.mock('expo-camera', () => ({ CameraView: 'CameraView', useCameraPermissions: jest.fn(), scanFromURLAsync: jest.fn() }));
 jest.mock('expo-image-picker', () => ({ launchImageLibraryAsync: jest.fn() }));
@@ -12,7 +13,10 @@ jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvail
 jest.mock('../services/kaleidoPay/connect', () => ({ rgbInvoiceWallet: () => null }));
 jest.mock('../components/payments/InvoiceExpiry', () => ({ invoiceExpiry: jest.fn(() => null) }));
 jest.mock('../utils/decodeInvoice', () => ({ decodeBolt11: jest.fn() }));
+let mockAppStateChange: (state: string) => void;
 beforeEach(() => {
+  mockFocused = true;
+  (require('react-native') as any).AppState = { currentState: 'active', addEventListener: jest.fn((_event, callback) => { mockAppStateChange = callback; return { remove: jest.fn() }; }) };
   (require('react-native') as any).Easing = { bezier: () => () => {} };
   (Animated.Value as unknown as jest.Mock).mockImplementation(() => ({ setValue: jest.fn(), stopAnimation: jest.fn(), interpolate: jest.fn() }));
   (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: false, canAskAgain: true }, jest.fn()]);
@@ -122,3 +126,32 @@ test.each([NPUB, `nostr:${NPUB}`, `NOSTR:${NPUB.toUpperCase()}`, `nostr:nprofile
     expect(navigation.navigate).not.toHaveBeenCalledWith('Send', expect.anything());
   },
 );
+
+
+test('releases the camera immediately after a payment QR, before navigation unmounts the scanner', async () => {
+  (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, jest.fn()]);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  const camera = screen.UNSAFE_getByType('CameraView' as any);
+  await act(async () => { await camera.props.onBarcodeScanned({ data: 'lnbc1000testinvoice' }); });
+  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: 'lnbc1000testinvoice' });
+  expect(screen.UNSAFE_queryByType('CameraView' as any)).toBeNull();
+});
+
+test('releases camera on blur and background, and returns with torch off', () => {
+  (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, jest.fn()]);
+  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const screen = render(<QRScannerScreen navigation={navigation} />);
+  fireEvent.press(screen.getByLabelText('Turn torch on'));
+  expect(screen.UNSAFE_getByType('CameraView' as any).props.enableTorch).toBe(true);
+  act(() => mockAppStateChange('inactive'));
+  expect(screen.UNSAFE_queryByType('CameraView' as any)).toBeNull();
+  act(() => mockAppStateChange('active'));
+  expect(screen.UNSAFE_getByType('CameraView' as any).props.enableTorch).toBe(false);
+  mockFocused = false;
+  screen.rerender(<QRScannerScreen navigation={navigation} />);
+  expect(screen.UNSAFE_queryByType('CameraView' as any)).toBeNull();
+  mockFocused = true;
+  screen.rerender(<QRScannerScreen navigation={navigation} />);
+  expect(screen.UNSAFE_getByType('CameraView' as any)).toBeTruthy();
+});

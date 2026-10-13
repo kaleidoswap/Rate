@@ -113,6 +113,19 @@ async function readMethodBalance(
 
 /** Track USD tokens separately: new token holdings count, BTC changes do not. */
 async function readMethodBalances(method: ReceiveMethod, signal: AbortSignal): Promise<Record<string, number> | null> {
+  if (method.protocol === 'RGB' && method.layer === 'onchain' && (!method.assetId || method.assetId === 'BTC')) {
+    const adapter = getConnectedAdapter(method.protocol);
+    if (!adapter) return null;
+    try {
+      // Native rgb-lib needs a chain sync before reading registerWallet's balance.
+      const b = await runReceiveOperation<any>('RGB Bitcoin balance', async () => {
+        if (adapter.account?.syncWallet) await adapter.account.syncWallet();
+        else await adapter.refreshBalances?.();
+        return adapter.getBtcBalance();
+      }, POLL_TIMEOUT_MS, signal);
+      return { balance: Number(b.confirmed ?? 0), _pending: Number(b.unconfirmed ?? 0) };
+    } catch { return null; }
+  }
   if (method.protocol === 'ARKADE' && method.layer === 'onchain') {
     const adapter = getConnectedAdapter(method.protocol);
     if (!adapter?.rawWallet) return null;
@@ -298,6 +311,10 @@ export function useDepositDetection({
         const balance = await readMethodBalances(method, operationController.signal);
         if (cancelled || firedRef.current || balance == null) continue;
         const baseline = baselinesRef.current.get(method.key);
+        if (method.protocol === 'RGB' && method.layer === 'onchain' && balance._pending > 0) {
+          emitStatus({ layer: 'onchain', protocol: 'RGB', status: 'pending', assetId: 'BTC', amount: balance._pending,
+            message: 'Bitcoin received. Waiting for block confirmation.' });
+        }
         if (method.protocol === 'ARKADE' && method.layer === 'onchain' && (balance._boardingPending > 0 || balance._boardingReady > 0)) {
           emitStatus({ layer: method.layer, protocol: 'ARKADE', status: 'pending',
             rawStatus: balance._boardingReady > 0 ? 'boarding_ready' : 'boarding_confirming',

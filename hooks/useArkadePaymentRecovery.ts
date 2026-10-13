@@ -1,3 +1,4 @@
+import { reconcileOtherPayments } from '../services/kaleidoPay/pendingPayments';
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
@@ -13,7 +14,12 @@ export function useArkadePaymentRecovery() {
     const run = async () => {
       if (!active || !foreground || running) return;
       running = true;
-      try { if (await reconcileArkadePayment(walletId, () => active && foreground)) void dispatch(loadBtcBalance()); }
+      try {
+        const current = () => active && foreground;
+        const arkadeChanged = await reconcileArkadePayment(walletId, current);
+        const othersChanged = current() && await reconcileOtherPayments(walletId, current);
+        if (current() && (arkadeChanged || othersChanged)) void dispatch(loadBtcBalance());
+      }
       catch { /* Recovery stays pending. No retry ever resends the payment. */ }
       finally { running = false; }
     };

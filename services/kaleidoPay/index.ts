@@ -84,6 +84,9 @@ export async function prepareKaleidoPay(maxWaitMs = 3000): Promise<void> {
   await Promise.race([preparing, new Promise(r => { timer = setTimeout(r, maxWaitMs); })]);
   clearTimeout(timer);
 }
+/** Network of a currently registered account, for read-only receipt recovery. */
+export function paymentAccountNetwork(sourceId: string): Network | undefined { return accounts.get(sourceId)?.source.network; }
+
 export function registerKaleidoPayAccount(account: PayAccount): () => void {
   accounts.set(account.source.id, account);
   return () => { if (accounts.get(account.source.id) === account) accounts.delete(account.source.id); };

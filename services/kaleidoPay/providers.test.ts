@@ -65,8 +65,8 @@ test('normalizes unknown SDK statuses instead of claiming success', async () => 
 test('pending recovery record survives reopening and cannot be overwritten', async () => {
   const attempt: PaymentAttempt = { id: 'one', sourceId: 'a', provider: 'A', total: '1001 sats', recipient: '1000 sats', createdAt: Date.now(), status: 'pending' };
   await beginPaymentAttempt(1, attempt);
-  await expect(beginPaymentAttempt(1, { ...attempt, id: 'two' })).rejects.toThrow('previous');
-  expect(await loadPaymentAttempt(1)).toEqual(attempt);
+  await expect(beginPaymentAttempt(1, { ...attempt, id: 'two' })).resolves.toBeUndefined();
+  expect(await loadPaymentAttempt(1, 'one')).toEqual(attempt);
   await AsyncStorage.setItem('kaleidopay-attempt-v1-2', '{"status":"completed"}');
   await expect(loadPaymentAttempt(2)).rejects.toThrow('unreadable');
 });

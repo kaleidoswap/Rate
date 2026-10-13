@@ -11,6 +11,8 @@ test('loads persisted endpoints and saves validated changes; reset is only a dra
   const onSave = jest.fn();
   const screen = render(<AccountSettings account="ARKADE" walletId={1} network="signet" connected busy={false} onNetwork={jest.fn()} onReconnect={jest.fn()} onSave={onSave} />);
   await act(async () => {});
+  expect(screen.queryByLabelText('Ark server URL')).toBeNull();
+  fireEvent.press(screen.getByText('Server settings'));
   expect(screen.getByLabelText('Ark server URL').props.value).toBe('https://existing.example');
   fireEvent.changeText(screen.getByLabelText('Ark server URL'), ' https://new.example/ ');
   fireEvent.press(screen.getByText('Save and reconnect'));

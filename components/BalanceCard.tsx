@@ -1,7 +1,7 @@
 import { useAppTheme } from '../theme/ThemeProvider';
 import { AllocationBar } from './AllocationBar';
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, AccessibilityInfo } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme, protocolColor } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
@@ -17,6 +17,7 @@ interface ProtocolBalance {
 
 interface BalanceCardProps {
     totalBalance: number;
+    holdingBalance?: boolean;
     hideAmounts?: boolean;
     pendingBtc?: number;
     availableBtc?: number;
@@ -82,6 +83,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     testBtc = 0,
     testNetworks = {},
     assetRows = [],
+    holdingBalance = false,
     updating = false,
     pendingAccounts = [],
     rgbBalanceIsLightning = false,
@@ -109,6 +111,24 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         const timer = setTimeout(() => setSlow(true), 12_000);
         return () => clearTimeout(timer);
     }, [syncing]);
+    const amountOpacity = useRef(new Animated.Value(1)).current;
+    const previousAmount = useRef(primaryText);
+    const [reduceMotion, setReduceMotion] = useState(true);
+    useEffect(() => {
+        let active = true;
+        void AccessibilityInfo?.isReduceMotionEnabled?.().then(value => { if (active) setReduceMotion(value); });
+        const listener = AccessibilityInfo?.addEventListener?.('reduceMotionChanged', setReduceMotion);
+        return () => { active = false; listener?.remove(); };
+    }, []);
+    useEffect(() => {
+        if (previousAmount.current === primaryText) return;
+        previousAmount.current = primaryText;
+        if (reduceMotion) { amountOpacity.setValue(1); return; }
+        amountOpacity.setValue(0.65);
+        const animation = Animated.timing(amountOpacity, { toValue: 1, duration: 180, useNativeDriver: true });
+        animation.start();
+        return () => animation.stop?.();
+    }, [primaryText, reduceMotion, amountOpacity]);
     const useDenominated = primaryText !== undefined;
     // Filter to only protocols with balance data
     const activeProtocols = byProtocol
@@ -187,7 +207,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
         <View style={styles.container}>
             <View style={styles.cardHeader}>
                 <View style={styles.labelRow}>
-                    <Text style={styles.balanceLabel}>{syncing && !loading ? 'Balance so far' : 'Total balance'}</Text>
+                    <Text style={styles.balanceLabel}>{holdingBalance ? 'Last balance' : syncing && !loading ? 'Balance so far' : 'Total balance'}</Text>
                     {syncing && <ActivityIndicator size="small" accessibilityLabel="Updating balance" color={theme.colors.text.secondary} />}
                 </View>
                 {/* Refresh and balance details stay separate from denomination. */}
@@ -199,12 +219,11 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         disabled={refreshing}
                         accessibilityLabel="Refresh balance"
                     >
-                        <Ionicons
+                        {refreshing ? <ActivityIndicator size="small" color={theme.colors.text.secondary} /> : <Ionicons
                             name="refresh"
                             size={16}
                             color={theme.colors.text.secondary}
-                            style={refreshing ? { transform: [{ rotate: '180deg' }] } : {}}
-                        />
+                        />}
                     </TouchableOpacity>
                     {hasBreakdown && (
                         <TouchableOpacity
@@ -223,7 +242,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     )}
                 </View>
             </View>
-            <View style={styles.totalBalanceContainer}>
+            <Animated.View style={[styles.totalBalanceContainer, { opacity: amountOpacity }]}>
                 {loading ? (
                     <View style={{ gap: 10, marginTop: 4 }}>
                         <Skeleton width={180} height={34} radius={10} style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
@@ -284,7 +303,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         Test funds · {hideAmounts ? '••••' : `${formatSatoshis(testBtc)} ${bitcoinUnit}`} · no real value
                     </Text>
                 )}
-            </View>
+            </Animated.View>
 
             {/* Per-network breakdown — vertical row list, collapsed behind the
                 chevron above. Mirrors the extension's BITCOIN section. */}

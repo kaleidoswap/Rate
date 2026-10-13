@@ -1,3 +1,4 @@
+import { readArkadeSendFailure } from '../kaleidoPay/arkadeSendFailure';
 import { Platform, Share } from 'react-native';
 import DeviceInfo from 'react-native-device-info';
 import { loadPaymentAttempt } from '../kaleidoPay/attempts';
@@ -7,13 +8,14 @@ export async function arkadeDiagnosticReport(walletId: number): Promise<string> 
   const [health, attempt] = await Promise.allSettled([readArkadeHealth(), loadPaymentAttempt(walletId)]);
   const h = health.status === 'fulfilled' ? health.value : undefined;
   const p = attempt.status === 'fulfilled' && attempt.value?.sourceId.startsWith('arkade') ? attempt.value : undefined;
+  const failure = p ? await readArkadeSendFailure(p.id) : undefined;
   return JSON.stringify({ exportedAt: new Date().toISOString(), platform: Platform.OS,
     app: DeviceInfo.getVersion(), build: DeviceInfo.getBuildNumber(),
     health: h ? { checkedAt: h.checkedAt, count: h.count, expiring: h.expiring, persistent: h.persistent,
       delegation: { enabled: h.enabled, serviceVerified: !h.delegateError && h.delegateFee !== undefined, eligible: h.eligible, registered: h.verified, lastAcceptedAt: h.lastDelegatedAt },
       recoverable: h.recoverable, balance: h.balance } : { unavailable: true },
     payment: p ? { status: p.status, source: p.sourceId, network: p.network, createdAt: p.createdAt,
-      hasReceipt: !!p.reference, lastCheckedAt: p.lastCheckedAt, checkFailed: p.checkFailed, onchainConfirmed: p.onchainConfirmed } : undefined,
+      hasReceipt: !!p.reference, failure, verification: p.status === 'unknown' && !p.reference ? 'receipt_missing' : p.checkFailed ? 'unavailable' : 'queried', lastCheckedAt: p.lastCheckedAt, checkFailed: p.checkFailed, onchainConfirmed: p.onchainConfirmed } : undefined,
   }, null, 2);
 }
 export async function shareArkadeDiagnostics(walletId: number): Promise<void> {

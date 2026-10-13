@@ -1,6 +1,6 @@
 import { recoverArkadePending } from '../protocols/arkadePending';
 import { checkPaymentStatus } from './index';
-import { loadPaymentAttempt, updatePaymentAttempt } from './attempts';
+import { loadPaymentAttempts, updatePaymentAttempt } from './attempts';
 import { checkOnchainConfirmation } from './onchainConfirmation';
 import { protocolManager } from '../protocols';
 const flights = new Map<number, Promise<boolean>>();
@@ -8,7 +8,10 @@ const flights = new Map<number, Promise<boolean>>();
 export function reconcileArkadePayment(walletId: number, isCurrent: () => boolean = () => true): Promise<boolean> {
   if (flights.has(walletId)) return flights.get(walletId)!;
   const task = (async () => {
-    const attempt = await loadPaymentAttempt(walletId);
+    const attempts = await loadPaymentAttempts(walletId);
+    let changed = false;
+    for (const attempt of attempts) {
+      changed = (await (async () => {
     if (!attempt || attempt.dismissedAt || !['arkade', 'arkade-onchain'].includes(attempt.sourceId)
       || attempt.status === 'failed' || (attempt.status === 'completed' && (attempt.sourceId !== 'arkade-onchain' || attempt.onchainConfirmed))) return false;
     const adapter: any = protocolManager.getAdapterIfAvailable('ARKADE');
@@ -38,6 +41,10 @@ export function reconcileArkadePayment(walletId: number, isCurrent: () => boolea
       if (current()) await updatePaymentAttempt(walletId, { ...attempt, lastCheckedAt: Date.now(), checkFailed: true });
       return false;
     } finally { if (timer) clearTimeout(timer); }
+      })()) || changed;
+      if (!isCurrent()) break;
+    }
+    return changed;
   })().finally(() => { flights.delete(walletId); });
   flights.set(walletId, task); return task;
 }

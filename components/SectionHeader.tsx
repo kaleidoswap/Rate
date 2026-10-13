@@ -47,7 +47,7 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
             <Ionicons
               name="chevron-forward"
               size={14}
-              color={theme.colors.primary[600]}
+              color={theme.colors.text.primary}
             />
           )}
         </PressableScale>
@@ -76,13 +76,19 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
       color: theme.colors.text.secondary,
     },
     action: {
+      minHeight: 44,
+      paddingHorizontal: theme.spacing[3],
+      borderRadius: theme.borderRadius.md,
+      borderWidth: 1,
+      borderColor: theme.colors.border.light,
+      backgroundColor: theme.colors.surface.secondary,
       flexDirection: 'row',
       alignItems: 'center',
       gap: theme.spacing[0.5],
     },
     actionText: {
       fontSize: theme.typography.fontSize.sm,
-      color: theme.colors.primary[600],
+      color: theme.colors.text.primary,
       fontWeight: theme.typography.fontWeight.semibold,
     },
   });

@@ -43,6 +43,8 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
   const adapter: any = given ?? rgbAccountAdapter();
   const support = rgbWalletSupport(adapter);
   const [state, setState] = useState<{ loading: boolean; error?: string; list?: RgbUtxo[] }>({ loading: false });
+  const [details, setDetails] = useState(false);
+  const [customize, setCustomize] = useState(false);
   const [num, setNum] = useState<number>(3);
   const [size, setSize] = useState<number>(3000);
   const [speed, setSpeed] = useState<Speed>('normal');
@@ -104,7 +106,7 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
   );
   const stat = (title: string, value: string, tint: string) => (
     <View style={{ flex: 1, padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1, borderColor: t.colors.border.light, gap: 2 }}>
-      <Text style={{ color: tint, fontSize: t.typography.fontSize.lg, fontWeight: '700' }}>{value}</Text>
+      <Text numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65} style={{ color: tint, fontSize: t.typography.fontSize.lg, fontWeight: '700' }}>{value}</Text>
       <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.xs }}>{title}</Text>
     </View>
   );
@@ -129,12 +131,11 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} tall title="UTXOs" subtitle="The bitcoin outputs behind your RGB assets">
+    <Sheet visible={visible} onClose={onClose} tall title="RGB funds" subtitle="Asset storage and bitcoin for fees">
       <ScrollView contentContainerStyle={{ gap: t.spacing[4], paddingBottom: t.spacing[4] }}>
         {!!reason && <Callout tone="warning" message={reason} />}
         <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>
-          RGB assets sit on bitcoin outputs. A colorable output can hold assets: free ones can receive a blinded invoice or a new
-          issuance. Plain bitcoin pays fees and funds new colorable outputs.
+          Keep some bitcoin for fees and free slots to receive assets.
         </Text>
 
         {!support.listUtxos && <Callout tone="info" message="Your RGB node doesn’t share its UTXOs over this connection. Manage them on the node." />}
@@ -143,19 +144,21 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
 
         {summary && <>
           <View style={{ flexDirection: 'row', gap: t.spacing[2] }}>
-            {stat('Holding assets', String(summary.colored.length), t.colors.text.primary)}
-            {stat('Free to receive', String(summary.free.length), summary.free.length ? t.colors.success[500] : t.colors.warning[500])}
-            {stat('Plain bitcoin', sats(summary.bitcoinSats), t.colors.text.primary)}
+            {stat('With assets', String(summary.colored.length), t.colors.text.primary)}
+            {stat('Receive slots', String(summary.free.length), summary.free.length ? t.colors.success[500] : t.colors.warning[500])}
+            {stat('Bitcoin for fees', sats(summary.bitcoinSats), t.colors.text.primary)}
           </View>
           {summary.free.length === 0 && <Callout tone="warning"
             message={support.createUtxos
-              ? 'No free colorable UTXO. Create some below to issue assets or receive with a blinded invoice.'
-              : 'No free colorable UTXO. Witness invoices still work: the sender creates the output.'} />}
+              ? 'No free receiving slots. Prepare slots below for blinded invoices or new assets.'
+              : 'No free receiving slots. You can still receive with a witness invoice.'} />}
 
+          <Button title={details ? 'Hide outputs' : 'View outputs (UTXOs)'} variant="ghost" onPress={() => setDetails(!details)} />
+          {details && <>
           <View style={{ gap: t.spacing[1] }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               {caption('Holding assets')}
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh UTXOs" onPress={() => void load()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh UTXOs" style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surface.secondary, borderWidth: 1, borderColor: t.colors.border.light, borderRadius: t.borderRadius.md }} onPress={() => void load()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 {state.loading ? <ActivityIndicator size="small" color={t.colors.text.tertiary} /> : <Ionicons name="refresh" size={14} color={t.colors.text.tertiary} />}
               </TouchableOpacity>
             </View>
@@ -172,16 +175,24 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
             {summary.bitcoin.length === 0 && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.sm }}>None.</Text>}
             {summary.bitcoin.map(u => row(u, null))}
           </View>
+          </>}
         </>}
 
         {support.createUtxos && <View style={{ gap: t.spacing[3] }}>
-          {caption('Create colorable UTXOs')}
+          {caption('Prepare receiving slots')}
+          <Text style={{ color: t.colors.text.secondary }}>Split bitcoin into {num} slots of {sats(size)}. Your bitcoin stays in your wallet; only the network fee is spent.</Text>
+          <Button title={customize ? 'Hide options' : 'Customize slots and fee'} variant="ghost" onPress={() => setCustomize(!customize)} />
+          {customize && <>
+          {caption('Number of slots')}
           <SegmentedTabs<string> scrollable={false} fill value={String(num)} onChange={(k) => setNum(Number(k))}
             options={RGB_UTXO_COUNTS.map(n => ({ key: String(n), label: `${n}` }))} />
+          {caption('Bitcoin per slot')}
           <SegmentedTabs<string> scrollable={false} fill value={String(size)} onChange={(k) => setSize(Number(k))}
             options={RGB_UTXO_SIZES.map(n => ({ key: String(n), label: `${n.toLocaleString()} sats` }))} />
+          {caption('Network fee speed')}
           <SegmentedTabs<Speed> scrollable={false} fill value={speed} onChange={setSpeed}
             options={(['slow', 'normal', 'fast'] as Speed[]).map(s => ({ key: s, label: `${SPEED_LABEL[s]} · ${fees[s]}` }))} />
+          </>}
           <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>
             {`${num} UTXO${num === 1 ? '' : 's'} of ${sats(size)}, about ${sats(estimate.feeSats)} in fees at ${feeRate} sat/vB${fees.live ? '' : ' (default rate)'}.`}
           </Text>

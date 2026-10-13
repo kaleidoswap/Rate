@@ -7,7 +7,7 @@
 import type { SwapAttempt } from '@universal-bolt12/swap-market';
 import { MempoolClient } from '../mempool/MempoolClient';
 import type { ActivityItem, ActivityLayer, SwapAttemptActivityInput } from '../ActivityService';
-import { loadPaymentAttempt, unresolvedAttempt } from './attempts';
+import { loadPaymentAttempts, unresolvedAttempt } from './attempts';
 import { kaleidoPayAttempts } from './recovery';
 
 /** Status lookups per feed load; older swaps are shown without one. */
@@ -59,12 +59,12 @@ export const PAYMENT_ATTEMPT_KIND = 'payment-attempt';
  */
 export async function loadPendingPaymentActivity(walletId: number | undefined): Promise<ActivityItem[]> {
   if (walletId == null) return [];
-  const attempt = await loadPaymentAttempt(walletId).catch(() => null);
-  if (!attempt || !unresolvedAttempt(attempt)) return [];
+  const attempts = await loadPaymentAttempts(walletId).catch(() => []);
+  return attempts.filter(unresolvedAttempt).map(attempt => {
   const source = attempt.sourceId.toLowerCase();
   const layer: ActivityLayer = source.startsWith('spark') ? 'Spark' : source.startsWith('bark') ? 'Bark'
     : source.startsWith('ark') ? 'Arkade' : source.startsWith('rgb') ? 'RGB-LN' : 'LN';
-  return [{
+  return {
     id: `payment-attempt-${attempt.id}`,
     contactName: attempt.recipientName,
     type: 'send',
@@ -79,5 +79,6 @@ export async function loadPendingPaymentActivity(walletId: number | undefined): 
     txid: attempt.reference ?? '',
     layer,
     kind: PAYMENT_ATTEMPT_KIND,
-  }];
+  };
+  });
 }

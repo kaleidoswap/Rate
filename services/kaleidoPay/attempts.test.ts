@@ -1,17 +1,17 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
-import { beginPaymentAttempt, dismissPaymentAttempt, loadPaymentAttempt, savePaymentAttempt, updatePaymentAttempt, unresolvedAttempt } from './attempts';
+import { loadPaymentAttempts, beginPaymentAttempt, dismissPaymentAttempt, loadPaymentAttempt, savePaymentAttempt, updatePaymentAttempt, unresolvedAttempt } from './attempts';
 import type { PaymentAttempt } from './attempts';
 
 const attempt = (status: PaymentAttempt['status']): PaymentAttempt => ({ id: `a-${status}`, sourceId: 'bark', provider: 'Bark', total: '1,010 sats', recipient: '1,000 sats', createdAt: 1, status });
 
-test('an unknown payment blocks the next one until the user dismisses it', async () => {
+test('a new payment preserves unknown receipts and blocks only duplicate attempts', async () => {
   await savePaymentAttempt(7, attempt('unknown'));
-  await expect(beginPaymentAttempt(7, attempt('pending'))).rejects.toThrow('Check your previous payment');
-  await dismissPaymentAttempt(7, (await loadPaymentAttempt(7))!);
-  const dismissed = await loadPaymentAttempt(7);
-  expect(dismissed).toMatchObject({ status: 'unknown', dismissedAt: expect.any(Number) });
-  expect(unresolvedAttempt(dismissed)).toBe(false);
-  await expect(beginPaymentAttempt(7, attempt('pending'))).resolves.toBeUndefined();
+  await beginPaymentAttempt(7, attempt('pending'));
+  expect(await loadPaymentAttempts(7)).toHaveLength(2);
+  await expect(beginPaymentAttempt(7, attempt('pending'))).rejects.toThrow('already');
+  await updatePaymentAttempt(7, { ...attempt('unknown'), status: 'completed' });
+  expect(await loadPaymentAttempt(7, 'a-unknown')).toMatchObject({ status: 'completed' });
+  expect(await loadPaymentAttempt(7)).toMatchObject({ id: 'a-pending' });
 });
 
 test('an unreadable record can be cleared so payments are possible again', async () => {
@@ -43,7 +43,7 @@ test('a delayed status result cannot overwrite a newer payment or undo dismissal
 test('concurrent starts preserve one recovery record and final results never regress', async () => {
   const results = await Promise.allSettled([
     beginPaymentAttempt(22, { ...attempt('pending'), id: 'first' }),
-    beginPaymentAttempt(22, { ...attempt('pending'), id: 'second' }),
+    beginPaymentAttempt(22, { ...attempt('pending'), id: 'first' }),
   ]);
   expect(results.map(r => r.status)).toEqual(['fulfilled', 'rejected']);
   const saved = (await loadPaymentAttempt(22))!;

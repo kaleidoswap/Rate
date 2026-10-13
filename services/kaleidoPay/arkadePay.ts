@@ -1,5 +1,5 @@
 import { recoverArkadePending } from '../protocols/arkadePending';
-import { arkadeSendFailure } from './arkadeSendFailure';
+import { arkadeSendFailure, recordArkadeSendFailure } from './arkadeSendFailure';
 /**
  * Arkade as KaleidoPay accounts:
  *  - `arkade`: pays an Ark address on this wallet's own Ark server directly, and pays
@@ -213,6 +213,7 @@ export function createArkadeAccount(adapter: ArkadePayAdapter, network: Network,
       let sent: any;
       try { sent = await adapter.sendPayment({ invoice: address, amount: accepted.recipientSat }); }
       catch (error) {
+        await recordArkadeSendFailure(attemptId, error).catch(() => undefined);
         return persist(ref(attemptId), { status: 'unknown', detail: `${arkadeSendFailure(error)} The payment outcome is unverified; check Activity before trying again.` });
       }
       // An out-of-round Ark payment is final once the server cosigns it, which is when the call returns.

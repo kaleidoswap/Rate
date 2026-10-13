@@ -1,6 +1,7 @@
+import { Button } from '../Button';
 import React, { useMemo } from 'react';
 import { useForegroundClock } from '../../hooks/useForegroundClock';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { decode } from 'light-bolt11-decoder';
 import { useAppTheme } from '../../theme/ThemeProvider';
 
@@ -24,6 +25,6 @@ export function InvoiceExpiry({ invoice, onRefresh, showCountdown = true }: { in
   if (seconds > 0 && !showCountdown) return null;
   return <View style={{ alignItems: 'center', padding: t.spacing[3], gap: t.spacing[2] }}>
     <Text style={{ color: seconds ? t.colors.text.secondary : t.colors.warning[500] }}>{seconds ? `Lightning invoice expires in ${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : 'Lightning invoice expired'}</Text>
-    {!seconds && onRefresh && <TouchableOpacity accessibilityRole="button" onPress={onRefresh} style={{ padding: t.spacing[3] }}><Text style={{ color: t.colors.primary[500] }}>Create a fresh request</Text></TouchableOpacity>}
+    {!seconds && onRefresh && <Button title="Create a fresh request" variant="ghost" size="sm" onPress={onRefresh} />}
   </View>;
 }

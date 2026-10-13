@@ -1,4 +1,4 @@
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { isPayable } from '../services/kaleidoPay';
 import { rgbInvoiceWallet } from '../services/kaleidoPay/connect';
@@ -15,6 +15,7 @@ import {
   Easing,
   StatusBar,
   ActivityIndicator,
+  AppState,
   Clipboard,
   Linking,
 } from 'react-native';
@@ -50,6 +51,12 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   const bitcoinUnit = useAppSelector((s: RootState) => s.settings.bitcoinUnit);
   const btcToEntryUnit = (btc: number): string =>
     bitcoinUnit === 'sats' ? String(Math.round(btc * 1e8)) : btc.toFixed(8);
+  const isFocused = useIsFocused();
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => setAppActive(state === 'active'));
+    return () => subscription.remove();
+  }, []);
   const [processing, setProcessing] = useState(false);
   const [scanError, setScanError] = useState('');
   const scanLock = useRef(false);
@@ -62,6 +69,9 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
+
+  const cameraActive = isFocused && appActive && !scanned && !processing;
+  useEffect(() => { if (!cameraActive) setFlashEnabled(false); }, [cameraActive]);
 
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
@@ -83,13 +93,13 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       ).start();
     };
 
-    if (!scanned && !processing) {
+    if (cameraActive) {
       startScanAnimation();
     } else {
       scanLineAnim.stopAnimation();
     }
     return () => scanLineAnim.stopAnimation();
-  }, [scanned, processing]);
+  }, [cameraActive]);
 
   const handleBarCodeScanned = async ({ data }: { data: string }) => {
     if (scanLock.current) return;
@@ -512,11 +522,11 @@ export default function QRScannerScreen({ navigation, route }: Props) {
         <View style={styles.header}>
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close scanner" style={styles.iconButton} onPress={() => navigation.goBack()}><Ionicons name="close" size={24} color={theme.colors.text.primary} /></TouchableOpacity>
           <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '600' }}>{captureMode === 'contact' ? 'Scan contact' : 'Scan to pay'}</Text>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel={flashEnabled ? 'Turn torch off' : 'Turn torch on'} disabled={!permission?.granted} style={styles.iconButton} onPress={toggleFlash}><Ionicons name={flashEnabled ? 'flash' : 'flash-off'} size={24} color={theme.colors.text.primary} /></TouchableOpacity>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel={flashEnabled ? 'Turn torch off' : 'Turn torch on'} disabled={!permission?.granted || !cameraActive} style={styles.iconButton} onPress={toggleFlash}><Ionicons name={flashEnabled ? 'flash' : 'flash-off'} size={24} color={theme.colors.text.primary} /></TouchableOpacity>
         </View>
         <View style={{ flex: 1, overflow: 'hidden' }}>
           {permission?.granted ? <>
-            <CameraView style={StyleSheet.absoluteFillObject} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={scanned ? undefined : handleBarCodeScanned} enableTorch={flashEnabled} />
+            {cameraActive && <CameraView style={StyleSheet.absoluteFillObject} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={scanned ? undefined : handleBarCodeScanned} enableTorch={flashEnabled} />}
             {renderScanOverlay()}{renderFeedback()}
           </> : <View style={styles.centerContent}>
             <Ionicons name="scan-outline" size={64} color={theme.colors.primary[500]} />

@@ -11,10 +11,10 @@ test('shows actual coverage and exposes details only on demand', async () => {
   (readArkadeHealth as jest.Mock).mockResolvedValue({ count: 2, expiring: 1, recoverable: '2000', subdust: '0', enabled: true, endpoint: 'https://delegate.arkade.money', eligible: 1, verified: 0, delegateFee: '0', persistent: true, coins: [] });
   const ui = render(<ArkadeMaintenanceSettings {...props} />);
   await act(async () => {});
-  expect(ui.getByText('1 compatible · 0 with confirmed registration')).toBeTruthy();
+  expect(ui.getByText('0 of 1 registrations confirmed')).toBeTruthy();
   expect(ui.getByText('Recover funds')).toBeTruthy();
   expect(ui.queryByText('https://delegate.arkade.money')).toBeNull();
-  fireEvent.press(ui.getByText('VTXO details'));
+  fireEvent.press(ui.getByText('Renewal details'));
   expect(ui.getByText('https://delegate.arkade.money')).toBeTruthy();
   fireEvent(ui.getByLabelText('Offline delegation'), 'valueChange', false);
   expect(props.onSave).toHaveBeenCalledWith({ delegationEnabled: false });

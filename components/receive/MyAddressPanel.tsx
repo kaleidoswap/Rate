@@ -1,3 +1,4 @@
+import { Button } from '../Button';
 // components/receive/MyAddressPanel.tsx
 //
 // Receive › My address: the reusable ways to get paid. Your kaleidoswap.me
@@ -46,9 +47,7 @@ export function MyAddressPanel({ walletId, qrSize, showLightningAddress, showOff
             <Text style={muted}>Reusable. Anyone can pay you any amount, any time, even while the app is closed.</Text>
           </View>
           <ReceiveRequestActions value={address} label="Lightning address" />
-          <TouchableOpacity accessibilityRole="button" onPress={onManageAddress} style={{ alignSelf: 'center', minHeight: 44, justifyContent: 'center' }}>
-            <Text style={{ color: t.colors.primary[500], fontWeight: '600' }}>Manage address</Text>
-          </TouchableOpacity>
+          <Button title="Manage address" variant="ghost" size="sm" onPress={onManageAddress} />
         </>
         : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Get a Lightning address" onPress={onManageAddress} activeOpacity={0.7}
           style={[card, { padding: t.spacing[5], alignItems: 'center', gap: t.spacing[2] }]}>

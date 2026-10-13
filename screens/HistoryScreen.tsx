@@ -259,7 +259,7 @@ export default function HistoryScreen({ previewItems, previewQuery, previewPerio
         const chip = layerChipColors(item.layer);
         const hasAmount = item.amount !== '';
         return (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true }) : setSelectedItem(item)}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}>
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={20} color={v.color} />
                 </View>

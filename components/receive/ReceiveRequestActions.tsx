@@ -6,8 +6,8 @@ import { PaymentNetworkLabel } from '../payments/PaymentNetworkLabel';
 import { feedback } from '../../utils/feedback';
 
 /** Copy/share feedback belongs to the exact request, never to another method. */
-export function ReceiveRequestActions({ value, label = 'Payment request', showValue = false }: {
-  value: string; label?: string; showValue?: boolean;
+export function ReceiveRequestActions({ value, label = 'Payment request', showValue = false, network }: {
+  value: string; label?: string; showValue?: boolean; network?: string;
 }) {
   const t = useAppTheme();
   const { fontScale } = useWindowDimensions();
@@ -44,7 +44,7 @@ export function ReceiveRequestActions({ value, label = 'Payment request', showVa
   const ink = t.colors.background.primary;
   const button = { minHeight: 48, borderRadius: t.borderRadius.lg, flexDirection: 'row' as const, alignItems: 'center' as const, justifyContent: 'center' as const, gap: t.spacing[2], paddingHorizontal: t.spacing[4], paddingVertical: t.spacing[3] };
   return <View style={{ width: '100%', gap: t.spacing[3], paddingTop: t.spacing[3] }}>
-    <PaymentNetworkLabel request={value} />
+    <PaymentNetworkLabel request={value} network={network} />
     {showValue && <View>
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${expanded ? 'Hide' : 'Show'} full ${label}`} accessibilityState={{ expanded }}
         onPress={() => setExpanded(v => !v)} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>

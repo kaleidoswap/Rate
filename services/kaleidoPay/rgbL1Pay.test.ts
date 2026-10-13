@@ -2,7 +2,7 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 const mockFeeRates = jest.fn(async () => ({ slow: 1, normal: 2, fast: 5, live: false }));
 jest.mock('../rgbWallet', () => ({ rgbFeeRates: () => mockFeeRates(), DEFAULT_RGB_FEE_RATES: { slow: 1, normal: 2, fast: 5, live: false } }));
 import { connectRgbL1PayAccounts, networkFeeRates, rgbL1FeeOptions, rgbL1PayAdapter, setRgbL1FeeSpeed } from './rgbL1Pay';
-import { currentRgbPayAdapter, registerRgbAssetPayment, rgbRequestAsset } from './rgbPay';
+import { connectRgbPayAccounts, currentRgbPayAdapter, registerRgbAssetPayment, rgbRequestAsset } from './rgbPay';
 import { executePaymentOffer, previewTarget, quotePaymentOffers } from './index';
 
 const USDT = { id: 'rgb:usdt', ticker: 'USDT', precision: 6 };
@@ -114,4 +114,52 @@ test('Send pays RGB on this phone at the chosen speed: Normal by default, the qu
     mockFeeRates.mockImplementation(async () => ({ slow: 1, normal: 2, fast: 5, live: false }));
   }
   expect(rgbL1FeeOptions()).toBeNull();
+});
+
+
+test('an invoice without an asset can use an explicitly chosen owned asset', async () => {
+  const wallet = l1();
+  wallet.account.decodeRgbInvoice.mockResolvedValue({ asset_id: undefined, assignment: undefined } as any);
+  const adapter = rgbL1PayAdapter(wallet);
+  const asset = await rgbRequestAsset(adapter, 'rgb:any', 1000000, USDT.id);
+  expect(asset).toEqual({ ...USDT, amount: 1000000 });
+  const off = connectRgbL1PayAccounts(wallet, 'mutinynet');
+  const unregister = registerRgbAssetPayment(USDT);
+  try {
+    const p = previewTarget({ kind: 'rgb', raw: 'rgb:any', rgbInvoice: 'rgb:any' }, undefined, 'assetless', { asset, networks: ['mutinynet'] });
+    const offer = (await quotePaymentOffers(p)).find(o => o.route.sourceId === 'rgb-asset')!;
+    expect(offer.unavailable).toBeUndefined();
+    await executePaymentOffer(p, offer, 'assetless-send');
+    expect(wallet.sendAsset).toHaveBeenCalledWith(expect.objectContaining({ token: USDT.id, recipient: 'rgb:any', amount: 1000000 }));
+  } finally { unregister(); off(); }
+});
+
+
+test('disconnecting an RLN account keeps the connected phone wallet available', async () => {
+  const wallet = l1();
+  const offPhone = connectRgbL1PayAccounts(wallet, 'mutinynet');
+  const node = { ...rgbL1PayAdapter(l1()), isConnected: () => true };
+  const offNode = connectRgbPayAccounts(node, 'mutinynet');
+  expect(currentRgbPayAdapter()).not.toBe(node);
+  offNode();
+  expect(currentRgbPayAdapter()?.isConnected()).toBe(true);
+  const p = previewTarget({ kind: 'bitcoin', raw: 'tb1qdest', address: 'tb1qdest', networks: ['mutinynet'] }, 10000, 'after-node-disconnect');
+  const offers = await quotePaymentOffers(p);
+  expect(offers.find(o => o.route.sourceId === 'rgb-btc')).toMatchObject({ accountName: 'RGB wallet', executable: true });
+  offPhone();
+  expect(currentRgbPayAdapter()).toBeNull();
+});
+
+
+test('quotes native BTC from spendable funds, excluding already committed inputs', async () => {
+  const wallet = l1();
+  wallet.getBtcBalance.mockResolvedValue({ confirmed: 100000, unconfirmed: 0, total: 500 });
+  expect(await rgbL1PayAdapter(wallet).getBtcBalance()).toEqual({ confirmed: 500 });
+  const off = connectRgbL1PayAccounts(wallet, 'mutinynet');
+  try {
+    const p = previewTarget({ kind: 'bitcoin', raw: 'tb1qdest', address: 'tb1qdest', networks: ['mutinynet'] }, 10000, 'locked-btc');
+    const offer = (await quotePaymentOffers(p)).find(o => o.route.sourceId === 'rgb-btc');
+    expect(offer?.unavailable).toBeTruthy();
+    expect(wallet.sendBtcOnchain).not.toHaveBeenCalled();
+  } finally { off(); }
 });

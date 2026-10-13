@@ -50,7 +50,12 @@ export function rgbL1FeeOptions(): RgbFeeOption[] | null {
 export function rgbL1PayAdapter(l1: any, feeRate: () => number | undefined = () => undefined): RgbPayAdapter {
   return {
     isConnected: () => !!l1?.isConnected?.(),
-    getBtcBalance: () => l1.getBtcBalance(),
+    // The native adapter's total is spendable vanilla BTC; settled may include
+    // inputs already committed to a pending transaction.
+    getBtcBalance: async () => {
+      const balance = await l1.getBtcBalance();
+      return { confirmed: Number(balance.total ?? balance.confirmed) };
+    },
     sendPayment: async () => { throw new Error('RGB on this phone has no Lightning.'); },
     getPaymentStatus: async () => ({ status: 'failed' }),
     sendBtcOnchain: (params) => l1.sendBtcOnchain(params),
@@ -60,6 +65,7 @@ export function rgbL1PayAdapter(l1: any, feeRate: () => number | undefined = () 
       const rate = chosen ?? feeRate();
       return l1.sendAsset({ token: asset_id, recipient: recipientId, amount, ...(rate ? { feeRate: rate } : {}) });
     },
+    listAssets: () => l1.listAssets(),
     getAssetBalance: (assetId) => l1.getAssetBalance(assetId),
     getAsset: (assetId) => l1.getAsset(assetId),
     getTransaction: (txId) => l1.getTransaction(txId),

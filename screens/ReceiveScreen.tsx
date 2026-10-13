@@ -227,6 +227,8 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   // Single source of truth for every leg encoded in the visible QR. Generation,
   // address disclosure, deposit monitoring, and Spark claiming all consume this.
   const [receiveMethods, setReceiveMethods] = useState<ReceiveMethod[]>([]);
+  const receiveNetworks = receiveMethods.map(method => receiveAccountChain(method.protocol));
+  const unifiedReceiveNetwork = receiveNetworks.length > 0 && receiveNetworks.every(n => n && n === receiveNetworks[0]) ? receiveNetworks[0] : undefined;
   // Universal code: the network it is for (null = the one most accounts are on) and
   // where its Lightning leg lands (null = automatic).
   const [universalChain, setUniversalChain] = useState<ReceiveChain | null>(null);
@@ -1760,7 +1762,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         {renderAmountRow()}
 
         {receiveMethods.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry showCountdown={showCountdown} key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
-        <ReceiveRequestActions value={unifiedUri} />
+        <ReceiveRequestActions value={unifiedUri} network={unifiedReceiveNetwork} />
         <ReceiveRequestDetails
           methods={receiveMethods}
           universal
@@ -1859,7 +1861,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         {renderAmountRow()}
 
         <InvoiceExpiry showCountdown={showCountdown} invoice={address} onRefresh={() => { void generateAddress(); }} />
-        <ReceiveRequestActions value={address} label={title} />
+        <ReceiveRequestActions value={address} label={title} network={method ? receiveAccountChain(method.protocol) : undefined} />
         <ReceiveRequestDetails
           methods={method ? [method] : []}
           universal={false}

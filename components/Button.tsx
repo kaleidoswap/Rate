@@ -77,7 +77,7 @@ export const Button: React.FC<ButtonProps> = ({
       case 'secondary':
         return { ...baseTextStyle, color: theme.colors.text.primary };
       case 'ghost':
-        return { ...baseTextStyle, color: theme.colors.primary[500] };
+        return { ...baseTextStyle, color: theme.colors.text.primary };
       case 'success':
         return { ...baseTextStyle, color: theme.colors.text.inverse };
       case 'warning':
@@ -218,7 +218,11 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
       borderColor: theme.colors.border.light,
     },
     ghost: {
-      backgroundColor: 'transparent',
+      backgroundColor: theme.colors.surface.secondary,
+      borderWidth: 1,
+      borderColor: theme.colors.border.light,
+      shadowOpacity: 0,
+      elevation: 0,
     },
     success: {
       backgroundColor: theme.colors.success[500],

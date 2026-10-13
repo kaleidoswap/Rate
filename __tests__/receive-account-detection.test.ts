@@ -121,3 +121,19 @@ it('detects a new non-USD Spark token at the native reusable address', async () 
   expect(onDetected).toHaveBeenCalledTimes(1);
   unmount();
 });
+
+
+it('shows pending RGB on-chain BTC and celebrates only after block confirmation', async () => {
+  const onDetected = jest.fn(), onStatus = jest.fn();
+  mockAdapter.getBtcBalance.mockResolvedValue({ confirmed: 100, unconfirmed: 0, total: 100 });
+  const { unmount } = renderHook(() => useDepositDetection({ enabled: true, methods: [method({ protocol: 'RGB', layer: 'onchain' })], onDetected, onStatus }));
+  await jest.advanceTimersByTimeAsync(0);
+  mockAdapter.getBtcBalance.mockResolvedValue({ confirmed: 100, unconfirmed: 500, total: 100 });
+  await jest.advanceTimersByTimeAsync(8000);
+  expect(onDetected).not.toHaveBeenCalled();
+  expect(onStatus).toHaveBeenCalledWith(expect.objectContaining({ protocol: 'RGB', status: 'pending', amount: 500 }));
+  mockAdapter.getBtcBalance.mockResolvedValue({ confirmed: 600, unconfirmed: 0, total: 600 });
+  await jest.advanceTimersByTimeAsync(8000);
+  expect(onDetected).toHaveBeenCalledWith(expect.objectContaining({ protocol: 'RGB', status: 'confirmed', amount: 500 }));
+  unmount();
+});

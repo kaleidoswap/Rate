@@ -25,6 +25,7 @@ const USE_TEXT: Record<Props['account'], string> = {
 };
 export function AccountSettings(props: Props) {
   const theme = useAppTheme();
+  const [serverExpanded, setServerExpanded] = useState(false);
   const [maintenanceBusy, setMaintenanceBusy] = useState(false);
   const accountBusy = props.busy || maintenanceBusy;
   const [server, setServer] = useState('');
@@ -79,12 +80,14 @@ export function AccountSettings(props: Props) {
     {!off && props.account === 'BARK' && <View style={styles.card}><Text style={styles.title}>Connection details</Text><Text style={styles.text}>Current connection: {host?.network ?? 'Not configured'}</Text><Text style={styles.text}>Ark server</Text><Text selectable style={styles.text}>{host?.arkServerUrl || 'Not configured'}</Text><Text style={styles.text}>Bitcoin explorer</Text><Text selectable style={styles.text}>{host?.esploraUrl || 'Not configured'}</Text><Text style={styles.text}>Servers are managed by Bark.</Text></View>}
     {!off && props.account === 'ARKADE' && <ArkadeMaintenanceSettings walletId={props.walletId} connected={props.connected} busy={props.busy} onSave={props.onSave} onBusyChange={setMaintenanceBusy} />}
     {!off && props.account === 'ARKADE' && <View style={styles.card}>
-      <Text style={styles.title}>Server settings</Text><Text style={styles.text}>Use endpoints for the selected network. Saving reconnects this account.</Text>
+      <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: serverExpanded }} onPress={() => setServerExpanded(!serverExpanded)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 48 }}><Text style={styles.title}>Server settings</Text><Text style={styles.title}>{serverExpanded ? '−' : '+'}</Text></TouchableOpacity>
+      {serverExpanded && <><Text style={styles.text}>Use endpoints for the selected network. Saving reconnects this account.</Text>
       <Text style={styles.text}>Ark server</Text><TextInput accessibilityLabel="Ark server URL" style={styles.input} value={server} onChangeText={setServer} editable={ready && !accountBusy} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
       <Text style={styles.text}>Bitcoin explorer (optional)</Text><TextInput accessibilityLabel="Bitcoin explorer URL" style={styles.input} value={explorer} onChangeText={setExplorer} editable={ready && !accountBusy} placeholder="Default explorer" placeholderTextColor={theme.colors.text.tertiary} autoCapitalize="none" autoCorrect={false} keyboardType="url" />
       {!!error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
       {action('Use network defaults', () => { setServer(getDefaultArkadeServerUrl(props.network as ProtocolNetwork)); setExplorer(''); setError(''); }, !ready || accountBusy)}
       {action('Save and reconnect', () => { try { const arkServerUrl = validateAccountEndpoint(server); const esploraUrl = explorer.trim() ? validateAccountEndpoint(explorer) : undefined; setError(''); props.onSave({ arkServerUrl, esploraUrl }); } catch (e) { setError((e as Error).message); } }, !ready || accountBusy)}
+      </>}
     </View>}
     {props.children}
   </>;

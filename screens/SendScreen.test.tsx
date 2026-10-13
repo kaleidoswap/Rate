@@ -24,7 +24,7 @@ jest.mock('../components/Button', () => ({ Button: ({ title, onPress, disabled }
 } }));
 const mockUsdb = { id: 'btkn1usdb', ticker: 'USDB', name: 'USDB', precision: 6, available: 5_000_000 };
 jest.mock('../services/kaleidoPay/connect', () => ({
-  usePayAccounts: () => {}, prepareRgbRequest: jest.fn(),
+  usePayAccounts: () => {}, inspectRgbRequest: jest.fn(), prepareRgbRequest: jest.fn(),
   prepareSparkTokenRequest: jest.fn(), sendableSparkTokens: jest.fn(async () => [mockUsdb]),
 }));
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), updatePaymentAttempt: jest.fn(async () => true), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
@@ -32,6 +32,7 @@ jest.mock('../services/kaleidoPay', () => ({
   PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   decodeTarget: (text: string) => {
     if (text === 'alice@example.com') return { kind: 'lnurl', raw: text, lnurl: text };
+    if (text.startsWith('rgb:')) return { kind: 'rgb', raw: text, rgbInvoice: text };
     if (text.startsWith('spark1')) return { kind: 'spark', raw: text, sparkAddress: text };
     if (!text.startsWith('ln')) throw new Error('not payable');
     return { kind: 'bolt11', raw: text, invoice: text, amountSat: 1000 };
@@ -102,6 +103,9 @@ test('a completed payment can be closed and refreshes balances', async () => {
   expect(screen.getByText('Payment completed')).toBeTruthy();
   expect(screen.queryByText('Pay again')).toBeNull();
   expect(require('../services/kaleidoPay/attempts').beginPaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ recipientName: expect.any(String), feeDisplay: '10 sats', accountName: 'Account Spark' }));
+  expect(screen.getByText('Quoted fees · 10 sats')).toBeTruthy();
+  expect(screen.queryByText('Requested')).toBeNull();
+  fireEvent.press(screen.getByText('Payment details'));
   expect(screen.getByText('Quoted fees')).toBeTruthy();
   expect(screen.getByText('View in Activity')).toBeTruthy();
   expect(mockFeedback.send).toHaveBeenCalledTimes(1);
@@ -109,12 +113,13 @@ test('a completed payment can be closed and refreshes balances', async () => {
   expect(navigation.goBack).toHaveBeenCalled();
 });
 
-test('an unresolved payment is shown instead of a new review', async () => {
+test('an unresolved payment does not replace a new payment form', async () => {
   const { loadPaymentAttempt } = require('../services/kaleidoPay/attempts');
   loadPaymentAttempt.mockResolvedValueOnce({ id: 'pending', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending' });
   const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
   await act(async () => {});
-  expect(screen.getByText('Verify payment')).toBeTruthy();
+  expect(screen.queryByText('Verify payment')).toBeNull();
+  expect(screen.getByText('Continue')).toBeTruthy();
   expect(quotePaymentOffers).not.toHaveBeenCalled();
 });
 
@@ -148,7 +153,7 @@ test('an unresolved payment stops being re-checked when Send closes', async () =
   loadPaymentAttempt.mockResolvedValueOnce({ id: 'p', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending', createdAt: Date.now() });
   jest.useFakeTimers();
   try {
-    const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+    const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true } }} />);
     await act(async () => {});
     await act(async () => {});
     expect(checkPaymentStatus).toHaveBeenCalledTimes(1);
@@ -193,8 +198,10 @@ test('a payment that needs checking can be moved past only after confirming the 
   const unknown = { id: 'u', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'unknown', createdAt: 1 };
   loadPaymentAttempt.mockResolvedValueOnce(unknown);
   const alert = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
-  const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true } }} />);
   await act(async () => {});
+  expect(screen.queryByText('Start a new payment')).toBeNull();
+  fireEvent.press(screen.getByText('Payment details'));
   fireEvent.press(screen.getByText('Start a new payment'));
   expect(dismissPaymentAttempt).not.toHaveBeenCalled();
   const buttons = alert.mock.calls[0][2] as any[];
@@ -351,10 +358,30 @@ test('a reopened 26-minute-old unknown payment does not restart automatic checki
   const { loadPaymentAttempt } = require('../services/kaleidoPay/attempts');
   const { checkPaymentStatus } = require('../services/kaleidoPay');
   loadPaymentAttempt.mockResolvedValueOnce({ id: 'old-arkade', sourceId: 'arkade', provider: 'Arkade', total: '10 sats', recipient: '10 sats', status: 'unknown', createdAt: Date.now() - 26 * 60_000 });
-  const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true } }} />);
   await act(async () => {});
   expect(screen.getByText('Confirmation is taking longer')).toBeTruthy();
   expect(screen.queryByLabelText('Checking payment automatically')).toBeNull();
   expect(checkPaymentStatus).not.toHaveBeenCalled();
   expect(screen.getByText('View in Activity')).toBeTruthy();
+});
+
+
+test('shows the decoded RGB asset and amount before Continue', async () => {
+  const { inspectRgbRequest } = require('../services/kaleidoPay/connect');
+  inspectRgbRequest.mockResolvedValue({ asset: { id: 'rgb-usd', ticker: 'USD', precision: 2, amount: 250 }, choices: [] });
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'rgb:fixed' } }} />);
+  await act(async () => {});
+  expect(inspectRgbRequest).toHaveBeenCalledWith('rgb:fixed');
+  expect(screen.queryByText('Ready to pay')).toBeNull();
+  expect(screen.getByText(/USD ·/)).toBeTruthy();
+});
+
+test('an assetless RGB invoice offers owned assets and an amount field', async () => {
+  const { inspectRgbRequest } = require('../services/kaleidoPay/connect');
+  inspectRgbRequest.mockResolvedValue({ asset: null, choices: [{ id: 'rgb-usd', ticker: 'USD', precision: 2 }] });
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'rgb:any' } }} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByText('USD'));
+  expect(screen.getByLabelText('Amount in USD')).toBeTruthy();
 });

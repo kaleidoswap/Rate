@@ -679,7 +679,14 @@ export default function DashboardScreen({ navigation }: Props) {
   // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
   // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
   const tokenValueSats = priceTokensInSats(tokens, btcPriceUSD, liteUsdAssetIds);
-  const totalBalance = bitcoinSummary.total + tokenValueSats;
+  const liveTotalBalance = bitcoinSummary.total + tokenValueSats;
+  const lastCompleteTotal = useRef<{ wallet: string | null; value: number } | null>(null);
+  const balanceRefreshing = isConnecting || isUpdating || loading || pendingBalanceAccounts.length > 0;
+  useEffect(() => {
+    if (!balanceRefreshing && !pendingBalanceAccounts.length && balanceUpdatedAt && !showingSnapshot) lastCompleteTotal.current = { wallet: walletKey, value: liveTotalBalance };
+  }, [walletKey, liveTotalBalance, balanceRefreshing, pendingBalanceAccounts.length, balanceUpdatedAt, showingSnapshot]);
+  const holdingBalance = balanceRefreshing && lastCompleteTotal.current?.wallet === walletKey;
+  const totalBalance = holdingBalance ? lastCompleteTotal.current!.value : liveTotalBalance;
   const denominatedTotal = formatDisplayAmount(totalBalance);
 
   // Bitcoin leads the list, in the BTC/sats display preference.
@@ -905,6 +912,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
           <BalanceCard
             totalBalance={totalBalance}
+            holdingBalance={holdingBalance}
             pendingBtc={pendingBtc}
             availableBtc={availableBtc}
             stale={!!connectionError || !!balanceWarning || offlineAccounts.length > 0 || showingSnapshot}

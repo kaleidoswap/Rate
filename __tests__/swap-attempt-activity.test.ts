@@ -1,6 +1,6 @@
 let mockSaved: any = null;
 jest.mock('../services/kaleidoPay/attempts', () => ({
-  loadPaymentAttempt: async () => mockSaved,
+  loadPaymentAttempts: async () => mockSaved ? [mockSaved] : [],
   unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown'),
 }));
 jest.mock('../services/kaleidoPay/recovery', () => ({ kaleidoPayAttempts: { list: jest.fn(async () => []) } }));

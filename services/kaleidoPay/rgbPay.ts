@@ -16,6 +16,7 @@ export interface RgbPayAdapter {
   decodeRgbInvoice?(params: { invoice: string }): Promise<any>;
   sendAsset?(params: { asset_id: string; recipientId: string; amount: number; feeRate?: number }): Promise<any>;
   getAssetBalance?(assetId: string): Promise<any>;
+  listAssets?(): Promise<any[]>;
   getAsset?(assetId: string): Promise<{ id: string; ticker: string; precision: number }>;
   getTransaction?(txId: string): Promise<{ status?: string }>;
 }
@@ -164,26 +165,36 @@ function fungibleAmount(decoded: any): number | undefined {
  * Decodes an RGB invoice into the request's asset (for previewTarget's `opts.asset`).
  * `amount` (base units) is used when the invoice names none.
  */
-export async function rgbRequestAsset(rgb: RgbPayAdapter, invoice: string, amount?: number): Promise<RequestAsset> {
+export async function rgbRequestAsset(rgb: RgbPayAdapter, invoice: string, amount?: number, chosenAssetId?: string): Promise<RequestAsset> {
   if (!rgb.isConnected()) throw new Error('RGB node not connected. Please connect it in Settings.');
   if (!rgb.decodeRgbInvoice) throw new Error('This wallet cannot read RGB invoices.');
   const decoded = await rgb.decodeRgbInvoice({ invoice });
-  const id = decoded?.asset_id;
-  if (typeof id !== 'string' || !id) throw new Error('The RGB invoice does not name an asset.');
+  const id = decoded?.asset_id || chosenAssetId;
+  if (typeof id !== 'string' || !id) throw new Error('Choose an asset to pay this RGB invoice.');
   const info = rgb.getAsset ? await rgb.getAsset(id).catch(() => undefined) : undefined;
   const precision = Number(info?.precision ?? 0);
   return { id, ticker: info?.ticker ?? 'RGB', precision: Number.isInteger(precision) && precision >= 0 ? precision : 0,
     amount: fungibleAmount(decoded) ?? amount ?? 0 };
 }
 
-let current: { rgb: RgbPayAdapter; network: Network; opts: RgbPayOptions } | null = null;
+type RgbContext = { rgb: RgbPayAdapter; network: Network; opts: RgbPayOptions };
+const contexts = new Set<RgbContext>();
+const activeContext = () => [...contexts].filter(c => c.rgb.isConnected()).sort((a, b) => Number(b.opts.lightning === false) - Number(a.opts.lightning === false))[0];
 let assetUnregister: (() => void) | null = null;
+let onchainUnregister: (() => void) | null = null;
+function refreshRgbOnchainAccount() {
+  onchainUnregister?.(); onchainUnregister = null;
+  const current = activeContext();
+  if (current?.rgb.sendBtcOnchain) onchainUnregister = registerKaleidoPayAccount(createRgbOnchainAccount(current.rgb, current.network, current.opts));
+}
+
 
 /**
  * Registers the RGB-asset account for one payment's asset (replacing any earlier one).
  * Call before previewTarget for an RGB invoice; returns the unregister function.
  */
 export function registerRgbAssetPayment(asset: SpendAsset): () => void {
+  const current = activeContext();
   if (!current) throw new Error('RGB node not connected. Please connect it in Settings.');
   assetUnregister?.();
   const unregister = registerKaleidoPayAccount(createRgbAssetAccount(current.rgb, current.network, asset, current.opts));
@@ -193,7 +204,7 @@ export function registerRgbAssetPayment(asset: SpendAsset): () => void {
 
 /** The RGB wallet Send pays RGB invoices from right now (the node, or RGB on this phone), if any. */
 export function currentRgbPayAdapter(): RgbPayAdapter | null {
-  return current?.rgb ?? null;
+  return activeContext()?.rgb ?? null;
 }
 
 /**
@@ -202,11 +213,13 @@ export function currentRgbPayAdapter(): RgbPayAdapter | null {
  */
 export function connectRgbPayAccounts(rgb: RgbPayAdapter, network: Network, opts: RgbPayOptions = {}): () => void {
   const unregister = opts.lightning === false ? [] : [registerKaleidoPayAccount(createRgbLightningAccount(rgb, network))];
-  if (isRln(rgb) && rgb.sendBtcOnchain) unregister.push(registerKaleidoPayAccount(createRgbOnchainAccount(rgb, network, opts)));
   const context = { rgb, network, opts };
-  if (isRln(rgb)) current = context;
+  if (isRln(rgb)) contexts.add(context);
+  refreshRgbOnchainAccount();
   return () => {
     unregister.forEach(u => u());
-    if (current === context) { current = null; assetUnregister?.(); assetUnregister = null; }
+    contexts.delete(context);
+    refreshRgbOnchainAccount();
+    if (!activeContext()) { assetUnregister?.(); assetUnregister = null; }
   };
 }

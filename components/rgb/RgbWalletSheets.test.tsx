@@ -40,6 +40,9 @@ beforeEach(() => (Alert.alert as jest.Mock).mockClear());
 describe('RgbUtxoSheet', () => {
   it('splits UTXOs into holding assets, free and plain bitcoin, with allocations in asset precision', async () => {
     const screen = render(<RgbUtxoSheet visible onClose={jest.fn()} adapter={device()} assets={[{ asset_id: 'rgb:usdt', ticker: 'USDT', precision: 6 }]} />);
+    await screen.findByText('View outputs (UTXOs)');
+    expect(screen.queryByText('2.5 USDT')).toBeNull();
+    fireEvent.press(screen.getByText('View outputs (UTXOs)'));
     expect(await screen.findByText('2.5 USDT')).toBeTruthy();
     expect(screen.getAllByText('Holding assets').length).toBeGreaterThan(0);
     expect(screen.getAllByText('60,000 sats').length).toBe(2); // the plain-bitcoin total and its one UTXO
@@ -51,6 +54,7 @@ describe('RgbUtxoSheet', () => {
     const onCreated = jest.fn();
     const screen = render(<RgbUtxoSheet visible onClose={jest.fn()} adapter={adapter} onCreated={onCreated} />);
     await screen.findAllByText('60,000 sats');
+    fireEvent.press(screen.getByText('Customize slots and fee'));
     fireEvent.press(screen.getByText('5'));
     fireEvent.press(screen.getByText('Create 5 UTXOs'));
     await confirmAlert('Create');
@@ -66,6 +70,7 @@ describe('RgbUtxoSheet', () => {
     adapter.createRgbUtxos.mockRejectedValueOnce(new Error('rgb-lib: InsufficientBitcoins { needed: 9000, available: 0 }'));
     const screen = render(<RgbUtxoSheet visible onClose={jest.fn()} adapter={adapter} />);
     expect(await screen.findByText(/This needs about .* you have 5,000 sats/)).toBeTruthy();
+    fireEvent.press(screen.getByText('Customize slots and fee'));
     fireEvent.press(screen.getAllByText('1').at(-1)!);
     fireEvent.press(screen.getAllByText('1,000 sats').at(-1)!);
     expect(screen.queryByText(/This needs about/)).toBeNull();
