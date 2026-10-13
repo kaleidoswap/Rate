@@ -1,7 +1,8 @@
 import { routeSpendable } from '../../utils/payment-balance';
 import { registerKaleidoPayAccount } from './index';
 import type { Network, PayAccount, RequestAsset, SpendAsset } from './index';
-import { createDirectAccount, lightningInvoiceFor, notEnough, resultOf } from './sparkPay';
+import { createDirectAccount, invoicePaymentHash, lightningInvoiceFor, notEnough, resultOf } from './sparkPay';
+import { PaymentNotSentError } from './errors';
 
 /** The part of the RGB node adapter (protocolManager 'RGB_LN', NwcRgbAdapter by default) these accounts use. */
 export interface RgbPayAdapter {
@@ -45,6 +46,12 @@ function feeRateOf(opts: RgbPayOptions): number {
 }
 const onchainFee = (opts: RgbPayOptions) => Math.ceil(feeRateOf(opts) * RGB_ONCHAIN_VBYTES);
 const isRln = (rgb: RgbPayAdapter) => rgb.walletType?.() !== 'ln';
+/**
+ * NIP-47 errors with which the wallet answers that it did not pay. A timeout or a generic
+ * error (OTHER, INTERNAL) is no answer: that payment may still go through.
+ */
+const NWC_NOT_PAID = new Set(['PAYMENT_FAILED', 'INSUFFICIENT_BALANCE', 'RATE_LIMITED', 'QUOTA_EXCEEDED', 'RESTRICTED', 'UNAUTHORIZED', 'NOT_IMPLEMENTED', 'UNSUPPORTED_ENCRYPTION']);
+const walletRefused = (error: unknown) => NWC_NOT_PAID.has(String((error as any)?.code ?? ''));
 const txidOf = (r: any): string | undefined => typeof r === 'string' ? r : r?.txid || r?.paymentHash || undefined;
 const followTx = (rgb: RgbPayAdapter) => async (txid: string) =>
   rgb.getTransaction ? resultOf((await rgb.getTransaction(txid).catch(() => undefined))?.status, txid) : { status: 'pending' as const, reference: txid };
@@ -75,10 +82,18 @@ export function createRgbLightningAccount(rgb: RgbPayAdapter, network: Network):
       return { feeSat, terms: { invoice, amountless }, expiresAt, detail: ESTIMATE };
     },
     matches: (preview, terms) => preview.code.invoice === terms.invoice,
+    // The invoice's hash: followed when the node's answer never comes (NWC waits for the payment to finish).
+    reference: terms => invoicePaymentHash(terms.invoice),
     async send(terms, quote) {
-      const sent = await rgb.sendPayment(terms.amountless ? { invoice: terms.invoice, amount: quote.recipientSat } : { invoice: terms.invoice });
-      // NWC returns 'confirmed' with a preimage and no hash.
-      return resultOf(sent?.status, sent?.paymentHash || sent?.preimage || undefined);
+      let sent;
+      try {
+        sent = await rgb.sendPayment(terms.amountless ? { invoice: terms.invoice, amount: quote.recipientSat } : { invoice: terms.invoice });
+      } catch (error) {
+        if (walletRefused(error)) throw new PaymentNotSentError(error instanceof Error ? error.message : 'The node refused the payment.');
+        throw error;
+      }
+      // NWC returns 'confirmed' with a preimage and no hash: keep the hash, never the preimage.
+      return resultOf(sent?.status, sent?.paymentHash || invoicePaymentHash(terms.invoice));
     },
     follow: async hash => resultOf((await rgb.getPaymentStatus(hash))?.status, hash),
   });

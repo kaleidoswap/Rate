@@ -1,4 +1,5 @@
 const mockRequest = jest.fn();
+const mockLookup = jest.fn();
 let mockMethods: string[] = [];
 
 jest.mock('expo-secure-store', () => ({ getItemAsync: jest.fn(async () => 'nostr+walletconnect://pk?relay=wss://r&secret=s') }));
@@ -8,6 +9,7 @@ jest.mock('./NWCExternalClient', () => ({
     getInfo: jest.fn(async () => ({ methods: mockMethods, pubkey: 'pk' })),
     rlnNodeInfo: jest.fn(async () => ({ pubkey: 'node' })),
     request: mockRequest,
+    lookupInvoice: mockLookup,
     close: jest.fn(),
   })),
 }));
@@ -55,4 +57,15 @@ test('the node’s on-chain history reads in the adapters’ transaction shape',
   expect(txs[0]).toEqual(expect.objectContaining({ id: 'a'.repeat(64), type: 'receive', status: 'confirmed', amount: 5000, timestamp: 1_700_000_000_000 }));
   expect(txs[0].asset.layer).toBe('BTC_L1');
   expect(txs[1]).toEqual(expect.objectContaining({ type: 'send', status: 'pending', amount: 3000 }));
+});
+
+test('a payment’s status: settled, failed or expired, and settled when the wallet only gives its time', async () => {
+  const adapter = await connected(['pay_invoice', 'lookup_invoice']);
+  const read = async (raw: any) => { mockLookup.mockResolvedValueOnce(raw); return (await adapter.getPaymentStatus('h')).status; };
+  expect(await read({ state: 'settled' })).toBe('confirmed');
+  expect(await read({ settled_at: 1_700_000_000 })).toBe('confirmed');
+  expect(await read({ state: 'failed' })).toBe('failed');
+  expect(await read({ state: 'expired' })).toBe('failed');
+  expect(await read({ state: 'pending' })).toBe('pending');
+  expect(mockLookup).toHaveBeenLastCalledWith({ payment_hash: 'h' });
 });
