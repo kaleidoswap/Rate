@@ -33,7 +33,7 @@ import Animated, {
 import { useSelector } from 'react-redux';
 import { theme } from '../../theme';
 import Markdown from 'react-native-markdown-display';
-import { MindCharacterBadge } from '../mind/MindCharacter';
+import { MindCharacter, MindCharacterBadge } from '../mind/MindCharacter';
 import { voiceMood, toolResultFlash, MIND_FLASH_MS, type MindFlash } from '../mind/mindMood';
 import { PrismoAnimatedCharacter, type PrismoAnimationRef } from '../mind/PrismoAnimatedCharacter';
 import { useAppSelector } from '../../store/hooks';
@@ -281,8 +281,10 @@ const VoiceAgentSession: React.FC<Omit<VoiceAgentOverlayProps, 'visible'>> = ({ 
       pulse.value = withRepeat(withTiming(1, { duration: 700, easing: Easing.inOut(Easing.quad) }), -1, true);
     } else if (phase === 'speaking') {
       pulse.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.quad) }), -1, true);
+    } else if (phase === 'thinking') {
+      // A slow pulse in the thinking colour, under Prismo's thinking pose.
+      pulse.value = withRepeat(withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.quad) }), -1, true);
     } else {
-      // idle / thinking: settle the ring; Prismo shows thinking itself.
       pulse.value = withTiming(0, { duration: 200 });
     }
   }, [phase, reduceMotion]);
@@ -780,19 +782,30 @@ const VoiceAgentSession: React.FC<Omit<VoiceAgentOverlayProps, 'visible'>> = ({ 
             })}
           </ScrollView>
 
-          {phase === 'speaking' && !!bubbles.filter(b => b.role === 'assistant').at(-1)?.text && <View style={[styles.bubble, styles.bubbleAssistant, { alignSelf: 'center', marginTop: 8, backgroundColor: theme.colors.background.primary, borderWidth: 1, borderColor: theme.colors.border.light }]}>
-            <ScrollView style={{ maxHeight: 144 }} nestedScrollEnabled><Text selectable style={styles.bubbleAssistantText}>{bubbles.filter(b => b.role === 'assistant').at(-1)?.text}</Text></ScrollView>
+          {phase === 'speaking' && !!bubbles.filter(b => b.role === 'assistant').at(-1)?.text && <View style={styles.speechBubbleWrap}>
+            <View style={styles.speechBubble}>
+              <ScrollView style={{ maxHeight: 176 }} nestedScrollEnabled><Text selectable style={styles.speechBubbleText}>{bubbles.filter(b => b.role === 'assistant').at(-1)?.text}</Text></ScrollView>
+            </View>
+            {/* The tail points at Prismo, who is the one speaking. */}
+            <View style={styles.speechBubbleTail} />
           </View>}
           {/* Prismo follows real playback energy. */}
           <View style={styles.orbArea}>
             <Animated.View style={[styles.orbRing, { backgroundColor: orbColor }, ringStyle]} />
-            <PrismoAnimatedCharacter
-              ref={characterRef}
-              phase={phase}
-              size={184}
-              accessibilityLabel={`Prismo, ${statusText}`}
-              onPress={voiceStarting ? pauseVoice : voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
-            />
+            <View style={phase === 'thinking' ? { opacity: 0 } : undefined}>
+              <PrismoAnimatedCharacter
+                ref={characterRef}
+                phase={phase}
+                size={184}
+                accessibilityLabel={`Prismo, ${statusText}`}
+                onPress={voiceStarting ? pauseVoice : voiceReady || aiFailed || speechFailed ? toggleListening : undefined}
+              />
+            </View>
+            {/* The animated renderer has no thinking pose: show the thinking Prismo on top, the
+                renderer stays mounted (and keeps taking taps) underneath. */}
+            {phase === 'thinking' && <View pointerEvents="none" style={styles.thinkingCharacter}>
+              <MindCharacter mood="thinking" size={184} />
+            </View>}
 
           </View>
           {__DEV__ && !voiceReady && <Pressable accessibilityRole="button" accessibilityLabel="Prova voce italiana" style={styles.pauseBtn} onPress={() => {
@@ -943,6 +956,20 @@ const styles = StyleSheet.create({
   loadFill: { height: '100%', borderRadius: 2, backgroundColor: theme.colors.primary[500] },
   orbArea: { alignItems: 'center', justifyContent: 'center', height: 184, marginTop: 4 },
   orbRing: { position: 'absolute', width: 92, height: 92, borderRadius: 46 },
+  thinkingCharacter: { position: 'absolute', width: 184, height: 184 },
+  speechBubbleWrap: { alignSelf: 'center', alignItems: 'center', maxWidth: '90%', marginTop: 8 },
+  speechBubble: {
+    paddingVertical: 12, paddingHorizontal: 16, borderRadius: 18,
+    backgroundColor: theme.colors.surface.elevated ?? theme.colors.surface.secondary,
+    borderWidth: 1.5, borderColor: theme.colors.primary[500],
+    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 12, shadowOffset: { width: 0, height: 4 }, elevation: 6,
+  },
+  speechBubbleText: { color: theme.colors.text.primary, fontSize: 17, lineHeight: 24, fontWeight: '500' },
+  speechBubbleTail: {
+    width: 14, height: 14, marginTop: -8, transform: [{ rotate: '45deg' }],
+    backgroundColor: theme.colors.surface.elevated ?? theme.colors.surface.secondary,
+    borderRightWidth: 1.5, borderBottomWidth: 1.5, borderColor: theme.colors.primary[500],
+  },
   orbChip: {
     position: 'absolute',
     bottom: 6,
