@@ -529,7 +529,9 @@ export class NwcRgbAdapter implements IProtocolAdapter {
     const raw = anyRec(await this.c().lookupInvoice({ payment_hash: paymentHash }));
     return {
       paymentHash,
-      status: raw.state === 'settled' ? 'confirmed' : raw.state === 'failed' ? 'failed' : 'pending',
+      // Wallets that leave out `state` still report a settled payment's time.
+      status: raw.state === 'settled' || (!raw.state && raw.settled_at) ? 'confirmed'
+        : raw.state === 'failed' || raw.state === 'expired' ? 'failed' : 'pending',
       amount: raw.amount ? Math.floor(raw.amount / 1000) : undefined,
       timestamp: raw.settled_at ? raw.settled_at * 1000 : undefined,
     };

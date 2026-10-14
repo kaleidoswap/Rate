@@ -173,6 +173,18 @@ test('a native build that can’t open other folders never opens a wallet meant 
   expect(lib.Wallet).not.toHaveBeenCalled();
 });
 
+test('the BTC balance Receive polls syncs with the chain first, without moving transfers', async () => {
+  const { lib, wallet } = fakeLib();
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  wallet.refresh.mockClear();
+  const balance = await account.syncedBtcBalance();
+  expect(balance.vanilla).toEqual({ settled: 50_000, future: 60_000, spendable: 50_000 });
+  expect(wallet.sync).toHaveBeenCalled();
+  expect(wallet.sync.mock.invocationCallOrder[0]).toBeLessThan(wallet.getBtcBalance.mock.invocationCallOrder.at(-1)!);
+  expect(wallet.getBtcBalance).toHaveBeenLastCalledWith(true);
+  expect(wallet.refresh).not.toHaveBeenCalled();
+});
+
 test('rgb-lib calls never overlap, whichever caller makes them', async () => {
   const { lib, wallet } = fakeLib();
   let running = 0;

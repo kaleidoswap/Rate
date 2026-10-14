@@ -1683,12 +1683,14 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   // Arkade and Bark complete a Lightning receive from this device (a swap the
   // app claims), so the payer's money only lands while the app stays open.
   const claimsOnDevice = receiveMethods.some((m) => m.layer === 'lightning' && (m.protocol === 'ARKADE' || m.protocol === 'BARK'));
+  const detectedAmount = depositAmountLabel(depositMonitor.amount, depositMonitor.assetId, rgbAssets);
   const renderStatus = () => (
-    <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message}
+    <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message} amountLabel={detectedAmount}
       hint={claimsOnDevice ? 'Keep this screen open until it arrives' : undefined} />
   );
 
   const renderOutcome = () => <ReceiveOutcomeCard status={requestPresentation} onRefresh={refreshRequest}
+    detectedAmount={detectedAmount} message={depositMonitor.message}
     requestedAmount={!selectedAsset.isRGB && (networkType !== 'unified' || unifiedAsset === 'BTC') && currentAmountSats > 0 ? `${currentAmountSats.toLocaleString()} sats` : undefined}
     onActivity={claimsOnDevice && requestPresentation === 'pending' ? undefined : () => navigation.navigate('Dashboard', { screen: 'Activity' })}
     hint={claimsOnDevice ? 'Keep this screen open until the payment arrives.' : undefined} />;
@@ -2033,8 +2035,10 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
       <DepositSuccessOverlay
         visible={showDepositSuccess}
-        ticker={depositMonitor.assetId === 'MULTIPLE' ? 'Multiple assets' : depositMonitor.assetId === 'BTC' ? 'BTC' : rgbAssets.find(a => a.asset_id === depositMonitor.assetId)?.ticker ?? (depositMonitor.assetId && depositMonitor.assetId !== selectedAsset.asset_id ? depositMonitor.assetId : selectedAsset.ticker)}
-        amountLabel={depositAmountLabel(depositMonitor.amount, depositMonitor.assetId, rgbAssets)}
+        // A newly received RGB asset is named once the asset list refreshes; never show its raw id meanwhile.
+        ticker={depositMonitor.assetId === 'MULTIPLE' ? 'Multiple assets' : depositMonitor.assetId === 'BTC' ? 'BTC' : rgbAssets.find(a => a.asset_id === depositMonitor.assetId)?.ticker
+          ?? (depositMonitor.assetId?.startsWith('rgb:') ? 'RGB asset' : depositMonitor.assetId && depositMonitor.assetId !== selectedAsset.asset_id ? depositMonitor.assetId : selectedAsset.ticker)}
+        amountLabel={detectedAmount}
         amountIsBalanceChange={depositMonitor.amountSource === 'balance'}
         account={depositMonitor.protocol === 'RGB' ? rgbLabel : depositMonitor.protocol === 'ARKADE' ? 'Arkade' : depositMonitor.protocol === 'SPARK' ? 'Spark' : depositMonitor.protocol === 'BARK' ? 'Bark' : undefined}
         network={depositMonitor.layer ? formatDepositLayer(depositMonitor.layer) : networkType === 'unified' ? undefined : networkType}

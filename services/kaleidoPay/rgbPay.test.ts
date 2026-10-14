@@ -1,7 +1,8 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
-const mockInvoices: Record<string, { amountSats?: number; timestamp: number }> = {};
+const mockInvoices: Record<string, { amountSats?: number; timestamp: number; hash?: string }> = {};
 jest.mock('../../utils/decodeInvoice', () => ({ decodeBolt11: (invoice: string) => ({ amountSats: mockInvoices[invoice]?.amountSats }) }));
-jest.mock('light-bolt11-decoder', () => ({ decode: (invoice: string) => ({ sections: [{ name: 'timestamp', value: mockInvoices[invoice].timestamp }] }) }));
+jest.mock('light-bolt11-decoder', () => ({ decode: (invoice: string) => ({ sections: [{ name: 'timestamp', value: mockInvoices[invoice].timestamp },
+  ...(mockInvoices[invoice].hash ? [{ name: 'payment_hash', value: mockInvoices[invoice].hash }] : [])] }) }));
 import { connectRgbPayAccounts, createRgbLightningAccount, createRgbOnchainAccount, registerRgbAssetPayment, rgbLightningFeeEstimate, rgbRequestAsset, RGB_ONCHAIN_VBYTES } from './rgbPay';
 import { executePaymentOffer, PaymentNotSentError, previewTarget, quotePaymentOffers } from './index';
 import type { Preview, Route } from './index';
@@ -9,6 +10,8 @@ import type { Preview, Route } from './index';
 const now = () => Math.floor(Date.now() / 1000);
 mockInvoices.fixed = { amountSats: 4000, timestamp: now() };
 mockInvoices.open = { timestamp: now() };
+const HASH = 'ab'.repeat(32);
+mockInvoices.hashed = { amountSats: 4000, timestamp: now(), hash: HASH };
 
 const lnRoute = { kind: 'direct', sourceId: 'rgb-ln', from: 'ln:regtest', to: 'ln:regtest' } as Route;
 const btcRoute = { kind: 'direct', sourceId: 'rgb-btc', from: 'btc:regtest', to: 'btc:regtest' } as Route;
@@ -40,7 +43,7 @@ test('Lightning over NWC: spendable is the wallet balance; the fee is a marked e
   const [option] = await account.quoteOptions!(lnPreview('fixed'), lnRoute);
   expect(option.quote).toMatchObject({ recipientSat: 4000, feeSat: 40, totalSat: 4040 });
   expect(option.detail).toContain('Estimated');
-  await expect(account.execute!(lnPreview('fixed'), lnRoute, option.quote!, 'a1')).resolves.toEqual({ status: 'completed', reference: 'pre' });
+  await expect(account.execute!(lnPreview('fixed'), lnRoute, option.quote!, 'a1')).resolves.toEqual({ status: 'completed' }); // never the preimage
   expect(n.sendPayment).toHaveBeenCalledWith({ invoice: 'fixed' });
   expect(n.listChannels).not.toHaveBeenCalled();
   n.getBtcBalance.mockResolvedValue({ confirmed: 4039 });
@@ -57,6 +60,28 @@ test('Lightning on a raw node: spendable is channel outbound capacity; amountles
   expect(n.sendPayment).toHaveBeenCalledWith({ invoice: 'open', amount: 2000 });
   await expect(account.status!('b1')).resolves.toEqual({ status: 'completed', reference: 'h1' });
   expect(n.getPaymentStatus).toHaveBeenCalledWith('h1');
+});
+
+test('Lightning: a send whose answer never came is followed by the invoice’s payment hash', async () => {
+  const n = node({ nwc: true });
+  const account = createRgbLightningAccount(n, 'regtest');
+  const quote = await account.quote(lnPreview('hashed'), lnRoute);
+  n.sendPayment.mockRejectedValueOnce(Object.assign(new Error("NWC request 'pay_invoice' timed out"), { code: 'OTHER' }));
+  await expect(account.execute!(lnPreview('hashed'), lnRoute, quote, 'h1')).rejects.toThrow(/timed out/);
+  n.getPaymentStatus.mockResolvedValueOnce({ status: 'pending' });
+  await expect(account.status!('h1')).resolves.toEqual({ status: 'pending', reference: HASH });
+  await expect(account.status!('h1')).resolves.toEqual({ status: 'completed', reference: HASH });
+  expect(n.getPaymentStatus).toHaveBeenCalledWith(HASH);
+});
+
+test('Lightning: a payment the node refuses is not sent, so it never needs checking', async () => {
+  const n = node({ nwc: true });
+  const account = createRgbLightningAccount(n, 'regtest');
+  const quote = await account.quote(lnPreview('hashed'), lnRoute);
+  n.sendPayment.mockRejectedValueOnce(Object.assign(new Error('no route'), { code: 'PAYMENT_FAILED' }));
+  await expect(account.execute!(lnPreview('hashed'), lnRoute, quote, 'h2')).rejects.toBeInstanceOf(PaymentNotSentError);
+  await expect(account.status!('h2')).resolves.toEqual({ status: 'failed', reference: HASH });
+  expect(n.getPaymentStatus).not.toHaveBeenCalled();
 });
 
 test('on-chain: sends sats at the quoted fee rate and follows the txid', async () => {

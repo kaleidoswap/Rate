@@ -171,6 +171,18 @@ export class RgbLibRnAccount {
   }
 
   /**
+   * Sync with the chain, then the BTC balance, as one queued call. Receive polls this to see
+   * a deposit while it is still in the mempool (`future` above `settled`); unlike
+   * registerWallet it does not also move every pending transfer, which can take far longer.
+   */
+  syncedBtcBalance(): Promise<RgbLib.BtcBalance> {
+    return this.serial(async () => {
+      await this.wallet.sync()
+      return this.wallet.getBtcBalance(true)
+    })
+  }
+
+  /**
    * Every asset under `nia`, the list the adapter reads: NIA and IFA tokens, CFA named
    * by their name, and UDA collectibles (one unit each).
    */
