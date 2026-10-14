@@ -10,6 +10,23 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.9.11] — 2026-10-14
+
+### Fixed
+- **RGB receive.** Bitcoin sent to the RGB wallet on this phone is detected while still in the mempool; a deposit already waiting, or the wallet's own change, no longer reads as a new payment. RGB transfers show which asset and how much arrived, including invoices for any asset, and a newly received asset is never shown by its raw id.
+- **Stuck RGB node payments.** A Lightning payment over NWC whose answer never came is followed by the invoice's payment hash instead of staying on "Needs checking"; an explicit refusal from the node is recorded as not sent. Payments recorded by earlier versions without a hash still need to be dismissed by hand.
+- **Assets disappearing on open.** The dashboard keeps each account's last known assets until that account answers, instead of dropping RGB assets during the early load and showing them again seconds later.
+- **Voice replies through the earpiece (iPhone).** Hands-free voice opens its audio session with the loudspeaker as default, playback is routed to the speaker right before speaking, and a cancelled recording start no longer leaves record mode on.
+
+### Changed
+- Activity details are condensed into one card, with the asset id (copyable), method and network on one line, and the fee only when known.
+- One updating indicator on the balance card instead of four; "View All" is a small text link.
+- Voice mode: Prismo shows its thinking pose while thinking, and the speech bubble is easier to read.
+- Prismo explains Bitcoin, Lightning and RGB concepts from an on-device knowledge base, in English and Italian.
+
+### Validation
+- CI (type-check, tests, iOS and Android production bundles) passed on both pull requests. Device testing of the voice audio route and the RGB mempool detection remains to be done with this release.
+
 ## [0.9.3] — 2026-10-12
 
 ### Fixed
