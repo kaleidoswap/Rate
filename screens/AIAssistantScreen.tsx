@@ -613,7 +613,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             ? 'Stopped.'
             : lastCall
             ? 'Done.'
-            : "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, or Bitcoin merchants.");
+            : "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, Bitcoin merchants, or how Bitcoin, Lightning and RGB work.");
         const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
         const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;
         if (invResult?.invoice) {

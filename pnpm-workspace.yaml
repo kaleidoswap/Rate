@@ -72,6 +72,9 @@ patchedDependencies:
   '@kaleidorg/wallet-engine@1.0.0-beta.75': patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
   decode-uri-component@0.5.0: patches/decode-uri-component@0.5.0.patch
   metro@0.83.3: patches/metro@0.83.3.patch
+  # Hands-free voice: the mic stream's PlayAndRecord/VoiceChat session must play
+  # replies on the loudspeaker, not the earpiece (DefaultToSpeaker).
+  react-native-live-audio-stream@1.1.1: patches/react-native-live-audio-stream@1.1.1.patch
 
 # Bark downloads checksum-verified native binaries during installation.
 onlyBuiltDependencies:

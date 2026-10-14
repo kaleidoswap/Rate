@@ -109,6 +109,8 @@ describe('withSnapshotFallback', () => {
     const live = [record('rgb:a', 'A', 'RGB', 5)];
     expect(withSnapshotFallback(live, snapshot).map((a) => `${a.asset_id}:${a.balance}`)).toEqual(['btkn1b:1', 'rgb:a:5']);
     expect(withSnapshotFallback([], snapshot)).toHaveLength(2);
+    // An account that answered with no assets no longer shows its last known ones.
+    expect(withSnapshotFallback([], snapshot, ['RGB']).map((a) => a.asset_id)).not.toContain('rgb:a');
   });
 });
 

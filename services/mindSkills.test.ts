@@ -12,7 +12,7 @@
 // before the L402 source was wired.
 
 import { ToolRegistry, SkillRegistry, skillsFromBundle, type SkillBundle } from '@kaleidorg/mind';
-import { buildMindToolSources, SOUL } from './mindAgent';
+import { buildMindToolSources, MIND_FAST_INTENTS, SOUL } from './mindAgent';
 import skillBundle from '../skills.bundle.json';
 
 // Native/host deps the tool sources import — stubbed; the tests only inspect
@@ -123,5 +123,18 @@ describe('persona', () => {
     expect(SOUL).toContain('Prismo');
     expect(SOUL).toMatch(/never joke about\s+money/);
     expect(SOUL).toMatch(/exact amount/);
+  });
+});
+
+describe('fast-path asset listing vs. concept questions', () => {
+  const assets = MIND_FAST_INTENTS.find(i => i.name === 'assets')!;
+  it('still lists the wallet’s own assets', () => {
+    for (const q of ['what assets do I have', 'show my RGB assets', 'which tokens do I hold']) expect(assets.match(q)).toBe(true);
+  });
+  it('leaves “what are RGB assets?” to the explanation', () => {
+    for (const q of ['what are RGB assets?', 'what is an RGB asset', 'explain RGB tokens', 'cosa sono gli asset RGB?']) expect(assets.match(q)).toBe(false);
+  });
+  it('the prompt lets Prismo explain Bitcoin, Lightning and RGB', () => {
+    expect(SOUL).toMatch(/explain Bitcoin, Lightning and RGB/);
   });
 });

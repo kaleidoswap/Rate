@@ -50,6 +50,9 @@ patchedDependencies:
   metro@0.83.3:
     hash: fdb75734e8b3226d6728dd4b137ce0747a30c033f86b7d3bb37df04d34d08122
     path: patches/metro@0.83.3.patch
+  react-native-live-audio-stream@1.1.1:
+    hash: e75aa9a302d585be13f91f8385b48fbe573c2e45ee89b9258da2cfccd1dbc1aa
+    path: patches/react-native-live-audio-stream@1.1.1.patch
 importers:
 
   .:
@@ -287,7 +290,7 @@ importers:
         version: 1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
       react-native-live-audio-stream:
         specifier: ^1.1.1
-        version: 1.1.1
+        version: 1.1.1(patch_hash=e75aa9a302d585be13f91f8385b48fbe573c2e45ee89b9258da2cfccd1dbc1aa)
       react-native-markdown-display:
         specifier: ^7.0.2
         version: 7.0.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
@@ -16185,7 +16188,7 @@ snapshots:
       react: 19.1.4
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
 
-  react-native-live-audio-stream@1.1.1: {}
+  react-native-live-audio-stream@1.1.1(patch_hash=e75aa9a302d585be13f91f8385b48fbe573c2e45ee89b9258da2cfccd1dbc1aa): {}
 
   react-native-markdown-display@7.0.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:

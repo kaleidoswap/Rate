@@ -114,12 +114,13 @@ export function replaceProtocolAssets<T extends { protocol?: string | null; asse
 
 /**
  * Live records, plus the last known ones of accounts that haven't listed their
- * assets yet (the dashboard's fast start).
+ * assets yet (the dashboard's fast start). `listed` names accounts that answered,
+ * even with no assets: their last known rows no longer stand in.
  */
 export function withSnapshotFallback(
-  live: readonly InventoryRecord[], snapshot: readonly InventoryRecord[],
+  live: readonly InventoryRecord[], snapshot: readonly InventoryRecord[], listed: readonly string[] = [],
 ): InventoryRecord[] {
-  const liveProtocols = new Set(live.map(tokenProtocol));
+  const liveProtocols = new Set<string>([...live.map(tokenProtocol), ...listed]);
   return [...snapshot.filter((r) => !liveProtocols.has(tokenProtocol(r))), ...live];
 }
 
