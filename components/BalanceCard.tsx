@@ -33,6 +33,8 @@ interface BalanceCardProps {
     updating?: boolean;
     pendingAccounts?: string[];
     rgbBalanceIsLightning?: boolean;
+    /** A Lightning node is connected, so its channel balance has a row. */
+    showLightning?: boolean;
     bitcoinUnit: string;
     onRefresh: () => void;
     refreshing: boolean;
@@ -66,6 +68,8 @@ interface BalanceCardProps {
 }
 
 
+const CONTROL_HIT_SLOP = { top: 7, bottom: 7, left: 7, right: 7 };
+
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
     { key: 'RGB', label: 'Lightning', color: protocolColor('RGB') },
     { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
@@ -87,6 +91,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     updating = false,
     pendingAccounts = [],
     rgbBalanceIsLightning = false,
+    showLightning = true,
     bitcoinUnit,
     onRefresh,
     refreshing,
@@ -134,7 +139,8 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     const activeProtocols = byProtocol
         ? PROTOCOL_DISPLAY.filter(p => byProtocol[p.key as keyof typeof byProtocol])
         : [];
-    const hasBreakdown = activeProtocols.length > 0 || assetRows.length > 0 || availableBtc !== undefined || !!lastUpdatedAt;
+    const hasBreakdown = activeProtocols.length > 0 || assetRows.length > 0 || availableBtc !== undefined || !!lastUpdatedAt
+        || pendingBtc > 0 || testBtc > 0 || stale;
     // Per-network balances are collapsed behind a chevron (extension parity).
     const [showBreakdown, setShowBreakdown] = useState(false);
     // The on-chain row belongs to the RGB node's wallet.
@@ -161,7 +167,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             value: byProtocol?.RGB?.confirmed ?? 0,
         },
     ];
-    if (byProtocol && 'RGB' in byProtocol) {
+    if (byProtocol && 'RGB' in byProtocol && (rgbBalanceIsLightning || showLightning)) {
         breakdownRows.push({
             key: 'RGB',
             name: 'BTC on Lightning',
@@ -205,11 +211,9 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 
     return (
         <View style={styles.container}>
+            {/* No label or status words above the figure: the refresh button turns
+                into the one updating indicator, and the details sit behind the chevron. */}
             <View style={styles.cardHeader}>
-                <View style={styles.labelRow}>
-                    <Text style={styles.balanceLabel}>{holdingBalance ? 'Last balance' : syncing && !loading ? 'Balance so far' : 'Total balance'}</Text>
-                    {syncing && <ActivityIndicator size="small" accessibilityLabel="Updating balance" color={theme.colors.text.secondary} />}
-                </View>
                 {/* Refresh and balance details stay separate from denomination. */}
                 <View style={styles.topControls}>
                     <TouchableOpacity
@@ -219,13 +223,11 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         disabled={refreshing || syncing}
                         accessibilityLabel="Refresh balance"
                         accessibilityState={{ disabled: refreshing || syncing }}
+                        hitSlop={CONTROL_HIT_SLOP}
                     >
-                        {/* One indicator for an update (next to the label): the button only dims meanwhile. */}
-                        <Ionicons
-                            name="refresh"
-                            size={16}
-                            color={refreshing || syncing ? theme.colors.text.tertiary : theme.colors.text.secondary}
-                        />
+                        {syncing
+                            ? <ActivityIndicator size="small" accessibilityLabel="Updating balance" color={theme.colors.text.secondary} style={styles.controlSpinner} />
+                            : <Ionicons name="refresh" size={14} color={refreshing ? theme.colors.text.tertiary : theme.colors.text.secondary} />}
                     </TouchableOpacity>
                     {hasBreakdown && (
                         <TouchableOpacity
@@ -234,10 +236,11 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             onPress={() => setShowBreakdown(v => !v)}
                             accessibilityState={{ expanded: showBreakdown }}
                             accessibilityLabel={showBreakdown ? 'Hide network balances' : 'Show network balances'}
+                            hitSlop={CONTROL_HIT_SLOP}
                         >
                             <Ionicons
                                 name={showBreakdown ? 'chevron-up' : 'chevron-down'}
-                                size={16}
+                                size={14}
                                 color={theme.colors.text.secondary}
                             />
                         </TouchableOpacity>
@@ -256,7 +259,7 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             next to the figure; no separate picker row below it. */}
                         <TouchableOpacity style={styles.primaryBalance} onPress={onCycleDenomination} disabled={!onCycleDenomination}
                             accessibilityRole="button"
-                            accessibilityLabel={`${syncing ? 'Balance so far' : 'Total balance'} ${primaryText} ${primaryUnitLabel ?? ''}.${onCycleDenomination ? ' Tap to change unit.' : ''}`}>
+                            accessibilityLabel={`${holdingBalance ? 'Last balance' : syncing ? 'Balance so far' : 'Total balance'} ${primaryText} ${primaryUnitLabel ?? ''}.${onCycleDenomination ? ' Tap to change unit.' : ''}`}>
                             <View style={styles.balanceRow}>
                                 <AmountText style={styles.balanceAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>{primaryText}</AmountText>
                                 {/* Fiat figures already carry their symbol, so only sats/BTC get a unit label. */}
@@ -280,14 +283,14 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                         </AmountText>
                     </>
                 )}
-                {/* Incoming funds and test sats are always visible, never folded into the total. */}
-                {/* The spinner by the label says it's updating; words only when it's slow, naming who. */}
-                {syncing && slow && <Text accessibilityLiveRegion="polite" style={styles.subLine}>
+                {/* Only the figure (and its equivalent) under the balance; status, pending and
+                    test funds are in the details. Slow accounts are named there. */}
+                {showBreakdown && syncing && slow && <Text accessibilityLiveRegion="polite" style={styles.subLine}>
                     Still syncing{pendingAccounts.length ? ` · ${pendingAccounts.join(', ')}` : ''}
                 </Text>}
-                {!loading && availableBtc !== undefined && (showBreakdown || pendingBtc > 0) && (
+                {!loading && showBreakdown && (availableBtc !== undefined || pendingBtc > 0) && (
                     <View style={{ gap: theme.spacing[2], marginTop: theme.spacing[3] }}>
-                        {showBreakdown && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
+                        {availableBtc !== undefined && <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: theme.spacing[3] }}>
                             <Text style={styles.subLine}>{stale || updating ? 'Last known available BTC' : 'Available bitcoin'}</Text>
                             <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(availableBtc)} ${bitcoinUnit}`}</AmountText>
                         </View>}
@@ -295,13 +298,13 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             <Text style={styles.subLine}>Not yet available</Text>
                             <AmountText style={[styles.subLine, { color: theme.colors.text.primary, fontWeight: '600' }]}>{hideAmounts ? '••••' : `${formatSatoshis(pendingBtc)} ${bitcoinUnit}`}</AmountText>
                         </View>}
-                        {pendingBtc > 0 && showBreakdown && <Text style={styles.subLine}>Awaiting confirmation or temporarily unavailable in an account.</Text>}
+                        {pendingBtc > 0 && <Text style={styles.subLine}>Awaiting confirmation or temporarily unavailable in an account.</Text>}
                     </View>
                 )}
-                {!loading && !syncing && (stale || (showBreakdown && lastUpdatedAt)) && <Text accessibilityLiveRegion="polite" style={[styles.subLine, stale && { color: theme.colors.warning[500] }]}>
-                    {stale ? 'Balance may be incomplete' : 'Updated'}{lastUpdatedAt && showBreakdown ? ` · ${new Date(lastUpdatedAt).toLocaleString()}` : ''}
+                {showBreakdown && !loading && !syncing && (stale || lastUpdatedAt) && <Text accessibilityLiveRegion="polite" style={[styles.subLine, stale && { color: theme.colors.warning[500] }]}>
+                    {stale ? 'Balance may be incomplete' : 'Updated'}{lastUpdatedAt ? ` · ${new Date(lastUpdatedAt).toLocaleString()}` : ''}
                 </Text>}
-                {!loading && testBtc > 0 && (
+                {showBreakdown && !loading && testBtc > 0 && (
                     <Text style={styles.subLine}>
                         Test funds · {hideAmounts ? '••••' : `${formatSatoshis(testBtc)} ${bitcoinUnit}`} · no real value
                     </Text>
@@ -408,23 +411,12 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         paddingVertical: theme.spacing[3],
     },
     cardHeader: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing[3],
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: theme.spacing[3],
     },
     totalBalanceContainer: {
         alignItems: 'center', paddingTop: theme.spacing[1], paddingBottom: theme.spacing[2],
     },
     primaryBalance: { width: '100%', alignItems: 'center' },
-    labelRow: {
-        flex: 1, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2],
-    },
-    updatingText: {
-        fontSize: theme.typography.fontSize.xs,
-        color: theme.colors.text.tertiary,
-    },
-    balanceLabel: {
-        fontSize: theme.typography.fontSize.xs,
-        fontWeight: theme.typography.fontWeight.medium, color: theme.colors.text.secondary,
-    },
     subLine: {
         fontSize: theme.typography.fontSize.xs,
         color: theme.colors.text.secondary,
@@ -463,14 +455,16 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         flexDirection: 'row',
         gap: theme.spacing[2],
     },
+    // Small icon buttons; hitSlop keeps the touch target at 44pt.
     controlButton: {
-        width: 44,
-        height: 44,
+        width: 30,
+        height: 30,
         borderRadius: theme.borderRadius.full,
         backgroundColor: theme.colors.surface.secondary,
         justifyContent: 'center',
         alignItems: 'center',
     },
+    controlSpinner: { transform: [{ scale: 0.75 }] },
     breakdownSection: {
         marginTop: theme.spacing[3],
     },
