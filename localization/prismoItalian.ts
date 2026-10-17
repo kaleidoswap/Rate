@@ -252,5 +252,21 @@ export const prismoItalian: Record<string, string> = {
   "Pay": "Paga",
   "Budget left": "Budget residuo",
   "Why you are asked": "Motivo della richiesta",
-  "RGB invoice": "Fattura RGB"
+  "RGB invoice": "Fattura RGB",
+  "Model status": "Stato del modello",
+  "Manage model": "Gestisci modello",
+  "Use Prismo": "Usa Prismo",
+  "Runs privately on this device": "Funziona in privato su questo dispositivo",
+  "No model selected": "Nessun modello selezionato",
+  "Loading": "Caricamento",
+  "Error": "Errore",
+  "Not downloaded": "Non scaricato",
+  "Saved memories": "Ricordi salvati",
+  "Confirm with biometrics or PIN": "Conferma con biometria o PIN",
+  "Advanced": "Avanzate",
+  "Danger zone": "Zona pericolosa",
+  "Delete unused models": "Elimina modelli inutilizzati",
+  "Delete unused models?": "Eliminare i modelli inutilizzati?",
+  "Removes downloaded models you are not using. You can download them again later.": "Rimuove i modelli scaricati che non stai usando. Potrai scaricarli di nuovo in seguito.",
+  "Delete all saved memories": "Elimina tutti i ricordi salvati"
 };
