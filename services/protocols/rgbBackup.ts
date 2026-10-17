@@ -19,6 +19,7 @@ import { File, Paths } from 'expo-file-system';
 import { rgbBackupPassword, rgbL1DataId, rgbL1WalletKey, type RgbL1Network } from './rgbL1';
 import { toFilesystemPath } from './bark';
 import { createVssClient, downloadBackupFile, readBackupManifest, uploadBackupFile, vssSigningKey, type BackupManifest } from './rgbVss';
+import { describeRgbError, recordRgbDiagnostic } from './rgbDiagnostics';
 
 export const RGB_VSS_SERVER_URL = process.env.EXPO_PUBLIC_VSS_SERVER_URL || 'https://vss.kaleidoswap.com/vss';
 const DEBOUNCE_MS = 4000;
@@ -93,7 +94,7 @@ export async function runRgbBackup(force = false): Promise<void> {
         try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
       }
     } catch (e: any) {
-      console.warn('[RGB backup] failed (will retry on the next change):', e?.message ?? e);
+      recordRgbDiagnostic('backup_failed', `${context?.network ?? ''}: ${describeRgbError(e)}`);
       setStatus({ ...status, state: 'failed', error: e?.message ?? 'Backup failed' });
     } finally {
       running = null;

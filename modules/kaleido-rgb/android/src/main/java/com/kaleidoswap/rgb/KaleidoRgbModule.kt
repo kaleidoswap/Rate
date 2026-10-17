@@ -98,24 +98,30 @@ class KaleidoRgbModule : Module() {
             mnemonic = k.stringOrNull("mnemonic"),
             witnessVersion = Mappers.witnessVersion(k.stringOrNull("witnessVersion")),
           )
+          val subdir = a.stringOrNull("subdir")
+          val walletKey = "${subdir ?: ""}/${keys.masterFingerprint}"
+          // Not open in this process: a runtime lock there was left by a process that died.
+          if (!sessions.isOpen(walletKey)) DataDirs.clearStaleRuntimeLock(DataDirs.walletDir(base(), subdir, keys.masterFingerprint))
           val data = WalletData(
-            dataDir = DataDirs.dataDir(base(), a.stringOrNull("subdir")).absolutePath,
+            dataDir = DataDirs.dataDir(base(), subdir).absolutePath,
             bitcoinNetwork = Mappers.network(a.string("network")),
             databaseType = DatabaseType.SQLITE,
             maxAllocationsPerUtxo = a.uInt("maxAllocationsPerUtxo"),
             supportedSchemas = a.strings("supportedSchemas").map { Mappers.schema(it) },
           )
-          sessions.add(Wallet(data, keys))
+          sessions.add(Wallet(data, keys), walletKey)
         }
       }
     }
 
     AsyncFunction("closeWallet") Coroutine { handle: Int ->
-      val session = sessions.remove(handle)
+      val session = sessions.getOrNull(handle)
       if (session != null) {
         try {
           session.exec { guarded { session.online = null; session.wallet.close() } }
         } finally {
+          // Only now, after the calls queued before it: until then the folder counts as open.
+          sessions.remove(handle)
           session.shutdown()
         }
       }

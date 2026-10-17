@@ -100,6 +100,8 @@ export class RgbLibRnAccount {
     private readonly onChange: () => void = () => undefined,
     /** App network name ('mainnet', 'mutinynet', …). */
     private readonly network: string = '',
+    /** Diagnostics (./rgbDiagnostics.ts): background failures nobody awaits. */
+    private readonly onEvent: (stage: string, detail?: string) => void = () => undefined,
   ) {}
 
   capabilities(): RgbDeviceCapabilities {
@@ -151,7 +153,8 @@ export class RgbLibRnAccount {
 
   /** The adapter's readiness probe and BTC balance source: `{ address, btcBalance }`. */
   async registerWallet(): Promise<{ address: string; btcBalance: RgbLib.BtcBalance }> {
-    await this.refresh().catch(() => undefined) // a failed sync still leaves the last known balance
+    // A failed sync still leaves the last known balance.
+    await this.refresh().catch((e) => this.onEvent('refresh_failed', errorText(e)))
     const address = await this.serial(() => this.wallet.getAddress())
     const btcBalance = await this.serial(() => this.wallet.getBtcBalance(true))
     return { address, btcBalance }
@@ -163,11 +166,11 @@ export class RgbLibRnAccount {
 
   // The adapter calls these without awaiting: never let them reject.
   refreshWallet(): Promise<void> {
-    return this.refresh(true).then(() => undefined, (e) => console.warn('[RGB_L1] refresh failed:', e?.message ?? e))
+    return this.refresh(true).then(() => undefined, (e) => this.onEvent('refresh_failed', errorText(e)))
   }
 
   syncWallet(): Promise<void> {
-    return this.serial(() => this.wallet.sync()).catch((e) => console.warn('[RGB_L1] sync failed:', e?.message ?? e))
+    return this.serial(() => this.wallet.sync()).catch((e) => this.onEvent('sync_failed', errorText(e)))
   }
 
   /**
@@ -430,14 +433,55 @@ export class RgbLibRnAccount {
   }
 }
 
+const errorText = (e: unknown): string => {
+  const err = e as { code?: unknown; message?: unknown } | null
+  const message = typeof err?.message === 'string' ? err.message : String(e)
+  return typeof err?.code === 'string' && err.code.startsWith('ERR_RGB_') && !message.includes(err.code) ? `${err.code}: ${message}` : message
+}
+
+const hostOf = (url: string): string => {
+  try { return new URL(url).host || url } catch { return url }
+}
+
+/** Opening a wallet and going online (a full scan) never takes this long when it works. */
+export const RGB_OPEN_TIMEOUT_MS = 180_000
+
+/** Wallet folders (subdir/fingerprint) this JS runtime has open, and how many times: their runtime lock may be live. */
+const openWallets = new Map<string, number>()
+const markOpen = (key: string) => { openWallets.set(key, (openWallets.get(key) ?? 0) + 1) }
+const markClosed = (key: string) => {
+  const left = (openWallets.get(key) ?? 1) - 1
+  if (left > 0) openWallets.set(key, left)
+  else openWallets.delete(key)
+}
+const walletKey = (subdir: string | null, fingerprint: string) => `${subdir ?? ''}/${fingerprint}`
+
+export interface RgbLibRnHooks {
+  /** After anything that changes what a backup holds. */
+  onChange?: () => void
+  /** Each step of opening the wallet and background failures (./rgbDiagnostics.ts). */
+  onEvent?: (stage: string, detail?: string) => void
+  /**
+   * Removes rgb-lib's runtime lock a killed process left in the wallet's folder
+   * (rgb-lib would wait an hour for it). Called only for a folder this runtime
+   * doesn't have open. True when one was removed.
+   */
+  clearStaleLock?: (subdir: string | null, masterFingerprint: string) => Promise<boolean>
+  openTimeoutMs?: number
+}
+
 /**
  * Builds the module the engine's `loadWdkModule('@utexo/wdk-wallet-rgb')` returns.
  * `load` is a lazy `require` of modules/kaleido-rgb, so the native module is touched
  * only when the RGB account connects.
  */
-export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: () => void } = {}) {
+export function createRgbLibRnModule(load: () => RgbModule, hooks: RgbLibRnHooks = {}) {
+  const emit = (stage: string, detail?: string) => { try { hooks.onEvent?.(stage, detail) } catch { /* diagnostics never break a call */ } }
+
   class WalletManagerRgb {
     private account: RgbLibRnAccount | null = null
+    private opening: Promise<RgbLibRnAccount> | null = null
+    private disposed = false
 
     constructor(
       private readonly mnemonic: string,
@@ -446,6 +490,35 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: 
 
     async getAccount(): Promise<RgbLibRnAccount> {
       if (this.account) return this.account
+      if (!this.opening) {
+        const opening = this.open()
+        this.opening = opening
+        // An open that finishes after its caller gave up (timeout) or after dispose is closed.
+        opening.then((account) => {
+          if (this.disposed) void account.dispose().catch(() => undefined)
+          else this.account = account
+        }, () => undefined).finally(() => { if (this.opening === opening) this.opening = null })
+      }
+      const timeoutMs = hooks.openTimeoutMs ?? RGB_OPEN_TIMEOUT_MS
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          const err = Object.assign(new Error(
+            `RGB on this phone didn't open within ${Math.round(timeoutMs / 1000)} s. The indexer (${hostOf(this.options.indexerUrl ?? '')}) may be slow or unreachable, `
+            + 'or the wallet is waiting on a lock left by an earlier run. Try again, or export the RGB diagnostics from Settings › RGB.',
+          ), { code: 'ERR_RGB_OPEN_TIMEOUT' })
+          emit('open_timeout', `${this.options.network} after ${timeoutMs} ms`)
+          reject(err)
+        }, timeoutMs)
+      })
+      try {
+        return await Promise.race([this.opening, timeout])
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
+    private async open(): Promise<RgbLibRnAccount> {
       const lib = load()
       const network = libNetwork(this.options.network)
       if (!this.options.indexerUrl) throw new Error('RGB needs an indexer URL')
@@ -455,15 +528,40 @@ export function createRgbLibRnModule(load: () => RgbModule, hooks: { onChange?: 
       if (subdir && lib.supportsSubdir() !== true) {
         throw new Error('Update the app to use RGB on this network.')
       }
+      emit('open_start', `${this.options.network} (${network}), folder ${subdir ?? 'original'}, indexer ${hostOf(this.options.indexerUrl)}, proxy ${hostOf(this.options.transportEndpoint)}`)
       const keys = await lib.restoreKeys(network, this.mnemonic)
+      const key = walletKey(subdir, keys.masterFingerprint)
+      if (hooks.clearStaleLock && !openWallets.has(key)) {
+        try {
+          if (await hooks.clearStaleLock(subdir, keys.masterFingerprint)) emit('stale_lock_cleared', `${subdir ?? 'original'} folder: removed rgb_runtime.lock left by an earlier run`)
+        } catch (e) {
+          emit('stale_lock_check_failed', errorText(e))
+        }
+      }
       const supportedSchemas = rgbLibSchemas(this.options.network)
       const wallet = new lib.Wallet(keys, subdir ? { network, subdir, supportedSchemas } : { network, supportedSchemas })
-      await wallet.goOnline(this.options.indexerUrl)
-      this.account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange, this.options.network)
-      return this.account
+      markOpen(key)
+      const started = Date.now()
+      try {
+        await wallet.goOnline(this.options.indexerUrl)
+      } catch (e) {
+        emit('go_online_failed', `${errorText(e)} (after ${Date.now() - started} ms)`)
+        // Never leave the native wallet open behind a failed connect: the next try opens it again.
+        await wallet.close().catch(() => undefined)
+        markClosed(key)
+        throw e
+      }
+      const migrated = (wallet as { migratedLegacyBdkCache?: string | null }).migratedLegacyBdkCache
+      emit('online', `${this.options.network} in ${Date.now() - started} ms${migrated ? `; old BDK cache moved aside as ${migrated}` : ''}`)
+      const account = new RgbLibRnAccount(lib, wallet, this.options.transportEndpoint, hooks.onChange, this.options.network, emit)
+      const dispose = account.dispose.bind(account)
+      let closed = false
+      account.dispose = () => dispose().finally(() => { if (!closed) { closed = true; markClosed(key) } })
+      return account
     }
 
     async dispose(): Promise<void> {
+      this.disposed = true
       const account = this.account
       this.account = null
       await account?.dispose()

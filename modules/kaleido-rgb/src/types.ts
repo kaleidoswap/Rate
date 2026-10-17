@@ -163,6 +163,8 @@ export interface WalletDirState {
   hasManifest: boolean
   hasBdkDb: boolean
   hasLegacyBdkBackup: boolean
+  /** rgb-lib's `rgb_runtime.lock` is there (native builds since the stale-lock fix report it). */
+  hasRuntimeLock?: boolean
 }
 
 export interface WalletOptions {
