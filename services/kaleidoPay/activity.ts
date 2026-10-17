@@ -7,7 +7,8 @@
 import type { SwapAttempt } from '@universal-bolt12/swap-market';
 import { MempoolClient } from '../mempool/MempoolClient';
 import type { ActivityItem, ActivityLayer, SwapAttemptActivityInput } from '../ActivityService';
-import { loadPaymentAttempts, unresolvedAttempt } from './attempts';
+import { dismissPaymentAttempt, loadPaymentAttempt, loadPaymentAttempts, unresolvedAttempt } from './attempts';
+import { removeContactEvent } from '../contactHistory';
 import { kaleidoPayAttempts } from './recovery';
 
 /** Status lookups per feed load; older swaps are shown without one. */
@@ -81,4 +82,24 @@ export async function loadPendingPaymentActivity(walletId: number | undefined): 
     kind: PAYMENT_ATTEMPT_KIND,
   };
   });
+}
+
+/** The saved payment behind an activity row, when the row is one (see loadPendingPaymentActivity). */
+export function paymentAttemptIdOf(item: Pick<ActivityItem, 'id' | 'kind'>): string | undefined {
+  const prefix = 'payment-attempt-';
+  return item.kind === PAYMENT_ATTEMPT_KIND && item.id.startsWith(prefix) ? item.id.slice(prefix.length) : undefined;
+}
+
+/**
+ * Removes a payment still pending or needing a check from this phone's Activity and the
+ * contact's history. Only the local record changes: nothing is cancelled, no funds move.
+ * The record is kept, marked dismissed (see dismissPaymentAttempt). False when there was
+ * nothing to remove (already settled or removed).
+ */
+export async function dismissPendingPayment(walletId: number, attemptId: string): Promise<boolean> {
+  const attempt = await loadPaymentAttempt(walletId, attemptId);
+  if (!attempt || !unresolvedAttempt(attempt)) return false;
+  await dismissPaymentAttempt(walletId, attempt);
+  await removeContactEvent(walletId, attemptId).catch(() => {});
+  return true;
 }

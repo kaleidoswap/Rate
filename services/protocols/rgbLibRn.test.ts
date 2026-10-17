@@ -344,3 +344,46 @@ test('over kaleido-rgb’s own Wallet: every feature is offered and calls reach 
   expect(mainnet.capabilities()).toEqual(expect.objectContaining({ issueIfa: false, inflate: false, drain: true }));
   expect(mockNative.openWallet).toHaveBeenLastCalledWith(expect.objectContaining({ network: 'MAINNET', supportedSchemas: ['NIA', 'CFA', 'UDA'] }));
 });
+
+test('a failed goOnline closes the native wallet and reports why, with its ERR_RGB_* code', async () => {
+  const { lib, wallet } = fakeLib();
+  const events: string[] = [];
+  wallet.goOnline.mockRejectedValueOnce(Object.assign(new Error('Indexer: connection refused'), { code: 'ERR_RGB_INDEXER' }));
+  const manager = new (createRgbLibRnModule(() => lib as any, { onEvent: (stage, detail) => events.push(`${stage}:${detail}`) }).WalletManagerRgb)('seed', options);
+  await expect(manager.getAccount()).rejects.toMatchObject({ code: 'ERR_RGB_INDEXER' });
+  expect(wallet.close).toHaveBeenCalled();
+  expect(events.some((e) => e.startsWith('go_online_failed:ERR_RGB_INDEXER: Indexer: connection refused'))).toBe(true);
+  // The next try opens it again.
+  await expect(manager.getAccount()).resolves.toBeTruthy();
+  expect(lib.Wallet).toHaveBeenCalledTimes(2);
+});
+
+test('a runtime lock left by an earlier run is cleared before opening, never while this runtime has the wallet open', async () => {
+  const { lib } = fakeLib();
+  lib.restoreKeys.mockImplementation(async (network: string, mnemonic: string) => ({ mnemonic, network, xpub: 'x', accountXpubVanilla: 'v', accountXpubColored: 'c', masterFingerprint: 'aa11bb22' }));
+  const clearStaleLock = jest.fn(async () => true);
+  const events: string[] = [];
+  const mod = createRgbLibRnModule(() => lib as any, { clearStaleLock, onEvent: (stage) => events.push(stage) });
+  const first = new mod.WalletManagerRgb('seed', { ...options, dataDir: 'rgb-mutinynet-signetcustom' });
+  await first.getAccount();
+  expect(clearStaleLock).toHaveBeenCalledWith('rgb-mutinynet-signetcustom', 'aa11bb22');
+  expect(events).toEqual(expect.arrayContaining(['open_start', 'stale_lock_cleared', 'online']));
+  // Same folder while it is open here: its lock may be live.
+  await new mod.WalletManagerRgb('seed', { ...options, dataDir: 'rgb-mutinynet-signetcustom' }).getAccount();
+  expect(clearStaleLock).toHaveBeenCalledTimes(1);
+  await first.dispose();
+  await new mod.WalletManagerRgb('seed', { ...options, dataDir: 'rgb-mutinynet-signetcustom' }).getAccount();
+  expect(clearStaleLock).toHaveBeenCalledTimes(1); // the second manager still has it open
+});
+
+test('an open that never finishes fails with ERR_RGB_OPEN_TIMEOUT instead of spinning forever, and is closed when it ends', async () => {
+  const { lib, wallet } = fakeLib();
+  let finish: () => void = () => undefined;
+  wallet.goOnline.mockImplementationOnce(() => new Promise<undefined>((resolve) => { finish = () => resolve(undefined); }));
+  const manager = new (createRgbLibRnModule(() => lib as any, { openTimeoutMs: 20 }).WalletManagerRgb)('seed', options);
+  await expect(manager.getAccount()).rejects.toMatchObject({ code: 'ERR_RGB_OPEN_TIMEOUT', message: expect.stringMatching(/mutinynet\.example/) });
+  await manager.dispose();
+  finish();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(wallet.close).toHaveBeenCalled();
+});

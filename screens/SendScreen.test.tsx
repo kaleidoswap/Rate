@@ -28,6 +28,7 @@ jest.mock('../services/kaleidoPay/connect', () => ({
   prepareSparkTokenRequest: jest.fn(), sendableSparkTokens: jest.fn(async () => [mockUsdb]),
 }));
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), updatePaymentAttempt: jest.fn(async () => true), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
+jest.mock('../services/contactHistory', () => ({ contactKeyFor: (d: string) => d.trim().toLowerCase(), recordContactEvent: jest.fn(async () => {}), updateContactEventStatus: jest.fn(async () => {}), removeContactEvent: jest.fn(async () => {}) }));
 jest.mock('../services/kaleidoPay', () => ({
   PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
   decodeTarget: (text: string) => {
@@ -193,21 +194,40 @@ test('a failed payment plays the error cue, a pending one stays silent until it 
   expect(mockFeedback.send).toHaveBeenCalledTimes(1);
 });
 
-test('a payment that needs checking can be moved past only after confirming the warning', async () => {
+test('a payment that needs checking can be removed from Activity only after confirming the warning', async () => {
   const { loadPaymentAttempt, dismissPaymentAttempt } = require('../services/kaleidoPay/attempts');
   const unknown = { id: 'u', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'unknown', createdAt: 1 };
   loadPaymentAttempt.mockResolvedValueOnce(unknown);
   const alert = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
-  const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true } }} />);
+  const navigation = { ...nav(), canGoBack: () => true };
+  const screen = render(<SendScreen navigation={navigation} route={{ params: { resumePayment: true, paymentAttemptId: 'u' } }} />);
   await act(async () => {});
-  expect(screen.queryByText('Start a new payment')).toBeNull();
-  fireEvent.press(screen.getByText('Payment details'));
-  fireEvent.press(screen.getByText('Start a new payment'));
+  // Visible without opening the receipt details.
+  fireEvent.press(screen.getByText('Remove from Activity'));
   expect(dismissPaymentAttempt).not.toHaveBeenCalled();
+  expect(alert.mock.calls[0][1]).toMatch(/does not cancel the payment or move any funds/);
   const buttons = alert.mock.calls[0][2] as any[];
   await act(async () => { await buttons.find(b => b.style === 'destructive').onPress(); });
   expect(dismissPaymentAttempt).toHaveBeenCalledWith(1, unknown);
+  expect(require('../services/contactHistory').removeContactEvent).toHaveBeenCalledWith(1, 'u');
   expect(screen.queryByText('Verify payment')).toBeNull();
+  expect(navigation.goBack).toHaveBeenCalled();
+  alert.mockRestore();
+});
+
+test('a payment stuck pending can be removed from Activity too', async () => {
+  const { loadPaymentAttempt, dismissPaymentAttempt } = require('../services/kaleidoPay/attempts');
+  const pending = { id: 'p', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending', createdAt: 1 };
+  loadPaymentAttempt.mockResolvedValueOnce(pending);
+  const alert = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true, paymentAttemptId: 'p' } }} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByText('Remove from Activity'));
+  const buttons = alert.mock.calls[0][2] as any[];
+  await act(async () => { buttons.find(b => b.style === 'cancel').onPress?.(); });
+  expect(dismissPaymentAttempt).not.toHaveBeenCalled();
+  await act(async () => { await buttons.find(b => b.style === 'destructive').onPress(); });
+  expect(dismissPaymentAttempt).toHaveBeenCalledWith(1, pending);
   alert.mockRestore();
 });
 

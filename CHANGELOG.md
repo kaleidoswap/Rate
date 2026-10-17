@@ -10,6 +10,26 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.9.12] — 2026-10-17
+
+### Fixed
+- **RGB on this phone not connecting.** rgb-lib leaves a runtime lock behind when the app is killed mid-call, and every later open waited up to an hour for it, blocking mainnet and Mutinynet alike. A leftover lock is now removed when no open wallet uses that folder, an open gives up after 3 minutes with `ERR_RGB_OPEN_TIMEOUT`, and a wallet that fails to go online is closed. The native part takes effect with this build.
+- **RGB connection errors are visible.** RGB settings show the last failed connection with its `ERR_RGB_*` code, and a Diagnostics row shares the connection log, also while disconnected.
+- **On-device AI failing to load.** Model downloads are checked (HTTP status, size, free space) before use, a corrupt model file is deleted so Retry downloads it again, and the Agent banner shows the underlying reason instead of only "failed to load". Chat model and speech recognition errors no longer overwrite each other.
+- **Removing a payment that needs checking.** A payment still pending or marked "Needs checking" can be removed from Activity: "Remove from Activity" on its receipt, or a long press on its row. It also leaves the contact's history. A confirmation explains that only the record on this phone is removed: nothing is cancelled and no funds move.
+- **Disconnected RGB node still in the balance details.** Once startup is done, an account that is off or disconnected leaves the breakdown, and the Lightning row shows only while a node is connected.
+
+### Changed
+- Balance card: only the figure and its equivalent; no label above and no status text below. The refresh button is the updating indicator, and pending funds, test funds and sync notes are in the expanded details. Refresh and expand buttons are smaller.
+- Asset list: the full-width "View N more" row is gone; the View All link stays.
+- Activity: the search field is replaced by a filter button that opens a sheet (type, period, network); active filters show as removable chips. Contacts get a new search bar.
+- Profile: redesigned, with the Nostr QR card and Lightning address; the Settings button is removed, Nostr settings stays.
+- Prismo settings: status card on top, grouped sections, and a danger zone with "Delete unused models" and "Clear memory".
+- Empty states and callouts are drawn with kaleido-ui components.
+
+### Validation
+- CI (type-check, tests, iOS and Android production bundles) passed on the pull request. The native RGB changes and the AI load recovery still need testing on a device with this release.
+
 ## [0.9.11] — 2026-10-14
 
 ### Fixed

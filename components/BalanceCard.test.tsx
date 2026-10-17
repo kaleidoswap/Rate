@@ -47,7 +47,9 @@ describe('balance disclosure', () => {
 
   it('no longer spells out the dollar-token share, and shows one updating indicator', () => {
     const screen = render(<BalanceCard {...props} updating refreshing />);
-    expect(screen.getByText('Balance so far')).toBeTruthy();
+    // No label above the figure: the refresh button is the indicator.
+    expect(screen.queryByText('Balance so far')).toBeNull();
+    expect(screen.queryByText('Total balance')).toBeNull();
     expect(screen.queryByText(/in dollar tokens/)).toBeNull();
     expect(screen.getAllByLabelText('Updating balance')).toHaveLength(1);
     expect(screen.queryByText(/Updating…/)).toBeNull();
@@ -91,6 +93,24 @@ describe('balance disclosure', () => {
   });
 });
 
+test('writes nothing under the balance until the details are opened', () => {
+  const ui = render(<BalanceCard {...props} availableBtc={1000} stale testBtc={200} />);
+  expect(ui.queryByText('Not yet available')).toBeNull();
+  expect(ui.queryByText('Balance may be incomplete')).toBeNull();
+  expect(ui.queryByText(/Test funds/)).toBeNull();
+  fireEvent.press(ui.getByLabelText('Show network balances'));
+  expect(ui.getByText(/Test funds/)).toBeTruthy();
+});
+test('shows the Lightning row only while a node is connected', () => {
+  const rgb = { RGB: { confirmed: 300, unconfirmed: 0, total: 300 } };
+  const off = render(<BalanceCard {...props} byProtocol={rgb} lightningBalance={900} showLightning={false} />);
+  fireEvent.press(off.getByLabelText('Show network balances'));
+  expect(off.queryByText('BTC on Lightning')).toBeNull();
+  expect(off.getByText('BTC on-chain')).toBeTruthy();
+  const on = render(<BalanceCard {...props} byProtocol={rgb} lightningBalance={900} />);
+  fireEvent.press(on.getByLabelText('Show network balances'));
+  expect(on.getByText('BTC on Lightning')).toBeTruthy();
+});
 test('distinguishes unavailable funds from incoming payments and flags old availability', () => {
   const ui = render(<BalanceCard {...props} availableBtc={1000} stale />);
   fireEvent.press(ui.getByLabelText('Show network balances'));
@@ -115,17 +135,20 @@ test('keeps fresh availability and timestamp in the expandable details', () => {
   expect(ui.getByText(/Updated ·/)).toBeTruthy();
 });
 
-it('keeps partial amounts visible and names slow accounts until syncing finishes', () => {
+it('keeps partial amounts visible and names slow accounts in the details only', () => {
   jest.useFakeTimers();
   const screen = render(<BalanceCard {...props} updating pendingAccounts={['Arkade', 'Bark']} />);
   expect(screen.getByText('1500')).toBeTruthy();
-  expect(screen.getByText('Balance so far')).toBeTruthy();
-  expect(screen.queryByText(/Arkade, Bark/)).toBeNull(); // the spinner alone, until it is slow
+  expect(screen.getByLabelText('Balance so far 1500 sats. Tap to change unit.')).toBeTruthy();
   expect(screen.getByLabelText('Updating balance')).toBeTruthy();
   act(() => jest.advanceTimersByTime(12000));
+  // Nothing is written under the balance...
+  expect(screen.queryByText(/Still syncing/)).toBeNull();
+  // ...the slow accounts are named in the details.
+  fireEvent.press(screen.getByLabelText('Show network balances'));
   expect(screen.getByText('Still syncing · Arkade, Bark')).toBeTruthy();
   screen.rerender(<BalanceCard {...props} />);
-  expect(screen.getByText('Total balance')).toBeTruthy();
+  expect(screen.getByLabelText('Total balance 1500 sats. Tap to change unit.')).toBeTruthy();
   expect(screen.queryByLabelText('Updating balance')).toBeNull();
   screen.unmount();
   jest.useRealTimers();

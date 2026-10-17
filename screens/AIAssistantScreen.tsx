@@ -24,7 +24,7 @@ import {
   Pressable,
 } from 'react-native';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
-import QVACService, { WORKLET_CRASHED_PREFIX } from '../services/QVACService';
+import QVACService, { WORKLET_CRASHED_PREFIX, llmErrorDetail } from '../services/QVACService';
 import { KaleidoMindOnboarding, type MindAvailability } from '../components/mind/KaleidoMindOnboarding';
 import { VoiceAgentOverlay } from '../components/voice-agent/VoiceAgentOverlay';
 import { Ionicons } from '@expo/vector-icons';
@@ -496,7 +496,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
         id: nextId(),
         text:
           qvac.llmStatus === 'error'
-            ? `⚠️ The on-device AI failed to load: ${qvac.error || 'unknown error'}. Tap retry in the banner above.`
+            ? `⚠️ The on-device AI failed to load: ${llmErrorDetail(qvac.llmError) || 'unknown error'}. Tap retry in the banner above.`
             : `⏳ The on-device AI is still getting ready (${qvac.combinedProgress}%). Give it a moment and try again.`,
         isUser: false,
         timestamp: new Date(),
@@ -716,7 +716,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
     // Runtime can't run here (e.g. Simulator / no native worklet). Don't show a
     // scary failure.
-    const isUnavailable = isError && (qvac.error ?? '').startsWith('unavailable:');
+    const isUnavailable = isError && (qvac.llmError ?? '').startsWith('unavailable:');
     if (isUnavailable) {
       return (
         <View style={[styles.modelBanner, styles.modelBannerError]}>
@@ -737,7 +737,10 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       );
     }
 
-    const crashed = isError && (qvac.error ?? '').startsWith(WORKLET_CRASHED_PREFIX);
+    const crashed = isError && (qvac.llmError ?? '').startsWith(WORKLET_CRASHED_PREFIX);
+    // The real reason (download HTTP status, disk space, loader message) so a
+    // failure can be diagnosed from a screenshot.
+    const errorDetail = isError && !crashed ? llmErrorDetail(qvac.llmError) : null;
     const label = crashed
       ? 'On-device AI closed the app last time it started. Tap Retry to try again.'
       : isError
@@ -754,7 +757,14 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
           ) : (
             <ActivityIndicator size="small" color={theme.colors.primary[600]} />
           )}
-          <Text style={[styles.modelBannerText, isError && styles.modelBannerTextError]}>{prismoText(label)}</Text>
+          <View style={styles.modelBannerBody}>
+            <Text style={[styles.modelBannerText, styles.modelBannerLabel, isError && styles.modelBannerTextError]}>{prismoText(label)}</Text>
+            {errorDetail ? (
+              <Text style={styles.modelBannerDetail} selectable numberOfLines={4} testID="ai-load-error-detail">
+                {errorDetail}
+              </Text>
+            ) : null}
+          </View>
           {isError && (
             <TouchableOpacity onPress={qvac.initialize} style={styles.modelRetry} accessibilityLabel={prismoText("Retry loading AI")}>
               <Text style={styles.modelRetryText}>{prismoText("Retry")}</Text>
@@ -1404,6 +1414,13 @@ const makeStyles = (theme: Theme) =>
       fontWeight: '600',
     },
     modelBannerTextError: { color: theme.colors.error[700] ?? theme.colors.error[600] },
+    modelBannerBody: { flex: 1, gap: theme.spacing[1] },
+    // Inside the column body the label sizes to its text, not flex: 1.
+    modelBannerLabel: { flex: 0 },
+    modelBannerDetail: {
+      fontSize: theme.typography.fontSize.xs,
+      color: theme.colors.text.secondary,
+    },
     modelRetry: {
       paddingVertical: theme.spacing[1],
       paddingHorizontal: theme.spacing[3],

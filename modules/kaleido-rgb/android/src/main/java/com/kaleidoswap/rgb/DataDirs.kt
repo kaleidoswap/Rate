@@ -10,6 +10,8 @@ object DataDirs {
   const val MANIFEST = "wallet_manifest.json"
   const val BDK_DB = "bdk_db"
   const val LEGACY_BDK_BACKUP = "bdk_db.pre-beta7"
+  /** rgb-lib's lock on a wallet's RGB runtime, removed when the call holding it ends. */
+  const val RUNTIME_LOCK = "rgb_runtime.lock"
 
   private val subdirPattern = Regex("^[A-Za-z0-9_-]{1,64}$")
   private val fingerprintPattern = Regex("^[0-9a-fA-F]{8}$")
@@ -35,7 +37,20 @@ object DataDirs {
     "hasManifest" to File(walletDir, MANIFEST).isFile,
     "hasBdkDb" to File(walletDir, BDK_DB).exists(),
     "hasLegacyBdkBackup" to (walletDir.listFiles()?.any { it.name.startsWith(LEGACY_BDK_BACKUP) } ?: false),
+    "hasRuntimeLock" to File(walletDir, RUNTIME_LOCK).exists(),
   )
+
+  /**
+   * rgb-lib holds `rgb_runtime.lock` while a call uses the wallet's RGB runtime and
+   * deletes it when the call ends. A process killed mid-call (the OS, a crash, a
+   * force stop) leaves it behind, and every later open waits up to an hour for it
+   * before failing with "unreleased lock file": RGB never connects again. Only call
+   * when no wallet in this process has the folder open. True when one was removed.
+   */
+  fun clearStaleRuntimeLock(walletDir: File): Boolean {
+    val lock = File(walletDir, RUNTIME_LOCK)
+    return lock.isFile && lock.delete()
+  }
 
   /**
    * rgb-lib 0.3.0-beta.6 moved to BDK 3, whose cache file can't read the one earlier

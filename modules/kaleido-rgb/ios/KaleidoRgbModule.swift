@@ -9,11 +9,14 @@ struct NotOnline: Error {}
 /// wallet, so every call on it runs on this wallet's own serial queue, in call order.
 final class Session {
   let wallet: Wallet
+  /// The wallet's folder (subdir + master fingerprint).
+  let walletKey: String
   var online: Online?
   let queue: DispatchQueue
 
-  init(wallet: Wallet, handle: Int) {
+  init(wallet: Wallet, walletKey: String, handle: Int) {
     self.wallet = wallet
+    self.walletKey = walletKey
     self.queue = DispatchQueue(label: "com.kaleidoswap.rgb.wallet.\(handle)", qos: .userInitiated)
   }
 
@@ -28,12 +31,18 @@ final class WalletSessions {
   private var nextHandle = 1
   private let lock = NSLock()
 
-  func add(_ wallet: Wallet) -> Int {
+  func add(_ wallet: Wallet, walletKey: String) -> Int {
     lock.lock(); defer { lock.unlock() }
     let handle = nextHandle
     nextHandle += 1
-    sessions[handle] = Session(wallet: wallet, handle: handle)
+    sessions[handle] = Session(wallet: wallet, walletKey: walletKey, handle: handle)
     return handle
+  }
+
+  /// Whether this process has the wallet in `walletKey`'s folder open.
+  func isOpen(_ walletKey: String) -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    return sessions.values.contains { $0.walletKey == walletKey }
   }
 
   func get(_ handle: Int) -> Session? {
@@ -157,25 +166,33 @@ public class KaleidoRgbModule: Module {
           mnemonic: k.stringOrNil("mnemonic"),
           witnessVersion: try Mappers.witnessVersion(k.stringOrNil("witnessVersion"))
         )
+        let subdir = a.stringOrNil("subdir")
+        let walletKey = "\(subdir ?? "")/\(keys.masterFingerprint)"
+        // Not open in this process: a runtime lock there was left by a process that died.
+        if !self.sessions.isOpen(walletKey) {
+          _ = DataDirs.clearStaleRuntimeLock(try DataDirs.walletDir(subdir, keys.masterFingerprint))
+        }
         let data = WalletData(
-          dataDir: try DataDirs.dataDir(a.stringOrNil("subdir")).path,
+          dataDir: try DataDirs.dataDir(subdir).path,
           bitcoinNetwork: try Mappers.network(try a.string("network")),
           databaseType: .sqlite,
           maxAllocationsPerUtxo: try a.u32("maxAllocationsPerUtxo"),
           supportedSchemas: try a.strings("supportedSchemas").map { try Mappers.schema($0) }
         )
-        return self.sessions.add(try Wallet(walletData: data, keys: keys))
+        return self.sessions.add(try Wallet(walletData: data, keys: keys), walletKey: walletKey)
       }
     }
 
     AsyncFunction("closeWallet") { (handle: Int, promise: Promise) in
-      guard let session = self.sessions.remove(handle) else {
+      guard let session = self.sessions.get(handle) else {
         promise.resolve(nil)
         return
       }
-      // Dropping the last reference frees the native wallet once queued calls finish.
-      session.queue.async {
+      // Dropping the last reference frees the native wallet once queued calls finish;
+      // until they have, the folder counts as open.
+      session.queue.async { [weak self] in
         session.online = nil
+        _ = self?.sessions.remove(handle)
         promise.resolve(nil)
       }
     }

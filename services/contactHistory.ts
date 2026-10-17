@@ -60,5 +60,12 @@ export async function updateContactEventStatus(walletId: number, id: string, sta
   await AsyncStorage.setItem(key(walletId), JSON.stringify(list));
 }
 
+/** Drops a send's event (the user removed the payment from Activity). No-op if it wasn't to a contact. */
+export async function removeContactEvent(walletId: number, attemptId: string): Promise<void> {
+  const list = await load(walletId);
+  const kept = list.filter((e) => e.id !== attemptId && e.attemptId !== attemptId);
+  if (kept.length !== list.length) await AsyncStorage.setItem(key(walletId), JSON.stringify(kept));
+}
+
 /** Only exact provider references identify a contact; amounts and dates are never used as guesses. */
 export async function walletContactEvents(walletId: number): Promise<ContactEvent[]> { return (await load(walletId)).filter(event => event && typeof event.contactName === 'string' && typeof event.contactKey === 'string'); }

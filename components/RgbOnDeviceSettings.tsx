@@ -9,7 +9,7 @@
 // servers, and turning it off. While an RGB node is connected it is the RGB
 // account and this wallet steps aside.
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -30,6 +30,7 @@ import ToastService from '../services/ToastService';
 import {
   findRgbCloudBackup, onRgbBackupStatus, restoreRgbFromCloud, restoreRgbFromFile, rgbBackupStatus, runRgbBackup, type RgbBackupStatus,
 } from '../services/protocols/rgbBackup';
+import { lastRgbConnectionError, onRgbConnectionError, rgbDiagnosticReport, type RgbConnectionError } from '../services/protocols/rgbDiagnostics';
 
 /** The rgb-lib account behind the RGB_L1 adapter, when connected. */
 function rgbL1Account(): any {
@@ -84,6 +85,9 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
   const [serversEdited, setServersEdited] = useState(false);
   const [endpointError, setEndpointError] = useState<string | null>(null);
   useEffect(() => onRgbBackupStatus(setCloud), []);
+  /** Why the last connection (at startup or from here) failed, with its ERR_RGB_* code. */
+  const [lastFailure, setLastFailure] = useState<RgbConnectionError | null>(lastRgbConnectionError());
+  useEffect(() => onRgbConnectionError(setLastFailure), []);
 
   const refresh = useCallback(async () => {
     const account = rgbL1Account();
@@ -327,6 +331,12 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     }
   };
 
+  /** Shares the RGB diagnostics: each connection step and error (no keys or seed). */
+  const shareDiagnostics = () => {
+    const report = rgbDiagnosticReport({ platform: Platform.OS, os: Platform.Version, selectedNetwork: network, enabled, connected, ready });
+    void Share.share({ title: 'RGB diagnostics', message: report }).catch(() => ToastService.getInstance().error('Could not share the RGB diagnostics.'));
+  };
+
   const accent = theme.colors.primary[500];
   const errorText = !!error && <Callout tone="error" message={error} style={styles.callout} />;
   const sectionLabel = (text: string) => <Text accessibilityRole="header" style={styles.sectionLabel}>{text}</Text>;
@@ -396,6 +406,15 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
         <Ionicons name={showServers ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.tertiary} />
       </TouchableOpacity>
       {showServers && servers}
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share RGB diagnostics" onPress={shareDiagnostics}
+        activeOpacity={0.7} style={[styles.row, styles.divider]}>
+        {rowIcon('document-text-outline')}
+        <View style={styles.text}>
+          <Text style={styles.label}>Diagnostics</Text>
+          <Text style={styles.description} numberOfLines={1}>Connection steps and errors, to share with support</Text>
+        </View>
+        <Ionicons name="share-outline" size={18} color={theme.colors.text.tertiary} />
+      </TouchableOpacity>
     </>
   );
 
@@ -482,6 +501,9 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           <Text style={styles.description}>On for {RGB_L1_NETWORK_LABEL[enabled]} but not connected.</Text>
         )}
         {errorText}
+        {!error && !busy && enabled && lastFailure && (
+          <Callout tone="error" message={`Last connection${lastFailure.network ? ` (${RGB_L1_NETWORK_LABEL[lastFailure.network as RgbL1Network] ?? lastFailure.network})` : ''} failed: ${lastFailure.message}`} />
+        )}
         <Button title={connectTitle} onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth style={styles.primary} />
       </View>
       {!locked && !ready.includes(network) && (

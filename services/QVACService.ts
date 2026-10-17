@@ -88,6 +88,57 @@ function isPhoneRuntime(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
+/** Message of anything thrown, including the cause QVAC errors carry. */
+export function errorMessage(err: unknown): string {
+  if (err instanceof Error) {
+    const cause = (err as { cause?: unknown }).cause;
+    const causeMsg = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
+    return causeMsg && !err.message.includes(causeMsg) ? `${err.message} (${causeMsg})` : err.message;
+  }
+  return String(err);
+}
+
+/**
+ * True when a load error says the weights file itself is bad (truncated,
+ * corrupt, not a GGUF), so deleting it and downloading again can fix it. Out of
+ * memory or a Metal init failure is not a file problem: keep the download.
+ */
+export function isCorruptModelFileError(message: string): boolean {
+  return /corrupt|incomplete|truncat|unexpected end|end of file|eof\b|invalid magic|bad magic|not a gguf|invalid gguf|gguf_init|failed to read|checksum|not within the file bounds|download incomplete/i
+    .test(message);
+}
+
+/**
+ * The underlying reason behind a chat-model error, for display ("LLM: " prefix
+ * dropped). Null when there is nothing beyond the banner's own wording.
+ */
+export function llmErrorDetail(llmError: string | null | undefined): string | null {
+  const text = (llmError ?? '').trim();
+  if (!text || text.startsWith(WORKLET_CRASHED_PREFIX) || text.startsWith('unavailable:')) return null;
+  return text.replace(/^LLM:\s*/, '') || null;
+}
+
+/** Absolute filesystem path for a file:// URI (loadModel wants a plain path). */
+function uriToPath(uri: string): string {
+  const path = uri.replace(/^file:\/\//, '');
+  try { return decodeURI(path); } catch { return path; }
+}
+
+function fileSize(file: File): number {
+  try { return file.info().size ?? 0; } catch { return 0; }
+}
+
+function availableDiskBytes(): number | null {
+  try {
+    const free = (Paths as unknown as { availableDiskSpace?: number }).availableDiskSpace;
+    return typeof free === 'number' && free > 0 ? free : null;
+  } catch {
+    return null;
+  }
+}
+
+const mb = (bytes: number) => Math.round(bytes / 1048576);
+
 const CONFIG_KEY = 'qvac.config.v1';
 
 // Set while this app session boots the QVAC worklet (first loadModel), cleared
@@ -126,6 +177,15 @@ export interface QVACState {
   whisperStatus: ModelStatus;
   llmDownloadProgress: number;
   whisperDownloadProgress: number;
+  /** Why the chat model failed (set while llmStatus is 'error'). */
+  llmError: string | null;
+  /** Why speech recognition failed (set while whisperStatus is 'error'). */
+  whisperError: string | null;
+  /**
+   * The chat model's error, else speech recognition's. Kept separate above so
+   * a voice failure (or a voice load clearing its own error) never overwrites
+   * or wipes the reason the chat model failed.
+   */
   error: string | null;
 }
 
@@ -167,6 +227,8 @@ class QVACService {
     whisperStatus: 'not_downloaded',
     llmDownloadProgress: 0,
     whisperDownloadProgress: 0,
+    llmError: null,
+    whisperError: null,
     error: null,
   };
 
@@ -291,8 +353,9 @@ class QVACService {
     return { ...this.state };
   }
 
-  private setState(partial: Partial<QVACState>) {
-    this.state = { ...this.state, ...partial };
+  private setState(partial: Partial<Omit<QVACState, 'error'>>) {
+    const next = { ...this.state, ...partial };
+    this.state = { ...next, error: next.llmError ?? next.whisperError };
     for (const listener of this.listeners) {
       listener(this.getState());
     }
@@ -400,7 +463,7 @@ class QVACService {
       this.config = { ...this.config, modelId: id };
       await this.saveConfig();
       await this.reloadLLM();
-      if (this.state.llmStatus === 'error') throw new Error(this.state.error || 'Unable to load model. Try again.');
+      if (this.state.llmStatus === 'error') throw new Error(this.state.llmError || 'Unable to load model. Try again.');
     } finally { this.changingModel = false; }
   }
 
@@ -423,7 +486,7 @@ class QVACService {
       this.state.llmStatus === 'loading' ||
       this.state.llmStatus === 'downloading';
     await this.unloadLLM();
-    this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, error: null });
+    this.setState({ llmStatus: 'not_downloaded', llmDownloadProgress: 0, llmError: null });
     if (wasActive) await this.initializeLLM();
   }
 
@@ -543,16 +606,28 @@ class QVACService {
     }
 
     const file = new File(dir, model.name);
+    // Bytes land in `<name>.part` and only become `<name>` once complete, so an
+    // interrupted download (app killed, network drop) never sits at the path
+    // loadModel reads.
+    const part = new File(dir, `${model.name}.part`);
 
     // Reuse a previously-downloaded, complete file
     if (file.exists) {
-      let size = 0;
-      try { size = file.info().size ?? 0; } catch { /* ignore */ }
+      const size = fileSize(file);
       if (size === model.size) {
         onProgress(100);
-        return file.uri.replace('file://', '');
+        return uriToPath(file.uri);
       }
+      console.warn(`[QVAC] ${model.name} on disk is ${size} bytes, expected ${model.size}; downloading it again`);
       try { file.delete(); } catch { /* ignore */ }
+    }
+    try { if (part.exists) part.delete(); } catch { /* ignore */ }
+
+    const free = availableDiskBytes();
+    if (free != null && free < model.size) {
+      throw new Error(
+        `Not enough free storage for ${model.name}: needs ${mb(model.size)} MB, ${mb(free)} MB free.`
+      );
     }
 
     // Download to a *known* path with a real byte-progress callback. The new
@@ -563,7 +638,7 @@ class QVACService {
     let lastPct = -1;
     const resumable = createDownloadResumable(
       model.url,
-      file.uri,
+      part.uri,
       {},
       (p) => {
         const total = p.totalBytesExpectedToWrite > 0 ? p.totalBytesExpectedToWrite : model.size;
@@ -575,11 +650,47 @@ class QVACService {
       }
     );
 
-    const result = await resumable.downloadAsync();
-    if (!result?.uri) throw new Error(`Download failed for ${model.name}`);
+    const discardPart = () => { try { if (part.exists) part.delete(); } catch { /* ignore */ } };
+    let result: Awaited<ReturnType<typeof resumable.downloadAsync>>;
+    try {
+      result = await resumable.downloadAsync();
+    } catch (err) {
+      discardPart();
+      throw new Error(`Download failed for ${model.name}: ${errorMessage(err)}`);
+    }
+    if (!result?.uri) {
+      discardPart();
+      throw new Error(`Download failed for ${model.name}`);
+    }
+    // The legacy API writes an HTTP error body (404 page, rate-limit JSON, a
+    // captive portal) to the file and resolves — it does not throw.
+    if (typeof result.status === 'number' && (result.status < 200 || result.status >= 300)) {
+      discardPart();
+      throw new Error(`Download failed for ${model.name}: HTTP ${result.status}`);
+    }
+    const got = fileSize(part);
+    if (got !== model.size) {
+      discardPart();
+      throw new Error(`Download incomplete for ${model.name}: got ${got} of ${model.size} bytes`);
+    }
+    part.move(file);
     onProgress(100);
     console.log(`[QVAC] downloaded ${model.name}`);
-    return result.uri.replace('file://', '');
+    return uriToPath(file.uri);
+  }
+
+  /** Delete a chat/voice model's weights by file name (e.g. after a corrupt-file load error). */
+  private discardModelFile(name: string): boolean {
+    try {
+      const file = new File(new Directory(Paths.document, 'qvac-models'), name);
+      if (!file.exists) return false;
+      file.delete();
+      console.warn(`[QVAC] deleted ${name} so the next attempt downloads it again`);
+      return true;
+    } catch (err) {
+      console.warn(`[QVAC] could not delete ${name}:`, errorMessage(err));
+      return false;
+    }
   }
 
   /**
@@ -627,6 +738,7 @@ class QVACService {
    * models we run on-device.
    */
   private async loadLocalLLM(modelSrc: any): Promise<string> {
+    let gpuError: string | null = null;
     if (QVACService.PREFER_GPU) {
       try {
         const id = await this.bootLoad(() => sdkLoadModel({
@@ -640,19 +752,24 @@ class QVACService {
         // Metal failed to init the llamacpp context — don't try it again this
         // session, and fall through to CPU.
         QVACService.PREFER_GPU = false;
-        console.warn(
-          '[QVAC] Metal/GPU load failed, falling back to CPU:',
-          gpuErr instanceof Error ? gpuErr.message : String(gpuErr)
-        );
+        gpuError = errorMessage(gpuErr);
+        console.warn('[QVAC] Metal/GPU load failed, falling back to CPU:', gpuError);
       }
     }
-    const id = await this.bootLoad(() => sdkLoadModel({
-      modelSrc,
-      modelType: 'llamacpp-completion',
-      modelConfig: { ...LOCAL_LLM_CONFIG },
-    } as any));
-    console.log('[QVAC] LLM loaded on CPU');
-    return id;
+    try {
+      const id = await this.bootLoad(() => sdkLoadModel({
+        modelSrc,
+        modelType: 'llamacpp-completion',
+        modelConfig: { ...LOCAL_LLM_CONFIG },
+      } as any));
+      console.log('[QVAC] LLM loaded on CPU');
+      return id;
+    } catch (cpuErr) {
+      // Report the CPU failure, and the GPU one too when it was different, so
+      // the banner and logs carry both reasons.
+      const cpuError = errorMessage(cpuErr);
+      throw new Error(gpuError && gpuError !== cpuError ? `${cpuError} (GPU: ${gpuError})` : cpuError);
+    }
   }
 
   /** @param opts.retry the user asked to try again after a previous boot crash. */
@@ -675,7 +792,7 @@ class QVACService {
       console.warn('[QVAC] LLM init skipped — worklet runtime unavailable on this device');
       this.setState({
         llmStatus: 'error',
-        error: 'unavailable: KaleidoMind needs a physical device.',
+        llmError: 'unavailable: KaleidoMind needs a physical device.',
       });
       return;
     }
@@ -684,10 +801,11 @@ class QVACService {
     }
     if (await this.previousBootCrashed(opts.retry)) {
       console.warn('[QVAC] LLM init skipped — the last worklet boot closed the app');
-      this.setState({ llmStatus: 'error', error: WORKLET_CRASHED_ERROR });
+      this.setState({ llmStatus: 'error', llmError: WORKLET_CRASHED_ERROR });
       return;
     }
 
+    let fileName: string | null = null;
     try {
       await this.loadConfig();
       let model = getModelById(this.config.modelId);
@@ -705,22 +823,33 @@ class QVACService {
         await this.saveConfig();
       }
 
-      this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, error: null });
-      const url = hfUrlFromDescriptor(model.descriptor)!;
+      this.setState({ llmStatus: 'downloading', llmDownloadProgress: 0, llmError: null });
+      fileName = String(model.descriptor?.modelId ?? '');
+      const url = hfUrlFromDescriptor(model.descriptor);
+      const size = Number(model.descriptor?.expectedSize);
+      if (!url || !fileName || !(size > 0)) {
+        throw new Error(`${model.label} has no downloadable weights in this SDK build`);
+      }
       const modelSrc = await this.ensureLocalModel(
-        { url, name: model.descriptor.modelId, size: model.descriptor.expectedSize },
+        { url, name: fileName, size },
         (pct) => this.setState({ llmDownloadProgress: pct })
       );
-      console.log('[QVAC] LLM: loadModel start', modelSrc);
+      console.log('[QVAC] LLM: loadModel start', model.id, modelSrc);
       this.setState({ llmStatus: 'loading', llmDownloadProgress: 100 });
       this.llmModelId = await this.loadLocalLLM(modelSrc);
 
       this.setState({ llmStatus: 'ready' });
       console.log('QVAC LLM ready:', this.llmModelId);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('QVAC LLM init failed:', msg);
-      this.setState({ llmStatus: 'error', error: `LLM: ${msg}` });
+      const msg = errorMessage(err);
+      console.error('QVAC LLM init failed:', msg, err);
+      // A truncated/corrupt weights file would fail the same way on every
+      // Retry: delete it so the next attempt downloads a fresh copy.
+      const corrupt = !!fileName && isCorruptModelFileError(msg) && this.discardModelFile(fileName);
+      this.setState({
+        llmStatus: 'error',
+        llmError: `LLM: ${msg}${corrupt ? ' — the model file was deleted; Retry downloads it again.' : ''}`,
+      });
     }
   }
 
@@ -791,7 +920,7 @@ class QVACService {
     try {
       await this.loadConfig();
 
-      this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, error: null });
+      this.setState({ whisperStatus: 'downloading', whisperDownloadProgress: 0, whisperError: null });
 
       // Use the user-selected Whisper variant, but keep the phone voice loop
       // memory-safe. whisper-large-v3-turbo is ~1.6 GB; loading neural TTS right
@@ -856,9 +985,9 @@ class QVACService {
       this.setState({ whisperStatus: 'ready' });
       console.log('QVAC Whisper ready:', this.whisperModelId);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error('QVAC Whisper init failed:', msg);
-      this.setState({ whisperStatus: 'error', error: `Whisper: ${msg}` });
+      const msg = errorMessage(err);
+      console.error('QVAC Whisper init failed:', msg, err);
+      this.setState({ whisperStatus: 'error', whisperError: `Whisper: ${msg}` });
     }
   }
 
@@ -1055,6 +1184,9 @@ class QVACService {
         this.embedModelId = id;
         return id;
       })();
+      // A failed load must not stick for the whole session: let the next
+      // concept question try again.
+      this.embedLoadPromise.catch(() => { this.embedLoadPromise = null; });
     }
     return this.embedLoadPromise;
   }

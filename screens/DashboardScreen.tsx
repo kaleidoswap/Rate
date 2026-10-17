@@ -455,6 +455,9 @@ export default function DashboardScreen({ navigation }: Props) {
       if (connectedCount > 0 && okBalances.length === 0) return;
 
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = { ...balanceStateRef.current.byProtocol };
+      // Once startup is done, an account that is off or disconnected (an RGB node the user
+      // disconnected) shows no balance at all, rather than its last one in the breakdown.
+      if (initDoneRef.current) for (const [adapter, proto] of adapterProtoMap) if (!adapter?.isConnected()) delete byProtocol[proto];
       // Bark is a layer like Arkade/Spark: counted in the total and shown in the breakdown.
       for (const r of okBalances) byProtocol[r.proto] = r.btc;
       const balance = btcBalanceFromProtocols(byProtocol);
@@ -940,6 +943,7 @@ export default function DashboardScreen({ navigation }: Props) {
             testNetworks={testNetworks}
             assetRows={breakdownAssetRows(tokens, liteUsdAssetIds, { foldDollars: isLite })}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
+            showLightning={hasChannelCapableNode}
             bitcoinUnit={bitcoinUnit}
             onRefresh={() => onRefresh(true)}
             refreshing={refreshing}

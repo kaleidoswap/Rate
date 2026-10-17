@@ -6,7 +6,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
-  TextInput,
   SectionList,
   Image,
   ActivityIndicator,
@@ -28,6 +27,7 @@ import { theme } from '../theme';
 import { Button, MainHeader, Sheet, ZapModal, ZapRecipient, SegmentedTabs, Input, CopyButton, PressableScale } from '../components';
 import { NostrIcon } from '../components/ProtocolIcons';
 import { ProfileAvatar } from '../components/ProfileAvatar';
+import { SearchField } from '../components/SearchField';
 import { formatNip05, nostrContactName, profileDisplayName, shortNpub } from '../utils/nostrProfile';
 import { feedback } from '../utils/feedback';
 import NostrService, { NostrContact, type NostrProfile } from '../services/NostrService';
@@ -530,25 +530,12 @@ export default function ContactsScreen({ navigation, route }: Props) {
 
   const renderHeader = () => (
     <View style={styles.listHeader}>
-      <View style={styles.searchBar}>
-        <Ionicons name="search" size={18} color={theme.colors.text.tertiary} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search contacts"
-          value={searchQuery}
-          onChangeText={(text) => dispatch(setSearchQuery(text))}
-          placeholderTextColor={theme.colors.text.tertiary}
-          autoCapitalize="none"
-          autoCorrect={false}
-          accessibilityLabel="Search contacts"
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => dispatch(setSearchQuery(''))} accessibilityLabel="Clear search"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="close-circle" size={18} color={theme.colors.text.tertiary} />
-          </TouchableOpacity>
-        )}
-      </View>
+      <SearchField
+        value={searchQuery}
+        onChangeText={(text) => dispatch(setSearchQuery(text))}
+        placeholder="Search name, address or npub"
+        accessibilityLabel="Search contacts"
+      />
 
       {/* Filters only matter once there is more than one source. */}
       {nostrConnected && counts.all > 0 && (
@@ -906,13 +893,6 @@ const styles = StyleSheet.create({
   },
   listContent: { paddingHorizontal: theme.spacing[4], paddingBottom: 140, flexGrow: 1 },
   listHeader: { gap: theme.spacing[3], paddingTop: theme.spacing[3] },
-  searchBar: {
-    flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2],
-    backgroundColor: theme.colors.surface.primary, borderRadius: theme.borderRadius.lg,
-    paddingHorizontal: theme.spacing[3], minHeight: 44,
-    borderWidth: StyleSheet.hairlineWidth, borderColor: theme.colors.border.light,
-  },
-  searchInput: { flex: 1, fontSize: theme.typography.fontSize.base, color: theme.colors.text.primary, paddingVertical: theme.spacing[2] },
   connectBanner: {
     flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3],
     padding: theme.spacing[3], borderRadius: theme.borderRadius.lg,

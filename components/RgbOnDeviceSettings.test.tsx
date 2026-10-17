@@ -290,3 +290,19 @@ test('start errors read as plain words', () => {
   expect(rgbStartError('skipped: something else')).toBe('something else');
   expect(rgbStartError(undefined)).toMatch(/didn’t start/);
 });
+
+test('a failed connection shows its rgb-lib error, and the diagnostics can be shared even while not connected', async () => {
+  const { recordRgbConnectionError, resetRgbDiagnostics } = require('../services/protocols/rgbDiagnostics');
+  jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  const { Share } = require('react-native');
+  const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
+  mockNetwork = 'mainnet';
+  const screen = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  await act(async () => { recordRgbConnectionError('mainnet', Object.assign(new Error('Internal: unreleased lock file'), { code: 'ERR_RGB_INTERNAL' })); });
+  expect(screen.getByText('Last connection (Mainnet) failed: ERR_RGB_INTERNAL: Internal: unreleased lock file')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Share RGB diagnostics'));
+  expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: 'RGB diagnostics', message: expect.stringContaining('ERR_RGB_INTERNAL') }));
+  resetRgbDiagnostics();
+  (console.warn as jest.Mock).mockRestore?.();
+});

@@ -22,6 +22,10 @@ jest.mock('../components', () => {
   return {
     Button: ({ title, onPress }: any) => <TouchableOpacity accessibilityRole="button" onPress={onPress}><Text>{title}</Text></TouchableOpacity>,
     CopyButton: ({ value, label }: any) => <Text>{`${label ?? 'copy'} ${value}`}</Text>,
+    Badge: ({ label }: any) => <Text>{label}</Text>,
+    Card: ({ children }: any) => <View>{children}</View>,
+    Divider: () => null,
+    SectionHeader: ({ title }: any) => <Text>{title}</Text>,
     EmptyState: ({ title, actionLabel, onAction }: any) => (
       <View><Text>{title}</Text><TouchableOpacity onPress={onAction}><Text>{actionLabel}</Text></TouchableOpacity></View>
     ),
@@ -78,13 +82,13 @@ it('derives the npub from the public key when it was not stored', () => {
   expect(screen.getByTestId('qr').props.children).toBe('nostr:npub1ab');
 });
 
-it('keeps the QR visible and settings directly accessible', () => {
+it('keeps the QR visible and only Nostr settings directly accessible', () => {
   const screen = render(<ProfileScreen navigation={navigation} />);
   expect(screen.getByTestId('qr')).toBeTruthy();
-  fireEvent.press(screen.getByText('Settings'));
-  expect(navigation.navigate).toHaveBeenCalledWith('Settings');
-  fireEvent.press(screen.getByText('Nostr & relays'));
+  expect(screen.queryByText('Settings')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Nostr settings'));
   expect(navigation.navigate).toHaveBeenCalledWith('NostrSettings');
+  expect(navigation.navigate).not.toHaveBeenCalledWith('Settings');
 });
 
 it('sends people without a Nostr identity to setup', () => {

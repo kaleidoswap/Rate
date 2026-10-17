@@ -6,6 +6,8 @@ enum DataDirs {
   static let manifest = "wallet_manifest.json"
   static let bdkDb = "bdk_db"
   static let legacyBdkBackup = "bdk_db.pre-beta7"
+  /// rgb-lib's lock on a wallet's RGB runtime, removed when the call holding it ends.
+  static let runtimeLock = "rgb_runtime.lock"
 
   static func base() -> URL {
     return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -46,7 +48,19 @@ enum DataDirs {
       "hasManifest": exists(walletDir.appendingPathComponent(manifest), directory: false),
       "hasBdkDb": exists(walletDir.appendingPathComponent(bdkDb)),
       "hasLegacyBdkBackup": names.contains { $0.hasPrefix(legacyBdkBackup) },
+      "hasRuntimeLock": exists(walletDir.appendingPathComponent(runtimeLock), directory: false),
     ]
+  }
+
+  /// rgb-lib holds `rgb_runtime.lock` while a call uses the wallet's RGB runtime and
+  /// deletes it when the call ends. A process killed mid-call (the OS, a crash, a
+  /// force quit) leaves it behind, and every later open waits up to an hour for it
+  /// before failing with "unreleased lock file": RGB never connects again. Only call
+  /// when no wallet in this process has the folder open. True when one was removed.
+  static func clearStaleRuntimeLock(_ walletDir: URL) -> Bool {
+    let lock = walletDir.appendingPathComponent(runtimeLock)
+    guard exists(lock, directory: false) else { return false }
+    return (try? FileManager.default.removeItem(at: lock)) != nil
   }
 
   /// rgb-lib 0.3.0-beta.6 moved to BDK 3, whose cache file can't read the one earlier
