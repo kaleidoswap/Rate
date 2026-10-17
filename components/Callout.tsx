@@ -4,7 +4,13 @@
 // the bespoke `error[50]` / `primary[50]` cards inlined in Swap, Send, etc.,
 // each of which re-derived its own background/border/icon. Tone drives the
 // accent; pass a title and/or message, or arbitrary children.
+//
+// The container (tinted wash, border, radius, padding) is the shared
+// kaleido-ui/native AlertBanner; Rate keeps its tone names, icon and
+// title/message layout on top. `tone="error"` maps 1:1 to the banner's
+// `error` variant (all four tones share names).
 import React from 'react';
+import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
 import { View, Text, StyleSheet, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/ThemeProvider';
@@ -47,39 +53,33 @@ export const Callout: React.FC<CalloutProps> = ({
   };
   const t = TONE[tone];
   return (
-    <View
-      style={[
-        styles.container,
-        { backgroundColor: t.accent + '26', borderColor: t.accent + '33' },
-        style,
-      ]}
-      accessibilityRole="alert"
-    >
-      <Ionicons
-        name={icon ?? t.icon}
-        size={18}
-        color={t.accent}
-        style={styles.icon}
-      />
-      <View style={styles.body}>
-        {!!title && (
-          <Text style={[styles.title, { color: t.accent }]}>{title}</Text>
-        )}
-        {!!message && <Text style={styles.message}>{message}</Text>}
-        {children}
+    <AlertBanner variant={tone} style={style}>
+      {/* AlertBanner doesn't forward a11y props; the role sits on the content. */}
+      <View style={styles.content} accessibilityRole="alert">
+        <Ionicons
+          name={icon ?? t.icon}
+          size={18}
+          color={t.accent}
+          style={styles.icon}
+        />
+        <View style={styles.body}>
+          {!!title && (
+            <Text style={[styles.title, { color: t.accent }]}>{title}</Text>
+          )}
+          {!!message && <Text style={styles.message}>{message}</Text>}
+          {children}
+        </View>
       </View>
-    </View>
+    </AlertBanner>
   );
 };
 
 const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
   StyleSheet.create({
-    container: {
+    content: {
+      flex: 1,
       flexDirection: 'row',
       alignItems: 'flex-start',
-      padding: theme.spacing[3],
-      borderRadius: theme.borderRadius.md,
-      borderWidth: 1,
       gap: theme.spacing[2],
     },
     icon: {

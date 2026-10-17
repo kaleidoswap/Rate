@@ -1,9 +1,14 @@
 // components/EmptyState.tsx
+//
+// Thin adapter over the shared kaleido-ui/native EmptyState: keeps Rate's
+// props (Ionicons glyph name, `message`, `actionLabel`/`onAction`) so callers
+// don't change, while the layout, type scale and icon disc come from the
+// design system. The CTA is the kaleido KButton.
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { EmptyState as KEmptyState, KButton } from '@kaleidorg/kaleido-ui/native';
 import { theme as staticTheme } from '../theme';
-import { useAppTheme } from '../theme/ThemeProvider';
 
 interface EmptyStateProps {
   icon?: keyof typeof Ionicons.glyphMap;
@@ -14,65 +19,39 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({ icon = 'folder-open-outline', title, message, actionLabel, onAction }: EmptyStateProps) {
-  const theme = useAppTheme();
-
   return (
-    <View style={styles.container}>
-      <View style={[styles.iconCircle, { backgroundColor: theme.colors.surface.tertiary }]}>
-        <Ionicons name={icon} size={40} color={theme.colors.text.tertiary} />
-      </View>
-      <Text style={[styles.title, { color: theme.colors.text.primary }]}>{title}</Text>
-      {message && (
-        <Text style={[styles.message, { color: theme.colors.text.secondary }]}>{message}</Text>
-      )}
-      {actionLabel && onAction && (
-        <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: theme.colors.primary[600] }]}
-          onPress={onAction}
-        >
-          <Text style={styles.actionLabel}>{actionLabel}</Text>
-        </TouchableOpacity>
-      )}
-    </View>
+    <KEmptyState
+      style={styles.container}
+      title={title}
+      description={message}
+      icon={(color, size) => <Ionicons name={icon} size={size} color={color} />}
+      action={
+        actionLabel && onAction ? (
+          <KButton
+            label={actionLabel}
+            size="sm"
+            onPress={onAction}
+            accessibilityLabel={actionLabel}
+            style={styles.action}
+          />
+        ) : undefined
+      }
+    />
   );
 }
 
 const styles = StyleSheet.create({
+  // Rate screens drop EmptyState into flex containers / list empty slots and
+  // rely on it filling and centering in the remaining space.
   container: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
     paddingHorizontal: staticTheme.spacing[10],
     paddingVertical: 60,
   },
-  iconCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: staticTheme.spacing[5],
-  },
-  title: {
-    fontSize: staticTheme.typography.fontSize.lg,
-    fontWeight: staticTheme.typography.fontWeight.semibold,
-    textAlign: 'center',
-    marginBottom: staticTheme.spacing[2],
-  },
-  message: {
-    fontSize: staticTheme.typography.fontSize.sm,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  actionButton: {
-    marginTop: staticTheme.spacing[6],
-    paddingHorizontal: staticTheme.spacing[6],
-    paddingVertical: staticTheme.spacing[3],
-    borderRadius: staticTheme.borderRadius.md,
-  },
-  actionLabel: {
-    color: staticTheme.colors.text.inverse,
-    fontSize: 15,
-    fontWeight: staticTheme.typography.fontWeight.semibold,
+  // KButton defaults to alignSelf: flex-start; keep the CTA centered.
+  action: {
+    alignSelf: 'center',
+    marginTop: staticTheme.spacing[3],
   },
 });
