@@ -1,15 +1,17 @@
-import { useAppTheme } from '../theme/ThemeProvider';
 // screens/ProfileScreen.tsx
 //
 // The user's Nostr profile as others see it, opened from the Dashboard: banner,
 // photo, names and links, plus a QR of the npub that friends scan to add them.
-// Editing happens one step further, on ProfileEdit.
+// Editing happens one step further, on ProfileEdit; relays and keys live in
+// Nostr settings (the only settings entry kept here).
 import React, { useEffect, useMemo } from 'react';
 import { Image, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { nip19 } from 'nostr-tools';
-import { theme } from '../theme';
-import { Button, CopyButton, EmptyState } from '../components';
+import { leading } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
+import { Badge, Card, CopyButton, Divider, EmptyState, SectionHeader } from '../components';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { ProfileAvatar } from '../components/ProfileAvatar';
 import { ReceiveQr } from '../components/receive/ReceiveQr';
@@ -73,19 +75,19 @@ export default function ProfileScreen({ navigation }: Props) {
     <View style={styles.container}>
       <ScreenHeader title="Profile" showBack rightAction={
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Edit profile"
-          onPress={() => navigation.navigate('ProfileEdit')}
-          style={{ minHeight: 44, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          onPress={() => navigation.navigate('ProfileEdit')} style={styles.editAction}>
           <Ionicons name="create-outline" size={18} color={theme.colors.primary[500]} />
-          <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Edit</Text>
+          <Text style={styles.editText}>Edit</Text>
         </TouchableOpacity>
       } />
-      <View style={{ flexDirection: 'row', paddingHorizontal: theme.spacing[4], gap: theme.spacing[2] }}>
-        <Button title="Settings" variant="ghost" onPress={() => navigation.navigate('Settings')} style={{ flex: 1 }} />
-        <Button title="Nostr & relays" variant="ghost" onPress={() => navigation.navigate('NostrSettings')} style={{ flex: 1 }} />
-      </View>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Identity: banner, centred avatar, names, NIP-05 and bio */}
         <View style={styles.hero}>
           <View style={styles.banner}>
+            <LinearGradient
+              colors={[theme.colors.surface.elevated, theme.colors.surface.primary]}
+              style={StyleSheet.absoluteFill}
+            />
             {isHttpUrl(banner) && <Image source={{ uri: banner }} style={styles.bannerImg} resizeMode="cover" />}
           </View>
           <View style={styles.avatarWrap}>
@@ -96,104 +98,211 @@ export default function ProfileScreen({ navigation }: Props) {
         <View style={styles.identity}>
           <Text style={styles.name} numberOfLines={2}>{name || 'No name yet'}</Text>
           {!!username && username !== name && <Text style={styles.username} numberOfLines={1}>@{username}</Text>}
-          {!!nip05 && (
-            <View style={styles.inline}>
-              <Ionicons name="at-outline" size={14} color={theme.colors.primary[500]} />
-              <Text style={styles.meta} numberOfLines={1}>{nip05}</Text>
-            </View>
-          )}
+          {!!nip05 && <Badge label={nip05} icon="at-outline" tone="primary" style={styles.nip05} />}
           {!!about && <Text style={styles.about}>{about}</Text>}
         </View>
 
-        {!!lud16 && <View style={styles.card}>
-          <View style={styles.row}>
-            <Ionicons name="flash" size={16} color={theme.colors.warning[500]} />
-            <View style={styles.rowText}>
-              <Text style={styles.meta} numberOfLines={1} selectable>{lud16}</Text>
+        {/* Shareable Nostr code */}
+        <View>
+          <SectionHeader title="Your Nostr code" eyebrow />
+          <Card style={styles.qrCard}>
+            <View style={styles.qrFrame}>
+              <ReceiveQr value={code} size={QR} label="Nostr code" />
             </View>
-            <CopyButton value={lud16} size={16} />
-          </View>
-        </View>}
+            <Text style={styles.qrHint}>Friends scan this to add you as a contact.</Text>
+            <Text style={styles.npub} numberOfLines={1} selectable>{shortNpub(npub)}</Text>
+            <Divider style={styles.qrDivider} />
+            <View style={styles.qrActions}>
+              <View style={styles.qrAction}>
+                <CopyButton value={npub} label="Copy" size={16} color={theme.colors.primary[500]} />
+              </View>
+              <View style={styles.qrActionSeparator} />
+              <TouchableOpacity style={styles.qrAction} onPress={share} accessibilityRole="button" accessibilityLabel="Share">
+                <Ionicons name="share-outline" size={16} color={theme.colors.primary[500]} />
+                <Text style={styles.actionText}>Share</Text>
+              </TouchableOpacity>
+            </View>
+          </Card>
+        </View>
 
-        <View style={[styles.card, styles.qrCard]}>
-          <ReceiveQr value={code} size={QR} label="Nostr code" />
-          <Text style={styles.npub} numberOfLines={1} selectable>{shortNpub(npub)}</Text>
-          <View style={styles.qrActions}>
-            <CopyButton value={npub} label="Copy" size={16} color={theme.colors.primary[500]} />
-            <TouchableOpacity style={styles.share} onPress={share} accessibilityRole="button" accessibilityLabel="Share">
-              <Ionicons name="share-outline" size={16} color={theme.colors.primary[500]} />
-              <Text style={styles.shareText}>Share</Text>
-            </TouchableOpacity>
+        {/* Payments */}
+        {!!lud16 && (
+          <View>
+            <SectionHeader title="Payments" eyebrow />
+            <Card style={styles.listCard}>
+              <View style={styles.row}>
+                <View style={styles.rowIcon}>
+                  <Ionicons name="flash" size={16} color={theme.colors.warning[500]} />
+                </View>
+                <View style={styles.rowText}>
+                  <Text style={styles.rowLabel}>Lightning address</Text>
+                  <Text style={styles.rowValue} numberOfLines={1} selectable>{lud16}</Text>
+                </View>
+                <CopyButton value={lud16} size={16} />
+              </View>
+            </Card>
           </View>
+        )}
+
+        {/* Nostr settings: the only settings entry on this screen */}
+        <View>
+          <SectionHeader title="Nostr" eyebrow />
+          <Card style={styles.listCard}>
+            <TouchableOpacity style={styles.row} onPress={() => navigation.navigate('NostrSettings')}
+              accessibilityRole="button" accessibilityLabel="Nostr settings"
+              accessibilityHint="Manage relays, keys and your Nostr identity">
+              <View style={styles.rowIcon}>
+                <Ionicons name="radio-outline" size={16} color={theme.colors.primary[500]} />
+              </View>
+              <View style={styles.rowText}>
+                <Text style={styles.rowValue}>Nostr settings</Text>
+                <Text style={styles.rowLabel} numberOfLines={1}>Relays, keys and identity</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
+            </TouchableOpacity>
+          </Card>
         </View>
       </ScrollView>
     </View>
   );
 }
 
-const AVATAR = 56;
-const QR = 168;
+const AVATAR = 88;
+const RING = 4;
+const QR = 184;
+const MIN_TOUCH = 44;
 
-const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background.secondary },
-  content: { padding: theme.spacing[4], paddingBottom: theme.spacing[10], gap: theme.spacing[2] },
-  hero: { marginBottom: AVATAR / 2 - theme.spacing[2] },
-  banner: {
-    height: 56,
-    borderRadius: theme.borderRadius.xl,
-    overflow: 'hidden',
-    backgroundColor: theme.colors.surface.primary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-  },
-  bannerImg: { width: '100%', height: '100%' },
-  avatarWrap: {
-    position: 'absolute',
-    left: theme.spacing[4],
-    bottom: -AVATAR / 2,
-    borderRadius: AVATAR / 2 + 3,
-    borderWidth: 3,
-    borderColor: theme.colors.background.secondary,
-  },
-  identity: { gap: theme.spacing[1] },
-  name: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: theme.typography.fontWeight.bold,
-    letterSpacing: -0.4,
-    color: theme.colors.text.primary,
-  },
-  username: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
-  inline: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1] },
-  meta: { flexShrink: 1, fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
-  about: {
-    marginTop: theme.spacing[2],
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.primary,
-  },
-  card: {
-    borderRadius: theme.borderRadius.xl,
-    backgroundColor: theme.colors.surface.primary,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: theme.colors.border.light,
-    overflow: 'hidden',
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing[3],
-    paddingHorizontal: theme.spacing[4],
-    paddingVertical: theme.spacing[3],
-    minHeight: 56,
-  },
-  rowDivider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.colors.border.light },
-  rowText: { flex: 1, minWidth: 0 },
-  rowLabel: { fontSize: theme.typography.fontSize.xs, color: theme.colors.text.tertiary },
-  rowValue: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.primary, fontWeight: theme.typography.fontWeight.medium },
-  qrCard: { alignItems: 'center', padding: theme.spacing[3], gap: theme.spacing[2] },
-  qrTitle: { fontSize: theme.typography.fontSize.base, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.text.primary },
-  qrHint: { fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary, marginBottom: theme.spacing[2] },
-  npub: { marginTop: theme.spacing[1], fontSize: theme.typography.fontSize.sm, color: theme.colors.text.secondary },
-  qrActions: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[6] },
-  share: { flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5], minHeight: 44, minWidth: 44 },
-  shareText: { fontSize: theme.typography.fontSize.sm, color: theme.colors.primary[500] },
-});
+const makeStyles = (theme: ReturnType<typeof useAppTheme>) => {
+  const fs = theme.typography.fontSize;
+  const lh = theme.typography.lineHeight;
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: theme.colors.background.secondary },
+    content: { padding: theme.spacing[4], paddingBottom: theme.spacing[12], gap: theme.spacing[6] },
+    editAction: {
+      minHeight: MIN_TOUCH,
+      paddingHorizontal: theme.spacing[3],
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[1.5],
+    },
+    editText: {
+      color: theme.colors.primary[500],
+      fontSize: fs.sm,
+      fontWeight: theme.typography.fontWeight.semibold,
+    },
+
+    hero: { alignItems: 'center', marginBottom: -theme.spacing[4] },
+    banner: {
+      alignSelf: 'stretch',
+      height: theme.spacing[28],
+      borderRadius: theme.borderRadius['2xl'],
+      overflow: 'hidden',
+      backgroundColor: theme.colors.surface.primary,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: theme.colors.border.light,
+    },
+    bannerImg: { width: '100%', height: '100%' },
+    avatarWrap: {
+      marginTop: -AVATAR / 2,
+      borderRadius: AVATAR / 2 + RING,
+      borderWidth: RING,
+      borderColor: theme.colors.background.secondary,
+      backgroundColor: theme.colors.background.secondary,
+    },
+
+    identity: { alignItems: 'center', gap: theme.spacing[1], paddingHorizontal: theme.spacing[2] },
+    name: {
+      fontSize: fs['2xl'],
+      lineHeight: leading(fs['2xl'], lh.tight),
+      fontWeight: theme.typography.fontWeight.bold,
+      letterSpacing: theme.typography.letterSpacing.tight,
+      color: theme.colors.text.primary,
+      textAlign: 'center',
+    },
+    username: {
+      fontSize: fs.sm,
+      lineHeight: leading(fs.sm, lh.normal),
+      color: theme.colors.text.secondary,
+    },
+    nip05: { marginTop: theme.spacing[1] },
+    about: {
+      marginTop: theme.spacing[3],
+      fontSize: fs.sm,
+      lineHeight: leading(fs.sm, lh.relaxed),
+      color: theme.colors.text.primary,
+      textAlign: 'center',
+    },
+
+    listCard: { padding: 0, overflow: 'hidden' },
+    row: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing[3],
+      paddingHorizontal: theme.spacing[4],
+      paddingVertical: theme.spacing[3],
+      minHeight: theme.spacing[16],
+    },
+    rowIcon: {
+      width: theme.spacing[9],
+      height: theme.spacing[9],
+      borderRadius: theme.borderRadius.full,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: theme.colors.surface.elevated,
+    },
+    rowText: { flex: 1, minWidth: 0, gap: theme.spacing[0.5] },
+    rowLabel: {
+      fontSize: fs.xs,
+      lineHeight: leading(fs.xs, lh.normal),
+      color: theme.colors.text.tertiary,
+    },
+    rowValue: {
+      fontSize: fs.sm,
+      lineHeight: leading(fs.sm, lh.normal),
+      color: theme.colors.text.primary,
+      fontWeight: theme.typography.fontWeight.medium,
+    },
+
+    qrCard: { alignItems: 'center', paddingBottom: 0 },
+    qrFrame: {
+      padding: theme.spacing[3],
+      borderRadius: theme.borderRadius.xl,
+      backgroundColor: theme.colors.surface.secondary,
+    },
+    qrHint: {
+      marginTop: theme.spacing[4],
+      fontSize: fs.sm,
+      lineHeight: leading(fs.sm, lh.normal),
+      color: theme.colors.text.secondary,
+      textAlign: 'center',
+    },
+    npub: {
+      marginTop: theme.spacing[1],
+      fontSize: fs.xs,
+      lineHeight: leading(fs.xs, lh.normal),
+      fontFamily: theme.typography.fontFamily.mono,
+      color: theme.colors.text.tertiary,
+    },
+    qrDivider: { alignSelf: 'stretch', marginTop: theme.spacing[4] },
+    qrActions: { flexDirection: 'row', alignSelf: 'stretch', alignItems: 'center' },
+    qrAction: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: theme.spacing[1.5],
+      minHeight: theme.spacing[12],
+    },
+    qrActionSeparator: {
+      width: StyleSheet.hairlineWidth,
+      alignSelf: 'stretch',
+      marginVertical: theme.spacing[2],
+      backgroundColor: theme.colors.border.light,
+    },
+    actionText: {
+      fontSize: fs.sm,
+      fontWeight: theme.typography.fontWeight.semibold,
+      color: theme.colors.primary[500],
+    },
+  });
+};
