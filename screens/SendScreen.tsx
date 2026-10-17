@@ -31,7 +31,8 @@ import { detectCrossChainAddress } from '../utils/crosschain';
 import { isUnresolved, unwrapCrossChainUri } from '../utils/crosschain-send';
 import { loadCrossChainSession } from '../services/crosschainSend';
 import NostrContactsSelector from '../components/NostrContactsSelector';
-import { contactKeyFor, recordContactEvent, updateContactEventStatus } from '../services/contactHistory';
+import { contactKeyFor, recordContactEvent, removeContactEvent, updateContactEventStatus } from '../services/contactHistory';
+import { confirmRemovePayment } from '../components/payments/confirmRemovePayment';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { motion, protocolTint } from '../theme';
 import { feedback } from '../utils/feedback';
@@ -404,6 +405,20 @@ export default function SendScreen({ navigation, route }: Props) {
     );
   }
 
+  // Pending or needing a check: removes the local record only (Activity, the contact's history).
+  function removeFromActivity() {
+    const current = attempt;
+    if (!walletId || !current || paying.current) return;
+    confirmRemovePayment(async () => {
+      try {
+        await dismissPaymentAttempt(walletId, current);
+        void removeContactEvent(walletId, current.id).catch(() => {});
+        attemptRef.current = null; setAttempt(null); setError(''); setJournalReady(true);
+        if (route.params?.resumePayment && navigation.canGoBack?.()) navigation.goBack();
+      } catch { setError('Could not update the payment record. Try again.'); }
+    });
+  }
+
   async function paste() {
     try { const text = await Clipboard.getString(); if (text) { setInput(text.trim()); setContactName(undefined); } }
     catch { setError('Could not read the clipboard.'); }
@@ -696,7 +711,7 @@ export default function SendScreen({ navigation, route }: Props) {
       {chainWaiting && <Button title="Check confirmation" variant="secondary" onPress={() => void checkStatus()} loading={statusChecking} disabled={statusChecking || busy} />}
       {unresolvedAttempt(a) ? <>
         <Button title="Verify payment" onPress={() => void checkStatus()} loading={busy || statusChecking} disabled={busy || statusChecking} />
-        {a.status === 'unknown' && !busy && receiptExpanded && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} />}
+        {!busy && <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} />}
       </> : <>
         {done && <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
           <Button title="View in Activity" variant="secondary" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} style={{ flex: 1 }} />

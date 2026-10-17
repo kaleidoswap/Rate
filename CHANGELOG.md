@@ -10,6 +10,9 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Fixed
+- **Removing a payment that needs checking.** A payment still pending or marked "Needs checking" can be removed from Activity: "Remove from Activity" on its receipt, or a long press on its row. It also leaves the contact's history. A confirmation explains that only the record on this phone is removed: nothing is cancelled and no funds move.
+
 ## [0.9.11] — 2026-10-14
 
 ### Fixed
