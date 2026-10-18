@@ -40,14 +40,14 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
           style={styles.action}
           accessibilityRole="button"
           accessibilityLabel={actionLabel}
-          // The link is small; the touch target still reaches 44pt.
-          hitSlop={{ top: 14, bottom: 14, left: 12, right: 12 }}
+          // The link is as small as the eyebrow; the touch target still reaches 44pt.
+          hitSlop={{ top: 18, bottom: 18, left: 12, right: 12 }}
         >
           <Text style={styles.actionText}>{actionLabel}</Text>
           {actionChevron && (
             <Ionicons
               name="chevron-forward"
-              size={12}
+              size={10}
               color={theme.colors.primary[500]}
             />
           )}
@@ -76,15 +76,16 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) =>
       textTransform: 'uppercase',
       color: theme.colors.text.secondary,
     },
-    // A quiet text link: the section's title leads, the action follows.
+    // A quiet text link set like the eyebrow title, so it never outweighs it.
     action: {
-      paddingVertical: theme.spacing[1],
       flexDirection: 'row',
       alignItems: 'center',
-      gap: theme.spacing[0.5],
+      gap: 2,
     },
     actionText: {
-      fontSize: theme.typography.fontSize.xs,
+      ...typeRoles.mini,
+      letterSpacing: typeRoles.mini.fontSize * 0.18,
+      textTransform: 'uppercase',
       color: theme.colors.primary[500],
       fontWeight: theme.typography.fontWeight.semibold,
     },
