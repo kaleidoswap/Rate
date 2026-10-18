@@ -55,6 +55,12 @@ export interface PayAccount {
   // funding, and deduplicate attemptId. Never pay while generating a quote.
   execute?: (preview: Preview, route: Route, quote: Quote, attemptId: string) => Promise<PaymentResult>;
   status?: (attemptId: string) => Promise<PaymentResult>;
+  /**
+   * Asks the provider to cancel a payment still in flight, where the rail allows it (e.g. an RGB
+   * transfer the recipient has not accepted). Resolves to the outcome after asking: 'failed' only
+   * when the provider confirms it was cancelled. Never sends.
+   */
+  cancel?: (attemptId: string) => Promise<PaymentResult>;
 }
 export interface PaymentOffer {
   id: string; provider: string; providerDetail?: string; accountName: string; route: Route;
@@ -360,6 +366,27 @@ export async function checkPaymentStatus(sourceId: string, attemptId: string): P
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return normalizeResult(await Promise.race([account.status(attemptId), new Promise<PaymentResult>(resolve => { timer = setTimeout(() => resolve({ status: 'unknown' }), 15000); })]));
+  } catch { return { status: 'unknown' }; }
+  finally { if (timer) clearTimeout(timer); }
+}
+
+/**
+ * True once a payment was handed to its account's executor: the at-most-once claim is written
+ * just before, and kept. False means the payment never left this phone (e.g. the app closed
+ * between saving the receipt and sending).
+ */
+export async function paymentHandedOver(sourceId: string, attemptId: string): Promise<boolean> {
+  const key = `kaleidopay-execution-${sourceId}-${attemptId}`;
+  if (executions.has(key)) return true;
+  return (await AsyncStorage.getItem(key)) !== null;
+}
+/** Asks the payment's account to cancel it; `unknown` when it can't (no account, no answer). */
+export async function cancelPaymentWithProvider(sourceId: string, attemptId: string): Promise<PaymentResult> {
+  const account = accounts.get(sourceId);
+  if (!account?.cancel) return { status: 'unknown' };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return normalizeResult(await Promise.race([account.cancel(attemptId), new Promise<PaymentResult>(resolve => { timer = setTimeout(() => resolve({ status: 'unknown' }), 20000); })]));
   } catch { return { status: 'unknown' }; }
   finally { if (timer) clearTimeout(timer); }
 }

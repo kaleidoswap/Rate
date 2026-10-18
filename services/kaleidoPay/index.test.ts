@@ -78,3 +78,20 @@ test('an executor refusing before sending is reported as not sent, never as unkn
     expect(execute).toHaveBeenCalledTimes(2);
   } finally { disconnect(); }
 });
+
+test('a payment counts as handed over only once its execution claim exists; cancel goes to its account', async () => {
+  const AsyncStorage = require('@react-native-async-storage/async-storage');
+  const { paymentHandedOver, cancelPaymentWithProvider } = require('./index');
+  expect(await paymentHandedOver('acct', 'never-sent')).toBe(false);
+  await AsyncStorage.setItem('kaleidopay-execution-acct-sent', 'started');
+  expect(await paymentHandedOver('acct', 'sent')).toBe(true);
+  expect(await cancelPaymentWithProvider('missing', 'x')).toEqual({ status: 'unknown' });
+  const cancel = jest.fn(async () => ({ status: 'failed' }));
+  const off = registerKaleidoPayAccount({ source: { id: 'acct', rail: 'ln', network: 'signet' }, swaps: [], quote: jest.fn(), cancel });
+  try {
+    expect(await cancelPaymentWithProvider('acct', 'sent')).toEqual({ status: 'failed' });
+    expect(cancel).toHaveBeenCalledWith('sent');
+    cancel.mockRejectedValueOnce(new Error('offline'));
+    expect(await cancelPaymentWithProvider('acct', 'sent')).toEqual({ status: 'unknown' });
+  } finally { off(); }
+});

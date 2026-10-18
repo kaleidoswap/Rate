@@ -17,6 +17,8 @@ jest.mock('../services/protocols', () => ({
   rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listTransfers: jest.fn(), account: { failTransfer: jest.fn(), capabilities: () => mockCaps } }),
 }));
 
+const mockForget = jest.fn();
+jest.mock('../services/ActivityService', () => ({ forgetActivityInFlight: (...args: any[]) => mockForget(...args) }));
 jest.mock('../services/mindIntents/model', () => ({ localTextModel: () => ({ ready: () => false, complete: jest.fn() }) }));
 jest.mock('./Sheet', () => ({ Sheet: ({ visible, children, title }: any) => {
   const { Text, View } = require('react-native');
@@ -31,17 +33,57 @@ const item = (rgbTransfer: ActivityItem['rgbTransfer']): ActivityItem => ({
   amount: '5', status: 'pending', txid: '', layer: 'RGB-L1', network: 'signet', account: 'RGB', rgbTransfer,
 });
 
-test('a transfer waiting for the sender shows its progress and can be cancelled after confirming', async () => {
-  const onRefresh = jest.fn(async () => true);
+test('an open invoice is cancelled after confirming and shows as cancelled at once, even before the list reloads', async () => {
+  const onRefresh = jest.fn(() => new Promise<boolean>(() => {})); // a slow reload never holds up the sheet
   const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'incoming', batchTransferIdx: 7 })} onClose={jest.fn()} onRefresh={onRefresh} />);
   expect(screen.getByText('Waiting for the other side')).toBeTruthy();
   expect(screen.getByText(/Your invoice is open/)).toBeTruthy();
   fireEvent.press(screen.getByText('Cancel invoice'));
-  const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
-  await act(async () => { await buttons.find((b: any) => b.text === 'Cancel transfer').onPress(); });
+  const [title, , buttons] = (Alert.alert as jest.Mock).mock.calls.at(-1);
+  expect(title).toBe('Cancel this invoice?');
+  await act(async () => { await buttons.find((b: any) => b.text === 'Cancel invoice').onPress(); });
   expect(mockCancel).toHaveBeenCalledWith(expect.anything(), 7);
+  // The cancelled invoice drops out of the list: the reload must ask the wallet again.
+  expect(mockForget).toHaveBeenCalledWith('transfers');
   expect(onRefresh).toHaveBeenCalled();
-  expect(screen.getByText('Cancelled.')).toBeTruthy();
+  expect(screen.getByText('Invoice cancelled.')).toBeTruthy();
+  expect(screen.getByText('Cancelled')).toBeTruthy();
+  expect(screen.getByText(/This invoice is cancelled/)).toBeTruthy();
+  expect(screen.queryByText('Cancel invoice')).toBeNull();
+});
+
+test('a transfer that moved on meanwhile says it can no longer be cancelled; errors are shown', async () => {
+  mockCancel.mockResolvedValueOnce(false);
+  const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'outgoing', batchTransferIdx: 7 })} onClose={jest.fn()} />);
+  fireEvent.press(screen.getByText('Cancel transfer'));
+  await act(async () => { await (Alert.alert as jest.Mock).mock.calls.at(-1)[2].find((b: any) => b.text === 'Cancel transfer').onPress(); });
+  expect(screen.getByText(/can no longer be cancelled/)).toBeTruthy();
+  expect(screen.queryByText('Cancelled')).toBeNull();
+  mockCancel.mockRejectedValueOnce(new Error('timed out'));
+  fireEvent.press(screen.getByText('Cancel transfer'));
+  await act(async () => { await (Alert.alert as jest.Mock).mock.calls.at(-1)[2].find((b: any) => b.text === 'Cancel transfer').onPress(); });
+  expect(screen.getByText(/Couldn’t reach the network/)).toBeTruthy();
+});
+
+test('an RGB account that can’t cancel shows no cancel button', () => {
+  const noBatch = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'incoming' })} onClose={jest.fn()} />);
+  expect(noBatch.queryByText('Cancel invoice')).toBeNull();
+});
+
+test('fees: the fee, the total sent and an explanation on demand', () => {
+  const sent: ActivityItem = { id: 'tx', type: 'send', source: 'onchain', asset: 'BTC', assetName: 'Bitcoin', assetTicker: 'sats', assetPrecision: 0, amount: '10,000', rawSats: 10000, fee: 250,
+    status: 'confirmed', txid: 'b9e837f55fba60daca3fb583953b546b33ad4aa2493812126a054925f56c9345', layer: 'L1', network: 'mainnet', timestamp: 1_700_000_000_000 };
+  const screen = render(<ActivityDetailSheet item={sent} onClose={jest.fn()} />);
+  expect(screen.getByLabelText('Amount −10,000 sats')).toBeTruthy();
+  expect(screen.getByText('Network fee')).toBeTruthy();
+  expect(screen.getByText('250 sats')).toBeTruthy();
+  expect(screen.getByText('Total sent')).toBeTruthy();
+  expect(screen.getByText('10,250 sats')).toBeTruthy();
+  expect(screen.queryByText(/Paid to Bitcoin miners/)).toBeNull();
+  fireEvent.press(screen.getByLabelText('What is this fee?'));
+  expect(screen.getByText(/Paid to Bitcoin miners/)).toBeTruthy();
+  expect(screen.getByText('View in explorer')).toBeTruthy();
+  expect(screen.getByText('Share')).toBeTruthy();
 });
 
 test('a transfer already in a transaction can’t be cancelled', () => {

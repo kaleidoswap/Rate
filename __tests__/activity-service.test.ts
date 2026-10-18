@@ -15,6 +15,7 @@ jest.mock('../services/protocols', () => ({
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   clearActivityCache,
+  forgetActivityInFlight,
   loadActivity,
   mergeActivity,
   onchainBtcItems,
@@ -371,6 +372,25 @@ describe('streamActivity', () => {
 
     transfers.resolve([{ txid: 'rgbsend', kind: 'Send', status: 'Settled', created_at: 1, requested_assignment: { value: 5 } }]);
     expect((await done).items.map((i) => i.id)).toEqual(['transfer-rgbsend-0']);
+  });
+
+  it('after a cancel, a reload asks for transfers again instead of reusing a call started before', async () => {
+    const before = deferred<any[]>();
+    let call = 0;
+    const invoice = { idx: 1, kind: 'ReceiveBlind', status: 'WaitingCounterparty', created_at: 1, recipient_id: 'r1', batch_transfer_idx: 7 };
+    adapters.RGB_L1 = {
+      isConnected: () => true, listPayments: async () => [],
+      listTransfers: jest.fn(() => (++call === 1 ? before.promise : Promise.resolve([{ ...invoice, status: 'Failed' }]))),
+    };
+    const assets = [{ asset_id: 'rgb:a', ticker: 'USDT', name: 'Tether', precision: 0 }];
+    const slow = streamActivity({ walletId: 9, assets });
+    await new Promise((r) => setTimeout(r, 0));
+    forgetActivityInFlight('transfers');
+    // The cancelled invoice (failed, never paid) is no longer listed.
+    expect((await streamActivity({ walletId: 9, assets }).done).items).toEqual([]);
+    before.resolve([invoice]);
+    await slow.done;
+    expect(adapters.RGB_L1.listTransfers).toHaveBeenCalledTimes(2);
   });
 
   const assetList = [

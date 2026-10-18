@@ -3,12 +3,24 @@ import { View, Text, ActivityIndicator } from 'react-native';
 import Animated, { ZoomIn } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
-import { motion } from '../../theme';
+import { motion, leading } from '../../theme';
+import { Badge } from '../Badge';
 import { Button } from '../Button';
 import { AmountText } from '../AmountText';
 import { PaymentReceiptDetails } from '../PaymentReceiptDetails';
 import { awaitingOnchainConfirmation, paymentPresentation } from '../../utils/payment-presentation';
 import { unresolvedAttempt, type PaymentAttempt } from '../../services/kaleidoPay/attempts';
+
+const RAIL_LABEL: Record<string, string> = { ln: 'Lightning', btc: 'Bitcoin', spark: 'Spark', ark: 'Ark', arkade: 'Arkade', bark: 'Bark', rgb: 'RGB', 'rgb-ln': 'RGB Lightning' };
+const RAIL_ICON: Record<string, string> = { ln: 'lightning', btc: 'onchain', spark: 'spark', ark: 'arkade', arkade: 'arkade', bark: 'bark', rgb: 'rgb', 'rgb-ln': 'rgb' };
+
+/** How a saved payment was paid, e.g. "Lightning · signet", from its destination rail. */
+export function paymentMethod(a: Pick<PaymentAttempt, 'destinationRail' | 'network'>): { label: string; icon?: string } | undefined {
+  const base = a.destinationRail?.split(':')[0];
+  if (!base) return undefined;
+  const network = a.network && a.network !== 'mainnet' ? a.network : undefined;
+  return { label: [RAIL_LABEL[base] ?? base, network].filter(Boolean).join(' · '), icon: RAIL_ICON[base] };
+}
 
 /** Shared receipt presentation. No wallet access, polling or payment execution. */
 export function PaymentOutcome({ attempt: a, busy = false, statusChecking = false, statusTimedOut = false, error = '', demo = false, expanded, onExpandedChange }: {
@@ -19,38 +31,55 @@ export function PaymentOutcome({ attempt: a, busy = false, statusChecking = fals
   const [localExpanded, setLocalExpanded] = useState(false);
   const receiptExpanded = expanded ?? localExpanded;
   const setReceiptExpanded = onExpandedChange ?? setLocalExpanded;
-  const text = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base };
+  const text = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base, lineHeight: leading(t.typography.fontSize.base) };
   const muted = { ...text, color: t.colors.text.secondary };
-  const small = { color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs };
-    const done = a.status === 'completed';
-    const chainWaiting = awaitingOnchainConfirmation(a);
-    const presentation = paymentPresentation(a);
-    const failed = a.status === 'failed';
-    const tone = done && !chainWaiting ? t.colors.primary[500] : failed ? t.colors.error[500] : t.colors.warning[500];
-    const title = done ? presentation.title : failed ? 'Payment failed' : busy && !statusChecking ? 'Sending payment' : statusTimedOut ? 'Confirmation is taking longer' : presentation.title;
+  const small = { color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, lineHeight: leading(t.typography.fontSize.xs, t.typography.lineHeight.relaxed) };
+  const done = a.status === 'completed';
+  const chainWaiting = awaitingOnchainConfirmation(a);
+  const presentation = paymentPresentation(a);
+  const failed = a.status === 'failed';
+  const tone = done && !chainWaiting ? t.colors.primary[500] : failed ? t.colors.error[500] : t.colors.warning[500];
+  const title = done ? presentation.title : failed ? 'Payment failed' : busy && !statusChecking ? 'Sending payment' : statusTimedOut ? 'Confirmation is taking longer' : presentation.title;
+  // A short status for the badge; the title above says it in full.
+  const badge = a.onchainConfirmed ? { label: 'Confirmed', tone: 'success' as const }
+    : chainWaiting ? { label: 'Awaiting confirmation', tone: 'warning' as const }
+    : done ? { label: 'Completed', tone: 'success' as const }
+    : failed ? { label: 'Failed', tone: 'error' as const }
+    : a.status === 'unknown' ? { label: 'Needs checking', tone: 'warning' as const }
+    : { label: 'In progress', tone: 'warning' as const };
+  const method = paymentMethod(a);
   return <View style={{ gap: t.spacing[4] }}>
       <View style={{ alignItems: 'center', gap: t.spacing[2], paddingTop: t.spacing[6] }}>
         <Animated.View key={a.onchainConfirmed ? 'chain-confirmed' : done ? 'completed' : failed ? 'failed' : 'checking'} entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
-          style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: tone + '26' }}>
-          {busy || statusChecking || (a.status === 'pending' && !statusTimedOut) ? <ActivityIndicator accessibilityLabel="Checking payment automatically" color={tone} /> : <Ionicons name={chainWaiting ? 'time-outline' : done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={40} color={tone} />}
+          style={{ width: 56, height: 56, borderRadius: t.borderRadius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: tone + '26' }}>
+          {busy || statusChecking || (a.status === 'pending' && !statusTimedOut) ? <ActivityIndicator accessibilityLabel="Checking payment automatically" color={tone} /> : <Ionicons name={chainWaiting ? 'time-outline' : done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={36} color={tone} />}
         </Animated.View>
-        <Text accessibilityRole="header" style={{ ...muted }}>{title}</Text>
-        <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '700' }}>{a.recipient}</AmountText>
+        <Text accessibilityRole="header" style={muted}>{title}</Text>
+        <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], lineHeight: leading(t.typography.fontSize['3xl'], t.typography.lineHeight.tight), fontWeight: t.typography.fontWeight.bold,
+          ...(failed ? { color: t.colors.text.tertiary, textDecorationLine: 'line-through' as const } : {}) }}>{a.recipient}</AmountText>
         {!!a.recipientName && <Text style={muted}>{done ? 'sent to' : 'to'} {a.recipientName}</Text>}
+        <Badge label={badge.label} tone={badge.tone} size="md" />
       </View>
       {demo && done && <Text style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>Simulated in this demo build. No funds moved.</Text>}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}>
-        <Text style={muted}>{a.accountName || a.provider}</Text>
-        <Text style={muted}>Quoted fees · {a.feeDisplay ?? 'Not recorded'}</Text>
-      </View>
-      <Button title={receiptExpanded ? 'Hide details' : 'Payment details'} variant="ghost" onPress={() => setReceiptExpanded(!receiptExpanded)} />
-      {receiptExpanded && <>
-      <PaymentReceiptDetails details={{ amount: a.recipient, recipient: a.recipientName, fees: a.feeDisplay, total: a.total, account: a.accountName || a.provider, reference: a.reference, createdAt: a.createdAt }} />
-      <Text style={small}>Fees and total are from the quote you approved. Final fees may differ where the provider supplies an estimate.</Text>
-      {!!a.detail && <Text style={small}>{a.detail}</Text>}
-      </>}
       <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>{unresolvedAttempt(a) ? (statusTimedOut ? 'No final result yet. Check again later; do not send it again.' : presentation.detail) : presentation.detail}</Text>
-      {!!a.lastCheckedAt && unresolvedAttempt(a) && receiptExpanded && <Text style={small}>Last verification attempt: {new Date(a.lastCheckedAt).toLocaleTimeString()}{a.status === 'unknown' && !a.reference ? ' · Receipt unavailable' : a.checkFailed ? ' · Connection unavailable' : ''}</Text>}
-      {!!error && error !== a.detail && unresolvedAttempt(a) && <Text accessibilityRole="alert" style={small}>{error}</Text>}
+      {!!error && error !== a.detail && unresolvedAttempt(a) && <Text accessibilityRole="alert" style={{ ...small, textAlign: 'center' }}>{error}</Text>}
+      <View style={{ gap: t.spacing[2] }}>
+        <Text style={sectionTitle(t)}>Amount and fees</Text>
+        <PaymentReceiptDetails sections="fees" details={{ amount: a.recipient, fees: a.feeDisplay, total: a.total }} />
+        <Text style={small}>Fees and total are from the quote you approved. Final fees may differ where the provider supplies an estimate.</Text>
+      </View>
+      <Button title={receiptExpanded ? 'Hide details' : 'Payment details'} variant="ghost" onPress={() => setReceiptExpanded(!receiptExpanded)}
+        icon={<Ionicons name={receiptExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={t.colors.text.primary} style={{ marginRight: t.spacing[1] }} />} />
+      {receiptExpanded && <View style={{ gap: t.spacing[2] }}>
+        <PaymentReceiptDetails sections="details" details={{ amount: a.recipient, recipient: a.recipientName, fees: a.feeDisplay, total: a.total, account: a.accountName || a.provider,
+          reference: a.reference, createdAt: a.createdAt, method: method?.label, methodIcon: method?.icon }} />
+        {!!a.detail && <Text style={small}>{a.detail}</Text>}
+        {!!a.lastCheckedAt && unresolvedAttempt(a) && <Text style={small}>Last verification attempt: {new Date(a.lastCheckedAt).toLocaleTimeString()}{a.status === 'unknown' && !a.reference ? ' · Receipt unavailable' : a.checkFailed ? ' · Connection unavailable' : ''}</Text>}
+      </View>}
   </View>;
 }
+
+const sectionTitle = (t: ReturnType<typeof useAppTheme>) => ({
+  color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, lineHeight: leading(t.typography.fontSize.xs),
+  fontWeight: t.typography.fontWeight.semibold, textTransform: 'uppercase' as const, letterSpacing: 0.6, marginLeft: t.spacing[1],
+});

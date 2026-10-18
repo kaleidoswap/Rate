@@ -286,6 +286,14 @@ export function mergeActivity(parts: ActivityParts): ActivityItem[] {
 const lastParts = new Map<string, ActivityParts>();
 const inFlight = new Map<string, { call: Promise<ActivityItem[]>; startedAt: number }>();
 
+/**
+ * Drop running calls (all, or one source's such as 'transfers'), so the next load asks the
+ * account again instead of waiting on a call started before a change made here (a cancel).
+ */
+export function forgetActivityInFlight(source?: string): void {
+  for (const key of [...inFlight.keys()]) if (!source || key.endsWith(`:${source}`)) inFlight.delete(key);
+}
+
 /** Forget the cached lists and running calls. */
 export function clearActivityCache(): void {
   lastParts.clear();
