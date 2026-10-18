@@ -8,7 +8,6 @@ import { theme, leading } from '../theme';
 import { AmountText, Badge, Button, Callout, Card, EmptyState, Input, ScreenHeader, Sheet } from '../components';
 import PaymentConfirmationModal from '../components/PaymentConfirmationModal';
 import { useAgentWallet } from '../hooks/useAgentWallet';
-import { usePolicy } from '../hooks/usePolicy';
 import { selectMindConfig } from '../store/slices/settingsSlice';
 import { formatSats, requiresStrongAuth, type ConfirmReadback } from '../services/aiConfirm';
 import { normalizeService, policyProblem, type SpendingPolicy } from '../services/agentWallet/policy';
@@ -57,8 +56,6 @@ function moveReadback(kind: Move, sats: number): ConfirmReadback {
 
 export default function AgentWalletScreen() {
   const { state, refresh, enable, topUp, withdraw, disable, savePolicy } = useAgentWallet();
-  const disclosure = usePolicy();
-  const advanced = disclosure.showNetworks;
   const mindConfig = useSelector(selectMindConfig);
   const priceUsd = useSelector((s: any) => s?.wallet?.btcPriceUSD) || 0;
   const [refreshing, setRefreshing] = useState(false);
@@ -184,12 +181,11 @@ export default function AgentWalletScreen() {
                     <Pressable
                       key={l.key}
                       style={styles.limitRow}
-                      disabled={!advanced}
                       onPress={() => { setEditText(String(policy[l.key])); setEditing(l.key); }}
                     >
                       <Text style={[styles.rowLabel, styles.flex]}>{l.label}</Text>
                       <AmountText style={styles.rowValue}>{formatSats(policy[l.key])}</AmountText>
-                      {advanced && <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />}
+                      <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
                     </Pressable>
                   ))}
                 </Card>
@@ -203,40 +199,35 @@ export default function AgentWalletScreen() {
                   {policy.allowedServices.map((s) => (
                     <View key={s} style={styles.limitRow}>
                       <Text style={[styles.rowLabel, styles.flex]}>{s}</Text>
-                      {advanced && (
-                        <Pressable hitSlop={8} onPress={() => persist({ ...policy, allowedServices: policy.allowedServices.filter((x) => x !== s) })}>
-                          <Ionicons name="close-circle" size={20} color={theme.colors.text.tertiary} />
-                        </Pressable>
-                      )}
+                      <Pressable hitSlop={8} onPress={() => persist({ ...policy, allowedServices: policy.allowedServices.filter((x) => x !== s) })}>
+                        <Ionicons name="close-circle" size={20} color={theme.colors.text.tertiary} />
+                      </Pressable>
                     </View>
                   ))}
-                  {advanced && (
-                    <View style={styles.addRow}>
-                      <TextInput
-                        style={styles.addInput}
-                        value={newService}
-                        onChangeText={setNewService}
-                        placeholder="api.example.com"
-                        placeholderTextColor={theme.colors.text.tertiary}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        keyboardType="url"
-                      />
-                      <Button
-                        title="Add"
-                        size="sm"
-                        disabled={!normalizeService(newService)}
-                        onPress={() => {
-                          const host = normalizeService(newService);
-                          if (!host || policy.allowedServices.includes(host)) return;
-                          setNewService('');
-                          persist({ ...policy, allowedServices: [...policy.allowedServices, host] });
-                        }}
-                      />
-                    </View>
-                  )}
+                  <View style={styles.addRow}>
+                    <TextInput
+                      style={styles.addInput}
+                      value={newService}
+                      onChangeText={setNewService}
+                      placeholder="api.example.com"
+                      placeholderTextColor={theme.colors.text.tertiary}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      keyboardType="url"
+                    />
+                    <Button
+                      title="Add"
+                      size="sm"
+                      disabled={!normalizeService(newService)}
+                      onPress={() => {
+                        const host = normalizeService(newService);
+                        if (!host || policy.allowedServices.includes(host)) return;
+                        setNewService('');
+                        persist({ ...policy, allowedServices: [...policy.allowedServices, host] });
+                      }}
+                    />
+                  </View>
                 </Card>
-                {!advanced && <Text style={styles.sectionHint}>Switch to Advanced in Settings, Preferences to change limits and services.</Text>}
               </View>
             )}
 

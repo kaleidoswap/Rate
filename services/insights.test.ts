@@ -9,7 +9,7 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 
 const NOW = new Date('2026-10-09T12:00:00Z').getTime();
 const base = (over: Partial<InsightInput> = {}): InsightInput => ({
-  now: NOW, advanced: false, feeRates: null, onchainSat: 0, rgbOnDevice: true, rgbAssetsWithBalance: 0,
+  now: NOW, feeRates: null, onchainSat: 0, rgbOnDevice: true, rgbAssetsWithBalance: 0,
   rgbBackup: { state: 'done', lastBackupAt: NOW - 1000 }, channels: [], activity: [], ...over,
 });
 const item = (over: Partial<ActivityItem>): ActivityItem => ({
@@ -51,10 +51,10 @@ describe('insight rules', () => {
     expect(rules(base({ channels: [{ assetTicker: 'USDT', localUnits: 95, remoteUnits: 5, usable: false }] }))).toEqual([]);
   });
 
-  test('channel funds on a node: Advanced only', () => {
+  test('channel funds on a node need its own backup', () => {
     const channels = [{ assetTicker: 'USDT', localUnits: 50, remoteUnits: 50, usable: true }];
-    expect(rules(base({ rgbOnDevice: false, channels }))).toEqual([]);
-    expect(rules(base({ rgbOnDevice: false, channels, advanced: true }))).toEqual(['channel-state-backup']);
+    expect(rules(base({ rgbOnDevice: true, channels }))).toEqual([]);
+    expect(rules(base({ rgbOnDevice: false, channels }))).toEqual(['channel-state-backup']);
   });
 
   test('a stuck swap or unconfirmed payment needs attention', () => {

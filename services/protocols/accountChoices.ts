@@ -6,7 +6,8 @@
  * and RGB on this phone are per-wallet preferences, and the RGB node is a
  * separate NWC connection.
  *
- * Lite starts with Spark and RGB on this phone. Advanced picks its own.
+ * A new wallet starts from every account available (RGB on this phone included);
+ * setup lets the user turn accounts off.
  */
 import type { NetworkConfig } from '../DatabaseService';
 import { buildDefaultNetworkConfig } from './networkConfig';
@@ -22,10 +23,8 @@ export interface AccountChoice {
   rgbOnDevice: boolean;
 }
 
-/** Lite: the everyday account (Spark) and RGB assets on the phone. */
-export const LITE_ACCOUNTS: AccountChoice = { spark: true, arkade: false, bark: false, rgbOnDevice: true };
-/** Advanced starts from everything available and lets the user turn accounts off. */
-export const ADVANCED_ACCOUNTS: AccountChoice = { spark: true, arkade: true, bark: BARK_ENABLED, rgbOnDevice: RGB_L1_ENABLED };
+/** Everything available: where setup starts, and what a restored wallet gets. */
+export const DEFAULT_ACCOUNTS: AccountChoice = { spark: true, arkade: true, bark: BARK_ENABLED, rgbOnDevice: RGB_L1_ENABLED };
 
 /** The wallet networks to store with a new wallet. */
 export function walletNetworksFor(choice: AccountChoice): Omit<NetworkConfig, 'id' | 'wallet_id'>[] {

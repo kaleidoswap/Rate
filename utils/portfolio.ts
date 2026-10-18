@@ -78,10 +78,10 @@ export interface BreakdownAssetRow {
   key: string;
   ticker: string;
   name: string;
-  /** NetworkIcon key ('rgb' | 'spark' | 'arkade'); absent for Lite's folded dollar row. */
-  network?: string;
+  /** NetworkIcon key ('rgb' | 'spark' | 'arkade'). */
+  network: string;
   /** "RGB", "Spark", "Arkade". */
-  networkLabel?: string;
+  networkLabel: string;
   /** Whole-token amount, e.g. "12.5". */
   amount: string;
   /** Dollar value, or undefined when the asset has no price. */
@@ -93,28 +93,19 @@ const NETWORK_LABEL: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKA
 /**
  * The non-bitcoin assets for the balance breakdown, one row each: priced ones
  * first (largest value first), then the unpriced ones, which carry no fiat value
- * and stay out of the total. Empty balances are left out. In Lite, the dollar
- * tokens fold into one "US Dollar" row, as in the asset list.
+ * and stay out of the total. Empty balances are left out.
  */
 export function breakdownAssetRows(
   assets: readonly PricedAsset[],
   usdAssetIds?: ReadonlySet<string>,
-  opts: { foldDollars?: boolean } = {},
 ): BreakdownAssetRow[] {
   const rows: BreakdownAssetRow[] = [];
-  let dollars = 0;
-  let hasDollars = false;
   for (const asset of assets) {
     const id = String(asset.asset_id ?? '');
     if (!id || id === 'BTC') continue;
     const baseUnits = getAssetBaseUnitBalance(asset.balance);
     if (!(baseUnits > 0)) continue;
     const usdValue = assetUsdValue(asset, usdAssetIds);
-    if (opts.foldDollars && usdValue !== undefined) {
-      dollars += usdValue;
-      hasDollars = true;
-      continue;
-    }
     const family = getAssetFamily(id, asset.ticker);
     const ticker = String(asset.ticker ?? '').trim() || String(asset.name ?? '').trim() || 'Asset';
     rows.push({
@@ -132,14 +123,5 @@ export function breakdownAssetRows(
     if (a.usdValue !== undefined && b.usdValue !== undefined && a.usdValue !== b.usdValue) return b.usdValue - a.usdValue;
     return a.ticker.localeCompare(b.ticker);
   });
-  if (hasDollars) {
-    rows.unshift({
-      key: 'usd',
-      ticker: 'USD',
-      name: 'US Dollar',
-      amount: dollars.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-      usdValue: dollars,
-    });
-  }
   return rows;
 }

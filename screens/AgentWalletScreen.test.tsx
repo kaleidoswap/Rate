@@ -4,9 +4,7 @@ import AgentWalletScreen from './AgentWalletScreen';
 import { DEFAULT_POLICY } from '../services/agentWallet/policy';
 
 const mockHook: any = {};
-let mockAdvanced = true;
 jest.mock('../hooks/useAgentWallet', () => ({ useAgentWallet: () => mockHook }));
-jest.mock('../hooks/usePolicy', () => ({ usePolicy: () => ({ showNetworks: mockAdvanced }) }));
 jest.mock('react-redux', () => ({ useSelector: (f: any) => f({ settings: {}, wallet: { btcPriceUSD: 0 } }) }));
 jest.mock('../store/slices/settingsSlice', () => ({ selectMindConfig: () => ({ confirmAuthThresholdSats: 10_000 }) }));
 jest.mock('../services/aiConfirm', () => ({
@@ -41,7 +39,6 @@ const base = {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockAdvanced = true;
   Object.assign(mockHook, base, {
     state: { loading: false, enabled: true, balanceSats: 2500, policy: { ...DEFAULT_POLICY, allowedServices: ['api.example.com'] }, totals: { todaySats: 1000, monthSats: 1000 }, entries: [
       { id: '1', kind: 'spend', at: Date.now(), amountSats: 21, feeSats: 1, status: 'paid', service: 'api.example.com', reason: 'fetch_paid_resource' },
@@ -88,11 +85,8 @@ test('withdraw cannot ask for more than the balance', () => {
   expect(mockHook.withdraw).not.toHaveBeenCalled();
 });
 
-test('pausing saves the rules; Lite cannot edit limits', async () => {
-  mockAdvanced = false;
+test('pausing saves the rules', async () => {
   const screen = render(<AgentWalletScreen />);
-  expect(screen.getByText(/Switch to Advanced/)).toBeTruthy();
-  expect(screen.queryByText('Add')).toBeNull();
   const { Switch } = require('react-native');
   fireEvent(screen.UNSAFE_getByType(Switch), 'valueChange', true);
   await act(async () => {});

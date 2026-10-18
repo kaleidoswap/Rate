@@ -330,9 +330,6 @@ The next chapters of KaleidoSwap, grouped by horizon. Items move up as they land
 - **White Noise chats by default** — adopt [White Noise](https://github.com/parres-hq/whitenoise)
   (MLS-over-Nostr) as the default end-to-end-encrypted messaging layer for 1:1 and group
   chat, with payments embedded directly in conversation.
-- **Lite vs Advanced modes** — a real mode switch: **Lite** hides protocol plumbing (one
-  balance; send / receive / swap / chat), **Advanced** exposes per-protocol accounts,
-  channels / LSP, RGB internals, and node settings.
 
 ### Next
 

@@ -33,7 +33,6 @@ const italian: Record<string, string> = {
   'Change PIN': 'Modifica PIN', 'Turn off PIN': 'Disattiva PIN', 'Set up PIN': 'Imposta PIN',
   'Auto-lock': 'Blocco automatico', 'View recovery phrase': 'Mostra frase di recupero',
   'RGB data backup': 'Backup dati RGB', 'Accounts & networks': 'Account e reti',
-  'Interface detail': 'Dettagli interfaccia', 'Display detail': 'Livello di dettaglio',
   'Remove from this device': 'Rimuovi da questo dispositivo', Cancel: 'Annulla', Save: 'Salva',
   'Export voice diagnostics': 'Esporta diagnostica vocale', 'Voice details & retry': 'Dettagli voce e riprova',
   'Generating voice…': 'Generazione della voce…',

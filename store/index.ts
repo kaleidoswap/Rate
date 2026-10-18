@@ -56,7 +56,7 @@ const persistConfig: PersistConfig<RootReducerState> = {
   storage: AsyncStorage,
   whitelist: ['settings', 'ui', 'contacts', 'nostr', 'chat'], // chat: unread counts / paid markers only, never message content
   blacklist: ['wallet', 'node', 'assets', 'transactions', 'swap'], // Removed nostr from blacklist
-  version: 6,
+  version: 7,
   // A timed-out migration rehydrates defaults and can overwrite the only keys.
   // Keep the gate closed until migration succeeds or the user retries.
   timeout: 0,
@@ -144,6 +144,15 @@ const persistConfig: PersistConfig<RootReducerState> = {
     try {
       if (state?.contacts && !Array.isArray(state.contacts.favoriteNostrPubkeys)) {
         state.contacts.favoriteNostrPubkeys = [];
+      }
+    } catch {
+      // Non-fatal.
+    }
+    // v7: Lite mode is gone (the app always shows everything); drop the old
+    // `settings.disclosureLevel` key so a persisted 'lite' leaves no trace.
+    try {
+      if (state?.settings && 'disclosureLevel' in state.settings) {
+        delete state.settings.disclosureLevel;
       }
     } catch {
       // Non-fatal.

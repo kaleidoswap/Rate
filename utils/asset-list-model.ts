@@ -72,12 +72,9 @@ export interface BuildAssetListArgs {
   showBtc: boolean;
   assets: readonly AssetListToken[];
   btcPriceUSD: number;
-  /** Assets the dashboard folds into its "USD" line (Lite). */
-  liteUsdAssetIds?: ReadonlySet<string>;
 }
 
 const BTC_NETWORK_ORDER: BtcNetwork[] = ['onchain', 'lightning', 'spark', 'arkade', 'bark'];
-export const LITE_USD_KEY = 'lite-usd';
 
 export function networkOfProtocol(protocol?: string | null): AssetNetwork {
   switch (String(protocol ?? '').toUpperCase()) {
@@ -110,19 +107,7 @@ export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
     });
   }
 
-  // Lite's single USD line, as on the dashboard.
-  const liteUsd = args.assets.filter((a) => args.liteUsdAssetIds?.has(a.asset_id));
-  const rest = args.assets.filter((a) => a.asset_id !== 'BTC' && !args.liteUsdAssetIds?.has(a.asset_id));
-  if (liteUsd.length) {
-    const holdings = liteUsd.map((token) => ({ network: networkOfProtocol(token.protocol), amount: wholeAmount(token), token }));
-    const amount = holdings.reduce((s, h) => s + h.amount, 0);
-    if (amount > 0) {
-      items.push({
-        key: LITE_USD_KEY, ticker: 'USD', name: 'US Dollar', precision: 2, amount,
-        networks: unique(holdings.map((h) => h.network)), holdings, isBtc: false, ...priced(amount, 1),
-      });
-    }
-  }
+  const rest = args.assets.filter((a) => a.asset_id !== 'BTC');
 
   const byTicker = new Map<string, AssetListItem>();
   for (const token of rest) {
@@ -162,10 +147,6 @@ export function buildAssetListItems(args: BuildAssetListArgs): AssetListItem[] {
 
 function priced(amount: number, unitUsd: number | undefined): Pick<AssetListItem, 'usdValue' | 'unitUsd'> {
   return unitUsd === undefined ? {} : { unitUsd, usdValue: amount * unitUsd };
-}
-
-function unique<T>(xs: T[]): T[] {
-  return Array.from(new Set(xs));
 }
 
 /** The holding a tap opens: the largest one. */

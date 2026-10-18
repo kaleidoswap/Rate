@@ -53,13 +53,12 @@ export function feeText(card: ActionCard, unit: Unit): string {
 interface ActionCardViewProps {
   card: ActionCard;
   unit: Unit;
-  advanced: boolean;
   onReview: () => void;
   onEdit: () => void;
   onCancel: () => void;
 }
 
-export function ActionCardView({ card, unit, advanced, onReview, onEdit, onCancel }: ActionCardViewProps) {
+export function ActionCardView({ card, unit, onReview, onEdit, onCancel }: ActionCardViewProps) {
   const amount = card.amountSat != null
     ? formatSats(card.amountSat, unit)
     : card.amountUnits != null ? formatUnits(card.amountUnits, card.asset) : 'You choose on review';
@@ -89,12 +88,12 @@ export function ActionCardView({ card, unit, advanced, onReview, onEdit, onCance
       {card.kind === 'send' && (
         <Row label="To">
           <Text style={styles.value} numberOfLines={1}>{card.recipient?.name ?? card.recipient?.destination ?? 'Choose on review'}</Text>
-          {!!card.recipient?.name && !!card.recipient.destination && advanced && (
+          {!!card.recipient?.name && !!card.recipient.destination && (
             <Text style={styles.sub} numberOfLines={1}>{card.recipient.destination}</Text>
           )}
         </Row>
       )}
-      {!!card.route && (advanced || card.kind !== 'send') && (
+      {!!card.route && (
         <Row label={card.kind === 'send' ? 'Paid from' : card.kind === 'swap' ? 'Provider' : 'Network'}>
           <Text style={styles.value} numberOfLines={1}>{card.route}</Text>
         </Row>

@@ -31,10 +31,6 @@ import { protocolManager, rgbAccountAdapter } from '../services/protocols';
 import { setBtcBalance } from '../store/slices/walletSlice';
 import { setProtocolAssets, setRgbAssets } from '../store/slices/assetsSlice';
 import { loadNostrProfile } from '../store/slices/nostrSlice';
-import {
-  selectDisclosureLevel,
-} from '../store/slices/settingsSlice';
-import { policyFor } from '@kaleidorg/wallet-engine';
 
 import { theme } from '../theme';
 import {
@@ -51,12 +47,10 @@ import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../
 import { formatAssetAmount } from '../utils/assetAmount';
 import { getAssetFamily } from '../utils/account-routing';
 import {
-  assetRecordFromUnified, buildAssetInventory, inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf, withSnapshotFallback,
-  type InventoryAsset, type InventoryRecord,
+  assetRecordFromUnified, buildAssetInventory, inventoryBtc, inventoryTokens, dollarAssetIds, withSnapshotFallback,
+  type InventoryRecord,
 } from '../utils/asset-inventory';
 import { assetUsdValue, breakdownAssetRows, tokenValueSats as priceTokensInSats } from '../utils/portfolio';
-
-const LITE_USD_ID = 'lite-usd';
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
 
 const { width } = Dimensions.get('window');
@@ -163,9 +157,6 @@ export default function DashboardScreen({ navigation }: Props) {
       dispatch(loadNostrProfile() as any);
     }
   }, [nostrConnected, nostrProfileLoaded, dispatch]);
-  const disclosureLevel = useSelector(selectDisclosureLevel);
-  const policy = policyFor(disclosureLevel);
-  const isLite = disclosureLevel === 'lite';
   const [isNodeUnlocked, setIsNodeUnlocked] = useState(false);
   const [isConnecting, setIsConnecting] = useState(true);
   const [balanceUpdatedAt, setBalanceUpdatedAt] = useState<number | undefined>();
@@ -680,27 +671,10 @@ export default function DashboardScreen({ navigation }: Props) {
   const btcEntry = inventoryBtc(inventory);
   const tokens = inventoryTokens(inventory);
 
-  // Lite collapses every asset into BTC / USD / other, hiding which network each
-  // lives on. Its USD line counts what is held anywhere (in channels too).
-  const assetTotalBaseUnits = (asset: InventoryAsset): number => {
-    const detail = asset.balanceDetail;
-    if (!detail) return asset.balance;
-    return (
-      Number(detail.settled ?? asset.balance) +
-      Number(detail.offchain_inbound ?? 0) +
-      Number(detail.offchain_outbound ?? 0)
-    );
-  };
-  const liteUsdAssetIds = liteUsdIdsOf(tokens);
-  const liteUsdDisplay = tokens
-    .filter((asset) => liteUsdAssetIds.has(asset.asset_id))
-    .reduce((sum, asset) => sum + assetTotalBaseUnits(asset) / Math.pow(10, asset.precision), 0);
-  // Lite's list: the dollar assets are folded into the USD figure.
-  const liteOtherAssets = tokens.filter((asset) => !liteUsdAssetIds.has(asset.asset_id));
-
-  // Dollar stablecoins (and whatever Lite folds into its USD line) join the total
-  // at $1, as sats at the live price — the extension's totalBTC = btc + tokenValueSats.
-  const tokenValueSats = priceTokensInSats(tokens, btcPriceUSD, liteUsdAssetIds);
+  // Dollar stablecoins join the total at $1, as sats at the live price — the
+  // extension's totalBTC = btc + tokenValueSats.
+  const usdAssetIds = dollarAssetIds(tokens);
+  const tokenValueSats = priceTokensInSats(tokens, btcPriceUSD, usdAssetIds);
   const liveTotalBalance = bitcoinSummary.total + tokenValueSats;
   const lastCompleteTotal = useRef<{ wallet: string | null; value: number } | null>(null);
   const balanceRefreshing = isConnecting || isUpdating || loading || pendingBalanceAccounts.length > 0;
@@ -722,7 +696,7 @@ export default function DashboardScreen({ navigation }: Props) {
     fiatValue: btcPriceUSD ? (btcEntry.balance / 100_000_000) * btcPriceUSD : undefined,
   } as any;
   // Dollar stablecoins are worth their face value.
-  const usdValueOf = (asset: any): number | undefined => assetUsdValue(asset, liteUsdAssetIds);
+  const usdValueOf = (asset: any): number | undefined => assetUsdValue(asset, usdAssetIds);
 
   const renderChannelModal = () => (
     <Sheet
@@ -941,7 +915,7 @@ export default function DashboardScreen({ navigation }: Props) {
             lastUpdatedAt={balanceUpdatedAt}
             testBtc={bitcoinSummary.test}
             testNetworks={testNetworks}
-            assetRows={breakdownAssetRows(tokens, liteUsdAssetIds, { foldDollars: isLite })}
+            assetRows={breakdownAssetRows(tokens, usdAssetIds)}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
             showLightning={hasChannelCapableNode}
             bitcoinUnit={bitcoinUnit}
@@ -956,8 +930,7 @@ export default function DashboardScreen({ navigation }: Props) {
             onCycleDenomination={cycleDenomination}
             onChainBalance={getTotalBtcBalance()}
             lightningBalance={offChainBalance}
-            // Always provide the per-network breakdown; it stays collapsed behind
-            // the chevron so it doesn't clutter lite mode.
+            // The per-network breakdown stays collapsed behind the chevron.
             byProtocol={(btcBalance as any)?.byProtocol}
             // Shimmer the balance while first connecting (before any data lands).
             loading={(isConnecting || loading) && totalBalance === 0 && !refreshing && !showingSnapshot}
@@ -981,25 +954,14 @@ export default function DashboardScreen({ navigation }: Props) {
         />
 
         <AssetList
-          // BTC always leads the list; in lite mode hide USDt (it's folded into the
-          // USD figure above) and strip the per-asset protocol badge (a network detail).
+          // BTC always leads the list. The list mixes protocols (RGB, Spark
+          // tokens, Arkade): each row carries the account it is on for the badge.
           assets={[
             btcListEntry,
-            // Lite folds every dollar stablecoin into one USD line.
-            ...(isLite && liteUsdDisplay > 0 ? [{
-              asset_id: LITE_USD_ID, ticker: 'USD', name: 'US Dollar', precision: 2,
-              balance: { spendable: Math.round(liteUsdDisplay * 100) },
-              fiatValue: liteUsdDisplay,
-            }] : []),
-            ...(isLite
-              ? liteOtherAssets.map((a) => ({ ...a, protocol: undefined, fiatValue: usdValueOf(a) }))
-              // The list mixes protocols (RGB, Spark tokens, Arkade): each row
-              // carries the account it is on for the badge.
-              : tokens.map((a) => ({ ...a, protocol: a.protocol as 'RGB' | 'SPARK' | 'ARKADE', fiatValue: usdValueOf(a) }))),
+            ...tokens.map((a) => ({ ...a, protocol: a.protocol as 'RGB' | 'SPARK' | 'ARKADE', fiatValue: usdValueOf(a) })),
           ]}
           onViewAll={() => navigation.getParent()?.navigate('Assets')}
           onAssetPress={(asset) => {
-            if (asset.asset_id === LITE_USD_ID) { navigation.getParent()?.navigate('Assets'); return; }
             const token = tokens.find((t) => t.asset_id === asset.asset_id);
             const protocol = token?.protocol ?? getAssetFamily(asset.asset_id, asset.ticker);
             navigation.getParent()?.navigate('AssetDetail', {
@@ -1031,7 +993,7 @@ export default function DashboardScreen({ navigation }: Props) {
         </TouchableOpacity>
         </>}
 
-        {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (
+        {!needsSetup && hasChannelCapableNode && (
         <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}

@@ -14,8 +14,7 @@ import {
   KeyboardAvoidingView,
   TextInput,
 } from 'react-native';
-import { useDispatch, useSelector } from 'react-redux';
-import { selectDisclosureLevel } from '../store/slices/settingsSlice';
+import { useDispatch } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
@@ -23,7 +22,7 @@ import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
 import { Button, Card, Input, ScreenHeader } from '../components';
 import { AlertBanner } from '@kaleidorg/kaleido-ui/native';
-import { ADVANCED_ACCOUNTS, LITE_ACCOUNTS, saveAccountPreferences, walletNetworksFor } from '../services/protocols/accountChoices';
+import { DEFAULT_ACCOUNTS, saveAccountPreferences, walletNetworksFor } from '../services/protocols/accountChoices';
 import { useScreenCaptureProtection } from '../hooks/useScreenCaptureProtection';
 
 interface Props {
@@ -37,7 +36,6 @@ export default function WalletRestoreScreen({ navigation }: Props) {
   // The recovery phrase is typed on this screen: keep it out of screenshots.
   useScreenCaptureProtection(true);
   const dispatch = useDispatch();
-  const disclosure = useSelector(selectDisclosureLevel);
   const [step, setStep] = useState<RestoreStep>('input');
   const [name, setName] = useState('');
   const [mnemonic, setMnemonic] = useState('');
@@ -133,9 +131,9 @@ export default function WalletRestoreScreen({ navigation }: Props) {
     animateTransition('restoring');
 
     try {
-      // The accounts a new wallet gets in the current mode (Lite: Spark and RGB on
-      // this phone). Others, and a Lightning wallet over NWC, are turned on in Settings.
-      const choice = disclosure === 'advanced' ? ADVANCED_ACCOUNTS : LITE_ACCOUNTS;
+      // A restored wallet gets every account available (RGB on this phone included);
+      // they can be turned off, and a Lightning wallet over NWC added, in Settings.
+      const choice = DEFAULT_ACCOUNTS;
       const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = walletNetworksFor(choice);
       await saveAccountPreferences(phrase, choice);
 

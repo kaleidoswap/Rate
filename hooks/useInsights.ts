@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAppSelector } from '../store/hooks';
-import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { useAssetInventory } from './useAssetInventory';
 import { useFiatRates } from './useFiatRates';
 import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
@@ -45,7 +44,6 @@ export function toInsightChannels(channels: any[], tickerOf: (assetId: string) =
 export function useInsights(channels: any[] = []) {
   const wallet = useAppSelector((s) => s.wallet.activeWallet);
   const walletKey = snapshotWalletKey(wallet);
-  const advanced = useAppSelector(selectDisclosureLevel) !== 'lite';
   const rgbAssets = useAppSelector((s) => s.assets.rgbAssets);
   const inventory = useAssetInventory();
   const rates = useFiatRates(['USD']);
@@ -74,7 +72,6 @@ export function useInsights(channels: any[] = []) {
     const tickers = new Map((rgbAssets ?? []).map((a: any) => [a.asset_id, a.ticker]));
     const all = computeInsights({
       now: Date.now(),
-      advanced,
       feeRates,
       onchainSat: btc.networks?.onchain ?? 0,
       rgbOnDevice: rgbAccountIsOnDevice(),
@@ -85,7 +82,7 @@ export function useInsights(channels: any[] = []) {
       btcPriceUsd: rates.usd,
     });
     return visibleInsights(all, dismissed, Date.now());
-  }, [inventory, rgbAssets, advanced, feeRates, backup, channels, activity, rates.usd, dismissed]);
+  }, [inventory, rgbAssets, feeRates, backup, channels, activity, rates.usd, dismissed]);
 
   const dismiss = useCallback(async (key: string) => {
     setDismissed((d) => ({ ...d, [key]: Date.now() }));

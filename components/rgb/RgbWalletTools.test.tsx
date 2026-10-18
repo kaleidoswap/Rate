@@ -3,10 +3,9 @@ import { Alert } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { RgbWalletTools } from './RgbWalletTools';
 
-let mockLevel = 'advanced';
 let mockAdapter: any = null;
 jest.mock('../../store/hooks', () => ({
-  useAppSelector: (f: any) => f({ settings: { disclosureLevel: mockLevel }, assets: { rgbAssets: [] } }),
+  useAppSelector: (f: any) => f({ assets: { rgbAssets: [] } }),
   useAppDispatch: () => jest.fn(),
 }));
 jest.mock('../../services/protocols', () => ({ rgbAccountAdapter: () => mockAdapter }));
@@ -19,20 +18,15 @@ jest.mock('./IssueAssetSheet', () => ({ IssueAssetSheet: ({ visible }: any) => (
 
 const device = { protocolName: 'RGB_L1', isConnected: () => true, listUnspents: jest.fn(), createRgbUtxos: jest.fn(), issueAssetNia: jest.fn(), account: { issueAssetCfa: jest.fn() } };
 
-beforeEach(() => { mockLevel = 'advanced'; mockAdapter = device; });
+beforeEach(() => { mockAdapter = device; });
 
-test('Advanced shows UTXOs and issuing for RGB on this phone, and opens each sheet', () => {
+test('shows UTXOs and issuing for RGB on this phone, and opens each sheet', () => {
   const screen = render(<RgbWalletTools />);
   fireEvent.press(screen.getByLabelText('UTXOs'));
   expect(screen.getByText('UTXO sheet open')).toBeTruthy();
   expect(screen.getByText('A new token or collectible')).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Issue an asset'));
   expect(screen.getByText('Issue sheet open')).toBeTruthy();
-});
-
-test('Lite shows neither', () => {
-  mockLevel = 'lite';
-  expect(render(<RgbWalletTools />).toJSON()).toBeNull();
 });
 
 test('the node over NWC shows only what its connection allows, and never issuing', () => {

@@ -85,11 +85,11 @@ describe('balance disclosure', () => {
   });
 
   it('opens the breakdown for assets alone, before any bitcoin account reports', () => {
-    const screen = render(<BalanceCard {...props} byProtocol={undefined} assetRows={[{ key: 'usd', ticker: 'USD', name: 'US Dollar', amount: '5.00', usdValue: 5 }]} />);
+    const screen = render(<BalanceCard {...props} byProtocol={undefined} assetRows={[assetRows[0]]} />);
     fireEvent.press(screen.getByLabelText('Show network balances'));
     expect(screen.queryByText('Bitcoin')).toBeNull();
-    expect(screen.getByText('US Dollar')).toBeTruthy();
-    expect(screen.getByText('5.00 USD')).toBeTruthy();
+    expect(screen.getByText('Tether USD · RGB')).toBeTruthy();
+    expect(screen.getByText('12.5 USDT')).toBeTruthy();
   });
 });
 

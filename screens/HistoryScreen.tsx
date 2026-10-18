@@ -12,9 +12,9 @@ import {
     RefreshControl,
     StatusBar,
     ActivityIndicator,
+    Alert,
 } from 'react-native';
 import { useAppSelector } from '../store/hooks';
-import { usePolicy } from '../hooks/usePolicy';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useActivityFeed } from '../hooks/useActivityFeed';
@@ -43,6 +43,8 @@ import {
 } from '../services/ActivityService';
 import { dismissPendingPayment, loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND, paymentAttemptIdOf } from '../services/kaleidoPay/activity';
 import { confirmRemovePayment } from '../components/payments/confirmRemovePayment';
+import { confirmCancelPayment, showCancelResult } from '../components/payments/confirmCancelPayment';
+import { cancelPendingPayment } from '../services/kaleidoPay/cancelPayment';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 import { AgentWalletStore, type AgentLedgerEntry } from '../services/agentWallet/store';
@@ -150,7 +152,6 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
     useEffect(() => { if (demo) setPeriod(previewPeriod ?? 'all'); }, [demo, previewPeriod]);
     const [contactEvents, setContactEvents] = useState<ContactEvent[]>([]);
     const navigation = useNavigation<any>();
-    const policy = usePolicy();
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
     const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
@@ -232,8 +233,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
         try { if (!demo) await feed.refresh(); } finally { setRefreshing(false); }
     }, [feed.refresh, demo]);
 
-    // Which network a payment used is Advanced detail: Lite has no network filter.
-    const networks = useMemo(() => (policy.showNetworks ? activityNetworks(items) : []), [items, policy.showNetworks]);
+    const networks = useMemo(() => activityNetworks(items), [items]);
     const activeNetwork = networks.includes(network as ActivityNetwork) ? network : 'all';
     const networkOptions = useMemo((): FilterOption<ActivityNetwork | 'all'>[] => [
         { key: 'all' as const, label: 'All networks' },
@@ -266,15 +266,35 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
         return Array.from(map.entries()).sort(([a], [b]) => ({ 'Needs checking': 0, 'In progress': 1 }[a] ?? 2) - ({ 'Needs checking': 0, 'In progress': 1 }[b] ?? 2)).map(([title, data]) => ({ title, data }));
     })();
 
-    // Long-press a payment still pending or needing a check to remove its local record.
+    // Long-press a payment still pending or needing a check: cancel it (after a check with
+    // the provider) or remove its local record.
+    const removeNow = (item: ActivityItem, attemptId: string) => confirmRemovePayment(async () => {
+        if (walletId == null) return;
+        await dismissPendingPayment(walletId, attemptId).catch(() => false);
+        setPendingPayment((list) => list.filter((it) => it.id !== item.id));
+        setContactEvents((list) => list.filter((e) => e.id !== attemptId && e.attemptId !== attemptId));
+    });
+    const cancelNow = (item: ActivityItem, attemptId: string) => confirmCancelPayment(async () => {
+        if (walletId == null) return;
+        try {
+            const outcome = await cancelPendingPayment(walletId, attemptId);
+            if (outcome.attempt && outcome.attempt.status !== 'pending' && outcome.attempt.status !== 'unknown') {
+                setPendingPayment((list) => list.filter((it) => it.id !== item.id));
+                void feed.refresh();
+            }
+            showCancelResult(outcome, outcome.outcome === 'in-flight' ? () => removeNow(item, attemptId) : undefined);
+        } catch {
+            Alert.alert('Couldn’t cancel', 'The payment could not be checked. Check your connection and try again.');
+        }
+    });
     const removePayment = (item: ActivityItem) => {
         const attemptId = paymentAttemptIdOf(item);
         if (walletId == null || !attemptId || (item.status !== 'pending' && item.status !== 'unknown')) return;
-        confirmRemovePayment(async () => {
-            await dismissPendingPayment(walletId, attemptId).catch(() => false);
-            setPendingPayment((list) => list.filter((it) => it.id !== item.id));
-            setContactEvents((list) => list.filter((e) => e.id !== attemptId && e.attemptId !== attemptId));
-        });
+        Alert.alert(item.status === 'unknown' ? 'Payment needs checking' : 'Payment in progress', 'Cancel it (we check with the provider first), or only remove it from Activity on this phone.', [
+            { text: 'Keep', style: 'cancel' },
+            { text: 'Cancel payment', onPress: () => cancelNow(item, attemptId) },
+            { text: 'Remove from Activity', style: 'destructive', onPress: () => removeNow(item, attemptId) },
+        ]);
     };
 
     const renderItem = ({ item }: { item: ActivityItem }) => {
@@ -285,7 +305,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
         return (
             <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}
                 onLongPress={paymentAttemptIdOf(item) ? () => removePayment(item) : undefined}
-                accessibilityActions={paymentAttemptIdOf(item) ? [{ name: 'longpress', label: 'Remove from Activity' }] : undefined}
+                accessibilityActions={paymentAttemptIdOf(item) ? [{ name: 'longpress', label: 'Cancel or remove payment' }] : undefined}
                 onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') removePayment(item); }}>
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={20} color={v.color} />
@@ -308,13 +328,11 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
                     </View>
                     <View style={styles.rowBottomLine}>
                         <View style={styles.metaRow}>
-                            {/* Which network a payment used is Advanced detail. */}
-                            {policy.showNetworks && (
-                                <View style={[styles.layerChip, { backgroundColor: chip.bg }]}>
-                                    {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={12} />}
-                                    <Text style={[styles.layerChipText, { color: chip.text }]}>{LAYER_LABEL[item.layer]}</Text>
-                                </View>
-                            )}
+                            {/* Which network a payment used. */}
+                            <View style={[styles.layerChip, { backgroundColor: chip.bg }]}>
+                                {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={12} />}
+                                <Text style={[styles.layerChipText, { color: chip.text }]}>{LAYER_LABEL[item.layer]}</Text>
+                            </View>
                             {item.timestamp != null && (
                                 <Text style={styles.timeText}>
                                     {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

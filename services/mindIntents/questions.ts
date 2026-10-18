@@ -19,8 +19,6 @@ export interface BalanceInput {
   totalSat: number;
   byAccount: Record<string, number>;
   assets: { ticker: string; amount: number }[];
-  /** Advanced mode names accounts; Lite keeps one total. */
-  advanced: boolean;
 }
 
 const ACCOUNT_NAME: Record<string, string> = { RGB: 'RGB', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' };
@@ -32,9 +30,7 @@ export function answerBalance(intent: MindIntent, input: BalanceInput): AnswerCa
     const amount = held.reduce((s, a) => s + a.amount, 0);
     return { kind: 'balance', title: `Your ${intent.asset}`, rows: [{ label: intent.asset, units: amount, unit: intent.asset }] };
   }
-  if (input.advanced) {
-    for (const [id, sat] of Object.entries(input.byAccount)) if (sat > 0) rows.push({ label: ACCOUNT_NAME[id] ?? id, sat });
-  }
+  for (const [id, sat] of Object.entries(input.byAccount)) if (sat > 0) rows.push({ label: ACCOUNT_NAME[id] ?? id, sat });
   for (const a of input.assets) if (a.amount > 0) rows.push({ label: a.ticker, units: a.amount, unit: a.ticker });
   return { kind: 'balance', title: 'Your balance', totalSat: input.totalSat, rows };
 }

@@ -1,7 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import * as Crypto from 'expo-crypto';
 import { useAppSelector } from '../store/hooks';
-import { selectDisclosureLevel } from '../store/slices/settingsSlice';
 import { useAssetInventory } from './useAssetInventory';
 import { useFiatRates } from './useFiatRates';
 import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
@@ -33,7 +32,6 @@ async function quoteSend(destination: string, amountSat: number) {
 /** Turns typed or spoken text into an action card or an answer, with the wallet's live data. */
 export function useIntentRunner() {
   const fiat = useAppSelector((s) => s.settings.currency) || 'USD';
-  const advanced = useAppSelector(selectDisclosureLevel) !== 'lite';
   const byProtocol = useAppSelector((s) => s.wallet.btcBalance?.byProtocol);
   const rgbAssets = useAppSelector((s) => s.assets.rgbAssets);
   const walletId = useAppSelector((s) => s.wallet.activeWallet?.id);
@@ -71,9 +69,8 @@ export function useIntentRunner() {
       totalSat: btc.balance,
       byAccount,
       assets: inventoryTokens(inventory).map((t) => ({ ticker: t.ticker, amount: t.balance / 10 ** (t.precision || 0) })),
-      advanced,
     };
-  }, [byProtocol, inventory, advanced]);
+  }, [byProtocol, inventory]);
 
   const activity = useCallback(async () => {
     const assets: AssetMeta[] = (rgbAssets ?? []).map((a: any) => ({
@@ -98,5 +95,5 @@ export function useIntentRunner() {
 
   const reset = useCallback(() => { run.current++; setBusy(false); setOutcome(null); }, []);
 
-  return { submit, busy, outcome, reset, advanced };
+  return { submit, busy, outcome, reset };
 }

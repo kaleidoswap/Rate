@@ -10,6 +10,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Added
+- **Cancel a payment that needs checking.** A payment still pending or marked "Needs checking" has "Cancel payment" on its receipt and in its row's long-press menu. It first asks the provider where the payment is: one that went through shows as completed, one the provider reports failed (or that never left this phone) is marked failed, and an RGB transfer the recipient hasn't accepted yet is cancelled. A Lightning, on-chain or Ark/Spark payment already on its way can't be called back; the app says so and offers "Remove from Activity".
+
+### Fixed
+- **Cancelling an RGB invoice looked like it did nothing.** The cancel worked, but a cancelled invoice leaves the activity list, so its detail sheet kept showing the old "waiting" state and the Cancel button (a second tap then said it could no longer be cancelled), and the reload could reuse a listing started before the cancel. The sheet now shows "Cancelled" as soon as the RGB wallet confirms it, the reload asks the wallet again, and errors are shown in the sheet. The button only shows where the RGB account can cancel.
+
+### Changed
+- **Payment details.** The activity detail sheet and Send's receipt have a clearer layout: amount (with dollar value) and a status badge at the top, a details card (date, network, contact, copyable IDs), a fee card (fee, total sent, what the fee pays for) and the actions together at the bottom (cancel, remove, accelerate, share, view in explorer).
+
+### Removed
+- **Lite mode.** The app always shows everything Advanced did: networks, routes, venues, channels, Bark, RGB tools and invoice options. The "Display detail" setting and the quick Lite path in wallet setup are gone; setup always goes through the Lightning wallet and "Choose accounts" steps, where every account (RGB on this phone included) starts on. A restored wallet gets every account too. A saved Lite preference is dropped on update.
+
 ## [0.9.12] — 2026-10-17
 
 ### Fixed

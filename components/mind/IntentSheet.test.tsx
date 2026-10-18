@@ -7,7 +7,7 @@ let mockOutcome: IntentOutcome | null = null;
 const mockSubmit = jest.fn();
 const mockReset = jest.fn();
 jest.mock('../../hooks/useIntentRunner', () => ({
-  useIntentRunner: () => ({ submit: mockSubmit, busy: false, outcome: mockOutcome, reset: mockReset, advanced: false }),
+  useIntentRunner: () => ({ submit: mockSubmit, busy: false, outcome: mockOutcome, reset: mockReset }),
 }));
 jest.mock('../../hooks/useFiatRates', () => ({ useFiatRates: () => ({ eur: 50_000 }), FIAT_SYMBOLS: { EUR: '€' } }));
 jest.mock('../../store/hooks', () => ({
@@ -53,8 +53,8 @@ test('the action card shows wallet numbers and Review hands the params to the ex
   expect(screen.getByText('20,000 sats')).toBeTruthy();
   expect(screen.getByText('€10.00')).toBeTruthy();
   expect(screen.getByText('≈ 12 sats')).toBeTruthy();
-  // Lite hides which account pays.
-  expect(screen.queryByText('Spark · Lightning')).toBeNull();
+  expect(screen.getByText('mario@ln.example')).toBeTruthy();
+  expect(screen.getByText('Spark · Lightning')).toBeTruthy();
   fireEvent.press(screen.getByText('Review'));
   expect(onReview).toHaveBeenCalledWith({ screen: 'Send', params: { prefilledAddress: 'mario@ln.example', contactName: 'Mario Rossi', prefilledAmountSat: 20_000 } });
   expect(onClose).toHaveBeenCalled();

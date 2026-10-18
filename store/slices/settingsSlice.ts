@@ -2,7 +2,6 @@
 
 // store/slices/settingsSlice.ts
 import { createSlice, PayloadAction, createSelector } from '@reduxjs/toolkit';
-import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import type { RootState } from '../index';
 
 // KaleidoMind (on-device AI) mode. Chosen once in onboarding, changeable in
@@ -82,9 +81,6 @@ interface SettingsState {
   currency: string;
   network: string;
   needsApiConfigUpdate: boolean;
-  // 'lite' shows BTC/USD/assets only; 'advanced' reveals networks/routes/channels.
-  // Chosen at wallet creation, reversible in settings.
-  disclosureLevel: DisclosureLevel;
   // The last explicit advanced receive destination, so repeated deposits do
   // not require navigating the routing matrix from scratch.
   lastBtcReceiveRoute: LastBtcReceiveRoute | null;
@@ -116,7 +112,6 @@ const initialState: SettingsState = {
   currency: 'USD',
   network: 'mainnet',
   needsApiConfigUpdate: false,
-  disclosureLevel: 'lite',
   lastBtcReceiveRoute: null,
   aiMode: 'off',
   aiOnboarded: false,
@@ -197,9 +192,6 @@ const settingsSlice = createSlice({
     setNetwork: (state, action: PayloadAction<string>) => {
       state.network = action.payload;
     },
-    setDisclosureLevel: (state, action: PayloadAction<DisclosureLevel>) => {
-      state.disclosureLevel = action.payload;
-    },
     setLastBtcReceiveRoute: (state, action: PayloadAction<LastBtcReceiveRoute>) => {
       state.lastBtcReceiveRoute = action.payload;
     },
@@ -248,7 +240,6 @@ export const {
   setAutoLockTimeout,
   setCurrency,
   setNetwork,
-  setDisclosureLevel,
   setLastBtcReceiveRoute,
   setMindConfig,
   resetMindConfig,
@@ -261,11 +252,6 @@ export const {
 // UI sound effects. Defaults true for state persisted before this field existed.
 export const selectSoundEnabled = (state: RootState): boolean =>
   state.settings.soundEnabled ?? true;
-
-// Selector for the current disclosure level ('lite' | 'advanced').
-// Falls back to 'lite' for state persisted before this field existed.
-export const selectDisclosureLevel = (state: RootState): DisclosureLevel =>
-  state.settings.disclosureLevel ?? 'lite';
 
 // Primary display denomination. Falls back to the existing bitcoinUnit (or
 // 'sats') for state persisted before this field existed.

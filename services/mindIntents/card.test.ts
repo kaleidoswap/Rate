@@ -186,10 +186,9 @@ describe('answers from wallet data', () => {
     expect(answerSpending({ kind: 'spending', period: 'today', direction: 'out' }, [], now).note).toMatch(/No payments sent today/);
   });
 
-  test('balance: Lite shows one total, Advanced names accounts', () => {
-    const input = { totalSat: 30_000, byAccount: { SPARK: 20_000, RGB: 10_000, ARKADE: 0 }, assets: [{ ticker: 'USDT', amount: 5 }], advanced: false };
-    expect(answerBalance({ kind: 'balance' }, input).rows).toEqual([{ label: 'USDT', units: 5, unit: 'USDT' }]);
-    expect(answerBalance({ kind: 'balance' }, { ...input, advanced: true }).rows.map((r) => r.label)).toEqual(['Spark', 'RGB', 'USDT']);
+  test('balance names the accounts that hold funds', () => {
+    const input = { totalSat: 30_000, byAccount: { SPARK: 20_000, RGB: 10_000, ARKADE: 0 }, assets: [{ ticker: 'USDT', amount: 5 }] };
+    expect(answerBalance({ kind: 'balance' }, input).rows.map((r) => r.label)).toEqual(['Spark', 'RGB', 'USDT']);
     expect(answerBalance({ kind: 'balance', asset: 'USDT' }, input)).toMatchObject({ title: 'Your USDT', rows: [{ units: 5 }] });
   });
 });
@@ -199,7 +198,7 @@ describe('runIntent', () => {
   const run = (text: string, activity: ActivityItem[] = []) => runIntent(text, {
     model: null,
     card: deps(),
-    balance: () => ({ totalSat: 5000, byAccount: {}, assets: [], advanced: false }),
+    balance: () => ({ totalSat: 5000, byAccount: {}, assets: [] }),
     activity: async () => activity,
   });
 

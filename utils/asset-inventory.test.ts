@@ -1,6 +1,6 @@
 import {
   assetRecordFromUnified, btcInputFromWallet, buildAssetInventory, inventoryBtc, inventoryTokens,
-  liteUsdAssetIds, replaceProtocolAssets, selectAssetInventory, withSnapshotFallback, type InventoryRecord,
+  dollarAssetIds, replaceProtocolAssets, selectAssetInventory, withSnapshotFallback, type InventoryRecord,
 } from './asset-inventory';
 import { USDB_DECIMALS, USDB_TICKER, USDB_TOKEN_ADDRESS } from './flashnet';
 
@@ -114,9 +114,9 @@ describe('withSnapshotFallback', () => {
   });
 });
 
-describe('liteUsdAssetIds', () => {
-  it('picks the Lite dollar asset by id, never by ticker', () => {
-    expect(Array.from(liteUsdAssetIds([{ asset_id: LIQUID_USDT }, { asset_id: 'rgb:fake-usd' }]))).toEqual([LIQUID_USDT]);
+describe('dollarAssetIds', () => {
+  it('picks the dollar asset by id, never by ticker', () => {
+    expect(Array.from(dollarAssetIds([{ asset_id: LIQUID_USDT }, { asset_id: 'rgb:fake-usd' }]))).toEqual([LIQUID_USDT]);
   });
 });
 

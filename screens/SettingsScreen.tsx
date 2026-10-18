@@ -24,8 +24,6 @@ import {
   setRemoteNodeUrl,
   setUnitPreference,
   selectDisplayDenomination,
-  selectDisclosureLevel,
-  setDisclosureLevel,
   setSoundEnabled,
   setTransactionNotifications,
   setAutoLockTimeout,
@@ -147,7 +145,6 @@ export default function SettingsScreen({ navigation }: Props) {
   const selectedNwcConnection = (nostrState.nwcConnections ?? []).find(
     (connection) => connection.id === nostrState.selectedNwcConnectionId,
   );
-  const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const [settingsQuery, setSettingsQuery] = useState('');
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
@@ -161,7 +158,6 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase' },
     { page: 'preferences', terms: 'preferences bitcoin balance unit sound sounds payment currency fiat notifications language lingua italiano english' },
-    { page: 'connections', terms: 'display detail mode lite advanced' },
     { page: 'connections', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
     { page: 'security', terms: 'danger remove delete wallet' },
   ];
@@ -561,7 +557,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   // Which settings selector sheet is open (one bottom sheet at a time).
-  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'display' | 'autoLock' | 'language'>(null);
+  const [activeSheet, setActiveSheet] = useState<null | 'unit' | 'currency' | 'autoLock' | 'language'>(null);
   const btcPrice = useBitcoinPriceIn(settings.currency);
 
   // Live previews for the unit selector (sample = 1,234,567 sats), matching
@@ -583,10 +579,6 @@ export default function SettingsScreen({ navigation }: Props) {
   const currencyOptions: SheetOption[] = ['USD', 'EUR', 'GBP', 'CHF', 'CAD', 'JPY'].map((c) => ({ id: c, label: c }));
   const autoLockMinutes = settings.autoLockTimeout ?? 5;
   const autoLockOptions: SheetOption[] = AUTO_LOCK_MINUTES.map((m) => ({ id: String(m), label: autoLockLabel(m), badge: m === 5 ? 'Default' : undefined }));
-  const displayModeOptions: SheetOption[] = [
-    { id: 'lite', label: 'Lite', description: 'BTC, USD & assets only' },
-    { id: 'advanced', label: 'Advanced', description: 'Networks, routes & channels' },
-  ];
 
   // soundEnabled may be undefined in state persisted before this setting existed.
   const soundOn = settings.soundEnabled ?? true;
@@ -904,14 +896,7 @@ export default function SettingsScreen({ navigation }: Props) {
           onSave={patch => { if (account === 'ARKADE') changeProtocolNetwork(account, (protoNetworks.arkade ?? 'signet') as ProtocolNetwork, patch); }}
         />}
 
-        {showSection('display detail mode lite advanced') && <>
-          <SectionLabel>Interface detail</SectionLabel>
-          <Group>
-          <Row first icon="options-outline" label="Display detail" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
-          </Group>
-        </>}
-
-        {/* Network changes live in the explicit Advanced section in both display modes. */}
+        {/* Network changes live in the Accounts & networks section. */}
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark') && (
           <>
           <SectionLabel>Accounts & networks</SectionLabel>
@@ -1031,14 +1016,6 @@ export default function SettingsScreen({ navigation }: Props) {
         options={autoLockOptions}
         selectedId={String(autoLockMinutes)}
         onSelect={(id) => dispatch(setAutoLockTimeout(Number(id)))}
-        onClose={() => setActiveSheet(null)}
-      />
-      <OptionSheet
-        visible={activeSheet === 'display'}
-        title="Display detail"
-        options={displayModeOptions}
-        selectedId={disclosureLevel}
-        onSelect={(id) => dispatch(setDisclosureLevel(id as any))}
         onClose={() => setActiveSheet(null)}
       />
       <RevealMnemonicModal

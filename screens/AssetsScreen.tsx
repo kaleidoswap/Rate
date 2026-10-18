@@ -25,11 +25,10 @@ import { NetworkStack } from '../components/NetworkStack';
 import { useRgbWalletSheets } from '../components/rgb/RgbWalletTools';
 import { rgbAccountAdapter } from '../services/protocols';
 import { rgbWalletSupport } from '../utils/rgb-wallet';
-import { usePolicy } from '../hooks/usePolicy';
 import { formatBitcoinAmount, useBitcoinPrice, useDisplayAmount } from '../utils/bitcoinUnits';
 import { getAssetFamily } from '../utils/account-routing';
 import { formatUsd, tokenValueSats } from '../utils/portfolio';
-import { inventoryBtc, inventoryTokens, liteUsdAssetIds as liteUsdIdsOf } from '../utils/asset-inventory';
+import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
 import { useAssetInventory } from '../hooks/useAssetInventory';
 import {
   ASSET_FILTERS,
@@ -61,10 +60,8 @@ export default function AssetsScreen({ navigation, route }: Props) {
   const hideBalances = useSelector((state: RootState) => state.settings.hideBalances);
   const btcPriceUSD = useBitcoinPrice();
   const { format: formatDisplayAmount, cycle: cycleDenomination } = useDisplayAmount();
-  const policy = usePolicy();
-  const isLite = policy.level === 'lite';
-  // Issuing RGB assets is an Advanced surface, offered only where the RGB account can issue.
-  const canIssue = policy.showExperimental && rgbWalletSupport(rgbAccountAdapter()).issue.length > 0;
+  // Issuing RGB assets is offered only where the RGB account can issue.
+  const canIssue = rgbWalletSupport(rgbAccountAdapter()).issue.length > 0;
   const rgbSheets = useRgbWalletSheets({
     onViewAsset: (a) => navigation.navigate('AssetDetail', {
       asset: { asset_id: a.assetId, ticker: a.ticker, name: a.name, precision: a.precision, issued_supply: a.supply, isRGB: true, protocol: 'RGB', balance: { settled: a.supply, future: a.supply, spendable: a.supply } },
@@ -80,9 +77,6 @@ export default function AssetsScreen({ navigation, route }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  // Lite folds its dollar assets into one USD line on the dashboard; do the same here.
-  const liteUsdAssetIds = useMemo(() => (isLite ? liteUsdIdsOf(tokens) : undefined), [tokens, isLite]);
-
   const items = useMemo(() => buildAssetListItems({
     btcNetworks: btc.networks,
     btcAvailable: btc.balance,
@@ -90,16 +84,15 @@ export default function AssetsScreen({ navigation, route }: Props) {
     showBtc: btcBalance != null,
     assets: tokens,
     btcPriceUSD,
-    liteUsdAssetIds,
-  }), [btc, btcBalance, tokens, btcPriceUSD, liteUsdAssetIds]);
+  }), [btc, btcBalance, tokens, btcPriceUSD]);
 
-  const filters = policy.showNetworks ? availableAssetFilters(items) : (['all'] as AssetFilter[]);
+  const filters = availableAssetFilters(items);
   const activeFilter = filters.includes(filter) ? filter : 'all';
   const shown = filterAssetItems(items, activeFilter, query);
 
   // The headline matches the dashboard's: bitcoin held plus dollar tokens at $1.
   const totalSats = (btcBalance?.summary?.total ?? btcBalance?.vanilla?.spendable ?? 0)
-    + tokenValueSats(tokens, btcPriceUSD, liteUsdAssetIds);
+    + tokenValueSats(tokens, btcPriceUSD);
   const total = formatDisplayAmount(totalSats);
 
   // A refresh ends when the dashboard writes new balances (or after a while).
@@ -168,13 +161,13 @@ export default function AssetsScreen({ navigation, route }: Props) {
         accessibilityRole="button"
         accessibilityLabel={hideBalances
           ? `${item.name}`
-          : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${policy.showNetworks && item.networks.length ? `, on ${item.networks.map(networkLabel).join(', ')}` : ''}`}
+          : `${item.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}${item.networks.length ? `, on ${item.networks.map(networkLabel).join(', ')}` : ''}`}
         style={[styles.row, index < shown.length - 1 && styles.rowDivider]}
       >
         <AssetIcon ticker={item.ticker} logoUri={item.icon} size={40} showBadge={false} />
         <View style={styles.info}>
           <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-          {policy.showNetworks && item.networks.length > 0 ? (
+          {item.networks.length > 0 ? (
             <View style={styles.subtitleRow}>
               {!!ticker && <Text style={styles.subtitle}>{ticker}</Text>}
               {!!ticker && <Text style={styles.subtitle}>·</Text>}

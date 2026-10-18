@@ -3,7 +3,6 @@ import { Alert, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { selectDisclosureLevel } from '../../store/slices/settingsSlice';
 import { refreshRgbAssets } from '../../store/slices/assetsSlice';
 import { rgbAccountAdapter } from '../../services/protocols';
 import { rgbWalletErrorMessage, rgbWalletSupport } from '../../utils/rgb-wallet';
@@ -38,13 +37,12 @@ export function useRgbWalletSheets({ onViewAsset }: { onViewAsset?: (asset: Issu
   return { sheets, openUtxos: () => setOpen('utxos'), openIssue: () => setOpen('issue'), openDrain: () => setOpen('drain') };
 }
 
-/** Settings › RGB: UTXOs and issuing, for the RGB account in use (Advanced only). */
+/** Settings › RGB: UTXOs and issuing, for the RGB account in use. */
 export function RgbWalletTools({ onViewAsset }: { onViewAsset?: (asset: IssuedRgbAsset) => void }) {
   const t = useAppTheme();
-  const level = useAppSelector(selectDisclosureLevel);
   const support = rgbWalletSupport(rgbAccountAdapter());
   const { sheets, openUtxos, openIssue, openDrain } = useRgbWalletSheets({ onViewAsset });
-  if (level !== 'advanced' || !support.kind) return null;
+  if (!support.kind) return null;
   const clearFailed = () => Alert.alert(
     'Remove failed transfers?',
     'Transfers that failed or expired moved nothing. Removing them only tidies your history.',

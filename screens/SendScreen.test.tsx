@@ -28,6 +28,8 @@ jest.mock('../services/kaleidoPay/connect', () => ({
   prepareSparkTokenRequest: jest.fn(), sendableSparkTokens: jest.fn(async () => [mockUsdb]),
 }));
 jest.mock('../services/kaleidoPay/attempts', () => ({ loadPaymentAttempt: jest.fn(async () => null), beginPaymentAttempt: jest.fn(), savePaymentAttempt: jest.fn(), updatePaymentAttempt: jest.fn(async () => true), dismissPaymentAttempt: jest.fn(async () => {}), unresolvedAttempt: (a: any) => !a?.dismissedAt && (a?.status === 'pending' || a?.status === 'unknown') }));
+const mockCancelPending = jest.fn();
+jest.mock('../services/kaleidoPay/cancelPayment', () => ({ cancelPendingPayment: (...args: any[]) => mockCancelPending(...args) }));
 jest.mock('../services/contactHistory', () => ({ contactKeyFor: (d: string) => d.trim().toLowerCase(), recordContactEvent: jest.fn(async () => {}), updateContactEventStatus: jest.fn(async () => {}), removeContactEvent: jest.fn(async () => {}) }));
 jest.mock('../services/kaleidoPay', () => ({
   PaymentNotSentError: class extends Error {}, KALEIDOPAY_DEMO: false, prepareKaleidoPay: async () => {}, railLabel: (r: string) => r,
@@ -104,10 +106,12 @@ test('a completed payment can be closed and refreshes balances', async () => {
   expect(screen.getByText('Payment completed')).toBeTruthy();
   expect(screen.queryByText('Pay again')).toBeNull();
   expect(require('../services/kaleidoPay/attempts').beginPaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ recipientName: expect.any(String), feeDisplay: '10 sats', accountName: 'Account Spark' }));
-  expect(screen.getByText('Quoted fees · 10 sats')).toBeTruthy();
+  // The fees show without opening the details; who and when are one tap away.
+  expect(screen.getByText('Quoted fees')).toBeTruthy();
+  expect(screen.getByText('10 sats')).toBeTruthy();
   expect(screen.queryByText('Requested')).toBeNull();
   fireEvent.press(screen.getByText('Payment details'));
-  expect(screen.getByText('Quoted fees')).toBeTruthy();
+  expect(screen.getByText('Requested')).toBeTruthy();
   expect(screen.getByText('View in Activity')).toBeTruthy();
   expect(mockFeedback.send).toHaveBeenCalledTimes(1);
   fireEvent.press(screen.getByText('Done'));
@@ -231,6 +235,49 @@ test('a payment stuck pending can be removed from Activity too', async () => {
   alert.mockRestore();
 });
 
+test('Cancel payment re-checks with the provider after confirming and shows what really happened', async () => {
+  const { loadPaymentAttempt } = require('../services/kaleidoPay/attempts');
+  const pending = { id: 'p', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'unknown', createdAt: 1 };
+  loadPaymentAttempt.mockResolvedValueOnce(pending);
+  mockCancelPending.mockResolvedValueOnce({ outcome: 'not-sent', message: 'The provider reports this payment failed, so the recipient was not paid.', attempt: { ...pending, status: 'failed' } });
+  const alert = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true, paymentAttemptId: 'p' } }} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByText('Cancel payment'));
+  expect(alert.mock.calls[0][0]).toBe('Cancel this payment?');
+  const buttons = alert.mock.calls[0][2] as any[];
+  await act(async () => { buttons.find(b => b.style === 'cancel').onPress?.(); });
+  expect(mockCancelPending).not.toHaveBeenCalled();
+  await act(async () => { await buttons.find(b => b.style === 'destructive').onPress(); });
+  expect(mockCancelPending).toHaveBeenCalledWith(1, 'p');
+  expect(alert.mock.calls[1][0]).toBe('Payment not sent');
+  expect(screen.getByText('Payment failed')).toBeTruthy();
+  expect(screen.queryByText('Cancel payment')).toBeNull();
+  expect(mockFeedback.error).toHaveBeenCalled();
+  alert.mockRestore();
+});
+
+test('a payment in flight that can’t be cancelled offers Remove from Activity', async () => {
+  const { loadPaymentAttempt, dismissPaymentAttempt } = require('../services/kaleidoPay/attempts');
+  const pending = { id: 'p', sourceId: 'A', provider: 'A', total: '1010 sats', recipient: '1000 sats', status: 'pending', createdAt: 1 };
+  loadPaymentAttempt.mockResolvedValueOnce(pending);
+  mockCancelPending.mockResolvedValueOnce({ outcome: 'in-flight', message: 'can’t be called back', attempt: pending });
+  const alert = jest.spyOn(require('react-native').Alert, 'alert').mockImplementation(() => {});
+  const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true, paymentAttemptId: 'p' } }} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByText('Cancel payment'));
+  await act(async () => { await (alert.mock.calls[0][2] as any[]).find(b => b.style === 'destructive').onPress(); });
+  expect(alert.mock.calls[1][0]).toBe('Can’t cancel this payment');
+  expect(screen.getByText('Verify payment')).toBeTruthy();
+  const remove = (alert.mock.calls[1][2] as any[]).find(b => b.text === 'Remove from Activity');
+  await act(async () => { remove.onPress(); });
+  // Removing still asks first: it only drops the local record.
+  expect(alert.mock.calls[2][1]).toMatch(/does not cancel the payment/);
+  await act(async () => { await (alert.mock.calls[2][2] as any[]).find(b => b.style === 'destructive').onPress(); });
+  expect(dismissPaymentAttempt).toHaveBeenCalledWith(1, pending);
+  alert.mockRestore();
+});
+
 test('picking an account card pays from it', async () => {
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010), offer('Bark', 1020)]);
   (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'pending' });
@@ -238,18 +285,6 @@ test('picking an account card pays from it', async () => {
   fireEvent.press(screen.getByLabelText(/^Pay from Bark\. Total 1020 sats/));
   await act(async () => { pay(screen, 'Pay 1020 sats'); });
   expect(executePaymentOffer).toHaveBeenCalledWith(mockPreview, expect.objectContaining({ id: 'Bark' }), expect.any(String));
-});
-
-test('Lite leaves Bark out unless it holds funds', async () => {
-  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010), offer('Bark', 1005)]);
-  mockState = { ...baseState(), settings: { bitcoinUnit: 'sats', disclosureLevel: 'lite' } };
-  let screen = await reviewed();
-  expect(screen.queryByLabelText(/^Pay from Bark/)).toBeNull();
-  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
-  screen.unmount();
-  mockState = { ...mockState, wallet: { activeWallet: { id: 1 }, btcBalance: { byProtocol: { BARK: { confirmed: 5000, unconfirmed: 2000, total: 7000 } } } } };
-  screen = await reviewed();
-  expect(screen.getByLabelText(/^Pay from Bark, balance 5,000 sats/)).toBeTruthy();
 });
 
 test('a Spark address can be paid in a Spark token the wallet holds', async () => {

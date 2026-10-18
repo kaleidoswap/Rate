@@ -33,6 +33,8 @@ import { loadCrossChainSession } from '../services/crosschainSend';
 import NostrContactsSelector from '../components/NostrContactsSelector';
 import { contactKeyFor, recordContactEvent, removeContactEvent, updateContactEventStatus } from '../services/contactHistory';
 import { confirmRemovePayment } from '../components/payments/confirmRemovePayment';
+import { confirmCancelPayment, showCancelResult } from '../components/payments/confirmCancelPayment';
+import { cancelPendingPayment } from '../services/kaleidoPay/cancelPayment';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { motion, protocolTint } from '../theme';
 import { feedback } from '../utils/feedback';
@@ -84,8 +86,6 @@ export default function SendScreen({ navigation, route }: Props) {
   const walletId = useAppSelector(s => s.wallet.activeWallet?.id);
   const rates = useFiatRates();
   usePayAccounts(walletId);
-  // Bark is an Advanced account: Lite shows it only when it holds funds.
-  const advanced = useAppSelector(s => s.settings.disclosureLevel) !== 'lite';
   const byProtocol = useAppSelector(s => s.wallet.btcBalance?.byProtocol);
   const balancesSat = useMemo(() => {
     const out: Partial<Record<PayAccountId, number>> = {};
@@ -228,11 +228,11 @@ export default function SendScreen({ navigation, route }: Props) {
   const total = spend ? displaySpend(spend.total, spend.asset) : '';
   const expired = !!quote && quote.expiresAt * 1000 <= now;
 
-  // The offers this screen shows: hidden accounts (Bark in Lite) are never picked for the user.
+  // The offers this screen shows.
   const visibleOffers = useCallback((list: PaymentOffer[]) => {
-    const ids = new Set(groupOffersByAccount(list, { advanced, balances: balancesSat }).flatMap(c => c.offers.map(o => o.id)));
+    const ids = new Set(groupOffersByAccount(list).flatMap(c => c.offers.map(o => o.id)));
     return list.filter(o => ids.has(o.id) || !offerAccount(o));
-  }, [advanced, balancesSat]);
+  }, []);
 
   // `quiet`: re-quoted because the user changed the fee speed, so the new total needs no second review.
   const getOffers = useCallback(async (refresh = false, quiet = false) => {
@@ -419,6 +419,25 @@ export default function SendScreen({ navigation, route }: Props) {
     });
   }
 
+  // Pending or needing a check: re-checks with the provider, then cancels where the rail allows.
+  function cancelPayment() {
+    const current = attempt;
+    if (!walletId || !current || paying.current) return;
+    confirmCancelPayment(async () => {
+      if (paying.current) return;
+      paying.current = true; setBusy(true); setError('');
+      try {
+        const result = await cancelPendingPayment(walletId, current.id);
+        if (attemptRef.current === current && result.attempt && result.attempt.status !== current.status) {
+          attemptRef.current = result.attempt; setAttempt(result.attempt); resultCue(result.attempt.status);
+          if (result.attempt.status === 'completed') void dispatch(loadBtcBalance());
+        }
+        showCancelResult(result, result.outcome === 'in-flight' ? removeFromActivity : undefined);
+      } catch { setError('Could not cancel the payment. Check your connection and try again.'); }
+      finally { paying.current = false; setBusy(false); }
+    });
+  }
+
   async function paste() {
     try { const text = await Clipboard.getString(); if (text) { setInput(text.trim()); setContactName(undefined); } }
     catch { setError('Could not read the clipboard.'); }
@@ -441,7 +460,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const feeText = (fee: number, asset: Parameters<typeof displaySpend>[1]) => fee === 0 ? 'No fee' : `+${displaySpend(fee, asset)}`;
 
   // Pay from: the ways to pay grouped by the account they spend from.
-  const choices = groupOffersByAccount(offers, { advanced, balances: balancesSat, now });
+  const choices = groupOffersByAccount(offers, { now });
   const shownOffers = visibleOffers(offers);
   const best = bestOffer(shownOffers);
   const accountHeading = (o: PaymentOffer) => {
@@ -707,11 +726,15 @@ export default function SendScreen({ navigation, route }: Props) {
     const failed = a.status === 'failed';
     return <View style={{ gap: t.spacing[4] }}>
       <PaymentOutcome attempt={a} busy={busy} statusChecking={statusChecking} statusTimedOut={statusTimedOut} error={error} demo={KALEIDOPAY_DEMO} expanded={receiptExpanded} onExpandedChange={setReceiptExpanded} />
-      {unresolvedAttempt(a) && <Button title="View in Activity" variant="secondary" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} />}
       {chainWaiting && <Button title="Check confirmation" variant="secondary" onPress={() => void checkStatus()} loading={statusChecking} disabled={statusChecking || busy} />}
       {unresolvedAttempt(a) ? <>
         <Button title="Verify payment" onPress={() => void checkStatus()} loading={busy || statusChecking} disabled={busy || statusChecking} />
-        {!busy && <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} />}
+        <Button title="Cancel payment" variant="secondary" onPress={cancelPayment} disabled={busy} />
+        <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
+          <Button title="View in Activity" variant="ghost" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} style={{ flex: 1 }} />
+          <Button title="Share receipt" variant="ghost" onPress={() => shareReceipt(a)} style={{ flex: 1 }} />
+        </View>
+        <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} disabled={busy} textStyle={{ color: t.colors.error[500] }} />
       </> : <>
         {done && <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
           <Button title="View in Activity" variant="secondary" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} style={{ flex: 1 }} />

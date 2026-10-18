@@ -352,21 +352,19 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                             <Text style={[styles.breakdownEyebrow, breakdownRows.length > 0 && styles.breakdownEyebrowSpaced]}>Assets</Text>
                             <View style={styles.breakdownList}>
                                 {assetRows.map((row) => {
-                                    const accent = row.network ? protocolColor(row.network.toUpperCase()) : theme.colors.success[500];
+                                    const accent = protocolColor(row.network.toUpperCase());
                                     return (
                                         <View key={row.key} style={styles.networkRow} accessibilityLabel={hideAmounts
-                                            ? `${row.ticker}${row.networkLabel ? ` on ${row.networkLabel}` : ''}`
-                                            : `${row.amount} ${row.ticker}${row.networkLabel ? ` on ${row.networkLabel}` : ''}${row.usdValue !== undefined ? `, about ${formatUsd(row.usdValue)}` : ''}`}>
+                                            ? `${row.ticker} on ${row.networkLabel}`
+                                            : `${row.amount} ${row.ticker} on ${row.networkLabel}${row.usdValue !== undefined ? `, about ${formatUsd(row.usdValue)}` : ''}`}>
                                             <View style={[styles.networkAccentBar, { backgroundColor: accent }]} />
                                             <View style={[styles.networkIconChip, { backgroundColor: accent + '22' }]}>
-                                                {row.network
-                                                    ? <NetworkIcon network={row.network} size={16} />
-                                                    : <Ionicons name="cash-outline" size={16} color={accent} />}
+                                                <NetworkIcon network={row.network} size={16} />
                                             </View>
                                             <View style={styles.networkTextBlock}>
                                                 <Text style={styles.networkName} numberOfLines={1}>{row.ticker}</Text>
                                                 <Text style={styles.networkSubtitle} numberOfLines={1}>
-                                                    {row.networkLabel ? `${row.name} · ${row.networkLabel}` : row.name}
+                                                    {`${row.name} · ${row.networkLabel}`}
                                                 </Text>
                                             </View>
                                             <View style={styles.networkValueBlock}>

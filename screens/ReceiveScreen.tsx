@@ -27,7 +27,7 @@ import { RootState } from '../store';
 // RGBApiService removed — all operations via protocolManager
 import { protocolManager, rgbAccountAdapter, rgbAccountIsOnDevice } from '../services/protocols';
 import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-engine';
-import { selectDisclosureLevel, setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
+import { setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import { useAssetInventory } from '../hooks/useAssetInventory';
 import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
@@ -235,16 +235,12 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   const [universalLn, setUniversalLn] = useState<AccountId | null>(null);
   // A Lightning receive into Arkade through a swap provider, while it is on screen.
   const [arkadeReceive, setArkadeReceive] = useState<ArkadeLightningReceive | null>(null);
-  // Lite mode: a single private BIP321 QR (BTC/$ toggle) with the advanced
-  // network picker hidden behind "Show all networks".
-  const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const nwcWalletType = useAppSelector((state: RootState) => state.nostr?.nwcWalletType);
   const nwcCapabilities = useAppSelector((state: RootState) => state.nostr?.nwcCapabilities ?? []);
   // The reusable QR is issued by a connected receiving node; without one it can't work.
   const hasReceivingNode = useAppSelector((state: RootState) => (state.nostr?.nwcConnections?.length ?? 0) > 0);
   const lastBtcReceiveRoute = useAppSelector((state: RootState) => state.settings.lastBtcReceiveRoute);
   const walletId = useAppSelector((state: RootState) => state.wallet?.activeWallet?.id);
-  const isLite = disclosureLevel === 'lite';
   // The account the payment lands in, for methods more than one account can receive.
   const [selectedAccount, setSelectedAccount] = useState<AccountId | null>(null);
   const restoredBtcRoute = useRef(false);
@@ -432,9 +428,8 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   };
   const rgbLabel = rgbAccountLabel(caps);
   const connectedNow = getProtocolStatus();
-  // Bark is an Advanced account: Lite never offers it as a place to receive.
   const receiveAccounts: ReceiveAccountInfo[] = (['RGB', 'SPARK', 'ARKADE', 'BARK'] as AccountId[])
-    .filter((account) => connectedNow[account] && (account !== 'BARK' || !isLite))
+    .filter((account) => connectedNow[account])
     .map((account) => ({ account, chain: receiveAccountChain(account) }));
   const isUsdAsset = /usd/i.test(selectedAsset.ticker);
   // The universal code is for BTC, or for USD (a BIP321 QR embedding the USD-receiving
@@ -456,9 +451,8 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   const rgbAdapterNow = rgbAccountAdapter();
   const rgbConnected = !!rgbAdapterNow?.isConnected();
   const rgbSupport = rgbReceiveSupport(rgbConnected ? rgbAdapterNow : null);
-  // RGB invoice options are an Advanced-mode control; Lite always makes the default invoice.
-  const showRgbAdvanced = !isLite && selectedAsset.isRGB && networkType === 'onchain' && rgbConnected;
-  const rgbOptionsInEffect = isLite ? DEFAULT_RGB_RECEIVE_OPTIONS : rgbOptions;
+  // RGB invoice options (on-chain RGB receives only).
+  const showRgbAdvanced = selectedAsset.isRGB && networkType === 'onchain' && rgbConnected;
   // A fixed-amount destination (Bark, Arkade Lightning) waits for an amount instead of failing.
   const awaitingAmount = networkType === 'lightning' && !!routeTarget?.needsAmount && requestedSats <= 0;
 
@@ -514,7 +508,6 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   useEffect(() => {
     if (
       restoredBtcRoute.current
-      || isLite
       || selectedAsset.ticker !== 'BTC'
       || !lastBtcReceiveRoute
     ) return;
@@ -523,7 +516,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     restoredBtcRoute.current = true;
     setSelectedAccount(lastBtcReceiveRoute.account);
     setNetworkType(lastBtcReceiveRoute.network);
-  }, [receiveMethodIds, isLite, lastBtcReceiveRoute, selectedAsset.ticker]);
+  }, [receiveMethodIds, lastBtcReceiveRoute, selectedAsset.ticker]);
   
   // Load Lightning channels
   const loadChannels = async () => {
@@ -861,7 +854,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
           const params = rgbInvoiceParams({
             assetId: selectedAsset.asset_id,
             expirySeconds,
-            options: rgbOptionsInEffect,
+            options: rgbOptions,
             support: rgbReceiveSupport(rgbAssetAdapter),
           });
           const rgbInvoice = await runReceiveOperation('Create RGB asset invoice', (signal) =>
@@ -1383,7 +1376,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
   // A single request identity prevents overlapping amount/network regeneration.
   const cancelScheduledAddress = useReceiveGeneration(
-    networkType !== 'unified' && !awaitingAmount ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, routeDestination, amount, expirySeconds, note, selectedAsset.isRGB ? rgbOptionsInEffect : null]) : null,
+    networkType !== 'unified' && !awaitingAmount ? JSON.stringify([selectedAsset.asset_id, networkType, arkadeSubMode, routeDestination, amount, expirySeconds, note, selectedAsset.isRGB ? rgbOptions : null]) : null,
     () => { setAddress(''); setError(null); setLoading(true); },
     () => { void generateAddress(); },
     () => { addressGenerationRef.current += 1; },
@@ -1445,7 +1438,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     setNetworkType('onchain');
   };
 
-  // Prefilled from KaleidoMind once: the asset, network (Advanced only) and amount asked for.
+  // Prefilled from KaleidoMind once: the asset, network and amount asked for.
   const appliedPrefill = useRef(false);
   useEffect(() => {
     const p = navRoute?.params;
@@ -1458,7 +1451,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       return;
     }
     appliedPrefill.current = true;
-    if (p.prefilledNetwork && !isLite) {
+    if (p.prefilledNetwork) {
       restoredBtcRoute.current = true;
       setNetworkType(p.prefilledNetwork);
     }

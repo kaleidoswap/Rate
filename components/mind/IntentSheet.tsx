@@ -33,7 +33,7 @@ interface Props {
 }
 
 export function IntentSheet({ visible, onClose, onReview, listen }: Props) {
-  const { submit, busy, outcome, reset, advanced } = useIntentRunner();
+  const { submit, busy, outcome, reset } = useIntentRunner();
   const unit = useAppSelector((s) => s.settings.bitcoinUnit) as 'BTC' | 'sats';
   const fiat = useAppSelector((s) => s.settings.currency) || 'USD';
   const voiceEnabled = useAppSelector(selectAiEnabled);
@@ -111,7 +111,6 @@ export function IntentSheet({ visible, onClose, onReview, listen }: Props) {
           <ActionCardView
             card={outcome.card}
             unit={unit}
-            advanced={advanced}
             onReview={() => { onReview(outcome.card.review); onClose(); }}
             onEdit={() => { reset(); input.current?.focus(); }}
             onCancel={close}

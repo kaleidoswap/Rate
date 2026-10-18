@@ -3,7 +3,7 @@ import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import SettingsScreen from './SettingsScreen';
 const mockDispatch = jest.fn();
-const mockState = { settings: { currency: 'USD', bitcoinUnit: 'sats', disclosureLevel: 'lite', soundEnabled: true }, nostr: { nwcConnections: [] }, wallet: { activeWallet: { id: 1, name: 'Daily wallet' }, isUnlocked: false } };
+const mockState = { settings: { currency: 'USD', bitcoinUnit: 'sats', soundEnabled: true }, nostr: { nwcConnections: [] }, wallet: { activeWallet: { id: 1, name: 'Daily wallet' }, isUnlocked: false } };
 jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f(mockState), useAppDispatch: () => mockDispatch }));
 jest.mock('@react-navigation/native', () => ({ useFocusEffect: (f: any) => require('react').useEffect(f, [f]) }));
 jest.mock('../services/protocols/bark', () => ({ BARK_ENABLED: true }));
@@ -52,7 +52,7 @@ test('home shows categories and keeps sensitive and technical actions in their s
   expect(screen.getByLabelText('Preferences')).toBeTruthy();
   expect(navigation.goBack).not.toHaveBeenCalled();
 });
-test('search finds advanced settings in lite mode and handles an empty result', async () => {
+test('search finds account settings and handles an empty result', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
   fireEvent.changeText(screen.getByLabelText('Search settings'), 'bark');
@@ -221,13 +221,13 @@ test('security explains both recovery requirements and opens RGB backup manageme
   expect(screen.getByLabelText('RGB data backup')).toBeTruthy();
 });
 
-test('keeps technical interface options inside Advanced and searchable', async () => {
+test('there is no Lite/Advanced display choice: every setting is always shown', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  expect(screen.queryByLabelText('Display detail')).toBeNull();
   expect(screen.queryByLabelText('Component preview')).toBeNull();
   fireEvent.press(screen.getByLabelText('Connections'));
-  expect(screen.getByLabelText('Display detail')).toBeTruthy();
+  expect(screen.queryByLabelText('Display detail')).toBeNull();
+  expect(screen.getByText('Accounts & networks')).toBeTruthy();
 });
 
 test('offers one persisted language preference for the app and Prismo', async () => {

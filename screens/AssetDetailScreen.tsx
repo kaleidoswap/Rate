@@ -101,7 +101,6 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
   }, [passed, storeAssets]);
 
   // An RGB asset's pending transfers move forward while this screen is open; history and balance follow.
-  const advanced = useAppSelector(s => (s as any).settings?.disclosureLevel) === 'advanced';
   const [historyKey, setHistoryKey] = useState(0);
   const watchRgb = valid && passed!.asset_id !== 'BTC' && (passed!.isRGB ?? (passed!.protocol ?? 'RGB') === 'RGB');
   useRgbTransferWatch({
@@ -177,7 +176,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     ...(!isBTC ? [{ label: isRGB ? 'Contract ID' : 'Asset ID', value: shortId(asset.asset_id), copy: asset.asset_id }] : []),
   ];
   const media = metadata?.media?.isImage ? metadata.media : null;
-  const canInflate = advanced && rights > 0 && rgbWalletSupport(rgbAccountAdapter()).inflate;
+  const canInflate = rights > 0 && rgbWalletSupport(rgbAccountAdapter()).inflate;
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
@@ -249,7 +248,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
           </PressableScale>
         )}
 
-        {advanced && isRGB && !isBTC && rgbWalletSupport(rgbAccountAdapter()).listUtxos && (
+        {isRGB && !isBTC && rgbWalletSupport(rgbAccountAdapter()).listUtxos && (
           <PressableScale accessibilityRole="button" accessibilityLabel="UTXOs" onPress={() => { feedback.select(); rgbSheets.openUtxos(); }} style={[styles.group, styles.row]}>
             <Text style={styles.rowLabel}>UTXOs holding this and other RGB assets</Text>
             <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />

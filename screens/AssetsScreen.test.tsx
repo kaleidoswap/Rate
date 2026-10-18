@@ -4,11 +4,7 @@ import { fireEvent, render } from '@testing-library/react-native';
 import AssetsScreen from './AssetsScreen';
 
 let mockState: any;
-let mockLevel: 'lite' | 'advanced' = 'advanced';
 jest.mock('react-redux', () => ({ useSelector: (fn: any) => fn(mockState), useDispatch: () => jest.fn() }));
-jest.mock('../hooks/usePolicy', () => ({
-  usePolicy: () => require('@kaleidorg/wallet-engine').policyFor(mockLevel),
-}));
 jest.mock('../utils/bitcoinUnits', () => ({
   formatBitcoinAmount: (n: number) => Math.round(n).toLocaleString('en-US'),
   useBitcoinPrice: () => 100_000,
@@ -42,7 +38,7 @@ const stateWith = (extra: object = {}) => ({
   ...extra,
 });
 
-beforeEach(() => { mockState = stateWith(); mockLevel = 'advanced'; });
+beforeEach(() => { mockState = stateWith(); });
 
 const navigation = () => ({ navigate: jest.fn(), goBack: jest.fn() });
 
@@ -85,15 +81,7 @@ test('a row opens the asset detail where most of it lives', () => {
   });
 });
 
-test('Lite hides networks and the issue button', () => {
-  mockLevel = 'lite';
-  const screen = render(<AssetsScreen navigation={navigation()} />);
-  expect(screen.queryByLabelText('Show assets on Spark')).toBeNull();
-  expect(screen.queryByLabelText('Issue a new asset')).toBeNull();
-  expect(screen.getByLabelText('Tether USD, 40 USDT, about $40.00')).toBeTruthy();
-});
-
-test('one add button in Advanced; pull to refresh asks the dashboard for fresh balances', () => {
+test('one add button; pull to refresh asks the dashboard for fresh balances', () => {
   const emit = jest.fn();
   (DeviceEventEmitter as any).emit = emit;
   const screen = render(<AssetsScreen navigation={navigation()} />);
@@ -106,7 +94,6 @@ test('one add button in Advanced; pull to refresh asks the dashboard for fresh b
 });
 
 test('no issue button when the RGB account can’t issue (the node over NWC)', () => {
-  mockLevel = 'advanced';
   const saved = mockRgb;
   mockRgb = { protocolName: 'RGB_LN', isConnected: () => true, walletType: () => 'rln', hasRlnMethod: () => true };
   const screen = render(<AssetsScreen navigation={navigation()} />);

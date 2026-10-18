@@ -33,19 +33,17 @@ export interface AccountChoice {
 
 /**
  * Offers grouped by account, accounts that can pay first and cheapest first.
- * Bark only shows in Lite when it holds funds (so they can still be spent); offers
- * that can't be traced to an account are left out of the cards but stay in the sheet.
+ * Offers that can't be traced to an account are left out of the cards but stay in the sheet.
  */
 export function groupOffersByAccount(
   offers: PaymentOffer[],
-  opts: { advanced: boolean; balances?: Partial<Record<PayAccountId, number>>; now?: number },
+  opts: { now?: number } = {},
 ): AccountChoice[] {
   const now = opts.now ?? Date.now();
   const byAccount = new Map<PayAccountId, PaymentOffer[]>();
   for (const offer of offers) {
     const account = offerAccount(offer);
     if (!account) continue;
-    if (account === 'BARK' && !opts.advanced && !((opts.balances?.BARK ?? 0) > 0)) continue;
     byAccount.set(account, [...(byAccount.get(account) ?? []), offer]);
   }
   const choices: AccountChoice[] = [...byAccount.entries()].map(([account, list]) => {

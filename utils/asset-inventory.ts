@@ -190,8 +190,8 @@ export const inventoryTokens = (inventory: readonly InventoryAsset[]): Inventory
 export const inventoryBtc = (inventory: readonly InventoryAsset[]): InventoryAsset =>
   inventory.find((a) => a.isNativeBtc) ?? btcInventoryEntry(null);
 
-/** Assets Lite folds into its single "US Dollar" line (by adapter id, never by ticker). */
-export function liteUsdAssetIds(assets: readonly { asset_id: string }[]): Set<string> {
+/** Assets priced as US dollars by adapter id (never by ticker), e.g. USDt on Liquid. */
+export function dollarAssetIds(assets: readonly { asset_id: string }[]): Set<string> {
   return new Set(assets
     .filter((a) => liteBucketOf({ id: a.asset_id } as any) === 'USD')
     .map((a) => a.asset_id));

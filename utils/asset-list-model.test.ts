@@ -1,5 +1,5 @@
 import {
-  assetListUsdTotal, availableAssetFilters, buildAssetListItems, dominantHolding, filterAssetItems, LITE_USD_KEY,
+  assetListUsdTotal, availableAssetFilters, buildAssetListItems, dominantHolding, filterAssetItems,
 } from './asset-list-model';
 
 const token = (asset_id: string, ticker: string, protocol: string, baseUnits: number, precision = 6, name = ticker) =>
@@ -56,14 +56,6 @@ test('search matches ticker, name or an exact asset id', () => {
   expect(filterAssetItems(items, 'all', 'gold').map((i) => i.ticker)).toEqual(['XAUT']);
   expect(filterAssetItems(items, 'all', 'btc').map((i) => i.ticker)).toEqual(['BTC']);
   expect(filterAssetItems(items, 'all', 'spark-usdt').map((i) => i.ticker)).toEqual(['USDT']);
-});
-
-test('Lite folds its dollar assets into one USD row, like the dashboard', () => {
-  const items = buildAssetListItems({ ...base, liteUsdAssetIds: new Set(['rgb-usdt']) });
-  const usd = items.find((i) => i.key === LITE_USD_KEY)!;
-  expect(usd).toMatchObject({ ticker: 'USD', amount: 30, usdValue: 30 });
-  // The rest stays as it was.
-  expect(items.find((i) => i.key === 'asset:USDT')?.amount).toBe(10);
 });
 
 test('the header total adds up every priced row', () => {

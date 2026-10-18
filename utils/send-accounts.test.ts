@@ -23,24 +23,22 @@ test('accounts that can pay come first, cheapest first; each picks its cheapest 
     offer('spark-ln', 'spark-ln', 1021),
     offer('spark-swap', 'spark-wallet-1', 1300),
     offer('arkade', 'arkade', undefined, { unavailable: 'Not enough balance' }),
-  ], { advanced: true });
+  ]);
   expect(groups.map(g => g.account)).toEqual(['SPARK', 'RGB', 'ARKADE']);
   expect(groups[0].best?.id).toBe('spark-ln');
   expect(groups[0].offers.map(o => o.id)).toEqual(['spark-ln', 'spark-swap']);
   expect(groups[2]).toMatchObject({ best: undefined, reason: 'Not enough balance' });
 });
 
-test('Bark is advanced: hidden in Lite unless it holds funds', () => {
+test('Bark is offered like any other account', () => {
   const offers = [offer('spark', 'spark-ln', 1021), offer('bark', 'bark', 1010)];
-  expect(groupOffersByAccount(offers, { advanced: false }).map(g => g.account)).toEqual(['SPARK']);
-  expect(groupOffersByAccount(offers, { advanced: false, balances: { BARK: 5000 } }).map(g => g.account)).toEqual(['BARK', 'SPARK']);
-  expect(groupOffersByAccount(offers, { advanced: true }).map(g => g.account)).toEqual(['BARK', 'SPARK']);
+  expect(groupOffersByAccount(offers).map(g => g.account)).toEqual(['BARK', 'SPARK']);
 });
 
 test('an expired quote does not count as payable', () => {
   const stale = offer('rgb', 'rgb-ln', 900);
   stale.quote.expiresAt = Math.floor(Date.now() / 1000) - 1;
-  const groups = groupOffersByAccount([stale, offer('spark', 'spark-ln', 1021)], { advanced: true });
+  const groups = groupOffersByAccount([stale, offer('spark', 'spark-ln', 1021)]);
   expect(groups[0].account).toBe('SPARK');
   expect(groups[1].best).toBeUndefined();
 });

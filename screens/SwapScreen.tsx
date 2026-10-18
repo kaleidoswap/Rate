@@ -1,6 +1,5 @@
 // screens/SwapScreen.tsx
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { usePolicy } from '../hooks/usePolicy';
 import {
   TextInput,
   useWindowDimensions,
@@ -132,8 +131,6 @@ export default function SwapScreen({ navigation, route }: Props) {
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
   const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
-  // Lite hides venues, the maker and account names: the best price is picked for you.
-  const policy = usePolicy();
   const [swapProgress, setSwapProgress] = useState<SwapProgress>('idle');
   const [pairsLoading, setPairsLoading] = useState(false);
   // A venue whose prices failed to load, so an empty list says why.
@@ -867,12 +864,12 @@ export default function SwapScreen({ navigation, route }: Props) {
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
       {renderPairsNotice()}
-      {/* Venue filter tabs (Advanced only: Lite picks the best price for you) */}
-      {policy.showRouteSelector && renderVenueFilter()}
+      {/* Venue filter tabs */}
+      {renderVenueFilter()}
 
       {/* KaleidoSwap maker provider — shows which maker is serving pairs so an
           empty pair list (e.g. "No trading pair found for BTC/USD") is debuggable. */}
-      {policy.showRouteSelector && rgbConnected && venueFilter !== 'flashnet' && (
+      {rgbConnected && venueFilter !== 'flashnet' && (
         <View style={styles.makerInfoRow}>
           <Ionicons name="server-outline" size={13} color={theme.colors.text.tertiary} />
           <Text style={styles.makerInfoLabel}>Maker</Text>
@@ -1445,7 +1442,7 @@ export default function SwapScreen({ navigation, route }: Props) {
       {renderAssetPicker()}
       {renderConfirmModal()}
       <ProviderSheet visible={showProviders} selectedId={selectedProvider.current} onClose={() => setShowProviders(false)}
-        options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: policy.showNetworks ? (isFlashnetPair(o.pair) ? 'Spark' : 'RGB Lightning node') : undefined,
+        options={providerOffers.map(o => ({ id: o.id, name: swapProviderName(o.pair), account: isFlashnetPair(o.pair) ? 'Spark' : 'RGB Lightning node',
           amountLabel: 'You receive', amount: o.quote ? `${formatDisplayAmount(o.quote.to_amount, o.quote.to_asset)} ${unitLabelFor(o.quote.to_asset)}` : 'Unavailable',
           detail: o.quote ? `Fee ${formatQuoteFee(o.quote)}` : '',
           unavailable: o.unavailable, expiresAt: o.quote?.expiry_timestamp, recommended: bestSwapOffer(providerOffers)?.id === o.id }))}

@@ -3,12 +3,11 @@ import { fireEvent, render } from '@testing-library/react-native';
 import AssetDetailScreen from './AssetDetailScreen';
 
 let mockAssets: any[] = [];
-let mockLevel = 'lite';
 const mockWatch = jest.fn();
 const mockOpenUtxos = jest.fn();
 jest.mock('../store/hooks', () => ({
   useAppDispatch: () => jest.fn(),
-  useAppSelector: (f: any) => f({ assets: { rgbAssets: mockAssets }, settings: { disclosureLevel: mockLevel } }),
+  useAppSelector: (f: any) => f({ assets: { rgbAssets: mockAssets } }),
 }));
 jest.mock('../hooks/useRgbTransferWatch', () => ({ useRgbTransferWatch: (args: any) => { mockWatch(args); return []; } }));
 jest.mock('../components/rgb/RgbWalletTools', () => ({ useRgbWalletSheets: () => ({ sheets: null, openUtxos: mockOpenUtxos, openIssue: jest.fn() }) }));
@@ -35,7 +34,7 @@ const usdt = {
 const open = (asset: any, navigation: any = { navigate: jest.fn(), goBack: jest.fn() }) =>
   ({ navigation, screen: render(<AssetDetailScreen navigation={navigation} route={{ params: { asset } }} />) });
 
-beforeEach(() => { mockAssets = []; mockLevel = 'lite'; mockWatch.mockClear(); mockMetadata = null; mockRights = 0; mockCaps = {}; });
+beforeEach(() => { mockAssets = []; mockWatch.mockClear(); mockMetadata = null; mockRights = 0; mockCaps = {}; });
 
 test('shows the balance in the asset unit, its breakdown and details', () => {
   const { screen } = open(usdt);
@@ -96,9 +95,7 @@ test('bitcoin and Spark tokens are not watched as RGB', () => {
   expect(mockWatch.mock.calls.at(-1)[0].enabled).toBe(false);
 });
 
-test('Advanced opens the RGB account’s UTXOs from an RGB asset; Lite does not offer it', () => {
-  expect(open(usdt).screen.queryByLabelText('UTXOs')).toBeNull();
-  mockLevel = 'advanced';
+test('opens the RGB account’s UTXOs from an RGB asset', () => {
   const { screen } = open(usdt);
   fireEvent.press(screen.getByLabelText('UTXOs'));
   expect(mockOpenUtxos).toHaveBeenCalled();
@@ -127,17 +124,14 @@ test('shows the RGB contract: schema, supply, issuance date, description and its
   expect(screen.queryByText('Ticker')).toBeNull(); // the same as the unit already shown
 });
 
-test('Advanced offers to issue more of an IFA asset the wallet holds inflation rights for', async () => {
+test('offers to issue more of an IFA asset the wallet holds inflation rights for', async () => {
   const { act } = require('@testing-library/react-native');
   mockMetadata = { schema: 'IFA', ticker: 'INF', precision: 2, issuedSupply: 1000, maxSupply: 5000 };
   mockRights = 4000;
   mockCaps = { inflate: true };
   const inf = { asset_id: 'rgb:inf', ticker: 'INF', name: 'Inflatable', precision: 2, protocol: 'RGB', isRGB: true, balance: 1000 };
-  const lite = open(inf).screen;
-  expect(await lite.findByText('Maximum supply')).toBeTruthy();
-  expect(lite.queryByLabelText('Issue more INF')).toBeNull();
-  mockLevel = 'advanced';
   const { screen } = open(inf);
+  expect(await screen.findByText('Maximum supply')).toBeTruthy();
   fireEvent.press(await screen.findByLabelText('Issue more INF'));
   expect(screen.getByText('Issue more · up to 40 INF')).toBeTruthy();
   await act(async () => undefined);

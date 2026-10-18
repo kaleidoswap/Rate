@@ -53,11 +53,4 @@ describe('breakdownAssetRows', () => {
     const sum = breakdownAssetRows(assets).reduce((s, r) => s + (r.usdValue ?? 0), 0);
     expect(sum).toBe(tokenValueUsd(assets));
   });
-
-  test('Lite folds the dollar tokens into one US Dollar row', () => {
-    const rows = breakdownAssetRows(assets, undefined, { foldDollars: true });
-    expect(rows.map((r) => r.ticker)).toEqual(['USD', 'XAUT']);
-    expect(rows[0]).toMatchObject({ name: 'US Dollar', amount: '52.50', usdValue: 52.5 });
-    expect(rows[0].network).toBeUndefined();
-  });
 });

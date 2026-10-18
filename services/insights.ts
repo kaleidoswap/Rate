@@ -41,7 +41,6 @@ export interface InsightChannel {
 
 export interface InsightInput {
   now: number;
-  advanced: boolean;
   /** Mainnet fee rates (sat/vB), null when unknown or not on mainnet. */
   feeRates?: { fastestFee: number; halfHourFee: number; hourFee: number } | null;
   onchainSat: number;
@@ -85,7 +84,7 @@ export function computeInsights(input: InsightInput): Insight[] {
     });
   }
 
-  if (input.advanced && !input.rgbOnDevice && input.channels.some((c) => c.localUnits > 0)) {
+  if (!input.rgbOnDevice && input.channels.some((c) => c.localUnits > 0)) {
     out.push({
       key: 'channel-state-backup', rule: 'channel-state-backup', priority: 6, cooldownMs: 30 * DAY,
       title: 'Your node holds channel funds',

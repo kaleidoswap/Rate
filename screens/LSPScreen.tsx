@@ -17,7 +17,6 @@ import { Card, Button, ScreenHeader } from '../components';
 import { RgbNodeIcon } from '../components/ProtocolIcons';
 import { RootState } from '../store';
 import { protocolManager } from '../services/protocols';
-import { usePolicy } from '../hooks/usePolicy';
 import { lspOrderToPaymentData, type LspOrderLike } from '../utils/lspOrder';
 
 interface Props {
@@ -63,9 +62,6 @@ export default function LSPScreen({ navigation }: Props) {
     !!rgbAdapter?.isConnected()
     && ((rgbAdapter as any)?.walletType?.() ?? nwcWalletType) !== 'ln'
     && (nwcWalletType == null || nwcCapabilities.includes('manageChannels'));
-  // Channel management is an Advanced-only surface; guard the screen itself so it
-  // can't leak into Lite mode even if reached via deep link or stale navigation.
-  const policy = usePolicy();
 
   useEffect(() => {
     fetchLSPInfo();
@@ -257,20 +253,6 @@ export default function LSPScreen({ navigation }: Props) {
       </Card>
     </View>
   );
-
-  if (!policy.showChannelManagement) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <ScreenHeader title="Open a channel" showBack />
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 16 }}>
-          <Ionicons name="lock-closed-outline" size={40} color={theme.colors.text.tertiary} />
-          <Text style={[styles.loadingText, { textAlign: 'center' }]}>
-            Channel management is available in Advanced mode. Enable it in Settings → Display Mode.
-          </Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   if (!isChannelCapableNode) {
     return (

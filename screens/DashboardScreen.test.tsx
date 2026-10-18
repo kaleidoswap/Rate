@@ -24,8 +24,7 @@ jest.mock('../store/slices/assetsSlice', () => ({
   setProtocolAssets: (payload: any) => ({ type: 'protocolAssets', payload }),
 }));
 jest.mock('../store/slices/nostrSlice', () => ({ loadNostrProfile: jest.fn() }));
-jest.mock('../store/slices/settingsSlice', () => ({ selectDisclosureLevel: () => 'lite' }));
-jest.mock('@kaleidorg/wallet-engine', () => ({ policyFor: () => ({}), liteBucketOf: () => 'OTHER' }));
+jest.mock('@kaleidorg/wallet-engine', () => ({ liteBucketOf: () => 'OTHER' }));
 jest.mock('../utils/bitcoinUnits', () => ({
   formatBitcoinAmount: String,
   useBitcoinConversion: () => ({ formatSatoshisToUSD: String }),
