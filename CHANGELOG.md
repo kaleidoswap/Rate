@@ -25,8 +25,8 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 - Align native release versions and archive validation with the release tag.
 
 ### Validation
-- Download validation exercised with 10 cases; syntax and whitespace checks passed.
-- Full Jest and device validation remain pending: local application dependencies are unavailable.
+- TypeScript and production JavaScript bundles for iOS and Android passed.
+- Payment and RGB receive regression tests passed; native behavior still requires device validation.
 
 ## [0.9.12] — 2026-10-17
 
