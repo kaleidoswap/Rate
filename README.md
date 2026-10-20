@@ -7,6 +7,9 @@ Network, RGB assets, and Bitcoin L2s (Spark, Arkade, Bark) together under one
 self-custodial roof — driven by a private, **on-device** AI assistant and Nostr social
 payments. Your keys, your assets, and your AI all stay on your phone.
 
+Read the announcement: [Introducing Rate: AI-Powered Self-Sovereign RGB Lightning Wallet](https://kaleidoswap.com/blog/introducing-rate).
+More about the project at [kaleidoswap.com](https://kaleidoswap.com). Release notes are in [CHANGELOG.md](CHANGELOG.md).
+
 > ⚠️ **Alpha software.** KaleidoSwap is under active development and **not production-ready**.
 > Expect bugs, breaking changes, and incomplete features. The KaleidoMind AI assistant is
 > **experimental** and can make mistakes — always review actions before confirming. Use
@@ -18,8 +21,9 @@ payments. Your keys, your assets, and your AI all stay on your phone.
 
 - 🔑 **Non-custodial & multi-protocol** — one HD wallet (BIP39) across Bitcoin on-chain,
   Lightning, RGB assets, Spark, Arkade, and Bark.
-- 🤖 **On-device AI** — a private assistant (KaleidoMind) that runs the LLM and speech
-  models locally; nothing is sent to a cloud LLM by default.
+- 🤖 **On-device AI** — a private assistant (KaleidoMind), embodied by **Prismo**, an
+  animated crystal character. It runs the LLM and speech models locally; nothing is sent
+  to a cloud LLM by default.
 - 🔁 **Atomic swaps** — trustless asset swaps via the KaleidoSwap maker network, plus
   Flashnet AMM pools on Spark.
 - 🌐 **Nostr-native** — contacts, Lightning Zaps, Lightning Address, and NWC
@@ -50,19 +54,34 @@ against the KaleidoSwap maker API, with additional venues for breadth:
 
 ---
 
-## The AI assistant (KaleidoMind)
+## The AI assistant (KaleidoMind and Prismo)
 
 The assistant is a natural-language interface to the wallet — ask it to check balances,
 create invoices, send payments, swap assets, or find merchants, in chat or by voice.
+It has a face: **Prismo**, an animated crystal character that looks, listens, thinks,
+speaks and reacts in the Agent tab, in chat and in Talk.
 
-- **Private by default.** The LLM (Qwen3.5 0.8B / 2B, by device RAM) and Whisper speech-to-text run **on
-  device** through the [QVAC SDK](https://www.npmjs.com/package/@qvac/sdk). Conversations
-  and transcription don't leave your phone.
-- **One agent for chat and voice.** A single runner (`services/mindAgent.ts`) powers both
-  text chat and hands-free voice, built on the shared `@kaleidorg/mind` engine.
+- **Private by default.** The LLM (Qwen3.5 0.8B / 2B, by device RAM), Whisper speech-to-text
+  and Supertonic 3 text-to-speech run **on device** through the
+  [QVAC SDK](https://www.npmjs.com/package/@qvac/sdk). Conversations and transcription
+  don't leave your phone.
+- **One agent for chat and Talk.** A single runner (`services/mindAgent.ts`) powers both
+  text chat and the hands-free Talk mode, built on the shared `@kaleidorg/mind` engine.
+  Payments from chat or voice still go through a confirmation sheet.
+- **Explains Bitcoin, Lightning and RGB.** Concept questions ("what is a Lightning
+  channel?") are answered from an on-device knowledge base (`services/aiKnowledge.ts`,
+  EmbeddingGemma embeddings via QVAC), in English and Italian.
+- **Voice.** Talk uses Whisper for transcription and **QVAC Supertonic 3** (Q8, ~127 MB,
+  downloaded on first use) for multilingual neural speech, with Prismo's mouth following
+  playback. Pick a feminine (F1) or masculine (M1) voice; the phone's system voice is the
+  fallback and an option.
+- **Prismo settings.** Switch the chat model, speech recognition model and voice, preview
+  the voice, and use the danger zone to delete unused models or clear memory.
+- **One language.** The app language (English or Italian, or follow the system) is shared
+  with Prismo's replies, voice and transcription.
 - **Physical device required.** On-device inference is **not available on a simulator /
-  emulator** (the rest of the wallet works fine on one). First launch downloads the
-  models (~0.5–1.3 GB LLM + ~80 MB Whisper).
+  emulator** (the rest of the wallet works fine on one). Models download on first use
+  (~0.5–1.3 GB LLM + ~80 MB Whisper + ~127 MB Supertonic).
 
 ---
 
@@ -77,7 +96,9 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
   protocol adapter (Spark, Arkade, RGB/RLN, Flashnet). Alongside it: the
   KaleidoMind agent (`mindAgent.ts` + `*Tools.ts`), on-device AI lifecycle
   (`QVACService.ts`), Nostr + NWC, and biometric auth + encrypted SQLite.
-- **Theming** — design tokens in `theme/`, shared UI primitives in `components/`.
+- **Theming** — design tokens in `theme/`, shared UI primitives in `components/` (some,
+  such as `EmptyState` and `Callout`, are thin adapters over `@kaleidorg/kaleido-ui`).
+- **Localization** — English and Italian strings in `localization/`.
 
 > A legacy single-node path (`RGBApiService.ts`, `WalletManager.ts`) is **deprecated**,
 > superseded by ProtocolManager.
@@ -89,7 +110,8 @@ create invoices, send payments, swap assets, or find merchants, in chat or by vo
 - **App** — React Native 0.81 + Expo SDK 54 (New Architecture), TypeScript
 - **State** — Redux Toolkit, Redux Persist
 - **Storage** — `expo-sqlite` for wallet metadata; `expo-secure-store` for seeds and keys
-- **AI / voice** — `@qvac/sdk` (on-device LLM + Whisper), `@kaleidorg/mind`
+- **AI / voice** — `@qvac/sdk` (on-device LLM, Whisper, Supertonic 3 TTS), `@kaleidorg/mind`
+- **UI** — `@kaleidorg/kaleido-ui` shared components
 - **Wallet engine** — `@kaleidorg/wallet-engine` + protocol SDKs (Spark, Arkade, RGB, Flashnet)
 - **Nostr** — `@nostr-dev-kit/ndk`, `nostr-tools`
 - **Maps** — BTC Map in `react-native-webview` + BTC Map API
@@ -221,7 +243,7 @@ Notes:
 - After changing native addons you must **rebuild** the app (`npx expo run:ios/android`);
   a Metro reload alone won't pick them up.
 - Models are **not** bundled — they download on first launch on a physical device
-  (~0.5–1.3 GB LLM + ~80 MB Whisper).
+  (~0.5–1.3 GB LLM + ~80 MB Whisper + ~127 MB Supertonic 3 voice).
 - Agent skills are bundled separately: `pnpm run bundle-skills` regenerates
   `skills.bundle.json` from the shared `@kaleidorg/mind` skills plus the
   app-specific ones in `skills/`.
@@ -243,10 +265,17 @@ Notes:
   Bitcoin addresses, Lightning invoices, RGB invoices, and LNURL via the QR scanner.
 - **Swap** — quote and execute atomic swaps via the KaleidoSwap maker network (and
   Flashnet AMM where available).
-- **Ask the assistant** — "send 50,000 sats to John", "create an invoice for $25", "swap
-  10 USDT to BTC", or "find coffee shops that accept Bitcoin" — by text or voice.
+- **Ask Prismo** — "send 50,000 sats to John", "create an invoice for $25", "swap
+  10 USDT to BTC", "find coffee shops that accept Bitcoin", or "what is RGB?" — in chat or
+  in Talk.
+- **Activity** — filter by type, period and network from the filter sheet; a payment
+  still pending or marked "Needs checking" can be removed from this phone's records.
+  Contacts have their own search bar.
+- **Arkade** — pending payments are recovered automatically; maintenance and exit
+  options live in the Arkade account settings.
 - **Social** — Zap Nostr contacts, pay a Lightning Address, or connect an external app
-  with NWC.
+  with NWC. The Profile screen shows your Nostr QR card and Lightning address, with a
+  shortcut to Nostr settings.
 
 ---
 
@@ -300,6 +329,7 @@ rate/
 ├── theme/          # Design tokens (dark)
 ├── hooks/          # React hooks (e.g. useProtocol)
 ├── utils/          # Helpers (account routing, swap model, …)
+├── localization/   # App and Prismo strings (English, Italian)
 ├── skills/         # KaleidoMind agent skills
 ├── types/          # TypeScript definitions
 └── assets/         # Static assets
@@ -314,7 +344,7 @@ rate/
 | `ELOOP: too many symbolic links … node_modules` | A self-referencing `node_modules` symlink. `rm node_modules && pnpm install`. |
 | iOS `pod install` → `Unicode Normalization … ASCII-8BIT` | `export LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` before running. |
 | `npx expo` prompts to install a different Expo version | `node_modules` is broken — reinstall so the local `expo` is used. |
-| AI assistant unavailable | On-device inference needs a **physical device**, or pair a desktop KaleidoMind provider. |
+| AI assistant unavailable | On-device inference needs a **physical device**, or pair a desktop KaleidoMind provider. If a model fails to load, the Agent banner shows the reason; Retry downloads a corrupt model again. |
 
 ---
 
@@ -349,7 +379,7 @@ The next chapters of KaleidoSwap, grouped by horizon. Items move up as they land
 - **Encrypted cloud backup & recovery** — beyond the 12 words: encrypted backup of
   contacts, Nostr identity, and app settings.
 - **Hardware-signer / external-key support** — sign with an external key device.
-- **Multi-language (i18n)** — localization for a broader audience.
+- **More languages** — the app and Prismo speak English and Italian today; more to come.
 - **Per-protocol UX maturity** — Spark token discovery and Arkade
   onboarding surfaced consistently across the wallet.
 
