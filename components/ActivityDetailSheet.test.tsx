@@ -115,6 +115,7 @@ test('details are condensed: the asset id can be copied, no "Not provided" fee, 
   const settled = { ...item({ status: 'settled', direction: 'incoming', batchTransferIdx: 7 }), asset: 'rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k', status: 'confirmed' as const,
     txid: 'b9e837f55fba60daca3fb583953b546b33ad4aa2493812126a054925f56c9345' };
   const screen = render(<ActivityDetailSheet item={settled} onClose={jest.fn()} />);
+  fireEvent.press(screen.getByText('Payment details'));
   expect(screen.getByText('Asset ID')).toBeTruthy();
   expect(screen.getByText('rgb:2dkSTbr-…ou5-M98k')).toBeTruthy();
   expect(screen.getByText('Tether (USDT)')).toBeTruthy();

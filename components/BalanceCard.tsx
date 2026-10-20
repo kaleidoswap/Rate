@@ -1,7 +1,7 @@
 import { useAppTheme } from '../theme/ThemeProvider';
 import { AllocationBar } from './AllocationBar';
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated, AccessibilityInfo, Easing } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, AccessibilityInfo, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme, protocolColor } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
@@ -109,8 +109,6 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     const styles = makeStyles(theme);
     const [slow, setSlow] = useState(false);
     const syncing = !!(updating || loading || refreshing || pendingAccounts.length);
-    const loadingProgress = useRef(new Animated.Value(0)).current;
-    const [trackWidth, setTrackWidth] = useState(0);
     useEffect(() => {
         setSlow(false);
         if (!syncing) return;
@@ -120,16 +118,6 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     const amountOpacity = useRef(new Animated.Value(1)).current;
     const previousAmount = useRef(primaryText);
     const [reduceMotion, setReduceMotion] = useState(true);
-    useEffect(() => {
-        loadingProgress.setValue(0);
-        if (!syncing || reduceMotion) return;
-        const animation = Animated.loop(Animated.timing(loadingProgress, {
-            toValue: 1, duration: 1800, easing: Easing.linear,
-            useNativeDriver: true, isInteraction: false,
-        }));
-        animation.start();
-        return () => animation.stop();
-    }, [syncing, reduceMotion, loadingProgress]);
     useEffect(() => {
         let active = true;
         void AccessibilityInfo?.isReduceMotionEnabled?.().then(value => { if (active) setReduceMotion(value); });
@@ -321,19 +309,6 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     </Text>
                 )}
             </Animated.View>
-
-            <View style={styles.syncTrackSlot}>
-                {syncing && <View style={styles.syncTrack}
-                    accessibilityRole="progressbar" accessibilityLabel="Updating balance"
-                    accessibilityState={{ busy: true }}
-                    onLayout={event => setTrackWidth(event.nativeEvent.layout.width)}>
-                    <Animated.View style={[styles.syncSegment, {
-                        transform: [{ translateX: reduceMotion ? trackWidth * 0.35 : loadingProgress.interpolate({
-                            inputRange: [0, 1], outputRange: [-trackWidth * 0.3, trackWidth],
-                        }) }],
-                    }]} />
-                </View>}
-            </View>
 
             {/* Per-network breakdown — vertical row list, collapsed behind the
                 chevron above. Mirrors the extension's BITCOIN section. */}
