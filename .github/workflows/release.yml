@@ -53,6 +53,8 @@ jobs:
             NAME="0.0.0-${GITHUB_SHA::7}"   # dry-run / manual dispatch
           fi
           CODE="$(git rev-list --count HEAD)"
+          APP_BUILD="$(node -p "require('./app.json').expo.ios.buildNumber")"
+          if [ "$APP_BUILD" -gt "$CODE" ]; then CODE="$APP_BUILD"; fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "code=$CODE" >> "$GITHUB_OUTPUT"
           echo "version=$NAME ($CODE)" >> "$GITHUB_STEP_SUMMARY"
@@ -228,6 +230,7 @@ jobs:
         run: |
           agvtool new-marketing-version "$VERSION_NAME"
           agvtool new-version -all "$VERSION_CODE"
+          node -e 'const fs=require("fs"); const p="../app.json"; const a=JSON.parse(fs.readFileSync(p,"utf8")); a.expo.version=process.env.VERSION_NAME; a.expo.ios.buildNumber=process.env.VERSION_CODE; fs.writeFileSync(p,JSON.stringify(a,null,2)+"\n");'
 
       - name: Archive, sign & upload to TestFlight
         env:

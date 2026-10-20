@@ -316,7 +316,7 @@ export function bestOffer(offers: PaymentOffer[]): PaymentOffer | undefined {
 }
 const executions = new Map<string, Promise<PaymentResult>>();
 const normalizeResult = (value: PaymentResult): PaymentResult => value && ['completed', 'pending', 'unknown', 'failed'].includes(value.status) ? value : { status: 'unknown' };
-import { PaymentNotSentError } from './errors';
+import { PaymentNotSentError, PaymentUncertainError } from './errors';
 export { PaymentNotSentError };
 export async function executePaymentOffer(preview: Preview, offer: PaymentOffer, attemptId: string): Promise<PaymentResult> {
   try {
@@ -342,7 +342,7 @@ export async function executePaymentOffer(preview: Preview, offer: PaymentOffer,
     catch (error) {
       // An executor that refused before sending says so; anything else may have reached the provider.
       if (error instanceof PaymentNotSentError) throw error;
-      return { status: 'unknown' };
+      return error instanceof PaymentUncertainError ? { status: 'unknown', detail: error.message } : { status: 'unknown' };
     }
   })();
   executions.set(key, execution);

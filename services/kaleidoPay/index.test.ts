@@ -78,3 +78,18 @@ test('an executor refusing before sending is reported as not sent, never as unkn
     expect(execute).toHaveBeenCalledTimes(2);
   } finally { disconnect(); }
 });
+
+test('uncertain RGB submission keeps a safe explanation without declaring failure', async () => {
+  const { executePaymentOffer, quotePaymentOffers } = require('./index');
+  const { PaymentUncertainError } = require('./errors');
+  const detail = 'RGB delivery could not be confirmed. Do not send again.';
+  const execute = jest.fn().mockRejectedValue(new PaymentUncertainError(detail));
+  const quote = jest.fn().mockResolvedValue({ recipientSat: 50000, totalSat: 50100, feeSat: 100, expiresAt: Math.floor(Date.now() / 1000) + 60 });
+  const disconnect = registerKaleidoPayAccount({ source: { id: 'uncertain-rgb', rail: 'ln', network: 'signet' }, swaps: [], quote, execute });
+  try {
+    const preview = previewPayment(code, 'signet', '', 'uncertain-request');
+    const [offer] = await quotePaymentOffers(preview);
+    await expect(executePaymentOffer(preview, offer, 'uncertain-attempt')).resolves.toEqual({ status: 'unknown', detail });
+    expect(execute).toHaveBeenCalledTimes(1);
+  } finally { disconnect(); }
+});

@@ -143,3 +143,21 @@ test('retries a failed cloud upload even after rgb-lib cleared its dirty flag', 
   await runRgbBackup();
   expect(mockUpload).toHaveBeenCalledTimes(2);
 });
+
+test('an upload from the previous network cannot mark the new network backed up', async () => {
+  let finish!: () => void;
+  let started!: () => void;
+  const uploaded = new Promise<void>(resolve => { started = resolve; });
+  mockUpload.mockImplementationOnce(async (_c, _p, data) => {
+    started();
+    await new Promise<void>(resolve => { finish = resolve; });
+    return { version: 1, size: data.length, chunks: 1, sha256: 'x', createdAt: 123 };
+  });
+  const pending = runRgbBackup(true);
+  await uploaded;
+  setRgbBackupContext({ mnemonic: 'seed', network: 'signet', account: () => account });
+  expect(rgbBackupStatus()).toEqual({ state: 'idle' });
+  finish();
+  await pending;
+  expect(rgbBackupStatus()).toEqual({ state: 'idle' });
+});

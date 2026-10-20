@@ -199,7 +199,7 @@ function DashboardTabs() {
         name="Mind"
         component={MindTabScreen}
         options={{
-          tabBarLabel: 'Agent',
+          tabBarLabel: 'Mind',
           tabBarIcon: ({ focused, color }: TabBarIconProps) => (
             <MindCharacterBadge size={24} color={color} focused={focused} />
           ),

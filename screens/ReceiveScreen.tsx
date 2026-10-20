@@ -1,3 +1,4 @@
+import { ActionableError } from '../components/ActionableError';
 import { depositAmountLabel } from '../utils/deposit-receipt';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { BridgeEntryCard } from '../components/receive/BridgeEntryCard';
@@ -1685,7 +1686,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
   const claimsOnDevice = receiveMethods.some((m) => m.layer === 'lightning' && (m.protocol === 'ARKADE' || m.protocol === 'BARK'));
   const detectedAmount = depositAmountLabel(depositMonitor.amount, depositMonitor.assetId, rgbAssets);
   const renderStatus = () => (
-    <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message} amountLabel={detectedAmount}
+    <ReceiveStatus visible={monitorVisible} status={monitorStatus} message={depositMonitor.message} amountLabel={detectedAmount} requestOnly={selectedAsset.isRGB}
       hint={claimsOnDevice ? 'Keep this screen open until it arrives' : undefined} />
   );
 
@@ -1707,7 +1708,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       return (
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color={theme.colors.error[500]} />
-          <Text style={styles.errorText}>{unifiedError}</Text>
+          <ActionableError message={unifiedError} context="receive" />
           <TouchableOpacity style={styles.retryButton} onPress={() => generateUnifiedUri()} activeOpacity={0.7}>
             <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
@@ -1806,7 +1807,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       return (
         <View style={styles.errorContainer}>
           <Ionicons name="alert-circle" size={48} color={theme.colors.error[500]} />
-          <Text style={styles.errorText}>{error}</Text>
+          <ActionableError message={error} context="receive" />
           <TouchableOpacity 
             style={styles.retryButton} 
             onPress={generateAddress}
@@ -1916,19 +1917,10 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
             onOpenOffer={() => { cancelReceiveWork(); navigation.navigate('MerchantOffer'); }}
           />
         ) : <>
+          {renderAssetTabs()}
           {renderOptionsPill()}
           {renderContent()}
-          {showRgbAdvanced && (
-            <RgbReceiveAdvanced
-              support={rgbSupport}
-              options={rgbOptions}
-              onChange={changeRgbOptions}
-              requestExpirySeconds={expirySeconds}
-              utxos={rgbUtxos}
-              onLoadUtxos={() => { void loadRgbUtxos(); }}
-              onCreateUtxos={rgbSupport.createUtxos ? () => setShowCreateUtxos(true) : undefined}
-            />
-          )}
+
           {networkType === 'bark' && arkadeSubMode === 'boarding' && <BarkBoardingPanel />}
           {/* With a QR on screen the status sits right under it; otherwise here. */}
           {!qrOnScreen && renderStatus()}
@@ -1939,6 +1931,17 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       {/* Everything that shapes the request, one tap away instead of above the QR. */}
       <Sheet visible={showOptions} onClose={() => setShowOptions(false)} title="Receive options">
         <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {showRgbAdvanced && (
+            <RgbReceiveAdvanced
+              support={rgbSupport}
+              options={rgbOptions}
+              onChange={changeRgbOptions}
+              requestExpirySeconds={expirySeconds}
+              utxos={rgbUtxos}
+              onLoadUtxos={() => { void loadRgbUtxos(); }}
+              onCreateUtxos={rgbSupport.createUtxos ? () => afterOptions(() => setShowCreateUtxos(true)) : undefined}
+            />
+          )}
           <Text style={styles.optionsCaption}>Asset</Text>
           {renderAssetTabs()}
           <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showOtherAssets }} onPress={() => setShowOtherAssets(v => !v)} style={styles.rgbEntry}>

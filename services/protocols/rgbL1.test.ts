@@ -171,3 +171,18 @@ describe('one RGB wallet per network', () => {
     expect(await rgbL1HomeNetwork('seed a')).toBe('mainnet');
   });
 });
+
+
+test('Signet and Testnet have isolated data, settings and readiness', async () => {
+  const { claimRgbL1DataFolder, markRgbL1Ready, readyRgbL1Networks, saveRgbL1Endpoints, loadRgbL1Host } = require('./rgbL1');
+  await markRgbL1Ready('seed a', 'mutinynet');
+  for (const network of ['signet', 'testnet']) {
+    await saveRgbL1Network('seed a', network as any);
+    expect(await loadRgbL1Network('seed a')).toBe(network);
+    expect(await claimRgbL1DataFolder('seed a', network)).toBe(`rgb-${network}`);
+    await markRgbL1Ready('seed a', network);
+  }
+  expect(await readyRgbL1Networks('seed a')).toEqual(['mutinynet', 'signet', 'testnet']);
+  await saveRgbL1Endpoints('seed a', 'signet', { indexerUrl: 'https://custom.example', transportEndpoint: 'rpcs://proxy.example' });
+  expect((await loadRgbL1Host('seed a', 'testnet')).indexerUrl).toBe('https://blockstream.info/testnet/api');
+});

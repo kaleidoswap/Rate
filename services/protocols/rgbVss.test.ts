@@ -39,8 +39,8 @@ test('a backup uploads its chunks before the manifest, signed, to the store', as
   expect(manifest).toEqual(expect.objectContaining({ size: VSS_CHUNK_SIZE + 10, chunks: 2, createdAt: 42 }));
   expect(calls.map((c) => c.url)).toEqual(Array(3).fill('https://vss.example/vss/putObjects'));
   const keys = calls.map((c) => Buffer.from(c.body).toString('latin1'));
-  expect(keys[0]).toContain('rgb-backup-file/chunk/0');
-  expect(keys[1]).toContain('rgb-backup-file/chunk/1');
+  expect(keys[0]).toContain(`rgb-backup-file/versions/${manifest.sha256}/chunk/0`);
+  expect(keys[1]).toContain(`rgb-backup-file/versions/${manifest.sha256}/chunk/1`);
   expect(keys[2]).toContain('rgb-backup-file/manifest');
   expect(calls.every((c) => /^[0-9a-f]{194}\d+$/.test(c.auth))).toBe(true);
 });
@@ -60,13 +60,47 @@ test('a download is the uploaded file, checked against its manifest', async () =
   };
   expect(await downloadBackupFile(client, 'rgb-backup-file')).toBeUndefined();
   const data = new Uint8Array(VSS_CHUNK_SIZE * 2 + 3).map((_, i) => i % 251);
-  await uploadBackupFile(client, 'rgb-backup-file', data, 42);
+  const manifest = await uploadBackupFile(client, 'rgb-backup-file', data, 42);
   const got = await downloadBackupFile(client, 'rgb-backup-file');
   expect(got?.manifest.createdAt).toBe(42);
   expect(Buffer.from(got!.data).equals(Buffer.from(data))).toBe(true);
   // A changed or missing chunk is refused, not restored.
-  store.set('rgb-backup-file/chunk/1', new Uint8Array(VSS_CHUNK_SIZE));
+  store.set(`rgb-backup-file/versions/${manifest.sha256}/chunk/1`, new Uint8Array(VSS_CHUNK_SIZE));
   await expect(downloadBackupFile(client, 'rgb-backup-file')).rejects.toThrow(/damaged/);
-  store.delete('rgb-backup-file/chunk/2');
+  store.delete(`rgb-backup-file/versions/${manifest.sha256}/chunk/2`);
   await expect(downloadBackupFile(client, 'rgb-backup-file')).rejects.toThrow(/incomplete/);
+});
+
+ test('an interrupted replacement leaves the published backup readable', async () => {
+  const store = new Map<string, Uint8Array>();
+  let remaining = Infinity;
+  const client: VssClient = {
+    async put(items) { if (--remaining < 0) throw new Error('offline'); for (const item of items) store.set(item.key, item.value); },
+    async get(key) { return store.get(key); },
+  };
+  const original = new Uint8Array(VSS_CHUNK_SIZE + 1).fill(1);
+  await uploadBackupFile(client, 'backup', original);
+  remaining = 1;
+  await expect(uploadBackupFile(client, 'backup', new Uint8Array(VSS_CHUNK_SIZE + 1).fill(2))).rejects.toThrow('offline');
+  expect((await downloadBackupFile(client, 'backup'))?.data).toEqual(original);
+});
+
+test('legacy v1 backups remain readable', async () => {
+  const data = new Uint8Array([4, 5]);
+  const manifest = { version: 1, size: 2, chunks: 1, sha256: Buffer.from(sha256(data)).toString('hex'), createdAt: 1 };
+  const client: VssClient = { put: async () => {}, get: async key => key.endsWith('/manifest') ? utf8ToBytes(JSON.stringify(manifest)) : key === 'old/chunk/0' ? data : undefined };
+  expect((await downloadBackupFile(client, 'old'))?.data).toEqual(data);
+});
+
+test('a stalled backup request times out and aborts instead of returning no backup', async () => {
+  jest.useFakeTimers();
+  let signal: AbortSignal | undefined;
+  const fetchImpl: any = (_url: string, init: any) => { signal = init.signal; return new Promise(() => {}); };
+  try {
+    const client = createVssClient('https://v', 's', vssSigningKey(MNEMONIC), fetchImpl);
+    const pending = expect(client.get('manifest')).rejects.toThrow('30 seconds');
+    await jest.advanceTimersByTimeAsync(30_001);
+    await pending;
+    expect(signal?.aborted).toBe(true);
+  } finally { jest.useRealTimers(); }
 });

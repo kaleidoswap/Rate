@@ -35,7 +35,6 @@ import { activityExplorerUrl } from '../utils/explorer';
 import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, rgbOnchainKindLabel, canDeleteRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
 import { cancelRgbTransfer, deleteRgbTransfer } from '../services/rgbWallet';
 import { rgbAccountAdapter } from '../services/protocols';
-import { ExplainButton } from './mind/ExplainSheet';
 import { middleEllipsis } from './receive/ReceiveRequestDetails';
 
 interface Props {
@@ -83,8 +82,9 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const theme = useAppTheme();
     const styles = useMemo(() => createStyles(theme), [theme]);
     const unit = useAppSelector(state => state.settings.bitcoinUnit);
-    const [checking, setChecking] = useState(false);
-    const [checkMessage, setCheckMessage] = useState('');
+    const [detailsExpanded, setDetailsExpanded] = useState(false);
+    const [cancelledId, setCancelledId] = useState<string | null>(null);
+    useEffect(() => { setDetailsExpanded(false); setCancelledId(null); }, [item?.id]);
     const [accelerating, setAccelerating] = useState(false);
     useEffect(() => setAccelerating(false), [item?.id]);
     const [cancelling, setCancelling] = useState(false);
@@ -105,9 +105,10 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     if (!item) return null;
 
     const v = typeVisual(item.type);
-    const st = ACTIVITY_STATUS_VISUAL[item.status];
+    const cancelled = cancelledId === item.id;
+    const st = ACTIVITY_STATUS_VISUAL[cancelled ? 'failed' : item.status];
     const onchain = item.source === 'onchain' || item.layer === 'L1' || item.layer === 'RGB-L1';
-    const statusLabel = onchain && item.status === 'pending' ? 'Awaiting confirmation' : onchain && item.status === 'confirmed' ? 'Confirmed on-chain' : st.label;
+    const statusLabel = cancelled ? 'Cancelled' : onchain && item.status === 'pending' ? 'Awaiting confirmation' : onchain && item.status === 'confirmed' ? 'Confirmed on-chain' : st.label;
     const hasAmount = item.amount !== '';
     const isIncoming = item.type === 'receive' || item.type === 'issuance';
     const txLabel = item.crossChain ? 'Order ID' : item.paymentHash ? 'Payment hash' : 'Transaction ID';
@@ -117,7 +118,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const proofVerified = !!proof && !!proofHash && preimageMatches(proof.preimage, proofHash);
     const target = accelerationTarget(item);
     const explorerUrl = activityExplorerUrl(item);
-    const rgb = item.rgbTransfer;
+    const rgb = item.rgbTransfer && cancelled ? { ...item.rgbTransfer, status: 'failed' as const } : item.rgbTransfer;
     const rgbAdapter = rgb ? rgbAccountAdapter() : null;
     const rgbSupport = rgbWalletSupport(rgbAdapter);
     const cancellable = !!rgb && canCancelRgbTransfer(rgb, rgbSupport);
@@ -147,7 +148,6 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
         {new Date(item.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
     </Text> });
     if (item.fee != null) details.push({ key: 'fee', label: 'Fee', value: <View style={styles.rowWithAction}>
-        <ExplainButton compact subject={{ type: 'fee', item }} />
         <Text style={styles.rowValue}>{`${formatBitcoinAmount(item.fee, unit)} ${unit}`}</Text>
     </View> });
     if (item.txid) details.push({ key: 'txid', label: txLabel, value: <View style={styles.rowWithAction}>
@@ -196,8 +196,11 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                         setCancelling(true); setCancelMessage('');
                         try {
                             const failed = await cancelRgbTransfer(rgbAdapter, rgb.batchTransferIdx!);
+                            if (failed) setCancelledId(item.id);
                             setCancelMessage(failed ? 'Cancelled.' : 'This transfer can no longer be cancelled.');
-                            await onRefresh?.();
+                            if (failed) {
+                                try { await onRefresh?.(); } catch { /* Cancellation already succeeded. */ }
+                            } else { await onRefresh?.(); }
                         } catch (e) {
                             setCancelMessage(rgbWalletErrorMessage(e, 'cancel'));
                         } finally {
@@ -233,20 +236,23 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     <Text style={styles.typeLabel}>{typeLabel(item)}</Text>
                     {hasAmount && (
                         <Text style={[styles.amount, { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary }]}>
-                            {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
+                            {cancelled || item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
                         </Text>
                     )}
                     {/* Status: an RGB transfer's own step reads better than "Confirmed on-chain" + "Settled". */}
                     <View style={styles.headerStatus}>
                         <View style={[styles.statusPill, { backgroundColor: st.color + '1A' }]}>
                             <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                            <Text style={[styles.statusText, { color: st.color }]}>{rgb && rgb.status !== 'settled' ? RGB_TRANSFER_STATUS_LABEL[rgb.status] : statusLabel}</Text>
+                            <Text style={[styles.statusText, { color: st.color }]}>{cancelled ? 'Cancelled' : rgb && rgb.status !== 'settled' ? RGB_TRANSFER_STATUS_LABEL[rgb.status] : statusLabel}</Text>
                         </View>
-                        <ExplainButton compact subject={rgb ? { type: 'rgb-transfer', item } : { type: 'activity', item }} />
                     </View>
                     {!!statusDetail && <Text style={styles.statusDetail}>{statusDetail}</Text>}
                 </View>
 
+                    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: detailsExpanded }} style={styles.closeButton} onPress={() => setDetailsExpanded(!detailsExpanded)}>
+                        <Text style={styles.closeButtonText}>{detailsExpanded ? 'Hide details' : 'Payment details'}</Text>
+                    </TouchableOpacity>
+                    {detailsExpanded && <>
                     <View style={styles.card}>
                         {details.map((row, i) => <View key={row.key} style={[styles.row, i > 0 && styles.rowDivider]}>
                             <Text style={styles.rowLabel}>{row.label}</Text>
@@ -313,11 +319,17 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             )}
                         </View>
                     )}
+                    </>}
                     {cancellable && (
                         <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={cancelTransfer} activeOpacity={0.8}>
                             <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Cancelling…' : rgb?.direction === 'incoming' ? 'Cancel invoice' : 'Cancel transfer'}</Text>
                         </TouchableOpacity>
                     )}
+                    {rgb && item.status === 'pending' && !cancelled && !cancellable && <Text style={styles.rowLabel}>
+                        {rgb.status === 'waiting-counterparty'
+                            ? 'Cancellation is unavailable for this account. Check the transfer in the connected RGB wallet.'
+                            : 'This transfer cannot be cancelled at this stage. Check its status for updates.'}
+                    </Text>}
                     {removable && (
                         <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={removeTransfer} activeOpacity={0.8}>
                             <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Removing…' : 'Remove from history'}</Text>
@@ -330,13 +342,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             <Text style={styles.accelerateButtonText}>Accelerate</Text>
                         </TouchableOpacity>
                     )}
-                    {onRefresh && <TouchableOpacity accessibilityRole="button" disabled={checking} style={styles.closeButton} onPress={async () => {
-                        setChecking(true); setCheckMessage('');
-                        try { const refreshed = await onRefresh(); setCheckMessage(refreshed === false ? 'Some accounts could not be checked. Try again when connected.' : 'Latest available activity checked.'); }
-                        catch { setCheckMessage('Could not check the status. Try again.'); }
-                        finally { setChecking(false); }
-                    }}><Text style={styles.closeButtonText}>{checking ? 'Checking…' : 'Check status'}</Text></TouchableOpacity>}
-                    {!!checkMessage && <Text accessibilityLiveRegion="polite" style={styles.rowLabel}>{checkMessage}</Text>}
+
                 </ScrollView>
                 </>)}
 

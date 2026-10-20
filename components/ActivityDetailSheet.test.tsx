@@ -35,6 +35,7 @@ test('a transfer waiting for the sender shows its progress and can be cancelled 
   const onRefresh = jest.fn(async () => true);
   const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'incoming', batchTransferIdx: 7 })} onClose={jest.fn()} onRefresh={onRefresh} />);
   expect(screen.getByText('Waiting for the other side')).toBeTruthy();
+  expect(screen.queryByText('Check status')).toBeNull();
   expect(screen.getByText(/Your invoice is open/)).toBeTruthy();
   fireEvent.press(screen.getByText('Cancel invoice'));
   const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
@@ -76,12 +77,38 @@ test('a failed transfer can be removed from history where the wallet can, after 
   mockCaps = {};
 });
 
-test('Explain opens a plain explanation of this exact transfer, even with KaleidoMind off', async () => {
-  const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'incoming', batchTransferIdx: 7 })} onClose={jest.fn()} />);
-  await act(async () => { fireEvent.press(screen.getByText('Explain')); });
-  expect(screen.getByText('About this RGB transfer')).toBeTruthy();
-  expect(screen.getByText(/This is an RGB transfer of 5 USDT\. Its current step is “Waiting for the other side”/)).toBeTruthy();
-  expect(screen.getByText(/Built-in explanation/)).toBeTruthy();
+test('technical details stay collapsed until requested', () => {
+  const screen = render(<ActivityDetailSheet item={{ ...item(undefined), txid: 'receipt-id', status: 'confirmed' }} onClose={jest.fn()} onRefresh={jest.fn()} />);
+  expect(screen.queryByText('receipt-id')).toBeNull();
+  expect(screen.queryByText('Check status')).toBeNull();
+  fireEvent.press(screen.getByText('Payment details'));
+  expect(screen.getByText('receipt-id')).toBeTruthy();
+  fireEvent.press(screen.getByText('Hide details'));
+  expect(screen.queryByText('receipt-id')).toBeNull();
+});
+
+test('successful cancellation immediately enables removal even before refreshed history arrives', async () => {
+  mockCaps = { deleteTransfers: true };
+  const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'outgoing', batchTransferIdx: 7 })} onClose={jest.fn()} />);
+  fireEvent.press(screen.getByText('Cancel transfer'));
+  const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
+  await act(async () => { await buttons.find((b: any) => b.text === 'Cancel transfer').onPress(); });
+  expect(screen.queryByText('Cancel transfer')).toBeNull();
+  expect(screen.getByText('Remove from history')).toBeTruthy();
+  expect(screen.getByText('Cancelled')).toBeTruthy();
+  mockCaps = {};
+});
+
+test('a rejected cancellation does not enable deletion', async () => {
+  mockCaps = { deleteTransfers: true };
+  mockCancel.mockResolvedValueOnce(false);
+  const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'outgoing', batchTransferIdx: 7 })} onClose={jest.fn()} />);
+  fireEvent.press(screen.getByText('Cancel transfer'));
+  const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
+  await act(async () => { await buttons.find((b: any) => b.text === 'Cancel transfer').onPress(); });
+  expect(screen.queryByText('Remove from history')).toBeNull();
+  expect(screen.getByText('This transfer can no longer be cancelled.')).toBeTruthy();
+  mockCaps = {};
 });
 
 test('details are condensed: the asset id can be copied, no "Not provided" fee, one line for method and network', () => {

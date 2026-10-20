@@ -1,4 +1,4 @@
-import { PaymentReceiptDetails } from '../components/PaymentReceiptDetails';
+import { rgbAmountUnits } from '../utils/rgb-amount';
 import { paymentPollingRemaining, awaitingOnchainConfirmation, paymentPresentation } from '../utils/payment-presentation';
 import { checkOnchainConfirmation } from '../services/kaleidoPay/onchainConfirmation';
 import { PaymentOutcome } from '../components/payments/PaymentOutcome';
@@ -26,7 +26,6 @@ import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
 import { SendDestinationsHint } from '../components/payments/SendDestinationsHint';
 import { CrossChainSendPanel } from '../components/payments/CrossChainSendPanel';
-import { LIGHTNING_ADDRESS } from '../utils/account-routing';
 import { detectCrossChainAddress } from '../utils/crosschain';
 import { isUnresolved, unwrapCrossChainUri } from '../utils/crosschain-send';
 import { loadCrossChainSession } from '../services/crosschainSend';
@@ -45,7 +44,7 @@ import { useForegroundClock } from '../hooks/useForegroundClock';
 import { formatBitcoinAmount, formatSatoshisToUSD } from '../utils/bitcoinUnits';
 import {
   KALEIDOPAY_DEMO, decodeTarget, prepareKaleidoPay, railLabel, previewInput, quotePaymentOffers, quoteSpend, formatSpend,
-  bestOffer, executePaymentOffer, checkPaymentStatus, PaymentNotSentError,
+  bestOffer, executePaymentOffer, checkPaymentStatus, paymentAccountNetwork, PaymentNotSentError,
 } from '../services/kaleidoPay';
 import type { PayTarget, Preview, PaymentOffer, RequestAsset } from '../services/kaleidoPay';
 import { usePayAccounts, inspectRgbRequest, prepareRgbRequest, prepareSparkTokenRequest, sendableSparkTokens } from '../services/kaleidoPay/connect';
@@ -55,7 +54,7 @@ import { rgbL1FeeOptions, setRgbL1FeeSpeed, type RgbFeeSpeed } from '../services
 import { SegmentedTabs } from '../components/SegmentedTabs';
 import { loadPaymentAttempt, beginPaymentAttempt, savePaymentAttempt, updatePaymentAttempt, unresolvedAttempt, dismissPaymentAttempt } from '../services/kaleidoPay/attempts';
 import type { PaymentAttempt } from '../services/kaleidoPay/attempts';
-import { ExplainButton } from '../components/mind/ExplainSheet';
+import { ActionableError } from '../components/ActionableError';
 
 interface Props { navigation: any; route: any }
 
@@ -105,6 +104,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const [assetAmount, setAssetAmount] = useState('');
   const [rgbChoices, setRgbChoices] = useState<RgbRequestAsset[]>([]);
   const [rgbReading, setRgbReading] = useState(false);
+  const [rgbBitcoin, setRgbBitcoin] = useState<number>();
   const [rgbAsset, setRgbAsset] = useState<RgbRequestAsset | null>(null);
   // A Spark address can be paid in bitcoin or in a Spark token the wallet holds (e.g. USDB).
   const [sparkTokenList, setSparkTokenList] = useState<SparkToken[]>([]);
@@ -158,15 +158,15 @@ export default function SendScreen({ navigation, route }: Props) {
   useEffect(() => {
     revision.current++;
     setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setPreviousTotal('');
-  }, [input, amountSat, assetAmount, sparkToken]);
+  }, [input, amountSat, assetAmount, sparkToken, rgbAsset?.id]);
   useEffect(() => { setRgbAsset(null); setAssetAmount(''); setSparkToken(null); }, [input]);
   useEffect(() => {
     let active = true;
-    setRgbChoices([]);
+    setRgbChoices([]); setRgbBitcoin(undefined);
     if (target?.kind !== 'rgb') { setRgbReading(false); return; }
     setRgbReading(true);
     void inspectRgbRequest(target.rgbInvoice!).then(result => {
-      if (active) { setRgbAsset(result.asset); setRgbChoices(result.choices); if (!result.asset && !result.choices.length) setError('No spendable RGB assets in the connected wallet.'); }
+      if (active) { setRgbAsset(result.asset); setRgbChoices(result.choices); setRgbBitcoin(result.bitcoinAvailable); if (!result.asset && !result.choices.length) setError('No spendable RGB assets in the connected wallet.'); }
     }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setRgbReading(false); });
     return () => { active = false; };
   }, [input]);
@@ -248,9 +248,10 @@ export default function SendScreen({ navigation, route }: Props) {
         const decoded = await prepareRgbRequest(target.rgbInvoice!, undefined, rgbAsset?.id);
         if (current !== revision.current) return;
         if (!rgbAsset) setRgbAsset(decoded);
-        const units = Number(assetAmount);
-        if (!decoded.amount && !(units > 0)) { setError(`Enter how much ${decoded.ticker} to send.`); return; }
-        asset = { id: decoded.id, ticker: decoded.ticker, precision: decoded.precision, amount: decoded.amount ?? Math.round(units * 10 ** decoded.precision) };
+        const units = rgbAmountUnits(assetAmount, decoded.precision);
+        if (!decoded.amount && units === undefined) { setError(`Enter how much ${decoded.ticker} to send.`); return; }
+        if (rgbAsset?.available !== undefined && (decoded.amount ?? units!) > rgbAsset.available) { setError(`Not enough ${decoded.ticker}. Available: ${formatSpend(rgbAsset.available, rgbAsset)}.`); return; }
+        asset = { id: decoded.id, ticker: decoded.ticker, precision: decoded.precision, amount: decoded.amount ?? units! };
       } else if (!sparkToken) {
         prepareSparkTokenRequest(null);
       } else {
@@ -317,7 +318,7 @@ export default function SendScreen({ navigation, route }: Props) {
     if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || quote.expiresAt * 1000 <= Date.now() || !selected.executable || unresolvedAttempt(attempt)) return;
     paying.current = true; setBusy(true); setError('');
     const recipient = preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat);
-    const next: PaymentAttempt = { destinationRail: selected.route.to, network: preview.request.network, recipientName, feeDisplay: spend ? displaySpend(spend.fee, spend.asset) : undefined, accountName: selected.accountName || selected.provider, id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
+    const next: PaymentAttempt = { destinationRail: selected.route.to, network: paymentAccountNetwork(selected.route.sourceId) ?? preview.request.network, recipientName, feeDisplay: spend ? (selected.route.sourceId === 'rgb-asset' ? `~${selected.quote?.feeSat ?? 0} sats (BTC)` : displaySpend(spend.fee, spend.asset)) : undefined, accountName: selected.accountName || selected.provider, id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
     try {
       await beginPaymentAttempt(walletId, next); // No send unless the recovery record is durable.
     } catch {
@@ -341,7 +342,7 @@ export default function SendScreen({ navigation, route }: Props) {
       try { await updatePaymentAttempt(walletId, updated); }
       catch { setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
     } catch (e) {
-      const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown' };
+      const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown', detail: e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.' };
       setAttempt(updated);
       resultCue(updated.status);
       logForContact(updated.status, updated.reference);
@@ -366,6 +367,10 @@ export default function SendScreen({ navigation, route }: Props) {
   // `quiet`: a background re-check, which neither blocks the screen nor reports its own failure.
   async function checkStatus(quiet = false) {
     if (!attempt || !walletId || paying.current || checking.current) return;
+    if (RGB_ONCHAIN_SOURCES.has(attempt.sourceId) && attempt.network && paymentAccountNetwork(attempt.sourceId) !== attempt.network) {
+      if (!quiet) setError(`Connect your RGB wallet on ${attempt.network} to verify this payment.`);
+      return;
+    }
     const lock = quiet ? checking : paying;
     lock.current = true; setStatusChecking(true);
     if (!quiet) { setBusy(true); setError(''); }
@@ -460,7 +465,6 @@ export default function SendScreen({ navigation, route }: Props) {
       subtitle: swap ? [`Swap to ${railLabel(o.route.to)}`, o.providerDetail].filter(Boolean).join(' · ') : `${railLabel(o.route.to)}, direct`,
       preferred: !swap && !!preview && railOf(o.route.to) === railOf(preview.request.acceptedRails[0] ?? '') };
   });
-  const liveOptions = options.filter(o => !o.unavailable).length;
   const shownSat = fixedSat ?? amountSat;
   const usdOf = (sats: number) => usd ? `≈ $${formatSatoshisToUSD(sats, usd)}` : '';
   const selectedAccount = selected ? offerAccount(selected) : null;
@@ -537,7 +541,7 @@ export default function SendScreen({ navigation, route }: Props) {
 
     {target?.kind === 'rgb' && rgbChoices.length > 0 && <View style={{ gap: t.spacing[2], marginTop: t.spacing[3] }}>
       <Text style={caption}>Pay with</Text>
-      {rgbChoices.map(asset => <Button key={asset.id} title={`${asset.ticker}${rgbAsset?.id === asset.id ? ' ✓' : ''}`} variant={rgbAsset?.id === asset.id ? 'secondary' : 'ghost'} onPress={() => { setRgbAsset(asset); setAssetAmount(''); }} />)}
+      {rgbChoices.map(asset => <Button key={asset.id} title={`${asset.ticker}${asset.available === undefined ? '' : ` · ${formatSpend(asset.available, asset)} available`}${rgbAsset?.id === asset.id ? ' ✓' : ''}`} variant={rgbAsset?.id === asset.id ? 'secondary' : 'ghost'} onPress={() => { setRgbAsset(asset); setAssetAmount(''); }} />)}
     </View>}
     {sparkAddressTarget && sparkTokenList.length > 0 && <View style={{ marginTop: t.spacing[4], gap: t.spacing[2] }}>
       <Text style={caption}>Pay in</Text>
@@ -572,10 +576,20 @@ export default function SendScreen({ navigation, route }: Props) {
       <TextInput accessibilityLabel={`Amount in ${sparkToken.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount} autoFocus
         placeholder="0" placeholderTextColor={t.colors.text.muted} style={{ ...text, fontSize: t.typography.fontSize['2xl'], paddingVertical: t.spacing[2] }} />
       <Text style={small}>{formatSpend(sparkToken.available, sparkToken)} available · sent over Spark, no fee</Text>
-    </View> : target?.kind === 'rgb' ? (rgbAsset && !rgbAsset.amount ? <View style={[card, { marginTop: t.spacing[3] }]}>
+    </View> : target?.kind === 'rgb' ? (rgbAsset ? <View style={[card, { marginTop: t.spacing[4], gap: t.spacing[3] }]}>
+      <Text style={caption}>Asset to send · {rgbAsset.ticker}</Text>
+      <Text style={text}>{rgbAsset.available === undefined ? 'Available balance could not be loaded' : `Available: ${formatSpend(rgbAsset.available, rgbAsset)}`}</Text>
+      {rgbBitcoin !== undefined && <Text style={small}>Bitcoin available for fees: {formatSats(rgbBitcoin)}</Text>}
       <Text style={text}>Amount in {rgbAsset.ticker}</Text>
-      <TextInput accessibilityLabel={`Amount in ${rgbAsset.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount}
-        placeholder={`Amount in ${rgbAsset.ticker}`} placeholderTextColor={t.colors.text.muted} style={{ ...text, paddingVertical: t.spacing[3] }} />
+      {rgbAsset.amount ? <>
+        <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'] }}>{formatSpend(rgbAsset.amount, rgbAsset)}</AmountText>
+        <Text style={small}>Amount set by the invoice</Text>
+      </> : <>
+        <TextInput accessibilityLabel={`Amount in ${rgbAsset.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount}
+          placeholder="0" placeholderTextColor={t.colors.text.muted} style={{ ...text, fontSize: t.typography.fontSize['3xl'], paddingVertical: t.spacing[3], borderBottomWidth: 1, borderColor: t.colors.primary[500] }} />
+        {rgbAsset.available !== undefined && <Button title={`Use available ${rgbAsset.ticker}`} variant="ghost" onPress={() => setAssetAmount((rgbAsset.available! / 10 ** rgbAsset.precision).toFixed(rgbAsset.precision))} />}
+        <Text style={small}>Enter the amount to send. Bitcoin is needed separately for network fees.</Text>
+      </>}
     </View> : null) : target && fixedSat === undefined ? (
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={shownSat ? `Amount, ${formatSats(shownSat)}. Change` : 'Add amount'} onPress={() => setShowAmountEditor(true)}
         style={{ alignItems: 'center', gap: 2, paddingVertical: t.spacing[5] }}>
@@ -611,6 +625,24 @@ export default function SendScreen({ navigation, route }: Props) {
   const renderReview = () => {
     if (!preview) return null;
     const amountLabel = preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat);
+    if (preview.code.kind === 'rgb') return <View style={{ gap: t.spacing[4] }}>
+      <Text style={caption}>Review RGB transfer</Text>
+      <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '700' }}>{amountLabel}</AmountText>
+      <Text style={muted} numberOfLines={2}>To {recipientName}</Text>
+      <View style={[card, { gap: t.spacing[3] }]}>
+        <Text style={text}>{selected?.accountName || 'RGB wallet'} · {selected ? paymentAccountNetwork(selected.route.sourceId) ?? preview.request.network : preview.request.network}</Text>
+        <Text style={text}>{rgbAsset?.available === undefined ? 'Available balance could not be loaded' : `Available: ${formatSpend(rgbAsset.available, rgbAsset)}`}</Text>
+        {rgbBitcoin !== undefined && <Text style={text}>Bitcoin available for fees: {formatSats(rgbBitcoin)}</Text>}
+        <Text style={text}>Bitcoin network fee: {quote ? `approximately ${quote.feeSat} sats` : 'Not available'}</Text>
+        <Text style={small}>The recipient receives {amountLabel}. The network fee is paid separately in bitcoin.</Text>
+      </View>
+      {feeOptions && <SegmentedTabs<RgbFeeSpeed> scrollable={false} fill value={feeSpeed} onChange={chooseSpeed}
+        options={feeOptions.map(o => ({ key: o.speed, label: `${SPEED_LABEL[o.speed]} · ${formatSats(o.feeSat)}` }))} />}
+      {offers.filter(o => o.unavailable).map(o => <Text key={o.id} accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500] }}>{o.unavailable}</Text>)}
+      {expired && <Text style={muted}>Refresh the transfer details before sending.</Text>}
+      {busy && <ActivityIndicator color={t.colors.primary[500]} />}
+      <Button title="Edit amount or invoice" variant="secondary" onPress={resetToInput} />
+    </View>;
     const via = selected?.route.kind === 'swap';
     return <>
       <View style={{ alignItems: 'center', gap: 2, paddingTop: t.spacing[2], paddingBottom: t.spacing[4] }}>
@@ -622,13 +654,13 @@ export default function SendScreen({ navigation, route }: Props) {
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: t.spacing[2] }}>
         <Text style={caption}>Pay from</Text>
-        {liveOptions > 1 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Compare ways to pay" onPress={() => setShowProviders(true)} hitSlop={8}>
-          <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>Compare all ›</Text>
+        {options.length > 1 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change account" onPress={() => setShowProviders(true)} hitSlop={8}>
+          <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>Change account ›</Text>
         </TouchableOpacity>}
       </View>
 
       <View style={{ gap: t.spacing[2] }}>
-        {choices.map((c, i) => {
+        {choices.filter(c => c.account === selectedAccount).map((c, i) => {
           const active = c.account === selectedAccount;
           const shown = active && selected ? selected : c.best;
           const s = shown?.quote ? quoteSpend(shown.quote) : null;
@@ -658,7 +690,7 @@ export default function SendScreen({ navigation, route }: Props) {
         })}
       </View>
 
-      {selected && selectedAccount && <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: t.spacing[2], marginTop: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1, borderColor: t.colors.border.light }}>
+      {advanced && selected && selectedAccount && <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: t.spacing[2], marginTop: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1, borderColor: t.colors.border.light }}>
         <NetworkIcon network={selectedAccount.toLowerCase()} size={16} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }}>{selected?.accountName || PAY_ACCOUNT_NAME[selectedAccount]}</Text>
         <Ionicons name="arrow-forward" size={12} color={t.colors.text.tertiary} />
         {via && <><Ionicons name="swap-horizontal" size={15} color={t.colors.text.secondary} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }}>{selected.provider}</Text>
@@ -668,7 +700,10 @@ export default function SendScreen({ navigation, route }: Props) {
         <Ionicons name="person-circle-outline" size={16} color={t.colors.text.secondary} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }} numberOfLines={1}>{recipientName}</Text>
       </View>}
 
-      {spend && <View style={{ marginTop: t.spacing[3] }}><PaymentReceiptDetails details={{ amount: amountLabel, recipient: recipientName, fees: displaySpend(spend.fee, spend.asset), total, account: selected?.accountName || selected?.provider }} /></View>}
+      {spend && <View style={{ marginTop: t.spacing[3], gap: t.spacing[2], padding: t.spacing[4], backgroundColor: t.colors.surface.primary, borderRadius: t.borderRadius.lg }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={muted}>Fee</Text><AmountText style={text}>{displaySpend(spend.fee, spend.asset)}</AmountText></View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={text}>Total you pay</Text><AmountText style={{ ...text, fontWeight: '700' }}>{total}</AmountText></View>
+      </View>}
 
       {feeOptions && feeOption && <View style={{ marginTop: t.spacing[3], gap: t.spacing[2] }}>
         <Text style={caption}>Network fee</Text>
@@ -707,31 +742,19 @@ export default function SendScreen({ navigation, route }: Props) {
     const failed = a.status === 'failed';
     return <View style={{ gap: t.spacing[4] }}>
       <PaymentOutcome attempt={a} busy={busy} statusChecking={statusChecking} statusTimedOut={statusTimedOut} error={error} demo={KALEIDOPAY_DEMO} expanded={receiptExpanded} onExpandedChange={setReceiptExpanded} />
-      {unresolvedAttempt(a) && <Button title="View in Activity" variant="secondary" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} />}
-      {chainWaiting && <Button title="Check confirmation" variant="secondary" onPress={() => void checkStatus()} loading={statusChecking} disabled={statusChecking || busy} />}
-      {unresolvedAttempt(a) ? <>
-        <Button title="Verify payment" onPress={() => void checkStatus()} loading={busy || statusChecking} disabled={busy || statusChecking} />
-        {!busy && <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} />}
-      </> : <>
-        {done && <View style={{ flexDirection: 'row', gap: t.spacing[3] }}>
-          <Button title="View in Activity" variant="secondary" onPress={() => navigation.navigate('Dashboard', { screen: 'Activity' })} style={{ flex: 1 }} />
-          <Button title="Share receipt" variant="secondary" onPress={() => shareReceipt(a)} style={{ flex: 1 }} />
-        </View>}
-        {done && target?.kind === 'lnurl' && target.lnurl && LIGHTNING_ADDRESS.test(target.lnurl) && <>
-          <Button title="Pay again" variant="secondary" onPress={() => {
-            requestId.current = Crypto.randomUUID(); revision.current++;
-            attemptRef.current = null; setAttempt(null); setPreview(null); setOffers([]); setSelectedId(undefined);
-            setAmountSat(undefined); setAssetAmount(''); setError(''); setReviewUpdated(false); setPreviousTotal('');
-          }} />
-          {!contacts?.some(c => c.lightning_address?.toLowerCase() === target.lnurl?.toLowerCase()) && <Button title="Save contact" variant="ghost"
-            onPress={() => navigation.navigate('Dashboard', { screen: 'Contacts', params: { scannedContact: target.lnurl } })} />}
-        </>}
-        <Button title={failed ? 'Review a new quote' : 'Done'} onPress={() => { if (done) navigation.goBack(); else { setAttempt(null); if (preview) void getOffers(true); } }} />
-      </>}
+      {(unresolvedAttempt(a) || chainWaiting) && !busy && !statusChecking && <Button
+        title={chainWaiting ? 'Check confirmation' : 'Verify payment'} variant="secondary"
+        onPress={() => void checkStatus()} />}
+      {unresolvedAttempt(a) && !busy && <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} />}
+      {done && receiptExpanded && <Button title="Share receipt" variant="ghost" onPress={() => shareReceipt(a)} />}
+      {failed ? <Button title={a.sourceId === 'rgb-asset' ? 'Review transfer' : 'Review a new quote'}
+        onPress={() => { setAttempt(null); if (preview) void getOffers(true); }} />
+        : <Button title="Done" onPress={() => navigation.goBack()} />}
+
     </View>;
   };
 
-  const payLabel = total ? `Pay ${total}` : 'Pay';
+  const payLabel = total ? `${target?.kind === 'rgb' ? 'Send' : 'Pay'} ${total}` : 'Pay';
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: t.colors.background.primary }} edges={['left', 'right', 'bottom']}>
@@ -745,27 +768,23 @@ export default function SendScreen({ navigation, route }: Props) {
             <Ionicons name="flask-outline" size={16} color={t.colors.warning[500]} />
             <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: quotes are live, the payment step is simulated. No funds move.</Text>
           </View>}
-          {!!error && !attempt && <View accessibilityRole="alert" style={{ flexDirection: 'row', gap: t.spacing[2], alignItems: 'flex-start', marginBottom: t.spacing[4] }}>
-            <Ionicons name="alert-circle-outline" size={18} color={t.colors.warning[500]} />
-            <Text style={{ ...text, color: t.colors.warning[500], flex: 1 }}>{error}</Text>
-            <ExplainButton compact subject={{ type: 'error', context: 'send', message: error }} />
-          </View>}
+          {!!error && !attempt && <ActionableError message={error} context="send" />}
           {journalUnreadable && !attempt && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} style={{ marginBottom: t.spacing[4] }} />}
           {attempt ? renderResult(attempt) : preview ? renderReview() : renderInput()}
         </ScrollView>}
         {!crossChain && !attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
           {!preview
-            ? <Button title={busy ? 'Getting quotes…' : 'Continue'} disabled={!target || busy || !journalReady || rgbReading || (target?.kind === 'rgb' && !rgbAsset)} onPress={review} />
+            ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Review transfer' : 'Continue')} disabled={!target || busy || !journalReady || rgbReading || (target?.kind === 'rgb' && !rgbAsset)} onPress={review} />
             : !quote || quote.expiresAt * 1000 <= Date.now() || selected?.unavailable
-              ? <Button title={busy ? 'Getting quotes…' : 'Refresh quotes'} disabled={busy} onPress={() => void getOffers(true)} />
+              ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh quotes')} disabled={busy} onPress={() => void getOffers(true)} />
               : reviewUpdated
-                ? <Button title="Review updated quote" disabled={busy} onPress={() => setReviewUpdated(false)} />
+                ? <Button title={target?.kind === 'rgb' ? 'Review updated transfer' : 'Review updated quote'} disabled={busy} onPress={() => setReviewUpdated(false)} />
                 : <SlideToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
           {preview && !walletId && <Text style={{ ...muted, textAlign: 'center' }}>Set up a wallet to pay.</Text>}
         </View>}
       </KeyboardAvoidingView>
       <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); setReviewUpdated(false); setPreviousTotal(''); }}
-        onClose={() => setShowProviders(false)} now={now} title="Ways to pay" intro="Same payment, every account that can pay it. Totals include every fee." />
+        onClose={() => setShowProviders(false)} now={now} title="Change account" intro="Choose an account for this payment. Available balances and totals include the quoted fees." />
       <AmountEditorModal visible={showAmountEditor} onClose={() => { continueAfterAmount.current = false; setShowAmountEditor(false); }} initialSats={amountSat} rates={rates} bitcoinUnit={bitcoinUnit}
         onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }} />
       <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)}

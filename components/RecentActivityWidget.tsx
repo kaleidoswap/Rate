@@ -17,23 +17,21 @@ import { useAppSelector } from '../store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
 import { theme } from '../theme';
-import { LAYER_LABEL, layerNetworkIcon } from '../utils/activity-layers';
-import { NetworkIcon } from './NetworkIcon';
+import { useAppTheme } from '../theme/ThemeProvider';
 import { SectionHeader } from './SectionHeader';
 import { ActivityDetailSheet } from './ActivityDetailSheet';
 import {
     type ActivityItem,
     type ActivityItemType,
-    type ActivityLayer,
     type AssetMeta,
 } from '../services/ActivityService';
-import { loadSwapAttemptActivity } from '../services/kaleidoPay/activity';
+import { loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND } from '../services/kaleidoPay/activity';
 import { useActivityFeed } from '../hooks/useActivityFeed';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
-import { RGB_TRANSFER_STATUS_LABEL } from '../utils/rgb-wallet';
 
 interface Props {
     onViewAll?: () => void;
+    onOpenPaymentAttempt?: (id: string) => void;
     /** Only this asset's items (an asset id, or 'BTC'), newest first. */
     assetId?: string;
     /** Swaps name the asset by ticker; matched too. */
@@ -78,7 +76,9 @@ function amountPrefix(type: ActivityItemType): string {
 
 const MAX_ITEMS = 4;
 
-export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, assetTicker, title = 'Activity', limit, style, refreshKey }) => {
+export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPaymentAttempt, assetId, assetTicker, title = 'Activity', limit, style, refreshKey }) => {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
     const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
@@ -132,30 +132,23 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
         const isIncoming = item.type === 'receive' || item.type === 'issuance' || item.type === 'swap';
         // Swaps carry the full "X sats → Y USDB" route in assetName; show it as a
         // subtitle so the route is visible without crowding the amount column.
-        const subtitle = item.type === 'swap' ? item.assetName
-            : item.rgbTransfer && item.status === 'pending' ? RGB_TRANSFER_STATUS_LABEL[item.rgbTransfer.status] : undefined;
+
 
         return (
             <TouchableOpacity
                 key={item.id}
                 activeOpacity={0.7}
                 style={styles.row}
-                onPress={() => setSelected(item)}
+                onPress={() => item.kind === PAYMENT_ATTEMPT_KIND && onOpenPaymentAttempt ? onOpenPaymentAttempt(item.id.replace('payment-attempt-', '')) : setSelected(item)}
             >
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={18} color={v.color} />
                 </View>
 
                 <View style={styles.rowBody}>
-                    <Text style={styles.rowTitle} numberOfLines={1}>{typeLabel(item.type)}</Text>
-                    {subtitle ? (
-                        <Text style={styles.rowSubtitle} numberOfLines={1}>{subtitle}</Text>
-                    ) : null}
+                    <Text style={styles.rowTitle} numberOfLines={1}>{item.contactName || typeLabel(item.type)}</Text>
                     <View style={styles.rowMeta}>
-                        <View style={styles.layerChip}>
-                            {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={11} />}
-                            <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
-                        </View>
+                        {item.timestamp != null && <Text style={styles.rowSubtitle}>{new Date(item.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Text>}
                         <View style={[styles.statusDot, { backgroundColor: st.color }]} />
                         <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
                     </View>
@@ -201,7 +194,7 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, assetId, asse
     );
 };
 
-const styles = StyleSheet.create({
+const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.create({
     container: {
         marginTop: theme.spacing[6],
         paddingHorizontal: theme.spacing[4],

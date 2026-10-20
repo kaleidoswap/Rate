@@ -96,7 +96,7 @@ export function usePayAccounts(walletId: number | undefined): void {
   }, [walletId]);
 }
 
-export type RgbRequestAsset = Omit<RequestAsset, 'amount'> & { amount?: number };
+export type RgbRequestAsset = Omit<RequestAsset, 'amount'> & { amount?: number; available?: number };
 let rgbAssetRegistration: (() => void) | null = null;
 
 /** The connected RGB wallet that can read and pay RGB invoices (the node, or RGB on this phone). */
@@ -166,14 +166,26 @@ export function arkadeReceiveOptions(): ArkadeLightningReceiveOptions | null {
 }
 
 /** Read the request before the user enters review; blank-asset invoices need an explicit choice. */
-export async function inspectRgbRequest(invoice: string): Promise<{ asset: RgbRequestAsset | null; choices: RgbRequestAsset[] }> {
+export async function inspectRgbRequest(invoice: string): Promise<{ asset: RgbRequestAsset | null; choices: RgbRequestAsset[]; bitcoinAvailable?: number }> {
   const adapter = rgbInvoiceWallet();
   if (!adapter?.decodeRgbInvoice) throw new Error('Connect your RGB wallet to read this invoice.');
   const decoded = await adapter.decodeRgbInvoice({ invoice });
-  if (decoded?.asset_id) return { asset: await prepareRgbRequest(invoice), choices: [] };
+  let bitcoinAvailable: number | undefined;
+  try {
+    const balance = await adapter.getBtcBalance();
+    if (Number.isSafeInteger(balance.confirmed) && balance.confirmed >= 0) bitcoinAvailable = balance.confirmed;
+  } catch { /* Keep an unavailable BTC balance distinct from zero. */ }
+  const withBalance = async (asset: RgbRequestAsset): Promise<RgbRequestAsset> => {
+    try {
+      const balance = await adapter.getAssetBalance?.(asset.id);
+      const available = Number(balance?.available) - Number(balance?.offchain_outbound ?? 0);
+      return Number.isSafeInteger(available) && available >= 0 ? { ...asset, available } : asset;
+    } catch { return asset; } // Unknown must not look like a zero balance.
+  };
+  if (decoded?.asset_id) return { asset: await withBalance(await prepareRgbRequest(invoice)), choices: [], bitcoinAvailable };
   const assets = await adapter.listAssets?.() ?? [];
   const choices = assets.filter(a => a.id !== 'BTC' && Number(a.balance?.available ?? a.balance?.spendable ?? 0) > 0)
     .map(a => ({ id: a.id, ticker: a.ticker || 'RGB', precision: a.precision ?? 0,
       ...(decoded?.assignment?.type === 'Fungible' && Number(decoded.assignment.value) > 0 ? { amount: Number(decoded.assignment.value) } : {}) }));
-  return { asset: null, choices };
+  return { asset: null, choices: await Promise.all(choices.map(withBalance)), bitcoinAvailable };
 }

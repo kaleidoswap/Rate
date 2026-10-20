@@ -42,3 +42,8 @@ build/
 
 # JetBrains IDE
 .idea/
+
+# Generated test reports
+coverage/
+
+.pnpm-store/

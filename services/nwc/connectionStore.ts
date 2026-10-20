@@ -83,6 +83,14 @@ export async function loadActiveNwcCredential(): Promise<{ id: string | null; ur
   return { id, uri };
 }
 
+/** Stop automatic reconnect without deleting the saved pairing (including legacy storage). */
+export async function deactivateNwcCredential(): Promise<void> {
+  const { id, uri } = await loadActiveNwcCredential();
+  if (uri) await saveNwcCredential(id ?? connectionIdForUri(uri), uri);
+  await SecureStore.deleteItemAsync(ACTIVE_NWC_CONNECTION_KEY);
+  await SecureStore.deleteItemAsync(ACTIVE_NWC_ID_KEY);
+}
+
 export async function removeNwcCredential(id: string): Promise<void> {
   await SecureStore.deleteItemAsync(credentialKey(id));
   const activeId = await SecureStore.getItemAsync(ACTIVE_NWC_ID_KEY);

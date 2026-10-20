@@ -1,11 +1,10 @@
 import { useAppTheme } from '../theme/ThemeProvider';
 import { AllocationBar } from './AllocationBar';
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, AccessibilityInfo } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Animated, AccessibilityInfo, Easing } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme, protocolColor } from '../theme';
 import { NetworkIcon } from './NetworkIcon';
-import { Skeleton } from './Skeleton';
 import { AmountText } from './AmountText';
 import { formatUsd, type BreakdownAssetRow } from '../utils/portfolio';
 
@@ -48,7 +47,7 @@ interface BalanceCardProps {
         ARKADE?: ProtocolBalance;
         BARK?: ProtocolBalance;
     };
-    /** Show shimmer placeholders instead of the balance while first loading. */
+    /** Show a dash until the first balance is available. */
     loading?: boolean;
     /**
      * Denomination-aware display (sats / BTC / fiat). When `primaryText` is
@@ -109,7 +108,9 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     const theme = useAppTheme();
     const styles = makeStyles(theme);
     const [slow, setSlow] = useState(false);
-    const syncing = !!(updating || loading || pendingAccounts.length);
+    const syncing = !!(updating || loading || refreshing || pendingAccounts.length);
+    const loadingProgress = useRef(new Animated.Value(0)).current;
+    const [trackWidth, setTrackWidth] = useState(0);
     useEffect(() => {
         setSlow(false);
         if (!syncing) return;
@@ -119,6 +120,16 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
     const amountOpacity = useRef(new Animated.Value(1)).current;
     const previousAmount = useRef(primaryText);
     const [reduceMotion, setReduceMotion] = useState(true);
+    useEffect(() => {
+        loadingProgress.setValue(0);
+        if (!syncing || reduceMotion) return;
+        const animation = Animated.loop(Animated.timing(loadingProgress, {
+            toValue: 1, duration: 1800, easing: Easing.linear,
+            useNativeDriver: true, isInteraction: false,
+        }));
+        animation.start();
+        return () => animation.stop();
+    }, [syncing, reduceMotion, loadingProgress]);
     useEffect(() => {
         let active = true;
         void AccessibilityInfo?.isReduceMotionEnabled?.().then(value => { if (active) setReduceMotion(value); });
@@ -249,10 +260,10 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
             </View>
             <Animated.View style={[styles.totalBalanceContainer, { opacity: amountOpacity }]}>
                 {loading ? (
-                    <View style={{ gap: 10, marginTop: 4 }}>
-                        <Skeleton width={180} height={34} radius={10} style={{ backgroundColor: 'rgba(255,255,255,0.18)' }} />
-                        <Skeleton width={110} height={15} radius={7} style={{ backgroundColor: 'rgba(255,255,255,0.12)' }} />
-                    </View>
+                    <>
+                        <Text style={styles.balanceAmount} accessibilityLabel="Balance loading">—</Text>
+                        <Text style={styles.balanceUsd}>Your balance will appear here</Text>
+                    </>
                 ) : useDenominated ? (
                     <>
                         {/* Tap the amount to cycle sats / BTC / fiat. The unit sits inline
@@ -310,6 +321,19 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                     </Text>
                 )}
             </Animated.View>
+
+            <View style={styles.syncTrackSlot}>
+                {syncing && <View style={styles.syncTrack}
+                    accessibilityRole="progressbar" accessibilityLabel="Updating balance"
+                    accessibilityState={{ busy: true }}
+                    onLayout={event => setTrackWidth(event.nativeEvent.layout.width)}>
+                    <Animated.View style={[styles.syncSegment, {
+                        transform: [{ translateX: reduceMotion ? trackWidth * 0.35 : loadingProgress.interpolate({
+                            inputRange: [0, 1], outputRange: [-trackWidth * 0.3, trackWidth],
+                        }) }],
+                    }]} />
+                </View>}
+            </View>
 
             {/* Per-network breakdown — vertical row list, collapsed behind the
                 chevron above. Mirrors the extension's BITCOIN section. */}

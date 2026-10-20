@@ -58,8 +58,8 @@ const REFRESH_EVERY_MS = 30_000
 const DEFAULT_FEE_RATE = 2
 // The output a sender creates for a witness invoice: rgb-lib's colorable-UTXO size, above dust.
 const WITNESS_OUTPUT_SAT = 1000
-/** rgb-lib names a witness recipient `wvout:…` and a blinded UTXO `utxob:…`. */
-const isWitnessRecipient = (recipientId: string) => /^wvout:/i.test(recipientId)
+/** Recipient IDs may include a chain prefix, e.g. Mutinynet `sbc:wvout:…`. */
+const isWitnessRecipient = (recipientId: string) => /(^|:)wvout:/i.test(recipientId)
 
 /**
  * What the wallet offers beyond sending and receiving: each call kaleido-rgb's
@@ -235,6 +235,16 @@ export class RgbLibRnAccount {
     witnessData?: { amountSat: number; blinding?: number }
   }): Promise<RgbLib.OperationResult> {
     const invoice = await this.lib.decodeInvoice(params.recipient)
+    if (invoice.expirationTimestamp != null && invoice.expirationTimestamp <= Math.floor(Date.now() / 1000)) {
+      throw Object.assign(new Error('This RGB invoice has expired. Ask the recipient for a new invoice.'), { code: 'RGB_INVOICE_INVALID' })
+    }
+    if (this.network && invoice.network !== libNetwork(this.network)) {
+      throw Object.assign(new Error('This RGB invoice belongs to a different network. Switch to the recipient’s network.'), { code: 'RGB_INVOICE_INVALID' })
+    }
+    if (invoice.assetId && invoice.assetId !== params.token) throw Object.assign(new Error('The invoice asks for a different asset.'), { code: 'RGB_INVOICE_INVALID' })
+    if (invoice.assignment?.type === 'FUNGIBLE' && invoice.assignment.amount !== params.amount) {
+      throw Object.assign(new Error('The invoice asks for a different amount.'), { code: 'RGB_INVOICE_INVALID' })
+    }
     const endpoints = invoice.transportEndpoints?.length ? invoice.transportEndpoints : [this.transportEndpoint]
     // A witness invoice asks the sender to create the receiving output: fund it with
     // rgb-lib's usual colorable-UTXO size unless the caller chose otherwise.
@@ -247,9 +257,16 @@ export class RgbLibRnAccount {
       transportEndpoints: endpoints,
       ...(witnessData ? { witnessData } : {}),
     }
-    const result = await this.serial(() => this.wallet.send(
-      { [params.token]: [recipient] }, false, params.feeRate ?? DEFAULT_FEE_RATE, params.minConfirmations ?? 1,
-    ))
+    const result = await this.serial(() => {
+      // A queued refresh/backup may have held the wallet beyond the invoice deadline.
+      if (invoice.expirationTimestamp != null && invoice.expirationTimestamp <= Math.floor(Date.now() / 1000)) {
+        throw Object.assign(new Error('This RGB invoice has expired. Ask the recipient for a new invoice.'), { code: 'RGB_INVOICE_INVALID' })
+      }
+      return this.wallet.send(
+        { [params.token]: [recipient] }, false, params.feeRate ?? DEFAULT_FEE_RATE, params.minConfirmations ?? 1,
+        ...(invoice.expirationTimestamp != null ? [invoice.expirationTimestamp] : []),
+      )
+    })
     this.lastRefresh = 0 // the next read picks the transfer up
     this.onChange()
     return result

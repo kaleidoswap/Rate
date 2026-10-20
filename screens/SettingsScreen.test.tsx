@@ -40,7 +40,7 @@ test('home shows categories and keeps sensitive and technical actions in their s
   expect(screen.queryByText('Daily wallet')).toBeNull();
   expect(screen.queryByText('Your wallet')).toBeNull();
   expect(screen.queryByText('Sats')).toBeNull();
-  expect(screen.getByLabelText('Agent')).toBeTruthy();
+  expect(screen.getByLabelText('Mind')).toBeTruthy();
   expect(screen.getByLabelText('Preferences')).toBeTruthy();
   expect(screen.queryByText('View recovery phrase')).toBeNull();
   expect(screen.queryByText('Remove Wallet')).toBeNull();
@@ -78,7 +78,7 @@ test('Bark’s network is changed from its account page, which describes real ve
   const alert = jest.spyOn(Alert, 'alert');
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Connections'));
+  fireEvent.press(screen.getByLabelText('Advanced'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   expect(alert).toHaveBeenCalledWith('Bark network', expect.stringContaining('real bitcoin'), expect.arrayContaining([
@@ -94,7 +94,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
   const { protocolManager, initializeProtocols } = require('../services/protocols');
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Connections'));
+  fireEvent.press(screen.getByLabelText('Advanced'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
   const choices = alert.mock.calls[0][2];
@@ -107,7 +107,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
 test('account pages expose supported controls and back returns to the account list', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Connections'));
+  fireEvent.press(screen.getByLabelText('Advanced'));
   fireEvent.press(screen.getByLabelText('Spark account settings'));
   expect(screen.getByText('Reconnect account')).toBeTruthy();
   expect(screen.getByLabelText('Use this account')).toBeTruthy();
@@ -221,12 +221,12 @@ test('security explains both recovery requirements and opens RGB backup manageme
   expect(screen.getByLabelText('RGB data backup')).toBeTruthy();
 });
 
-test('keeps technical interface options inside Advanced and searchable', async () => {
+test('keeps display preferences separate from technical wallet tools', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
   expect(screen.queryByLabelText('Display detail')).toBeNull();
   expect(screen.queryByLabelText('Component preview')).toBeNull();
-  fireEvent.press(screen.getByLabelText('Connections'));
+  fireEvent.press(screen.getByLabelText('Preferences'));
   expect(screen.getByLabelText('Display detail')).toBeTruthy();
 });
 
@@ -238,4 +238,18 @@ test('offers one persisted language preference for the app and Prismo', async ()
   fireEvent.press(screen.getByText('Language: Italiano'));
   expect(mockDispatch).toHaveBeenCalledWith(expect.objectContaining({ type: 'settings/setLanguage', payload: 'it' }));
   expect(screen.queryByText('Language: Italiano')).toBeNull();
+});
+
+test('advanced tools and the map remain accessible without crowding everyday connections', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Places to pay'));
+  expect(navigation.navigate).toHaveBeenCalledWith('Map');
+  fireEvent.press(screen.getByLabelText('Connections'));
+  expect(screen.queryByLabelText('Spark account settings')).toBeNull();
+  fireEvent.press(screen.getByLabelText('Back'));
+  fireEvent.press(screen.getByLabelText('Advanced'));
+  expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Open a Lightning channel'));
+  expect(navigation.navigate).toHaveBeenCalledWith('LSP');
 });

@@ -1,3 +1,4 @@
+import { validateModelDownload } from './qvacDownloadValidation';
 // services/QVACService.ts
 import {
   loadModel as sdkLoadModel,
@@ -673,6 +674,8 @@ class QVACService {
       discardPart();
       throw new Error(`Download incomplete for ${model.name}: got ${got} of ${model.size} bytes`);
     }
+    try { validateModelDownload(result.status, got, model.size); }
+    catch (err) { discardPart(); throw err; }
     part.move(file);
     onProgress(100);
     console.log(`[QVAC] downloaded ${model.name}`);

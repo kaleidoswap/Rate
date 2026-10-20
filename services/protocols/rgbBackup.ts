@@ -38,6 +38,7 @@ interface BackupContext {
   account: () => any
 }
 let context: BackupContext | null = null;
+let contextRevision = 0;
 let status: RgbBackupStatus = { state: 'idle' };
 let timer: ReturnType<typeof setTimeout> | null = null;
 let running: Promise<void> | null = null;
@@ -57,7 +58,9 @@ export const rgbBackupStoreId = (mnemonic: string, network: string) => `rgb-l1-f
 
 /** Set while RGB on this phone is connected (./wdk.ts), cleared when it disconnects. */
 export function setRgbBackupContext(next: BackupContext | null): void {
+  const changed = context?.mnemonic !== next?.mnemonic || context?.network !== next?.network;
   context = next;
+  if (changed) { contextRevision++; setStatus({ state: 'idle' }); }
   if (!next && timer) { clearTimeout(timer); timer = null; }
 }
 
@@ -72,8 +75,12 @@ export function scheduleRgbBackup(): void {
 export async function runRgbBackup(force = false): Promise<void> {
   if (running) { again = true; return running; }
   running = Promise.resolve().then(async () => {
+    const ctx = context;
+    const revision = contextRevision;
+    const update = (next: RgbBackupStatus) => {
+      if (contextRevision === revision) setStatus(next);
+    };
     try {
-      const ctx = context;
       const account = ctx?.account();
       if (!ctx || !account) return;
       const retryKey = `rgb-backup-pending-${rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network))}`;
@@ -81,7 +88,7 @@ export async function runRgbBackup(force = false): Promise<void> {
       // rgb-lib clears its dirty flag when creating a file, before the cloud upload succeeds.
       // Persist retry intent first so a failed upload is retried even after restarting.
       await AsyncStorage.setItem(retryKey, '1');
-      setStatus({ ...status, state: 'backing-up', error: undefined });
+      update({ ...status, state: 'backing-up', error: undefined });
       const file = new File(Paths.cache, `rgb-backup-${Date.now()}.rgbbackup`);
       try {
         await account.backup(toFilesystemPath(file.uri), rgbBackupPassword(ctx.mnemonic));
@@ -89,13 +96,13 @@ export async function runRgbBackup(force = false): Promise<void> {
         const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network)), vssSigningKey(ctx.mnemonic));
         const manifest = await uploadBackupFile(client, PREFIX, data);
         await AsyncStorage.removeItem(retryKey);
-        setStatus({ state: 'done', lastBackupAt: manifest.createdAt });
+        update({ state: 'done', lastBackupAt: manifest.createdAt });
       } finally {
         try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
       }
     } catch (e: any) {
       recordRgbDiagnostic('backup_failed', `${context?.network ?? ''}: ${describeRgbError(e)}`);
-      setStatus({ ...status, state: 'failed', error: e?.message ?? 'Backup failed' });
+      update({ ...status, state: 'failed', error: e?.message ?? 'Backup failed' });
     } finally {
       running = null;
       if (again) { again = false; scheduleRgbBackup(); }

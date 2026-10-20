@@ -138,7 +138,7 @@ export function createDirectAccount<T>(cfg: DirectAccountConfig<T>): PayAccount 
     async execute(preview, route, accepted, attemptId) {
       const saved = approved.get(accepted);
       if (!saved || route.to !== railOnNetwork || accepted.expiresAt <= now() || !cfg.matches(preview, saved.terms)) {
-        throw new PaymentNotSentError('Review the payment again to get a fresh quote.');
+        throw new PaymentNotSentError(cfg.id === 'rgb-asset' ? 'Refresh the transfer details before sending.' : 'Review the payment again to get a fresh quote.');
       }
       if (!cfg.isConnected()) throw new PaymentNotSentError(`${cfg.walletName} is not connected.`);
       approved.delete(accepted); // a quote pays once
@@ -166,8 +166,8 @@ export function createDirectAccount<T>(cfg: DirectAccountConfig<T>): PayAccount 
       const next = await cfg.follow(saved.reference);
       // A failed lookup leaves the payment pending rather than unknown.
       if (next.status === 'unknown') return saved;
-      const updated: PaymentResult = { status: next.status, reference: saved.reference };
-      if (updated.status !== saved.status) await AsyncStorage.setItem(key(attemptId), JSON.stringify(updated));
+      const updated: PaymentResult = { ...next, reference: saved.reference };
+      if (updated.status !== saved.status || updated.detail !== saved.detail) await AsyncStorage.setItem(key(attemptId), JSON.stringify(updated));
       return updated;
     },
   };

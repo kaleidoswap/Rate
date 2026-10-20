@@ -4,3 +4,6 @@
  * failed, not unknown, so it never blocks the next payment.
  */
 export class PaymentNotSentError extends Error {}
+
+/** A safe explanation when submission may have happened; never retry automatically. */
+export class PaymentUncertainError extends Error {}

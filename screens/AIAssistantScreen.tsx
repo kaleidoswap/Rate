@@ -173,6 +173,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // AI settings sheet (model selection, voice). Settings → KaleidoMind
   // → "Models & privacy" opens this tab with the sheet up.
   const [showSettings, setShowSettings] = useState(false);
+  const [showModelError, setShowModelError] = useState(false);
   useEffect(() => {
     if (!route?.params?.openSettings) return;
     setShowSettings(true);
@@ -771,6 +772,18 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             </TouchableOpacity>
           )}
         </View>
+        {isError && <View style={{ gap: theme.spacing[2], marginTop: theme.spacing[2] }}>
+          <Text style={styles.modelBannerText}>Retry loading, or open Models & privacy to choose a smaller model or remove and download it again.</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing[3] }}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Models & privacy" onPress={() => setShowSettings(true)} style={styles.modelRetry}>
+              <Text style={styles.modelRetryText}>Models & privacy</Text>
+            </TouchableOpacity>
+            {!!qvac.llmError && <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showModelError }} onPress={() => setShowModelError(v => !v)} style={styles.modelRetry}>
+              <Text style={styles.modelRetryText}>{showModelError ? 'Hide error details' : 'Error details'}</Text>
+            </TouchableOpacity>}
+          </View>
+          {showModelError && !!qvac.llmError && <Text selectable style={styles.modelBannerText}>{qvac.llmError}</Text>}
+        </View>}
         {!isError && qvac.isDownloading && (
           <View style={styles.modelProgressTrack}>
             <View style={[styles.modelProgressFill, { width: `${qvac.combinedProgress}%` }]} />

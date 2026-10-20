@@ -149,20 +149,20 @@ export default function SettingsScreen({ navigation }: Props) {
   );
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const [settingsQuery, setSettingsQuery] = useState('');
-  type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant';
+  type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Agent' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Mind', advanced: 'Advanced' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
-    ...(!RGB_VIA_NWC ? [{ page: 'connections', terms: 'direct node connectivity url' }] : []),
+    ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
     { page: 'assistant', terms: 'kaleidomind ai desktop model agent assistant personalize connection wallet budget limit' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase' },
     { page: 'preferences', terms: 'preferences bitcoin balance unit sound sounds payment currency fiat notifications language lingua italiano english' },
-    { page: 'connections', terms: 'display detail mode lite advanced' },
-    { page: 'connections', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
+    { page: 'preferences', terms: 'display detail mode lite advanced' },
+    { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
     { page: 'security', terms: 'danger remove delete wallet' },
   ];
   const query = settingsQuery.trim().toLowerCase();
@@ -180,11 +180,11 @@ export default function SettingsScreen({ navigation }: Props) {
   }, [settingsQuery, page, navigation, account]);
   useFocusEffect(useCallback(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (!page && !settingsQuery) return false;
+      if (!account && !page && !settingsQuery) return false;
       goBack(); return true;
     });
     return () => subscription.remove();
-  }, [page, settingsQuery, goBack]));
+  }, [account, page, settingsQuery, goBack]));
   const [isEditingUrl, setIsEditingUrl] = useState(false);
   const [tempNodeUrl, setTempNodeUrl] = useState(settings.remoteNodeUrl);
 
@@ -662,11 +662,14 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row first icon="sparkles-outline" label="Agent" onPress={() => openPage('assistant')} />
+            <Row first icon="sparkles-outline" label="Mind" onPress={() => openPage('assistant')} />
+            <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />
+            <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
 
 
           </Group>
         </>}
+        {page === 'advanced' && !account && <Text style={styles.pageDescription}>Manage your accounts, networks and wallet tools. Changing a network changes which balance you see.</Text>}
         {page === 'security' && !account && <Text style={styles.pageDescription}>Lock the app on this phone and keep your recovery phrase private. The phrase gives access to your funds.</Text>}
 
 
@@ -914,6 +917,8 @@ export default function SettingsScreen({ navigation }: Props) {
         {/* Network changes live in the explicit Advanced section in both display modes. */}
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark') && (
           <>
+          <SectionLabel>Wallet tools</SectionLabel>
+          <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>
           <SectionLabel>Accounts & networks</SectionLabel>
           <Group>
           {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).map((proto, idx) => {
@@ -948,7 +953,7 @@ export default function SettingsScreen({ navigation }: Props) {
             return (
               <TouchableOpacity key={proto} activeOpacity={0.7} accessibilityRole="button"
                 accessibilityLabel={`${labels[proto]} account settings`} accessibilityHint={`${status}${networkLabel ? ` · ${networkLabel}` : ''}`}
-                onPress={() => { setSettingsQuery(''); setPage('connections'); setAccount(proto); }}
+                onPress={() => { setSettingsQuery(''); setPage('advanced'); setAccount(proto); }}
                 style={[styles.row, idx > 0 && styles.rowDivider]}>
                 <View style={[styles.rowIcon, { backgroundColor: colors[proto] + '1A', opacity: connected ? 1 : 0.5 }]}>
                   {proto === 'RGB' && rgbNodeConnected() ? <RgbNodeIcon size={18} /> : <NetworkIcon network={proto} size={18} color={colors[proto]} />}
@@ -975,7 +980,7 @@ export default function SettingsScreen({ navigation }: Props) {
         )}
 
         {/* Remove from this device */}
-        {page === 'connections' && !account && __DEV__ && <>
+        {page === 'advanced' && !account && __DEV__ && <>
           <SectionLabel>Developer previews</SectionLabel>
           <Group>
             {__DEV__ && <Row icon="receipt-outline" label="Activity & Receive review" description="Search, periods and incoming payment states" onPress={() => navigation.navigate('WalletFlowsReview')} />}

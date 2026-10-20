@@ -1,3 +1,4 @@
+import { rgbWithTimeout } from './rgbTimeout';
 /**
  * Minimal VSS client (LDK Versioned Storage Service) for RGB backups
  * -----------------------------------------------------------------
@@ -132,7 +133,10 @@ export interface VssClient {
 export function createVssClient(serverUrl: string, storeId: string, signingKey: Uint8Array, fetchImpl: typeof fetch = fetch): VssClient {
   const base = serverUrl.replace(/\/+$/, '');
   const call = async (path: string, body: Uint8Array) => {
+    const controller = new AbortController();
+    return rgbWithTimeout((async () => {
     const res = await fetchImpl(`${base}/${path}`, {
+      signal: controller.signal,
       method: 'POST',
       headers: { 'Content-Type': 'application/octet-stream', Authorization: vssAuthToken(signingKey) },
       body: body as any,
@@ -140,6 +144,7 @@ export function createVssClient(serverUrl: string, storeId: string, signingKey: 
     if (res.status === 404 && path === 'getObject') return undefined;
     if (!res.ok) throw new Error(`Backup server error (${res.status}).`);
     return new Uint8Array(await res.arrayBuffer());
+    })(), 30_000, 'The RGB backup server did not respond within 30 seconds. Check your connection and try again.', () => controller.abort());
   };
   return {
     async put(items) { await call('putObjects', encodePutObjects(storeId, items)); },
@@ -150,15 +155,16 @@ export function createVssClient(serverUrl: string, storeId: string, signingKey: 
   };
 }
 
-export interface BackupManifest { version: 1; size: number; chunks: number; sha256: string; createdAt: number }
+export interface BackupManifest { version: 1 | 2; size: number; chunks: number; sha256: string; createdAt: number }
 
-/** Chunks first, manifest last: a reader never sees a manifest whose chunks aren't there yet. */
+/** Immutable content-addressed chunks; only publish the manifest after every chunk succeeds. */
 export async function uploadBackupFile(client: VssClient, prefix: string, data: Uint8Array, now = Date.now()): Promise<BackupManifest> {
+  const digest = bytesToHex(sha256(data));
   const chunks = Math.max(1, Math.ceil(data.length / VSS_CHUNK_SIZE));
   for (let i = 0; i < chunks; i++) {
-    await client.put([{ key: `${prefix}/chunk/${i}`, value: data.slice(i * VSS_CHUNK_SIZE, (i + 1) * VSS_CHUNK_SIZE) }]);
+    await client.put([{ key: `${prefix}/versions/${digest}/chunk/${i}`, value: data.slice(i * VSS_CHUNK_SIZE, (i + 1) * VSS_CHUNK_SIZE) }]);
   }
-  const manifest: BackupManifest = { version: 1, size: data.length, chunks, sha256: bytesToHex(sha256(data)), createdAt: now };
+  const manifest: BackupManifest = { version: 2, size: data.length, chunks, sha256: digest, createdAt: now };
   await client.put([{ key: `${prefix}/manifest`, value: utf8ToBytes(JSON.stringify(manifest)) }]);
   return manifest;
 }
@@ -173,7 +179,7 @@ export async function readBackupManifest(client: VssClient, prefix: string): Pro
   const raw = await client.get(`${prefix}/manifest`);
   if (!raw) return undefined;
   const manifest = JSON.parse(new TextDecoder().decode(raw)) as BackupManifest;
-  if (manifest.version !== 1 || !Number.isInteger(manifest.chunks) || manifest.chunks < 1) throw new Error('Unsupported RGB backup.');
+  if (![1, 2].includes(manifest.version) || !Number.isSafeInteger(manifest.size) || manifest.size < 0 || !Number.isInteger(manifest.chunks) || manifest.chunks !== Math.max(1, Math.ceil(manifest.size / VSS_CHUNK_SIZE)) || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Unsupported RGB backup.');
   return manifest;
 }
 
@@ -183,7 +189,8 @@ export async function downloadBackupFile(client: VssClient, prefix: string): Pro
   const data = new Uint8Array(manifest.size);
   let at = 0;
   for (let i = 0; i < manifest.chunks; i++) {
-    const chunk = await client.get(`${prefix}/chunk/${i}`);
+    const chunkPrefix = manifest.version === 2 ? `${prefix}/versions/${manifest.sha256}` : prefix;
+    const chunk = await client.get(`${chunkPrefix}/chunk/${i}`);
     if (!chunk || at + chunk.length > manifest.size) throw new Error('The RGB backup is incomplete.');
     data.set(chunk, at);
     at += chunk.length;

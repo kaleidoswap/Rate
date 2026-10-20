@@ -457,7 +457,15 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   async createRgbInvoiceWithSignal(params: any, signal?: AbortSignal): Promise<any> {
     this.requireRln();
-    return this.c().rlnRgbInvoice(params, signal);
+    const { duration_seconds, ...body } = params ?? {};
+    return this.c().rlnRgbInvoice({
+      ...body,
+      witness: body.witness ?? true,
+      min_confirmations: body.min_confirmations ?? 1,
+      expiration_timestamp: body.expiration_timestamp
+        ?? Math.floor(Date.now() / 1000) + (duration_seconds ?? 3600),
+      // The NWC bridge supplies the node's configured RGB proxy when omitted.
+    }, signal);
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
@@ -539,7 +547,36 @@ export class NwcRgbAdapter implements IProtocolAdapter {
 
   async sendAsset(params: any): Promise<any> {
     this.requireRln();
-    return this.c().rlnSendAsset(params);
+    if (params.recipient_map) return this.c().rlnSendAsset(params);
+    if (!params.asset_id || !Number.isSafeInteger(params.amount) || params.amount <= 0) {
+      throw new Error('Choose an RGB asset and a positive whole-unit amount.');
+    }
+    const invoice = anyRec(await this.c().rlnDecodeRgbInvoice({ invoice: params.recipientId }));
+    if (!invoice.recipient_id || !['Blind', 'Witness'].includes(invoice.recipient_type)) {
+      throw new Error('The node returned an invalid RGB recipient.');
+    }
+    if (invoice.asset_id && invoice.asset_id !== params.asset_id) throw new Error('The invoice asks for a different asset.');
+    const now = Math.floor(Date.now() / 1000);
+    if (invoice.expiration_timestamp != null && invoice.expiration_timestamp <= now) throw new Error('The RGB invoice has expired.');
+    if (invoice.assignment?.Fungible != null && invoice.assignment.Fungible !== params.amount) throw new Error('The invoice asks for a different amount.');
+    if (invoice.assignment === 'NonFungible' && params.amount !== 1) throw new Error('A collectible must be sent as one unit.');
+    if (invoice.assignment !== 'Any' && invoice.assignment !== 'NonFungible' && invoice.assignment?.Fungible == null) throw new Error('This RGB assignment is not supported for payments.');
+    const feeRate = params.feeRate ?? 2;
+    if (!Number.isSafeInteger(feeRate) || feeRate <= 0) throw new Error('The node requires a positive whole-number fee rate.');
+    return this.c().rlnSendAsset({
+      donation: false,
+      fee_rate: feeRate,
+      min_confirmations: params.minConfirmations ?? 1,
+      expiration_timestamp: invoice.expiration_timestamp ?? now + 3600,
+      recipient_map: {
+        [params.asset_id]: [{
+          recipient_id: invoice.recipient_id,
+          assignment: invoice.assignment === 'NonFungible' ? 'NonFungible' : { Fungible: params.amount },
+          witness_data: invoice.recipient_type === 'Witness' ? { amount_sat: 1000, blinding: null } : null,
+          ...(invoice.transport_endpoints?.length ? { transport_endpoints: invoice.transport_endpoints } : {}),
+        }],
+      },
+    });
   }
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
@@ -562,7 +599,7 @@ export class NwcRgbAdapter implements IProtocolAdapter {
   ): Promise<Address> {
     if (assetId) {
       this.requireRln();
-      const raw = anyRec(await this.c().rlnRgbInvoice({ asset_id: assetId }, signal));
+      const raw = anyRec(await this.createRgbInvoiceWithSignal({ asset_id: assetId }, signal));
       return {
         address: raw.invoice ?? raw.recipient_id ?? '',
         format: 'RGB_INVOICE',

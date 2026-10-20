@@ -10,6 +10,24 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-20
+
+### Changed
+- Streamlined payment review, receipts and Activity; recent activity appears below the wallet balance.
+- Show the selected payment account with alternatives under Change account.
+- Expose receive asset selection, distinguish open RGB requests from incoming transfers, and move technical settings under Advanced.
+- Remove the manual Check status action from Activity details.
+
+### Fixed
+- Make failed RGB transfers removable immediately after successful cancellation.
+- Reject failed HTTP downloads and incomplete AI model files before native loading; expose model-load diagnostics and model settings.
+- Include pending RGB routing, amount, backup, timeout, NWC and native iOS fixes from the working tree.
+- Align native release versions and archive validation with the release tag.
+
+### Validation
+- Download validation exercised with 10 cases; syntax and whitespace checks passed.
+- Full Jest and device validation remain pending: local application dependencies are unavailable.
+
 ## [0.9.12] — 2026-10-17
 
 ### Fixed

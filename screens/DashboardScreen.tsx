@@ -45,6 +45,7 @@ import {
   MainHeader
 } from '../components';
 import { Sheet } from '../components/Sheet';
+import { RecentActivityWidget } from '../components/RecentActivityWidget';
 import { InsightCards } from '../components/mind/InsightCards';
 import { ProfileChip } from '../components/ProfileChip';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
@@ -182,6 +183,7 @@ export default function DashboardScreen({ navigation }: Props) {
   // skip the first balance load. These refs are the immediate lifecycle gates;
   // state remains the source of truth for rendering.
   const protocolsReadyRef = useRef(false);
+  const [showChannels, setShowChannels] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // The same live BTC price the fiat figures use (redux's btcPriceUSD is rarely set).
   const { formatSatoshisToUSD, bitcoinPrice: liveBtcPrice } = useBitcoinConversion();
@@ -959,7 +961,7 @@ export default function DashboardScreen({ navigation }: Props) {
             // Always provide the per-network breakdown; it stays collapsed behind
             // the chevron so it doesn't clutter lite mode.
             byProtocol={(btcBalance as any)?.byProtocol}
-            // Shimmer the balance while first connecting (before any data lands).
+            // Show a dash while first connecting, before any balance is available.
             loading={(isConnecting || loading) && totalBalance === 0 && !refreshing && !showingSnapshot}
             updating={isConnecting || isUpdating || loading}
             pendingAccounts={pendingBalanceAccounts.map(p => ({ RGB: 'RGB', LN: 'Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[p] ?? p))}
@@ -973,6 +975,7 @@ export default function DashboardScreen({ navigation }: Props) {
           />}
         </View>
 
+        <RecentActivityWidget title="Recent activity" limit={3} refreshKey={balanceUpdatedAt} onOpenPaymentAttempt={id => navigation.getParent()?.navigate('Send', { resumePayment: true, paymentAttemptId: id })} onViewAll={() => navigation.navigate('Activity')} />
         <InsightCards
           channels={channels}
           onAction={(action) => (action.kind === 'navigate'
@@ -1017,22 +1020,17 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('Assets', { issue: true })}
         />
 
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={() => navigation.navigate('Map')}
-          style={styles.placesLink}
-        >
-          <Ionicons name="map-outline" size={22} color={theme.colors.text.secondary} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base }}>Places to pay</Text>
-            <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm }}>Find nearby businesses accepting bitcoin</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
-        </TouchableOpacity>
+
         </>}
 
         {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (
-        <ChannelList
+        <View>
+        <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showChannels }} style={styles.placesLink} onPress={() => setShowChannels(!showChannels)}>
+          <Ionicons name="git-branch-outline" size={20} color={theme.colors.text.secondary} />
+          <Text style={{ flex: 1, color: theme.colors.text.primary }}>Manage Lightning channels</Text>
+          <Ionicons name={showChannels ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+        {showChannels && <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
           formatSatoshis={formatSatoshis}
@@ -1043,7 +1041,8 @@ export default function DashboardScreen({ navigation }: Props) {
             setChannelModalVisible(true);
           }}
           onOpenChannel={() => navigation.getParent()?.navigate('LSP')}
-        />
+        />}
+        </View>
         )}
       </ScrollView>
 

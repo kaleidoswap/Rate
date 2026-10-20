@@ -39,6 +39,17 @@ describe('NWC mobile state flow', () => {
     expect(state.nwcCapabilities).toContain('manageChannels');
   });
 
+  it('deselects a node without deleting saved wallets or choosing a fallback', () => {
+    let state = nostrReducer(undefined, { type: 'init' });
+    state = nostrReducer(state, upsertNwcConnection(connection('a', 'rln')));
+    state = nostrReducer(state, upsertNwcConnection(connection('b', 'ln')));
+    state = nostrReducer(state, selectNwcConnection(null));
+    expect(state.selectedNwcConnectionId).toBeNull();
+    expect(state.connectedWallet).toBeNull();
+    expect(state.nwcCapabilities).toEqual([]);
+    expect(state.nwcConnections).toHaveLength(2);
+  });
+
   it('falls back safely when the active wallet is removed and fully clears on wallet deletion', () => {
     let state = nostrReducer(undefined, { type: 'init' });
     state = nostrReducer(state, upsertNwcConnection(connection('a', 'rln')));

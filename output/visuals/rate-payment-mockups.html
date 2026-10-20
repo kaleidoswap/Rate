@@ -1,0 +1,68 @@
+<div id="rate-mockups" class="viz-carousel viz-dotted-background" aria-label="Rate · proposte per i pagamenti" data-previous-label="Precedente" data-next-label="Successivo">
+  <section data-variant="Activity" aria-label="Activity compatta">
+    <div class="rt-phone">
+      <div class="rt-system"><span>9:41</span><span>◒ ▰</span></div>
+      <header><span class="rt-brand">KALEIDOSWAP</span><span class="rt-demo">MOCKUP</span></header>
+      <h1>Activity</h1>
+      <p class="rt-caption">Your payments, at a glance.</p>
+      <div class="rt-section">IN PROGRESS <span>1</span></div>
+      <button class="rt-row cursor-interaction" data-open="pending" aria-label="Open pending RGB transfer">
+        <span class="rt-avatar rt-wait"><i data-lucide="clock-3"></i></span>
+        <span class="rt-person"><strong>RGB transfer</strong><small class="rt-warning">Waiting for recipient · 2 days</small></span>
+        <span class="rt-money">−25 USDT</span>
+      </button>
+      <div class="rt-section">TODAY</div>
+      <button class="rt-row cursor-interaction" data-open="receipt" aria-label="Open payment to Alice">
+        <span class="rt-avatar"><i data-lucide="arrow-up-right"></i></span>
+        <span class="rt-person"><strong>Alice</strong><small>Sent · 10:42</small></span>
+        <span class="rt-money">−12,500 sats</span>
+      </button>
+      <div class="rt-row"><span class="rt-avatar rt-in"><i data-lucide="arrow-down-left"></i></span><span class="rt-person"><strong>Received</strong><small>09:18</small></span><span class="rt-money rt-green">+50,000 sats</span></div>
+      <div class="rt-section">YESTERDAY</div>
+      <div class="rt-row"><span class="rt-avatar"><i data-lucide="arrow-up-right"></i></span><span class="rt-person"><strong>Marco</strong><small>Sent · 18:06</small></span><span class="rt-money">−10 USDT</span></div>
+      <div class="rt-row"><span class="rt-avatar"><i data-lucide="arrow-up-right"></i></span><span class="rt-person"><strong>Coffee</strong><small>Sent · 08:35</small></span><span class="rt-money">−4,200 sats</span></div>
+      <div class="rt-spacer"></div>
+      <nav class="rt-bottom" aria-label="Navigation preview"><span class="rt-active"><i data-lucide="wallet"></i>Wallet</span><span><i data-lucide="users"></i>Contacts</span><span class="rt-scan"><i data-lucide="scan-line"></i></span><span><i data-lucide="map-pin"></i>Map</span><span><i data-lucide="sparkles"></i>Mind</span></nav>
+      <div class="rt-home"></div>
+    </div>
+  </section>
+  <section data-variant="Pagamento completato" aria-label="Ricevuta essenziale" hidden>
+    <div class="rt-phone">
+      <div class="rt-system"><span>9:41</span><span>◒ ▰</span></div>
+      <header><span>Payment</span><span class="rt-demo">MOCKUP</span></header>
+      <div class="rt-hero"><div class="rt-result"><i data-lucide="check"></i></div><p>Payment completed</p><h1>12,500 <span>sats</span></h1><p class="rt-to">to Alice</p></div>
+      <p class="rt-note">Your payment has arrived.</p>
+      <details class="rt-details"><summary class="cursor-interaction">Payment details <i data-lucide="chevron-down"></i></summary><dl><div><dt>Recipient</dt><dd>alice@example.com</dd></div><div><dt>Fee</dt><dd>2 sats</dd></div><div><dt>Total paid</dt><dd>12,502 sats</dd></div><div><dt>Account</dt><dd>Spark · Mainnet</dd></div><div><dt>Date</dt><dd>20 Oct, 10:42</dd></div></dl><button class="rt-quiet cursor-interaction" data-share>Share receipt</button><small class="rt-share" hidden>Receipt preview ready · no payment was made.</small></details>
+      <div class="rt-spacer"></div><button class="rt-primary cursor-interaction" data-home>Done</button><div class="rt-home"></div>
+    </div>
+  </section>
+  <section data-variant="RGB in attesa" aria-label="Gestione RGB pending" hidden>
+    <div class="rt-phone" id="rt-pending">
+      <div class="rt-system"><span>9:41</span><span>◒ ▰</span></div>
+      <header><span>Transfer</span><span class="rt-demo">MOCKUP</span></header>
+      <div class="rt-hero"><div class="rt-result rt-wait"><i data-lucide="clock-3"></i></div><p data-status>Waiting for recipient</p><h1>25 <span>USDT</span></h1><p class="rt-to" data-age>Requested 2 days ago</p></div>
+      <p class="rt-note" data-note>The recipient hasn’t accepted this transfer yet. You can still cancel it.</p>
+      <details class="rt-details"><summary class="cursor-interaction">Payment details <i data-lucide="chevron-down"></i></summary><dl><div><dt>Account</dt><dd>RGB on this phone</dd></div><div><dt>Network</dt><dd>Bitcoin · Mainnet</dd></div><div><dt>Created</dt><dd>18 Oct, 11:24</dd></div></dl></details>
+      <div class="rt-confirm" hidden role="group" aria-label="Confirm cancellation"><strong>Cancel this transfer?</strong><p>The wallet will check whether it can still be cancelled.</p><button class="rt-danger cursor-interaction" data-confirm>Yes, cancel transfer</button><button class="rt-quiet cursor-interaction" data-keep>Keep transfer</button></div>
+      <div class="rt-spacer"></div><button class="rt-quiet cursor-interaction" data-check>Check status</button><button class="rt-danger cursor-interaction" data-cancel>Cancel transfer</button><button class="rt-primary cursor-interaction" data-home>Done</button><div class="rt-home"></div>
+    </div>
+  </section>
+</div>
+<style>
+#rate-mockups section{padding:20px 12px;min-height:770px;box-sizing:border-box}
+#rate-mockups .rt-phone{--rt-bg:light-dark(#f6f8f7,#0d1813);--rt-surface:light-dark(#ffffff,#17231d);--rt-text:light-dark(#14251c,#f4f8f5);--rt-muted:light-dark(#637269,#9aa99f);--rt-line:light-dark(#dde5df,#2b3b31);--rt-green:light-dark(#08774f,#15e99a);--rt-warn:light-dark(#8d5a0d,#e5b96f);--rt-danger:light-dark(#ae3636,#ef9999);background:var(--rt-bg);color:var(--rt-text);font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;border:1px solid var(--rt-line);border-radius:34px;max-width:380px;min-height:730px;margin:auto;padding:20px 22px 10px;box-sizing:border-box;display:flex;flex-direction:column;box-shadow:0 20px 50px #00000014}
+#rate-mockups button{font:inherit;color:inherit}#rate-mockups .rt-system{display:flex;justify-content:space-between;font-size:12px;font-weight:600;margin:0 4px 26px}#rate-mockups header{display:flex;justify-content:space-between;align-items:center;margin-bottom:28px;font-weight:500}#rate-mockups .rt-brand{font-size:11px;letter-spacing:2px}#rate-mockups .rt-demo{font-size:10px;letter-spacing:1.5px;color:var(--rt-muted)}#rate-mockups h1{font-size:30px;line-height:1.2;font-weight:600;margin:0;letter-spacing:-1px}#rate-mockups .rt-caption{color:var(--rt-muted);margin:8px 0 28px;font-size:13px}#rate-mockups .rt-section{display:flex;gap:8px;align-items:center;font-size:10px;letter-spacing:1.4px;color:var(--rt-muted);margin:20px 0 8px;font-weight:600}#rate-mockups .rt-section span{letter-spacing:0}#rate-mockups .rt-row{display:flex;align-items:center;gap:12px;width:100%;padding:16px 0;border:0;border-bottom:1px solid var(--rt-line);background:none;text-align:left;box-sizing:border-box}#rate-mockups .rt-avatar{width:36px;height:36px;display:grid;place-items:center;background:var(--rt-surface);border-radius:50%;flex-shrink:0}#rate-mockups .rt-avatar svg{width:18px;height:18px}#rate-mockups .rt-person{display:flex;flex-direction:column;flex:1;min-width:0}#rate-mockups strong{font-weight:500}#rate-mockups small{font-size:11px;color:var(--rt-muted);margin-top:3px}#rate-mockups .rt-money{font-size:13px;font-weight:500;white-space:nowrap;font-variant-numeric:tabular-nums}#rate-mockups .rt-green,#rate-mockups .rt-in{color:var(--rt-green)}#rate-mockups .rt-warning{color:var(--rt-warn)}#rate-mockups .rt-wait{color:var(--rt-warn);background:color-mix(in srgb,var(--rt-warn) 12%,var(--rt-bg))}#rate-mockups .rt-spacer{flex:1;min-height:24px}#rate-mockups .rt-bottom{display:flex;justify-content:space-between;border-top:1px solid var(--rt-line);padding-top:16px;align-items:center}#rate-mockups .rt-bottom span{display:flex;flex-direction:column;align-items:center;gap:5px;font-size:10px;color:var(--rt-muted)}#rate-mockups .rt-bottom svg{width:18px;height:18px}#rate-mockups .rt-bottom .rt-active{color:var(--rt-green)}#rate-mockups .rt-bottom .rt-scan{background:var(--rt-surface);padding:12px;border-radius:14px;color:var(--rt-text)}#rate-mockups .rt-home{width:100px;height:4px;background:var(--rt-text);opacity:.65;border-radius:5px;margin:22px auto 0}#rate-mockups .rt-hero{text-align:center;padding:22px 0 10px}#rate-mockups .rt-result{width:60px;height:60px;border-radius:50%;background:color-mix(in srgb,var(--rt-green) 12%,var(--rt-bg));color:var(--rt-green);display:grid;place-items:center;margin:0 auto 24px}#rate-mockups .rt-result.rt-wait{color:var(--rt-warn);background:color-mix(in srgb,var(--rt-warn) 12%,var(--rt-bg))}#rate-mockups .rt-result svg{width:28px;height:28px}#rate-mockups .rt-hero p{color:var(--rt-muted);margin:12px 0}#rate-mockups .rt-hero h1{font-size:40px;letter-spacing:-1.6px}#rate-mockups .rt-hero h1 span{font-size:22px;letter-spacing:-.5px;font-weight:400}#rate-mockups .rt-hero .rt-to{color:var(--rt-text)}#rate-mockups .rt-note{text-align:center;color:var(--rt-muted);font-size:13px;margin:12px 12px 28px}#rate-mockups .rt-details{border-top:1px solid var(--rt-line);border-bottom:1px solid var(--rt-line)}#rate-mockups summary{display:flex;justify-content:space-between;align-items:center;padding:18px 0;list-style:none;font-size:13px}#rate-mockups summary::-webkit-details-marker{display:none}#rate-mockups summary svg{width:16px;height:16px;color:var(--rt-muted)}#rate-mockups dl{margin:0 0 14px;font-size:12px}#rate-mockups dl div{display:flex;justify-content:space-between;gap:10px;padding:7px 0}#rate-mockups dt{color:var(--rt-muted)}#rate-mockups dd{margin:0;text-align:right;overflow-wrap:anywhere}#rate-mockups .rt-primary,#rate-mockups .rt-danger,#rate-mockups .rt-quiet{width:100%;border:0;border-radius:14px;padding:14px;margin-top:8px;font-weight:500}#rate-mockups .rt-primary{background:#15e99a;color:#09271b}#rate-mockups .rt-danger{background:var(--rt-surface);color:var(--rt-danger)}#rate-mockups .rt-quiet{background:transparent;color:var(--rt-muted)}#rate-mockups .rt-confirm{padding:16px;margin-top:16px;background:var(--rt-surface);border-radius:16px}#rate-mockups .rt-confirm p{font-size:12px;color:var(--rt-muted)}#rate-mockups .rt-share{display:block;padding-bottom:12px}#rate-mockups [hidden]{display:none!important}@media(max-width:380px){#rate-mockups section{padding:12px 0}#rate-mockups .rt-phone{padding-left:16px;padding-right:16px}#rate-mockups .rt-row{gap:8px}#rate-mockups .rt-money{font-size:12px}}
+</style>
+<script>
+(()=>{const root=document.getElementById('rate-mockups');const sections=[...root.querySelectorAll('section[data-variant]')];const pending=document.getElementById('rt-pending');
+function show(index){sections.forEach((section,i)=>section.hidden=i!==index);}
+root.querySelectorAll('[data-home]').forEach(b=>b.onclick=()=>show(0));
+root.querySelector('[data-open="receipt"]').onclick=()=>show(1);root.querySelector('[data-open="pending"]').onclick=()=>show(2);
+root.querySelector('[data-share]').onclick=()=>root.querySelector('.rt-share').hidden=false;
+const cancel=pending.querySelector('[data-cancel]');const confirm=pending.querySelector('.rt-confirm');let cancelled=false;
+cancel.onclick=()=>{if(cancelled){root.querySelector('[data-open="pending"]').hidden=true;show(0);return;}confirm.hidden=false;};
+pending.querySelector('[data-keep]').onclick=()=>confirm.hidden=true;
+pending.querySelector('[data-confirm]').onclick=()=>{cancelled=true;confirm.hidden=true;pending.querySelector('[data-status]').textContent='Transfer cancelled';pending.querySelector('[data-age]').textContent='No funds sent';pending.querySelector('[data-note]').textContent='The transfer was cancelled. You can now remove it from your history.';cancel.textContent='Remove from history';pending.querySelector('[data-check]').hidden=true;};
+pending.querySelector('[data-check]').onclick=()=>pending.querySelector('[data-age]').textContent='Checked just now · still waiting';
+})();
+</script>

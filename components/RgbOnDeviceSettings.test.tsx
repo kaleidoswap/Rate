@@ -34,8 +34,8 @@ jest.mock('../services/protocols/rgbL1', () => ({
   rgbL1Restorer: () => jest.fn(),
   RGB_L1_UPDATE_TO_SWITCH: 'Update the app to switch networks.',
   RGB_L1_DEFAULT_NETWORK: 'mainnet',
-  RGB_L1_NETWORKS: ['mainnet', 'mutinynet'],
-  RGB_L1_NETWORK_LABEL: { mainnet: 'Mainnet', mutinynet: 'Mutinynet' },
+  RGB_L1_NETWORKS: ['mainnet', 'mutinynet', 'signet', 'testnet'],
+  RGB_L1_NETWORK_LABEL: { mainnet: 'Mainnet', mutinynet: 'Mutinynet', signet: 'Signet', testnet: 'Testnet' },
   markRgbL1Ready: (...a: any[]) => { mockCalls.push('ready'); return (mockReady as any)(...a); },
   rgbBackupPassword: () => 'derived-password',
   isRgbLibNativeAvailable: () => true,
@@ -214,7 +214,8 @@ test('connected: switching asks first, explains the separate wallets, then switc
   mockAdapters.RGB_L1 = connectedL1();
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Switch to Mutinynet'));
+  fireEvent.press(screen.getByLabelText('Choose RGB network'));
+  fireEvent.press(screen.getByLabelText('Use Mutinynet'));
   const [title, message, buttons] = lastAlert();
   expect(title).toBe('Switch to Mutinynet?');
   expect(message).toMatch(/own RGB wallet.*separate balances.*Mainnet RGB assets stay here/);
@@ -229,7 +230,8 @@ test('a failed switch shows why', async () => {
   mockSwitch.mockResolvedValueOnce({ success: false, error: 'Couldn’t restore your RGB backup (offline).' });
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
-  fireEvent.press(screen.getByLabelText('Switch to Mutinynet'));
+  fireEvent.press(screen.getByLabelText('Choose RGB network'));
+  fireEvent.press(screen.getByLabelText('Use Mutinynet'));
   await act(async () => { await press(lastAlert()[2], 'Switch'); });
   expect(screen.getByText(/Couldn’t restore your RGB backup/)).toBeTruthy();
 });
@@ -241,7 +243,7 @@ test('an app build that can’t switch keeps the first network and says to updat
   const connected = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
   expect(connected.getByText('Update the app to switch networks.')).toBeTruthy();
-  expect(connected.queryByLabelText('Switch to Mutinynet')).toBeNull();
+  expect(connected.queryByLabelText('Choose RGB network')).toBeNull();
   connected.unmount();
   delete mockAdapters.RGB_L1;
   mockNetwork = null;
@@ -289,6 +291,20 @@ test('start errors read as plain words', () => {
   expect(rgbStartError('skipped: your RGB Lightning Node is the RGB account')).toMatch(/Remove it to use RGB on this phone/);
   expect(rgbStartError('skipped: something else')).toBe('something else');
   expect(rgbStartError(undefined)).toMatch(/didn’t start/);
+});
+
+
+test('connected wallet can select public Signet from all four networks', async () => {
+  mockNetwork = 'mainnet';
+  mockAdapters.RGB_L1 = connectedL1();
+  const screen = render(<RgbOnDeviceSettings walletId={7} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Choose RGB network'));
+  for (const name of ['Mainnet', 'Mutinynet', 'Signet', 'Testnet']) expect(screen.getByLabelText(`Use ${name}`)).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Use Signet'));
+  expect(lastAlert()[0]).toBe('Switch to Signet?');
+  await act(async () => { await press(lastAlert()[2], 'Switch'); });
+  expect(mockSwitch).toHaveBeenCalledWith('signet');
 });
 
 test('a failed connection shows its rgb-lib error, and the diagnostics can be shared even while not connected', async () => {
