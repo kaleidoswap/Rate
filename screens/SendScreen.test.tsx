@@ -236,7 +236,8 @@ test('picking an account card pays from it', async () => {
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010), offer('Bark', 1020)]);
   (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'pending' });
   const screen = await reviewed();
-  fireEvent.press(screen.getByLabelText(/^Pay from Bark\. Total 1020 sats/));
+  fireEvent.press(screen.getByLabelText('Change account'));
+  fireEvent.press(screen.getByLabelText(/^Bark\. Total you pay/));
   await act(async () => { pay(screen, 'Pay 1020 sats'); });
   expect(executePaymentOffer).toHaveBeenCalledWith(mockPreview, expect.objectContaining({ id: 'Bark' }), expect.any(String));
 });
@@ -273,7 +274,9 @@ test('quotes show as they arrive; the first payable one is picked and kept', asy
   });
   const screen = await reviewed();
   expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(true);
-  expect(screen.getByLabelText(/^Pay from Spark/)).toBeTruthy();
+  expect(screen.queryByLabelText(/^Pay from Spark/)).toBeNull();
+  fireEvent.press(screen.getByLabelText('Change account'));
+  expect(screen.getByLabelText(/^Spark\. Total you pay/)).toBeTruthy();
 });
 
 test('an empty Send lists what it can send to, including other chains', async () => {

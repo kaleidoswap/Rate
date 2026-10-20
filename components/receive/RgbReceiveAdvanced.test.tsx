@@ -31,11 +31,13 @@ test('choosing blinded with no free UTXO warns and offers to create some', () =>
   expect(onChange).toHaveBeenCalledWith({ kind: 'blinded', durationSeconds: 86_400, minConfirmations: 1 });
 });
 
-test('the node over NWC shows only expiry and confirmations', () => {
+test('the node over NWC offers invoice kind, expiry and confirmations without local UTXOs', () => {
   const screen = render(<RgbReceiveAdvanced support={nwc} options={DEFAULT_RGB_RECEIVE_OPTIONS} onChange={jest.fn()}
     requestExpirySeconds={3600} utxos={null} onLoadUtxos={jest.fn()} />);
   fireEvent.press(screen.getByLabelText('Advanced RGB options: Default'));
-  expect(screen.queryByText('Invoice type')).toBeNull();
+  expect(screen.getByText('Invoice type')).toBeTruthy();
+  expect(screen.getByText('Witness')).toBeTruthy();
+  expect(screen.getByText('Blinded')).toBeTruthy();
   expect(screen.queryByText('UTXOs')).toBeNull();
   expect(screen.getByText('Expires in')).toBeTruthy();
   expect(screen.getByText('Confirmations')).toBeTruthy();
@@ -43,5 +45,5 @@ test('the node over NWC shows only expiry and confirmations', () => {
 
 test('the summary lists only what differs from the default', () => {
   expect(rgbAdvancedSummary({ kind: 'blinded', durationSeconds: 604_800, minConfirmations: 3 }, all)).toBe('Blinded · 7 days · 3 confirmations');
-  expect(rgbAdvancedSummary({ kind: 'blinded', durationSeconds: null, minConfirmations: 1 }, nwc)).toBe('Default');
+  expect(rgbAdvancedSummary({ kind: 'blinded', durationSeconds: null, minConfirmations: 1 }, nwc)).toBe('Blinded');
 });
