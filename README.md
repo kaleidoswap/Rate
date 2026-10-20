@@ -7,9 +7,6 @@ Network, RGB assets, and Bitcoin L2s (Spark, Arkade, Bark) together under one
 self-custodial roof — driven by a private, **on-device** AI assistant and Nostr social
 payments. Your keys, your assets, and your AI all stay on your phone.
 
-Read the announcement: [Introducing Rate: AI-Powered Self-Sovereign RGB Lightning Wallet](https://kaleidoswap.com/blog/introducing-rate).
-More about the project at [kaleidoswap.com](https://kaleidoswap.com). Release notes are in [CHANGELOG.md](CHANGELOG.md).
-
 > ⚠️ **Alpha software.** KaleidoSwap is under active development and **not production-ready**.
 > Expect bugs, breaking changes, and incomplete features. The KaleidoMind AI assistant is
 > **experimental** and can make mistakes — always review actions before confirming. Use
@@ -442,3 +439,11 @@ Reinstall with `pnpm install --force --ignore-scripts` to restore the published
 package after an overlay. Dataset collection remains off; adding consent and
 review UI is a separate integration. Validate voice/model behavior on a physical
 device before shipping an app release.
+
+---
+
+Read the announcement: [Introducing Rate: AI-Powered Self-Sovereign RGB Lightning Wallet](https://kaleidoswap.com/blog/introducing-rate).
+
+More about our product suite on [kaleidoswap.com](https://kaleidoswap.com/products). 
+
+Release notes are in [CHANGELOG.md](CHANGELOG.md).
