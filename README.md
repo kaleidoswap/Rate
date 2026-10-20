@@ -282,10 +282,10 @@ Notes:
 ## Testing
 
 ```bash
-npm test                # run all tests
-npm run test:watch      # watch mode
-npm run test:coverage   # coverage report
-npx jest path/to/file.test.ts   # single file
+pnpm test               # run all tests
+pnpm test:watch         # watch mode
+pnpm test:coverage      # coverage report
+pnpm exec jest path/to/file.test.ts   # single file
 ```
 
 Coverage floor (enforced by `jest.config.js` and checked in CI): current coverage, about 36% statements/lines, 35% functions, 34% branches. Raise it as tests are added.
@@ -389,7 +389,7 @@ The next chapters of KaleidoSwap, grouped by horizon. Items move up as they land
 
 1. Fork the repository and create a feature branch.
 2. Make your changes and add tests where applicable.
-3. Ensure `npm test` passes.
+3. Ensure `pnpm test` passes.
 4. Submit a pull request.
 
 ## License
