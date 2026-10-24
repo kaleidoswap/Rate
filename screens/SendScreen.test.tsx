@@ -474,3 +474,33 @@ test('reopening a failed RGB payment shows its saved cause without expanding det
   expect(screen.getByText('The invoice has expired. Nothing was sent.')).toBeTruthy();
   expect(screen.getByText('Review transfer')).toBeTruthy();
 });
+
+const soon = () => Math.floor(Date.now() / 1000) + 1;
+const wait = (ms: number) => act(async () => { await new Promise(r => setTimeout(r, ms)); });
+
+test('an expiring total is re-priced on its own; the same total keeps the slider and shows no timer', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValueOnce([offer('Spark', 1010, soon())]).mockResolvedValue([offer('Spark', 1010)]);
+  const screen = await reviewed();
+  expect(screen.queryByText(/held for|quote valid/)).toBeNull();
+  await wait(1100);
+  expect(quotePaymentOffers).toHaveBeenCalledTimes(2);
+  expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  expect(screen.queryByText('Accept new total')).toBeNull();
+  expect(screen.queryByText('Refresh')).toBeNull();
+});
+
+test('a re-priced total that went up needs accepting before paying', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValueOnce([offer('Spark', 1010, soon())]).mockResolvedValue([offer('Spark', 1030)]);
+  const screen = await reviewed();
+  await wait(1100);
+  expect(screen.getByText('The total went up from 1010 sats to 1030 sats. Check it before paying.')).toBeTruthy();
+  expect(screen.queryByText('Slide to pay 1030 sats')).toBeNull();
+  fireEvent.press(screen.getByText('Accept new total'));
+  expect(screen.getByText('Slide to pay 1030 sats')).toBeTruthy();
+});
+
+test('a swap shows how long its price is held', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([{ ...offer('Bark', 1100), route: { kind: 'swap', sourceId: 'Bark', from: 'ln:mainnet', to: 'btc:mainnet' } }]);
+  const screen = await reviewed();
+  expect(screen.getByText(/^Swap price held for \d+s$/)).toBeTruthy();
+});

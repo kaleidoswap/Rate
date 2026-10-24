@@ -36,7 +36,7 @@ export function ProviderSheet({ visible, options, selectedId, onSelect, onClose,
   const t = useAppTheme();
   const clock = useForegroundClock(visible && now === undefined);
   const currentTime = now ?? clock;
-  const reasonOf = (o: ProviderOption) => o.unavailable || (o.expiresAt !== undefined && o.expiresAt <= currentTime ? 'Quote expired. Refresh to compare again.' : '');
+  const reasonOf = (o: ProviderOption) => o.unavailable || (o.expiresAt !== undefined && o.expiresAt <= currentTime ? 'Price expired. Refresh to compare again.' : '');
   const live = options.filter(o => !reasonOf(o));
   const groups: [string, ProviderOption[]][] = [];
   for (const o of live) {

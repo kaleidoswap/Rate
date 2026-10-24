@@ -20,7 +20,7 @@ export function paymentPresentation(a: PaymentAttempt): { title: string; detail:
     return { title: 'Processing on-chain payment', detail: 'Waiting for the provider to report the transaction. Do not send again.' };
   }
   return a.status === 'completed' ? { title: 'Payment completed', detail: 'Your payment is complete.' }
-    : a.status === 'failed' ? { title: 'Payment failed', detail: a.detail || (a.sourceId === 'rgb-asset' ? 'The RGB transfer failed. Review the transfer details before trying again.' : 'This payment was not sent, or the provider confirmed it failed. Review a new quote before trying again.') }
+    : a.status === 'failed' ? { title: 'Payment failed', detail: a.detail || (a.sourceId === 'rgb-asset' ? 'The RGB transfer failed. Review the transfer details before trying again.' : 'This payment was not sent, or the provider confirmed it failed. Review the payment again before retrying.') }
     : a.status === 'unknown' ? { title: 'Payment outcome unknown', detail: a.detail || 'We have no confirmation that this payment completed. Do not send again.' }
     : { title: 'Confirming payment', detail: 'Checking automatically. Do not send again.' };
 }
