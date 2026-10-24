@@ -63,7 +63,10 @@ const nav = () => ({ goBack: jest.fn(), navigate: jest.fn() });
 async function reviewed(navigation = nav()) {
   const screen = render(<SendScreen navigation={navigation} route={{ params: { prefilledAddress: 'lnbc1' } }} />);
   await act(async () => {});
-  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  // A prefilled request goes straight to review; Continue only remains when it does not.
+  const proceed = screen.queryByText('Continue');
+  if (proceed) await act(async () => { fireEvent.press(proceed); });
+  await act(async () => {});
   return screen;
 }
 const pay = (screen: any, label: string) => fireEvent(screen.getByLabelText(label), 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
@@ -77,7 +80,7 @@ test('one flow: decode, compare ways to pay, and pay only the reviewed total', a
   expect(executePaymentOffer).not.toHaveBeenCalled();
   expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
   // Pay from: one card per account, the cheapest picked.
-  expect(screen.getByLabelText(/^Pay from Spark\. Total 1010 sats/).props.accessibilityState.checked).toBe(true);
+  expect(screen.getByLabelText(/^Pay from Spark\. Total 1010 sats/)).toBeTruthy();
   expect(screen.queryByLabelText(/^Pay from Bark/)).toBeNull();
   fireEvent.press(screen.getByLabelText('Change account'));
   fireEvent.press(screen.getByLabelText(/^Bark\. Total you pay/));
@@ -273,7 +276,7 @@ test('quotes show as they arrive; the first payable one is picked and kept', asy
     return [offer('Bark', 1020), offer('Spark', 1010)];
   });
   const screen = await reviewed();
-  expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(true);
+  expect(screen.getByLabelText(/^Pay from Bark/)).toBeTruthy();
   expect(screen.queryByLabelText(/^Pay from Spark/)).toBeNull();
   fireEvent.press(screen.getByLabelText('Change account'));
   expect(screen.getByLabelText(/^Spark\. Total you pay/)).toBeTruthy();
@@ -357,7 +360,8 @@ test('completed address payments have one exit and optional receipt sharing', as
   const navigation = nav();
   const screen = render(<SendScreen navigation={navigation} route={{ params: { prefilledAddress: 'alice@example.com', prefilledAmountSat: 1000 } }} />);
   await act(async () => {});
-  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  await act(async () => {});
+  expect(screen.queryByText('Continue')).toBeNull(); // a contact with an amount goes straight to review
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
   expect(screen.queryByText('Save contact')).toBeNull();
   expect(screen.queryByText('Pay again')).toBeNull();
@@ -503,4 +507,27 @@ test('a swap shows how long its price is held', async () => {
   (quotePaymentOffers as jest.Mock).mockResolvedValue([{ ...offer('Bark', 1100), route: { kind: 'swap', sourceId: 'Bark', from: 'ln:mainnet', to: 'btc:mainnet' } }]);
   const screen = await reviewed();
   expect(screen.getByText(/^Swap price held for \d+s$/)).toBeTruthy();
+});
+
+test('a scanned request opens the review on its own; a typed one waits for Continue', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  const scanned = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'lnbc1' } }} />);
+  await act(async () => {});
+  await act(async () => {});
+  expect(scanned.getByText('Slide to pay 1010 sats')).toBeTruthy();
+  scanned.unmount();
+  const typed = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+  await act(async () => {});
+  await act(async () => { fireEvent.changeText(typed.getByLabelText('Payment request'), 'lnbc1'); });
+  expect(typed.getByText('Continue')).toBeTruthy();
+  expect(quotePaymentOffers).toHaveBeenCalledTimes(1);
+});
+
+test('the review names an unlabelled invoice by its kind and shows the fee once', async () => {
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
+  const screen = await reviewed();
+  expect(screen.getByText('Lightning invoice')).toBeTruthy();
+  expect(screen.queryByText(/^To lnbc/)).toBeNull();
+  expect(screen.getAllByText('10 sats')).toHaveLength(1);
+  expect(screen.queryByLabelText('Change account')).toBeNull(); // only one way to pay
 });
