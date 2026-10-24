@@ -63,6 +63,7 @@ import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 import { ExplainButton } from '../components/mind/ExplainSheet';
+import { defaultLayerSwapDeps, layerSwapNetwork } from '../services/layerSwap/sparkArkade';
 
 interface Props {
   navigation: any;
@@ -864,9 +865,25 @@ export default function SwapScreen({ navigation, route }: Props) {
 
   const liquidityShortfall = swapState.currentQuote ? quoteChannelShortfall(swapState.currentQuote, liquidity, quoteLegLabel) : null;
 
+  // Spark ⇄ Arkade over Lightning lives on its own screen; offer it when both wallets are on one chain.
+  let canMoveBitcoin = false;
+  try { canMoveBitcoin = 'network' in layerSwapNetwork(defaultLayerSwapDeps()); } catch { /* a wallet is not ready */ }
+  const renderMoveBitcoinEntry = () => canMoveBitcoin && (
+    <TouchableOpacity
+      accessibilityRole="button"
+      style={styles.moveBitcoinRow}
+      onPress={() => navigation.navigate('MoveBitcoin')}
+    >
+      <Ionicons name="swap-horizontal" size={16} color={theme.colors.primary[500]} />
+      <Text style={styles.moveBitcoinLabel}>Move bitcoin between Spark and Arkade</Text>
+      <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
+    </TouchableOpacity>
+  );
+
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
       {renderPairsNotice()}
+      {renderMoveBitcoinEntry()}
       {/* Venue filter tabs (Advanced only: Lite picks the best price for you) */}
       {policy.showRouteSelector && renderVenueFilter()}
 
@@ -1464,6 +1481,22 @@ const styles = StyleSheet.create({
 
   scrollView: {
     flex: 1,
+  },
+
+  moveBitcoinRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+    minHeight: 44,
+    paddingHorizontal: theme.spacing[3],
+    marginBottom: theme.spacing[3],
+    borderRadius: theme.borderRadius.base,
+    backgroundColor: theme.colors.background.tertiary,
+  },
+  moveBitcoinLabel: {
+    flex: 1,
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.fontSize.sm,
   },
 
   helpButton: {

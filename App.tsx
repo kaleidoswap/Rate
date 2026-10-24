@@ -62,6 +62,7 @@ import MapScreen from './screens/MapScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
+import MoveBitcoinScreen from './screens/MoveBitcoinScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import OnboardingProfileScreen from './screens/OnboardingProfileScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
@@ -284,6 +285,7 @@ function AppNavigator() {
         <Stack.Screen name="QRScanner" component={asModalScreen(QRScannerScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Swap" component={asModalScreen(SwapScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="MoveBitcoin" component={asModalScreen(MoveBitcoinScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="AssetDetail" component={asModalScreen(AssetDetailScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
         <Stack.Screen name="Map" component={MapScreen} />

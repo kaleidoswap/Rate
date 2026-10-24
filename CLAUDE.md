@@ -57,6 +57,7 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 - `DatabaseService.ts` – SQLite (expo-sqlite). The file is **not** encrypted (no SQLCipher yet), so it must never hold secrets: seeds live in SecureStore via `SecurityService`, and `setSetting(..., encrypted=true)` throws unless a key is set
 - `NostrService.ts` / `NWCService.ts` – Nostr protocol + NIP-47 Wallet Connect
 - `SecurityService.ts` – biometric auth, SecureStore encryption
+- `layerSwap/sparkArkade.ts` – move BTC between Spark and Arkade over Lightning (`screens/MoveBitcoinScreen.tsx`, linked from Swap): composes KaleidoPay (Arkade Lightning receive + claim; Spark invoice paid by the Arkade Intents swap), so quoting, refusal of changed terms and recovery stay KaleidoPay's
 - `QVACService.ts` – on-device AI model lifecycle (LLM + Whisper via @qvac/sdk)
 - `mindAgent.ts` – the ONE KaleidoMind agent runner (fast-path → recipe → agentic funnel) shared by chat and voice; `walletTools.ts` / `merchantTools.ts` / `aiMemory.ts` / `aiKnowledge.ts` are its tool-source bindings
 
