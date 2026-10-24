@@ -57,6 +57,7 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 - `DatabaseService.ts` – SQLite (expo-sqlite). The file is **not** encrypted (no SQLCipher yet), so it must never hold secrets: seeds live in SecureStore via `SecurityService`, and `setSetting(..., encrypted=true)` throws unless a key is set
 - `NostrService.ts` / `NWCService.ts` – Nostr protocol + NIP-47 Wallet Connect
 - `SecurityService.ts` – biometric auth, SecureStore encryption
+- `atomicSwap/` – atomic BTC L1 ⇄ USDT-RGB L1 swaps against the KaleidoSwap maker (`/v2/swap/atomic/*`): a plain-JS port of swap-sdk's `AtomicSwaps` (its client lives in the wasm entry, stubbed on mobile) that verifies every maker answer, lossless JSON for rgb-lib messages (64-bit blindings), and the run (`executeAtomicSwap`). The wallet side is `RgbLibRnAccount.atomicSwapWallet()`, null until the native module is built on kaleidoswap/rgb-lib (`supportsAtomicSwaps()`)
 - `QVACService.ts` – on-device AI model lifecycle (LLM + Whisper via @qvac/sdk)
 - `mindAgent.ts` – the ONE KaleidoMind agent runner (fast-path → recipe → agentic funnel) shared by chat and voice; `walletTools.ts` / `merchantTools.ts` / `aiMemory.ts` / `aiKnowledge.ts` are its tool-source bindings
 

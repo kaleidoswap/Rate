@@ -16,6 +16,10 @@ export interface KaleidoRgbNative {
   restoreBackup(args: Args): Promise<void>
   openWallet(args: Args): Promise<number>
   closeWallet(handle: number): Promise<void>
+  /** Atomic swap calls, on kaleidoswap/rgb-lib builds only (see `supportsAtomicSwaps`). JSON text in and out. */
+  acceptSwapOffer?: (handle: number, args: Args) => Promise<string>
+  completeSwapProposal?: (handle: number, args: Args) => Promise<string>
+  acceptSwapTransfers?: (handle: number, args: Args) => Promise<void>
   /** Every wallet call: `(handle, args)`, run in order on that wallet's own thread. */
   [walletCall: string]: unknown
 }

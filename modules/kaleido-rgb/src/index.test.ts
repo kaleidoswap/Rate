@@ -4,7 +4,7 @@ jest.mock('./native', () => ({ getNativeModule: () => (mockAvailable ? mockNativ
 
 import {
   DEFAULT_RECEIVE_SECONDS, DEFAULT_SEND_SECONDS, RgbLibError, Wallet, decodeInvoice, expiresAt, isAvailable, isRgbLibError,
-  legacyBdkCacheAction, restoreBackup, restoreKeys, rgbErrorCode, toRgbLibError,
+  legacyBdkCacheAction, restoreBackup, restoreKeys, rgbErrorCode, supportsAtomicSwaps, toRgbLibError,
 } from './index';
 import type { Keys } from './types';
 
@@ -182,5 +182,30 @@ describe('errors', () => {
     mockAvailable = false;
     expect(isAvailable()).toBe(false);
     await expect(restoreKeys('MAINNET', 'x')).rejects.toMatchObject({ code: 'ERR_RGB_UNAVAILABLE' });
+  });
+});
+
+describe('atomic swaps', () => {
+  test('are unavailable on an official rgb-lib build, without touching the wallet', async () => {
+    expect(supportsAtomicSwaps()).toBe(false);
+    const wallet = new Wallet(keys, { network: 'SIGNET_CUSTOM' });
+    await expect(wallet.acceptSwapOffer('{}', 1)).rejects.toMatchObject({ code: 'ERR_RGB_UNAVAILABLE' });
+    expect(mockNative.openWallet).not.toHaveBeenCalled();
+  });
+
+  test('pass rgb-lib JSON through as text on a build that has them', async () => {
+    Object.assign(mockNative, {
+      acceptSwapOffer: jest.fn(async () => '{"offer":{},"taker_rgb_blinding":18446744073709551557}'),
+      completeSwapProposal: jest.fn(async () => '{"txid":"t"}'),
+      acceptSwapTransfers: jest.fn(async () => undefined),
+    });
+    expect(supportsAtomicSwaps()).toBe(true);
+    const wallet = new Wallet(keys, { network: 'SIGNET_CUSTOM' });
+    expect(await wallet.acceptSwapOffer('{"swap_id":"s"}', 1)).toBe('{"offer":{},"taker_rgb_blinding":18446744073709551557}');
+    expect(mockNative.acceptSwapOffer).toHaveBeenCalledWith(7, { offerJson: '{"swap_id":"s"}', minConfirmations: 1, skipSync: false });
+    await wallet.completeSwapProposal('{"p":1}', 1);
+    expect(mockNative.completeSwapProposal).toHaveBeenCalledWith(7, { proposalJson: '{"p":1}', minConfirmations: 1, skipSync: false });
+    await wallet.acceptSwapTransfers('{"c":1}');
+    expect(mockNative.acceptSwapTransfers).toHaveBeenCalledWith(7, { completionJson: '{"c":1}', role: 'TAKER', skipSync: false });
   });
 });

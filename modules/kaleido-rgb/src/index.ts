@@ -66,6 +66,21 @@ export function nativeRgbLibVersion(): string | null {
   return getNativeModule()?.rgbLibVersion() ?? null
 }
 
+/**
+ * rgb-lib's atomic on-chain swap calls (`accept_swap_offer`,
+ * `complete_swap_proposal`, `accept_swap_transfers`): only a native build on
+ * kaleidoswap/rgb-lib (with kaleidoswap/rgb-lib#18) has them. Official
+ * rgb-lib builds, this module's today, do not.
+ */
+export function supportsAtomicSwaps(): boolean {
+  const mod = getNativeModule()
+  return !!mod && typeof mod.acceptSwapOffer === 'function' && typeof mod.completeSwapProposal === 'function'
+    && typeof mod.acceptSwapTransfers === 'function'
+}
+
+/** Which side of an atomic swap the wallet is on. The app is always the taker. */
+export type OnchainSwapRole = 'MAKER' | 'TAKER'
+
 /** Wallets in folders of their own (`subdir`): always, with this module. */
 export const supportsSubdir = isAvailable
 /** Custom signets (Mutinynet): always, with this module. */
@@ -279,6 +294,35 @@ export class Wallet {
   /** True when the wallet changed since its last backup. */
   backupInfo(): Promise<boolean> {
     return this.op('backupInfo')
+  }
+
+  /**
+   * Atomic swaps (see `supportsAtomicSwaps`). The swap messages cross the
+   * bridge as rgb-lib's serde JSON text, never as JS objects: their 64-bit
+   * fields (seal blindings) do not survive JS numbers.
+   *
+   * `accept_swap_offer`: reserves the wallet's inputs for a verified
+   * `OnchainSwapOffer` and returns the `OnchainSwapRequest` JSON to post.
+   */
+  acceptSwapOffer(offerJson: string, minConfirmations: number, skipSync = false): Promise<string> {
+    return this.atomicOp('acceptSwapOffer', { offerJson, minConfirmations, skipSync })
+  }
+
+  /** `complete_swap_proposal`: signs the maker's `OnchainSwapProposal`; returns the `OnchainSwapCompletion` JSON. */
+  completeSwapProposal(proposalJson: string, minConfirmations: number, skipSync = false): Promise<string> {
+    return this.atomicOp('completeSwapProposal', { proposalJson, minConfirmations, skipSync })
+  }
+
+  /** `accept_swap_transfers`: takes the wallet's side of a broadcast swap from the finalized completion. */
+  acceptSwapTransfers(completionJson: string, role: OnchainSwapRole = 'TAKER', skipSync = false): Promise<void> {
+    return this.atomicOp('acceptSwapTransfers', { completionJson, role, skipSync })
+  }
+
+  private atomicOp<T>(name: string, args: Record<string, unknown>): Promise<T> {
+    if (!supportsAtomicSwaps()) {
+      return Promise.reject(new RgbLibError(BRIDGE_ERROR_CODES.unavailable, 'This app build cannot run atomic RGB swaps.'))
+    }
+    return this.op(name, args)
   }
 
   getFeeEstimation(blocks: number): Promise<number> {

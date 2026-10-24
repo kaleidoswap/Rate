@@ -13,6 +13,7 @@
  * for this wallet (see `rgbLibSubdir`), else rgb-lib's original folder.
  */
 import type * as RgbLib from '../../modules/kaleido-rgb'
+import type { AtomicSwapWallet } from '../atomicSwap/atomicSwapFlow'
 
 type RgbModule = typeof RgbLib
 type LibNetwork = RgbLib.BitcoinNetwork
@@ -416,6 +417,33 @@ export class RgbLibRnAccount {
     this.lastRefresh = 0
     this.onChange()
     return created
+  }
+
+  /**
+   * This wallet as the taker of atomic BTC <-> RGB swaps (services/atomicSwap),
+   * or null on a native build without rgb-lib's swap calls (official rgb-lib
+   * has none: they come with kaleidoswap/rgb-lib).
+   */
+  atomicSwapWallet(): AtomicSwapWallet | null {
+    if (typeof this.lib.supportsAtomicSwaps !== 'function' || !this.lib.supportsAtomicSwaps()) return null
+    return {
+      walletOutpoints: async () => {
+        const unspents = await this.serial(() => this.wallet.listUnspents(false, false))
+        return unspents.map((u) => ({ txid: u.utxo.outpoint.txid, vout: u.utxo.outpoint.vout }))
+      },
+      acceptSwapOffer: (offerJson) => this.serial(() => this.wallet.acceptSwapOffer(offerJson, 1)),
+      completeSwapProposal: async (proposalJson) => {
+        const signed = await this.serial(() => this.wallet.completeSwapProposal(proposalJson, 1))
+        this.lastRefresh = 0
+        this.onChange()
+        return signed
+      },
+      acceptSwapTransfers: async (completionJson) => {
+        await this.serial(() => this.wallet.acceptSwapTransfers(completionJson, 'TAKER'))
+        this.lastRefresh = 0
+        this.onChange()
+      },
+    }
   }
 
   signPsbt(psbt: string): Promise<string> {
