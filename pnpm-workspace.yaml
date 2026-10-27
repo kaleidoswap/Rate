@@ -35,6 +35,8 @@ overrides:
   brace-expansion@5: ^5.0.12
   browserslist@4: ^4.28.7
   baseline-browser-mapping@2: ^2.11.0
+  bip39@3: ^3.1.2
+  bitcoinjs-lib@6: ^6.1.10
   fast-uri@3: ^3.1.9
   js-yaml@3: ^3.15.2
   js-yaml@4: ^4.3.2
