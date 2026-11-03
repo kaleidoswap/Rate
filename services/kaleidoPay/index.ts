@@ -39,7 +39,7 @@ export interface Quote {
   spend?: SpendQuote;
   estimatedSeconds?: number;
 }
-export interface PaymentResult { status: 'completed' | 'pending' | 'unknown' | 'failed'; reference?: string; detail?: string }
+export interface PaymentResult { status: 'completed' | 'pending' | 'unknown' | 'failed'; reference?: string; detail?: string; resolution?: 'refunded' }
 export interface AccountQuoteOption { id: string; name: string; detail?: string; quote?: Quote; unavailable?: string }
 export interface PayAccount {
   pay?: (preview: Preview, route: Route, quote: Quote, onUpdate?: (attempt: SwapAttempt) => void) => Promise<SwapAttempt>;
@@ -57,7 +57,7 @@ export interface PayAccount {
   status?: (attemptId: string) => Promise<PaymentResult>;
 }
 export interface PaymentOffer {
-  id: string; provider: string; providerDetail?: string; accountName: string; route: Route;
+  id: string; provider: string; providerChoiceId?: string; providerDetail?: string; accountName: string; route: Route;
   quote?: Quote; unavailable?: string; executable: boolean;
 }
 /** Development builds with EXPO_PUBLIC_KALEIDOPAY_DEMO=1 simulate only the final payment; quotes stay live and
@@ -294,7 +294,7 @@ async function quoteRoute(preview: Preview, route: Route): Promise<PaymentOffer[
       : [{ id: '', name: base.provider, quote: await quotePayment(preview, route) }];
     if (!account || accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Refresh quotes.');
     return choices.map(choice => {
-      const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, providerDetail: choice.detail, quote: choice.quote, unavailable: choice.unavailable };
+      const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, providerChoiceId: choice.id, providerDetail: choice.detail, quote: choice.quote, unavailable: choice.unavailable };
       try {
         if (offer.quote && !offer.unavailable) {
           validateQuote(offer.quote, preview, account);

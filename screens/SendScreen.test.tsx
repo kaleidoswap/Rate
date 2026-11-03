@@ -474,3 +474,11 @@ test('reopening a failed RGB payment shows its saved cause without expanding det
   expect(screen.getByText('The invoice has expired. Nothing was sent.')).toBeTruthy();
   expect(screen.getByText('Review transfer')).toBeTruthy();
 });
+
+test('Swap context automatically reviews once without executing a payment', async () => {
+  const v = render(<SendScreen navigation={{ goBack: jest.fn() }} route={{ params: { swapContext: true, prefilledAddress: 'lnbc1', prefilledAmountSat: 1000 } }} />);
+  await act(async () => {});
+  expect(previewInput).toHaveBeenCalledTimes(1);
+  expect(executePaymentOffer).not.toHaveBeenCalled();
+  v.unmount();
+});

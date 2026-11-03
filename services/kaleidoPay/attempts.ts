@@ -22,6 +22,7 @@ function validateAttempt(value: any): PaymentAttempt {
     || typeof value.provider !== 'string' || typeof value.total !== 'string' || typeof value.recipient !== 'string'
     || !Number.isSafeInteger(value.createdAt)
     || ['recipientName', 'feeDisplay', 'accountName', 'destinationRail', 'network', 'detail'].some(field => value[field] !== undefined && typeof value[field] !== 'string')
+    || (value.resolution !== undefined && value.resolution !== 'refunded')
     || (value.lastCheckedAt !== undefined && !Number.isSafeInteger(value.lastCheckedAt))
     || (value.checkFailed !== undefined && typeof value.checkFailed !== 'boolean')
     || (value.onchainConfirmed !== undefined && typeof value.onchainConfirmed !== 'boolean')

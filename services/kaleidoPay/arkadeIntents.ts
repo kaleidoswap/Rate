@@ -312,7 +312,9 @@ interface AttemptRef { rfqId: string; providerId: string; fundAmountSats: number
 export function resultOfPhase(phase: ArkadeSwapPhase | undefined, reference?: string): PaymentResult {
   switch (phase) {
     case 'settled': return { status: 'completed', reference };
-    case 'refunded': case 'cancelled': case 'failed': return { status: 'failed', reference };
+    case 'refunded': return { status: 'failed', resolution: 'refunded', reference, detail: 'The swap was refunded to your Arkade wallet. The recipient was not paid.' };
+    case 'cancelled': return { status: 'failed', reference, detail: 'The swap expired without funding. Nothing was sent.' };
+    case 'failed': case 'needs_recovery': return { status: 'unknown', reference, detail: 'Funds need recovery. Keep this wallet available and check again; do not pay again.' };
     case 'prepared': case 'funded': return { status: 'pending', reference };
     default: return { status: 'unknown', reference };
   }
@@ -387,13 +389,23 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     return reconciling;
   }
 
-  async function execute(preview: Preview, route: Route, quote: Quote, attemptId: string): Promise<PaymentResult> {
+  const executions = new Map<string, Promise<PaymentResult>>();
+  function execute(preview: Preview, route: Route, quote: Quote, attemptId: string): Promise<PaymentResult> {
+    const current = executions.get(attemptId);
+    if (current) return current;
+    const task = executeOnce(preview, route, quote, attemptId).finally(() => executions.delete(attemptId));
+    executions.set(attemptId, task);
+    return task;
+  }
+  async function executeOnce(preview: Preview, route: Route, quote: Quote, attemptId: string): Promise<PaymentResult> {
     const prior = await AsyncStorage.getItem(attemptKey(attemptId));
     if (prior) return status(attemptId); // never fund an attempt twice
     let approval: Approval, facts: InvoiceFacts, provider: IntentsProvider, wallet: any, arkServerUrl: string;
     try {
       approval = approved.get(quote)!;
       if (!approval || approval.terms !== terms(preview, route)) throw new Error('Review the payment again to get a fresh quote.');
+      // Consume before the first provider await: two attempt IDs cannot reuse one approval.
+      approved.delete(quote);
       facts = check(preview, route);
       if (quote.expiresAt <= Math.floor(Date.now() / 1000)) throw new Error('Review the payment again to get a fresh quote.');
       const listed = (await providers()).find(p => p.id === approval.providerId);
@@ -414,7 +426,11 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
       let prepared: Awaited<ReturnType<ArkadeIntentsVenue['prepareLightningSend']>>;
       try { prepared = await venue.prepareLightningSend({ invoice: facts }); }
       catch (error) {
-        throw new PaymentNotSentError(`${provider.name} did not give a usable quote (${error instanceof Error ? error.message : 'no answer'}). Choose another way to pay.`);
+        const reason = error instanceof Error ? error.message : 'no answer';
+        if (reason.includes('invoice_cltv_too_large')) {
+          throw new PaymentNotSentError('This Lightning invoice requires a longer payment window than the provider supports. Ask for a different invoice or choose another provider. Nothing was sent.');
+        }
+        throw new PaymentNotSentError(`${provider.name} did not give a usable quote (${reason}). Choose another way to pay.`);
       }
       const now = Math.floor(Date.now() / 1000);
       const spend = prepared.fundAmountSats + approval.fundingFee;
@@ -428,9 +444,17 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
       const balance = await opts.balance().catch(() => null);
       if (balance === null || spend > balance) throw new PaymentNotSentError('Insufficient Arkade balance. Nothing was sent.');
 
+      const checkFundingDeadline = () => {
+        const now = Math.floor(Date.now() / 1000);
+        if (prepared.summary.validUntil <= now + 5 || quote.expiresAt <= now || facts.expiresAt <= now + INVOICE_MARGIN_S) {
+          throw new PaymentNotSentError('The quote or invoice expired before funding. Nothing was sent.');
+        }
+      };
+      checkFundingDeadline();
       // Recovery data first: the venue record is already stored; link it to this attempt.
       const ref: AttemptRef = { rfqId: prepared.record.id, providerId: provider.id, fundAmountSats: prepared.fundAmountSats };
       await AsyncStorage.setItem(attemptKey(attemptId), JSON.stringify(ref));
+      checkFundingDeadline();
       // Funding is the acceptance. Past this point a failure may have moved funds: it is not "not sent".
       const txid: string = await wallet.sendBitcoin({ address: prepared.address, amount: prepared.fundAmountSats });
       if (!txid) return { status: 'unknown', reference: prepared.record.id };
@@ -456,7 +480,7 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
     if (!record) return { status: 'unknown', reference: ref.rfqId };
     // Funded but not yet notified reads as prepared; with a funding txid it is in flight.
     if (record.phase === 'prepared' && !ref.fundingTxid) return { status: 'unknown', reference: ref.rfqId };
-    return resultOfPhase(record.phase, record.phase === 'settled' ? record.resolvedTxid ?? ref.rfqId : ref.rfqId);
+    return resultOfPhase(record.phase, ['settled', 'refunded'].includes(record.phase) ? record.resolvedTxid ?? ref.rfqId : ref.rfqId);
   }
 
   const swaps: SwapCapability[] = [{ id: ARKADE_INTENTS_SWAP_ID, from: opts.rail, to, network }];
@@ -484,6 +508,8 @@ const idleTransport: RfqTransport = {
 // Arkade and the wallet claims them (revealing the preimage settles the invoice).
 // ---------------------------------------------------------------------------
 export interface ArkadeLightningReceiveOptions {
+  /** Explicit route selection must never fall back to another provider. */
+  providerId?: string;
   network: Network;
   /** The connected Arkade SDK wallet (`ArkadeWdkAdapter.rawWallet`). */
   wallet: any;
@@ -538,7 +564,8 @@ const receiveFeeCap = (estimate: number, amountSats: number) => estimate + Math.
 export async function createArkadeLightningReceive(opts: ArkadeLightningReceiveOptions, amountSats: number): Promise<ArkadeLightningReceive> {
   if (!Number.isSafeInteger(amountSats) || amountSats <= 0) throw new Error('Set an amount: Lightning into Arkade needs one.');
   if (!opts.wallet || !opts.arkServerUrl) throw new Error('Arkade is not connected.');
-  const list = await receiveProviders(opts)();
+  const available = await receiveProviders(opts)();
+  const list = opts.providerId ? available.filter(p => p.id === opts.providerId) : available;
   const reasons: string[] = [];
   for (const provider of list) {
     if (!('market' in provider)) { reasons.push(`${provider.name}: ${provider.unavailable}`); continue; }
@@ -558,6 +585,13 @@ export async function createArkadeLightningReceive(opts: ArkadeLightningReceiveO
         reasons.push(`${provider.name}: quoted a different amount`);
         continue;
       }
+      // The SDK calls min(quote deadline, BOLT11 expiry) "invoiceExpiresAt".
+      // Keep that short deadline for UI, but recovery must observe the real invoice
+      // lifetime: an already shared invoice can still be paid after the quote closes.
+      const invoiceExpiry = invoiceFacts(prepared.invoice).expiresAt;
+      if (invoiceExpiry > (prepared.record.invoiceExpiresAt ?? 0)) {
+        await (opts.store ?? arkadeIntentsStore).put({ ...prepared.record, invoiceExpiresAt: invoiceExpiry });
+      }
       return {
         rfqId: prepared.record.id, invoice: prepared.invoice, amountSats,
         payAmountSats: prepared.payAmountSats, provider: provider.name, expiresAt: prepared.invoiceExpiresAt,
@@ -573,20 +607,43 @@ export async function createArkadeLightningReceive(opts: ArkadeLightningReceiveO
     : 'No swap provider receives Lightning into Arkade on this network right now.');
 }
 
-const claimVenues = new WeakMap<object, ArkadeIntentsVenue>();
-/**
- * One claim pass for a Lightning receive: claims the provider's Arkade lockup once it
- * is funded. Safe to call repeatedly; never pays. Returns the swap's phase.
- */
+interface ClaimContext { venue: ArkadeIntentsVenue; flight?: Promise<ArkadeSwapPhase | undefined> }
+const claimVenues = new WeakMap<object, Map<ArkadeSwapStore, Map<string, ClaimContext>>>();
+/** One idempotent recovery pass, scoped to this wallet, store, server and receipt. */
 export async function claimArkadeLightningReceive(
   wallet: any, arkServerUrl: string, rfqId: string, store: ArkadeSwapStore = arkadeIntentsStore,
 ): Promise<ArkadeSwapPhase | undefined> {
   if (!wallet || !arkServerUrl) return undefined;
-  let venue = claimVenues.get(wallet);
-  if (!venue) {
-    venue = new (load().venue.ArkadeIntentsVenue)({ wallet, arkServerUrl, store, transport: idleTransport });
-    claimVenues.set(wallet, venue);
+  let stores = claimVenues.get(wallet);
+  if (!stores) { stores = new Map(); claimVenues.set(wallet, stores); }
+  let contexts = stores.get(store);
+  if (!contexts) { contexts = new Map(); stores.set(store, contexts); }
+  const key = JSON.stringify([arkServerUrl, rfqId]);
+  let context = contexts.get(key);
+  if (!context) {
+    // Do not reconcile unrelated wallets' records in the shared AsyncStorage store.
+    const scoped: ArkadeSwapStore = {
+      put: record => store.put(record), get: id => id === rfqId ? store.get(id) : Promise.resolve(undefined),
+      listPending: async () => (await store.listPending()).filter(record => record.id === rfqId),
+    };
+    context = { venue: new (load().venue.ArkadeIntentsVenue)({ wallet, arkServerUrl, store: scoped, transport: idleTransport }) };
+    contexts.set(key, context);
   }
-  const record = await venue.claimReceive(rfqId, { waitSeconds: 0 });
-  return record?.phase;
+  const current = context;
+  current.flight ??= (async () => {
+    const before = await store.get(rfqId);
+    if (!before) return undefined;
+    if (['settled', 'cancelled', 'refunded', 'failed'].includes(before.phase)) return before.phase;
+    // Migrate existing prepared receipts too, before the SDK's expiry fast path.
+    if (before.phase === 'prepared' && before.invoice) {
+      const invoiceExpiry = invoiceFacts(before.invoice).expiresAt;
+      if (invoiceExpiry > (before.invoiceExpiresAt ?? 0)) await store.put({ ...before, invoiceExpiresAt: invoiceExpiry });
+    }
+    // claimReceive alone does not run the prepared-record expiry/grace check.
+    await current.venue.reconcile();
+    const after = await store.get(rfqId);
+    if (!after || ['settled', 'cancelled', 'refunded', 'failed'].includes(after.phase)) return after?.phase;
+    return (await current.venue.claimReceive(rfqId, { waitSeconds: 0 }))?.phase;
+  })().finally(() => { current.flight = undefined; });
+  return current.flight;
 }

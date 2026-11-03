@@ -9,6 +9,7 @@ export function awaitingOnchainConfirmation(a: PaymentAttempt | null): boolean {
   return !!a && isOnchainPayment(a) && a.status === 'completed' && !a.onchainConfirmed;
 }
 export function paymentPresentation(a: PaymentAttempt): { title: string; detail: string } {
+  if (a.status === 'failed' && a.resolution === 'refunded') return { title: 'Swap refunded', detail: a.detail || 'Funds were returned to your wallet. The recipient was not paid.' };
   if (a.sourceId === 'rgb-asset' && a.status === 'pending' && a.reference) {
     return { title: 'RGB transfer in progress', detail: a.detail || 'Waiting for recipient acceptance and Bitcoin confirmations. Keep this wallet open and ask the recipient to sync their wallet. Do not send again.' };
   }
