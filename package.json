@@ -114,7 +114,7 @@
     "redux-persist": "^6.0.0",
     "sodium-javascript": "^0.8.0",
     "upng-js": "^2.1.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
