@@ -21,6 +21,7 @@ import { Button } from '../components/Button';
 import { PressableScale } from '../components/PressableScale';
 import { SlideToConfirm } from '../components/SlideToConfirm';
 import { AmountText } from '../components/AmountText';
+import { Divider } from '../components/Divider';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
@@ -61,6 +62,10 @@ interface Props { navigation: any; route: any }
 // Re-checks of an unresolved payment: quick at first, then every 15 s, for at most 10 minutes.
 const STATUS_POLL_DELAYS_MS = [3_000, 5_000, 10_000, 15_000];
 const STATUS_POLL_LIMIT_MS = 10 * 60_000;
+// A reviewed total is re-priced on its own shortly before it expires, a few times at most
+// (then Refresh takes over), so the slider stays usable while the screen is open.
+const AUTO_REFRESH_LEAD_MS = 10_000;
+const AUTO_REFRESH_LIMIT = 5;
 
 // RGB on this phone pays on-chain from these accounts, at a speed chosen in the review.
 const RGB_ONCHAIN_SOURCES = new Set(['rgb-btc', 'rgb-asset']);
@@ -119,8 +124,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const [error, setError] = useState('');
   const [receiptExpanded, setReceiptExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [reviewUpdated, setReviewUpdated] = useState(false);
-  const [previousTotal, setPreviousTotal] = useState('');
+  // The total the user last saw for the selected way to pay: a higher one needs another review.
+  const [accepted, setAccepted] = useState<{ id: string; asset?: string; total: number; label: string } | null>(null);
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const [statusTimedOut, setStatusTimedOut] = useState(false);
   const [statusChecking, setStatusChecking] = useState(false);
@@ -132,6 +137,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const paying = useRef(false);
   const checking = useRef(false);
   const requestId = useRef(Crypto.randomUUID());
+  // A request that arrives whole (scanned, pasted, a contact, another screen) goes straight to review.
+  const autoReview = useRef(false);
 
   const { target, error: decodeError } = useMemo(() => decodeQuietly(input), [input]);
   // Only what the wallet's own decoding rejects can be an address on another chain.
@@ -144,7 +151,7 @@ export default function SendScreen({ navigation, route }: Props) {
   // Prefilled from a scan, a contact, an asset page or chat.
   useEffect(() => {
     const p = route.params ?? {};
-    if (p.prefilledAddress || p.address) setInput(p.prefilledAddress || p.address);
+    if (p.prefilledAddress || p.address) { setInput(p.prefilledAddress || p.address); autoReview.current = true; }
     if (p.contactName) setContactName(p.contactName);
     if (Number.isSafeInteger(p.prefilledAmountSat) && p.prefilledAmountSat > 0) {
       setAmountSat(p.prefilledAmountSat);
@@ -157,7 +164,7 @@ export default function SendScreen({ navigation, route }: Props) {
   // Anything that changes the request discards the reviewed quotes.
   useEffect(() => {
     revision.current++;
-    setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setPreviousTotal('');
+    setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setAccepted(null);
   }, [input, amountSat, assetAmount, sparkToken, rgbAsset?.id]);
   useEffect(() => { setRgbAsset(null); setAssetAmount(''); setSparkToken(null); }, [input]);
   useEffect(() => {
@@ -227,6 +234,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const spend = quote ? quoteSpend(quote) : null;
   const total = spend ? displaySpend(spend.total, spend.asset) : '';
   const expired = !!quote && quote.expiresAt * 1000 <= now;
+  const totalRose = !!(selected && spend && accepted && accepted.id === selected.id && (accepted.asset !== spend.asset.id || spend.total > accepted.total));
 
   // The offers this screen shows: hidden accounts (Bark in Lite) are never picked for the user.
   const visibleOffers = useCallback((list: PaymentOffer[]) => {
@@ -234,11 +242,22 @@ export default function SendScreen({ navigation, route }: Props) {
     return list.filter(o => ids.has(o.id) || !offerAccount(o));
   }, [advanced, balancesSat]);
 
+  const acceptOffer = (o?: PaymentOffer) => {
+    if (!o?.quote) return;
+    const s = quoteSpend(o.quote);
+    setAccepted({ id: o.id, asset: s.asset.id, total: s.total, label: displaySpend(s.total, s.asset) });
+  };
+  const acceptRef = useRef(acceptOffer);
+  acceptRef.current = acceptOffer;
+  const selectedIdRef = useRef<string | undefined>(undefined);
+  selectedIdRef.current = selectedId;
+  const autoRefreshes = useRef(0);
+
   // `quiet`: re-quoted because the user changed the fee speed, so the new total needs no second review.
-  const getOffers = useCallback(async (refresh = false, quiet = false) => {
+  // `background`: the automatic re-price before expiry; it neither blocks the screen nor reports failures.
+  const getOffers = useCallback(async (refresh = false, quiet = false, background = false) => {
     const current = ++revision.current;
-    setBusy(true); setError(''); setMoreQuotes(false);
-    if (refresh && !quiet) setPreviousTotal(total);
+    if (!background) { setBusy(true); setError(''); setMoreQuotes(false); autoRefreshes.current = 0; }
     try {
       await prepareKaleidoPay();
       if (current !== revision.current) return;
@@ -262,29 +281,45 @@ export default function SendScreen({ navigation, route }: Props) {
         asset = { id: sparkToken.id, ticker: sparkToken.ticker, precision: sparkToken.precision, amount };
       }
       const fresh = await previewInput(input, asset && target?.kind !== 'rgb' ? undefined : fixedSat ?? amountSat, requestId.current, { asset });
-      if (current !== revision.current) return;
+      if (current !== revision.current || (background && (paying.current || attemptRef.current))) return;
       if (fresh.plan.status !== 'ready') { setPreview(fresh); setOffers([]); setError(fresh.plan.reason); return; }
       // Show quotes as they arrive: the first payable one ends the wait, slower providers fill in after.
       let picked = refresh;
+      let chosenAgain = !quiet;
       const show = (list: PaymentOffer[], done: boolean) => {
-        if (current !== revision.current) return;
+        // A payment started meanwhile keeps the offer it was started with.
+        if (current !== revision.current || (background && (paying.current || attemptRef.current))) return;
         setPreview(fresh); setOffers(list);
         const shown = visibleOffers(list);
         const best = bestOffer(shown.filter(o => o.executable)) ?? shown.find(o => o.executable && o.quote && !o.unavailable);
         // Pick once, the first time something payable shows (or at the end); later quotes never move the selection.
-        if (!picked && (best || done)) { picked = true; setSelectedId((best ?? bestOffer(shown))?.id); }
+        if (!picked && (best || done)) { picked = true; const first = best ?? bestOffer(shown); setSelectedId(first?.id); acceptRef.current(first); }
+        // A fee speed the user picked is its own review of the new total.
+        if (!chosenAgain) { const same = list.find(o => o.id === selectedIdRef.current); if (same?.quote) { chosenAgain = true; acceptRef.current(same); } }
         if (best || done) setBusy(false);
-        setMoreQuotes(!done);
+        if (!background) setMoreQuotes(!done);
       };
       const result = await quotePaymentOffers(fresh, partial => show(partial, false));
-      show(result, true);
-      if (current !== revision.current) return;
       // Refresh never switches the chosen way to pay, even when its quote fails.
-      setReviewUpdated(refresh && !quiet);
+      show(result, true);
     } catch (e) {
-      if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
-    } finally { if (current === revision.current) { setBusy(false); setMoreQuotes(false); } }
-  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, visibleOffers]);
+      if (current === revision.current && !background) setError(e instanceof Error ? e.message : 'Could not check the fees. Please try again.');
+    } finally { if (current === revision.current && !background) { setBusy(false); setMoreQuotes(false); } }
+  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, visibleOffers]);
+
+  // Re-price the selected way to pay before it expires (at once when the app comes back
+  // after expiry). An equal or lower total keeps the slider; a higher one asks for a review.
+  useEffect(() => {
+    if (!quote || !preview || attempt || busy || autoRefreshes.current >= AUTO_REFRESH_LIMIT) return;
+    const remaining = quote.expiresAt * 1000 - Date.now();
+    const wait = remaining > 2 * AUTO_REFRESH_LEAD_MS ? remaining - AUTO_REFRESH_LEAD_MS : Math.max(0, remaining);
+    const timer = setTimeout(() => {
+      if (paying.current) return;
+      autoRefreshes.current++;
+      void getOffers(true, false, true);
+    }, wait);
+    return () => clearTimeout(timer);
+  }, [quote, preview, attempt, busy, expired, getOffers]);
 
   // A Spark address can also be paid in the Spark tokens this wallet holds.
   const sparkAddressTarget = target?.kind === 'spark' && fixedSat === undefined;
@@ -302,6 +337,13 @@ export default function SendScreen({ navigation, route }: Props) {
   useEffect(() => {
     if (continueNow.current && amountSat) { continueNow.current = false; void getOffers(); }
   }, [amountSat, getOffers]);
+
+  // RGB and Spark addresses first ask what to pay with, so they wait for Continue.
+  useEffect(() => {
+    if (!autoReview.current || !journalReady) return;
+    autoReview.current = false;
+    if (target && !attempt && !preview && !busy && target.kind !== 'rgb' && target.kind !== 'spark') review();
+  });
 
   function review() {
     if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }
@@ -425,11 +467,11 @@ export default function SendScreen({ navigation, route }: Props) {
   }
 
   async function paste() {
-    try { const text = await Clipboard.getString(); if (text) { setInput(text.trim()); setContactName(undefined); } }
+    try { const text = await Clipboard.getString(); if (text) { autoReview.current = true; setInput(text.trim()); setContactName(undefined); } }
     catch { setError('Could not read the clipboard.'); }
   }
 
-  const pickContact = (c: Contact) => { const dest = c.lightning_address || c.node_pubkey; if (dest) { feedback.select(); setInput(dest); setContactName(c.name); } };
+  const pickContact = (c: Contact) => { const dest = c.lightning_address || c.node_pubkey; if (dest) { feedback.select(); autoReview.current = true; setInput(dest); setContactName(c.name); } };
   const iconButton = { width: 40, height: 40, borderRadius: t.borderRadius.md, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.colors.background.secondary };
 
   const resetToInput = () => { revision.current++; setBusy(false); setPreview(null); setOffers([]); };
@@ -443,7 +485,6 @@ export default function SendScreen({ navigation, route }: Props) {
   const row = (label: string, value: string) => <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[3] }}><Text style={muted}>{label}</Text><AmountText style={{ ...text, textAlign: 'right', flexShrink: 1 }}>{value}</AmountText></View>;
   const railIcon = (r: string) => ({ ln: 'lightning', btc: 'onchain', ark: 'arkade', spark: 'spark', rgb: 'rgb' } as Record<string, string>)[railOf(r)] ?? railOf(r);
   const recipientName = preview?.code.label || contactName || target?.label || (input.trim().length > 52 ? `${input.trim().slice(0, 18)}…${input.trim().slice(-10)}` : input.trim()) || 'Recipient';
-  const feeText = (fee: number, asset: Parameters<typeof displaySpend>[1]) => fee === 0 ? 'No fee' : `+${displaySpend(fee, asset)}`;
 
   // Pay from: the ways to pay grouped by the account they spend from.
   const choices = groupOffersByAccount(offers, { advanced, balances: balancesSat, now });
@@ -475,7 +516,6 @@ export default function SendScreen({ navigation, route }: Props) {
     feedback.select();
     setFeeSpeed(next);
     setRgbL1FeeSpeed(next);
-    setPreviousTotal('');
     void getOffers(true, true);
   };
 
@@ -499,7 +539,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const renderField = () => (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], paddingLeft: t.spacing[4], paddingRight: t.spacing[2], minHeight: 56,
       borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: target || crossChain ? t.colors.primary[500] : t.colors.border.light }}>
-      <TextInput accessibilityLabel="Payment request" value={input} onChangeText={v => { setInput(v); setContactName(undefined); }} autoCapitalize="none" autoCorrect={false}
+      <TextInput accessibilityLabel="Payment request" value={input} onChangeText={v => { autoReview.current = false; setInput(v); setContactName(undefined); }} autoCapitalize="none" autoCorrect={false}
         placeholder="Paste an invoice or address" placeholderTextColor={t.colors.text.muted}
         style={{ ...text, flex: 1, fontFamily: input ? t.typography.fontFamily.mono : undefined, fontSize: input ? t.typography.fontSize.sm : t.typography.fontSize.base, paddingVertical: t.spacing[3] }} />
       {input ? (
@@ -644,51 +684,43 @@ export default function SendScreen({ navigation, route }: Props) {
       <Button title="Edit amount or invoice" variant="secondary" onPress={resetToInput} />
     </View>;
     const via = selected?.route.kind === 'swap';
+    const named = preview.code.label || contactName || target?.label;
+    const current = choices.find(c => c.account === selectedAccount);
+    const canChange = options.length > 1;
     return <>
       <View style={{ alignItems: 'center', gap: 2, paddingTop: t.spacing[2], paddingBottom: t.spacing[4] }}>
-        <Text style={muted}>You send to {recipientName}</Text>
+        <Text style={muted}>{named ? `To ${named}` : target ? KIND_LABEL[target.kind] : 'Payment'}</Text>
         <AmountText style={{ ...text, fontSize: t.typography.fontSize['4xl'], fontWeight: '700' }}>{amountLabel}</AmountText>
         {!preview.request.asset && !!usd && <Text style={small}>{usdOf(preview.request.amountSat)}{fixedSat !== undefined ? ' · set by the request' : ''}</Text>}
         {!!(preview.code.message || preview.code.description) && <Text style={{ ...muted, fontSize: t.typography.fontSize.sm }}>“{preview.code.message || preview.code.description}”</Text>}
+        {expiresIn !== undefined && <Text style={{ ...small, color: expiresIn < 2 ? t.colors.warning[500] : t.colors.text.tertiary }}>{expiresIn < 1 ? 'Invoice expires in less than a minute' : `Invoice expires in ${expiresIn} min`}</Text>}
       </View>
 
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: t.spacing[2] }}>
         <Text style={caption}>Pay from</Text>
-        {options.length > 1 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change account" onPress={() => setShowProviders(true)} hitSlop={8}>
-          <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>Change account ›</Text>
-        </TouchableOpacity>}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
+          {/* Slower accounts keep answering in the background; they only ever show up in Change account. */}
+          {moreQuotes && <ActivityIndicator size="small" color={t.colors.text.tertiary} accessibilityLabel="Checking other accounts" />}
+          {canChange && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change account" onPress={() => setShowProviders(true)} hitSlop={8}>
+            <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>Change account ›</Text>
+          </TouchableOpacity>}
+        </View>
       </View>
 
-      <View style={{ gap: t.spacing[2] }}>
-        {choices.filter(c => c.account === selectedAccount).map((c, i) => {
-          const active = c.account === selectedAccount;
-          const shown = active && selected ? selected : c.best;
-          const s = shown?.quote ? quoteSpend(shown.quote) : null;
-          const blocked = !c.best;
-          return (
-            <Animated.View key={c.account} entering={FadeInDown.delay(i * motion.stagger).duration(motion.duration.base)}>
-              <PressableScale scaleTo={0.98} disabled={blocked} onPress={() => { if (c.best && !active) { feedback.select(); setSelectedId(c.best.id); setReviewUpdated(false); setPreviousTotal(''); } }}
-                accessibilityRole="radio" accessibilityState={{ checked: active, disabled: blocked }}
-                accessibilityLabel={`Pay from ${PAY_ACCOUNT_NAME[c.account]}${balancesSat[c.account] !== undefined ? `, balance ${formatSats(balancesSat[c.account]!)}` : ''}. ${blocked ? c.reason : s ? `Total ${displaySpend(s.total, s.asset)}` : ''}`}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1.5,
-                  borderColor: active ? t.colors.primary[500] : t.colors.border.light, backgroundColor: active ? t.colors.primary[50] : t.colors.surface.primary, opacity: blocked ? 0.5 : 1 }}>
-                {iconChip(c.account.toLowerCase(), 36)}
-                <View style={{ flex: 1, gap: 2 }}>
-                  <Text style={{ ...text, fontWeight: '600' }}>{c.best?.accountName || PAY_ACCOUNT_NAME[c.account]}</Text>
-                  {balancesSat[c.account] !== undefined && <AmountText style={small}>{formatSats(balancesSat[c.account]!)}</AmountText>}
-                </View>
-                <View style={{ alignItems: 'flex-end', gap: 2, maxWidth: '45%' }}>
-                  {s ? <AmountText style={{ ...text, fontWeight: '600', color: s.fee === 0 ? t.colors.success[500] : t.colors.text.primary }}>{feeText(s.fee, s.asset)}</AmountText>
-                    : <Text style={{ ...small, color: t.colors.warning[500] }} numberOfLines={2}>{c.reason}</Text>}
-                  {!!s && shown?.id === best?.id && <Text style={{ ...small, color: t.colors.primary[500] }}>Best price</Text>}
-                  {!!s && via && active && <Text style={small}>via {selected?.provider}</Text>}
-                </View>
-                {active && <Ionicons name="checkmark-circle" size={20} color={t.colors.primary[500]} />}
-              </PressableScale>
-            </Animated.View>
-          );
-        })}
-      </View>
+      {current && <Animated.View entering={FadeInDown.duration(motion.duration.base)}>
+        <PressableScale scaleTo={0.98} disabled={!canChange} onPress={() => { feedback.select(); setShowProviders(true); }}
+          accessibilityRole="button" accessibilityHint={canChange ? 'Choose another account' : undefined}
+          accessibilityLabel={`Pay from ${PAY_ACCOUNT_NAME[current.account]}${balancesSat[current.account] !== undefined ? `, balance ${formatSats(balancesSat[current.account]!)}` : ''}. ${spend ? `Total ${total}` : current.reason ?? ''}`}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1, borderColor: t.colors.border.light, backgroundColor: t.colors.surface.primary }}>
+          {iconChip(current.account.toLowerCase(), 36)}
+          <View style={{ flex: 1, gap: 2 }}>
+            <Text style={{ ...text, fontWeight: '600' }}>{selected?.accountName || PAY_ACCOUNT_NAME[current.account]}</Text>
+            {spend ? balancesSat[current.account] !== undefined && <AmountText style={small}>{formatSats(balancesSat[current.account]!)} available</AmountText>
+              : <Text style={{ ...small, color: t.colors.warning[500] }} numberOfLines={2}>{current.reason}</Text>}
+          </View>
+          {canChange && <Ionicons name="chevron-forward" size={18} color={t.colors.text.tertiary} />}
+        </PressableScale>
+      </Animated.View>}
 
       {advanced && selected && selectedAccount && <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', gap: t.spacing[2], marginTop: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1, borderColor: t.colors.border.light }}>
         <NetworkIcon network={selectedAccount.toLowerCase()} size={16} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }}>{selected?.accountName || PAY_ACCOUNT_NAME[selectedAccount]}</Text>
@@ -700,9 +732,15 @@ export default function SendScreen({ navigation, route }: Props) {
         <Ionicons name="person-circle-outline" size={16} color={t.colors.text.secondary} /><Text style={{ ...small, color: t.colors.text.primary, fontWeight: '600' }} numberOfLines={1}>{recipientName}</Text>
       </View>}
 
+      {/* The one place the fee shows: amount, fee (and swap provider), total. */}
       {spend && <View style={{ marginTop: t.spacing[3], gap: t.spacing[2], padding: t.spacing[4], backgroundColor: t.colors.surface.primary, borderRadius: t.borderRadius.lg }}>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={muted}>Fee</Text><AmountText style={text}>{displaySpend(spend.fee, spend.asset)}</AmountText></View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={text}>Total you pay</Text><AmountText style={{ ...text, fontWeight: '700' }}>{total}</AmountText></View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={muted}>Amount</Text><AmountText style={text}>{displaySpend(spend.amount, spend.asset)}</AmountText></View>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <Text style={muted}>{via ? `Fee · swap via ${selected?.provider}` : 'Fee'}</Text>
+          <AmountText style={{ ...text, color: spend.fee === 0 ? t.colors.success[500] : t.colors.text.primary }}>{spend.fee === 0 ? 'No fee' : displaySpend(spend.fee, spend.asset)}</AmountText>
+        </View>
+        <Divider />
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}><Text style={{ ...text, fontWeight: '600' }}>Total you pay</Text><AmountText style={{ ...text, fontWeight: '700' }}>{total}</AmountText></View>
       </View>}
 
       {feeOptions && feeOption && <View style={{ marginTop: t.spacing[3], gap: t.spacing[2] }}>
@@ -713,21 +751,18 @@ export default function SendScreen({ navigation, route }: Props) {
       </View>}
 
       <View style={{ gap: t.spacing[2], marginTop: t.spacing[3], alignItems: 'center' }}>
-        {spend && quote && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        {/* Only a swap holds a market price; a direct payment's fee is re-checked on its own, so it shows no timer. */}
+        {spend && quote && (expired || via) && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Ionicons name="time-outline" size={14} color={expired ? t.colors.warning[500] : t.colors.text.secondary} />
           <Text accessibilityLiveRegion="polite" style={{ ...muted, fontSize: t.typography.fontSize.sm, color: expired ? t.colors.warning[500] : t.colors.text.secondary }}>
-            {expired ? 'Quote expired. Refresh before paying.' : `Total ${total} · quote valid ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}
+            {expired ? 'This price expired. Refresh to see the current total.' : `Swap price held for ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}
           </Text>
         </View>}
         {!!selected?.unavailable && <Text accessibilityRole="alert" style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>{selected.unavailable}</Text>}
-        {!!previousTotal && reviewUpdated && <Text accessibilityRole="alert" style={{ ...muted, textAlign: 'center' }}>Previous total: {previousTotal}. Review the updated quote before paying.</Text>}
+        {totalRose && <Text accessibilityRole="alert" style={{ ...muted, textAlign: 'center' }}>The total went up from {accepted!.label} to {total}. Check it before paying.</Text>}
         {!busy && preview.plan.status === 'ready' && !offers.some(o => o.quote) && <Text style={{ ...muted, textAlign: 'center' }}>No way to pay this right now. Check your balances and connected accounts, then refresh.</Text>}
-        {selected && !selected.executable && <Text style={{ ...muted, textAlign: 'center' }}>This account can quote but cannot pay yet.</Text>}
+        {selected && !selected.executable && <Text style={{ ...muted, textAlign: 'center' }}>This account can't pay this yet. Choose another account.</Text>}
         {busy && <ActivityIndicator color={t.colors.primary[500]} />}
-        {!busy && moreQuotes && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
-          <ActivityIndicator size="small" color={t.colors.text.tertiary} />
-          <Text style={small}>Checking other ways to pay…</Text>
-        </View>}
       </View>
     </>;
   };
@@ -747,7 +782,7 @@ export default function SendScreen({ navigation, route }: Props) {
         onPress={() => void checkStatus()} />}
       {unresolvedAttempt(a) && !busy && <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} />}
       {done && receiptExpanded && <Button title="Share receipt" variant="ghost" onPress={() => shareReceipt(a)} />}
-      {failed ? <Button title={a.sourceId === 'rgb-asset' ? 'Review transfer' : 'Review a new quote'}
+      {failed ? <Button title={a.sourceId === 'rgb-asset' ? 'Review transfer' : 'Review again'}
         onPress={() => { setAttempt(null); if (preview) void getOffers(true); }} />
         : <Button title="Done" onPress={() => navigation.goBack()} />}
 
@@ -766,7 +801,7 @@ export default function SendScreen({ navigation, route }: Props) {
         ) : <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ padding: t.spacing[5] }}>
           {KALEIDOPAY_DEMO && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], padding: t.spacing[3], borderRadius: t.borderRadius.lg, backgroundColor: t.colors.warning[500] + '22', marginBottom: t.spacing[4] }}>
             <Ionicons name="flask-outline" size={16} color={t.colors.warning[500]} />
-            <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: quotes are live, the payment step is simulated. No funds move.</Text>
+            <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: fees are live, the payment step is simulated. No funds move.</Text>
           </View>}
           {!!error && !attempt && <ActionableError message={error} context="send" />}
           {journalUnreadable && !attempt && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} style={{ marginBottom: t.spacing[4] }} />}
@@ -774,21 +809,21 @@ export default function SendScreen({ navigation, route }: Props) {
         </ScrollView>}
         {!crossChain && !attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
           {!preview
-            ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Review transfer' : 'Continue')} disabled={!target || busy || !journalReady || rgbReading || (target?.kind === 'rgb' && !rgbAsset)} onPress={review} />
+            ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Checking fees…') : (target?.kind === 'rgb' ? 'Review transfer' : 'Continue')} disabled={!target || busy || !journalReady || rgbReading || (target?.kind === 'rgb' && !rgbAsset)} onPress={review} />
             : !quote || quote.expiresAt * 1000 <= Date.now() || selected?.unavailable
-              ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh quotes')} disabled={busy} onPress={() => void getOffers(true)} />
-              : reviewUpdated
-                ? <Button title={target?.kind === 'rgb' ? 'Review updated transfer' : 'Review updated quote'} disabled={busy} onPress={() => setReviewUpdated(false)} />
+              ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Checking fees…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh')} disabled={busy} onPress={() => void getOffers(true)} />
+              : totalRose
+                ? <Button title={target?.kind === 'rgb' ? 'Accept new transfer total' : 'Accept new total'} disabled={busy} onPress={() => acceptOffer(selected)} />
                 : <SlideToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
           {preview && !walletId && <Text style={{ ...muted, textAlign: 'center' }}>Set up a wallet to pay.</Text>}
         </View>}
       </KeyboardAvoidingView>
-      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); setReviewUpdated(false); setPreviousTotal(''); }}
-        onClose={() => setShowProviders(false)} now={now} title="Change account" intro="Choose an account for this payment. Available balances and totals include the quoted fees." />
+      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); acceptOffer(offers.find(o => o.id === id)); }}
+        onClose={() => setShowProviders(false)} now={now} title="Change account" intro="Choose an account for this payment. Available balances and totals include fees." />
       <AmountEditorModal visible={showAmountEditor} onClose={() => { continueAfterAmount.current = false; setShowAmountEditor(false); }} initialSats={amountSat} rates={rates} bitcoinUnit={bitcoinUnit}
         onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }} />
       <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)}
-        onSelectContact={c => { setShowContacts(false); const dest = c.lightning_address || c.node_pubkey; if (dest) { setInput(dest); setContactName(c.name); } }} />
+        onSelectContact={c => { setShowContacts(false); const dest = c.lightning_address || c.node_pubkey; if (dest) { autoReview.current = true; setInput(dest); setContactName(c.name); } }} />
     </SafeAreaView>
   );
 }

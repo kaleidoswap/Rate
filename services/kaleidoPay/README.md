@@ -37,7 +37,7 @@ move funds. Provider API calls that create quotes/swaps belong in this callback.
 Review again after connecting an account. The UI rejects stale asynchronous
 quote responses after edits, rejects inconsistent quote totals, and displays
 expiry. The Pay action revalidates the quote and persists a durable attempt before
-funding. Expired or refreshed quotes require another review. Request IDs here are local preview identifiers,
+funding. Send re-prices the selected quote on its own shortly before it expires (a few times at most, then Refresh); an equal or lower total keeps the review, a higher one requires accepting the new total. Request IDs here are local preview identifiers,
 not durable payment-attempt identifiers or reusable-offer identities.
 
 ## Source packages

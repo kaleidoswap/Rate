@@ -254,7 +254,7 @@ export async function quotePayment(preview: Preview, selectedRoute?: Route): Pro
   try {
     const quote = await Promise.race([
       account.quote(preview, route),
-      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond. Try refreshing quotes.')), 15000); }),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond. Try again.')), 15000); }),
     ]);
     if (accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Review the request again.');
     validateQuote(quote, preview, account);
@@ -290,9 +290,9 @@ async function quoteRoute(preview: Preview, route: Route): Promise<PaymentOffer[
   try {
     getAccount(preview, route);
     const choices: AccountQuoteOption[] = account?.quoteOptions
-      ? await Promise.race([account.quoteOptions(preview, route), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond. Try refreshing quotes.')), 15000); })])
+      ? await Promise.race([account.quoteOptions(preview, route), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Provider did not respond. Try again.')), 15000); })])
       : [{ id: '', name: base.provider, quote: await quotePayment(preview, route) }];
-    if (!account || accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Refresh quotes.');
+    if (!account || accounts.get(route.sourceId) !== account) throw new Error('Account disconnected. Refresh to try again.');
     return choices.map(choice => {
       const offer: PaymentOffer = { ...base, id: choice.id ? `${base.id}:${choice.id}` : base.id, provider: choice.name, providerDetail: choice.detail, quote: choice.quote, unavailable: choice.unavailable };
       try {
