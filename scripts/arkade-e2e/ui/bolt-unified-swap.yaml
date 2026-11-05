@@ -1,0 +1,62 @@
+appId: com.kaleidoswap.wallet
+---
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible: "Refresh balance"
+    timeout: 60000
+- tapOn: "Swap"
+- extendedWaitUntil:
+    visible: "From asset: Bitcoin"
+    timeout: 30000
+- assertNotVisible: "Explore maker routes →"
+- assertVisible: "From network: Arkade"
+- assertVisible: "To network: Lightning"
+- takeScreenshot: unified-swap-selection
+- scrollUntilVisible:
+    element: "Swap amount in sats"
+    direction: DOWN
+- tapOn: "Swap amount in sats"
+- inputText: "10000"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "Estimated fee .* sats"
+    direction: DOWN
+- takeScreenshot: unified-swap-fees
+- scrollUntilVisible:
+    element: "Reverse swap direction"
+    direction: UP
+- tapOn: "Reverse swap direction"
+- assertVisible: "From network: Lightning"
+- assertVisible: "To network: Arkade"
+- assertNotVisible: "Swap Lightning invoice"
+- scrollUntilVisible:
+    element: "Estimated fee .* sats"
+    direction: DOWN
+- takeScreenshot: unified-receive-fees
+- scrollUntilVisible:
+    element: "From asset: Bitcoin"
+    direction: UP
+- tapOn: "From asset: Bitcoin"
+- tapOn: "Select from asset USDT"
+- assertVisible: "From network: Liquid"
+- scrollUntilVisible:
+    element: "This asset and network combination is not available."
+    direction: DOWN
+- takeScreenshot: unified-unsupported-pair
+- scrollUntilVisible:
+    element: "View saved swap"
+    direction: UP
+- tapOn: "View saved swap"
+- assertVisible: "You receive 10,000 sats · sender pays 10,030 sats"
+- assertNotVisible: "Copy Payment request"
+- takeScreenshot: unified-restored-request
+- tapOn: "Back to Swap"
+- scrollUntilVisible:
+    element: "Last Arkade payment · View status"
+    direction: UP
+- tapOn: "Last Arkade payment · View status"
+- extendedWaitUntil:
+    visible: "Payment completed"
+    timeout: 30000
+- takeScreenshot: unified-payment-receipt

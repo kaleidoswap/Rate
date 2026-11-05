@@ -179,8 +179,8 @@ Both quotes include Bark's own Lightning fee from `estimatePaymentFee`; without
 that estimate the quote is unavailable, never a partial total. The swap adds
 Bark's fee for each of the provider's two invoices.
 
-wallet-engine beta.75 does not expose `payLightningOffer` yet, so
-`patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch` (declared in
-`pnpm-workspace.yaml`) adds it to the Bark wallet port and routes `lno1…` in the
-adapter's `sendPayment`. `barkOffer.test.ts` guards the patch. Drop it when
-wallet-engine ships the same change.
+wallet-engine beta.80 includes `payLightningOffer` and routes `lno1…` offers in
+Bark's `sendPayment`; no local package patch is needed. `barkOffer.test.ts`
+checks this integration. Metro uses the installed release by default; set
+`WALLET_ENGINE_LOCAL=1` only when intentionally developing against the sibling
+wallet-engine checkout.

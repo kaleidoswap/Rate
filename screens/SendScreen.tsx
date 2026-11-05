@@ -1,3 +1,5 @@
+import { makerSendOffers, makerRoot, loadMakerCatalog } from '../services/makerRoutes';
+import { arkadeReceiveOptions } from '../services/kaleidoPay/connect';
 import { rgbAmountUnits } from '../utils/rgb-amount';
 import { paymentPollingRemaining, awaitingOnchainConfirmation, paymentPresentation } from '../utils/payment-presentation';
 import { checkOnchainConfirmation } from '../services/kaleidoPay/onchainConfirmation';
@@ -241,6 +243,12 @@ export default function SendScreen({ navigation, route }: Props) {
     if (refresh && !quiet) setPreviousTotal(total);
     try {
       await prepareKaleidoPay();
+      if (route.params?.makerNetwork) {
+        const options = arkadeReceiveOptions();
+        if (!options || options.network !== route.params.makerNetwork || !options.makerUrl || !route.params.makerUrl || makerRoot(options.makerUrl) !== makerRoot(route.params.makerUrl)) throw new Error('The selected maker or Arkade network changed. Reopen Maker routes.');
+        const catalog = await loadMakerCatalog(options.makerUrl, options.network);
+        if (!catalog.routes.some(r => r.action === 'send-arkade')) throw new Error('This maker route is no longer available.');
+      }
       if (current !== revision.current) return;
       let asset: RequestAsset | undefined;
       if (target?.kind === 'rgb') {
@@ -268,7 +276,9 @@ export default function SendScreen({ navigation, route }: Props) {
       let picked = refresh;
       const show = (list: PaymentOffer[], done: boolean) => {
         if (current !== revision.current) return;
+        if (route.params?.makerNetwork) list = makerSendOffers(list, route.params.makerNetwork);
         setPreview(fresh); setOffers(list);
+        if (done && route.params?.makerNetwork && !list.length) setError('KaleidoSwap cannot pay this request from Arkade on the selected network.');
         const shown = visibleOffers(list);
         const best = bestOffer(shown.filter(o => o.executable)) ?? shown.find(o => o.executable && o.quote && !o.unavailable);
         // Pick once, the first time something payable shows (or at the end); later quotes never move the selection.
@@ -284,7 +294,16 @@ export default function SendScreen({ navigation, route }: Props) {
     } catch (e) {
       if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
     } finally { if (current === revision.current) { setBusy(false); setMoreQuotes(false); } }
-  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, visibleOffers]);
+  }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, visibleOffers, route.params?.makerNetwork, route.params?.makerUrl]);
+
+  // Swap review reuses the journalled payment executor; this only fetches quotes.
+  const swapReviewStarted = useRef(false);
+  useEffect(() => {
+    if (route.params?.swapContext && journalReady && !journalUnreadable && input && amountSat && !swapReviewStarted.current) {
+      swapReviewStarted.current = true;
+      void getOffers();
+    }
+  }, [route.params?.swapContext, journalReady, journalUnreadable, input, amountSat, getOffers]);
 
   // A Spark address can also be paid in the Spark tokens this wallet holds.
   const sparkAddressTarget = target?.kind === 'spark' && fixedSat === undefined;
@@ -479,9 +498,10 @@ export default function SendScreen({ navigation, route }: Props) {
     void getOffers(true, true);
   };
 
-  const headerTitle = attempt ? (attempt.status === 'completed' ? 'Sent' : 'Payment') : 'Send';
+  const headerTitle = route.params?.swapContext ? 'Swap' : attempt ? (attempt.status === 'completed' ? 'Sent' : 'Payment') : 'Send';
   const onBack = () => {
     if (paying.current) return;
+    if (route.params?.swapContext) { navigation.goBack(); return; }
     if (preview && !attempt) { resetToInput(); return; }
     navigation.goBack();
   };

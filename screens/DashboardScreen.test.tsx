@@ -93,6 +93,16 @@ describe('dashboard connection recovery', () => {
     expect(adapter.getBtcBalance).toHaveBeenCalled();
     expect(screen.queryByText('Balance unavailable')).toBeNull();
   });
+  it('opens saved maker requests while offline without retrying the connection', async () => {
+    mockState.wallet.activeWallet = { id: 1, encrypted_mnemonic: 'test-only-seed' };
+    const navigate = jest.fn();
+    const screen = render(<DashboardScreen navigation={{ getParent: () => ({ navigate }) }} />);
+    await waitFor(() => expect(screen.getByText('Balance unavailable')).toBeTruthy());
+    const calls = (initializeProtocolServices as jest.Mock).mock.calls.length;
+    fireEvent.press(screen.getByText('View saved swaps'));
+    expect(navigate).toHaveBeenCalledWith('Swap');
+    expect(initializeProtocolServices).toHaveBeenCalledTimes(calls);
+  });
   it('drops RGB on this phone from the offline banner once it connects after startup', async () => {
     mockState.wallet.activeWallet = { id: 1, encrypted_mnemonic: 'test-only-seed' };
     let rgbL1Connected = false;

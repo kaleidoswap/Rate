@@ -28,10 +28,10 @@ module.exports = {
   // and never checked.
   coverageThreshold: {
     global: {
-      statements: 36,
-      branches: 34,
-      functions: 35,
-      lines: 36
+      statements: 57.12,
+      branches: 53.11,
+      functions: 53.18,
+      lines: 58.47
     }
   },
   // Sibling packages (universal-bolt12) fall back to this app's node_modules for babel helpers.

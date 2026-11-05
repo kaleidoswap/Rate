@@ -25,14 +25,15 @@ export function PaymentOutcome({ attempt: a, busy = false, statusChecking = fals
     const done = a.status === 'completed';
     const chainWaiting = awaitingOnchainConfirmation(a);
     const presentation = paymentPresentation(a);
+    const refunded = a.status === 'failed' && a.resolution === 'refunded';
     const failed = a.status === 'failed';
-    const tone = done && !chainWaiting ? t.colors.primary[500] : failed ? t.colors.error[500] : t.colors.warning[500];
-    const title = done ? presentation.title : failed ? 'Payment failed' : busy && !statusChecking ? 'Sending payment' : statusTimedOut && a.sourceId !== 'rgb-asset' ? 'Confirmation is taking longer' : presentation.title;
+    const tone = (done && !chainWaiting) || refunded ? t.colors.primary[500] : failed ? t.colors.error[500] : t.colors.warning[500];
+    const title = done ? presentation.title : failed ? presentation.title : busy && !statusChecking ? 'Sending payment' : statusTimedOut && a.sourceId !== 'rgb-asset' ? 'Confirmation is taking longer' : presentation.title;
   return <View style={{ gap: t.spacing[4] }}>
       <View style={{ alignItems: 'center', gap: t.spacing[2], paddingTop: t.spacing[6] }}>
         <Animated.View key={a.onchainConfirmed ? 'chain-confirmed' : done ? 'completed' : failed ? 'failed' : 'checking'} entering={ZoomIn.springify().damping(motion.springSnappy.damping)}
           style={{ width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', backgroundColor: tone + '26' }}>
-          {busy || statusChecking || (a.status === 'pending' && !statusTimedOut) ? <ActivityIndicator accessibilityLabel="Checking payment automatically" color={tone} /> : <Ionicons name={chainWaiting ? 'time-outline' : done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={40} color={tone} />}
+          {busy || statusChecking || (a.status === 'pending' && !statusTimedOut) ? <ActivityIndicator accessibilityLabel="Checking payment automatically" color={tone} /> : <Ionicons name={chainWaiting ? 'time-outline' : refunded ? 'return-down-back-outline' : done ? 'checkmark' : failed ? 'close' : 'time-outline'} size={40} color={tone} />}
         </Animated.View>
         <Text accessibilityRole="header" style={{ ...muted }}>{title}</Text>
         <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '700' }}>{a.recipient}</AmountText>

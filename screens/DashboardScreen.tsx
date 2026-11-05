@@ -931,6 +931,9 @@ export default function DashboardScreen({ navigation }: Props) {
             <View style={{ padding: theme.spacing[6], gap: theme.spacing[2] }}>
               <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg }}>Balance unavailable</Text>
               <Text style={{ color: theme.colors.text.secondary }}>Reconnect to see your balance and make payments.</Text>
+              <TouchableOpacity accessibilityRole="button" onPress={() => (navigation.getParent?.() ?? navigation).navigate('Swap')} style={{ minHeight: 48, justifyContent: 'center' }}>
+                <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>View saved swaps</Text>
+              </TouchableOpacity>
             </View>
           ) :
 

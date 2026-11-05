@@ -47,7 +47,7 @@ jest.mock('@kaleidorg/swap-sdk/arkade', () => ({
     async prepareLightningReceive(params: any) {
       const fee = mockVenue.receive(params, this.opts.transport);
       const id = `rfq-recv-${mockVenue.instances.length}`;
-      const record = { id, route: 'lightning:BTC->arkade:BTC', phase: 'prepared' };
+      const record = { id, route: 'lightning:BTC->arkade:BTC', phase: 'prepared', invoice: 'lntbs1hold', invoiceExpiresAt: Math.floor(Date.now()/1000)+120 };
       await this.opts.store.put(record);
       return { record, invoice: 'lntbs1hold', payAmountSats: params.amountSats + fee, invoiceExpiresAt: 2_000_000_000,
         summary: { fromAmountSats: params.amountSats + fee, toAmountSats: params.amountSats } };
@@ -99,7 +99,7 @@ beforeEach(() => {
   );
   mockVenue.instances.length = 0;
   mockVenue.binding.from = 10_100;
-  mockVenue.prepare.mockClear();
+  mockVenue.prepare.mockReset();
   mockVenue.reconcile.mockReset();
   wallet.sendBitcoin.mockClear();
   mockHttpTransport.mockClear();
@@ -223,6 +223,16 @@ describe('Lightning into Arkade', () => {
     expect(params.maxPayAmountSats).toBe(10_102 + 50 + 10);
   });
 
+  test('never switches provider when a maker route is explicitly selected', async () => {
+    mockMarkets.splice(0, mockMarkets.length, { ...lnMarket(), solver: 'Solver A', discovery_pubkey: SOLVER, transports: { nostr: { relays: ['wss://relay.example'] } } });
+    mockVenue.receive.mockReset().mockImplementationOnce(() => { throw new Error('no liquidity'); }).mockReturnValue(31);
+    try {
+      await expect(createArkadeLightningReceive({ ...base, providerId: 'kaleidoswap' }, 10_000)).rejects.toThrow('no liquidity');
+      expect(mockVenue.receive).toHaveBeenCalledTimes(1);
+      expect(mockVenue.receive.mock.calls[0][1].kind).toBe('http');
+    } finally { mockMarkets.splice(0, mockMarkets.length); }
+  });
+
   test('falls back to a registry solver when KaleidoSwap cannot quote', async () => {
     mockMarkets.splice(0, mockMarkets.length, { ...lnMarket(), solver: 'Solver A', discovery_pubkey: SOLVER, transports: { nostr: { relays: ['wss://relay.example'] } } });
     mockVenue.receive.mockReset().mockImplementationOnce(() => { throw new Error('no liquidity'); }).mockReturnValue(31);
@@ -240,6 +250,8 @@ describe('Lightning into Arkade', () => {
 
   test('claims a receive without waiting', async () => {
     mockVenue.claim.mockReset();
+    const { arkadeIntentsStore } = require('./arkadeIntents');
+    await arkadeIntentsStore.put({ id: 'rfq-recv-1', phase: 'funded', route: 'lightning:BTC->arkade:BTC' });
     await expect(claimArkadeLightningReceive(wallet, base.arkServerUrl, 'rfq-recv-1')).resolves.toBe('settled');
     expect(mockVenue.claim).toHaveBeenCalledWith('rfq-recv-1', { waitSeconds: 0 });
   });
@@ -262,4 +274,113 @@ test('mainnet discovery includes the official Lightning solver missing from the 
   expect(estimateLightningSend(card.markets[0], 10_000)).toEqual({ feeSat: 31 });
   expect(estimateLightningSend(card.markets[0], 499)).toHaveProperty('unavailable');
   expect(estimateLightningSend(card.markets[0], 50_001)).toHaveProperty('unavailable');
+});
+
+
+describe('restart, offline and expiry guards', () => {
+  function fixture() {
+    const balance = jest.fn(async () => 100_000);
+    const swap = createArkadeIntentsSwap({ sourceId: 'qa', rail: 'ark', network: 'mutinynet', wallet: () => wallet,
+      arkServerUrl: () => 'https://mutinynet.arkade.sh', arkNetwork: () => 'mutinynet', fundingFee: () => 0,
+      balance, makerUrl: 'https://maker.signet.kaleidoswap.com', fetchImpl });
+    const preview = previewTarget(invoiceTarget(), undefined, 'qa');
+    const route = { kind: 'swap' as const, sourceId: 'qa', from: 'ark', to: 'ln:mutinynet', providerId: 'arkade-intents' };
+    return { swap, preview, route, balance };
+  }
+  test('explains the live maker CLTV refusal without funding', async () => {
+    const { swap, preview, route } = fixture();
+    const q = (await swap.quoteOptions(preview, route))[0].quote!;
+    mockVenue.prepare.mockImplementationOnce(() => { throw Error('unsupported_payload (invoice_cltv_too_large at profile.invoice: 80 blocks, limit 48)'); });
+    await expect(swap.execute(preview, route, q, 'cltv')).rejects.toThrow('longer payment window');
+    expect(wallet.sendBitcoin).not.toHaveBeenCalled();
+  });
+  test('concurrent double tap creates and funds exactly one RFQ', async () => {
+    const { swap, preview, route } = fixture();
+    const q = (await swap.quoteOptions(preview, route))[0].quote!;
+    const results = await Promise.all([swap.execute(preview, route, q, 'double'), swap.execute(preview, route, q, 'double')]);
+    expect(results[0]).toEqual(results[1]);
+    expect(mockVenue.prepare).toHaveBeenCalledTimes(1);
+    expect(wallet.sendBitcoin).toHaveBeenCalledTimes(1);
+  });
+  test('one approval cannot fund two different attempt IDs', async () => {
+    const { swap, preview, route } = fixture();
+    const q = (await swap.quoteOptions(preview, route))[0].quote!;
+    const results = await Promise.allSettled([swap.execute(preview, route, q, 'one'), swap.execute(preview, route, q, 'two')]);
+    expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    expect(wallet.sendBitcoin).toHaveBeenCalledTimes(1);
+  });
+  test('expiry during the balance lookup blocks funding', async () => {
+    const { swap, preview, route, balance } = fixture();
+    const q = (await swap.quoteOptions(preview, route))[0].quote!;
+    const now = Date.now();
+    const clock = jest.spyOn(Date, 'now');
+    balance.mockImplementationOnce(async () => { clock.mockReturnValue(now + 70_000); return 100_000; });
+    try { await expect(swap.execute(preview, route, q, 'late')).rejects.toThrow('expired'); }
+    finally { clock.mockRestore(); }
+    expect(wallet.sendBitcoin).not.toHaveBeenCalled();
+  });
+  test('restart after uncertain funding recovers the same receipt without resending', async () => {
+    const { swap, preview, route } = fixture();
+    const q = (await swap.quoteOptions(preview, route))[0].quote!;
+    wallet.sendBitcoin.mockRejectedValueOnce(new Error('offline after broadcast'));
+    await expect(swap.execute(preview, route, q, 'lost')).rejects.toThrow('offline');
+    const restarted = fixture().swap;
+    expect(await restarted.execute(preview, route, q, 'lost')).toMatchObject({ status: 'unknown' });
+    mockVenue.reconcile.mockImplementation(async (store: any) => {
+      const records = await store.listPending();
+      await store.put({ ...records[0], phase: 'settled', resolvedTxid: 'recovered' });
+    });
+    expect(await restarted.status('lost')).toEqual({ status: 'completed', reference: 'recovered' });
+    expect(wallet.sendBitcoin).toHaveBeenCalledTimes(1);
+  });
+  test('restored receive uses actual invoice expiry, not the shorter quote deadline', async () => {
+    const store = createAsyncStorageArkadeSwapStore('real-expiry:');
+    const quoteDeadline = Math.floor(Date.now()/1000)-1000;
+    await store.put({ id: 'still-payable', phase: 'prepared', invoice: 'lntbs1hold', invoiceExpiresAt: quoteDeadline } as any);
+    mockVenue.reconcile.mockImplementationOnce(async (scoped: any) => {
+      const r = await scoped.get('still-payable');
+      expect(r.invoiceExpiresAt).toBeGreaterThan(Math.floor(Date.now()/1000)+3500);
+      expect(r.phase).toBe('prepared');
+    });
+    await claimArkadeLightningReceive({}, 'https://a', 'still-payable', store);
+    expect((await store.get('still-payable'))?.phase).toBe('prepared');
+  });
+  test('expired receive is cancelled only by reconciliation; terminal poll never claims', async () => {
+    const store = createAsyncStorageArkadeSwapStore('expiry:');
+    await store.put({ id: 'expired', phase: 'prepared' } as any);
+    mockVenue.claim.mockClear();
+    mockVenue.reconcile.mockImplementationOnce(async (scoped: any) => {
+      await scoped.put({ id: 'expired', phase: 'cancelled' });
+    });
+    expect(await claimArkadeLightningReceive({}, 'https://a', 'expired', store)).toBe('cancelled');
+    expect(mockVenue.claim).not.toHaveBeenCalled();
+  });
+  test('offline recovery preserves pending state and cannot inspect a different receipt', async () => {
+    const store = createAsyncStorageArkadeSwapStore('offline:');
+    await store.put({ id: 'mine', phase: 'prepared' } as any);
+    await store.put({ id: 'other', phase: 'funded' } as any);
+    mockVenue.reconcile.mockImplementationOnce(async (scoped: any) => {
+      expect((await scoped.listPending()).map((r: any) => r.id)).toEqual(['mine']);
+      expect(await scoped.get('other')).toBeUndefined();
+      throw Error('offline');
+    });
+    await expect(claimArkadeLightningReceive({}, 'https://a', 'mine', store)).rejects.toThrow('offline');
+    expect((await store.get('mine'))?.phase).toBe('prepared');
+  });
+  test('claim cache isolates different stores and servers on the same wallet', async () => {
+    const w = {};
+    const a = createAsyncStorageArkadeSwapStore('a:'); const b = createAsyncStorageArkadeSwapStore('b:');
+    for (const store of [a,b]) await store.put({ id: 'same', phase: 'funded' } as any);
+    await claimArkadeLightningReceive(w, 'https://a', 'same', a);
+    await claimArkadeLightningReceive(w, 'https://a', 'same', b);
+    await claimArkadeLightningReceive(w, 'https://b', 'same', b);
+    expect(mockVenue.instances).toHaveLength(3);
+  });
+});
+
+test('a failed refund action does not assert that funds were returned', () => {
+  expect(resultOfPhase('failed', 'rfq')).toMatchObject({ status: 'unknown', detail: expect.stringContaining('Funds need recovery') });
+  expect(resultOfPhase('failed', 'rfq')).not.toHaveProperty('resolution');
+  expect(resultOfPhase('refunded', 'refundtx')).toMatchObject({ status: 'failed', resolution: 'refunded', reference: 'refundtx' });
+  expect(resultOfPhase('cancelled')).toMatchObject({ status: 'failed', detail: expect.stringContaining('without funding') });
 });
