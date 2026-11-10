@@ -16,7 +16,7 @@ class NotOnline : IllegalStateException("The RGB wallet is not online: call goOn
  * One open rgb-lib wallet. rgb-lib blocks and keeps one SQLite database per
  * wallet, so every call on it runs on this wallet's own thread, in call order.
  */
-class Session(val wallet: Wallet) {
+class Session(val wallet: Wallet, val walletKey: String) {
   @Volatile var online: Online? = null
   private val executor: ExecutorService = Executors.newSingleThreadExecutor { Thread(it, "kaleido-rgb-wallet") }
   private val dispatcher = executor.asCoroutineDispatcher()
@@ -34,13 +34,19 @@ class WalletSessions {
   private val sessions = ConcurrentHashMap<Int, Session>()
   private val nextHandle = AtomicInteger(1)
 
-  fun add(wallet: Wallet): Int {
+  /** `walletKey` names the wallet's folder (subdir + master fingerprint). */
+  fun add(wallet: Wallet, walletKey: String): Int {
     val handle = nextHandle.getAndIncrement()
-    sessions[handle] = Session(wallet)
+    sessions[handle] = Session(wallet, walletKey)
     return handle
   }
 
+  /** Whether this process has the wallet in `walletKey`'s folder open. */
+  fun isOpen(walletKey: String): Boolean = sessions.values.any { it.walletKey == walletKey }
+
   fun get(handle: Int): Session = sessions[handle] ?: throw WalletNotFound(handle)
+
+  fun getOrNull(handle: Int): Session? = sessions[handle]
 
   fun remove(handle: Int): Session? = sessions.remove(handle)
 

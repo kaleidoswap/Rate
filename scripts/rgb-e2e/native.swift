@@ -30,18 +30,6 @@ let proxy = "rpcs://proxy.iriswallet.com/0.2/json-rpc"
                     }
                     emit("wallet", ["role": role, "address": try String(contentsOf: publicFile, encoding: .utf8), "directory": w.getWalletDir()])
                 }
-            } else if mode == "arkade-fund" {
-                let file = root.appendingPathComponent("arkade-funding.json")
-                try check(!FileManager.default.fileExists(atPath: file.path), "Arkade funding already attempted")
-                let request = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("arkade-funding-request.json"))) as! [String: Any]
-                let address = request["address"] as! String
-                try check(address.hasPrefix("tb1p") && request["network"] as? String == "mutinynet", "Test boarding address required")
-                let alice = try wallet(root, "alice", "mutinynet")
-                let online = try alice.goOnline(onlineOptions: OnlineOptions(indexerUrl: indexer, skipConsistencyCheck: false, vanillaSyncLookback: 20))
-                try Data("{}".utf8).write(to: file, options: [.atomic])
-                let txid = try alice.sendBtc(online: online, address: address, amount: 30000, feeRate: 1, skipSync: false)
-                try JSONSerialization.data(withJSONObject: ["txid": txid, "amount": 30000, "address": address]).write(to: file, options: [.atomic])
-                emit("arkade-funded-test-btc", ["txid": txid, "amount": 30000])
             } else if mode == "connect-networks" {
                 try connectNetworks(root)
             } else if mode == "switch" {

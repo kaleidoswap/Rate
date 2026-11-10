@@ -6,7 +6,7 @@ repo_dir="$(cd "$(dirname "$0")/../.." && pwd)"
 state_dir="${1:?Pass an absolute directory for the isolated test wallets}"
 mode="${2:-status}"
 [[ "$state_dir" = /* ]] || { echo 'State directory must be absolute' >&2; exit 64; }
-case "$mode" in arkade-fund|failure-tests|backup-export|backup-restore|prepare|switch|connect-networks|send|status|app-prepare|app-send|app-status|extended-invalid-invoices|extended-prepare|extended-send|extended-fund|extended-utxos|extended-offline|extended-status) ;; *) echo 'Unknown mode' >&2; exit 64 ;; esac
+case "$mode" in failure-tests|backup-export|backup-restore|prepare|switch|connect-networks|send|status|app-prepare|app-send|app-status|extended-invalid-invoices|extended-prepare|extended-send|extended-fund|extended-utxos|extended-offline|extended-status) ;; *) echo 'Unknown mode' >&2; exit 64 ;; esac
 umask 077
 mkdir -p "$state_dir"
 probe_bin="$state_dir/native-probe"

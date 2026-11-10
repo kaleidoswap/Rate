@@ -22,7 +22,7 @@ nodeLinker: hoisted
 # both build tooling) call uuid.v4(), which uuid 11 still ships as CommonJS.
 # decode-uri-component uses a CommonJS compatibility patch for query-string.
 # Expo Metro 0.83.3 is patched to pass file contents to image-size 2.0.4.
-# node-forge, braces and sprintf-js still have no patched release.
+# braces and sprintf-js still have no patched release.
 overrides:
   # Pinned to the version Expo SDK 54 expects (from chore/wallet-engine-beta69).
   expo-constants: 18.0.14
@@ -35,21 +35,23 @@ overrides:
   brace-expansion@5: ^5.0.12
   browserslist@4: ^4.28.7
   baseline-browser-mapping@2: ^2.11.0
-  fast-uri@3: ^3.1.8
+  fast-uri@3: ^3.1.9
   js-yaml@3: ^3.15.2
   js-yaml@4: ^4.3.2
   nanoid@3: ^3.3.18
   postcss@8: ^8.5.23
   shell-quote@1: ^1.9.0
-  undici@6: ^6.28.1
-  ip-address@10: ^10.7.1
+  undici@6: ^6.29.1
+  ip-address@10: ^10.7.5
   protobufjs@7: ^7.6.5
-  markdown-it: ^14.3.1
+  markdown-it: ^14.3.3
   uuid@<11.1.1: ^11.1.1
   http-cache-semantics@4: ^4.3.0
   source-map-js@1: ^1.2.2
   compression@1: ^1.8.2
-  decode-uri-component: 0.5.0
+  decode-uri-component: 0.5.1
+  follow-redirects@1: ^1.16.2
+  node-forge@1: ^1.4.2
   image-size: 2.0.4
   # One copy of each native addon the QVAC worker loads. The worker bundle asks
   # for an exact addon version, but the bare-kit linker links the hoisted copy
@@ -68,7 +70,7 @@ patchedDependencies:
   # Addon frameworks declare iOS 15.0 like their binaries (bare-link 3 wrote
   # 14.0, which App Store Connect rejects with ITMS-90208; fixed in bare-link 4).
   bare-link@3.2.2: patches/bare-link@3.2.2.patch
-  decode-uri-component@0.5.0: patches/decode-uri-component@0.5.0.patch
+  decode-uri-component@0.5.1: patches/decode-uri-component@0.5.1.patch
   metro@0.83.3: patches/metro@0.83.3.patch
   # Hands-free voice: the mic stream's PlayAndRecord/VoiceChat session must play
   # replies on the loudspeaker, not the earpiece (DefaultToSpeaker).
