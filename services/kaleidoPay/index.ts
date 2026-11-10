@@ -221,7 +221,7 @@ export function quoteSpend(quote: Quote): SpendQuote {
   return quote.spend ?? { asset: { id: 'BTC', ticker: 'sats', precision: 0 }, amount: quote.recipientSat, fee: quote.feeSat!, total: quote.totalSat! };
 }
 export function formatSpend(value: number, asset: SpendAsset): string {
-  return `${(value / 10 ** asset.precision).toLocaleString(undefined, { maximumFractionDigits: asset.precision })} ${asset.ticker}`;
+  return `${(value / 10 ** asset.precision).toLocaleString('en-US', { maximumFractionDigits: asset.precision })} ${asset.ticker}`;
 }
 function getAccount(preview: Preview, route: Route) {
   const account = accounts.get(route.sourceId);

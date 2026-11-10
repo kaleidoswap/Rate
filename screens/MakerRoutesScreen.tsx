@@ -109,7 +109,7 @@ function MakerRoutesSession({ walletId, network, url, navigation }: { walletId?:
       </View>}
       {receipt && <View style={{ gap: t.spacing[3] }}>
         <Text style={text}>{phase === 'settled' ? 'Received in Arkade' : phase === 'funded' ? 'Payment received · claiming' : phase === 'checking' ? 'Connection interrupted · checking saved request' : ['failed', 'refunded', 'cancelled'].includes(phase) ? 'Request closed' : 'Waiting for payment or confirmation'}</Text>
-        <Text style={text}>You receive {receipt.amountSats.toLocaleString()} sats · sender pays {receipt.payAmountSats.toLocaleString()} sats</Text>
+        <Text style={text}>You receive {receipt.amountSats.toLocaleString('en-US')} sats · sender pays {receipt.payAmountSats.toLocaleString('en-US')} sats</Text>
         <Text style={{ color: t.colors.text.secondary }}>Provider: {receipt.provider}. Requests are restored after reopening.</Text>
         {receipt.expiresAt * 1000 <= now && phase !== 'settled' && <Text style={{ color: t.colors.text.secondary }}>Payment window closed. Checking the existing swap; do not pay this invoice again.</Text>}
         {receipt.expiresAt * 1000 > now && phase !== 'settled' && !['failed', 'refunded', 'cancelled'].includes(phase) && <ReceiveRequestActions value={receipt.invoice} network={network} showValue />}

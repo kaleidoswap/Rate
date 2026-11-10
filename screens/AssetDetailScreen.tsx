@@ -221,7 +221,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
           {locations.length ? <>
             <View style={{ paddingHorizontal: theme.spacing[4] }}><AllocationBar hideAmounts={isBTC && (btc?.summary?.test ?? 0) > 0} items={locations.map(l => ({ label: l.label, value: l.amount, color: protocolColor(l.label.toUpperCase()) }))} /></View>
             {locations.map((l, i) => <View key={`${l.label}-${i}`} style={[styles.row, styles.rowDivider]}>
-              <Text style={styles.rowLabel}>{l.label}</Text><AmountText style={styles.rowValue}>{l.amount.toLocaleString(undefined, { maximumFractionDigits: 8 })} {l.unit || unit}</AmountText>
+              <Text style={styles.rowLabel}>{l.label}</Text><AmountText style={styles.rowValue}>{l.amount.toLocaleString('en-US', { maximumFractionDigits: 8 })} {l.unit || unit}</AmountText>
             </View>)}
           </> : <View style={styles.row}><Text style={styles.rowLabel}>Account breakdown is not available yet.</Text></View>}
         </View>

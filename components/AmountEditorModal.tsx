@@ -68,7 +68,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, rates, bitcoi
           {!!rate && <Ionicons name="swap-vertical" size={18} color={t.colors.text.secondary} />}
         </TouchableOpacity>
       </View>
-      <Text style={muted}>{empty ? (sending ? 'This request has no amount: you choose how much to send.' : 'The sender chooses the amount.') : !valid ? 'Enter a valid amount of at least 1 sat.' : fiat ? `${tokenValue(sats)} ${bitcoinUnit}` : rate ? `≈ $${((sats / 1e8) * rate).toFixed(2)} USD` : `${sats.toLocaleString()} sats`}</Text>
+      <Text style={muted}>{empty ? (sending ? 'This request has no amount: you choose how much to send.' : 'The sender chooses the amount.') : !valid ? 'Enter a valid amount of at least 1 sat.' : fiat ? `${tokenValue(sats)} ${bitcoinUnit}` : rate ? `≈ $${((sats / 1e8) * rate).toFixed(2)} USD` : `${sats.toLocaleString('en-US')} sats`}</Text>
       {!sending && <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
         {/* Quick amounts in dollars, and "any amount" so the payer decides. */}
         {!!rate && [1, 5, 20].map(usd => <TouchableOpacity key={usd} accessibilityRole="button" accessibilityLabel={`Request ${usd} dollars`}

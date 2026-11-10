@@ -50,7 +50,7 @@ export function BarkBoardingPanel() {
       if (value < terms.minBoardAmountSats) throw new Error(`Minimum boarding amount: ${terms.minBoardAmountSats} sats.`);
       Alert.alert(
         'Move on-chain funds into Bark?',
-        `${value.toLocaleString()} sats on ${barkNetworkLabel()}. Network fees apply. Bark requires ${terms.requiredConfirmations} confirmations.`,
+        `${value.toLocaleString('en-US')} sats on ${barkNetworkLabel()}. Network fees apply. Bark requires ${terms.requiredConfirmations} confirmations.`,
         [
           { text: 'Cancel', style: 'cancel', onPress: () => setBusy(false) },
           {

@@ -1,0 +1,135 @@
+diff --git a/dist/cjs.js b/dist/cjs.js
+index 7c36cbdd06cc22c92d590be3f87a08a91ca06b40..ee3367146f36b104b7a3b946e7add2974aeadd7e 100644
+--- a/dist/cjs.js
++++ b/dist/cjs.js
+@@ -76,11 +76,27 @@ function propertyIsUnsafe(target, key) {
+ 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ }
+ 
++// Dependabot GHSA: assigning '__proto__' via `destination[key] = value` invokes
++// the Object.prototype setter and poisons the returned object's prototype.
++// Defining it as an own data property keeps merge results unchanged.
++function setSafe(destination, key, value) {
++	if (key === '__proto__') {
++		Object.defineProperty(destination, key, {
++			value: value,
++			enumerable: true,
++			writable: true,
++			configurable: true
++		});
++	} else {
++		destination[key] = value;
++	}
++}
++
+ function mergeObject(target, source, options) {
+ 	var destination = {};
+ 	if (options.isMergeableObject(target)) {
+ 		getKeys(target).forEach(function(key) {
+-			destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
++			setSafe(destination, key, cloneUnlessOtherwiseSpecified(target[key], options));
+ 		});
+ 	}
+ 	getKeys(source).forEach(function(key) {
+@@ -89,9 +105,9 @@ function mergeObject(target, source, options) {
+ 		}
+ 
+ 		if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-			destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
++			setSafe(destination, key, getMergeFunction(key, options)(target[key], source[key], options));
+ 		} else {
+-			destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
++			setSafe(destination, key, cloneUnlessOtherwiseSpecified(source[key], options));
+ 		}
+ 	});
+ 	return destination
+diff --git a/dist/umd.js b/dist/umd.js
+index 4071e7c56ec8e5273fe166f6e723ac460fab8b72..59684ccee5c82ff6b7cb7057ba752d5cb5db06bc 100644
+--- a/dist/umd.js
++++ b/dist/umd.js
+@@ -80,11 +80,27 @@
+ 				&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ 	}
+ 
++	// Dependabot GHSA: assigning '__proto__' via `destination[key] = value` invokes
++	// the Object.prototype setter and poisons the returned object's prototype.
++	// Defining it as an own data property keeps merge results unchanged.
++	function setSafe(destination, key, value) {
++		if (key === '__proto__') {
++			Object.defineProperty(destination, key, {
++				value: value,
++				enumerable: true,
++				writable: true,
++				configurable: true
++			});
++		} else {
++			destination[key] = value;
++		}
++	}
++
+ 	function mergeObject(target, source, options) {
+ 		var destination = {};
+ 		if (options.isMergeableObject(target)) {
+ 			getKeys(target).forEach(function(key) {
+-				destination[key] = cloneUnlessOtherwiseSpecified(target[key], options);
++				setSafe(destination, key, cloneUnlessOtherwiseSpecified(target[key], options));
+ 			});
+ 		}
+ 		getKeys(source).forEach(function(key) {
+@@ -93,9 +109,9 @@
+ 			}
+ 
+ 			if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-				destination[key] = getMergeFunction(key, options)(target[key], source[key], options);
++				setSafe(destination, key, getMergeFunction(key, options)(target[key], source[key], options));
+ 			} else {
+-				destination[key] = cloneUnlessOtherwiseSpecified(source[key], options);
++				setSafe(destination, key, cloneUnlessOtherwiseSpecified(source[key], options));
+ 			}
+ 		});
+ 		return destination
+diff --git a/index.js b/index.js
+index 77968aed5d456cccc294f60912ef381fa1e52a7b..156a5373143307589bbb09bf3cf4c1dd29ce7d45 100644
+--- a/index.js
++++ b/index.js
+@@ -51,11 +51,27 @@ function propertyIsUnsafe(target, key) {
+ 			&& Object.propertyIsEnumerable.call(target, key)) // and also unsafe if they're nonenumerable.
+ }
+ 
++// Dependabot GHSA: assigning '__proto__' via `destination[key] = value` invokes
++// the Object.prototype setter and poisons the returned object's prototype.
++// Defining it as an own data property keeps merge results unchanged.
++function setSafe(destination, key, value) {
++	if (key === '__proto__') {
++		Object.defineProperty(destination, key, {
++			value: value,
++			enumerable: true,
++			writable: true,
++			configurable: true
++		})
++	} else {
++		destination[key] = value
++	}
++}
++
+ function mergeObject(target, source, options) {
+ 	var destination = {}
+ 	if (options.isMergeableObject(target)) {
+ 		getKeys(target).forEach(function(key) {
+-			destination[key] = cloneUnlessOtherwiseSpecified(target[key], options)
++			setSafe(destination, key, cloneUnlessOtherwiseSpecified(target[key], options))
+ 		})
+ 	}
+ 	getKeys(source).forEach(function(key) {
+@@ -64,9 +80,9 @@ function mergeObject(target, source, options) {
+ 		}
+ 
+ 		if (propertyIsOnObject(target, key) && options.isMergeableObject(source[key])) {
+-			destination[key] = getMergeFunction(key, options)(target[key], source[key], options)
++			setSafe(destination, key, getMergeFunction(key, options)(target[key], source[key], options))
+ 		} else {
+-			destination[key] = cloneUnlessOtherwiseSpecified(source[key], options)
++			setSafe(destination, key, cloneUnlessOtherwiseSpecified(source[key], options))
+ 		}
+ 	})
+ 	return destination

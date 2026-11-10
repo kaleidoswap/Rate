@@ -48,7 +48,7 @@ interface Props {
 const PRESETS = [21, 100, 500, 1000, 5000, 21000];
 
 const formatSats = (n: number) =>
-  n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
 export default function ZapModal({
   visible,

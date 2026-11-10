@@ -121,7 +121,7 @@ export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySe
               <View key={u.outpoint} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[2] }}>
                 <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.xs, flexShrink: 1 }} numberOfLines={1} ellipsizeMode="middle">{u.outpoint}</Text>
                 <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }}>
-                  {u.sats.toLocaleString()} sats · {u.allocations || u.pending ? 'in use' : 'free'}
+                  {u.sats.toLocaleString('en-US')} sats · {u.allocations || u.pending ? 'in use' : 'free'}
                 </Text>
               </View>
             ))}
