@@ -185,6 +185,6 @@ if (!config.resolver.assetExts.includes('wasm')) {
 }
 
 // Add Node.js polyfills to resolver platforms
-config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+config.resolver.platforms = ['ios', 'android', 'native'];
 
 module.exports = config;

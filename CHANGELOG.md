@@ -10,6 +10,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Removed
+- Dead code and dependencies: `axios` (no usage since the service-layer
+  refactor), the unused web target (`react-native-web`, `react-dom`,
+  `@expo/metro-runtime`, the `web` script and Metro's `web` platform — no CI
+  build or documented flow used it, and the wallet needs native modules), the
+  `upng-js` color-averaging helper nothing imported, plus orphaned components
+  and hooks (`NetworkBadge`, `mind/IntentBar`, `mind/AgentWalletCard`,
+  `useBackupHealth`, `useIsNarrow`, `speechLanguage`, `payment-receipt`,
+  `request-guard`, `iconAverageColor`) with their tests.
+- Unused dev tooling: `@babel/preset-env`, `jest-expo`, `bare-pack` (each
+  already provided where needed).
+
 ### Security
 - Build-time dependencies moved past three Dependabot advisories: `glob`
   13→14.0.2 (post-timeout filesystem traversal), `minimatch` 9/10→11.0.1

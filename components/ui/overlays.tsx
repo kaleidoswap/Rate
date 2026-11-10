@@ -3,7 +3,6 @@ import {
   AccessibilityInfo,
   findNodeHandle,
   Modal,
-  Platform,
   Pressable,
   ScrollView,
   View,
@@ -36,8 +35,6 @@ export function Dialog({
   const { height } = useWindowDimensions();
   const heading = useRef<View>(null);
   const focusHeading = () => {
-    // React Native Web's Modal manages DOM focus; findNodeHandle is native-only.
-    if (Platform.OS === 'web') return;
     const node = findNodeHandle(heading.current);
     if (node != null) AccessibilityInfo.setAccessibilityFocus(node);
   };
