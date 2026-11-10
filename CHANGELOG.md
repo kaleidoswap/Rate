@@ -10,6 +10,31 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-10
+
+### Added
+- **Maker routes.** Swap shows the maker's published routes — which assets it
+  sends and receives, in which amounts — on a dedicated Maker routes screen,
+  with the chosen route summarized in the payment review (MakerRouteList,
+  SwapRouteSummary).
+
+### Changed
+- `@kaleidorg/wallet-engine` moves to 1.0.0-beta.80 (the beta.75 patch is
+  upstream now); `@kaleidorg/swap-sdk` to 0.14.1 with `@arkade-os/sdk` 0.4.78
+  and `@arkade-os/swap` 0.0.24; `bip39` to 3.1.2, with `bitcoinjs-lib` 6.1.10
+  pinned by override.
+- Every sats and token amount now formats with `en-US` grouping regardless of
+  the host locale, so unit tests and CI are deterministic on any machine
+  (dates stay locale-aware).
+
+### Security
+- Build-time dependencies moved past three Dependabot advisories: `glob`
+  13→14.0.2 (post-timeout filesystem traversal), `minimatch` 9/10→11.0.1
+  (globparts denial of service), and `deepmerge` 4.3.1 patched locally
+  (`mergeObject()` prototype poisoning of returned objects; no upstream fix
+  published yet). None of these ship in the app binary — Expo CLI and Jest
+  build tooling only.
+
 ### Removed
 - Dead code and dependencies: `axios` (no usage since the service-layer
   refactor), the unused web target (`react-native-web`, `react-dom`,
@@ -22,21 +47,10 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 - Unused dev tooling: `@babel/preset-env`, `jest-expo`, `bare-pack` (each
   already provided where needed).
 
-### Security
-- Build-time dependencies moved past three Dependabot advisories: `glob`
-  13→14.0.2 (post-timeout filesystem traversal), `minimatch` 9/10→11.0.1
-  (globparts denial of service), and `deepmerge` 4.3.1 patched locally
-  (`mergeObject()` prototype poisoning of returned objects; no upstream fix
-  published yet). None of these ship in the app binary — Expo CLI and Jest
-  build tooling only.
-
-### Changed
-- `@kaleidorg/swap-sdk` moves to 0.14.1, with `@arkade-os/sdk` 0.4.78 and
-  `@arkade-os/swap` 0.0.24, the versions that release declares as peers. The
-  Arkade Intents venue the app loads from it keeps the same interface.
-- Every sats and token amount now formats with `en-US` grouping regardless of
-  the host locale, so unit tests and CI are deterministic on any machine
-  (dates stay locale-aware).
+### Validation
+- CI (type-check, tests, iOS and Android production bundles) passed on both
+  pull requests. Device testing of the 0.11.0 items (RGB runtime-lock
+  clearing, mempool deposit detection, voice audio route) is still pending.
 
 ## [0.11.0] — 2026-10-20
 
