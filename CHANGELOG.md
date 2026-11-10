@@ -12,7 +12,7 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ### Changed
 
-- `@kaleidorg/swap-sdk` moves to 0.14.0, with `@arkade-os/sdk` 0.4.78 and
+- `@kaleidorg/swap-sdk` moves to 0.14.1, with `@arkade-os/sdk` 0.4.78 and
   `@arkade-os/swap` 0.0.24, the versions that release declares as peers. The
   Arkade Intents venue the app loads from it keeps the same interface.
 
