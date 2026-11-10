@@ -1418,7 +1418,7 @@ class NostrService {
     const summary = req.asset?.amount != null
       ? `${req.asset.amount} ${req.asset.ticker || 'asset'}`
       : req.amountMsat
-        ? `${Math.round(req.amountMsat / 1000).toLocaleString()} sats`
+        ? `${Math.round(req.amountMsat / 1000).toLocaleString('en-US')} sats`
         : '';
     const lines = [`⚡ Payment request${summary ? ` — ${summary}` : ''}`];
     if (req.description) lines.push(req.description);

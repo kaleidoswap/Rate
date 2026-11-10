@@ -54,3 +54,15 @@ test('image-size rejects an ICNS entry whose zero length used to hang the parser
     assert.throws(() => imageSize(input));
   `], { cwd, timeout: 5000, stdio: 'pipe' });
 });
+
+test('Metro uses the installed wallet-engine release even with a sibling checkout', () => {
+  const env = { ...process.env };
+  delete env.WALLET_ENGINE_LOCAL;
+  execFileSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const path = require('node:path');
+    const config = require('./metro.config');
+    assert.equal(config.resolver.extraNodeModules['@kaleidorg/wallet-engine'],
+      path.resolve('node_modules/@kaleidorg/wallet-engine'));
+  `], { cwd, env, timeout: 30000, stdio: 'pipe' });
+});

@@ -1,0 +1,9 @@
+appId: com.kaleidoswap.wallet
+---
+- tapOn:
+    text: Annulla
+    optional: true
+- takeScreenshot: after-dismiss
+- launchApp:
+    stopApp: false
+- takeScreenshot: after-foreground

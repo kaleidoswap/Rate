@@ -17,7 +17,7 @@ import { rgbAccountAdapter } from '../../services/protocols';
 
 type Speed = 'slow' | 'normal' | 'fast';
 const SPEED_LABEL: Record<Speed, string> = { slow: 'Slow', normal: 'Normal', fast: 'Fast' };
-const sats = (n: number) => `${n.toLocaleString()} sats`;
+const sats = (n: number) => `${n.toLocaleString('en-US')} sats`;
 
 /** Sends all plain bitcoin of RGB on this phone to one address. Outputs holding assets stay. */
 export function DrainSheet({ visible, onClose, adapter: given, onDrained }: {

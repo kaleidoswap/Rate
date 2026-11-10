@@ -39,7 +39,7 @@ const MAKER_PAIR = {
   id: 'btc-usdt',
   base: { ticker: 'BTC', name: 'Bitcoin', precision: 8, protocol_ids: { RGB: 'btc' } },
   quote: { ticker: 'USDT', name: 'Tether', precision: 6, protocol_ids: { RGB: 'rgb:usdt' } },
-  routes: [{ from_layer: 'BTC_LN', to_layer: 'RGB_LN' }],
+  routes: [{ from_layer: 'BTC_LN', to_layer: 'RGB_LN' }, { from_layer: 'RGB_LN', to_layer: 'BTC_LN' }],
   is_active: true, venue: 'kaleidoswap' as const,
 };
 const FLASH_PAIR = {
@@ -89,6 +89,17 @@ describe('swap tools — KaleidoSwap maker venue', () => {
     expect(names).not.toContain('kaleidoswap_place_order');
     expect(defs.find((d) => d.name === 'execute_swap')?.requiresConfirmation).toBe(true);
     expect(defs.find((d) => d.name === 'kaleidoswap_get_quote')?.requiresConfirmation).toBeFalsy();
+  });
+
+  it('consumes a reviewed quote before a concurrent or uncertain execution can replay it', async () => {
+    await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    maker.initSwap.mockRejectedValueOnce(new Error('Connection lost'));
+    const first = source.execute('execute_swap', { quote_id: 'rfq1' });
+    const second = source.execute('execute_swap', { quote_id: 'rfq1' });
+    const results = await Promise.allSettled([first, second]);
+    expect(results.every(r => r.status === 'rejected')).toBe(true);
+    expect(maker.initSwap).toHaveBeenCalledTimes(1);
+    await expect(source.execute('execute_swap', { quote_id: 'rfq1' })).rejects.toThrow(/fresh quote/);
   });
 
   it('get_quote converts BTC sats→msat and returns the receive in display units', async () => {
@@ -194,6 +205,21 @@ describe('swap tools — channel capacity preflight', () => {
     expect(describeSwapQuote('rfq1')).toMatchObject({ from: 'BTC', to: 'USDT', sendAmount: 100_000, receiveAmount: 73, receiveUnit: 'USDT' });
   });
 
+  it('does not initialize a maker swap if its quote expires during the liquidity check', async () => {
+    const q: any = await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDT', amount: 100_000 });
+    const expired = Date.now() + 120_000;
+    let clock: jest.SpyInstance | undefined;
+    adapter.listChannels.mockImplementationOnce(async () => {
+      clock = jest.spyOn(Date, 'now').mockReturnValue(expired);
+      return [btcChannel(200_000, 0), usdtChannel(0, 100_000_000)];
+    });
+    try {
+      await expect(source.execute('execute_swap', { quote_id: q.quote_id })).rejects.toThrow('expired while checking liquidity');
+      expect(maker.initSwap).not.toHaveBeenCalled();
+      expect(rln.whitelistSwap).not.toHaveBeenCalled();
+    } finally { clock?.mockRestore(); }
+  });
+
   it('BTC → asset: refuses before the confirmation when outbound < amount + 3,000 sats, and says what fits', async () => {
     maker.getQuote.mockResolvedValueOnce({
       rfq_id: 'rfq-short',
@@ -289,9 +315,32 @@ describe('swap tools — Flashnet venue', () => {
     expect(res.txid).toBe('tx1');
   });
 
-  it('atomic_status reports flashnet swaps as completed (instant settle)', async () => {
-    const s: any = await source.execute('kaleidoswap_atomic_status', { atomic_id: 'flashnet-123' });
-    expect(s.status).toBe('completed');
+  it('never invents settlement for an unknown or merely quoted Flashnet swap', async () => {
+    const unknown: any = await source.execute('kaleidoswap_atomic_status', { atomic_id: 'flashnet-123' });
+    expect(unknown.status).toBe('unknown');
+    const q: any = await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDB', amount: 50_000 });
+    const quoted: any = await source.execute('kaleidoswap_atomic_status', { atomic_id: q.quote_id });
+    expect(quoted.status).toBe('unknown');
+    await source.execute('execute_swap', { quote_id: q.quote_id });
+    expect(await source.execute('kaleidoswap_atomic_status', { atomic_id: q.quote_id })).toMatchObject({ status: 'completed', txid: 'tx1' });
+  });
+
+  it('keeps an uncertain execution unknown and prevents retrying the consumed quote', async () => {
+    const q: any = await source.execute('kaleidoswap_get_quote', { from_asset: 'BTC', to_asset: 'USDB', amount: 50_000 });
+    flash.executeSwap.mockRejectedValueOnce(new Error('Network request failed'));
+    await expect(source.execute('execute_swap', { quote_id: q.quote_id })).rejects.toThrow('Network request failed');
+    expect(await source.execute('kaleidoswap_atomic_status', { atomic_id: q.quote_id })).toMatchObject({ status: 'unknown' });
+    await expect(source.execute('execute_swap', { quote_id: q.quote_id })).rejects.toThrow('no longer available');
+    expect(flash.executeSwap).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not overwrite simultaneous quotes generated in the same millisecond', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+    try {
+      const args = { from_asset: 'BTC', to_asset: 'USDB', amount: 50_000 };
+      const [a, b]: any[] = await Promise.all([source.execute('kaleidoswap_get_quote', args), source.execute('kaleidoswap_get_quote', args)]);
+      expect(a.quote_id).not.toBe(b.quote_id);
+    } finally { now.mockRestore(); }
   });
 });
 

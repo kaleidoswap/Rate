@@ -238,7 +238,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
           : '• Send & receive Bitcoin (Lightning)\n• RGB assets not supported on this wallet';
         Alert.alert(
           `Connect ${typeName}?`,
-          `${nodeInfo.alias ? `${nodeInfo.alias}\n` : ''}${sats == null ? '' : `Balance: ${sats.toLocaleString()} sats · `}${network}\n\nThis wallet will be used to:\n${capabilitySummary}`,
+          `${nodeInfo.alias ? `${nodeInfo.alias}\n` : ''}${sats == null ? '' : `Balance: ${sats.toLocaleString('en-US')} sats · `}${network}\n\nThis wallet will be used to:\n${capabilitySummary}`,
           [
             { text: 'Cancel', style: 'cancel', onPress: () => setLoading(false) },
             {
@@ -574,7 +574,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                   </View>
 
                   {active && balanceSats !== null && (
-                    <Text style={styles.walletBalance}>{balanceSats.toLocaleString()} sats</Text>
+                    <Text style={styles.walletBalance}>{balanceSats.toLocaleString('en-US')} sats</Text>
                   )}
 
                   <TouchableOpacity

@@ -45,11 +45,12 @@ import {
   SwapPair, SwapVenueFilter, SwapProgress,
   findPair, allTickers, tradableTickers, findPairAsset, getPairAsset,
   getAssetId, isBtcTicker, getQuoteLayers, isFlashnetPair, getAssetNetwork,
-  normalizeMakerPairs, buildFlashnetPairs, validateSwapString, swapRateLabel, maxSwapSendRaw,
+  capSwapBalance, normalizeMakerPairs, buildFlashnetPairs, validateSwapString, swapRateLabel, maxSwapSendRaw,
   QUOTE_DEBOUNCE_MS, QUOTE_REFRESH_MS, DEFAULT_FLASHNET_SLIPPAGE_BPS, MSATS_PER_SAT, RLN_HTLC_MIN_MSAT,
 } from '../utils/swap-model';
 import { minimumSwapOutput, quoteHasExpired } from '../utils/swap-review';
 import { describeSwapFailure, isConnectionFailure, SWAP_FAILED_COPY, SWAP_UNCONFIRMED_COPY, type SwapFailureCopy } from '../utils/swap-errors';
+import { SwapRouteSummary } from '../components/payments/SwapRouteSummary';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import {
   fetchSwapOffers, bestSwapOffer, assertSwapQuoteProvider, swapProviderName, type SwapOffer,
@@ -138,6 +139,7 @@ export default function SwapScreen({ navigation, route }: Props) {
   const [pairsLoading, setPairsLoading] = useState(false);
   // A venue whose prices failed to load, so an empty list says why.
   const [pairsFailed, setPairsFailed] = useState(false);
+  const [makerApiUnavailable, setMakerApiUnavailable] = useState(false);
   const [quoteSecsLeft, setQuoteSecsLeft] = useState<number | null>(null);
   // The RGB node's channels: what a maker swap can carry (channels unknown = no guard).
   const [liquidity, setLiquidity] = useState<ChannelLiquidity>({ htlcMinMsat: RLN_HTLC_MIN_MSAT });
@@ -281,6 +283,7 @@ export default function SwapScreen({ navigation, route }: Props) {
   const loadTradingPairs = async () => {
     setPairsLoading(true);
     setPairsFailed(false);
+    setMakerApiUnavailable(false);
     let failed = false;
     try {
       let makerPairs: SwapPair[] = [];
@@ -297,6 +300,8 @@ export default function SwapScreen({ navigation, route }: Props) {
         }
       } catch (err) {
         console.warn('[SwapScreen] Failed to load Kaleidoswap pairs:', err);
+        const status = (err as any)?.response?.status ?? (err as any)?.status;
+        setMakerApiUnavailable(status === 404);
         failed = true;
       }
 
@@ -545,15 +550,16 @@ export default function SwapScreen({ navigation, route }: Props) {
         const toAssetId = quote.to_asset_id
           ?? (toAsset ? getAssetId(toAsset) : quote.to_asset);
         const rawFromAmount = quote.from_amount_raw ?? (isBtcTicker(quote.from_asset)
-          ? Math.round(quote.from_amount * 1e8 * 1000)
+          ? btcDisplayToSats(quote.from_amount) * MSATS_PER_SAT
           : Math.round(quote.from_amount * Math.pow(10, fromPrecision)));
         const rawToAmount = quote.to_amount_raw ?? (isBtcTicker(quote.to_asset)
-          ? Math.round(quote.to_amount * 1e8 * 1000)
+          ? btcDisplayToSats(quote.to_amount) * MSATS_PER_SAT
           : Math.round(quote.to_amount * Math.pow(10, toPrecision)));
 
         // The channels may have changed since the quote: stop before the maker locks anything.
         const shortfall = quoteChannelShortfall(quote, await loadChannelLiquidity(), quoteLegLabel);
         if (shortfall) throw new Error(`Can't swap: ${shortfall}`);
+        if (quoteHasExpired(quote.expiry_timestamp)) throw new Error('The quote expired while checking liquidity. Refresh and review again.');
 
         // Step 1: Init swap. The maker SDK's SwapRequest is a FLAT shape
         // ({ rfq_id, from_asset, from_amount, to_asset, to_amount }) — passing a
@@ -648,9 +654,12 @@ export default function SwapScreen({ navigation, route }: Props) {
     const rfqId = quote.rfq_id;
     let pollCount = 0;
     const maxPolls = 20; // × 3s ≈ 1 minute
+    let inFlight = false;
+    let stopped = false;
 
     // Single exit path so every outcome clears the interval and the spinner.
     const stop = (interval: ReturnType<typeof setInterval>) => {
+      stopped = true;
       clearInterval(interval);
       setPollingInterval(null);
       dispatch(setExecuting(false));
@@ -664,6 +673,8 @@ export default function SwapScreen({ navigation, route }: Props) {
     };
 
     const interval = setInterval(async () => {
+      if (inFlight || stopped) return;
+      inFlight = true;
       try {
         pollCount++;
 
@@ -682,6 +693,7 @@ export default function SwapScreen({ navigation, route }: Props) {
           status = undefined;
         }
 
+        if (stopped) return;
         const swapStatus = status?.status || 'pending';
 
         if (swapStatus === 'confirmed' || swapStatus === 'completed' || swapStatus === 'failed') {
@@ -723,6 +735,9 @@ export default function SwapScreen({ navigation, route }: Props) {
         if (pollCount >= maxPolls) giveUp(interval, 'Not confirmed within a minute');
       } catch (error) {
         console.warn('Failed to poll swap status:', error);
+        if (pollCount >= maxPolls) giveUp(interval, 'Status unavailable');
+      } finally {
+        inFlight = false;
       }
     }, 3000);
 
@@ -770,7 +785,7 @@ export default function SwapScreen({ navigation, route }: Props) {
   const maxSendable = (): number => {
     const balance = assetByTicker(swapState.fromAsset)?.balance ?? 0;
     const cap = makerSendCapacity();
-    return cap !== undefined && cap > 0 ? Math.min(balance, cap) : balance;
+    return capSwapBalance(balance, cap);
   };
 
 
@@ -866,6 +881,7 @@ export default function SwapScreen({ navigation, route }: Props) {
 
   const renderSwapInterface = () => (
     <View style={styles.swapContainer}>
+      {makerApiUnavailable && <Callout tone="warning" title="RGB swaps unavailable with this maker" message="This maker cannot provide RGB Lightning swaps in this version of Rate. Choose another maker in Settings, or use Send and Receive for supported payments." />}
       {renderPairsNotice()}
       {/* Venue filter tabs (Advanced only: Lite picks the best price for you) */}
       {policy.showRouteSelector && renderVenueFilter()}
@@ -908,17 +924,22 @@ export default function SwapScreen({ navigation, route }: Props) {
               // Limit the quote input to the available balance for the selected
               // from-asset/network (same idea as the extension's clamp-to-max) and,
               // for maker swaps, to what the channels can send.
+              // Decimal-pad uses a comma in locales such as Italian. Never
+              // strip it as a thousands separator and change the spend amount.
+              if (!/^\d*(?:[.,]\d*)?$/.test(text)) return;
+              const normalized = text.replace(',', '.');
               const max = maxSendable();
-              const n = parseFloat(text.replace(/,/g, ''));
+              const n = Number(normalized);
               if (max > 0 && Number.isFinite(n) && n > max) {
                 dispatch(setFromAmount(String(max)));
               } else {
-                dispatch(setFromAmount(text));
+                dispatch(setFromAmount(normalized));
               }
             }}
             placeholder="0"
             placeholderTextColor={theme.colors.text.tertiary}
             keyboardType="decimal-pad"
+            accessibilityLabel={`Amount to swap in ${unitLabelFor(swapState.fromAsset)}`}
             style={styles.amountInput}
           />
           {renderTokenButton('from')}
@@ -967,43 +988,16 @@ export default function SwapScreen({ navigation, route }: Props) {
         </View>
       </View>
 
-      {providerOffers.length > 0 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Compare swap providers"
-        onPress={() => setShowProviders(true)} style={styles.quoteInfoContainer}>
-        <View style={styles.quoteInfoRow}><Text style={styles.quoteInfoLabel}>Provider</Text><Text style={styles.quoteInfoValue}>{swapProviderName(providerOffers.find(o => o.id === selectedProvider.current)?.pair ?? providerOffers[0].pair)} ›</Text></View>
-        <Text style={styles.quoteInfoLabel}>{providerOffers.filter(o => o.quote).length} live quotes · Compare costs and accounts</Text>
-      </TouchableOpacity>}
-      {/* Quote Info & Fees (Accordion Style) */}
-      {swapState.currentQuote && (
-        <Animated.View entering={FadeInDown.duration(motion.duration.base)} style={styles.quoteInfoContainer}>
-          <View style={styles.quoteInfoRow}>
-            <Text style={styles.quoteInfoLabel}>Rate</Text>
-            <Text style={styles.quoteInfoValue}>
-              {swapRateLabel(swapState.currentQuote, bitcoinUnit)}
-            </Text>
-          </View>
-          <View style={styles.quoteInfoRow}>
-            <Text style={styles.quoteInfoLabel}>Swap fee</Text>
-            <Text style={styles.quoteInfoValue}>
-              {formatQuoteFee(swapState.currentQuote)}
-            </Text>
-          </View>
-          {quoteSecsLeft != null && (
-            <View style={styles.quoteInfoRow}>
-              <Text style={styles.quoteInfoLabel}>Quote expires</Text>
-              <View style={styles.expiryPill}>
-                <Ionicons
-                  name="time-outline"
-                  size={13}
-                  color={quoteSecsLeft <= 5 ? theme.colors.warning[500] : theme.colors.primary[500]}
-                />
-                <Text style={[styles.expiryText, quoteSecsLeft <= 5 && { color: theme.colors.warning[500] }]}>
-                  {quoteSecsLeft > 0 ? `in ${quoteSecsLeft}s` : 'refreshing…'}
-                </Text>
-              </View>
-            </View>
-          )}
-        </Animated.View>
-      )}
+      {swapState.currentQuote && <SwapRouteSummary
+        provider={swapState.currentQuote.venue === 'flashnet' ? 'Flashnet' : 'KaleidoSwap'}
+        route={`${networkLabelFor(swapState.fromAsset)} → ${networkLabelFor(swapState.toAsset)}`}
+        fee={formatQuoteFee(swapState.currentQuote)}
+        rate={swapRateLabel(swapState.currentQuote, bitcoinUnit)}
+        secondsLeft={quoteSecsLeft}
+        offerCount={providerOffers.length}
+        onCompare={() => setShowProviders(true)}
+      />}
+      {!swapState.currentQuote && providerOffers.length > 1 && <Button title="Compare providers" variant="secondary" onPress={() => setShowProviders(true)} />}
 
       {!!liquidityShortfall && (
         <Callout tone="warning" title="Not enough channel liquidity" message={liquidityShortfall.charAt(0).toUpperCase() + liquidityShortfall.slice(1)} style={{ marginTop: theme.spacing[3] }} />
@@ -1029,8 +1023,10 @@ export default function SwapScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const networkLabelFor = (ticker: string) =>
-    ({ Spark: 'Spark', LN: 'Lightning', 'RGB-LN': 'RGB Lightning' } as const)[getAssetNetwork(filteredPairs, ticker)];
+  const networkLabelFor = (ticker: string) => {
+    const selected = swapState.currentQuote && quotePairs.current.get(swapState.currentQuote);
+    return ({ Spark: 'Spark', LN: 'Lightning', 'RGB-LN': 'RGB Lightning' } as const)[getAssetNetwork(selected ? [selected] : filteredPairs, ticker)];
+  };
 
   const renderTokenButton = (side: 'from' | 'to') => {
     const ticker = side === 'from' ? swapState.fromAsset : swapState.toAsset;
@@ -1070,9 +1066,7 @@ export default function SwapScreen({ navigation, route }: Props) {
     const tickers = side === 'to'
       ? tradableTickers(filteredPairs, swapState.fromAsset)
       : allTickers(filteredPairs);
-    const pickerAssets = tickers.length
-      ? tickers.map(t => assetByTicker(t)).filter((a): a is Asset => !!a)
-      : availableAssets.map(a => assetByTicker(a.ticker) ?? a);
+    const pickerAssets = tickers.map(t => assetByTicker(t)).filter((a): a is Asset => !!a);
     const other = side === 'from' ? swapState.toAsset : swapState.fromAsset;
 
     return (
@@ -1113,7 +1107,7 @@ export default function SwapScreen({ navigation, route }: Props) {
           { key: 'init', label: 'Requesting swap' },
           { key: 'taker', label: 'Preparing channels' },
           { key: 'execute', label: 'Swapping' },
-          { key: 'done', label: 'Completed' },
+          { key: 'done', label: 'Waiting for confirmation' },
         ];
     const order = ['idle', 'init', 'taker', 'execute', 'done'];
     const currentIdx = order.indexOf(swapProgress);
@@ -1425,6 +1419,8 @@ export default function SwapScreen({ navigation, route }: Props) {
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         {swapState.error && (
           <Card style={styles.errorCard}>
@@ -1438,6 +1434,10 @@ export default function SwapScreen({ navigation, route }: Props) {
           </Card>
         )}
 
+        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('MakerRoutes')} style={{ minHeight: 48, padding: theme.spacing[4], marginBottom: theme.spacing[4], borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary }}>
+          <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Explore maker routes →</Text>
+          <Text style={{ color: theme.colors.text.secondary }}>Bitcoin, Lightning, Arkade and supported assets</Text>
+        </TouchableOpacity>
         {renderSwapInterface()}
         {renderExecutionStatus()}
       </ScrollView>
@@ -1555,6 +1555,9 @@ const styles = StyleSheet.create({
   maxButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 44,
+    flexShrink: 1,
+    flexWrap: 'wrap',
     gap: theme.spacing[2],
   },
 
@@ -1576,6 +1579,7 @@ const styles = StyleSheet.create({
 
   swapInputRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: theme.spacing[3],
@@ -1588,6 +1592,7 @@ const styles = StyleSheet.create({
 
   amountInput: {
     flex: 1,
+    minWidth: 110,
     fontSize: 28,
     fontWeight: '600',
     color: theme.colors.text.primary,
@@ -1599,6 +1604,7 @@ const styles = StyleSheet.create({
 
   amountText: {
     flex: 1,
+    minWidth: 110,
     fontSize: 28,
     fontWeight: '600',
     color: theme.colors.text.primary,
@@ -1635,7 +1641,7 @@ const styles = StyleSheet.create({
     marginTop: -1,
   },
   assetSelectorTokenNetwork: {
-    fontSize: 10,
+    fontSize: theme.typography.fontSize.xs,
     color: theme.colors.text.tertiary,
   },
 

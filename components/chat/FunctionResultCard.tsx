@@ -94,7 +94,7 @@ const amountText = (n: unknown, unit: unknown) => {
   const v = Number(n);
   if (!Number.isFinite(v)) return '';
   const u = String(unit ?? '');
-  return u === 'sats' ? `${Math.round(v).toLocaleString()} sats` : `${v.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${u}`;
+  return u === 'sats' ? `${Math.round(v).toLocaleString('en-US')} sats` : `${v.toLocaleString('en-US', { maximumFractionDigits: 8 })} ${u}`;
 };
 const shortHash = (h: string) => (h.length > 24 ? `${h.slice(0, 10)}…${h.slice(-8)}` : h);
 
@@ -230,10 +230,10 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
         <View style={styles.card}>
           <Text style={failed ? styles.errorText : styles.title}>
             {failed ? 'Payment failed' : pending ? 'Payment pending' : 'Payment sent'}
-            {Number(functionResult.amount) > 0 && functionCalled !== 'rln_send_asset' ? ` · ${Number(functionResult.amount).toLocaleString()} sats` : ''}
+            {Number(functionResult.amount) > 0 && functionCalled !== 'rln_send_asset' ? ` · ${Number(functionResult.amount).toLocaleString('en-US')} sats` : ''}
           </Text>
           {functionResult.feeKnown !== false && Number(functionResult.fee) > 0 && (
-            <Text style={styles.invoiceText}>Fee {Number(functionResult.fee).toLocaleString()} sats</Text>
+            <Text style={styles.invoiceText}>Fee {Number(functionResult.fee).toLocaleString('en-US')} sats</Text>
           )}
           {!!proof && (
             <TouchableOpacity
@@ -416,11 +416,11 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
         <View style={styles.card}>
           <Text style={styles.title}>💰 Wallet Balance</Text>
           <Text style={styles.balanceAmount}>
-            {Number(functionResult.btc_sats || 0).toLocaleString()} sats
+            {Number(functionResult.btc_sats || 0).toLocaleString('en-US')} sats
           </Text>
           {functionResult.btc_pending_sats > 0 && (
             <Text style={styles.balanceSub}>
-              {Number(functionResult.btc_pending_sats).toLocaleString()} sats pending
+              {Number(functionResult.btc_pending_sats).toLocaleString('en-US')} sats pending
             </Text>
           )}
           {Array.isArray(functionResult.assets) && functionResult.assets.length > 0 && (
@@ -472,7 +472,7 @@ const FunctionResultCard: React.FC<FunctionResultCardProps> = ({
                   {t.direction === 'received' ? '↓ Received' : '↑ Sent'}
                 </Text>
                 <Text style={styles.txAmount}>
-                  {Number(t.amount_sats || 0).toLocaleString()} sats
+                  {Number(t.amount_sats || 0).toLocaleString('en-US')} sats
                 </Text>
               </View>
             ))

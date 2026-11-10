@@ -48,7 +48,7 @@ async function assertSpendable(bark: BarkPaySender, totalSat: number): Promise<v
   let spendable: number | undefined;
   try { spendable = (await bark.getBtcBalance())?.confirmed; } catch { return; }
   if (typeof spendable === 'number' && Number.isFinite(spendable) && totalSat > spendable) {
-    throw new Error(`Not enough in Bark: this payment needs ${totalSat.toLocaleString()} sats including fees, ${spendable.toLocaleString()} sats are spendable.`);
+    throw new Error(`Not enough in Bark: this payment needs ${totalSat.toLocaleString('en-US')} sats including fees, ${spendable.toLocaleString('en-US')} sats are spendable.`);
   }
 }
 

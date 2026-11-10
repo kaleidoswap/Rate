@@ -1400,7 +1400,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     requestEventId.current = id;
     void recordContactEvent(walletId, {
       id, contactKey: requestContact.key, contactName: requestContact.name, direction: 'requested',
-      amount: currentAmountSats > 0 ? `${currentAmountSats.toLocaleString()} sats` : '', note: note || undefined,
+      amount: currentAmountSats > 0 ? `${currentAmountSats.toLocaleString('en-US')} sats` : '', note: note || undefined,
       status: 'open', createdAt: Date.now(),
     }).catch(() => {});
   }, [requestContact, currentAmountSats, note, walletId]);
@@ -1623,10 +1623,10 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     if (currentAmountSats > 0) {
       const sub = [usd ? `≈ $${((currentAmountSats / SATS_PER_BTC) * usd).toFixed(2)}` : null, note ? `“${note}”` : null].filter(Boolean).join(' · ');
       return (
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Edit request, ${currentAmountSats.toLocaleString()} sats${sub ? `, ${sub}` : ''}`}
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Edit request, ${currentAmountSats.toLocaleString('en-US')} sats${sub ? `, ${sub}` : ''}`}
           onPress={edit} activeOpacity={0.7} style={{ alignItems: 'center', marginTop: theme.spacing[2], marginBottom: theme.spacing[1] }}>
           <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: theme.spacing[1.5] }}>
-            <AmountText style={styles.amountHeadline}>{currentAmountSats.toLocaleString()}</AmountText>
+            <AmountText style={styles.amountHeadline}>{currentAmountSats.toLocaleString('en-US')}</AmountText>
             <Text style={styles.amountHeadlineUnit}>sats</Text>
             <Ionicons name="pencil" size={14} color={theme.colors.primary[500]} />
           </View>
@@ -1692,7 +1692,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
   const renderOutcome = () => <ReceiveOutcomeCard status={requestPresentation} onRefresh={refreshRequest}
     detectedAmount={detectedAmount} message={depositMonitor.message}
-    requestedAmount={!selectedAsset.isRGB && (networkType !== 'unified' || unifiedAsset === 'BTC') && currentAmountSats > 0 ? `${currentAmountSats.toLocaleString()} sats` : undefined}
+    requestedAmount={!selectedAsset.isRGB && (networkType !== 'unified' || unifiedAsset === 'BTC') && currentAmountSats > 0 ? `${currentAmountSats.toLocaleString('en-US')} sats` : undefined}
     onActivity={claimsOnDevice && requestPresentation === 'pending' ? undefined : () => navigation.navigate('Dashboard', { screen: 'Activity' })}
     hint={claimsOnDevice ? 'Keep this screen open until the payment arrives.' : undefined} />;
 
@@ -1840,7 +1840,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     const method = receiveMethods[0];
     const title = method ? requestKind(method) : 'Bitcoin address';
     const swapNote = arkadeReceive && method?.protocol === 'ARKADE' && method.layer === 'lightning'
-      ? `The sender pays ${arkadeReceive.payAmountSats.toLocaleString()} sats; ${(arkadeReceive.payAmountSats - arkadeReceive.amountSats).toLocaleString()} sats go to ${arkadeReceive.provider} for the swap.`
+      ? `The sender pays ${arkadeReceive.payAmountSats.toLocaleString('en-US')} sats; ${(arkadeReceive.payAmountSats - arkadeReceive.amountSats).toLocaleString('en-US')} sats go to ${arkadeReceive.provider} for the swap.`
       : undefined;
     return (
       <View style={styles.qrSection}>

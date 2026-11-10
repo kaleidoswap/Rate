@@ -365,7 +365,7 @@ export default function ChatScreen({ navigation, route }: Props) {
 
   const sendReceipt = (amountSats?: number, sent = false) => {
     const verb = sent ? 'Sent' : 'Paid';
-    const text = amountSats ? `⚡ ${verb} ${amountSats.toLocaleString()} sats` : `⚡ ${verb}`;
+    const text = amountSats ? `⚡ ${verb} ${amountSats.toLocaleString('en-US')} sats` : `⚡ ${verb}`;
     dispatch(sendDirectMessage({ pubkey, text }) as any).catch(() => {});
   };
 
@@ -381,7 +381,7 @@ export default function ChatScreen({ navigation, route }: Props) {
       p.asset?.amount != null
         ? `${p.asset.amount} ${p.asset.ticker || 'asset'}`
         : p.amountMsat
-          ? `${Math.round(p.amountMsat / 1000).toLocaleString()} sats`
+          ? `${Math.round(p.amountMsat / 1000).toLocaleString('en-US')} sats`
           : 'Any amount';
     const expired = p.expiry ? Date.now() / 1000 > p.expiry : false;
     const paid = !!paidInvoices[p.invoice] || (p.requestId ? paidRequestIds.has(p.requestId) : false);
@@ -494,7 +494,7 @@ export default function ChatScreen({ navigation, route }: Props) {
                   >
                     <Ionicons name="flash" size={15} color={theme.colors.text.inverse} />
                     <Text style={styles.payBtnText}>
-                      Pay{legacyPayable.amountSats ? ` ${legacyPayable.amountSats.toLocaleString()} sats` : ''}
+                      Pay{legacyPayable.amountSats ? ` ${legacyPayable.amountSats.toLocaleString('en-US')} sats` : ''}
                     </Text>
                   </TouchableOpacity>
                 ) : (

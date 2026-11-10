@@ -23,7 +23,7 @@ export interface RgbAssetLabel {
 
 type Speed = 'slow' | 'normal' | 'fast';
 const SPEED_LABEL: Record<Speed, string> = { slow: 'Slow', normal: 'Normal', fast: 'Fast' };
-const sats = (n: number) => `${n.toLocaleString()} sats`;
+const sats = (n: number) => `${n.toLocaleString('en-US')} sats`;
 
 /**
  * The RGB account's UTXOs: which hold assets, which are free to receive into,
@@ -125,7 +125,7 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
     if (!u.assets.length) return u.pending ? 'Reserved for an open invoice' : 'Holds an asset';
     return u.assets.map(a => {
       const known = label(a.assetId);
-      const amount = known ? `${formatAssetAmount(a.amount, known.precision ?? 0)} ${known.ticker}` : `${a.amount.toLocaleString()} units`;
+      const amount = known ? `${formatAssetAmount(a.amount, known.precision ?? 0)} ${known.ticker}` : `${a.amount.toLocaleString('en-US')} units`;
       return a.settled ? amount : `${amount} incoming`;
     }).join(' · ');
   };
@@ -188,7 +188,7 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
             options={RGB_UTXO_COUNTS.map(n => ({ key: String(n), label: `${n}` }))} />
           {caption('Bitcoin per slot')}
           <SegmentedTabs<string> scrollable={false} fill value={String(size)} onChange={(k) => setSize(Number(k))}
-            options={RGB_UTXO_SIZES.map(n => ({ key: String(n), label: `${n.toLocaleString()} sats` }))} />
+            options={RGB_UTXO_SIZES.map(n => ({ key: String(n), label: `${n.toLocaleString('en-US')} sats` }))} />
           {caption('Network fee speed')}
           <SegmentedTabs<Speed> scrollable={false} fill value={speed} onChange={setSpeed}
             options={(['slow', 'normal', 'fast'] as Speed[]).map(s => ({ key: s, label: `${SPEED_LABEL[s]} · ${fees[s]}` }))} />

@@ -161,7 +161,7 @@ export function createRgbAssetAccount(rgb: RgbPayAdapter, network: Network, asse
         feeSat: btcFee,
         spend: { asset, amount: requested.amount, fee: 0, total: requested.amount },
         terms: { invoice, assetId: requested.id, amount: requested.amount, ...(feeRate ? { feeRate } : {}) },
-        detail: `Plus about ${btcFee.toLocaleString()} sats network fee (estimate${feeRate ? `, ${feeRate} sat/vB` : ''})`,
+        detail: `Plus about ${btcFee.toLocaleString('en-US')} sats network fee (estimate${feeRate ? `, ${feeRate} sat/vB` : ''})`,
       };
     },
     matches: (preview, terms) => preview.code.rgbInvoice === terms.invoice && preview.request.asset?.id === terms.assetId && preview.request.asset?.amount === terms.amount,

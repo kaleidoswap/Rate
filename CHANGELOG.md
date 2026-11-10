@@ -10,11 +10,33 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
-### Changed
+### Removed
+- Dead code and dependencies: `axios` (no usage since the service-layer
+  refactor), the unused web target (`react-native-web`, `react-dom`,
+  `@expo/metro-runtime`, the `web` script and Metro's `web` platform — no CI
+  build or documented flow used it, and the wallet needs native modules), the
+  `upng-js` color-averaging helper nothing imported, plus orphaned components
+  and hooks (`NetworkBadge`, `mind/IntentBar`, `mind/AgentWalletCard`,
+  `useBackupHealth`, `useIsNarrow`, `speechLanguage`, `payment-receipt`,
+  `request-guard`, `iconAverageColor`) with their tests.
+- Unused dev tooling: `@babel/preset-env`, `jest-expo`, `bare-pack` (each
+  already provided where needed).
 
+### Security
+- Build-time dependencies moved past three Dependabot advisories: `glob`
+  13→14.0.2 (post-timeout filesystem traversal), `minimatch` 9/10→11.0.1
+  (globparts denial of service), and `deepmerge` 4.3.1 patched locally
+  (`mergeObject()` prototype poisoning of returned objects; no upstream fix
+  published yet). None of these ship in the app binary — Expo CLI and Jest
+  build tooling only.
+
+### Changed
 - `@kaleidorg/swap-sdk` moves to 0.14.1, with `@arkade-os/sdk` 0.4.78 and
   `@arkade-os/swap` 0.0.24, the versions that release declares as peers. The
   Arkade Intents venue the app loads from it keeps the same interface.
+- Every sats and token amount now formats with `en-US` grouping regardless of
+  the host locale, so unit tests and CI are deterministic on any machine
+  (dates stay locale-aware).
 
 ## [0.11.0] — 2026-10-20
 

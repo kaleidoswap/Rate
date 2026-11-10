@@ -22,10 +22,10 @@ export const formatSats = (sats: number, unit: Unit) => `${formatBitcoinAmount(s
 export function formatFiat(value: number, currency: string): string {
   const symbol = FIAT_SYMBOLS[currency] ?? `${currency} `;
   const digits = currency === 'JPY' ? 0 : value < 1 ? 4 : 2;
-  return `${symbol}${value.toLocaleString(undefined, { minimumFractionDigits: Math.min(2, digits), maximumFractionDigits: digits })}`;
+  return `${symbol}${value.toLocaleString('en-US', { minimumFractionDigits: Math.min(2, digits), maximumFractionDigits: digits })}`;
 }
 
-const formatUnits = (n: number, unit: string) => `${n.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${unit}`;
+const formatUnits = (n: number, unit: string) => `${n.toLocaleString('en-US', { maximumFractionDigits: 6 })} ${unit}`;
 
 const KIND_ICON: Record<ActionCard['kind'], keyof typeof Ionicons.glyphMap> = {
   send: 'arrow-up', receive: 'arrow-down', swap: 'swap-horizontal',
