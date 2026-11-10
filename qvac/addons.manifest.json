@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "bundleId": "979a1624ada525f4d80e60fc2446f21332c4d31460942280899646afc7674405",
+  "bundleId": "c0c1828e0118e7f1fba9c9d3da2f74a955d37d4987d25a7262d8d8aebe19e0bb",
   "addons": [
     "@qvac/asr-ggml",
     "@qvac/fabric",

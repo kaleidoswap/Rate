@@ -54,7 +54,7 @@
     "@scure/btc-signer": "^1.8.0",
     "@secondts/bark-react-native": "0.25.0",
     "@tetherto/wdk-wallet-spark": "1.0.0-beta.17",
-    "bip39": "^3.1.0",
+    "bip39": "^3.1.2",
     "buffer": "^6.0.3",
     "crypto-js": "^4.2.0",
     "event-source-polyfill": "^1.0.31",
