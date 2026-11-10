@@ -95,7 +95,6 @@ export const AssetList: React.FC<AssetListProps> = ({
     onAssetPress,
 }) => {
     const shown = assets.slice(0, VISIBLE);
-    const more = assets.length - shown.length;
     return (
         <View style={styles.section}>
             <SectionHeader title="Assets" eyebrow actionLabel="View All" onAction={onViewAll} />
@@ -115,16 +114,9 @@ export const AssetList: React.FC<AssetListProps> = ({
             ) : (
                 <View style={styles.group}>
                     {shown.map((asset, i) => (
-                        <AssetRow key={asset.asset_id} asset={asset} index={i} last={i === shown.length - 1 && more <= 0}
+                        <AssetRow key={asset.asset_id} asset={asset} index={i} last={i === shown.length - 1}
                             onPress={() => onAssetPress(asset)} />
                     ))}
-                    {more > 0 && (
-                        <PressableScale scaleTo={0.98} onPress={onViewAll} accessibilityRole="button"
-                            accessibilityLabel={`View ${more} more ${more === 1 ? 'asset' : 'assets'}`} style={styles.moreRow}>
-                            <Text style={styles.moreText}>View {more} more {more === 1 ? 'asset' : 'assets'}</Text>
-                            <Ionicons name="chevron-forward" size={16} color={theme.colors.primary[500]} />
-                        </PressableScale>
-                    )}
                 </View>
             )}
         </View>
@@ -196,20 +188,6 @@ const styles = StyleSheet.create({
     fiat: {
         fontSize: theme.typography.fontSize.xs,
         color: theme.colors.text.secondary,
-    },
-    moreRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: theme.spacing[1],
-        minHeight: 48,
-        borderTopWidth: StyleSheet.hairlineWidth,
-        borderTopColor: theme.colors.border.light,
-    },
-    moreText: {
-        fontSize: theme.typography.fontSize.sm,
-        color: theme.colors.primary[500],
-        fontWeight: '600',
     },
     emptyCard: {
         padding: theme.spacing[6],

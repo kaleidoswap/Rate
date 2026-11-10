@@ -8,6 +8,7 @@ import { Button, Input, MainHeader } from '../components';
 import { RgbNodeIcon } from '../components/ProtocolIcons';
 import { theme, leading } from '../theme';
 import { RootState } from '../store';
+import { useAppLanguage } from '../localization/useAppLanguage';
 import { protocolManager, reconcileRgbOnDevice } from '../services/protocols';
 import DatabaseService from '../services/DatabaseService';
 import { setActiveWallet, loadBtcBalance } from '../store/slices/walletSlice';
@@ -25,6 +26,7 @@ import {
   type NwcGetInfoResult,
 } from '../services/nwc/NWCExternalClient';
 import {
+  deactivateNwcCredential,
   connectionIdForUri,
   deriveNwcCapabilities,
   friendlyNwcError,
@@ -53,6 +55,8 @@ type WalletType = 'ln' | 'rln';
  */
 const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
   const dispatch = useDispatch();
+  const { language } = useAppLanguage();
+  const [disconnecting, setDisconnecting] = useState(false);
   const activeWallet = useSelector((s: RootState) => s.wallet?.activeWallet);
   const storedType = useSelector((s: RootState) => s.nostr?.nwcWalletType);
   const savedConnections = useSelector((s: RootState) => s.nostr?.nwcConnections ?? []);
@@ -289,6 +293,42 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
     navigation.navigate('QRScanner');
   };
 
+  const disconnectNwc = async () => {
+    if (loading || disconnecting) return;
+    setDisconnecting(true);
+    setConnectionError(null);
+    try {
+      const db = DatabaseService.getInstance();
+      if (activeWallet?.id) {
+        await db.updateNetworkConfig(activeWallet.id, 'rln', { enabled: false });
+      }
+      await deactivateNwcCredential();
+      await protocolManager.disconnect('RGB_LN');
+      dispatch(selectNwcConnection(null));
+      setConnectionString('');
+      setSaved(false);
+      setInfo(null);
+      setWalletType(null);
+      setBalanceSats(null);
+      if (activeWallet?.id) {
+        const refreshed = await db.getActiveWallet();
+        if (refreshed) dispatch(setActiveWallet(refreshed));
+      }
+      refreshBalances();
+      // A slow native wallet start must not hold the NWC disconnect UI open.
+      void reconcileRgbOnDevice().then((result) => {
+        if (result && !result.success && !result.error?.startsWith('skipped:')) {
+          setConnectionError(result.error || 'RGB on this phone did not connect.');
+        }
+        refreshBalances();
+      }).catch((error) => setConnectionError(friendlyNwcError(error)));
+    } catch (error) {
+      setConnectionError(friendlyNwcError(error));
+    } finally {
+      setDisconnecting(false);
+    }
+  };
+
   // Removing deletes the stored connection string: getting it back means pasting it again.
   const confirmDisconnect = (connection?: SavedNwcConnection) => {
     const name = connection?.alias || 'this Lightning wallet';
@@ -356,7 +396,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
   };
 
   const handleSelectConnection = async (connection: SavedNwcConnection) => {
-    if (connection.id === selectedConnectionId || loading) return;
+    if (connection.id === selectedConnectionId || loading || disconnecting) return;
     setLoading(true);
     setConnectionError(null);
     const previous = savedConnections.find((item) => item.id === selectedConnectionId);
@@ -443,7 +483,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
         <Button
           title={loading ? 'Connecting…' : 'Add wallet'}
           onPress={() => connect(connectionString.trim())}
-          disabled={loading || !connectionString.trim()}
+          disabled={loading || disconnecting || !connectionString.trim()}
           loading={loading}
         />
 
@@ -451,6 +491,22 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
           <View style={styles.errorCard}>
             <Ionicons name="alert-circle-outline" size={20} color={theme.colors.error[500]} />
             <Text style={styles.errorText}>{connectionError}</Text>
+          </View>
+        )}
+
+        {(selectedConnectionId || saved) && (
+          <View style={styles.savedSection}>
+            <Button
+              title={language === 'it' ? 'Disconnetti NWC' : 'Disconnect NWC'}
+              onPress={disconnectNwc}
+              disabled={loading || disconnecting}
+              loading={disconnecting}
+            />
+            <Text style={styles.walletMeta}>
+              {language === 'it'
+                ? 'L’abbinamento resta salvato. Tocca il wallet qui sotto per riconnetterti.'
+                : 'Your pairing stays saved. Tap the wallet below to reconnect.'}
+            </Text>
           </View>
         )}
 
@@ -525,7 +581,7 @@ const NWCConnectScreen: React.FC<Props> = ({ navigation, route }) => {
                     style={styles.removeButton}
                     onPress={(event) => {
                       event.stopPropagation();
-                      confirmDisconnect(connection);
+                      if (!disconnecting && !loading) confirmDisconnect(connection);
                     }}
                     hitSlop={8}
                     accessibilityRole="button"

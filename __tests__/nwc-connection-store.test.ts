@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 
 import {
   ACTIVE_NWC_CONNECTION_KEY,
+  deactivateNwcCredential,
   connectionIdForUri,
   deriveNwcCapabilities,
   friendlyNwcError,
@@ -51,6 +52,24 @@ describe('NWC connection store', () => {
     expect(await loadNwcCredential(walletA)).toBeNull();
     expect(await loadNwcCredential(walletB)).toBe(uri(walletB));
     expect(await loadActiveNwcCredential()).toEqual({ id: null, uri: null });
+  });
+
+  it('disconnects without deleting pairings or activating a fallback, and reconnects', async () => {
+    await saveAndSelectNwcCredential(walletA, uri(walletA));
+    await saveNwcCredential(walletB, uri(walletB));
+    await deactivateNwcCredential();
+    expect(await loadActiveNwcCredential()).toEqual({ id: null, uri: null });
+    expect(await loadNwcCredential(walletA)).toBe(uri(walletA));
+    expect(await loadNwcCredential(walletB)).toBe(uri(walletB));
+    await selectNwcCredential(walletA);
+    expect(await loadActiveNwcCredential()).toEqual({ id: walletA, uri: uri(walletA) });
+  });
+
+  it('preserves a legacy active pairing before disconnecting', async () => {
+    memory.set(ACTIVE_NWC_CONNECTION_KEY, uri(walletA));
+    await deactivateNwcCredential();
+    expect(await loadActiveNwcCredential()).toEqual({ id: null, uri: null });
+    expect(await loadNwcCredential(walletA)).toBe(uri(walletA));
   });
 
   it('derives permissions from advertised NIP-47 and RLN methods', () => {

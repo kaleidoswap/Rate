@@ -23,3 +23,9 @@ test('confirmed payments offer activity and a new request', () => {
   expect(activity).toHaveBeenCalledTimes(1);
   expect(ui.getByText('New request')).toBeTruthy();
 });
+test('a detected payment says what arrived and where it stands', () => {
+  const ui = render(<ReceiveOutcomeCard status="pending" detectedAmount="100 USDT" message="Received. It counts once the sender’s bitcoin transaction confirms." />);
+  expect(ui.getByText('+100 USDT')).toBeTruthy();
+  expect(ui.getByText(/counts once the sender/)).toBeTruthy();
+  expect(ui.queryByText(/sender does not need/)).toBeNull();
+});

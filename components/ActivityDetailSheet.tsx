@@ -35,7 +35,7 @@ import { activityExplorerUrl } from '../utils/explorer';
 import { RGB_TRANSFER_STATUS_LABEL, canCancelRgbTransfer, rgbOnchainKindLabel, canDeleteRgbTransfer, rgbTransferStatusDetail, rgbWalletErrorMessage, rgbWalletSupport } from '../utils/rgb-wallet';
 import { cancelRgbTransfer, deleteRgbTransfer } from '../services/rgbWallet';
 import { rgbAccountAdapter } from '../services/protocols';
-import { ExplainButton } from './mind/ExplainSheet';
+import { middleEllipsis } from './receive/ReceiveRequestDetails';
 
 interface Props {
     item: ActivityItem | null;
@@ -82,8 +82,9 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const theme = useAppTheme();
     const styles = useMemo(() => createStyles(theme), [theme]);
     const unit = useAppSelector(state => state.settings.bitcoinUnit);
-    const [checking, setChecking] = useState(false);
-    const [checkMessage, setCheckMessage] = useState('');
+    const [detailsExpanded, setDetailsExpanded] = useState(false);
+    const [cancelledId, setCancelledId] = useState<string | null>(null);
+    useEffect(() => { setDetailsExpanded(false); setCancelledId(null); }, [item?.id]);
     const [accelerating, setAccelerating] = useState(false);
     useEffect(() => setAccelerating(false), [item?.id]);
     const [cancelling, setCancelling] = useState(false);
@@ -104,9 +105,10 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     if (!item) return null;
 
     const v = typeVisual(item.type);
-    const st = ACTIVITY_STATUS_VISUAL[item.status];
+    const cancelled = cancelledId === item.id;
+    const st = ACTIVITY_STATUS_VISUAL[cancelled ? 'failed' : item.status];
     const onchain = item.source === 'onchain' || item.layer === 'L1' || item.layer === 'RGB-L1';
-    const statusLabel = onchain && item.status === 'pending' ? 'Awaiting confirmation' : onchain && item.status === 'confirmed' ? 'Confirmed on-chain' : st.label;
+    const statusLabel = cancelled ? 'Cancelled' : onchain && item.status === 'pending' ? 'Awaiting confirmation' : onchain && item.status === 'confirmed' ? 'Confirmed on-chain' : st.label;
     const hasAmount = item.amount !== '';
     const isIncoming = item.type === 'receive' || item.type === 'issuance';
     const txLabel = item.crossChain ? 'Order ID' : item.paymentHash ? 'Payment hash' : 'Transaction ID';
@@ -116,11 +118,45 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const proofVerified = !!proof && !!proofHash && preimageMatches(proof.preimage, proofHash);
     const target = accelerationTarget(item);
     const explorerUrl = activityExplorerUrl(item);
-    const rgb = item.rgbTransfer;
+    const rgb = item.rgbTransfer && cancelled ? { ...item.rgbTransfer, status: 'failed' as const } : item.rgbTransfer;
     const rgbAdapter = rgb ? rgbAccountAdapter() : null;
     const rgbSupport = rgbWalletSupport(rgbAdapter);
     const cancellable = !!rgb && canCancelRgbTransfer(rgb, rgbSupport);
     const removable = !!rgb && canDeleteRgbTransfer(rgb, rgbSupport);
+    const rgbSettled = rgb?.status === 'settled';
+    const statusDetail = rgb ? (rgbSettled ? '' : rgbTransferStatusDetail(rgb.status, rgb.direction))
+        : item.status === 'unknown' ? 'The provider has not confirmed the outcome. Check the status before sending again.'
+        : item.status === 'pending' ? 'Submitted and waiting for confirmation. You can leave this screen and check again later.' : '';
+    // Method, account and network in one line: "RGB · mutinynet", the account only when it says more.
+    const accountName = item.account ?? (['LN', 'RGB-LN', 'RGB-L1', 'L1'].includes(item.layer) ? 'RGB' : item.layer);
+    const methodText = [LAYER_LABEL[item.layer], accountName !== LAYER_LABEL[item.layer] && accountName !== item.layer ? accountName : null, item.network]
+        .filter(Boolean).join(' · ');
+    const assetId = item.asset && item.asset !== 'BTC' && !item.crossChain ? item.asset : '';
+    const assetTitle = item.assetName && item.assetTicker && item.assetName !== item.assetTicker ? `${item.assetName} (${item.assetTicker})` : item.assetName || item.assetTicker;
+    const details: { key: string; label: string; value: React.ReactNode }[] = [];
+    if (item.contactName) details.push({ key: 'contact', label: item.type === 'receive' ? 'From' : 'Recipient', value: <Text style={styles.rowValue}>{item.contactName}</Text> });
+    if (assetId || item.assetName) details.push({ key: 'asset', label: 'Asset', value: <Text style={styles.rowValue} numberOfLines={1}>{assetTitle}</Text> });
+    if (assetId) details.push({ key: 'asset-id', label: 'Asset ID', value: <View style={styles.rowWithAction}>
+        <Text style={styles.monoValue} selectable numberOfLines={1}>{middleEllipsis(assetId, 12, 8)}</Text>
+        <CopyButton value={assetId} size={14} />
+    </View> });
+    details.push({ key: 'method', label: 'Method', value: <View style={styles.layerChip}>
+        {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={14} />}
+        <Text style={styles.layerChipText} numberOfLines={1}>{methodText}</Text>
+    </View> });
+    if (item.timestamp != null) details.push({ key: 'date', label: 'Date', value: <Text style={styles.rowValue}>
+        {new Date(item.timestamp).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+    </Text> });
+    if (item.fee != null) details.push({ key: 'fee', label: 'Fee', value: <View style={styles.rowWithAction}>
+        <Text style={styles.rowValue}>{`${formatBitcoinAmount(item.fee, unit)} ${unit}`}</Text>
+    </View> });
+    if (item.txid) details.push({ key: 'txid', label: txLabel, value: <View style={styles.rowWithAction}>
+        <Text style={styles.monoValue} selectable numberOfLines={1}>{middleEllipsis(item.txid, 8, 8)}</Text>
+        <CopyButton value={item.txid} size={14} />
+        {explorerUrl && <TouchableOpacity accessibilityRole="link" accessibilityLabel="View in explorer" hitSlop={8} onPress={() => Linking.openURL(explorerUrl).catch(() => {})}>
+            <Ionicons name="open-outline" size={16} color={theme.colors.primary[500]} />
+        </TouchableOpacity>}
+    </View> });
     const removeTransfer = () => {
         if (!rgb || rgb.batchTransferIdx == null) return;
         Alert.alert(
@@ -160,8 +196,11 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                         setCancelling(true); setCancelMessage('');
                         try {
                             const failed = await cancelRgbTransfer(rgbAdapter, rgb.batchTransferIdx!);
+                            if (failed) setCancelledId(item.id);
                             setCancelMessage(failed ? 'Cancelled.' : 'This transfer can no longer be cancelled.');
-                            await onRefresh?.();
+                            if (failed) {
+                                try { await onRefresh?.(); } catch { /* Cancellation already succeeded. */ }
+                            } else { await onRefresh?.(); }
                         } catch (e) {
                             setCancelMessage(rgbWalletErrorMessage(e, 'cancel'));
                         } finally {
@@ -192,97 +231,38 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                 {/* Icon + type + amount */}
                 <View style={styles.header}>
                     <View style={[styles.bigIcon, { backgroundColor: v.color + '1A' }]}>
-                        <Ionicons name={v.icon} size={32} color={v.color} />
+                        <Ionicons name={v.icon} size={26} color={v.color} />
                     </View>
                     <Text style={styles.typeLabel}>{typeLabel(item)}</Text>
                     {hasAmount && (
                         <Text style={[styles.amount, { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary }]}>
-                            {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
+                            {cancelled || item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
                         </Text>
                     )}
-                    {!item.rgbTransfer && <ExplainButton subject={{ type: 'activity', item }} />}
+                    {/* Status: an RGB transfer's own step reads better than "Confirmed on-chain" + "Settled". */}
+                    <View style={styles.headerStatus}>
+                        <View style={[styles.statusPill, { backgroundColor: st.color + '1A' }]}>
+                            <View style={[styles.statusDot, { backgroundColor: st.color }]} />
+                            <Text style={[styles.statusText, { color: st.color }]}>{cancelled ? 'Cancelled' : rgb && rgb.status !== 'settled' ? RGB_TRANSFER_STATUS_LABEL[rgb.status] : statusLabel}</Text>
+                        </View>
+                    </View>
+                    {!!statusDetail && <Text style={styles.statusDetail}>{statusDetail}</Text>}
                 </View>
 
-                    {/* Status */}
-                    <View style={styles.row}>
-                        <Text style={styles.rowLabel}>Status</Text>
-                        <View style={styles.statusBadge}>
-                            <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                            <Text style={[styles.statusText, { color: st.color }]}>{statusLabel}</Text>
-                        </View>
+                    <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: detailsExpanded }} style={styles.closeButton} onPress={() => setDetailsExpanded(!detailsExpanded)}>
+                        <Text style={styles.closeButtonText}>{detailsExpanded ? 'Hide details' : 'Payment details'}</Text>
+                    </TouchableOpacity>
+                    {detailsExpanded && <>
+                    <View style={styles.card}>
+                        {details.map((row, i) => <View key={row.key} style={[styles.row, i > 0 && styles.rowDivider]}>
+                            <Text style={styles.rowLabel}>{row.label}</Text>
+                            {row.value}
+                        </View>)}
                     </View>
-
-                    {!!item.contactName && <View style={styles.row}>
-                        <Text style={styles.rowLabel}>{item.type === 'receive' ? 'From' : 'Recipient'}</Text>
-                        <Text style={styles.rowValue}>{item.contactName}</Text>
-                    </View>}
-                    {/* Network layer */}
-                    <View style={styles.row}>
-                        <Text style={styles.rowLabel}>Payment method</Text>
-                        <View style={styles.layerChip}>
-                            {layerNetworkIcon(item.layer) && <NetworkIcon network={layerNetworkIcon(item.layer)!} size={14} />}
-                            <Text style={styles.layerChipText}>{LAYER_LABEL[item.layer]}</Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.row}>
-                        <Text style={styles.rowLabel}>Account</Text>
-                        <Text style={styles.rowValue}>{item.account ?? (['LN', 'RGB-LN', 'RGB-L1', 'L1'].includes(item.layer) ? 'RGB' : item.layer)}</Text>
-                    </View>
-                    <View style={styles.row}>
-                        <Text style={styles.rowLabel}>Network</Text>
-                        <Text style={styles.rowValue}>{item.network ?? 'Not provided'}</Text>
-                    </View>
-                    {item.status === 'unknown' && <Text style={styles.rowLabel}>The provider has not confirmed the outcome. Check the status before sending again.</Text>}
-                    {rgb && (
-                        <View style={styles.row}>
-                            <Text style={styles.rowLabel}>Progress</Text>
-                            <View style={styles.rowWithAction}>
-                                <ExplainButton compact subject={{ type: 'rgb-transfer', item }} />
-                                <Text style={styles.rowValue}>{RGB_TRANSFER_STATUS_LABEL[rgb.status]}</Text>
-                            </View>
-                        </View>
-                    )}
-                    {rgb && <Text style={styles.rowLabel}>{rgbTransferStatusDetail(rgb.status, rgb.direction)}</Text>}
-                    {!rgb && item.status === 'pending' && <Text style={styles.rowLabel}>Submitted and waiting for confirmation. You can leave this screen and check again later.</Text>}
-                    {/* Asset name */}
-                    {!!item.assetName && (
-                        <View style={styles.row}>
-                            <Text style={styles.rowLabel}>Asset</Text>
-                            <Text style={styles.rowValue}>{item.assetName}</Text>
-                        </View>
-                    )}
-
-                    {/* Timestamp */}
-                    {item.timestamp != null && (
-                        <View style={styles.row}>
-                            <Text style={styles.rowLabel}>Date</Text>
-                            <Text style={styles.rowValue}>
-                                {new Date(item.timestamp).toLocaleString(undefined, {
-                                    month: 'short',
-                                    day: 'numeric',
-                                    year: 'numeric',
-                                    hour: '2-digit',
-                                    minute: '2-digit',
-                                })}
-                            </Text>
-                        </View>
-                    )}
-
-                    {/* Fee */}
-                    {(
-                        <View style={styles.row}>
-                            <Text style={styles.rowLabel}>Fee</Text>
-                            <View style={styles.rowWithAction}>
-                                {item.fee != null && <ExplainButton compact subject={{ type: 'fee', item }} />}
-                                <Text style={styles.rowValue}>{item.fee != null ? `${formatBitcoinAmount(item.fee, unit)} ${unit}` : 'Not provided'}</Text>
-                            </View>
-                        </View>
-                    )}
 
                     {cc && (
                         <>
-                            <View style={styles.row}>
+                            <View style={[styles.card, styles.row]}>
                                 <Text style={styles.rowLabel}>Route</Text>
                                 <View style={styles.layerChip}>
                                     <NetworkIcon network={cc.sourceChain} size={14} />
@@ -293,7 +273,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                                 </View>
                             </View>
                             {!!cc.amountOutRaw && (
-                                <View style={styles.row}>
+                                <View style={[styles.card, styles.row]}>
                                     <Text style={styles.rowLabel}>{cc.direction === 'deposit' ? 'You receive' : 'They receive'}</Text>
                                     <Text style={styles.rowValue}>
                                         {cc.status === 'completed' ? '' : '≈ '}{formatRecordAmount(cc.amountOutRaw, cc.destDecimals, cc.destAsset)}
@@ -315,22 +295,6 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                         </>
                     )}
 
-                    {/* Txid / payment hash */}
-                    {!!item.txid && (
-                        <View style={styles.txidBlock}>
-                            <View style={styles.txidHeader}>
-                                <Text style={styles.rowLabel}>{txLabel}</Text>
-                                <CopyButton value={item.txid} label="Copy" size={14} />
-                            </View>
-                            <Text style={styles.txidText} selectable numberOfLines={3}>{item.txid}</Text>
-                            {explorerUrl && (
-                                <TouchableOpacity accessibilityRole="link" style={styles.explorerLink} onPress={() => Linking.openURL(explorerUrl).catch(() => {})}>
-                                    <Ionicons name="open-outline" size={14} color={theme.colors.primary[500]} />
-                                    <Text style={styles.explorerLinkText}>View in explorer</Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
-                    )}
                     {proof && (
                         <View style={styles.txidBlock}>
                             <View style={styles.txidHeader}>
@@ -355,11 +319,17 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             )}
                         </View>
                     )}
+                    </>}
                     {cancellable && (
                         <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={cancelTransfer} activeOpacity={0.8}>
                             <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Cancelling…' : rgb?.direction === 'incoming' ? 'Cancel invoice' : 'Cancel transfer'}</Text>
                         </TouchableOpacity>
                     )}
+                    {rgb && item.status === 'pending' && !cancelled && !cancellable && <Text style={styles.rowLabel}>
+                        {rgb.status === 'waiting-counterparty'
+                            ? 'Cancellation is unavailable for this account. Check the transfer in the connected RGB wallet.'
+                            : 'This transfer cannot be cancelled at this stage. Check its status for updates.'}
+                    </Text>}
                     {removable && (
                         <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={removeTransfer} activeOpacity={0.8}>
                             <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Removing…' : 'Remove from history'}</Text>
@@ -372,13 +342,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                             <Text style={styles.accelerateButtonText}>Accelerate</Text>
                         </TouchableOpacity>
                     )}
-                    {onRefresh && <TouchableOpacity accessibilityRole="button" disabled={checking} style={styles.closeButton} onPress={async () => {
-                        setChecking(true); setCheckMessage('');
-                        try { const refreshed = await onRefresh(); setCheckMessage(refreshed === false ? 'Some accounts could not be checked. Try again when connected.' : 'Latest available activity checked.'); }
-                        catch { setCheckMessage('Could not check the status. Try again.'); }
-                        finally { setChecking(false); }
-                    }}><Text style={styles.closeButtonText}>{checking ? 'Checking…' : 'Check status'}</Text></TouchableOpacity>}
-                    {!!checkMessage && <Text accessibilityLiveRegion="polite" style={styles.rowLabel}>{checkMessage}</Text>}
+
                 </ScrollView>
                 </>)}
 
@@ -410,19 +374,18 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         alignItems: 'center',
         gap: theme.spacing[2],
         flexShrink: 1,
+        justifyContent: 'flex-end',
     },
     header: {
         alignItems: 'center',
-        paddingVertical: theme.spacing[5],
+        paddingVertical: theme.spacing[4],
         paddingHorizontal: theme.spacing[4],
-        gap: theme.spacing[2],
-        borderBottomWidth: 1,
-        borderBottomColor: theme.colors.border.light,
+        gap: theme.spacing[1.5],
     },
     bigIcon: {
-        width: 72,
-        height: 72,
-        borderRadius: 36,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: theme.spacing[1],
@@ -442,15 +405,48 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         gap: theme.spacing[2],
         paddingBottom: theme.spacing[4],
     },
+    card: {
+        backgroundColor: theme.colors.surface.primary,
+        borderRadius: theme.borderRadius.lg,
+        paddingHorizontal: theme.spacing[4],
+        borderWidth: 1,
+        borderColor: theme.colors.border.light,
+    },
     row: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: theme.colors.surface.primary,
-        borderRadius: theme.borderRadius.lg,
-        padding: theme.spacing[4],
-        borderWidth: 1,
-        borderColor: theme.colors.border.light,
+        gap: theme.spacing[3],
+        paddingVertical: theme.spacing[3],
+    },
+    rowDivider: {
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: theme.colors.border.light,
+    },
+    monoValue: {
+        fontSize: 12,
+        fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+        color: theme.colors.text.primary,
+        flexShrink: 1,
+    },
+    headerStatus: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[2],
+        marginTop: theme.spacing[1],
+    },
+    statusPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: theme.spacing[3],
+        paddingVertical: theme.spacing[1],
+        borderRadius: theme.borderRadius.full,
+    },
+    statusDetail: {
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.text.secondary,
+        textAlign: 'center',
     },
     rowLabel: {
         fontSize: theme.typography.fontSize.sm,
@@ -461,13 +457,8 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         fontSize: theme.typography.fontSize.sm,
         fontWeight: '600',
         color: theme.colors.text.primary,
-        maxWidth: '60%',
+        flexShrink: 1,
         textAlign: 'right',
-    },
-    statusBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
     },
     statusDot: {
         width: 6,

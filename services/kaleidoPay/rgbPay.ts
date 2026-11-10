@@ -1,7 +1,8 @@
 import { routeSpendable } from '../../utils/payment-balance';
 import { registerKaleidoPayAccount } from './index';
-import type { Network, PayAccount, RequestAsset, SpendAsset } from './index';
-import { createDirectAccount, lightningInvoiceFor, notEnough, resultOf } from './sparkPay';
+import type { Network, PayAccount, PaymentResult, RequestAsset, SpendAsset } from './index';
+import { createDirectAccount, invoicePaymentHash, lightningInvoiceFor, notEnough, resultOf } from './sparkPay';
+import { PaymentNotSentError } from './errors';
 
 /** The part of the RGB node adapter (protocolManager 'RGB_LN', NwcRgbAdapter by default) these accounts use. */
 export interface RgbPayAdapter {
@@ -18,6 +19,7 @@ export interface RgbPayAdapter {
   getAssetBalance?(assetId: string): Promise<any>;
   listAssets?(): Promise<any[]>;
   getAsset?(assetId: string): Promise<{ id: string; ticker: string; precision: number }>;
+  getRgbTransferStatus?(txId: string): Promise<PaymentResult>;
   getTransaction?(txId: string): Promise<{ status?: string }>;
 }
 
@@ -45,6 +47,12 @@ function feeRateOf(opts: RgbPayOptions): number {
 }
 const onchainFee = (opts: RgbPayOptions) => Math.ceil(feeRateOf(opts) * RGB_ONCHAIN_VBYTES);
 const isRln = (rgb: RgbPayAdapter) => rgb.walletType?.() !== 'ln';
+/**
+ * NIP-47 errors with which the wallet answers that it did not pay. A timeout or a generic
+ * error (OTHER, INTERNAL) is no answer: that payment may still go through.
+ */
+const NWC_NOT_PAID = new Set(['PAYMENT_FAILED', 'INSUFFICIENT_BALANCE', 'RATE_LIMITED', 'QUOTA_EXCEEDED', 'RESTRICTED', 'UNAUTHORIZED', 'NOT_IMPLEMENTED', 'UNSUPPORTED_ENCRYPTION']);
+const walletRefused = (error: unknown) => NWC_NOT_PAID.has(String((error as any)?.code ?? ''));
 const txidOf = (r: any): string | undefined => typeof r === 'string' ? r : r?.txid || r?.paymentHash || undefined;
 const followTx = (rgb: RgbPayAdapter) => async (txid: string) =>
   rgb.getTransaction ? resultOf((await rgb.getTransaction(txid).catch(() => undefined))?.status, txid) : { status: 'pending' as const, reference: txid };
@@ -75,10 +83,18 @@ export function createRgbLightningAccount(rgb: RgbPayAdapter, network: Network):
       return { feeSat, terms: { invoice, amountless }, expiresAt, detail: ESTIMATE };
     },
     matches: (preview, terms) => preview.code.invoice === terms.invoice,
+    // The invoice's hash: followed when the node's answer never comes (NWC waits for the payment to finish).
+    reference: terms => invoicePaymentHash(terms.invoice),
     async send(terms, quote) {
-      const sent = await rgb.sendPayment(terms.amountless ? { invoice: terms.invoice, amount: quote.recipientSat } : { invoice: terms.invoice });
-      // NWC returns 'confirmed' with a preimage and no hash.
-      return resultOf(sent?.status, sent?.paymentHash || sent?.preimage || undefined);
+      let sent;
+      try {
+        sent = await rgb.sendPayment(terms.amountless ? { invoice: terms.invoice, amount: quote.recipientSat } : { invoice: terms.invoice });
+      } catch (error) {
+        if (walletRefused(error)) throw new PaymentNotSentError(error instanceof Error ? error.message : 'The node refused the payment.');
+        throw error;
+      }
+      // NWC returns 'confirmed' with a preimage and no hash: keep the hash, never the preimage.
+      return resultOf(sent?.status, sent?.paymentHash || invoicePaymentHash(terms.invoice));
     },
     follow: async hash => resultOf((await rgb.getPaymentStatus(hash))?.status, hash),
   });
@@ -125,6 +141,10 @@ export function createRgbAssetAccount(rgb: RgbPayAdapter, network: Network, asse
       if (!rgb.sendAsset || !rgb.decodeRgbInvoice || !isRln(rgb)) throw new Error('This wallet cannot send RGB assets.');
       const decoded = await rgb.decodeRgbInvoice({ invoice });
       if (decoded?.asset_id && decoded.asset_id !== requested.id) throw new Error('The invoice asks for a different asset.');
+      const expiry = decoded?.expiration_timestamp ?? decoded?.expirationTimestamp;
+      if (expiry != null && Number(expiry) <= Math.floor(Date.now() / 1000)) throw new Error('This RGB invoice has expired. Ask the recipient for a new invoice.');
+      const invoiceNetwork = ({ MAINNET: 'mainnet', TESTNET: 'testnet', SIGNET: 'signet', SIGNET_CUSTOM: 'mutinynet', REGTEST: 'regtest' } as Record<string, string>)[decoded?.network];
+      if (invoiceNetwork && invoiceNetwork !== network) throw new Error('This RGB invoice belongs to a different network. Switch to the recipient’s network.');
       const invoiceAmount = fungibleAmount(decoded);
       if (invoiceAmount !== undefined && invoiceAmount !== requested.amount) throw new Error('The invoice asks for a different amount.');
       if (rgb.getAssetBalance) {
@@ -150,7 +170,7 @@ export function createRgbAssetAccount(rgb: RgbPayAdapter, network: Network, asse
       const txid = txidOf(sent);
       return txid ? { status: 'pending', reference: txid } : { status: 'unknown' };
     },
-    follow: followTx(rgb),
+    follow: rgb.getRgbTransferStatus ? txid => rgb.getRgbTransferStatus!(txid) : followTx(rgb),
   });
 }
 
@@ -182,9 +202,24 @@ const contexts = new Set<RgbContext>();
 const activeContext = () => [...contexts].filter(c => c.rgb.isConnected()).sort((a, b) => Number(b.opts.lightning === false) - Number(a.opts.lightning === false))[0];
 let assetUnregister: (() => void) | null = null;
 let onchainUnregister: (() => void) | null = null;
+let recoveryUnregister: (() => void) | null = null;
 function refreshRgbOnchainAccount() {
   onchainUnregister?.(); onchainUnregister = null;
+  recoveryUnregister?.(); recoveryUnregister = null;
+  assetUnregister?.(); assetUnregister = null;
   const current = activeContext();
+  if (current?.rgb.getRgbTransferStatus) {
+    // Status recovery is available immediately after reconnect, without an invoice
+    // or a new quote. The normal per-asset account replaces it while paying.
+    recoveryUnregister = registerKaleidoPayAccount(createDirectAccount({
+      id: 'rgb-asset', rail: 'rgb', network: current.network, walletName: current.opts.walletName ?? 'RGB wallet', optionName: 'RGB',
+      isConnected: () => current.rgb.isConnected(),
+      prepare: async () => { throw new Error('Scan an RGB invoice to choose an asset.'); },
+      matches: () => false,
+      send: async () => { throw new Error('Scan an RGB invoice to pay.'); },
+      follow: txid => current.rgb.getRgbTransferStatus!(txid),
+    }));
+  }
   if (current?.rgb.sendBtcOnchain) onchainUnregister = registerKaleidoPayAccount(createRgbOnchainAccount(current.rgb, current.network, current.opts));
 }
 
@@ -199,7 +234,7 @@ export function registerRgbAssetPayment(asset: SpendAsset): () => void {
   assetUnregister?.();
   const unregister = registerKaleidoPayAccount(createRgbAssetAccount(current.rgb, current.network, asset, current.opts));
   assetUnregister = unregister;
-  return () => { unregister(); if (assetUnregister === unregister) assetUnregister = null; };
+  return () => { if (assetUnregister !== unregister) return; unregister(); assetUnregister = null; refreshRgbOnchainAccount(); };
 }
 
 /** The RGB wallet Send pays RGB invoices from right now (the node, or RGB on this phone), if any. */

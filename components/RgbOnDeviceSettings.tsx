@@ -4,12 +4,11 @@
 // Before it starts: pick the network (servers under Advanced), then Connect, or
 // restore this wallet's RGB data from the cloud backup or an exported file.
 // Connect looks for a cloud backup first and asks before restoring it.
-// Each network is a separate RGB wallet; once connected it can switch to the
-// other one (an older app build keeps the first network). Once connected: status, back up now, export a file, the
+// Each network is a separate RGB wallet; once connected it can switch networks (an older app build keeps the first network). Once connected: status, back up now, export a file, the
 // servers, and turning it off. While an RGB node is connected it is the RGB
 // account and this wallet steps aside.
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, Share, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -30,6 +29,7 @@ import ToastService from '../services/ToastService';
 import {
   findRgbCloudBackup, onRgbBackupStatus, restoreRgbFromCloud, restoreRgbFromFile, rgbBackupStatus, runRgbBackup, type RgbBackupStatus,
 } from '../services/protocols/rgbBackup';
+import { lastRgbConnectionError, onRgbConnectionError, rgbDiagnosticReport, type RgbConnectionError } from '../services/protocols/rgbDiagnostics';
 
 /** The rgb-lib account behind the RGB_L1 adapter, when connected. */
 function rgbL1Account(): any {
@@ -79,11 +79,15 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
   const [backupNeeded, setBackupNeeded] = useState(false);
   const [cloud, setCloud] = useState<RgbBackupStatus>(rgbBackupStatus());
   const [showServers, setShowServers] = useState(false);
+  const [showNetworks, setShowNetworks] = useState(false);
   const [indexer, setIndexer] = useState('');
   const [proxy, setProxy] = useState('');
   const [serversEdited, setServersEdited] = useState(false);
   const [endpointError, setEndpointError] = useState<string | null>(null);
   useEffect(() => onRgbBackupStatus(setCloud), []);
+  /** Why the last connection (at startup or from here) failed, with its ERR_RGB_* code. */
+  const [lastFailure, setLastFailure] = useState<RgbConnectionError | null>(lastRgbConnectionError());
+  useEffect(() => onRgbConnectionError(setLastFailure), []);
 
   const refresh = useCallback(async () => {
     const account = rgbL1Account();
@@ -125,6 +129,13 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
 
   const label = RGB_L1_NETWORK_LABEL[network];
   const busy = phase !== null;
+  const [slowConnection, setSlowConnection] = useState(false);
+  useEffect(() => {
+    setSlowConnection(false);
+    if (phase !== 'connecting') return;
+    const timer = setTimeout(() => setSlowConnection(true), 15_000);
+    return () => clearTimeout(timer);
+  }, [phase]);
 
   /** Starts RGB on this phone on the chosen network, optionally from a backup first. */
   const run = async (restore: Restore | null) => {
@@ -200,23 +211,22 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
       'RGB on this phone (beta)',
       (network === 'mainnet'
         ? 'Holds RGB assets on-chain on Bitcoin mainnet, with real funds. '
-        : 'Holds RGB assets on-chain on Mutinynet, a test network. ')
+        : `Holds RGB assets on-chain on ${label}, a test network. `)
       + 'Each network is a separate RGB wallet with its own balances. '
       + 'RGB assets need more than your recovery phrase: they are backed up to the cloud after every send and receive. You can also export a backup file.',
       [{ text: 'Cancel', style: 'cancel' }, { text: 'Continue', onPress: () => lookForBackup('connect') }],
     );
   };
 
-  /** Switch to the other network's own RGB wallet; this one's data stays on the phone. */
-  const otherNetwork = RGB_L1_NETWORKS.find((n) => n !== network) ?? network;
+  /** Switch to the selected network's own RGB wallet; this one's data stays on the phone. */
   const canSwitch = isRgbL1NetworkSwitchSupported();
-  const switchNetwork = () => {
+  const switchNetwork = (otherNetwork: RgbL1Network) => {
     if (busy || !canSwitch) return;
     const to = RGB_L1_NETWORK_LABEL[otherNetwork];
     Alert.alert(
       `Switch to ${to}?`,
       `Each network has its own RGB wallet on this phone, with separate balances and backups. Your ${label} RGB assets stay here and come back when you switch back. `
-      + (otherNetwork === 'mainnet' ? 'Mainnet uses real funds.' : 'Mutinynet is a test network.'),
+      + (otherNetwork === 'mainnet' ? 'Mainnet uses real funds.' : `${to} is a test network.`),
       [{ text: 'Cancel', style: 'cancel' }, { text: 'Switch', onPress: async () => {
         setPhase('connecting');
         setError(null);
@@ -327,6 +337,12 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     }
   };
 
+  /** Shares the RGB diagnostics: each connection step and error (no keys or seed). */
+  const shareDiagnostics = () => {
+    const report = rgbDiagnosticReport({ platform: Platform.OS, os: Platform.Version, selectedNetwork: network, enabled, connected, ready });
+    void Share.share({ title: 'RGB diagnostics', message: report }).catch(() => ToastService.getInstance().error('Could not share the RGB diagnostics.'));
+  };
+
   const accent = theme.colors.primary[500];
   const errorText = !!error && <Callout tone="error" message={error} style={styles.callout} />;
   const sectionLabel = (text: string) => <Text accessibilityRole="header" style={styles.sectionLabel}>{text}</Text>;
@@ -396,6 +412,15 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
         <Ionicons name={showServers ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.tertiary} />
       </TouchableOpacity>
       {showServers && servers}
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share RGB diagnostics" onPress={shareDiagnostics}
+        activeOpacity={0.7} style={[styles.row, styles.divider]}>
+        {rowIcon('document-text-outline')}
+        <View style={styles.text}>
+          <Text style={styles.label}>Diagnostics</Text>
+          <Text style={styles.description} numberOfLines={1}>Connection steps and errors, to share with support</Text>
+        </View>
+        <Ionicons name="share-outline" size={18} color={theme.colors.text.tertiary} />
+      </TouchableOpacity>
     </>
   );
 
@@ -414,15 +439,26 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           <View style={styles.text}>
             <Text style={styles.label}>Connected · {label}</Text>
             <Text style={styles.description} numberOfLines={1}>
-              {canSwitch ? `Switch to ${RGB_L1_NETWORK_LABEL[otherNetwork]} for its own RGB wallet` : RGB_L1_UPDATE_TO_SWITCH}
+              {canSwitch ? 'Separate balances and backups for each network' : RGB_L1_UPDATE_TO_SWITCH}
             </Text>
           </View>
           {busy ? <ActivityIndicator color={accent} /> : canSwitch && (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Switch to ${RGB_L1_NETWORK_LABEL[otherNetwork]}`} onPress={switchNetwork}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Choose RGB network" accessibilityState={{ expanded: showNetworks }} onPress={() => setShowNetworks(v => !v)}>
               <Text style={styles.action}>Switch</Text>
             </TouchableOpacity>
           )}
         </View>
+        {showNetworks && canSwitch && <View style={styles.section}>
+          {RGB_L1_NETWORKS.map(n => <TouchableOpacity key={n} accessibilityRole="button"
+            accessibilityLabel={`Use ${RGB_L1_NETWORK_LABEL[n]}`} accessibilityState={{ selected: n === network, disabled: busy || n === network }}
+            disabled={busy || n === network} onPress={() => { setShowNetworks(false); switchNetwork(n); }} style={styles.row}>
+            <View style={styles.text}>
+              <Text style={styles.label}>{RGB_L1_NETWORK_LABEL[n]}</Text>
+              <Text style={styles.description}>{n === 'mainnet' ? 'Real funds' : 'Test funds'} · {n === network ? 'Connected' : ready.includes(n) ? 'Wallet on this phone' : 'Set up or restore wallet'}</Text>
+            </View>
+            <Ionicons name={n === network ? 'checkmark-circle' : 'chevron-forward'} size={20} color={n === network ? accent : theme.colors.text.tertiary} />
+          </TouchableOpacity>)}
+        </View>}
         {errorText}
         {sectionLabel('Backup')}
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back up RGB data now" onPress={backupNow}
@@ -456,7 +492,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
 
   // Not connected: choose the network, then connect; or restore what you had.
   const connectTitle = phase === 'checking' ? 'Checking for a backup…'
-    : phase === 'connecting' ? 'Connecting…'
+    : phase === 'connecting' ? (slowConnection ? 'Synchronizing RGB wallet…' : 'Connecting…')
     : phase === 'restoring' ? 'Restoring…'
     : enabled ? 'Try again' : 'Connect';
   return (
@@ -470,7 +506,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           </View>
         ) : (
           <>
-            <SegmentedTabs scrollable={false} fill
+            <SegmentedTabs scrollable
               options={RGB_L1_NETWORKS.map((n) => ({ key: n, label: RGB_L1_NETWORK_LABEL[n], disabled: busy }))}
               value={network} onChange={setNetwork} />
             <Text style={styles.description}>
@@ -482,6 +518,9 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           <Text style={styles.description}>On for {RGB_L1_NETWORK_LABEL[enabled]} but not connected.</Text>
         )}
         {errorText}
+        {!error && !busy && enabled && lastFailure && (
+          <Callout tone="error" message={`Last connection${lastFailure.network ? ` (${RGB_L1_NETWORK_LABEL[lastFailure.network as RgbL1Network] ?? lastFailure.network})` : ''} failed: ${lastFailure.message}`} />
+        )}
         <Button title={connectTitle} onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth style={styles.primary} />
       </View>
       {!locked && !ready.includes(network) && (

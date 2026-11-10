@@ -100,7 +100,7 @@ android {
         // Overridable from CI via -PVERSION_CODE / -PVERSION_NAME (or the
         // ORG_GRADLE_PROJECT_* env vars). Defaults keep local builds working.
         versionCode((findProperty('VERSION_CODE') ?: '2').toString().toInteger())
-        versionName((findProperty('VERSION_NAME') ?: '0.2.4').toString())
+        versionName((findProperty('VERSION_NAME') ?: '0.11.0').toString())
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
 

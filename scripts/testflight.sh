@@ -75,6 +75,15 @@ if [ "${SKIP_BUMP:-0}" != "1" ]; then
   echo "    build number is now $NEW_BUILD — commit ios/ + app.json after a successful upload"
 fi
 
+# Ensure the native RGB framework is present before CocoaPods resolves it.
+echo "==> prepare rgb-lib"
+node modules/kaleido-rgb/scripts/download-rgb-lib-ios.js
+
+# Rebuild only the native addons in the QVAC manifest, including split iOS packages.
+echo "==> prepare QVAC addons"
+node scripts/patch-bare-kit-linker.js
+node node_modules/react-native-bare-kit/ios/link.mjs
+
 # --- Install CocoaPods deps ---------------------------------------------------
 echo "==> pod install"
 ( cd ios && pod install )
@@ -99,6 +108,19 @@ xcodebuild archive \
   -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
   DEVELOPMENT_TEAM="$TEAM_ID" \
   CODE_SIGN_STYLE=Automatic
+
+# Check the native archive, not only app.json, before uploading a release.
+EXPECTED_VERSION="$(node -p "require('./app.json').expo.version")"
+EXPECTED_BUILD="$(node -p "require('./app.json').expo.ios.buildNumber")"
+ARCHIVED_PLIST="$ARCHIVE/Products/Applications/$SCHEME.app/Info.plist"
+ACTUAL_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$ARCHIVED_PLIST")"
+ACTUAL_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$ARCHIVED_PLIST")"
+if [ "$ACTUAL_VERSION" != "$EXPECTED_VERSION" ] || [ "$ACTUAL_BUILD" != "$EXPECTED_BUILD" ]; then
+  echo "Release version mismatch: expected $EXPECTED_VERSION ($EXPECTED_BUILD), archived $ACTUAL_VERSION ($ACTUAL_BUILD)" >&2
+  exit 1
+fi
+echo "==> verified archive: $ACTUAL_VERSION ($ACTUAL_BUILD)"
+python3 scripts/check-ios-frameworks.py "$ARCHIVE/Products/Applications/$SCHEME.app"
 
 # --- Export the .ipa ----------------------------------------------------------
 echo "==> export ipa"

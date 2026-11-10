@@ -78,8 +78,9 @@ async function setSpeakerPlaybackMode(): Promise<void> {
       interruptionMode: 'doNotMix',
       shouldRouteThroughEarpiece: false,
     });
-  } catch {
-    /* non-fatal */
+  } catch (error) {
+    // Non-fatal, but a failure here is why a reply would come out of the earpiece.
+    console.warn('[voice] could not route playback to the speaker:', error instanceof Error ? error.message : error);
   }
 }
 
@@ -123,6 +124,10 @@ async function qvacSpeak(text: string, token: number, cb: SpeakCallbacks): Promi
   if (!dir.exists) dir.create({ intermediates: true });
   const file = new File(dir, `speech-${token}.wav`);
   file.write(wav);
+  // Synthesis takes seconds, and the mic may have switched the session to record (earpiece)
+  // meanwhile: route to the speaker again right before playing.
+  await setSpeakerPlaybackMode();
+  if (token !== generation) { try { file.delete(); } catch {} return true; }
   const sound = createAudioPlayer({ uri: file.uri }, { updateInterval: 40 });
   currentSound = sound;
   return new Promise<boolean>((resolve, reject) => {
@@ -174,6 +179,8 @@ export async function speak(text: string, cb: SpeakCallbacks = {}): Promise<void
       if (live()) { recordVoiceDiagnostic('system_fallback'); cb.onFallback?.(error instanceof Error ? error.message : 'QVAC voice synthesis or playback failed.'); }
     }
   }
+  if (!live()) return;
+  await setSpeakerPlaybackMode(); // the system voice plays in whatever session is current
   if (!live()) return;
   cb.onEngine?.('system', engine === 'system' ? undefined : 'unavailable');
   let boundaryTimer: ReturnType<typeof setTimeout> | undefined;

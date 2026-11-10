@@ -1,6 +1,6 @@
 import { BarkReactNativeAdapter } from '@kaleidorg/wallet-engine/adapters/bark-react-native';
 
-// Guards patches/@kaleidorg__wallet-engine@*.patch: Bark pays BOLT12 offers through payLightningOffer.
+// Guards the published wallet-engine integration: Bark pays BOLT12 offers through payLightningOffer.
 test('the Bark adapter sends a BOLT12 offer to payLightningOffer', async () => {
   const adapter = new BarkReactNativeAdapter({ runtime: { now: () => 1 } });
   const preimage = '00'.repeat(32);

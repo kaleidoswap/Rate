@@ -17,11 +17,11 @@ describe('rgbReceiveSupport', () => {
     expect(rgbReceiveSupport({ ...engineNode, allowPrivilegedOps: true }).createUtxos).toBe(true);
   });
   it('the node over NWC exposes only expiry and confirmations', () => {
-    expect(rgbReceiveSupport(nwcNode)).toEqual({ invoiceKind: false, expiry: true, minConfirmations: true, listUtxos: false, createUtxos: false });
+    expect(rgbReceiveSupport(nwcNode)).toEqual({ invoiceKind: true, expiry: true, minConfirmations: true, listUtxos: false, createUtxos: false });
   });
   it('the node over NWC lists and creates UTXOs only when its connection advertises those methods', () => {
     const advertised = { ...nwcNode, hasRlnMethod: (m: string) => m === 'rln_list_unspents' };
-    expect(rgbReceiveSupport(advertised)).toMatchObject({ invoiceKind: false, listUtxos: true, createUtxos: false });
+    expect(rgbReceiveSupport(advertised)).toMatchObject({ invoiceKind: true, listUtxos: true, createUtxos: false });
   });
   it('no adapter, no options', () => {
     expect(rgbReceiveSupport(null)).toEqual(NO_RGB_RECEIVE_SUPPORT);
@@ -44,7 +44,7 @@ describe('rgbInvoiceParams', () => {
   it('drops what the account does not support', () => {
     const options = { kind: 'blinded' as const, durationSeconds: 600, minConfirmations: 6 };
     expect(rgbInvoiceParams({ assetId: ANY_RGB_ASSET_ID, expirySeconds: 3600, options, support: rgbReceiveSupport(nwcNode) }))
-      .toEqual({ min_confirmations: 6, duration_seconds: 600 });
+      .toEqual({ min_confirmations: 6, duration_seconds: 600, witness: false });
     expect(rgbInvoiceParams({ assetId: ANY_RGB_ASSET_ID, expirySeconds: 3600, options }))
       .toEqual({ min_confirmations: 1, duration_seconds: 3600 });
   });

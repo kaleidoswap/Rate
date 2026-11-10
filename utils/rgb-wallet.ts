@@ -219,13 +219,15 @@ export function normalizeRgbTransfers(raw: unknown): RgbTransfer[] {
     const moved = Array.isArray(t.assignments)
       ? t.assignments.reduce((sum: number, a: any) => sum + (num(a?.value ?? a?.amount) ?? 0), 0)
       : num(t.amount) ?? 0;
+    const direction = rgbTransferDirection(t.kind);
     out.push({
       idx: Number(t.idx ?? 0),
       batchTransferIdx: num(t.batch_transfer_idx ?? t.batchTransferIdx),
       status,
-      direction: rgbTransferDirection(t.kind),
+      direction,
       kind: String(t.kind ?? ''),
-      amount: requested ?? moved,
+      // A receive shows what arrived once the sender's transfer is known (an any-amount invoice requests none).
+      amount: direction === 'incoming' && moved > 0 ? moved : requested ?? moved,
       txid: t.txid || undefined,
       recipientId: t.recipient_id ?? t.recipientId ?? undefined,
       createdAt: num(t.created_at ?? t.createdAt),

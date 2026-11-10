@@ -42,7 +42,7 @@ export const BalanceCard: React.FC<{ data: BalanceData }> = ({ data }) => {
             <Text style={s.capLabel}>Total balance</Text>
             <Ionicons name="chevron-forward" size={16} color={theme.colors.text.secondary} />
           </View>
-          <Text style={s.total}>{data.total_sats.toLocaleString()} sats</Text>
+          <Text style={s.total}>{data.total_sats.toLocaleString('en-US')} sats</Text>
           {usd > 0 && <Text style={s.usd}>≈ ${usd.toFixed(2)}</Text>}
           <View style={s.layers}>
             {data.layers.slice(0, 2).map((l) => {
@@ -50,7 +50,7 @@ export const BalanceCard: React.FC<{ data: BalanceData }> = ({ data }) => {
               return <View key={l.layer} style={s.layerRow}>
                 <View style={[s.dot, { backgroundColor: m.color }]} />
                 <Text style={s.layerName}>{m.label}</Text>
-                <Text style={s.layerSats}>{l.btc_sats.toLocaleString()} sats</Text>
+                <Text style={s.layerSats}>{l.btc_sats.toLocaleString('en-US')} sats</Text>
               </View>;
             })}
             {data.layers.length > 2 && <Text style={s.usd}>+{data.layers.length - 2} more · View details</Text>}
@@ -75,8 +75,8 @@ const BalanceDetailModal: React.FC<{ visible: boolean; data: BalanceData; onClos
             <Ionicons name="close" size={22} color={tx(theme, 'secondary')} />
           </Pressable>
           <Text style={s.sheetTitle}>Balance</Text>
-          <Text style={s.sheetTotal}>{data.total_sats.toLocaleString()} sats</Text>
-          {usd > 0 && <Text style={s.sheetUsd}>≈ ${usd.toFixed(2)}{data.priceUsd ? ` · BTC $${Math.round(data.priceUsd).toLocaleString()}` : ''}</Text>}
+          <Text style={s.sheetTotal}>{data.total_sats.toLocaleString('en-US')} sats</Text>
+          {usd > 0 && <Text style={s.sheetUsd}>≈ ${usd.toFixed(2)}{data.priceUsd ? ` · BTC $${Math.round(data.priceUsd).toLocaleString('en-US')}` : ''}</Text>}
           <ScrollView style={{ alignSelf: 'stretch', marginTop: 16 }}>
             <AllocationBar items={data.layers.map(l => ({ label: meta(theme, l.layer).label, value: l.btc_sats, color: meta(theme, l.layer).color }))} />
             {data.layers.map((l) => {
@@ -92,13 +92,13 @@ const BalanceDetailModal: React.FC<{ visible: boolean; data: BalanceData; onClos
                     </View>
                     <Text style={s.detName}>{m.label}</Text>
                     <View style={{ flex: 1 }} />
-                    <Text style={s.detSats}>{l.btc_sats.toLocaleString()} sats</Text>
+                    <Text style={s.detSats}>{l.btc_sats.toLocaleString('en-US')} sats</Text>
                   </View>
                   {usdOf(l.btc_sats, data.priceUsd) > 0 && <Text style={s.detUsd}>≈ ${usdOf(l.btc_sats, data.priceUsd).toFixed(2)}</Text>}
                   {assets.map((a, i) => (
                     <View key={i} style={s.assetRow}>
                       <Text style={s.assetTicker}>{a.ticker}</Text>
-                      <Text style={s.assetAmt}>{assetAmt(a).toLocaleString()}</Text>
+                      <Text style={s.assetAmt}>{assetAmt(a).toLocaleString('en-US')}</Text>
                     </View>
                   ))}
                 </View>

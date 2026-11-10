@@ -49,6 +49,8 @@ import {
 import { createRgbLibRnModule } from './rgbLibRn'
 import { findRgbCloudBackup, restoreRgbFromCloud, runRgbBackup, scheduleRgbBackup, setRgbBackupContext } from './rgbBackup'
 import { isRgbNode, rgbOnDeviceStep } from './rgbAccount'
+import { clearRgbConnectionError, describeRgbError, recordRgbConnectionError, recordRgbDiagnostic } from './rgbDiagnostics'
+import { clearStaleRgbRuntimeLock } from './rgbRuntimeLock'
 
 /** The maker URL from the RGB config and Arkade's server URL, for Send's payment accounts. */
 export function payOptionsFrom(networkConfigs: Array<{ type: string; enabled: boolean; config?: string }>): PayOptions {
@@ -104,7 +106,12 @@ function registerWdkModuleLoaders(): void {
   // rgb-lib behind the same surface (./rgbLibRn.ts), required only on connect.
   if (RGB_L1_ENABLED) {
     // Every change (send, receive, settle) schedules the automatic cloud backup.
-    registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(rgbLibModule, { onChange: scheduleRgbBackup }))
+    // Each step and failure goes to the RGB diagnostics Settings › RGB shows and exports.
+    registerWdkModule('@utexo/wdk-wallet-rgb', () => createRgbLibRnModule(rgbLibModule, {
+      onChange: scheduleRgbBackup,
+      onEvent: recordRgbDiagnostic,
+      clearStaleLock: async (subdir, fingerprint) => clearStaleRgbRuntimeLock(await rgbLibModule().dataDir(subdir), fingerprint),
+    }))
   }
 }
 
@@ -390,7 +397,7 @@ export async function switchRgbL1Network(
       await connectRgbL1Once(manager, mnemonic, results, {})
     })
   } catch (error: unknown) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
+    return { success: false, error: recordRgbConnectionError(network, error).message }
   }
   return results.get('RGB_L1')
 }
@@ -416,9 +423,10 @@ async function connectRgbL1Once(
   results: Map<ProtocolType, { success: boolean; error?: string }>,
   opts: RgbL1ConnectOptions,
 ): Promise<void> {
+  let network: RgbL1Network | null = null
   try {
     let existing = manager.getAdapterIfAvailable('RGB_L1')
-    const network = await loadRgbL1Network(mnemonic)
+    network = await loadRgbL1Network(mnemonic)
     if (network && existing?.isConnected() && rgbL1ConnectedNetwork && rgbL1ConnectedNetwork !== network) {
       // Another network was chosen: close this one, then start that network's wallet.
       await releaseRgbL1(manager)
@@ -438,9 +446,12 @@ async function connectRgbL1Once(
       return
     }
     if (!isRgbLibNativeAvailable()) {
-      results.set('RGB_L1', { success: false, error: 'This app build does not include RGB. Install a newer build.' })
+      const error = 'This app build does not include RGB. Install a newer build.'
+      recordRgbConnectionError(network, error)
+      results.set('RGB_L1', { success: false, error })
       return
     }
+    recordRgbDiagnostic('connect_start', `${network}${opts.skipCloudRestore ? ' (no cloud restore)' : ''}`)
     if (!opts.skipCloudRestore && !(await isRgbL1Ready(mnemonic, network))) {
       // First start on this phone: bring the RGB data back from the cloud backup first.
       // If that can't be checked, don't start an empty wallet that would back up over it.
@@ -449,16 +460,20 @@ async function connectRgbL1Once(
         restored = await restoreRgbFromCloud({ mnemonic, network, restore: rgbL1Restorer(mnemonic, network) })
         console.log(`[initializeWdkProtocols] RGB_L1 cloud restore: ${restored}`)
       } catch (e: unknown) {
-        const why = e instanceof Error ? e.message : String(e)
-        results.set('RGB_L1', { success: false, error: `Couldn't restore your RGB backup (${why}). Check your connection and try again.` })
+        const error = `Couldn't restore your RGB backup (${describeRgbError(e)}). Check your connection and try again.`
+        recordRgbConnectionError(network, error)
+        results.set('RGB_L1', { success: false, error })
         return
       }
+      recordRgbDiagnostic('cloud_restore', `${network}: ${restored}`)
       // Nothing on this network, but a backup on another one: on a build that can't
       // switch, don't fix this wallet to an empty network; let the user pick in Settings › RGB.
       if (restored === 'no-backup' && !isRgbL1NetworkSwitchSupported()) {
         const elsewhere = await backupOnOtherNetwork(mnemonic, network)
         if (elsewhere) {
-          results.set('RGB_L1', { success: false, error: `Your RGB backup is on ${RGB_L1_NETWORK_LABEL[elsewhere]}. Choose its network in Settings › RGB to restore it.` })
+          const error = `Your RGB backup is on ${RGB_L1_NETWORK_LABEL[elsewhere]}. Choose its network in Settings › RGB to restore it.`
+          recordRgbConnectionError(network, error)
+          results.set('RGB_L1', { success: false, error })
           return
         }
       }
@@ -470,9 +485,12 @@ async function connectRgbL1Once(
     setRgbBackupContext({ mnemonic, network, account: () => (manager.getAdapterIfAvailable('RGB_L1') as any)?.account ?? null })
     void runRgbBackup() // catch up on anything that changed since the last upload
     results.set('RGB_L1', { success: true })
+    clearRgbConnectionError()
+    recordRgbDiagnostic('connected', network)
     console.log(`[initializeWdkProtocols] RGB_L1 connected (${network})`)
   } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : String(error)
+    // With its ERR_RGB_* code: Settings › RGB shows it and the RGB diagnostics keep it.
+    const msg = recordRgbConnectionError(network, error).message
     console.error('[initializeWdkProtocols] RGB_L1 failed:', msg)
     results.set('RGB_L1', { success: false, error: msg })
   }

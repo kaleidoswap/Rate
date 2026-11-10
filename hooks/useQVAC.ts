@@ -144,7 +144,12 @@ export function useQVAC(autoInit: boolean = true): UseQVACResult {
   // A user-initiated (re)try, so it also boots again after a crashed boot.
   const initialize = useMemo(
     () => async () => {
-      await service.initializeLLM({ retry: true });
+      try {
+        await service.initializeLLM({ retry: true });
+      } catch (err) {
+        // initializeLLM records failures in state; this only guards the button.
+        console.error('[QVAC] retry failed:', err);
+      }
     },
     [service]
   );

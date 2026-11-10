@@ -1,6 +1,6 @@
 import { reconcilePendingActivity } from '../utils/activity-reconciliation';
-import { ActivitySearchControls } from '../components/ActivitySearchControls';
-import { matchesActivitySearch, type ActivityPeriod } from '../utils/activity-search';
+import { ActiveFilterBar, FilterButton, FilterChipGroup, type ActiveFilter, type FilterOption } from '../components/FilterChips';
+import { matchesActivityPeriod, type ActivityPeriod } from '../utils/activity-search';
 import { walletContactEvents, type ContactEvent } from '../services/contactHistory';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -22,7 +22,6 @@ import { RootState } from '../store';
 import { MainHeader } from '../components/MainHeader';
 import { Sheet } from '../components/Sheet';
 import { Button } from '../components/Button';
-import { SegmentedTabs } from '../components/SegmentedTabs';
 import { EmptyState } from '../components/EmptyState';
 import { theme } from '../theme';
 import {
@@ -42,7 +41,8 @@ import {
     type ActivityStatus,
     type AssetMeta,
 } from '../services/ActivityService';
-import { loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND } from '../services/kaleidoPay/activity';
+import { dismissPendingPayment, loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND, paymentAttemptIdOf } from '../services/kaleidoPay/activity';
+import { confirmRemovePayment } from '../components/payments/confirmRemovePayment';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 import { AgentWalletStore, type AgentLedgerEntry } from '../services/agentWallet/store';
@@ -55,6 +55,13 @@ const FILTERS: { key: ActivityTab; label: string }[] = [
     { key: 'send', label: 'Sent' },
     { key: 'swap', label: 'Swaps' },
     { key: 'agent', label: 'Agent' },
+];
+
+const PERIODS: FilterOption<ActivityPeriod>[] = [
+    { key: 'all', label: 'Any time' },
+    { key: '7d', label: '7 days' },
+    { key: '30d', label: '30 days' },
+    { key: '90d', label: '90 days' },
 ];
 
 // Per-type visual identity: icon + accent colour. Direction colours come from
@@ -137,11 +144,10 @@ function sectionTitle(ts?: number): string {
     return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-export default function HistoryScreen({ previewItems, previewQuery, previewPeriod }: { previewItems?: ActivityItem[]; previewQuery?: string; previewPeriod?: ActivityPeriod } = {}) {
+export default function HistoryScreen({ previewItems, previewPeriod }: { previewItems?: ActivityItem[]; previewPeriod?: ActivityPeriod } = {}) {
     const demo = __DEV__ ? previewItems : undefined;
-    const [query, setQuery] = useState('');
     const [period, setPeriod] = useState<ActivityPeriod>('all');
-    useEffect(() => { if (demo) { setQuery(previewQuery ?? ''); setPeriod(previewPeriod ?? 'all'); } }, [demo, previewQuery, previewPeriod]);
+    useEffect(() => { if (demo) setPeriod(previewPeriod ?? 'all'); }, [demo, previewPeriod]);
     const [contactEvents, setContactEvents] = useState<ContactEvent[]>([]);
     const navigation = useNavigation<any>();
     const policy = usePolicy();
@@ -229,7 +235,7 @@ export default function HistoryScreen({ previewItems, previewQuery, previewPerio
     // Which network a payment used is Advanced detail: Lite has no network filter.
     const networks = useMemo(() => (policy.showNetworks ? activityNetworks(items) : []), [items, policy.showNetworks]);
     const activeNetwork = networks.includes(network as ActivityNetwork) ? network : 'all';
-    const networkOptions = useMemo(() => [
+    const networkOptions = useMemo((): FilterOption<ActivityNetwork | 'all'>[] => [
         { key: 'all' as const, label: 'All networks' },
         ...networks.map((n) => ({
             key: n,
@@ -238,8 +244,15 @@ export default function HistoryScreen({ previewItems, previewQuery, previewPerio
         })),
     ], [networks]);
 
+    const resetFilters = () => { setPeriod('all'); setFilter('all'); setNetwork('all'); };
+    const activeFilters: ActiveFilter[] = [
+        ...(filter !== 'all' ? [{ key: 'type', label: FILTERS.find((f) => f.key === filter)?.label ?? filter, onRemove: () => setFilter('all') }] : []),
+        ...(period !== 'all' ? [{ key: 'period', label: `Last ${PERIODS.find((p) => p.key === period)?.label ?? period}`, onRemove: () => setPeriod('all') }] : []),
+        ...(activeNetwork !== 'all' ? [{ key: 'network', label: ACTIVITY_NETWORK_LABEL[activeNetwork], onRemove: () => setNetwork('all') }] : []),
+    ];
+
     const filtered = (filter === 'agent' ? agentItems : items)
-        .filter((it) => matchesActivityFilter(it, filter, activeNetwork) && matchesActivitySearch(it, query, period))
+        .filter((it) => matchesActivityFilter(it, filter, activeNetwork) && matchesActivityPeriod(it, period))
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
 
     // Build sections grouped by day.
@@ -253,13 +266,27 @@ export default function HistoryScreen({ previewItems, previewQuery, previewPerio
         return Array.from(map.entries()).sort(([a], [b]) => ({ 'Needs checking': 0, 'In progress': 1 }[a] ?? 2) - ({ 'Needs checking': 0, 'In progress': 1 }[b] ?? 2)).map(([title, data]) => ({ title, data }));
     })();
 
+    // Long-press a payment still pending or needing a check to remove its local record.
+    const removePayment = (item: ActivityItem) => {
+        const attemptId = paymentAttemptIdOf(item);
+        if (walletId == null || !attemptId || (item.status !== 'pending' && item.status !== 'unknown')) return;
+        confirmRemovePayment(async () => {
+            await dismissPendingPayment(walletId, attemptId).catch(() => false);
+            setPendingPayment((list) => list.filter((it) => it.id !== item.id));
+            setContactEvents((list) => list.filter((e) => e.id !== attemptId && e.attemptId !== attemptId));
+        });
+    };
+
     const renderItem = ({ item }: { item: ActivityItem }) => {
         const v = typeVisual(item.type);
         const st = statusVisual[item.status];
         const chip = layerChipColors(item.layer);
         const hasAmount = item.amount !== '';
         return (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}
+                onLongPress={paymentAttemptIdOf(item) ? () => removePayment(item) : undefined}
+                accessibilityActions={paymentAttemptIdOf(item) ? [{ name: 'longpress', label: 'Remove from Activity' }] : undefined}
+                onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') removePayment(item); }}>
                 <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
                     <Ionicons name={v.icon} size={20} color={v.color} />
                 </View>
@@ -307,27 +334,27 @@ export default function HistoryScreen({ previewItems, previewQuery, previewPerio
     return (
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
-            {!demo && <MainHeader title="Activity" />}
+            {!demo && <MainHeader title="Activity"
+                rightAction={<FilterButton activeCount={activeFilters.length} onPress={() => setFiltersVisible(true)} />} />}
 
-            {demo && <Text style={[styles.loadingText, { paddingHorizontal: theme.spacing[4], paddingBottom: theme.spacing[2], color: theme.colors.warning[500] }]}>PREVIEW · Example activity</Text>}
-            <ActivitySearchControls query={query} onQuery={setQuery}
-                activeCount={Number(period !== 'all') + Number(filter !== 'all') + Number(activeNetwork !== 'all')}
-                onOpenFilters={() => setFiltersVisible(true)} />
-            <Sheet visible={filtersVisible} onClose={() => setFiltersVisible(false)} title="Filters"
-                footer={<View style={{ gap: theme.spacing[2] }}>
-                    <Button title="Show results" onPress={() => setFiltersVisible(false)} />
-                    <Button title="Reset filters" variant="ghost" onPress={() => { setPeriod('all'); setFilter('all'); setNetwork('all'); }} />
+            {demo && (
+                <View style={styles.previewRow}>
+                    <Text style={[styles.loadingText, { color: theme.colors.warning[500] }]}>PREVIEW · Example activity</Text>
+                    <FilterButton activeCount={activeFilters.length} onPress={() => setFiltersVisible(true)} />
+                </View>
+            )}
+            <ActiveFilterBar filters={activeFilters} onClearAll={resetFilters} />
+            <Sheet visible={filtersVisible} onClose={() => setFiltersVisible(false)} title="Filter activity"
+                footer={<View style={styles.sheetFooter}>
+                    <Button title="Reset" variant="ghost" style={styles.sheetFooterReset} disabled={activeFilters.length === 0} onPress={resetFilters} />
+                    <Button title={filtered.length === 1 ? 'Show 1 result' : `Show ${filtered.length} results`} style={styles.sheetFooterApply} onPress={() => setFiltersVisible(false)} />
                 </View>}>
-                <View style={{ gap: theme.spacing[4], paddingBottom: theme.spacing[4] }}>
-                    <Text style={styles.filterLabel}>Activity type</Text>
-                    <SegmentedTabs options={FILTERS} value={filter} onChange={setFilter} />
-                    <Text style={styles.filterLabel}>Period</Text>
-                    <SegmentedTabs<ActivityPeriod> value={period} onChange={setPeriod}
-                        options={[{ key: 'all', label: 'Any time' }, { key: '7d', label: '7 days' }, { key: '30d', label: '30 days' }, { key: '90d', label: '90 days' }]} />
-                    {networks.length > 1 && <>
-                        <Text style={styles.filterLabel}>Network</Text>
-                        <SegmentedTabs<ActivityNetwork | 'all'> options={networkOptions} value={activeNetwork} onChange={setNetwork} />
-                    </>}
+                <View style={styles.sheetBody}>
+                    <FilterChipGroup label="Type" options={FILTERS} value={filter} onChange={setFilter} />
+                    <FilterChipGroup label="Period" options={PERIODS} value={period} onChange={setPeriod} />
+                    {networks.length > 1 && (
+                        <FilterChipGroup label="Network" options={networkOptions} value={activeNetwork} onChange={setNetwork} />
+                    )}
                 </View>
             </Sheet>
 
@@ -367,10 +394,10 @@ export default function HistoryScreen({ previewItems, previewQuery, previewPerio
                     ) : (
                         <EmptyState
                             icon="receipt-outline"
-                            actionLabel={query || period !== 'all' || filter !== 'all' || activeNetwork !== 'all' ? 'Reset filters' : undefined}
-                            onAction={() => { setQuery(''); setPeriod('all'); setFilter('all'); setNetwork('all'); }}
-                            title={query || period !== 'all' ? 'No matching activity' : filter === 'pending' ? 'No pending payments' : filter === 'agent' ? 'No agent payments yet' : 'No activity yet'}
-                            message={query || period !== 'all' ? 'Try another name, amount or reference, or choose a wider period.' : filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : filter === 'agent' ? 'What the assistant pays from its Agent wallet, and your top-ups, appear here.' : 'Your payments and transfers will appear here.'}
+                            actionLabel={activeFilters.length > 0 ? 'Reset filters' : undefined}
+                            onAction={resetFilters}
+                            title={period !== 'all' || activeNetwork !== 'all' ? 'No matching activity' : filter === 'pending' ? 'No pending payments' : filter === 'agent' ? 'No agent payments yet' : 'No activity yet'}
+                            message={period !== 'all' || activeNetwork !== 'all' ? 'Try a wider period or another network.' : filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : filter === 'agent' ? 'What the assistant pays from its Agent wallet, and your top-ups, appear here.' : 'Your payments and transfers will appear here.'}
                         />
                     )}
                 />
@@ -385,10 +412,26 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: theme.colors.background.secondary,
     },
-    filterLabel: {
-        color: theme.colors.text.secondary,
-        fontSize: theme.typography.fontSize.sm,
-        fontWeight: '600',
+    previewRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: theme.spacing[4],
+        paddingBottom: theme.spacing[2],
+    },
+    sheetBody: {
+        gap: theme.spacing[5],
+        paddingBottom: theme.spacing[4],
+    },
+    sheetFooter: {
+        flexDirection: 'row',
+        gap: theme.spacing[3],
+    },
+    sheetFooterReset: {
+        flex: 1,
+    },
+    sheetFooterApply: {
+        flex: 2,
     },
     errorBanner: {
         flexDirection: 'row',

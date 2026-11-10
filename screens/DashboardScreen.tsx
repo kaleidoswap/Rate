@@ -45,6 +45,7 @@ import {
   MainHeader
 } from '../components';
 import { Sheet } from '../components/Sheet';
+import { RecentActivityWidget } from '../components/RecentActivityWidget';
 import { InsightCards } from '../components/mind/InsightCards';
 import { ProfileChip } from '../components/ProfileChip';
 import { formatBitcoinAmount, useBitcoinConversion, useDisplayAmount } from '../utils/bitcoinUnits';
@@ -122,6 +123,8 @@ const EMPTY_BTC_BALANCE = {
 
 /** How long the first balance waits for every account before showing the connected ones. */
 const EARLY_BALANCE_MS = 2_500;
+/** The wallet whose assets redux holds: only a different wallet clears them (not a remount). */
+let assetsWalletKey: string | null = null;
 
 function anyAccountConnected(): boolean {
   return (['RGB', 'SPARK', 'ARKADE', 'BARK'] as const).some(
@@ -180,6 +183,7 @@ export default function DashboardScreen({ navigation }: Props) {
   // skip the first balance load. These refs are the immediate lifecycle gates;
   // state remains the source of truth for rendering.
   const protocolsReadyRef = useRef(false);
+  const [showChannels, setShowChannels] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   // The same live BTC price the fiat figures use (redux's btcPriceUSD is rarely set).
   const { formatSatoshisToUSD, bitcoinPrice: liveBtcPrice } = useBitcoinConversion();
@@ -199,6 +203,9 @@ export default function DashboardScreen({ navigation }: Props) {
   // last known ones stand in here until this wallet's accounts answer.
   const liveAssets = useAppSelector(state => state.assets.rgbAssets) as InventoryRecord[];
   const [snapshotAssets, setSnapshotAssets] = useState<InventoryRecord[]>([]);
+  // Accounts that listed their assets live for this wallet: until then their last known ones show.
+  const [listedProtocols, setListedProtocols] = useState<string[]>([]);
+  const initDoneRef = useRef(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const isUpdatingRef = useRef(false);
   // Last known balances (per wallet) shown at launch until the live ones land.
@@ -390,7 +397,14 @@ export default function DashboardScreen({ navigation }: Props) {
       ];
       const assetsTask = Promise.all(
         adapterMap.map(async ([adapter, proto]) => {
-          if (!adapter?.isConnected()) return [] as InventoryRecord[];
+          if (!adapter?.isConnected()) {
+            // An account that is off (not just still connecting) lists nothing.
+            if (!adapter && initDoneRef.current && current()) {
+              dispatch(setProtocolAssets({ protocol: proto, assets: [] }));
+              setListedProtocols(list => list.includes(proto) ? list : [...list, proto]);
+            }
+            return [] as InventoryRecord[];
+          }
           try {
             const unifiedAssets = await boundedBalanceRead<any[]>(`${proto} assets`, () => adapter.listAssets(), 60_000);
             const mapped = unifiedAssets
@@ -400,6 +414,7 @@ export default function DashboardScreen({ navigation }: Props) {
             if (current()) {
               liveDataRef.current = true;
               dispatch(setProtocolAssets({ protocol: proto, assets: mapped }));
+              setListedProtocols(list => list.includes(proto) ? list : [...list, proto]);
             }
             return mapped;
           } catch (e) {
@@ -434,13 +449,17 @@ export default function DashboardScreen({ navigation }: Props) {
       const assets = assetResults.flat();
       setChannels(channelsList);
       setChannelsLive(true);
-      dispatch(setRgbAssets(assets as any));
+      // No full replace here: each account already replaced its own assets above, and one
+      // that is still connecting or failed keeps what it showed (the flicker on open).
 
       // Every account failed: keep the last figures on screen (the warning says why)
       // rather than replacing them with zero.
       if (connectedCount > 0 && okBalances.length === 0) return;
 
       const byProtocol: Record<string, { confirmed: number; unconfirmed: number; total: number }> = { ...balanceStateRef.current.byProtocol };
+      // Once startup is done, an account that is off or disconnected (an RGB node the user
+      // disconnected) shows no balance at all, rather than its last one in the breakdown.
+      if (initDoneRef.current) for (const [adapter, proto] of adapterProtoMap) if (!adapter?.isConnected()) delete byProtocol[proto];
       // Bark is a layer like Arkade/Spark: counted in the total and shown in the breakdown.
       for (const r of okBalances) byProtocol[r.proto] = r.btc;
       const balance = btcBalanceFromProtocols(byProtocol);
@@ -541,6 +560,7 @@ export default function DashboardScreen({ navigation }: Props) {
         await loadDashboardData(true);
       }
       if (!await init || !mountedRef.current) return;
+      initDoneRef.current = true;
       await Promise.all([checkNodeStatus(true), loadDashboardData(initFirst)]);
     } finally {
       // Both a failed connection and a missing wallet are terminal UI states.
@@ -562,8 +582,10 @@ export default function DashboardScreen({ navigation }: Props) {
     setBtcBalanceState(EMPTY_BTC_BALANCE);
     setPendingBalanceAccounts([]);
     setSnapshotAssets([]);
-    // Redux must not keep the previous wallet's assets either.
-    dispatch(setRgbAssets([]));
+    setListedProtocols([]);
+    // Redux must not keep the previous wallet's assets either; the same wallet keeps them.
+    if (assetsWalletKey !== null && assetsWalletKey !== walletKey) dispatch(setRgbAssets([]));
+    assetsWalletKey = walletKey;
     setChannels([]);
     setChannelsLive(false);
     setSnapshotChannels([]);
@@ -594,18 +616,20 @@ export default function DashboardScreen({ navigation }: Props) {
     }, [activeWallet])
   );
 
-  const onRefresh = async () => {
+  // `silent`: the refresh on returning to the app, shown only by the balance card's own
+  // indicator, not by the pull-to-refresh spinner as if the user had pulled.
+  const onRefresh = async (silent = false) => {
     if (refreshing || isConnecting || needsSetup) return;
-    setRefreshing(true);
+    if (!silent) setRefreshing(true);
     try {
       if (connectionError || offlineAccounts.length > 0) protocolsReadyRef.current = false;
       await connectAndLoad();
     } finally {
-      setRefreshing(false);
+      if (!silent) setRefreshing(false);
     }
   };
 
-  resumeRefreshRef.current = onRefresh;
+  resumeRefreshRef.current = () => onRefresh(true);
 
   const formatSatoshis = (satoshis: number): string => {
     return formatBitcoinAmount(satoshis, bitcoinUnit);
@@ -653,7 +677,7 @@ export default function DashboardScreen({ navigation }: Props) {
       available: availableBtc,
       networks: bitcoinByNetwork(protocolBalances ?? {}, summaryChannels, rgbBalanceIsLightning),
     },
-    assets: showingSnapshot ? withSnapshotFallback(liveAssets, snapshotAssets) : liveAssets,
+    assets: withSnapshotFallback(liveAssets, snapshotAssets, listedProtocols),
   });
   const btcEntry = inventoryBtc(inventory);
   const tokens = inventoryTokens(inventory);
@@ -870,7 +894,7 @@ export default function DashboardScreen({ navigation }: Props) {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={onRefresh}
+            onRefresh={() => onRefresh()}
             tintColor={theme.colors.primary[500]}
             colors={[theme.colors.primary[500]]}
           />
@@ -884,7 +908,7 @@ export default function DashboardScreen({ navigation }: Props) {
           />
         ) : <>
         {!connectionError && !balanceWarning && offlineAccounts.length > 0 && (
-          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
+          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={() => onRefresh()}>
             <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
             <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
               {offlineAccounts.join(', ').replace(/^./, (c) => c.toUpperCase())} {offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete. Tap to retry.
@@ -892,7 +916,7 @@ export default function DashboardScreen({ navigation }: Props) {
           </TouchableOpacity>
         )}
         {(connectionError || balanceWarning) && (
-          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={onRefresh}>
+          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={() => onRefresh()}>
             <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
             <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
               {connectionError
@@ -921,8 +945,9 @@ export default function DashboardScreen({ navigation }: Props) {
             testNetworks={testNetworks}
             assetRows={breakdownAssetRows(tokens, liteUsdAssetIds, { foldDollars: isLite })}
             rgbBalanceIsLightning={rgbBalanceIsLightning}
+            showLightning={hasChannelCapableNode}
             bitcoinUnit={bitcoinUnit}
-            onRefresh={onRefresh}
+            onRefresh={() => onRefresh(true)}
             refreshing={refreshing}
             formatSatoshis={formatSatoshis}
             formatUSD={formatUSD}
@@ -936,7 +961,7 @@ export default function DashboardScreen({ navigation }: Props) {
             // Always provide the per-network breakdown; it stays collapsed behind
             // the chevron so it doesn't clutter lite mode.
             byProtocol={(btcBalance as any)?.byProtocol}
-            // Shimmer the balance while first connecting (before any data lands).
+            // Show a dash while first connecting, before any balance is available.
             loading={(isConnecting || loading) && totalBalance === 0 && !refreshing && !showingSnapshot}
             updating={isConnecting || isUpdating || loading}
             pendingAccounts={pendingBalanceAccounts.map(p => ({ RGB: 'RGB', LN: 'Lightning', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' }[p] ?? p))}
@@ -950,6 +975,7 @@ export default function DashboardScreen({ navigation }: Props) {
           />}
         </View>
 
+        <RecentActivityWidget title="Recent activity" limit={3} refreshKey={balanceUpdatedAt} onOpenPaymentAttempt={id => navigation.getParent()?.navigate('Send', { resumePayment: true, paymentAttemptId: id })} onViewAll={() => navigation.navigate('Activity')} />
         <InsightCards
           channels={channels}
           onAction={(action) => (action.kind === 'navigate'
@@ -994,22 +1020,17 @@ export default function DashboardScreen({ navigation }: Props) {
           onIssueAsset={() => navigation.getParent()?.navigate('Assets', { issue: true })}
         />
 
-        <TouchableOpacity
-          accessibilityRole="button"
-          onPress={() => navigation.navigate('Map')}
-          style={styles.placesLink}
-        >
-          <Ionicons name="map-outline" size={22} color={theme.colors.text.secondary} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base }}>Places to pay</Text>
-            <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm }}>Find nearby businesses accepting bitcoin</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
-        </TouchableOpacity>
+
         </>}
 
         {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (
-        <ChannelList
+        <View>
+        <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showChannels }} style={styles.placesLink} onPress={() => setShowChannels(!showChannels)}>
+          <Ionicons name="git-branch-outline" size={20} color={theme.colors.text.secondary} />
+          <Text style={{ flex: 1, color: theme.colors.text.primary }}>Manage Lightning channels</Text>
+          <Ionicons name={showChannels ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.secondary} />
+        </TouchableOpacity>
+        {showChannels && <ChannelList
           channels={channels}
           bitcoinUnit={bitcoinUnit}
           formatSatoshis={formatSatoshis}
@@ -1020,7 +1041,8 @@ export default function DashboardScreen({ navigation }: Props) {
             setChannelModalVisible(true);
           }}
           onOpenChannel={() => navigation.getParent()?.navigate('LSP')}
-        />
+        />}
+        </View>
         )}
       </ScrollView>
 

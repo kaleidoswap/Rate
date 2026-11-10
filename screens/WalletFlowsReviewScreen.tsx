@@ -19,7 +19,7 @@ import { ReceiveOutcomeCard } from '../components/receive/ReceiveOutcomeCard';
 import { ReceiveRequestActions } from '../components/receive/ReceiveRequestActions';
 
 /** Native UI review only: the QR is deliberately not a payable destination. */
-export default function WalletFlowsReviewScreen({ navigation, route }: { navigation: any; route?: { params?: { page?: string; state?: string; query?: string; period?: string } } }) {
+export default function WalletFlowsReviewScreen({ navigation, route }: { navigation: any; route?: { params?: { page?: string; state?: string; period?: string } } }) {
   const t = useAppTheme();
   const [page, setPage] = useState<'history' | 'receive' | 'arkade' | 'rgb' | 'payments'>('history');
   const [state, setState] = useState<'watching' | 'expired' | 'pending' | 'confirmed'>('watching');
@@ -46,7 +46,7 @@ export default function WalletFlowsReviewScreen({ navigation, route }: { navigat
       { utxo: { outpoint: { txid: 'demo-asset', vout: 0 }, btcAmount: 3000, colorable: true }, rgbAllocations: [{ assetId: 'demo-usd', amount: 25000, settled: true }], pendingBlinded: 0 },
       { utxo: { outpoint: { txid: 'demo-free', vout: 1 }, btcAmount: 3000, colorable: true }, rgbAllocations: [], pendingBlinded: 0 },
       { utxo: { outpoint: { txid: 'demo-bitcoin', vout: 2 }, btcAmount: 60000, colorable: false }, rgbAllocations: [], pendingBlinded: 0 }
-    ] }} /> : page === 'arkade' ? <ScrollView contentContainerStyle={{ padding: t.spacing[4] }}><Text style={{ color: t.colors.warning[500], marginBottom: t.spacing[3] }}>ANTEPRIMA · Dati di esempio · Nessuna operazione sui fondi</Text><ArkadeMaintenanceSettings connected busy={false} onSave={() => {}} onBusyChange={() => {}} previewHealth={demoHealth} /></ScrollView> : page === 'history' ? <HistoryScreen previewItems={items} previewQuery={route?.params?.query} previewPeriod={['7d', '30d', '90d'].includes(route?.params?.period ?? '') ? route?.params?.period as ActivityPeriod : 'all'} /> : <ScrollView contentContainerStyle={{ padding: t.spacing[4], gap: t.spacing[4] }}>
+    ] }} /> : page === 'arkade' ? <ScrollView contentContainerStyle={{ padding: t.spacing[4] }}><Text style={{ color: t.colors.warning[500], marginBottom: t.spacing[3] }}>ANTEPRIMA · Dati di esempio · Nessuna operazione sui fondi</Text><ArkadeMaintenanceSettings connected busy={false} onSave={() => {}} onBusyChange={() => {}} previewHealth={demoHealth} /></ScrollView> : page === 'history' ? <HistoryScreen previewItems={items} previewPeriod={['7d', '30d', '90d'].includes(route?.params?.period ?? '') ? route?.params?.period as ActivityPeriod : 'all'} /> : <ScrollView contentContainerStyle={{ padding: t.spacing[4], gap: t.spacing[4] }}>
       <Text style={{ color: t.colors.warning[500], fontSize: t.typography.fontSize.sm }}>PREVIEW · Example request · Cannot receive funds</Text>
       <Text style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize['2xl'], fontWeight: '700' }}>Receive 5,000 sats</Text>
       {state === 'watching' ? <>

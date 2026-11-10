@@ -12,12 +12,13 @@ test('a row shows the amount with its unit and its dollar value', () => {
   expect(onAssetPress).toHaveBeenCalledWith(expect.objectContaining({ asset_id: 'BTC' }));
 });
 
-test('shows four assets and folds the rest into "View N more"', () => {
+test('shows four assets; the rest are behind the header\'s View All link', () => {
   const onViewAll = jest.fn();
   const screen = render(<AssetList onViewAll={onViewAll} onIssueAsset={jest.fn()} onAssetPress={jest.fn()}
     assets={['A', 'B', 'C', 'D', 'E', 'F'].map(id => asset(id))} />);
   expect(screen.queryByText('E')).toBeNull();
-  fireEvent.press(screen.getByLabelText('View 2 more assets'));
+  expect(screen.queryByText(/more assets/)).toBeNull();
+  fireEvent.press(screen.getByLabelText('View All'));
   expect(onViewAll).toHaveBeenCalled();
 });
 

@@ -40,7 +40,7 @@ function fakeLib() {
   };
   const lib = {
     restoreKeys: jest.fn(async (network: string, mnemonic: string) => ({ mnemonic, network, xpub: 'x', accountXpubVanilla: 'v', accountXpubColored: 'c', masterFingerprint: 'f' })),
-    decodeInvoice: jest.fn(async () => ({ recipientId: 'their-rid', transportEndpoints: ['rpcs://their-proxy'], invoice: 'i', assignment: { type: 'ANY' }, network: 'SIGNET', expirationTimestamp: null })),
+    decodeInvoice: jest.fn(async () => ({ recipientId: 'their-rid', transportEndpoints: ['rpcs://their-proxy'], invoice: 'i', assignment: { type: 'ANY' }, network: 'SIGNET_CUSTOM', expirationTimestamp: null })),
     Wallet: jest.fn(() => wallet),
     supportsSubdir: jest.fn(() => true),
   };
@@ -135,7 +135,7 @@ test('every change schedules a backup; witness invoices get their output funded;
   await account.refreshWallet();
   expect(onChange).toHaveBeenCalledTimes(4);
   lib.decodeInvoice.mockResolvedValue({ recipientId: 'wvout:abc', transportEndpoints: [], assetId: 'rgb:usdt', invoice: 'i',
-    assignment: { type: 'FUNGIBLE', amount: 500 }, network: 'SIGNET', expirationTimestamp: null } as any);
+    assignment: { type: 'FUNGIBLE', amount: 500 }, network: 'SIGNET_CUSTOM', expirationTimestamp: null } as any);
   await account.transfer({ token: 'rgb:usdt', recipient: 'rgb:witness-invoice', amount: 500 });
   expect(wallet.send).toHaveBeenLastCalledWith({ 'rgb:usdt': [expect.objectContaining({ recipientId: 'wvout:abc', witnessData: { amountSat: 1000 }, transportEndpoints: ['rpcs://proxy.example/json-rpc'] })] }, false, 2, 1);
   expect(onChange).toHaveBeenCalledTimes(5);
@@ -171,6 +171,18 @@ test('a native build that can’t open other folders never opens a wallet meant 
   const manager = new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', { ...options, dataDir: 'rgb-mutinynet' });
   await expect(manager.getAccount()).rejects.toThrow(/Update the app/);
   expect(lib.Wallet).not.toHaveBeenCalled();
+});
+
+test('the BTC balance Receive polls syncs with the chain first, without moving transfers', async () => {
+  const { lib, wallet } = fakeLib();
+  const account = await new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('seed', options).getAccount();
+  wallet.refresh.mockClear();
+  const balance = await account.syncedBtcBalance();
+  expect(balance.vanilla).toEqual({ settled: 50_000, future: 60_000, spendable: 50_000 });
+  expect(wallet.sync).toHaveBeenCalled();
+  expect(wallet.sync.mock.invocationCallOrder[0]).toBeLessThan(wallet.getBtcBalance.mock.invocationCallOrder.at(-1)!);
+  expect(wallet.getBtcBalance).toHaveBeenLastCalledWith(true);
+  expect(wallet.refresh).not.toHaveBeenCalled();
 });
 
 test('rgb-lib calls never overlap, whichever caller makes them', async () => {
@@ -331,4 +343,122 @@ test('over kaleido-rgb’s own Wallet: every feature is offered and calls reach 
   const mainnet = await open(KaleidoRgb, 'mainnet');
   expect(mainnet.capabilities()).toEqual(expect.objectContaining({ issueIfa: false, inflate: false, drain: true }));
   expect(mockNative.openWallet).toHaveBeenLastCalledWith(expect.objectContaining({ network: 'MAINNET', supportedSchemas: ['NIA', 'CFA', 'UDA'] }));
+});
+
+test('failed startup closes the native wallet before retry', async () => {
+  const { lib, wallet } = fakeLib();
+  wallet.goOnline.mockRejectedValueOnce(new Error('indexer unavailable'));
+  const manager = new (createRgbLibRnModule(() => lib as any).WalletManagerRgb)('failed-seed', options);
+  await expect(manager.getAccount()).rejects.toThrow('indexer unavailable');
+  expect(wallet.close).toHaveBeenCalledTimes(1);
+  await expect(manager.getAccount()).resolves.toBeDefined();
+  await manager.dispose();
+});
+
+
+test.each(['wvout:abc', 'sbc:wvout:BWQcnLsM-~4IGU1b-E8QaVA4-b1bjJi2-JV1~9kh-~Prw0pl-RxG1tRQ', 'bc:wvout:abc', 'tb:wvout:abc'])(
+  'funds witness outputs for chain-prefixed native recipients: %s', async recipientId => {
+    const { lib, wallet } = fakeLib();
+    lib.decodeInvoice.mockResolvedValue({ network: 'SIGNET_CUSTOM', recipientId, transportEndpoints: [], assignment: { type: 'FUNGIBLE', amount: 25 } } as any);
+    const account = await open(lib);
+    await account.transfer({ token: 'rgb:asset', recipient: 'rgb:invoice', amount: 25 });
+    expect(wallet.send).toHaveBeenCalledWith({ 'rgb:asset': [expect.objectContaining({ recipientId, witnessData: { amountSat: 1000 } })] }, false, 2, 1);
+  },
+);
+
+test('a chain-prefixed blinded recipient must not get a witness output', async () => {
+  const { lib, wallet } = fakeLib();
+  lib.decodeInvoice.mockResolvedValue({ network: 'SIGNET_CUSTOM', recipientId: 'sbc:utxob:abc', transportEndpoints: [], assignment: { type: 'FUNGIBLE', amount: 25 } } as any);
+  await (await open(lib)).transfer({ token: 'rgb:asset', recipient: 'rgb:invoice', amount: 25 });
+  expect(wallet.send.mock.calls[0][0]['rgb:asset'][0].witnessData).toBeUndefined();
+});
+
+
+test.each([
+  [{ expirationTimestamp: 1 }, /expired/],
+  [{ network: 'SIGNET' }, /different network/],
+  [{ network: 'MAINNET' }, /different network/],
+  [{ assetId: 'rgb:other' }, /different asset/],
+  [{ assignment: { type: 'FUNGIBLE', amount: 99 } }, /different amount/],
+])('rejects invalid invoice before native send: %j', async (fields, error) => {
+  const { lib, wallet } = fakeLib();
+  const decoded = await lib.decodeInvoice();
+  lib.decodeInvoice.mockResolvedValue({ ...decoded, ...fields } as any);
+  const account = await open(lib);
+  await expect(account.transfer({ token: 'rgb:usdt', recipient: 'invoice', amount: 25 })).rejects.toThrow(error);
+  expect(wallet.send).not.toHaveBeenCalled();
+});
+
+test('preserves the invoice deadline in native send', async () => {
+  const { lib, wallet } = fakeLib();
+  const decoded = await lib.decodeInvoice();
+  const deadline = Math.floor(Date.now() / 1000) + 600;
+  lib.decodeInvoice.mockResolvedValue({ ...decoded, expirationTimestamp: deadline } as any);
+  const account = await open(lib);
+  await account.transfer({ token: 'rgb:usdt', recipient: 'invoice', amount: 25 });
+  expect(wallet.send).toHaveBeenCalledWith(expect.anything(), false, 2, 1, deadline);
+});
+
+test('an invoice expiring while queued behind a backup is never sent', async () => {
+  const { lib, wallet } = fakeLib();
+  const account = await open(lib);
+  const now = jest.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
+  let release!: () => void;
+  wallet.backup.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+  const backup = account.backup('/test/backup', 'password');
+  await Promise.resolve();
+  const decoded = await lib.decodeInvoice();
+  lib.decodeInvoice.mockResolvedValue({ ...decoded, expirationTimestamp: 1_800_000_001 } as any);
+  const send = account.transfer({ token: 'rgb:usdt', recipient: 'invoice', amount: 25 });
+  await Promise.resolve();
+  now.mockReturnValue(1_800_000_002_000);
+  release();
+  try {
+    await backup;
+    await expect(send).rejects.toMatchObject({ code: 'RGB_INVOICE_INVALID' });
+    expect(wallet.send).not.toHaveBeenCalled();
+  } finally { now.mockRestore(); }
+});
+
+test('a failed goOnline closes the native wallet and reports why, with its ERR_RGB_* code', async () => {
+  const { lib, wallet } = fakeLib();
+  const events: string[] = [];
+  wallet.goOnline.mockRejectedValueOnce(Object.assign(new Error('Indexer: connection refused'), { code: 'ERR_RGB_INDEXER' }));
+  const manager = new (createRgbLibRnModule(() => lib as any, { onEvent: (stage, detail) => events.push(`${stage}:${detail}`) }).WalletManagerRgb)('seed', options);
+  await expect(manager.getAccount()).rejects.toMatchObject({ code: 'ERR_RGB_INDEXER' });
+  expect(wallet.close).toHaveBeenCalled();
+  expect(events.some((e) => e.startsWith('go_online_failed:ERR_RGB_INDEXER: Indexer: connection refused'))).toBe(true);
+  // The next try opens it again.
+  await expect(manager.getAccount()).resolves.toBeTruthy();
+  expect(lib.Wallet).toHaveBeenCalledTimes(2);
+});
+
+test('a runtime lock left by an earlier run is cleared before opening, never while this runtime has the wallet open', async () => {
+  const { lib } = fakeLib();
+  lib.restoreKeys.mockImplementation(async (network: string, mnemonic: string) => ({ mnemonic, network, xpub: 'x', accountXpubVanilla: 'v', accountXpubColored: 'c', masterFingerprint: 'aa11bb22' }));
+  const clearStaleLock = jest.fn(async () => true);
+  const events: string[] = [];
+  const mod = createRgbLibRnModule(() => lib as any, { clearStaleLock, onEvent: (stage) => events.push(stage) });
+  const first = new mod.WalletManagerRgb('seed', { ...options, dataDir: 'rgb-mutinynet-signetcustom' });
+  await first.getAccount();
+  expect(clearStaleLock).toHaveBeenCalledWith('rgb-mutinynet-signetcustom', 'aa11bb22');
+  expect(events).toEqual(expect.arrayContaining(['open_start', 'stale_lock_cleared', 'online']));
+  // Same folder while it is open here: its lock may be live.
+  await new mod.WalletManagerRgb('seed', { ...options, dataDir: 'rgb-mutinynet-signetcustom' }).getAccount();
+  expect(clearStaleLock).toHaveBeenCalledTimes(1);
+  await first.dispose();
+  await new mod.WalletManagerRgb('seed', { ...options, dataDir: 'rgb-mutinynet-signetcustom' }).getAccount();
+  expect(clearStaleLock).toHaveBeenCalledTimes(1); // the second manager still has it open
+});
+
+test('an open that never finishes fails with ERR_RGB_OPEN_TIMEOUT instead of spinning forever, and is closed when it ends', async () => {
+  const { lib, wallet } = fakeLib();
+  let finish: () => void = () => undefined;
+  wallet.goOnline.mockImplementationOnce(() => new Promise<undefined>((resolve) => { finish = () => resolve(undefined); }));
+  const manager = new (createRgbLibRnModule(() => lib as any, { openTimeoutMs: 20 }).WalletManagerRgb)('seed', options);
+  await expect(manager.getAccount()).rejects.toMatchObject({ code: 'ERR_RGB_OPEN_TIMEOUT', message: expect.stringMatching(/mutinynet\.example/) });
+  await manager.dispose();
+  finish();
+  await new Promise((r) => setTimeout(r, 0));
+  expect(wallet.close).toHaveBeenCalled();
 });

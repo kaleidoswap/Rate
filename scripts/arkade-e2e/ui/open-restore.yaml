@@ -1,0 +1,4 @@
+appId: com.kaleidoswap.wallet
+---
+- tapOn: 'Restore an existing wallet from its recovery phrase'
+- assertVisible: 'Recovery Phrase'

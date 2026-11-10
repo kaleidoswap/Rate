@@ -1,4 +1,4 @@
-import { fetchSwapOffers, bestSwapOffer, SwapOffer, loadChannelLiquidity, quoteChannelShortfall } from './swapQuotes';
+import { fetchSwapQuote, fetchSwapOffers, bestSwapOffer, SwapOffer, loadChannelLiquidity, quoteChannelShortfall } from './swapQuotes';
 import { flashnetClientManager, kaleidoClientManager, protocolManager } from './protocols';
 import { SwapPair } from '../utils/swap-model';
 import type { SwapQuote } from '../store/slices/swapSlice';
@@ -9,6 +9,36 @@ jest.mock('./protocols', () => ({
 }));
 const pair = (id: string): SwapPair => ({ id, poolId: id, venue: 'flashnet', base: { ticker: 'BTC', name: 'Bitcoin', precision: 8, protocol_ids: { SPARK: 'btc' } }, quote: { ticker: 'TOK', name: 'Token', precision: 0, protocol_ids: { SPARK: 'token' } }, routes: [] });
 afterEach(() => jest.useRealTimers());
+describe('maker quote contract in both directions', () => {
+  const makerPair: SwapPair = { id: 'btc-token', venue: 'kaleidoswap', base: { ticker: 'BTC', name: 'BTC', precision: 8, protocol_ids: { RGB: 'btc' } }, quote: { ticker: 'TOK', name: 'Token', precision: 0, protocol_ids: { RGB: 'rgb:tok' } }, routes: [{ from_layer: 'BTC_LN', to_layer: 'RGB_LN' }, { from_layer: 'RGB_LN', to_layer: 'BTC_LN' }] };
+  const response = (request: any) => ({ rfq_id: 'q', from_asset: request.from_asset, to_asset: { ...request.to_asset, amount: request.to_asset.asset_id === 'btc' ? 1000000 : 10 }, fee: { final_fee: 0, fee_asset_precision: 0 }, expires_at: Date.now() / 1000 + 30 });
+  test.each([['BTC', 'TOK', 1000, 'sats', 1000000, 10], ['BTC', 'TOK', 0.00001, 'BTC', 1000000, 10], ['TOK', 'BTC', 10, 'sats', 10, 1000], ['TOK', 'BTC', 10, 'BTC', 10, 0.00001]])('%s → %s (%s %s)', async (from, to, amount, unit, raw, received) => {
+    const getQuote = jest.fn(async req => response(req));
+    (kaleidoClientManager.getClient as jest.Mock).mockReturnValue({ maker: { getQuote } });
+    const q = await fetchSwapQuote(makerPair, String(from), String(to), Number(amount), String(unit));
+    expect(q.from_amount_raw).toBe(raw); expect(q.to_amount).toBe(received);
+  });
+  test.each(['asset', 'layer', 'amount', 'expiry', 'output'])('rejects changed %s terms', async field => {
+    const getQuote = jest.fn(async req => {
+      const r = response(req);
+      if (field === 'asset') r.to_asset.asset_id = 'other';
+      if (field === 'layer') r.to_asset.layer = 'RGB_L1';
+      if (field === 'amount') r.from_asset = { ...r.from_asset, amount: 2 };
+      if (field === 'expiry') r.expires_at = 0;
+      if (field === 'output') r.to_asset.amount = 1.5;
+      return r;
+    });
+    (kaleidoClientManager.getClient as jest.Mock).mockReturnValue({ maker: { getQuote } });
+    await expect(fetchSwapQuote(makerPair, 'BTC', 'TOK', 1000, 'sats')).rejects.toThrow();
+  });
+  test('rejects unadvertised directions and inactive pairs before contacting the maker', async () => {
+    const getQuote = jest.fn();
+    (kaleidoClientManager.getClient as jest.Mock).mockReturnValue({ maker: { getQuote } });
+    await expect(fetchSwapQuote({ ...makerPair, routes: [] }, 'BTC', 'TOK', 1000, 'sats')).rejects.toThrow();
+    expect(await fetchSwapOffers([{ ...makerPair, is_active: false }], 'BTC', 'TOK', 1000, 'sats')).toEqual([]);
+    expect(getQuote).not.toHaveBeenCalled();
+  });
+});
 test('compares live pools with integer token precision and no invented fallback', async () => {
   const simulateSwap = jest.fn(async ({ poolId }: any) => { if (poolId === 'offline') throw new Error('Offline'); return { amountOut: poolId === 'best' ? '20' : '18', feePaidAssetIn: '2' }; });
   (flashnetClientManager.getClient as jest.Mock).mockReturnValue({ simulateSwap });

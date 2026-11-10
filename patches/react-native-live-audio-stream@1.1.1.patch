@@ -1,0 +1,18 @@
+diff --git a/ios/RNLiveAudioStream.m b/ios/RNLiveAudioStream.m
+index a6f2317..8a11f90 100644
+--- a/ios/RNLiveAudioStream.m
++++ b/ios/RNLiveAudioStream.m
+@@ -32,10 +32,11 @@ RCT_EXPORT_METHOD(start) {
+                                        mode: AVAudioSessionModeVoiceChat
+                                     options: AVAudioSessionCategoryOptionDuckOthers |
+                                              AVAudioSessionCategoryOptionAllowBluetooth |
+-                                             AVAudioSessionCategoryOptionAllowAirPlay
++                                             AVAudioSessionCategoryOptionAllowAirPlay |
++                                             AVAudioSessionCategoryOptionDefaultToSpeaker
+                                       error: &error];
+     } else {
+-        success = [audioSession setCategory: AVAudioSessionCategoryPlayAndRecord withOptions: AVAudioSessionCategoryOptionDuckOthers error: &error];
++        success = [audioSession setCategory: AVAudioSessionCategoryPlayAndRecord withOptions: AVAudioSessionCategoryOptionDuckOthers | AVAudioSessionCategoryOptionDefaultToSpeaker error: &error];
+         success = [audioSession setMode: AVAudioSessionModeVoiceChat error: &error] && success;
+     }
+     if (!success || error != nil) {

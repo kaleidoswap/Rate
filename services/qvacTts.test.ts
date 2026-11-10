@@ -90,3 +90,20 @@ it('aborts pending synthesis on stop and never falls back for the cancelled turn
   expect(fallback).not.toHaveBeenCalled();
   expect(speakBest).not.toHaveBeenCalled();
 });
+
+it('routes to the speaker again right before playing, after the seconds of synthesis', async () => {
+  const { setAudioModeAsync } = require('expo-audio');
+  mockEngine = 'supertonic';
+  let finishSynth: (v: any) => void = () => {};
+  mockSynth.mockReturnValue(new Promise(resolve => { finishSynth = resolve; }));
+  const pending = speak('Ciao');
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  const before = (setAudioModeAsync as jest.Mock).mock.calls.length;
+  expect(before).toBeGreaterThanOrEqual(1);
+  finishSynth({ sampleRate: 24000, pcm: [0, 1000, 0] }); // meanwhile the mic may have switched to record
+  for (let i = 0; i < 8; i++) await Promise.resolve();
+  expect((setAudioModeAsync as jest.Mock).mock.calls.length).toBe(before + 1);
+  expect(setAudioModeAsync).toHaveBeenLastCalledWith(expect.objectContaining({ allowsRecording: false, shouldRouteThroughEarpiece: false }));
+  mockPlayback({ playing: false, currentTime: .01, didJustFinish: true });
+  await pending;
+});

@@ -1,9 +1,9 @@
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 const mockFeeRates = jest.fn(async () => ({ slow: 1, normal: 2, fast: 5, live: false }));
 jest.mock('../rgbWallet', () => ({ rgbFeeRates: () => mockFeeRates(), DEFAULT_RGB_FEE_RATES: { slow: 1, normal: 2, fast: 5, live: false } }));
-import { connectRgbL1PayAccounts, networkFeeRates, rgbL1FeeOptions, rgbL1PayAdapter, setRgbL1FeeSpeed } from './rgbL1Pay';
+import { connectRgbL1PayAccounts, networkFeeRates, rgbL1FeeOptions, rgbL1PayAdapter, rgbL1TransferStatus, setRgbL1FeeSpeed } from './rgbL1Pay';
 import { connectRgbPayAccounts, currentRgbPayAdapter, registerRgbAssetPayment, rgbRequestAsset } from './rgbPay';
-import { executePaymentOffer, previewTarget, quotePaymentOffers } from './index';
+import { checkPaymentStatus, executePaymentOffer, previewTarget, quotePaymentOffers } from './index';
 
 const USDT = { id: 'rgb:usdt', ticker: 'USDT', precision: 6 };
 
@@ -15,9 +15,10 @@ function l1() {
     sendBtcOnchain: jest.fn(async () => ({ ok: true, txid: 'btc-tx' })),
     sendAsset: jest.fn(async () => ({ txid: 'rgb-tx', batchTransferIdx: 1 })),
     getAssetBalance: jest.fn(async () => ({ available: 9_000_000, total: 9_000_000 })),
+    listAssets: jest.fn(async () => [{ id: 'BTC' }, USDT]),
     getAsset: jest.fn(async () => USDT),
     getTransaction: jest.fn(async () => ({ status: 'pending' })),
-    account: { decodeRgbInvoice: jest.fn(async () => ({ asset_id: USDT.id, assignment: { type: 'Fungible', value: 2_500_000 } })) },
+    account: { refreshTransfers: jest.fn(async () => true), listTransfers: jest.fn(async (_id: string): Promise<any[]> => []), decodeRgbInvoice: jest.fn(async () => ({ asset_id: USDT.id, assignment: { type: 'Fungible', value: 2_500_000 } })) },
   };
 }
 
@@ -162,4 +163,88 @@ test('quotes native BTC from spendable funds, excluding already committed inputs
     expect(offer?.unavailable).toBeTruthy();
     expect(wallet.sendBtcOnchain).not.toHaveBeenCalled();
   } finally { off(); }
+});
+
+
+test('RGB follow refreshes the handshake, reports ACK/block waits, and recovers after reconnect', async () => {
+  const wallet = l1();
+  let off = connectRgbL1PayAccounts(wallet, 'mutinynet');
+  const unregister = registerRgbAssetPayment(USDT);
+  try {
+    const asset = { ...USDT, amount: 2_500_000 };
+    const preview = previewTarget({ kind: 'rgb', raw: 'rgb:invoice', rgbInvoice: 'rgb:invoice' }, undefined, 'handshake', { asset, networks: ['mutinynet'] });
+    const offer = (await quotePaymentOffers(preview)).find(o => o.route.sourceId === 'rgb-asset')!;
+    await executePaymentOffer(preview, offer, 'handshake');
+    wallet.account.listTransfers.mockResolvedValue([{ txid: 'rgb-tx', status: 'WaitingCounterparty' }]);
+    expect(await checkPaymentStatus('rgb-asset', 'handshake')).toMatchObject({ status: 'pending', detail: expect.stringContaining('open and sync') });
+    expect(wallet.account.refreshTransfers).toHaveBeenCalled();
+    expect(wallet.account.listTransfers).not.toHaveBeenCalledWith('BTC');
+    unregister(); off();
+    off = connectRgbL1PayAccounts(wallet, 'mutinynet');
+    wallet.account.listTransfers.mockResolvedValue([{ txid: 'rgb-tx', status: 'WAITING_CONFIRMATIONS' }]);
+    expect(await checkPaymentStatus('rgb-asset', 'handshake')).toMatchObject({ status: 'pending', detail: expect.stringContaining('Bitcoin confirmations') });
+    wallet.account.refreshTransfers.mockRejectedValueOnce(new Error('offline'));
+    expect(await checkPaymentStatus('rgb-asset', 'handshake')).toMatchObject({ status: 'unknown' });
+    wallet.account.listTransfers.mockResolvedValue([{ txid: 'rgb-tx', status: 'Settled' }]);
+    expect(await checkPaymentStatus('rgb-asset', 'handshake')).toMatchObject({ status: 'completed' });
+    expect(wallet.sendAsset).toHaveBeenCalledTimes(1);
+    expect(wallet.getTransaction).not.toHaveBeenCalled();
+  } finally { unregister(); off(); }
+});
+
+
+test('missing and failed RGB transfers never use Bitcoin confirmation as proof of delivery', async () => {
+  const wallet = l1();
+  wallet.getTransaction.mockResolvedValue({ status: 'confirmed' });
+  expect(await rgbL1TransferStatus(wallet, 'missing')).toMatchObject({ status: 'pending' });
+  wallet.account.listTransfers.mockResolvedValue([{ txid: 'failed-tx', status: 'Failed' }]);
+  expect(await rgbL1TransferStatus(wallet, 'failed-tx')).toMatchObject({ status: 'failed' });
+  expect(wallet.getTransaction).not.toHaveBeenCalled();
+});
+
+test.each([
+  ['WAITING_SAFE_HEIGHT', 'safety height'],
+  ['WAITING_BROADCAST', 'broadcast'],
+])('explains the native beta.7 phase %s', async (status, message) => {
+  const wallet = l1();
+  wallet.account.listTransfers.mockResolvedValue([{ txid: 'rgb-tx', status }]);
+  expect(await rgbL1TransferStatus(wallet, 'rgb-tx')).toMatchObject({ status: 'pending', detail: expect.stringContaining(message) });
+});
+
+test.each([
+  ['ERR_RGB_INSUFFICIENT_ALLOCATION_SLOTS', /UTXOs/],
+  ['ERR_RGB_INSUFFICIENT_BITCOINS', /Not enough bitcoin/],
+  ['RGB_INVOICE_INVALID', /expired/],
+])('definite refusal is not an uncertain payment: %s', async (code, message) => {
+  const { PaymentNotSentError } = require('./errors');
+  const wallet = l1();
+  wallet.sendAsset.mockRejectedValueOnce(Object.assign(new Error('expired'), { code }));
+  const pending = rgbL1PayAdapter(wallet).sendAsset!({ asset_id: USDT.id, recipientId: 'invoice', amount: 25 });
+  await expect(pending).rejects.toBeInstanceOf(PaymentNotSentError);
+  await expect(pending).rejects.toThrow(message);
+  expect(wallet.sendAsset).toHaveBeenCalledTimes(1);
+});
+
+test('a transport failure is never classified as definitely unpaid or retried', async () => {
+  const wallet = l1();
+  const error = Object.assign(new Error('connection lost'), { code: 'ERR_RGB_PROXY' });
+  wallet.sendAsset.mockRejectedValueOnce(error);
+  await expect(rgbL1PayAdapter(wallet).sendAsset!({ asset_id: USDT.id, recipientId: 'invoice', amount: 25 })).rejects.toThrow(/ERR_RGB_PROXY.*Check your connection/);
+  expect(wallet.sendAsset).toHaveBeenCalledTimes(1);
+});
+
+test.each([
+  [{ expiration_timestamp: 1 }, /expired/],
+  [{ network: 'SIGNET' }, /different network/],
+])('invalid RGB invoice cannot produce an offer: %j', async (fields, error) => {
+  const wallet = l1();
+  wallet.account.decodeRgbInvoice.mockResolvedValueOnce({ asset_id: USDT.id, assignment: { type: 'Fungible', value: 2_500_000 }, ...fields } as any);
+  const disconnect = connectRgbL1PayAccounts(wallet, 'mutinynet');
+  const unregister = registerRgbAssetPayment(USDT);
+  try {
+    const preview = previewTarget({ kind: 'rgb', raw: 'rgb:invoice', rgbInvoice: 'rgb:invoice' }, undefined, 'invalid-invoice', { asset: { ...USDT, amount: 2_500_000 }, networks: ['mutinynet'] });
+    const offer = (await quotePaymentOffers(preview)).find(o => o.route.sourceId === 'rgb-asset')!;
+    expect(offer.unavailable).toMatch(error);
+    expect(wallet.sendAsset).not.toHaveBeenCalled();
+  } finally { unregister(); disconnect(); }
 });

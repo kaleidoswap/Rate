@@ -25,6 +25,16 @@ export function resultOf(status: unknown, reference?: string): PaymentResult {
   return { status: 'unknown', ...ref };
 }
 
+/** Payment hash of a BOLT11 invoice, or undefined when it can't be read. */
+export function invoicePaymentHash(invoice: string): string | undefined {
+  try {
+    const section = (decode(invoice.trim()).sections as { name: string; value?: unknown }[]).find(x => x.name === 'payment_hash');
+    return typeof section?.value === 'string' && /^[a-f0-9]{64}$/i.test(section.value) ? section.value.toLowerCase() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Amount and expiry (ms) of a BOLT11 invoice; expiry is null when it cannot be read. */
 export function invoiceTerms(invoice: string): { amountSat?: number; expiresAtMs: number | null } {
   const amountSat = decodeBolt11(invoice).amountSats || undefined;
@@ -84,6 +94,11 @@ export interface DirectAccountConfig<T> {
   send: (terms: T, quote: Quote) => Promise<PaymentResult>;
   /** Follows a pending payment by its reference. */
   follow?: (reference: string) => Promise<PaymentResult>;
+  /**
+   * The reference known before sending (a Lightning invoice's payment hash). Saved with the
+   * attempt first, so a send whose answer never came (a timeout, a lost reply) can still be followed.
+   */
+  reference?: (terms: T) => string | undefined;
 }
 
 export function createDirectAccount<T>(cfg: DirectAccountConfig<T>): PayAccount {
@@ -123,13 +138,23 @@ export function createDirectAccount<T>(cfg: DirectAccountConfig<T>): PayAccount 
     async execute(preview, route, accepted, attemptId) {
       const saved = approved.get(accepted);
       if (!saved || route.to !== railOnNetwork || accepted.expiresAt <= now() || !cfg.matches(preview, saved.terms)) {
-        throw new PaymentNotSentError('Review the payment again to get a fresh quote.');
+        throw new PaymentNotSentError(cfg.id === 'rgb-asset' ? 'Refresh the transfer details before sending.' : 'Review the payment again to get a fresh quote.');
       }
       if (!cfg.isConnected()) throw new PaymentNotSentError(`${cfg.walletName} is not connected.`);
       approved.delete(accepted); // a quote pays once
       // Recorded before sending: after a crash the attempt reads as unknown, never as unpaid.
-      await AsyncStorage.setItem(key(attemptId), JSON.stringify({ status: 'unknown' }));
-      const result = await cfg.send(saved.terms, accepted);
+      const reference = cfg.reference?.(saved.terms);
+      const before: PaymentResult = { status: 'unknown', ...(reference ? { reference } : {}) };
+      await AsyncStorage.setItem(key(attemptId), JSON.stringify(before));
+      let result: PaymentResult;
+      try {
+        result = await cfg.send(saved.terms, accepted);
+      } catch (error) {
+        // The wallet refused it: nothing to follow. Anything else stays unknown, with its reference.
+        if (error instanceof PaymentNotSentError) await AsyncStorage.setItem(key(attemptId), JSON.stringify({ ...before, status: 'failed' }));
+        throw error;
+      }
+      if (!result.reference && reference) result = { ...result, reference };
       await AsyncStorage.setItem(key(attemptId), JSON.stringify(result));
       return result;
     },
@@ -141,8 +166,8 @@ export function createDirectAccount<T>(cfg: DirectAccountConfig<T>): PayAccount 
       const next = await cfg.follow(saved.reference);
       // A failed lookup leaves the payment pending rather than unknown.
       if (next.status === 'unknown') return saved;
-      const updated: PaymentResult = { status: next.status, reference: saved.reference };
-      if (updated.status !== saved.status) await AsyncStorage.setItem(key(attemptId), JSON.stringify(updated));
+      const updated: PaymentResult = { ...next, reference: saved.reference };
+      if (updated.status !== saved.status || updated.detail !== saved.detail) await AsyncStorage.setItem(key(attemptId), JSON.stringify(updated));
       return updated;
     },
   };

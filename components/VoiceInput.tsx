@@ -49,6 +49,11 @@ async function disposeRecorder(rec: AudioRecorder): Promise<void> {
   try { rec.release(); } catch { /* already released */ }
 }
 
+// Back to playback routing after a start that didn't become a recording; never throws.
+async function leaveRecordMode(): Promise<void> {
+  try { await setAudioModeAsync({ allowsRecording: false }); } catch { /* best effort */ }
+}
+
 // We serialise recording to ONE AudioRecorder at a time. Multiple VoiceInput
 // instances can be mounted simultaneously on the tab navigator (the AI chat
 // screen's mic + the dashboard voice-agent overlay), and they share the single
@@ -198,7 +203,9 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
           playsInSilentMode: true,
         });
 
-        if (cancelled()) return;
+        // A start cancelled from here on (Prismo began to speak) must not leave the
+        // session in record mode: on iPhone that plays the reply through the earpiece.
+        if (cancelled()) { await leaveRecordMode(); return; }
         recording = new AudioModule.AudioRecorder(
           onLevelRef.current ? { ...RECORDING_OPTIONS, isMeteringEnabled: true } : RECORDING_OPTIONS,
         );
@@ -208,7 +215,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         // mic-permission grant) `record()` can otherwise capture pure silence for
         // the whole clip — the "first recording returns no speech" bug.
         await new Promise((resolve) => setTimeout(resolve, 250));
-        if (cancelled()) { await disposeRecorder(recording); return; }
+        if (cancelled()) { await disposeRecorder(recording); await leaveRecordMode(); return; }
         recording.record();
 
         recorderRef.current = recording;
@@ -226,6 +233,7 @@ const VoiceInput = forwardRef<VoiceInputRef, VoiceInputProps>(
         recorderRef.current = null;
         isRecordingRef.current = false;
         setIsRecording(false);
+        await leaveRecordMode();
         console.error('VoiceInput start error:', err);
         if (!cancelled()) onError(err instanceof Error ? err.message : 'Failed to start recording');
       } finally {

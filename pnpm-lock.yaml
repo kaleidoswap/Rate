@@ -38,9 +38,6 @@ overrides:
   rocksdb-native: 3.18.1
 
 patchedDependencies:
-  '@kaleidorg/wallet-engine@1.0.0-beta.75':
-    hash: 1578bf3164767820650213ed96d3e86efe13eacdfdf61298d2312055ddb2b421
-    path: patches/@kaleidorg__wallet-engine@1.0.0-beta.75.patch
   bare-link@3.2.2:
     hash: b00e73506f8d6604e591288e7894a4aa87a51615da6781fc0ee4b07f4c6bbefe
     path: patches/bare-link@3.2.2.patch
@@ -50,16 +47,20 @@ patchedDependencies:
   metro@0.83.3:
     hash: fdb75734e8b3226d6728dd4b137ce0747a30c033f86b7d3bb37df04d34d08122
     path: patches/metro@0.83.3.patch
+  react-native-live-audio-stream@1.1.1:
+    hash: e75aa9a302d585be13f91f8385b48fbe573c2e45ee89b9258da2cfccd1dbc1aa
+    path: patches/react-native-live-audio-stream@1.1.1.patch
+
 importers:
 
   .:
     dependencies:
       '@arkade-os/sdk':
-        specifier: ^0.4.72
-        version: 0.4.72(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
+        specifier: 0.4.78
+        version: 0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
       '@arkade-os/swap':
-        specifier: ^0.0.14
-        version: 0.0.14(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
+        specifier: 0.0.24
+        version: 0.0.24(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
       '@arkade-os/wdk':
         specifier: github:arkade-os/arkade-wdk#102967daf634759f1602f06dd27f3b21a0a88d9a
         version: https://codeload.github.com/arkade-os/arkade-wdk/tar.gz/102967daf634759f1602f06dd27f3b21a0a88d9a(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))(bare-url@2.5.4)(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(sodium-javascript@0.8.0)
@@ -82,17 +83,17 @@ importers:
         specifier: 0.11.0
         version: 0.11.0(@qvac/sdk@0.21.0(870e029b05c8e740abd72cfad143dbc2))
       '@kaleidorg/swap-sdk':
-        specifier: ^0.7.2
-        version: 0.7.2(97282afab3b61d4ec9bf2ebca2993c58)
+        specifier: ^0.12.0
+        version: 0.12.0(353bc03da4774e0dd557e9ed001fa004)
       '@kaleidorg/wallet-engine':
-        specifier: 1.0.0-beta.75
-        version: 1.0.0-beta.75(patch_hash=1578bf3164767820650213ed96d3e86efe13eacdfdf61298d2312055ddb2b421)(302afbf817ccc7f0d4f2c807e881fd15)
+        specifier: 1.0.0-beta.80
+        version: 1.0.0-beta.80(5c134c987824d4402fa982d1586c1611)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
-        specifier: 1.0.0-beta.2
-        version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
+        specifier: 1.0.0-beta.3
+        version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
       '@kaleidorg/wdk-wallet-rln':
-        specifier: 1.0.0-beta.2
-        version: 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
+        specifier: 1.0.0-beta.5
+        version: 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
       '@noble/curves':
         specifier: ^1.9.0
         version: 1.9.7
@@ -287,7 +288,7 @@ importers:
         version: 1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
       react-native-live-audio-stream:
         specifier: ^1.1.1
-        version: 1.1.1
+        version: 1.1.1(patch_hash=e75aa9a302d585be13f91f8385b48fbe573c2e45ee89b9258da2cfccd1dbc1aa)
       react-native-markdown-display:
         specifier: ^7.0.2
         version: 7.0.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
@@ -422,8 +423,8 @@ packages:
       expo-task-manager:
         optional: true
 
-  '@arkade-os/sdk@0.4.71':
-    resolution: {integrity: sha512-gLoHL40EPi21+XlZzxMVfLYl4nWNVXqhRIwksV0vzSb8ID+hfYl9PYm5cgazEwxFkP/tm08C2uK72QjSAkG94A==}
+  '@arkade-os/sdk@0.4.78':
+    resolution: {integrity: sha512-y3qrs4yP53ujULPcI/OrzGPeG4WX+vxKdU6xhcumReoOAUgJQc4D5K+OlzX9Ro1K1y6+HzjD/1eCQYTPml5GwQ==}
     engines: {node: '>=22.12.0 <27'}
     peerDependencies:
       '@react-native-async-storage/async-storage': '>=1.0.0'
@@ -443,33 +444,12 @@ packages:
       expo-task-manager:
         optional: true
 
-  '@arkade-os/sdk@0.4.72':
-    resolution: {integrity: sha512-u0h+oLu+l9//VBQxroIgHjXTdfQsOZZGfmXKkmZj5SzaozsDH6L2FDUbUtzGlNZF/UBKqcwwBHb4PzsP8unjZQ==}
-    engines: {node: '>=22.12.0 <27'}
-    peerDependencies:
-      '@react-native-async-storage/async-storage': '>=1.0.0'
-      expo: '>=54.0.0'
-      expo-background-task: ~1.0.10 || >=55.0.0
-      expo-sqlite: ~16.0.10 || >=55.0.0
-      expo-task-manager: ~14.0.9 || >=55.0.0
-    peerDependenciesMeta:
-      '@react-native-async-storage/async-storage':
-        optional: true
-      expo:
-        optional: true
-      expo-background-task:
-        optional: true
-      expo-sqlite:
-        optional: true
-      expo-task-manager:
-        optional: true
-
-  '@arkade-os/solver-discovery@0.2.3':
-    resolution: {integrity: sha512-i77/BCAmHY4fec41HfYb5osu+QkCEOf2jLha1HX5pkp6bHGrm10WG8eOGREKqPCC4bOI3E8cKwEVGxP0qlNt5g==}
+  '@arkade-os/solver-discovery@0.2.7':
+    resolution: {integrity: sha512-T5dfiezUG5YKtzOmX1Z2E0LePF3bx6unsqq7UPgha0Zp9PQFcodYMYl6T1i0AbruaGup5XWq8Die5wusiA5qUA==}
     engines: {node: '>=18'}
 
-  '@arkade-os/swap@0.0.14':
-    resolution: {integrity: sha512-Wn159smG1KrcJk9oCyp4MCLK1cLeiNEGUeYuQNQcKZ8SMxLRW2J3sf34KK4EJVOfuU1nDOgLcb8fsL2A8Wm8vw==}
+  '@arkade-os/swap@0.0.24':
+    resolution: {integrity: sha512-EFaKR3Q1wWduX5nvA4CUxA86BO7q50QPYSV0o2RFG64i0tlo/eWsJpqmifWeQ23i6WlBRrJjoYKH6jzRZ254Ow==}
     peerDependencies:
       nostr-tools: ^2.12.0
     peerDependenciesMeta:
@@ -1622,26 +1602,25 @@ packages:
       '@qvac/sdk':
         optional: true
 
-  '@kaleidorg/swap-sdk@0.7.2':
-    resolution: {integrity: sha512-+zJbph7BUU5CNvzf/aEYUPsURXtf+uQVBeVNweYNS/SHiTT9W9x5nNhDr39CY6fkUc7lc3B0D59YGQJP7XJ+hg==}
+  '@kaleidorg/swap-sdk@0.12.0':
+    resolution: {integrity: sha512-nG1VYIrUdpBaytI4C2V5drvG7Y//KCVVVhikZPNd6V/K9j4vHeDYXs2CdIDfixbmHhy9f9Vwie34pOE2zMnqHg==}
     engines: {node: '>=22'}
     peerDependencies:
-      '@arkade-os/sdk': '>=0.4.71 <0.5.0'
-      '@arkade-os/swap': ^0.0.14
+      '@arkade-os/sdk': '>=0.4.74 <0.5.0'
+      '@arkade-os/swap': '>=0.0.20 <0.1.0'
     peerDependenciesMeta:
       '@arkade-os/sdk':
         optional: true
       '@arkade-os/swap':
         optional: true
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.75':
-    resolution: {integrity: sha512-yq7P5dq48LMiY0YNH/Wrha1+rxTS/LBxGxrrQjJOFGxUlTwRKTkH4ev1LEeMl5B37bOTXiF8p/nwdUwhn8bVkw==}
+  '@kaleidorg/wallet-engine@1.0.0-beta.80':
+    resolution: {integrity: sha512-4qBvVL3e6Gis3Wk5bC8zugSJT0k3NGG6aF2SVrXnLvJnTgllZA02j+TZnJN6CICb4DISLZ0rmLLfOAMRWhw/Vg==}
     peerDependencies:
-      '@arkade-os/boltz-swap': ^0.3.22
       '@arkade-os/sdk': ^0.4.72
       '@buildonspark/spark-sdk': ^0.7.10
       '@flashnet/sdk': ^0.5.7
-      '@kaleidorg/swap-sdk': ^0.1.1 || ^0.3.0 || ^0.7.0
+      '@kaleidorg/swap-sdk': ^0.12.0
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': ^1.0.0-beta.3
       '@kaleidorg/wdk-wallet-liquid': ^1.0.0-beta.9
       '@kaleidorg/wdk-wallet-rln': ^1.0.0-beta.5
@@ -1652,8 +1631,6 @@ packages:
       '@utexo/wdk-wallet-rgb': ^2.0.3
       kaleido-sdk: ^0.1.18
     peerDependenciesMeta:
-      '@arkade-os/boltz-swap':
-        optional: true
       '@arkade-os/sdk':
         optional: true
       '@buildonspark/spark-sdk':
@@ -1681,13 +1658,13 @@ packages:
       kaleido-sdk:
         optional: true
 
-  '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.2':
-    resolution: {integrity: sha512-rRU5OcBRp6jeY0kGffqT2jezFFVuAPX519Qc99jcHEo+qLJuNqM8sSHMfO5x8bx4zrF0AXhN3CEpsSHPHDHUaA==}
+  '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3':
+    resolution: {integrity: sha512-bSFvV/i5obI2yzQS3sgb6dxLhPL8dURGzG6VCrCHSGm5F23CH0o+kjQaheD5+QPpCF74guP5LhRzvkO1+QqR2Q==}
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
 
-  '@kaleidorg/wdk-wallet-rln@1.0.0-beta.2':
-    resolution: {integrity: sha512-falAKsvaMDUlhRv+PE5xqAL1IMwLo1DXWB9wWcoc3Kw5P+hLy0JXm19nwhVcsUM15MKl5GaByEE2+ov0cvVfmA==}
+  '@kaleidorg/wdk-wallet-rln@1.0.0-beta.5':
+    resolution: {integrity: sha512-5u9AzKpMHRMtp0EoHammRA6LUJ0MfHIdbSMqhRtqWF4o8+31sykCNvlUJk7tP40bm04g2FQ9wOiVKUOdrpYdBA==}
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
 
@@ -1805,18 +1782,21 @@ packages:
   '@opentelemetry/sdk-trace-base@2.8.0':
     resolution: {integrity: sha512-mhU4jp+vW0mGbFRd+GeXHvmfA4aDqWjBjLC3pE5XMpLs0IE2ryYb019Ts2AQrOq67gaTF25D91+fgvEHDZEnuQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-node@2.8.0':
     resolution: {integrity: sha512-nZt9OGufioAc3AfoLTqA9bsAeaMJAictYDdI2VcNQ+PmT+3rfKjAZDZvgPfd8VPX0O5Bw1hdQF6kDK8VSpZiWg==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
   '@opentelemetry/sdk-trace-web@2.8.0':
     resolution: {integrity: sha512-P3ZM8BGJ5mwjtyfAxRyxsCyWHvaj+xahdhLoS3YiPsEyTHcWTVzx2691C8SrGkpvro3tNFCsWuNNrvM+spKODg==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.0.0 <1.10.0'
 
@@ -1880,14 +1860,12 @@ packages:
     engines: {bare: '>=1.20.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/asr-ggml-linux-x64@0.7.0':
     resolution: {integrity: sha512-qF45QUDYoudIHkajoZ+YomwhukH2K3yggVPlgflwqo+dJ10KKK+9UMoox5DAbc7CO4t00y+GuJqALjR+tCTrAg==}
     engines: {bare: '>=1.20.0'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/asr-ggml-win32-x64@0.7.0':
     resolution: {integrity: sha512-KB3xVFi3c98irYXXJk7QsU9cUb57R26I6XEq98od3Uai13zGdNSafvqKp0DpBg4XbV06vG+GS3XPgn60jn+HPg==}
@@ -1916,14 +1894,12 @@ packages:
     engines: {bare: '>=1.19.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/audiogen-ggml-linux-x64@0.5.1':
     resolution: {integrity: sha512-GQZ3ixV3sOPzFdH7iXoOnY97S2LWMUDpWENIef3CA6rVRzkTR4n14sGBqMfQYWhDHB/dnHx12GAEHOzpzONelw==}
     engines: {bare: '>=1.19.0'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/audiogen-ggml-win32-x64@0.5.1':
     resolution: {integrity: sha512-wIN8/Hy/b+MtxX8Fd+nEse+k7W6V0VHmUJcVTSVUQL+J6kioK0mBI4NlXinWBjelJAqemfLS/UqrwfcrV/InsQ==}
@@ -1983,14 +1959,12 @@ packages:
     engines: {bare: '>=1.24.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/fabric-linux-x64@0.18.1':
     resolution: {integrity: sha512-shUBeDWJoKjG2E0/YIv0sPJMEPj3uS9f/DMDBzE8pMYUb3P0XptM5gOaCx4u0pkMcE73TLBrNHbcdPHS3z4ZXQ==}
     engines: {bare: '>=1.24.0'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/fabric-win32-x64@0.18.1':
     resolution: {integrity: sha512-PX9oPp5Xc25z+gptYE90icxEGPyAc3S/FrNsFKWjjuCXgIWfA1uOJS4BW4D8CeOQyfHS9/mgxD2nLcwDKk7tiw==}
@@ -2147,14 +2121,12 @@ packages:
     engines: {bare: '>=1.19.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/tts-ggml-linux-x64@0.10.1':
     resolution: {integrity: sha512-65FA84LX+9cCi7q7IrGAV/BAW7c42Z5qNsRGpe6uoIBMnb1treSXQDb/hkZEnG4JEbv3TCuWj+TXrN+i9qrkAA==}
     engines: {bare: '>=1.19.0'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   '@qvac/tts-ggml-win32-x64@0.10.1':
     resolution: {integrity: sha512-l99qIGcbVNzk0+xVWz+yjLkOTIG4b4RCVztSzcIdRADnzZpT8rG4I+3lvl35Ahxew9YTe+DqEF5kXnIZgmJ33w==}
@@ -2425,6 +2397,7 @@ packages:
 
   '@tetherto/wdk-uikit-react-native@1.0.0-beta.2':
     resolution: {integrity: sha512-w485qkMeOSIhnK0fxQtsJuQJMn7zQLb7w+X3jTQaVz6GLhDZj5iRIPHi4lV8MUGRrVdYuT50PSNVxAjPFIGqqQ==}
+    deprecated: This package is no longer maintained.
     peerDependencies:
       react: '*'
       react-native: '*'
@@ -5216,28 +5189,24 @@ packages:
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [glibc]
 
   lightningcss-linux-arm64-musl@1.32.0:
     resolution: {integrity: sha512-UpQkoenr4UJEzgVIYpI80lDFvRmPVg6oqboNHfoH4CQIfNA+HOrZ7Mo7KZP02dC6LjghPQJeBsvXhJod/wnIBg==}
     engines: {node: '>= 12.0.0'}
     cpu: [arm64]
     os: [linux]
-    libc: [musl]
 
   lightningcss-linux-x64-gnu@1.32.0:
     resolution: {integrity: sha512-V7Qr52IhZmdKPVr+Vtw8o+WLsQJYCTd8loIfpDaMRWGUZfBOYEJeyJIkqGIDMZPwPx24pUMfwSxxI8phr/MbOA==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
-    libc: [glibc]
 
   lightningcss-linux-x64-musl@1.32.0:
     resolution: {integrity: sha512-bYcLp+Vb0awsiXg/80uCRezCYHNg1/l3mt0gzHnWV9XP1W5sKa5/TCdGWaR/zBM2PeF/HbsQv/j2URNOiVuxWg==}
     engines: {node: '>= 12.0.0'}
     cpu: [x64]
     os: [linux]
-    libc: [musl]
 
   lightningcss-win32-arm64-msvc@1.32.0:
     resolution: {integrity: sha512-8SbC8BR40pS6baCM8sbtYDSwEVQd4JlFTOlaD3gWGHfThTcABnNDBda6eTZeqbofalIJhFx0qKzgHJmcPTnGdw==}
@@ -7414,7 +7383,7 @@ snapshots:
       - ecpair
       - utf-8-validate
 
-  '@arkade-os/sdk@0.4.71(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)':
+  '@arkade-os/sdk@0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)':
     dependencies:
       '@bitcoinerlab/descriptors-scure': 3.1.7(bip32@5.0.1(typescript@5.9.3))
       '@marcbachmann/cel-js': 8.0.0
@@ -7439,37 +7408,12 @@ snapshots:
       - ecpair
       - utf-8-validate
 
-  '@arkade-os/sdk@0.4.72(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)':
-    dependencies:
-      '@bitcoinerlab/descriptors-scure': 3.1.7(bip32@5.0.1(typescript@5.9.3))
-      '@marcbachmann/cel-js': 8.0.0
-      '@noble/curves': 2.0.1
-      '@noble/secp256k1': 3.0.0
-      '@scure/base': 2.0.0
-      '@scure/bip39': 2.0.1
-      '@scure/btc-signer': 2.0.1
-      bip68: 1.0.4
-      ws-electrumx-client: 1.0.5
-    optionalDependencies:
-      '@react-native-async-storage/async-storage': 2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
-      expo: 54.0.37(@babel/core@7.29.7)(@expo/metro-runtime@6.1.2)(graphql@16.14.2)(react-native-webview@13.16.1(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(typescript@5.9.3)
-      expo-background-task: 1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
-      expo-sqlite: 16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
-      expo-task-manager: 14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
-    transitivePeerDependencies:
-      - '@ledgerhq/ledger-bitcoin'
-      - bip32
-      - bitcoinjs-lib
-      - bufferutil
-      - ecpair
-      - utf-8-validate
+  '@arkade-os/solver-discovery@0.2.7': {}
 
-  '@arkade-os/solver-discovery@0.2.3': {}
-
-  '@arkade-os/swap@0.0.14(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))':
+  '@arkade-os/swap@0.0.24(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))':
     dependencies:
-      '@arkade-os/sdk': 0.4.71(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
-      '@arkade-os/solver-discovery': 0.2.3
+      '@arkade-os/sdk': 0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
+      '@arkade-os/solver-discovery': 0.2.7
       '@noble/ciphers': 2.1.1
       '@noble/curves': 2.0.1
       '@noble/hashes': 2.0.1
@@ -9228,12 +9172,12 @@ snapshots:
     optionalDependencies:
       '@qvac/sdk': 0.21.0(870e029b05c8e740abd72cfad143dbc2)
 
-  '@kaleidorg/swap-sdk@0.7.2(97282afab3b61d4ec9bf2ebca2993c58)':
+  '@kaleidorg/swap-sdk@0.12.0(353bc03da4774e0dd557e9ed001fa004)':
     optionalDependencies:
-      '@arkade-os/sdk': 0.4.72(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
-      '@arkade-os/swap': 0.0.14(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
+      '@arkade-os/sdk': 0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
+      '@arkade-os/swap': 0.0.24(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.75(patch_hash=1578bf3164767820650213ed96d3e86efe13eacdfdf61298d2312055ddb2b421)(302afbf817ccc7f0d4f2c807e881fd15)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.80(5c134c987824d4402fa982d1586c1611)':
     dependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
@@ -9242,27 +9186,26 @@ snapshots:
       '@scure/bip39': 1.6.0
       '@scure/btc-signer': 2.2.0
     optionalDependencies:
-      '@arkade-os/boltz-swap': 0.3.40(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
-      '@arkade-os/sdk': 0.4.72(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
+      '@arkade-os/sdk': 0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
       '@buildonspark/spark-sdk': 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
       '@flashnet/sdk': 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)
-      '@kaleidorg/swap-sdk': 0.7.2(97282afab3b61d4ec9bf2ebca2993c58)
-      '@kaleidorg/wdk-protocol-swap-kaleidoswap': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
-      '@kaleidorg/wdk-wallet-rln': 1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
+      '@kaleidorg/swap-sdk': 0.12.0(353bc03da4774e0dd557e9ed001fa004)
+      '@kaleidorg/wdk-protocol-swap-kaleidoswap': 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
+      '@kaleidorg/wdk-wallet-rln': 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
       '@secondts/bark-react-native': 0.25.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@tetherto/wdk-wallet-spark': 1.0.0-beta.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))(bare-url@2.5.4)(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(sodium-javascript@0.8.0)(ws@8.21.0)
       '@utexo/rgb-lib-wasm': 1.0.0-beta.3
       '@utexo/wdk-wallet-rgb': 2.0.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))(bare-url@2.5.4)(sodium-javascript@0.8.0)(typescript@5.9.3)
       kaleido-sdk: 0.1.18(typescript@5.9.3)
 
-  '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)':
+  '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))
       kaleido-sdk: 0.1.18(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
-  '@kaleidorg/wdk-wallet-rln@1.0.0-beta.2(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)':
+  '@kaleidorg/wdk-wallet-rln@1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))
       kaleido-sdk: 0.1.18(typescript@5.9.3)
@@ -16185,7 +16128,7 @@ snapshots:
       react: 19.1.4
       react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
 
-  react-native-live-audio-stream@1.1.1: {}
+  react-native-live-audio-stream@1.1.1(patch_hash=e75aa9a302d585be13f91f8385b48fbe573c2e45ee89b9258da2cfccd1dbc1aa): {}
 
   react-native-markdown-display@7.0.2(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4):
     dependencies:

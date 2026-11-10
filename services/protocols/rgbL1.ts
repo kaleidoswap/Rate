@@ -6,7 +6,7 @@
  * RGB Lightning node (paired over NWC) or this on-device wallet; the node wins
  * when both are available (see utils/protocol-bridge.ts).
  *
- * Runs on mainnet (the default, like the wallet's other accounts) or Mutinynet,
+ * Runs on mainnet (the default), Mutinynet, public Signet or Testnet,
  * switchable: each network is a separate RGB wallet with its own balances,
  * ready flag and cloud backup. rgb-lib names a wallet's folder after the seed,
  * not the network, so the network a seed first started on keeps the original
@@ -55,11 +55,11 @@ export function isRgbL1NetworkSwitchSupported(): boolean {
 
 export const RGB_L1_UPDATE_TO_SWITCH = 'Update the app to switch networks.'
 
-export type RgbL1Network = 'mainnet' | 'mutinynet'
-export const RGB_L1_NETWORKS: readonly RgbL1Network[] = ['mainnet', 'mutinynet']
+export type RgbL1Network = 'mainnet' | 'mutinynet' | 'signet' | 'testnet'
+export const RGB_L1_NETWORKS: readonly RgbL1Network[] = ['mainnet', 'mutinynet', 'signet', 'testnet']
 /** What a new wallet uses, matching its Spark and Arkade accounts. */
 export const RGB_L1_DEFAULT_NETWORK: RgbL1Network = 'mainnet'
-export const RGB_L1_NETWORK_LABEL: Record<RgbL1Network, string> = { mainnet: 'Mainnet', mutinynet: 'Mutinynet' }
+export const RGB_L1_NETWORK_LABEL: Record<RgbL1Network, string> = { mainnet: 'Mainnet', mutinynet: 'Mutinynet', signet: 'Signet', testnet: 'Testnet' }
 
 export interface RgbL1Host {
   network: RgbL1Network
@@ -71,6 +71,16 @@ export interface RgbL1Host {
 
 // EXPO_PUBLIC_* vars are inlined at build time only on direct member access.
 const DEFAULTS: Record<RgbL1Network, RgbL1Host> = {
+  signet: {
+    network: 'signet',
+    indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_SIGNET_INDEXER_URL || 'https://mempool.space/signet/api',
+    transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_SIGNET_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+  },
+  testnet: {
+    network: 'testnet',
+    indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_TESTNET_INDEXER_URL || 'https://blockstream.info/testnet/api',
+    transportEndpoint: process.env.EXPO_PUBLIC_RGB_L1_TESTNET_PROXY_ENDPOINT || 'rpcs://proxy.iriswallet.com/0.2/json-rpc',
+  },
   mainnet: {
     network: 'mainnet',
     indexerUrl: process.env.EXPO_PUBLIC_RGB_L1_MAINNET_INDEXER_URL || 'https://blockstream.info/api',
@@ -180,8 +190,8 @@ export function rgbL1DataId(network: RgbL1Network): string {
   return network === 'mutinynet' ? RGB_L1_CUSTOM_SIGNET_ID : network
 }
 
-/** Mutinynet's custom-signet wallet never uses the original folder (old SIGNET data may be there). */
-const usesOwnFolder = (network: RgbL1Network) => rgbL1DataId(network) !== network
+/** Test networks always use their own folders: old Mutinynet SIGNET data may occupy the original one. */
+const usesOwnFolder = (network: RgbL1Network) => network !== 'mainnet'
 
 /** The folder rgb-lib keeps a network's wallet in when it isn't in the original one. */
 export const rgbL1Subdir = (network: RgbL1Network) => `rgb-${rgbL1DataId(network)}`

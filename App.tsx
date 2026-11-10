@@ -62,6 +62,7 @@ import MapScreen from './screens/MapScreen';
 import ContactsScreen from './screens/ContactsScreen';
 import ChatScreen from './screens/ChatScreen';
 import SwapScreen from './screens/SwapScreen';
+import MakerRoutesScreen from './screens/MakerRoutesScreen';
 import NostrSettingsScreen from './screens/NostrSettingsScreen';
 import OnboardingProfileScreen from './screens/OnboardingProfileScreen';
 import ProfileEditScreen from './screens/ProfileEditScreen';
@@ -93,6 +94,7 @@ type RootStackParamList = {
   WalletReview: undefined;
   PrismoReview: { state?: string } | undefined;
   WalletFlowsReview: { page?: string; state?: string; query?: string; period?: string } | undefined;
+  MakerRoutes: undefined;
   Swap: { fromAsset?: string; toAsset?: string; fromAmountSat?: number; fromAmountUnits?: number } | undefined;
   NostrSettings: undefined;
   Profile: undefined;
@@ -199,7 +201,7 @@ function DashboardTabs() {
         name="Mind"
         component={MindTabScreen}
         options={{
-          tabBarLabel: 'Agent',
+          tabBarLabel: 'Mind',
           tabBarIcon: ({ focused, color }: TabBarIconProps) => (
             <MindCharacterBadge size={24} color={color} focused={focused} />
           ),
@@ -283,6 +285,7 @@ function AppNavigator() {
         <Stack.Screen name="Bridge" component={asModalScreen(BridgeScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="QRScanner" component={asModalScreen(QRScannerScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={FLOW_OPTIONS} />
+        <Stack.Screen name="MakerRoutes" component={asModalScreen(MakerRoutesScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Swap" component={asModalScreen(SwapScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="AssetDetail" component={asModalScreen(AssetDetailScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />

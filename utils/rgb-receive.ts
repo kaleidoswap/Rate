@@ -44,7 +44,7 @@ interface RgbAdapterLike {
  * What the RGB account's adapter accepts. RGB on this phone takes everything. The
  * node through the engine takes the invoice options and lists UTXOs, but creates
  * them only when privileged ops are enabled. The node paired over NWC forwards
- * the invoice call as is: only expiry and confirmations are known to pass through,
+ * the invoice options through its RLN request mapping,
  * and lists or creates UTXOs only when the connection advertises those methods.
  */
 export function rgbReceiveSupport(adapter: unknown): RgbReceiveSupport {
@@ -52,7 +52,7 @@ export function rgbReceiveSupport(adapter: unknown): RgbReceiveSupport {
   if (!a) return NO_RGB_RECEIVE_SUPPORT;
   if (typeof a.walletType === 'function') {
     const has = (m: string) => a.hasRlnMethod?.(m) === true;
-    return { invoiceKind: false, expiry: true, minConfirmations: true, listUtxos: has('rln_list_unspents'), createUtxos: has('rln_create_utxos') };
+    return { invoiceKind: a.walletType() === 'rln', expiry: true, minConfirmations: true, listUtxos: has('rln_list_unspents'), createUtxos: has('rln_create_utxos') };
   }
   const onDevice = a.protocolName === 'RGB_L1';
   const engineNode = a.protocolName === 'RGB_LN' && typeof a.executeProtocolOperation === 'function';

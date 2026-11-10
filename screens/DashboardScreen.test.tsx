@@ -14,6 +14,7 @@ jest.mock('@react-navigation/native', () => ({
   useIsFocused: () => true,
   useFocusEffect: (fn: any) => require('react').useEffect(fn, [fn]),
 }));
+jest.mock('../components/RecentActivityWidget', () => ({ RecentActivityWidget: () => null }));
 jest.mock('../components/mind/InsightCards', () => ({ InsightCards: () => null }));
 jest.mock('../components/mind/IntentBar', () => ({ IntentBar: () => null }));
 jest.mock('../services/initializeServices', () => ({ initializeProtocolServices: jest.fn() }));

@@ -42,3 +42,11 @@ build/
 
 # JetBrains IDE
 .idea/
+
+# Generated test reports
+coverage/
+
+.pnpm-store/
+
+# Local run/e2e artifacts (emulator logs, design reviews, audit output)
+output/

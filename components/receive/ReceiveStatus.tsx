@@ -5,20 +5,24 @@ import { useAppTheme } from '../../theme/ThemeProvider';
 import type { DepositDetectionStatus } from '../../hooks/useDepositDetection';
 
 export type ReceiveStatusValue = 'idle' | 'generating' | DepositDetectionStatus;
-export function ReceiveStatus({ visible, status, message, hint }: {
+export function ReceiveStatus({ visible, status, message, hint, amountLabel, requestOnly = false }: {
   visible: boolean; status: ReceiveStatusValue; message?: string;
+  /** What arrived, e.g. "100 USDT", once the watcher knows it. */
+  amountLabel?: string;
   /** What the user must do while waiting, e.g. keep the app open. */
   hint?: string;
+  requestOnly?: boolean;
 }) {
   const t = useAppTheme();
   if (!visible) return null;
   const problem = status === 'failed' || status === 'expired';
   const received = status === 'confirmed' || status === 'claimed';
   const busy = status === 'pending' || status === 'generating';
-  const title = received ? 'Payment received' : status === 'pending' ? 'Payment detected · confirming'
+  const title = received ? (amountLabel ? `${amountLabel} received` : 'Payment received')
+    : status === 'pending' ? (amountLabel ? `${amountLabel} incoming · confirming` : 'Payment detected · confirming')
     : status === 'generating' ? 'Preparing your request' : status === 'expired' ? 'Request expired'
-    : status === 'failed' ? 'Could not confirm payment' : 'Waiting for payment';
-  const guidance = message || (status === 'pending' ? 'The sender does not need to pay again.' : undefined);
+    : status === 'failed' ? 'Could not confirm payment' : requestOnly ? 'Request ready' : 'Waiting for payment';
+  const guidance = message || (status === 'pending' ? 'The sender does not need to pay again.' : requestOnly ? 'No transfer detected yet. Share this request with the sender.' : undefined);
   const color = problem ? t.colors.warning[500] : received ? t.colors.success[500] : t.colors.text.secondary;
   return <View accessibilityLiveRegion="polite" style={{ alignItems: 'center', gap: t.spacing[2], paddingVertical: t.spacing[3] }}>
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
@@ -26,6 +30,6 @@ export function ReceiveStatus({ visible, status, message, hint }: {
       <Text style={{ color, fontSize: t.typography.fontSize.sm }}>{title}</Text>
     </View>
     {!!hint && !received && !problem && <Text style={{ color: t.colors.warning[500], textAlign: 'center', fontSize: t.typography.fontSize.xs }}>{hint}</Text>}
-    {!!guidance && (problem || status === 'pending') && <Text style={{ color: t.colors.text.secondary, textAlign: 'center', fontSize: t.typography.fontSize.sm }}>{guidance}</Text>}
+    {!!guidance && (problem || status === 'pending' || (requestOnly && !received && !busy)) && <Text style={{ color: t.colors.text.secondary, textAlign: 'center', fontSize: t.typography.fontSize.sm }}>{guidance}</Text>}
   </View>;
 }

@@ -89,7 +89,7 @@ export function BarkBoardingPanel() {
         <View style={styles.row}>
           <Text style={[styles.body, styles.flex]}>
             {onchain
-              ? `On-chain: ${onchain.confirmedSats.toLocaleString()} sats confirmed · ${onchain.pendingSats.toLocaleString()} pending`
+              ? `On-chain: ${onchain.confirmedSats.toLocaleString('en-US')} sats confirmed · ${onchain.pendingSats.toLocaleString('en-US')} pending`
               : 'Could not read the on-chain balance.'}
             {onchain && loadFailed ? ' (could not refresh)' : ''}
           </Text>

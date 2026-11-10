@@ -10,7 +10,7 @@ module.exports = {
     // expo(-.*)? / react-native(-.*)? cover the whole expo-* and react-native-* families
     // (expo-font, react-native-reanimated, …), not just the bare packages — the
     // hyphenated ones ship ESM too and need the same transform.
-    'node_modules/(?!(react-native(-.*)?|@react-native|@react-navigation|expo(-.*)?|@expo|@react-native-community|@nostr-dev-kit|nostr-tools|react-redux|@reduxjs|@testing-library|@kaleidorg|@scure|@noble|micro-packed|@arkade-os|@bitcoinerlab|@marcbachmann)/)'
+    'node_modules/(?!(react-native(-.*)?|@react-native|@react-navigation|expo(-.*)?|@expo|@react-native-community|@nostr-dev-kit|nostr-tools|react-redux|@reduxjs|@testing-library|@kaleidorg|@tetherto|qr|@scure|@noble|micro-packed|@arkade-os|@bitcoinerlab|@marcbachmann)/)'
   ],
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json'],
   testMatch: ['**/__tests__/**/*.test.[jt]s?(x)', '**/?(*.)+(spec|test).[jt]s?(x)'],
@@ -28,10 +28,10 @@ module.exports = {
   // and never checked.
   coverageThreshold: {
     global: {
-      statements: 36,
-      branches: 34,
-      functions: 35,
-      lines: 36
+      statements: 56.96,
+      branches: 52.68,
+      functions: 52.98,
+      lines: 58.33
     }
   },
   // Sibling packages (universal-bolt12) fall back to this app's node_modules for babel helpers.

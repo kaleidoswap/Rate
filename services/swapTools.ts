@@ -69,6 +69,10 @@ interface CachedQuote {
   expiresAt: number;
 }
 const quoteCache = new Map<string, CachedQuote>();
+// Only a successful execution response is evidence of Flashnet settlement.
+// After restart (or eviction), report unknown rather than inventing success.
+const flashnetReceipts = new Map<string, string>();
+let quoteSequence = 0;
 
 export interface SwapQuoteView {
   quoteId: string;
@@ -193,7 +197,7 @@ async function fetchQuote(from: string, to: string, amt: number): Promise<{ id: 
     });
     const rawToAmount = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
     const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
-    const id = `flashnet-${now}`;
+    const id = `flashnet-${now}-${++quoteSequence}`;
     log('flashnet quote', { id, from, to, amt, rawToAmount });
     return {
       id,
@@ -383,6 +387,10 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
       throw new Error('That quote expired — please re-quote before swapping.');
     }
 
+    // Consume synchronously before the first await: concurrent taps and uncertain
+    // network results must never submit the same reviewed quote twice.
+    quoteCache.delete(id);
+
     if (q.venue === 'flashnet') {
       const res: any = await flashnet().executeSwap({
         poolId: q.poolId,
@@ -393,11 +401,16 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
         maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
       });
       quoteCache.delete(id);
+      flashnetReceipts.set(id, res?.outboundTransferId ?? '');
+      if (flashnetReceipts.size > 100) flashnetReceipts.delete(flashnetReceipts.keys().next().value!);
       log('flashnet swap done', { id });
       return { atomic_id: id, venue: 'flashnet', status: 'completed', txid: res?.outboundTransferId ?? '' };
     }
 
     await assertChannelCapacity(q);
+    if (Date.now() >= q.expiresAt || Date.now() - q.ts > QUOTE_TTL_MS) {
+      throw new Error('That quote expired while checking liquidity — please re-quote before swapping.');
+    }
     // KaleidoSwap atomic: init → verify terms → whitelist → taker → execute.
     const init: any = await maker().initSwap({
       rfq_id: q.rfqId ?? id,
@@ -424,8 +437,11 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
   kaleidoswap_atomic_status: async ({ atomic_id }) => {
     requireSwaps();
     const id = String(atomic_id ?? '');
-    // Flashnet settles instantly (no status endpoint).
-    if (id.startsWith('flashnet-')) return { atomic_id: id, status: 'completed' };
+    if (id.startsWith('flashnet-')) {
+      return flashnetReceipts.has(id)
+        ? { atomic_id: id, status: 'completed', txid: flashnetReceipts.get(id) }
+        : { atomic_id: id, status: 'unknown' };
+    }
     const a = protocolManager.getAdapterIfAvailable('RGB_LN');
     const s: any = await a?.getSwapStatus?.(id);
     return { atomic_id: id, status: s?.status ?? 'pending' };
