@@ -1,5 +1,5 @@
 import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
-import { SwapPair, getAssetId, getQuoteLayers, isFlashnetPair, isBtcTicker, swapChannelShortfall, DEFAULT_FLASHNET_SLIPPAGE_BPS, RLN_HTLC_MIN_MSAT } from '../utils/swap-model';
+import { SwapPair, swapInputRaw, getAssetId, getQuoteLayers, isFlashnetPair, isBtcTicker, swapChannelShortfall, DEFAULT_FLASHNET_SLIPPAGE_BPS, RLN_HTLC_MIN_MSAT } from '../utils/swap-model';
 import type { SwapQuote } from '../store/slices/swapSlice';
 
 const quoteClients = new WeakMap<SwapQuote, unknown>();
@@ -20,13 +20,13 @@ export function bestSwapOffer(offers: SwapOffer[]): SwapOffer | undefined {
   return valid.reduce((best, o) => o.quote!.to_amount > best.quote!.to_amount ? o : best);
 }
 export async function fetchSwapQuote(pair: SwapPair, fromTicker: string, toTicker: string, fromAmount: number, unit: string): Promise<SwapQuote> {
+  if (pair.is_active === false || fromTicker === toTicker || ![pair.base.ticker, pair.quote.ticker].includes(fromTicker) || ![pair.base.ticker, pair.quote.ticker].includes(toTicker)) throw new Error('Choose an available trading pair.');
   const from = pair.base.ticker === fromTicker ? pair.base : pair.quote;
   const to = pair.base.ticker === toTicker ? pair.base : pair.quote;
   const fromId = getAssetId(from), toId = getAssetId(to);
-  const toSats = (value: number) => unit === 'sats' ? value : Math.round(value * 1e8);
   const fromSats = (value: number) => unit === 'sats' ? value : value / 1e8;
   const flash = isFlashnetPair(pair);
-  const rawInput = isBtcTicker(fromTicker) ? toSats(fromAmount) * (flash ? 1 : 1000) : Math.round(fromAmount * 10 ** from.precision);
+  const rawInput = swapInputRaw(fromAmount, from, unit, flash);
   if (!Number.isSafeInteger(rawInput) || rawInput <= 0) throw new Error('Enter a valid amount.');
   const client = flash ? flashnetClientManager.getClient() : kaleidoClientManager.getClient();
   let quote: SwapQuote;
@@ -49,7 +49,7 @@ export async function fetchSwapQuote(pair: SwapPair, fromTicker: string, toTicke
       from_asset: { asset_id: fromId, layer: fromLayer as any, amount: rawInput }, to_asset: { asset_id: toId, layer: toLayer as any },
     });
     const rawOutput = Number(response.to_asset?.amount);
-    if (response.from_asset?.asset_id !== fromId || response.to_asset?.asset_id !== toId || Number(response.from_asset?.amount) !== rawInput || !response.rfq_id) throw new Error('Provider returned different swap terms.');
+    if (response.from_asset?.asset_id !== fromId || response.to_asset?.asset_id !== toId || Number(response.from_asset?.amount) !== rawInput || response.from_asset?.layer !== fromLayer || response.to_asset?.layer !== toLayer || !response.rfq_id) throw new Error('Provider returned different swap terms.');
     const fee = Number(response.fee?.final_fee);
     const feePrecision = response.fee?.fee_asset_precision ?? to.precision;
     if (!Number.isSafeInteger(fee) || fee < 0 || !Number.isInteger(feePrecision) || feePrecision < 0 || feePrecision > 18) throw new Error('Provider returned an invalid fee.');
@@ -65,7 +65,7 @@ export async function fetchSwapQuote(pair: SwapPair, fromTicker: string, toTicke
   return quote;
 }
 export async function fetchSwapOffers(pairs: SwapPair[], from: string, to: string, amount: number, unit: string): Promise<SwapOffer[]> {
-  const matches = pairs.filter(p => (p.base.ticker === from && p.quote.ticker === to) || (p.base.ticker === to && p.quote.ticker === from));
+  const matches = pairs.filter(p => p.is_active !== false && ((p.base.ticker === from && p.quote.ticker === to) || (p.base.ticker === to && p.quote.ticker === from)));
   return Promise.all([...new Map(matches.map(p => [swapProviderKey(p), p])).values()].map(async pair => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const offer: SwapOffer = { id: swapProviderKey(pair), pair: JSON.parse(JSON.stringify(pair)) };

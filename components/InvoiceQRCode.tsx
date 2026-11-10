@@ -31,7 +31,7 @@ export async function shareLightningInvoice(params: {
   const { invoice, amount, description } = params;
   // Share a tappable `lightning:` URI so the recipient's wallet opens directly.
   const link = invoice.toLowerCase().startsWith('lightning:') ? invoice : `lightning:${invoice}`;
-  const message = `⚡️ Lightning Invoice\n\n💰 Amount: ${amount.toLocaleString()} sats\n${
+  const message = `⚡️ Lightning Invoice\n\n💰 Amount: ${amount.toLocaleString('en-US')} sats\n${
     description ? `📝 Description: ${description}\n` : ''
   }\n${link}`;
   return sharePayable(link, 'Lightning Invoice', message);
@@ -185,7 +185,7 @@ export default function InvoiceQRCode({
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>Amount:</Text>
             <Text style={styles.infoValue}>
-              <Text style={styles.amountText}>{amount.toLocaleString()}</Text>
+              <Text style={styles.amountText}>{amount.toLocaleString('en-US')}</Text>
               <Text style={styles.unitText}> sats</Text>
             </Text>
           </View>

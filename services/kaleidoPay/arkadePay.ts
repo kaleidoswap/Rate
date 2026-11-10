@@ -168,7 +168,7 @@ export function createArkadeAccount(adapter: ArkadePayAdapter, network: Network,
     const total = preview.request.amountSat + fee;
     const balance = await spendableSats(adapter);
     if (balance === null) throw new Error('Could not read your Arkade balance. Please try again.');
-    if (total > balance) throw new Error(`Insufficient Arkade balance (${total.toLocaleString()} sats needed).`);
+    if (total > balance) throw new Error(`Insufficient Arkade balance (${total.toLocaleString('en-US')} sats needed).`);
     const quote: Quote = { recipientSat: preview.request.amountSat, feeSat: fee, totalSat: total,
       expiresAt: Math.floor(Date.now() / 1000) + QUOTE_TTL_S, estimatedSeconds: 5 };
     quotes.set(quote, address);
@@ -252,7 +252,7 @@ export function createArkadeOnchainAccount(adapter: ArkadePayAdapter, network: N
     const total = preview.request.amountSat + fee;
     const balance = await spendableSats(adapter);
     if (balance === null) throw new Error('Could not read your Arkade balance. Please try again.');
-    if (total > balance) throw new Error(`Insufficient Arkade balance (${total.toLocaleString()} sats needed).`);
+    if (total > balance) throw new Error(`Insufficient Arkade balance (${total.toLocaleString('en-US')} sats needed).`);
     const result: Quote = { recipientSat: preview.request.amountSat, feeSat: fee, totalSat: total,
       expiresAt: Math.floor(Date.now() / 1000) + QUOTE_TTL_S };
     quotes.set(result, { address, fee });

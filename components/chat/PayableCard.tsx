@@ -38,7 +38,7 @@ export const PayableCard: React.FC<{ payable: Payable; onCopy: (text: string, la
             <Ionicons name={ICON[kind] as any} size={14} color={accent(theme)} />
           </View>
           <Text style={s.label}>{KIND_LABEL[kind]}</Text>
-          {amountSats != null && <Text style={s.amount}>{amountSats.toLocaleString()} sats</Text>}
+          {amountSats != null && <Text style={s.amount}>{amountSats.toLocaleString('en-US')} sats</Text>}
           <Ionicons name="chevron-forward" size={15} color={muted(theme)} style={{ marginLeft: 4 }} />
         </View>
         {!!description && <Text style={s.desc} numberOfLines={2}>{description}</Text>}

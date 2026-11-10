@@ -28,7 +28,7 @@ export const CardDetailModal: React.FC<{
   return (
     <Sheet visible={visible} onClose={onClose} title={KIND_LABEL[kind]}>
         <View style={s.body}>
-          {amountSats != null && <Text style={s.amount}>{amountSats.toLocaleString()} sats</Text>}
+          {amountSats != null && <Text style={s.amount}>{amountSats.toLocaleString('en-US')} sats</Text>}
           {!!description && <Text style={s.desc}>{description}</Text>}
 
           <View style={s.qrWrap}>

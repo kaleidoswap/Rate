@@ -1,0 +1,6 @@
+appId: com.kaleidoswap.wallet
+---
+- tapOn:
+    text: 'Apri'
+    optional: true
+- takeScreenshot: ios-current

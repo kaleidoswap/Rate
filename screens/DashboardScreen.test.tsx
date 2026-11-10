@@ -16,7 +16,6 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('../components/RecentActivityWidget', () => ({ RecentActivityWidget: () => null }));
 jest.mock('../components/mind/InsightCards', () => ({ InsightCards: () => null }));
-jest.mock('../components/mind/IntentBar', () => ({ IntentBar: () => null }));
 jest.mock('../services/initializeServices', () => ({ initializeProtocolServices: jest.fn() }));
 jest.mock('../services/protocols', () => ({ protocolManager: { getAdapterIfAvailable: jest.fn() }, rgbAccountAdapter: jest.fn(), rgbAccountProtocol: () => 'RGB_LN' }));
 jest.mock('../store/slices/walletSlice', () => ({ setBtcBalance: (payload: any) => ({ type: 'balance', payload }) }));

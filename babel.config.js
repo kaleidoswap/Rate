@@ -7,7 +7,8 @@ module.exports = function (api) {
         ['@babel/preset-typescript', { allowDeclareFields: true }]
       ],
       plugins: [
-        ['@babel/plugin-transform-runtime', { helpers: true }],
+        // Expo enables runtime helpers for modules, but disables them for startup
+        // scripts. Forcing the plugin here adds require() before Metro exists.
         // Release bundles must not log wallet/payment details (keeps warn/error).
         ...(isProduction ? ['./scripts/babel-plugin-strip-console'] : []),
         'react-native-reanimated/plugin',

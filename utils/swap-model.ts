@@ -151,10 +151,27 @@ export function bestLayer(assetId: string): string {
 export function getQuoteLayers(pair: SwapPair, fromAssetId: string, toAssetId: string): { fromLayer: string; toLayer: string } {
   const defaultFrom = bestLayer(fromAssetId)
   const defaultTo = bestLayer(toAssetId)
-  if (!pair.routes || pair.routes.length === 0) return { fromLayer: defaultFrom, toLayer: defaultTo }
-  const exact = pair.routes.find(r => r.from_layer === defaultFrom && r.to_layer === defaultTo)
+  if (pair.is_active === false) throw new Error('This trading pair is unavailable.')
+  const exact = pair.routes?.find(r => r.from_layer === defaultFrom && r.to_layer === defaultTo)
   if (exact) return { fromLayer: exact.from_layer, toLayer: exact.to_layer }
-  return { fromLayer: defaultFrom, toLayer: defaultTo }
+  throw new Error('This direction is not available over Lightning. Choose a supported route.')
+}
+
+/** Reject amounts that would silently round to a different spend. */
+export function swapInputRaw(amount: number, asset: SwapPairAsset, unit: string, flash: boolean): number {
+  const btc = isBtcTicker(asset.ticker);
+  const precision = btc ? (unit === 'sats' ? 0 : 8) : asset.precision;
+  if (!Number.isFinite(amount) || amount <= 0 || !Number.isInteger(precision) || precision < 0 || precision > 18) throw new Error('Enter a valid amount.');
+  const scaled = amount * 10 ** precision;
+  const whole = Math.round(scaled);
+  if (!Number.isSafeInteger(whole) || whole <= 0 || Math.abs(scaled - whole) > Number.EPSILON * Math.max(1, scaled) * 4) throw new Error('The amount has too many decimal places.');
+  const raw = whole * (btc && !flash ? MSATS_PER_SAT : 1);
+  if (!Number.isSafeInteger(raw)) throw new Error('Amount is too large.');
+  return raw;
+}
+
+export function capSwapBalance(balance: number, capacity: number | undefined): number {
+  return Math.max(0, capacity === undefined ? balance : Math.min(balance, capacity));
 }
 
 export function getAssetNetwork(pairs: SwapPair[], ticker: string): 'Spark' | 'LN' | 'RGB-LN' {
@@ -371,11 +388,11 @@ export function validateSwapString(
   const [swapFromAmount, swapFromAsset, swapToAmount, swapToAsset, , swapPaymentHash] = parts
   const normalizeAsset = (v: string) => (v.toLowerCase() === 'btc' ? 'btc' : v)
   return (
-    parseInt(swapFromAmount, 10) === fromAmount &&
+    /^\d+$/.test(swapFromAmount) && Number.isSafeInteger(fromAmount) && fromAmount > 0 && Number(swapFromAmount) === fromAmount &&
     normalizeAsset(swapFromAsset) === normalizeAsset(fromAssetId) &&
-    parseInt(swapToAmount, 10) === toAmount &&
+    /^\d+$/.test(swapToAmount) && Number.isSafeInteger(toAmount) && toAmount > 0 && Number(swapToAmount) === toAmount &&
     normalizeAsset(swapToAsset) === normalizeAsset(toAssetId) &&
-    swapPaymentHash === paymentHash
+    paymentHash.length > 0 && swapPaymentHash === paymentHash
   )
 }
 
@@ -384,26 +401,25 @@ export function validateSwapString(
 // ========================================================================
 
 export function normalizeMakerPairs(rawPairs: any[]): SwapPair[] {
-  return (rawPairs || []).filter((p: any) => p.is_active !== false).map((p: any) => ({
-    id: p.id,
-    base: {
-      ticker: p.base_asset || p.baseAsset || '',
-      name: p.base_asset_name || p.baseAssetName || p.base_asset || '',
-      precision: p.base_precision || p.basePrecision || 8,
-      protocol_ids: { RGB: p.base_asset_id || p.baseAssetId || '' },
-      endpoints: p.endpoints,
-    },
-    quote: {
-      ticker: p.quote_asset || p.quoteAsset || '',
-      name: p.quote_asset_name || p.quoteAssetName || p.quote_asset || '',
-      precision: p.quote_precision || p.quotePrecision || 8,
-      protocol_ids: { RGB: p.quote_asset_id || p.quoteAssetId || '' },
-      endpoints: p.endpoints,
-    },
-    routes: p.routes || [{ from_layer: 'RGB_LN', to_layer: 'RGB_LN' }],
-    is_active: p.is_active ?? true,
-    venue: 'kaleidoswap' as const,
-  }))
+  if (!Array.isArray(rawPairs)) return [];
+  return rawPairs.filter(p => p && p.is_active !== false).map(p => {
+    const asset = (side: 'base' | 'quote'): SwapPairAsset => {
+      const nested = p[side];
+      return {
+        ticker: nested?.ticker ?? p[`${side}_asset`] ?? p[`${side}Asset`] ?? '',
+        name: nested?.name ?? p[`${side}_asset_name`] ?? p[`${side}AssetName`] ?? p[`${side}_asset`] ?? '',
+        precision: nested?.precision ?? p[`${side}_precision`] ?? p[`${side}Precision`] ?? 8,
+        protocol_ids: nested?.protocol_ids ?? { RGB: nested?.asset_id ?? p[`${side}_asset_id`] ?? p[`${side}AssetId`] ?? '' },
+        endpoints: nested?.endpoints,
+      };
+    };
+    return {
+      id: p.id, base: asset('base'), quote: asset('quote'),
+      // Missing discovery data is not permission to invent a route.
+      routes: Array.isArray(p.routes) ? p.routes.filter((r: any) => r && typeof r.from_layer === 'string' && typeof r.to_layer === 'string') : [],
+      is_active: true, venue: 'kaleidoswap' as const,
+    };
+  }).filter(p => p.base.ticker && p.quote.ticker);
 }
 
 /**

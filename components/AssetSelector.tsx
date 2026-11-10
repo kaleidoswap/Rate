@@ -101,7 +101,7 @@ export const AssetSelector: React.FC<AssetSelectorProps> = ({
     const network = asset.network ?? (asset.protocol ? PROTOCOL_NETWORK[asset.protocol] : undefined);
     const balance = asset.balanceLabel
       ?? (asset.balance !== undefined
-        ? asset.balance.toLocaleString(undefined, { maximumFractionDigits: resolvePrecision(asset.precision) })
+        ? asset.balance.toLocaleString('en-US', { maximumFractionDigits: resolvePrecision(asset.precision) })
         : undefined);
     return (
       <Animated.View entering={index < ANIMATED_ROWS ? FadeInDown.delay(index * motion.stagger).duration(motion.duration.base) : undefined}>

@@ -6,12 +6,11 @@ const path = require('path');
 /** @type {import('expo/metro-config').MetroConfig} */
 const config = getDefaultConfig(__dirname);
 
-// Allow Metro to resolve local packages still linked from siblings:
-// @kaleidorg/wallet-engine is a local sibling when present; fall back to
-// the npm version in node_modules when the sibling doesn't exist (CI / fresh clone).
+// Use the pinned wallet-engine release by default, including when a sibling
+// checkout exists. Opt into local development with WALLET_ENGINE_LOCAL=1.
 const fs = require('fs');
 const localWalletEngine = path.resolve(__dirname, '../wallet-engine');
-const walletEngineRoot = fs.existsSync(localWalletEngine)
+const walletEngineRoot = process.env.WALLET_ENGINE_LOCAL === '1' && fs.existsSync(localWalletEngine)
   ? localWalletEngine
   : path.resolve(__dirname, 'node_modules/@kaleidorg/wallet-engine');
 const kaleidoUiRoot = path.resolve(__dirname, '../kaleido-ui');
@@ -122,19 +121,12 @@ config.resolver.extraNodeModules = {
 // normally. A subpath can't go through extraNodeModules (that maps a package root
 // and then appends the remainder), hence resolveRequest.
 const swapSdkStub = path.resolve(__dirname, 'metro-stubs/unavailable-wdk-module.js');
-// One @arkade-os/sdk. @arkade-os/swap hard-pins (and so nests) its own SDK copy
-// (0.4.71) while the app's wallet is built from the root copy (0.4.72); the venue
-// hands that wallet, and VHTLC/ArkAddress/Transaction objects, across the
-// boundary, so two copies would mean two class identities and two contract
-// registries. extraNodeModules can't fix that (it is only a fallback for imports
-// that fail to resolve), so every '@arkade-os/sdk' import — and its subpaths — is
-// resolved as if it came from the app root. Exception: @arkade-os/boltz-swap
-// (Arkade's Boltz Lightning path in wallet-engine) pins 0.4.35 and keeps its own
-// copy, as before, since its API predates the root SDK; so does @arkade-os/wdk
-// (it pins its own SDK too), so the app's existing Arkade wallet code is unchanged.
+// Resolve Arkade Intents imports from the app root so wallets, contracts and
+// transactions share the same SDK class identities. The legacy WDK backend
+// keeps its own SDK copy because it targets a different API version.
 const appOrigin = path.join(__dirname, 'package.json');
 const arkadeSdkRequest = /^@arkade-os\/sdk(\/.*)?$/;
-const keepsOwnArkadeSdk = /[\\/]node_modules[\\/]@arkade-os[\\/](boltz-swap|wdk)[\\/]/;
+const keepsOwnArkadeSdk = /[\\/]node_modules[\\/]@arkade-os[\\/]wdk[\\/]/;
 const previousResolveRequest = config.resolver.resolveRequest;
 const resolveNext = (context, moduleName, platform) =>
   previousResolveRequest
@@ -171,7 +163,7 @@ config.resolver.alias = {
 // The WDK wallet modules now come from npm (published versions) / a github dep, so
 // they resolve from node_modules normally — no sibling watchFolders needed. Keep the
 // shared @tetherto/wdk-wallet base as a single copy to avoid duplicate instances
-// (only @kaleidorg/wallet-engine remains a linked sibling, watched above).
+// (wallet-engine can be explicitly opted into sibling development above).
 config.resolver.extraNodeModules['@tetherto/wdk-wallet'] = path.resolve(
   __dirname,
   'node_modules/@tetherto/wdk-wallet'
@@ -193,6 +185,6 @@ if (!config.resolver.assetExts.includes('wasm')) {
 }
 
 // Add Node.js polyfills to resolver platforms
-config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+config.resolver.platforms = ['ios', 'android', 'native'];
 
 module.exports = config;

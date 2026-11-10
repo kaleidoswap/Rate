@@ -868,7 +868,7 @@ export default function ContactsScreen({ navigation, route }: Props) {
         recipient={zapRecipient}
         onClose={() => setZapRecipient(null)}
         onSuccess={({ amountSats, isZap }) =>
-          toast().success(`${isZap ? 'Zap sent' : 'Payment sent'} · ${amountSats.toLocaleString()} sats to ${zapRecipient?.name ?? 'contact'}`)
+          toast().success(`${isZap ? 'Zap sent' : 'Payment sent'} · ${amountSats.toLocaleString('en-US')} sats to ${zapRecipient?.name ?? 'contact'}`)
         }
       />
     </View>
