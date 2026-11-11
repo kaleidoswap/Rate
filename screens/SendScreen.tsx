@@ -388,11 +388,11 @@ export default function SendScreen({ navigation, route }: Props) {
       try { await updatePaymentAttempt(walletId, updated); }
       catch { setError('The payment result could not be saved. Keep this receipt; reopening will check the payment again.'); }
     } catch (e) {
-      const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown', detail: e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.' };
+      const updated: PaymentAttempt = { ...next, status: e instanceof PaymentNotSentError ? 'failed' : 'unknown', detail: e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Don’t pay this twice.' };
       setAttempt(updated);
       resultCue(updated.status);
       logForContact(updated.status, updated.reference);
-      setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Do not send again.');
+      setError(e instanceof PaymentNotSentError ? `${e.message} Nothing was sent.` : 'Payment status needs checking. Don’t pay this twice.');
       try { await updatePaymentAttempt(walletId, updated); } catch { /* The durable pending record forces a status check on reopen. */ }
     } finally {
       paying.current = false; setBusy(false);
@@ -425,7 +425,7 @@ export default function SendScreen({ navigation, route }: Props) {
       const result = await checkOnchainConfirmation({ ...attempt, ...(attempt.status === 'completed' ? {} : providerResult) });
       // A background result is dropped when nothing changed, or the record changed meanwhile (checked, dismissed).
       if (attemptRef.current !== attempt) return;
-      if (!quiet && result.status === 'unknown') setError(result.detail || 'No payment receipt is available yet. Check Activity; do not send again.');
+      if (!quiet && result.status === 'unknown') setError(result.detail || 'No payment receipt is available yet. Check Activity; don\'t pay this twice.');
       const updated = { ...attempt, ...result, lastCheckedAt: Date.now(), checkFailed: false };
       if (!await updatePaymentAttempt(walletId, updated)) return;
       if (attemptRef.current !== attempt) return;
@@ -868,9 +868,9 @@ export default function SendScreen({ navigation, route }: Props) {
         initialSats={amountEditorFor === 'btc' ? amountSat : undefined}
         initialAssetValue={amountEditorFor !== 'btc' ? assetAmount || undefined : undefined}
         asset={amountEditorFor === 'spark' && sparkToken
-          ? { unit: sparkToken.ticker, maxUnits: sparkToken.available / 10 ** sparkToken.precision, availableLabel: `${formatSpend(sparkToken.available, sparkToken)} available` }
+          ? { unit: sparkToken.ticker, maxUnits: sparkToken.available / 10 ** sparkToken.precision, availableLabel: `${formatSpend(sparkToken.available, sparkToken)} available`, decimals: sparkToken.precision }
           : amountEditorFor === 'rgb' && rgbAsset
-            ? rgbAsset.available === undefined ? { unit: rgbAsset.ticker } : { unit: rgbAsset.ticker, maxUnits: rgbAsset.available / 10 ** rgbAsset.precision, availableLabel: `${formatSpend(rgbAsset.available, rgbAsset)} available` }
+            ? rgbAsset.available === undefined ? { unit: rgbAsset.ticker, decimals: rgbAsset.precision } : { unit: rgbAsset.ticker, maxUnits: rgbAsset.available / 10 ** rgbAsset.precision, availableLabel: `${formatSpend(rgbAsset.available, rgbAsset)} available`, decimals: rgbAsset.precision }
             : undefined}
         rates={rates} bitcoinUnit={bitcoinUnit}
         onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }}

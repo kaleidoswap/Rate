@@ -83,7 +83,7 @@ export function rgbL1PayAdapter(l1: any, feeRate: () => number | undefined = () 
           throw new PaymentNotSentError('The invoice’s RGB delivery service could not be reached. Check your connection and ask the recipient for a fresh invoice.');
         }
         const code = typeof error?.code === 'string' && /^ERR_RGB_[A-Z_]+$/.test(error.code) ? ` (${error.code})` : '';
-        throw new PaymentUncertainError(`The RGB wallet could not confirm submission${code}. Check your connection and verify this payment in Activity. Do not send again until its status is known.`);
+        throw new PaymentUncertainError(`The RGB wallet could not confirm submission${code}. Check your connection and verify this payment in Activity. Don’t pay this twice until its status is known.`);
       }
     },
     listAssets: () => l1.listAssets(),
@@ -122,10 +122,10 @@ export async function rgbL1TransferStatus(l1: any, txid: string): Promise<Paymen
     const status = String(transfer.status).replace(/[_-]/g, '').toLowerCase();
     if (status === 'settled') return { status: 'completed', reference: txid, detail: 'The recipient accepted your RGB transfer and it is confirmed on-chain.' };
     if (status === 'failed') return { status: 'failed', reference: txid, detail: 'The RGB transfer failed. Review the transfer in Activity before trying again.' };
-    if (status === 'waitingcounterparty') return { status: 'pending', reference: txid, detail: 'Waiting for the recipient to accept the RGB transfer. Ask them to open and sync their wallet. Keep this wallet open to complete the transfer. Do not send again.' };
-    if (status === 'waitingsafeheight') return { status: 'pending', reference: txid, detail: 'Waiting for the Bitcoin safety height before broadcasting the RGB transfer. Keep this wallet open. Do not send again.' };
-    if (status === 'waitingbroadcast') return { status: 'pending', reference: txid, detail: 'RGB transfer accepted; waiting for the Bitcoin transaction to be broadcast. Keep this wallet open. Do not send again.' };
-    if (status === 'waitingconfirmations') return { status: 'pending', reference: txid, detail: 'The recipient accepted the RGB transfer. Waiting for Bitcoin confirmations. Do not send again.' };
+    if (status === 'waitingcounterparty') return { status: 'pending', reference: txid, detail: 'Waiting for the recipient to accept the RGB transfer. Ask them to open and sync their wallet. Keep this wallet open to complete the transfer. Don’t pay this twice.' };
+    if (status === 'waitingsafeheight') return { status: 'pending', reference: txid, detail: 'Waiting for the Bitcoin safety height before broadcasting the RGB transfer. Keep this wallet open. Don’t pay this twice.' };
+    if (status === 'waitingbroadcast') return { status: 'pending', reference: txid, detail: 'RGB transfer accepted; waiting for the Bitcoin transaction to be broadcast. Keep this wallet open. Don’t pay this twice.' };
+    if (status === 'waitingconfirmations') return { status: 'pending', reference: txid, detail: 'The recipient accepted the RGB transfer. Waiting for Bitcoin confirmations. Don’t pay this twice.' };
   }
-  return { status: 'pending', reference: txid, detail: 'RGB transfer status is not available yet. Check again later. Do not send again.' };
+  return { status: 'pending', reference: txid, detail: 'RGB transfer status is not available yet. Check again later. Don’t pay this twice.' };
 }

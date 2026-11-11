@@ -2,8 +2,8 @@
 import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import QRCode from 'react-native-qrcode-svg';
 import InvoiceQRCode, { sharePayable } from '../InvoiceQRCode';
+import { ReceiveQr } from '../receive/ReceiveQr';
 import { BalanceCard, type BalanceData } from './BalanceCard';
 import { useAppTheme } from '../../theme/ThemeProvider';
 import { formatDistance } from '../../services/btcmapService';
@@ -108,7 +108,7 @@ const AddressCard: React.FC<{
   <View style={styles.card}>
     <Text style={styles.title}>{title}</Text>
     <View style={styles.qrWrap}>
-      <QRCode value={value} size={168} backgroundColor="#ffffff" color="#000000" />
+      <ReceiveQr value={value} size={168} label={title} />
     </View>
     <Text style={styles.addressText} selectable>{value}</Text>
     <View style={styles.actionRow}>

@@ -223,6 +223,7 @@ jest.mock('react-native', () => ({
   useWindowDimensions: () => ({ width: 393, height: 852, scale: 3, fontScale: 1 }),
   KeyboardAvoidingView: 'KeyboardAvoidingView',
   Keyboard: { dismiss: jest.fn(), addListener: () => ({ remove: jest.fn() }), removeListener: jest.fn() },
+  InteractionManager: { runAfterInteractions: (fn: any) => { fn(); return { cancel: jest.fn() }; } },
   Share: { share: jest.fn(() => Promise.resolve({ action: 'sharedAction' })) },
   AccessibilityInfo: { setAccessibilityFocus: jest.fn() },
   findNodeHandle: jest.fn(() => 1),

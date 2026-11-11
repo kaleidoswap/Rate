@@ -11,6 +11,11 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Added
+- **The wallet's own number pad.** Amounts are entered on big keys with a tick
+  of haptics each press — no OS keyboard in the middle of a payment. The
+  decimal point only appears where one belongs (never in sats), the display
+  groups thousands as you type, and every composed value is a plain decimal
+  by construction.
 - **People-first Send.** Typing a name autocompletes your contacts; picking
   one jumps straight to the amount — keypad, then the usual review. No
   Continue tap in between.
@@ -36,12 +41,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   (out of the options sheet).
 - Friendlier scanner: a bad QR code auto-resumes scanning after a moment
   instead of waiting for "Scan again", and the error and instruction copy is
-  plain language.
+  plain language. Its chrome (spacing, type, corners) now follows the design
+  tokens; the camera keeps its dark backdrop in every theme.
+- The AI chat's invoice and address cards show the same QR as the rest of the
+  wallet (tap to enlarge and brighten included) instead of a private copy of
+  the renderer.
 - Maker routes say "Accepts N–M sats" instead of "Published range".
 - The fee-speed choice no longer shows "sat/vB"; the destinations hint lists
   "Lightning invoice or address" instead of every format name.
 - Receiving from an asset's page now actually opens that asset's receive
   request (the parameter it passed was being ignored).
+- One calm safety line everywhere a payment is being checked: "Don't pay this
+  twice." replaces the six repetitions of "Do not send again."
 
 ### Fixed
 - RGB receive retry message no longer talks about "blocking the screen in the

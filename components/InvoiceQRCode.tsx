@@ -13,10 +13,10 @@ import {
   Pressable,
   Share,
 } from 'react-native';
-import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../theme';
+import { ReceiveQr } from './receive/ReceiveQr';
 
 /**
  * Open the OS share sheet for a Lightning invoice. Exported so both the invoice
@@ -167,18 +167,7 @@ export default function InvoiceQRCode({
         </View>
         
         <View style={styles.qrContainer}>
-          <LinearGradient
-            colors={['#ffffff', '#f8fafc']}
-            style={styles.qrWrapper}
-          >
-            <QRCode
-              value={invoice}
-              size={QR_SIZE}
-              backgroundColor="white"
-              color="#1a1a1a"
-              quietZone={16}
-            />
-          </LinearGradient>
+          <ReceiveQr value={invoice} size={QR_SIZE} label="Lightning invoice" />
         </View>
         
         <View style={styles.infoContainer}>
@@ -323,11 +312,6 @@ const styles = StyleSheet.create({
   qrContainer: {
     alignItems: 'center',
     marginBottom: theme.spacing[3],
-  },
-  qrWrapper: {
-    padding: theme.spacing[3],
-    borderRadius: theme.borderRadius.xl,
-    ...theme.shadows.md,
   },
   infoContainer: {
     marginBottom: theme.spacing[3],

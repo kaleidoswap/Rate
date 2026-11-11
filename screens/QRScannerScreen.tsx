@@ -553,13 +553,14 @@ const styles = StyleSheet.create({
   entryLabel: { color: theme.colors.text.primary, fontSize: theme.typography.fontSize.base },
   container: {
     flex: 1,
-    backgroundColor: 'black',
+    // The camera view keeps its own black backdrop in every theme.
+    backgroundColor: '#000000',
   },
   centerContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: theme.spacing[5],
   },
 
   // Overlay Mask
@@ -604,7 +605,7 @@ const styles = StyleSheet.create({
     height: 40,
     borderColor: theme.colors.primary[400],
     borderWidth: 4,
-    borderRadius: 4,
+    borderRadius: theme.borderRadius.sm,
   },
   topLeft: {
     top: 0,
@@ -658,23 +659,23 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(30, 41, 59, 0.9)',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 30,
-    gap: 12,
+    paddingHorizontal: theme.spacing[5],
+    paddingVertical: theme.spacing[3],
+    borderRadius: theme.borderRadius.full,
+    gap: theme.spacing[3],
   },
   processingText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    paddingHorizontal: theme.spacing[5],
     // Guarantee clearance from the status bar / sheet grabber so the close
     // button is always reachable even when the top safe-area inset is 0.
-    paddingTop: 16,
+    paddingTop: theme.spacing[4],
   },
   iconButton: {
     width: 44,
@@ -687,20 +688,20 @@ const styles = StyleSheet.create({
 
   // Permissions
   permissionText: {
-    fontSize: 16,
+    fontSize: theme.typography.fontSize.base,
     color: 'white',
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: theme.spacing[5],
   },
   permissionButton: {
     backgroundColor: theme.colors.primary[600],
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+    paddingVertical: theme.spacing[3],
+    paddingHorizontal: theme.spacing[6],
+    borderRadius: theme.borderRadius.md,
   },
   permissionButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: theme.typography.fontSize.base,
     fontWeight: '600',
   },
 });
