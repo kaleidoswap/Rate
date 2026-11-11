@@ -20,6 +20,16 @@
 import { InProcessToolSource, getWalletTool, type ToolSource } from '@kaleidorg/mind';
 import { kaleidoswapTools, normalizeKaleidoswapArgs } from '@kaleidorg/mind/kaleidoswap';
 import { protocolManager, kaleidoClientManager, flashnetClientManager } from './protocols';
+import type { PairQuoteResponse } from 'kaleido-sdk';
+import type { UnifiedAsset } from '@kaleidorg/wallet-engine';
+
+/** The Flashnet pool fields the pair builder reads; the wire object carries more. */
+interface FlashnetPool {
+  assetAAddress?: string;
+  assetBAddress?: string;
+  assetABech32Address?: string;
+  assetBBech32Address?: string;
+}
 import {
   normalizeMakerPairs,
   buildFlashnetPairs,
@@ -38,7 +48,7 @@ import {
 import { BTC_ASSET_PUBKEY } from '../utils/flashnet';
 import { loadChannelLiquidity } from './swapQuotes';
 
-const log = (...a: any[]) => { try { console.log('[AI/swap]', ...a); } catch { /* noop */ } };
+const log = (...a: unknown[]) => { try { console.log('[AI/swap]', ...a); } catch { /* noop */ } };
 
 type Venue = 'kaleidoswap' | 'flashnet';
 
@@ -161,7 +171,7 @@ export async function refreshSwapQuoteForConfirm(
   return { quote: view, refreshed: true, move, needsReapproval: move > tolerance };
 }
 
-function makerFee(resp: any, fromTicker: string, toTicker: string, fromAssetId: string): { fee?: number; feeUnit?: string } {
+function makerFee(resp: PairQuoteResponse, fromTicker: string, toTicker: string, fromAssetId: string): { fee?: number; feeUnit?: string } {
   const raw = Number(resp?.fee?.final_fee);
   if (!Number.isFinite(raw)) return {};
   const precision = Number(resp?.fee?.fee_asset_precision ?? 0);
@@ -186,17 +196,23 @@ async function fetchQuote(from: string, to: string, amt: number): Promise<{ id: 
   // Flashnet (Spark AMM): BTC settles in sats; assets in raw smallest units.
   if (isFlashnetPair(pair)) {
     const client = flashnet();
-    const poolId = pair.poolId || flashnetClientManager.getPoolId() || undefined;
+    const poolId = pair.poolId || flashnetClientManager.getPoolId();
+    if (!poolId) throw new Error('No Spark pool is configured for this pair — reconnect Spark and retry.');
     const rawFromAmount = isBtcTicker(from) ? Math.round(amt) : Math.round(amt * Math.pow(10, fromA.precision));
-    const sim: any = await client.simulateSwap({
+    // The Flashnet client's runtime reads maxSlippageBps; the SimulateSwapRequest
+    // type in the shipped SDK does not declare it. Typed via the client's own
+    // parameter so the drift lands upstream, not here.
+    const sim = await client.simulateSwap({
       poolId,
       assetInAddress: fromAssetId,
       assetOutAddress: toAssetId,
       amountIn: String(rawFromAmount),
       maxSlippageBps: DEFAULT_FLASHNET_SLIPPAGE_BPS,
-    });
-    const rawToAmount = Number(sim?.amountOut ?? sim?.amount_out ?? 0);
-    const rawFee = Number(sim?.feePaidAssetIn ?? sim?.fee_paid_asset_in ?? 0);
+    } as Parameters<typeof client.simulateSwap>[0]);
+    // The snake_case spellings are drift guards for older Flashnet builds.
+    const legacy = sim as unknown as { amount_out?: string; fee_paid_asset_in?: string };
+    const rawToAmount = Number(sim?.amountOut ?? legacy.amount_out ?? 0);
+    const rawFee = Number(sim?.feePaidAssetIn ?? legacy.fee_paid_asset_in ?? 0);
     const id = `flashnet-${now}-${++quoteSequence}`;
     log('flashnet quote', { id, from, to, amt, rawToAmount });
     return {
@@ -218,7 +234,7 @@ async function fetchQuote(from: string, to: string, amt: number): Promise<{ id: 
   // KaleidoSwap maker (RGB/RLN): BTC quoted in msats.
   const rawFromAmount = isBtcTicker(from) ? Math.round(amt * MSATS_PER_SAT) : Math.round(amt * Math.pow(10, fromA.precision));
   const { fromLayer, toLayer } = getQuoteLayers(pair, fromAssetId, toAssetId);
-  const resp: any = await maker().getQuote({
+  const resp = await maker().getQuote({
     from_asset: { asset_id: fromAssetId, layer: fromLayer, amount: rawFromAmount },
     to_asset: { asset_id: toAssetId, layer: toLayer },
   });
@@ -279,9 +295,9 @@ function requireSwaps(): void {
     throw new Error('Connect your RGB Lightning or Spark wallet to swap.');
   }
 }
-function maker(): any { return kaleidoClientManager.getClient().maker; }
-function rln(): any { return kaleidoClientManager.getClient().rln; }
-function flashnet(): any { return flashnetClientManager.getClient(); }
+function maker() { return kaleidoClientManager.getClient().maker; }
+function rln() { return kaleidoClientManager.getClient().rln; }
+function flashnet() { return flashnetClientManager.getClient(); }
 
 /** Load pairs from every connected venue, tagged with `venue`. Mirrors the
  *  SwapScreen dual-load (maker pairs + Flashnet pools with Spark inventory). */
@@ -290,7 +306,7 @@ async function loadAllPairs(): Promise<SwapPair[]> {
 
   if (rgbAvailable()) {
     try {
-      const raw: any = await maker().listPairs();
+      const raw = await maker().listPairs();
       out.push(...normalizeMakerPairs(raw?.pairs ?? raw ?? []));
     } catch (e) { log('maker pairs failed', e); }
   }
@@ -298,11 +314,15 @@ async function loadAllPairs(): Promise<SwapPair[]> {
   if (flashnetAvailable()) {
     try {
       const client = flashnet();
-      const pools: any = await client.listPools({ sort: 'TVL_DESC' });
-      const poolArray: any[] = Array.isArray(pools) ? pools : pools?.pools ?? [];
+      const pools = await client.listPools({ sort: 'TVL_DESC' });
+      // The shipped type is { pools: AmmPool[] }; the Array.isArray leg is a
+      // drift guard for older clients that returned a bare array.
+      const poolArray = (Array.isArray(pools)
+        ? (pools as unknown as FlashnetPool[])
+        : (pools as unknown as { pools?: FlashnetPool[] }).pools ?? []);
       // listPools returns hex pubkeys; encode each side to bech32m so the pair
       // builder can recognise USDB and match held Spark assets.
-      const enriched = poolArray.map((p: any) => {
+      const enriched = poolArray.map((p) => {
         const encode = (addr?: string) => {
           if (!addr || addr === BTC_ASSET_PUBKEY) return undefined;
           try { return client.encodeTokenAddress(addr); } catch { return undefined; }
@@ -313,8 +333,8 @@ async function loadAllPairs(): Promise<SwapPair[]> {
           assetBBech32Address: p.assetBBech32Address ?? encode(p.assetBAddress),
         };
       });
-      const sparkAssets: any[] = (await protocolManager.getAdapterIfAvailable('SPARK')?.listAssets?.().catch(() => [])) ?? [];
-      const inventory = sparkAssets.map((a) => ({ asset_id: a.id ?? a.asset_id, ticker: a.ticker, name: a.name, precision: a.precision }));
+      const sparkAssets: UnifiedAsset[] = (await protocolManager.getAdapterIfAvailable('SPARK')?.listAssets?.().catch(() => [] as UnifiedAsset[])) ?? [];
+      const inventory = sparkAssets.map((a) => ({ asset_id: a.id, ticker: a.ticker, name: a.name, precision: a.precision }));
       out.push(...buildFlashnetPairs(enriched, inventory));
     } catch (e) { log('flashnet pairs failed', e); }
   }
@@ -392,8 +412,10 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
     quoteCache.delete(id);
 
     if (q.venue === 'flashnet') {
-      const res: any = await flashnet().executeSwap({
-        poolId: q.poolId,
+      const executePoolId = q.poolId || flashnetClientManager.getPoolId();
+      if (!executePoolId) throw new Error('No Spark pool is configured for this pair — reconnect Spark and retry.');
+      const res = await flashnet().executeSwap({
+        poolId: executePoolId,
         assetInAddress: q.fromAssetId,
         assetOutAddress: q.toAssetId,
         amountIn: String(q.rawFromAmount),
@@ -412,14 +434,16 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
       throw new Error('That quote expired while checking liquidity — please re-quote before swapping.');
     }
     // KaleidoSwap atomic: init → verify terms → whitelist → taker → execute.
-    const init: any = await maker().initSwap({
+    const init = await maker().initSwap({
       rfq_id: q.rfqId ?? id,
       from_asset: q.fromAssetId,
       from_amount: q.rawFromAmount,
       to_asset: q.toAssetId,
       to_amount: q.rawToAmount,
     });
-    const swapstring = init?.swapstring ?? init?.swap_string ?? '';
+    // `swap_string` is the pre-schema spelling; kept as a drift guard.
+    const legacyInit = init as unknown as { swap_string?: string };
+    const swapstring = init?.swapstring ?? legacyInit.swap_string ?? '';
     const paymentHash = init?.payment_hash ?? '';
     if (!validateSwapString(swapstring, q.rawFromAmount, q.fromAssetId, q.rawToAmount, q.toAssetId, paymentHash)) {
       throw new Error('Swap verification failed — the maker terms did not match your quote. Aborted for your safety.');
@@ -443,7 +467,7 @@ const HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<unknow
         : { atomic_id: id, status: 'unknown' };
     }
     const a = protocolManager.getAdapterIfAvailable('RGB_LN');
-    const s: any = await a?.getSwapStatus?.(id);
+    const s = await a?.getSwapStatus?.(id);
     return { atomic_id: id, status: s?.status ?? 'pending' };
   },
 };

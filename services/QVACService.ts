@@ -89,15 +89,10 @@ function isPhoneRuntime(): boolean {
   return Platform.OS === 'ios' || Platform.OS === 'android';
 }
 
-/** Message of anything thrown, including the cause QVAC errors carry. */
-export function errorMessage(err: unknown): string {
-  if (err instanceof Error) {
-    const cause = (err as { cause?: unknown }).cause;
-    const causeMsg = cause instanceof Error ? cause.message : typeof cause === 'string' ? cause : '';
-    return causeMsg && !err.message.includes(causeMsg) ? `${err.message} (${causeMsg})` : err.message;
-  }
-  return String(err);
-}
+// Moved to utils/errors.ts so redux slices can use it without importing
+// the whole QVAC service; re-exported for existing callers.
+import { errorMessage } from '../utils/errors';
+export { errorMessage };
 
 /**
  * True when a load error says the weights file itself is bad (truncated,
