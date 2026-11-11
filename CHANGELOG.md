@@ -10,6 +10,28 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **One amount editor everywhere.** Sending bitcoin, a Spark token or an RGB
+  asset now opens the same amount sheet (big display, quick Max chip for
+  tokens, validation against the available balance) instead of three different
+  inline inputs.
+- **No more refresh stairs.** An expired price refreshes itself and the
+  slide-to-pay stays armed; after a manual refresh the new total is noted
+  briefly ("Price updated · now N") instead of demanding a second review.
+  "quote" is now "price" in the payment flow.
+- Friendlier scanner: a bad QR code auto-resumes scanning after a moment
+  instead of waiting for "Scan again", and the error and instruction copy is
+  plain language.
+- Maker routes say "Accepts N–M sats" instead of "Published range".
+- The fee-speed choice no longer shows "sat/vB"; the destinations hint lists
+  "Lightning invoice or address" instead of every format name.
+- Receiving from an asset's page now actually opens that asset's receive
+  request (the parameter it passed was being ignored).
+
+### Fixed
+- RGB receive retry message no longer talks about "blocking the screen in the
+  background" — it just says the request is ready.
+
 ## [0.12.0] — 2026-11-10
 
 ### Added

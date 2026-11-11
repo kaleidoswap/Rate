@@ -1307,7 +1307,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       });
       setUnifiedError(
         rgb?.isConnected() && reason !== 'manual'
-          ? 'RGB receive is available. Tap Try Again to generate it explicitly without blocking the screen in the background.'
+          ? 'RGB receive is ready. Tap Try Again to show it.'
           : 'None of your accounts could create a payment code. Check that they are connected, then try again.',
       );
       setUnifiedLoading(false);

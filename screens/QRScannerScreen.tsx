@@ -133,19 +133,17 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       }
       const paymentData = await processScannedData(data);
       if (current !== scanRevision.current) return;
+      // Send decodes the request itself: only the string and its amount travel.
       navigation.navigate('Send', {
-        selectedAsset: paymentData.selectedAsset,
         prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
         prefilledAmount: 'amount' in paymentData ? paymentData.amount : undefined,
-        label: 'label' in paymentData ? paymentData.label : undefined,
-        message: 'message' in paymentData ? paymentData.message : undefined,
-        decodedInvoice: 'decodedInvoice' in paymentData ? paymentData.decodedInvoice : undefined,
-        decodedRGBInvoice: 'decodedRGBInvoice' in paymentData ? paymentData.decodedRGBInvoice : undefined,
-        isLightning: paymentData.type === 'lightning', fromQRScanner: true, paymentType: paymentData.type,
       });
     } catch (error) {
-      if (current === scanRevision.current) setScanError(getErrorMessage(error));
-      // Keep scanning paused until the user chooses to retry.
+      if (current === scanRevision.current) {
+        setScanError(getErrorMessage(error));
+        // A bad code shouldn't force a manual retry: scanning resumes by itself.
+        setTimeout(() => { if (current === scanRevision.current) resetScanner(); }, 2500);
+      }
     } finally { if (current === scanRevision.current) { entryAction.current = false; setProcessing(false); } }
   };
 
@@ -182,7 +180,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
   };
 
   const UNRECOGNIZED_ERROR =
-    'The scanned QR code is not a recognized Bitcoin, Lightning, RGB, Spark, Arkade, EVM or Solana format.';
+    "We couldn't read this code. Make sure it's a payment code this wallet supports.";
 
   const processScannedData = async (raw: string) => {
     let data = raw.trim();
@@ -257,7 +255,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
     if (error?.message?.includes('expired')) {
       return 'This invoice has expired. Please request a new one.';
     }
-    if (error?.message?.includes('recognized')) {
+    if (error?.message?.includes('recognized') || error?.message?.includes("couldn't read")) {
       return error.message;
     }
     return 'Unable to process this QR code. Please verify it\'s a valid payment code and try again.';
@@ -543,7 +541,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void pasteRequest()} style={styles.entryAction}><Ionicons name="clipboard-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Paste</Text></TouchableOpacity>
             <TouchableOpacity accessibilityRole="button" disabled={processing} onPress={() => void chooseImage()} style={styles.entryAction}><Ionicons name="image-outline" size={24} color={theme.colors.text.primary} /><Text style={styles.entryLabel}>Choose image</Text></TouchableOpacity>
           </View>
-          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Scan an invoice, address or multi-method request. You’ll review the amount, account and fees before paying.'}</Text>
+          <Text style={{ color: theme.colors.text.secondary, textAlign: 'center' }}>{processing ? 'Reading request…' : captureMode === 'contact' ? 'Scan a contact code or paste their address.' : 'Scan a payment code. You’ll review the amount, account and fees before paying.'}</Text>
         </View>
       </SafeAreaView>
     </View>

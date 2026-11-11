@@ -113,6 +113,8 @@ export default function SendScreen({ navigation, route }: Props) {
   const [sparkToken, setSparkToken] = useState<SparkToken | null>(null);
   const [moreQuotes, setMoreQuotes] = useState(false);
   const [showAmountEditor, setShowAmountEditor] = useState(false);
+  // One amount editor everywhere: bitcoin, a Spark token or an RGB asset.
+  const [amountEditorFor, setAmountEditorFor] = useState<'btc' | 'spark' | 'rgb'>('btc');
   const [showContacts, setShowContacts] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [offers, setOffers] = useState<PaymentOffer[]>([]);
@@ -121,7 +123,6 @@ export default function SendScreen({ navigation, route }: Props) {
   const [error, setError] = useState('');
   const [receiptExpanded, setReceiptExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [reviewUpdated, setReviewUpdated] = useState(false);
   const [previousTotal, setPreviousTotal] = useState('');
   const [attempt, setAttempt] = useState<PaymentAttempt | null>(null);
   const [statusTimedOut, setStatusTimedOut] = useState(false);
@@ -133,6 +134,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const revision = useRef(0);
   const paying = useRef(false);
   const checking = useRef(false);
+  const autoRefreshes = useRef(0);
   const requestId = useRef(Crypto.randomUUID());
 
   const { target, error: decodeError } = useMemo(() => decodeQuietly(input), [input]);
@@ -159,6 +161,7 @@ export default function SendScreen({ navigation, route }: Props) {
   // Anything that changes the request discards the reviewed quotes.
   useEffect(() => {
     revision.current++;
+    autoRefreshes.current = 0;
     setPreview(null); setOffers([]); setSelectedId(undefined); setError(''); setBusy(false); setPreviousTotal('');
   }, [input, amountSat, assetAmount, sparkToken, rgbAsset?.id]);
   useEffect(() => { setRgbAsset(null); setAssetAmount(''); setSparkToken(null); }, [input]);
@@ -230,6 +233,14 @@ export default function SendScreen({ navigation, route }: Props) {
   const total = spend ? displaySpend(spend.total, spend.asset) : '';
   const expired = !!quote && quote.expiresAt * 1000 <= now;
 
+  // After a manual refresh the new total is pointed out briefly, never gated.
+  useEffect(() => {
+    if (!previousTotal) return;
+    if (previousTotal === total) { setPreviousTotal(''); return; }
+    const timer = setTimeout(() => setPreviousTotal(''), 6000);
+    return () => clearTimeout(timer);
+  }, [previousTotal, total]);
+
   // The offers this screen shows: hidden accounts (Bark in Lite) are never picked for the user.
   const visibleOffers = useCallback((list: PaymentOffer[]) => {
     const ids = new Set(groupOffersByAccount(list, { advanced, balances: balancesSat }).flatMap(c => c.offers.map(o => o.id)));
@@ -289,12 +300,21 @@ export default function SendScreen({ navigation, route }: Props) {
       const result = await quotePaymentOffers(fresh, partial => show(partial, false));
       show(result, true);
       if (current !== revision.current) return;
-      // Refresh never switches the chosen way to pay, even when its quote fails.
-      setReviewUpdated(refresh && !quiet);
+      // Refresh never switches the chosen way to pay, even when its quote fails;
+      // the new total is noted briefly instead of asking for a second review.
     } catch (e) {
       if (current === revision.current) setError(e instanceof Error ? e.message : 'Could not get quotes. Please try again.');
     } finally { if (current === revision.current) { setBusy(false); setMoreQuotes(false); } }
   }, [input, fixedSat, amountSat, assetAmount, rgbAsset, sparkToken, target, total, visibleOffers, route.params?.makerNetwork, route.params?.makerUrl]);
+
+  // An expired price refreshes itself: no extra taps, the slide stays armed.
+  // After a few failed tries it stops and the manual Refresh button remains.
+  useEffect(() => {
+    if (!expired || busy || !preview || attempt) return;
+    if (autoRefreshes.current >= 3) return;
+    const timer = setTimeout(() => { autoRefreshes.current += 1; void getOffers(true, true); }, 400);
+    return () => clearTimeout(timer);
+  }, [expired, busy, preview, attempt, getOffers]);
 
   // A Spark address can also be paid in the Spark tokens this wallet holds.
   const sparkAddressTarget = target?.kind === 'spark' && fixedSat === undefined;
@@ -576,32 +596,33 @@ export default function SendScreen({ navigation, route }: Props) {
     </View>}
 
     {sparkToken ? <View style={[card, { marginTop: t.spacing[3] }]}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={text}>Amount in {sparkToken.ticker}</Text>
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Send all ${sparkToken.ticker}`} hitSlop={8}
-          onPress={() => setAssetAmount((sparkToken.available / 10 ** sparkToken.precision).toFixed(sparkToken.precision).replace(/\.?0+$/, ''))}>
-          <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>Max</Text>
-        </TouchableOpacity>
-      </View>
-      <TextInput accessibilityLabel={`Amount in ${sparkToken.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount} autoFocus
-        placeholder="0" placeholderTextColor={t.colors.text.muted} style={{ ...text, fontSize: t.typography.fontSize['2xl'], paddingVertical: t.spacing[2] }} />
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Amount in ${sparkToken.ticker}${assetAmount ? `, ${assetAmount}. Change` : ''}`}
+        onPress={() => { setAmountEditorFor('spark'); setShowAmountEditor(true); }} style={{ alignItems: 'center', gap: 2, paddingVertical: t.spacing[2] }}>
+        <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '700', color: assetAmount ? t.colors.text.primary : t.colors.text.tertiary }}>
+          {assetAmount || '0'} <Text style={{ ...muted, fontSize: t.typography.fontSize.lg }}>{sparkToken.ticker}</Text>
+        </AmountText>
+        <Text style={{ ...small, color: t.colors.primary[500] }}>{assetAmount ? 'tap to change' : 'Tap to set an amount'}</Text>
+      </TouchableOpacity>
       <Text style={small}>{formatSpend(sparkToken.available, sparkToken)} available · sent over Spark, no fee</Text>
     </View> : target?.kind === 'rgb' ? (rgbAsset ? <View style={[card, { marginTop: t.spacing[4], gap: t.spacing[3] }]}>
       <Text style={caption}>Asset to send · {rgbAsset.ticker}</Text>
       <Text style={text}>{rgbAsset.available === undefined ? 'Available balance could not be loaded' : `Available: ${formatSpend(rgbAsset.available, rgbAsset)}`}</Text>
       {rgbBitcoin !== undefined && <Text style={small}>Bitcoin available for fees: {formatSats(rgbBitcoin)}</Text>}
-      <Text style={text}>Amount in {rgbAsset.ticker}</Text>
       {rgbAsset.amount ? <>
         <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'] }}>{formatSpend(rgbAsset.amount, rgbAsset)}</AmountText>
         <Text style={small}>Amount set by the invoice</Text>
       </> : <>
-        <TextInput accessibilityLabel={`Amount in ${rgbAsset.ticker}`} keyboardType="decimal-pad" value={assetAmount} onChangeText={setAssetAmount}
-          placeholder="0" placeholderTextColor={t.colors.text.muted} style={{ ...text, fontSize: t.typography.fontSize['3xl'], paddingVertical: t.spacing[3], borderBottomWidth: 1, borderColor: t.colors.primary[500] }} />
-        {rgbAsset.available !== undefined && <Button title={`Use available ${rgbAsset.ticker}`} variant="ghost" onPress={() => setAssetAmount((rgbAsset.available! / 10 ** rgbAsset.precision).toFixed(rgbAsset.precision))} />}
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Amount in ${rgbAsset.ticker}${assetAmount ? `, ${assetAmount}. Change` : ''}`}
+          onPress={() => { setAmountEditorFor('rgb'); setShowAmountEditor(true); }} style={{ alignItems: 'center', gap: 2, paddingVertical: t.spacing[2] }}>
+          <AmountText style={{ ...text, fontSize: t.typography.fontSize['3xl'], fontWeight: '700', color: assetAmount ? t.colors.text.primary : t.colors.text.tertiary }}>
+            {assetAmount || '0'} <Text style={{ ...muted, fontSize: t.typography.fontSize.lg }}>{rgbAsset.ticker}</Text>
+          </AmountText>
+          <Text style={{ ...small, color: t.colors.primary[500] }}>{assetAmount ? 'tap to change' : 'Tap to set an amount'}</Text>
+        </TouchableOpacity>
         <Text style={small}>Enter the amount to send. Bitcoin is needed separately for network fees.</Text>
       </>}
     </View> : null) : target && fixedSat === undefined ? (
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={shownSat ? `Amount, ${formatSats(shownSat)}. Change` : 'Add amount'} onPress={() => setShowAmountEditor(true)}
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={shownSat ? `Amount, ${formatSats(shownSat)}. Change` : 'Add amount'} onPress={() => { setAmountEditorFor('btc'); setShowAmountEditor(true); }}
         style={{ alignItems: 'center', gap: 2, paddingVertical: t.spacing[5] }}>
         <AmountText style={{ ...text, fontSize: t.typography.fontSize['4xl'], fontWeight: '700', color: shownSat ? t.colors.text.primary : t.colors.text.tertiary }}>
           {shownSat ? formatBitcoinAmount(shownSat, bitcoinUnit) : '0'} <Text style={{ ...muted, fontSize: t.typography.fontSize.lg }}>{bitcoinUnit}</Text>
@@ -677,7 +698,7 @@ export default function SendScreen({ navigation, route }: Props) {
           const blocked = !c.best;
           return (
             <Animated.View key={c.account} entering={FadeInDown.delay(i * motion.stagger).duration(motion.duration.base)}>
-              <PressableScale scaleTo={0.98} disabled={blocked} onPress={() => { if (c.best && !active) { feedback.select(); setSelectedId(c.best.id); setReviewUpdated(false); setPreviousTotal(''); } }}
+              <PressableScale scaleTo={0.98} disabled={blocked}                 onPress={() => { if (c.best && !active) { feedback.select(); setSelectedId(c.best.id); setPreviousTotal(''); } }}
                 accessibilityRole="radio" accessibilityState={{ checked: active, disabled: blocked }}
                 accessibilityLabel={`Pay from ${PAY_ACCOUNT_NAME[c.account]}${balancesSat[c.account] !== undefined ? `, balance ${formatSats(balancesSat[c.account]!)}` : ''}. ${blocked ? c.reason : s ? `Total ${displaySpend(s.total, s.asset)}` : ''}`}
                 style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1.5,
@@ -719,18 +740,18 @@ export default function SendScreen({ navigation, route }: Props) {
         <Text style={caption}>Network fee</Text>
         <SegmentedTabs<RgbFeeSpeed> scrollable={false} fill value={feeSpeed} onChange={chooseSpeed}
           options={feeOptions.map(o => ({ key: o.speed, label: `${SPEED_LABEL[o.speed]} · ${formatSats(o.feeSat)}` }))} />
-        <Text style={small}>{`About ${formatSats(feeOption.feeSat)} at ${feeOption.rate} sat/vB${feeOption.live ? '' : ' (default rate)'}. Slower costs less and takes longer to confirm.`}</Text>
+        <Text style={small}>{`About ${formatSats(feeOption.feeSat)} network fee${feeOption.live ? '' : ' (estimate)'}. Slower costs less, faster confirms sooner.`}</Text>
       </View>}
 
       <View style={{ gap: t.spacing[2], marginTop: t.spacing[3], alignItems: 'center' }}>
         {spend && quote && <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Ionicons name="time-outline" size={14} color={expired ? t.colors.warning[500] : t.colors.text.secondary} />
           <Text accessibilityLiveRegion="polite" style={{ ...muted, fontSize: t.typography.fontSize.sm, color: expired ? t.colors.warning[500] : t.colors.text.secondary }}>
-            {expired ? 'Quote expired. Refresh before paying.' : `Total ${total} · quote valid ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}
+            {expired ? (autoRefreshes.current < 3 ? 'Price expired. Updating…' : 'Price expired. Refresh before paying.') : `Total ${total} · valid ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}
           </Text>
         </View>}
         {!!selected?.unavailable && <Text accessibilityRole="alert" style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>{selected.unavailable}</Text>}
-        {!!previousTotal && reviewUpdated && <Text accessibilityRole="alert" style={{ ...muted, textAlign: 'center' }}>Previous total: {previousTotal}. Review the updated quote before paying.</Text>}
+        {!!previousTotal && previousTotal !== total && !busy && <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>Price updated · now {total}</Text>}
         {!busy && preview.plan.status === 'ready' && !offers.some(o => o.quote) && <Text style={{ ...muted, textAlign: 'center' }}>No way to pay this right now. Check your balances and connected accounts, then refresh.</Text>}
         {selected && !selected.executable && <Text style={{ ...muted, textAlign: 'center' }}>This account can quote but cannot pay yet.</Text>}
         {busy && <ActivityIndicator color={t.colors.primary[500]} />}
@@ -757,7 +778,7 @@ export default function SendScreen({ navigation, route }: Props) {
         onPress={() => void checkStatus()} />}
       {unresolvedAttempt(a) && !busy && <Button title="Remove from Activity" variant="ghost" onPress={removeFromActivity} />}
       {done && receiptExpanded && <Button title="Share receipt" variant="ghost" onPress={() => shareReceipt(a)} />}
-      {failed ? <Button title={a.sourceId === 'rgb-asset' ? 'Review transfer' : 'Review a new quote'}
+      {failed ? <Button title={a.sourceId === 'rgb-asset' ? 'Review transfer' : 'Check for a new price'}
         onPress={() => { setAttempt(null); if (preview) void getOffers(true); }} />
         : <Button title="Done" onPress={() => navigation.goBack()} />}
 
@@ -785,18 +806,26 @@ export default function SendScreen({ navigation, route }: Props) {
         {!crossChain && !attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
           {!preview
             ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Review transfer' : 'Continue')} disabled={!target || busy || !journalReady || rgbReading || (target?.kind === 'rgb' && !rgbAsset)} onPress={review} />
-            : !quote || quote.expiresAt * 1000 <= Date.now() || selected?.unavailable
-              ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh quotes')} disabled={busy} onPress={() => void getOffers(true)} />
-              : reviewUpdated
-                ? <Button title={target?.kind === 'rgb' ? 'Review updated transfer' : 'Review updated quote'} disabled={busy} onPress={() => setReviewUpdated(false)} />
-                : <SlideToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
+            : !quote || quote.expiresAt * 1000 <= now || selected?.unavailable
+              ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Updating price…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh price')} disabled={busy} onPress={() => void getOffers(true)} />
+              : <SlideToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
           {preview && !walletId && <Text style={{ ...muted, textAlign: 'center' }}>Set up a wallet to pay.</Text>}
         </View>}
       </KeyboardAvoidingView>
-      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); setReviewUpdated(false); setPreviousTotal(''); }}
+      <ProviderSheet visible={showProviders} options={options} selectedId={selectedId} onSelect={id => { setSelectedId(id); setPreviousTotal(''); }}
         onClose={() => setShowProviders(false)} now={now} title="Change account" intro="Choose an account for this payment. Available balances and totals include the quoted fees." />
-      <AmountEditorModal visible={showAmountEditor} onClose={() => { continueAfterAmount.current = false; setShowAmountEditor(false); }} initialSats={amountSat} rates={rates} bitcoinUnit={bitcoinUnit}
-        onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }} />
+      <AmountEditorModal visible={showAmountEditor}
+        onClose={() => { continueAfterAmount.current = false; setAmountEditorFor('btc'); setShowAmountEditor(false); }}
+        initialSats={amountEditorFor === 'btc' ? amountSat : undefined}
+        initialAssetValue={amountEditorFor !== 'btc' ? assetAmount || undefined : undefined}
+        asset={amountEditorFor === 'spark' && sparkToken
+          ? { unit: sparkToken.ticker, maxUnits: sparkToken.available / 10 ** sparkToken.precision, availableLabel: `${formatSpend(sparkToken.available, sparkToken)} available` }
+          : amountEditorFor === 'rgb' && rgbAsset
+            ? rgbAsset.available === undefined ? { unit: rgbAsset.ticker } : { unit: rgbAsset.ticker, maxUnits: rgbAsset.available / 10 ** rgbAsset.precision, availableLabel: `${formatSpend(rgbAsset.available, rgbAsset)} available` }
+            : undefined}
+        rates={rates} bitcoinUnit={bitcoinUnit}
+        onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }}
+        onConfirmAssetUnits={u => { setAssetAmount(u > 0 ? String(u) : ''); setShowAmountEditor(false); }} />
       <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)}
         onSelectContact={c => { setShowContacts(false); const dest = c.lightning_address || c.node_pubkey; if (dest) { setInput(dest); setContactName(c.name); } }} />
     </SafeAreaView>

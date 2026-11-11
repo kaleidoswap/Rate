@@ -157,7 +157,7 @@ export default function AssetDetailScreen({ navigation, route }: Props) {
     : asset.locations ?? (isBTC ? [] : [{ label: NETWORK_LABEL[protocol], amount: bal.available / 10 ** precision, unit }]);
   const selectedAsset = { asset_id: asset.asset_id, ticker: asset.ticker, name: asset.name, isRGB };
   const actions: Array<{ key: string; label: string; icon: keyof typeof Ionicons.glyphMap; tint: string; onPress: () => void }> = [
-    { key: 'receive', label: 'Receive', icon: 'arrow-down', tint: theme.colors.success[500], onPress: () => navigation.navigate('Receive', { selectedAsset }) },
+    { key: 'receive', label: 'Receive', icon: 'arrow-down', tint: theme.colors.success[500], onPress: () => navigation.navigate('Receive', { selectedAsset, prefilledAssetTicker: isRGB ? asset.ticker : undefined }) },
     { key: 'swap', label: 'Swap', icon: 'swap-horizontal', tint: theme.colors.brand.violet, onPress: () => navigation.navigate('Swap') },
     { key: 'send', label: 'Send', icon: 'arrow-up', tint: theme.colors.primary[500], onPress: () => navigation.navigate('Send', { selectedAsset }) },
   ];

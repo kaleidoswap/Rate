@@ -17,7 +17,6 @@ jest.mock('../store/hooks', () => ({
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('../hooks/useFiatRates', () => ({ useFiatRates: () => ({ usd: 100000 }) }));
 jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: 'ScreenHeader' }));
-jest.mock('../components/AmountEditorModal', () => ({ AmountEditorModal: () => null }));
 jest.mock('../components/NostrContactsSelector', () => () => null);
 jest.mock('../components/Button', () => ({ Button: ({ title, onPress, disabled }: any) => {
   const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity disabled={disabled} onPress={onPress}><Text>{title}</Text></TouchableOpacity>;
@@ -260,7 +259,9 @@ test('a Spark address can be paid in a Spark token the wallet holds', async () =
   const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'spark1recipient' } }} />);
   await act(async () => {});
   fireEvent.press(screen.getByLabelText(/^Pay in USDB/));
-  fireEvent.changeText(screen.getByLabelText('Amount in USDB'), '2.5');
+  fireEvent.press(screen.getByLabelText('Amount in USDB'));
+  fireEvent.changeText(screen.getByLabelText('Requested amount'), '2.5');
+  await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   expect(prepareSparkTokenRequest).toHaveBeenLastCalledWith(mockUsdb);
   expect(previewInput).toHaveBeenCalledWith('spark1recipient', undefined, 'test-uuid',
@@ -283,7 +284,7 @@ test('an empty Send lists what it can send to, including other chains', async ()
   const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
   await act(async () => {});
   expect(screen.getByText('You can send to')).toBeTruthy();
-  expect(screen.getByText('Invoice · LNURL · Lightning address · BOLT12 offer')).toBeTruthy();
+  expect(screen.getByText('Lightning invoice or address')).toBeTruthy();
   expect(screen.getByText('USDC / USDT to other chains')).toBeTruthy();
   expect(screen.queryByText('Liquid')).toBeNull();
 });
@@ -325,11 +326,11 @@ test('paying from RGB on this phone offers Slow, Normal and Fast with their fee;
   (quotePaymentOffers as jest.Mock).mockResolvedValue([rgbOffer]);
   const screen = await reviewed();
   expect(screen.getByText('Network fee')).toBeTruthy();
-  expect(screen.getByText(/About 2,100 sats at 7 sat\/vB/)).toBeTruthy();
+  expect(screen.getByText(/About 2,100 sats network fee/)).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByText('Fast · 3,600 sats')); });
   expect(mockSetSpeed).toHaveBeenLastCalledWith('fast');
   expect(quotePaymentOffers).toHaveBeenCalledTimes(2);
-  expect(screen.getByText(/About 3,600 sats at 12 sat\/vB/)).toBeTruthy();
+  expect(screen.getByText(/About 3,600 sats network fee/)).toBeTruthy();
   expect(screen.queryByText('Review updated quote')).toBeNull(); // the user chose it: no second review
   mockFeeOptions = null;
 });
@@ -440,7 +441,9 @@ test('RGB has a visible balance and amount, accepts decimal comma and reviews a 
   await act(async () => {});
   expect(screen.getByText('Bitcoin available for fees: 2,500 sats')).toBeTruthy();
   expect(screen.getByText('Available: 500 sats')).toBeTruthy(); // shared formatter mocked above
-  fireEvent.changeText(screen.getByLabelText('Amount in USD'), '1,25');
+  fireEvent.press(screen.getByLabelText('Amount in USD'));
+  fireEvent.changeText(screen.getByLabelText('Requested amount'), '1,25');
+  await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   await act(async () => { fireEvent.press(screen.getByText('Review transfer')); });
   expect(previewInput).toHaveBeenCalledWith('rgb:any', undefined, expect.any(String), { asset: { id: 'rgb-usd', ticker: 'USD', precision: 2, amount: 125 } });
   expect(screen.getByText('Review RGB transfer')).toBeTruthy();

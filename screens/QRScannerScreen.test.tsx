@@ -87,7 +87,7 @@ test('a token request is never silently treated as a BTC native request', async 
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
   expect(navigation.navigate).not.toHaveBeenCalled();
-  expect(screen.getByText(/not a recognized/)).toBeTruthy();
+  expect(screen.getByText(/couldn't read this code/)).toBeTruthy();
 });
 
 test.each(['lnbc-expired', 'bitcoin:?lightning=lnbc-expired'])('rejects an expired invoice before navigating: %s', async code => {
