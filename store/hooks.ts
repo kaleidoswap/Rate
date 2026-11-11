@@ -3,12 +3,11 @@ import { useDispatch, useSelector, TypedUseSelectorHook } from 'react-redux';
 import type { RootState, AppDispatch } from './index';
 
 // Import async thunks at the top
-import { 
-  initializeWallet, 
-  unlockWallet, 
-  loadBtcBalance, 
-  fetchBitcoinPrice, 
-  syncWallet 
+import {
+  unlockWallet,
+  loadBtcBalance,
+  fetchBitcoinPrice,
+  syncWallet
 } from './slices/walletSlice';
 
 import { 
@@ -89,9 +88,6 @@ export const useWalletActions = () => {
   const dispatch = useAppDispatch();
   
   return {
-    initializeWallet: (password: string, walletName: string, networks: any[]) =>
-      dispatch(initializeWallet({ password, walletName, networks })),
-    
     unlockWallet: (params: any) =>
       dispatch(unlockWallet(params)),
     

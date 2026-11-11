@@ -10,6 +10,13 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Removed
+- **The deprecated service facades are gone.** `WalletManager` (a thin
+  leftover over ProtocolManager) and the last `RGBApiService` references:
+  switching wallets talks to `protocolManager` and `initializeProtocols`
+  directly, and the never-dispatched `initializeWallet` thunk (with its hook
+  wrapper) is deleted. AGENTS.md no longer points anyone at the facades.
+
 ### Added
 - **The identity is payable.** The dashboard's profile chip shows your
   lightning address under your name — your kaleidoswap.me handle when set,

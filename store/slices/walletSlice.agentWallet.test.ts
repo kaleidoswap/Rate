@@ -1,6 +1,6 @@
 const mockOrder: string[] = [];
 jest.mock('../../services/agentWallet/lifecycle', () => ({ closeAgentWallet: jest.fn(async () => { mockOrder.push('close-agent'); }) }));
-jest.mock('../../services/protocols', () => ({ protocolManager: {}, rgbAccountAdapter: jest.fn() }));
+jest.mock('../../services/protocols', () => ({ protocolManager: { disconnectAll: jest.fn(async () => {}) }, rgbAccountAdapter: jest.fn(), initializeProtocols: jest.fn(async () => new Map()) }));
 jest.mock('../../services/balanceSnapshot', () => ({ clearBalanceSnapshots: jest.fn(async () => {}) }));
 jest.mock('../../services/DatabaseService', () => ({
   __esModule: true,
@@ -10,7 +10,6 @@ jest.mock('../../services/DatabaseService', () => ({
     deleteWallet: async () => { mockOrder.push('delete'); },
   }) },
 }));
-jest.mock('../../services/WalletManager', () => ({ __esModule: true, default: { getInstance: () => ({}) } }));
 
 import { deleteWallet, switchWallet } from './walletSlice';
 
