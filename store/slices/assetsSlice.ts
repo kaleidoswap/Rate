@@ -5,7 +5,7 @@ import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
 import DatabaseService from '../../services/DatabaseService';
 import { assetRecordFromUnified, replaceProtocolAssets, type InventoryRecord, type TokenProtocol } from '../../utils/asset-inventory';
 
-// Define NiaAsset interface locally since it's not exported from RGBApiService
+// The RGB inventory's asset shape, mirrored here for the slices.
 interface NiaAsset {
   asset_id: string;
   asset_iface: string;

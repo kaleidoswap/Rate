@@ -5,7 +5,7 @@ import { WalletRecord, NetworkConfig, NetworkType } from '../../services/Databas
 import DatabaseService from '../../services/DatabaseService';
 import { clearBalanceSnapshots } from '../../services/balanceSnapshot';
 import type { BtcNetwork } from '../../utils/wallet-balance-summary';
-import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
+import { protocolManager, rgbAccountAdapter, initializeProtocols } from '../../services/protocols';
 import type { ProtocolType } from '../../services/protocols';
 
 export interface ProtocolBalance {
@@ -81,40 +81,6 @@ const initialState: WalletState = {
 };
 
 // Async thunks
-export const initializeWallet = createAsyncThunk(
-  'wallet/initialize',
-  async (params: { password: string; walletName: string; networks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] }, { rejectWithValue }) => {
-    try {
-      const dbService = DatabaseService.getInstance();
-      const walletManager = require('../../services/WalletManager').default.getInstance();
-
-      // Retrieve wallet from DB (assuming active or by name/id logic needed here, but keeping simple)
-      const wallet = await dbService.getActiveWallet();
-      if (!wallet || !wallet.encrypted_mnemonic) {
-        throw new Error('No active wallet or missing mnemonic');
-      }
-
-      // Decrypt mnemonic (mocking decryption for now as per previous logic, usually handled by DB service in future)
-      // Assuming encrypted_mnemonic IS the mnemonic for this PoC if encryption not fully wired in DB service layer yet
-      // OR assuming DatabaseService handles it.
-      const mnemonic = wallet.encrypted_mnemonic;
-
-      // Initialize WalletManager
-      const walletNetworks = params.networks.map(n => ({
-        type: n.type as any, // Cast to WalletType
-        enabled: n.enabled,
-        config: n.config ? JSON.parse(n.config) : {},
-      }));
-
-      await walletManager.initialize(mnemonic, walletNetworks);
-
-      return { wallet, mnemonic };
-    } catch (error: any) {
-      return rejectWithValue(error.message);
-    }
-  }
-);
-
 export const loadWallets = createAsyncThunk(
   'wallet/loadWallets',
   async (_, { rejectWithValue }) => {
@@ -144,20 +110,16 @@ export const switchWallet = createAsyncThunk(
       const dbService = DatabaseService.getInstance();
       await dbService.setActiveWallet(walletId);
       const wallet = await dbService.getActiveWallet();
-      const walletManager = require('../../services/WalletManager').default.getInstance();
 
       if (wallet && wallet.encrypted_mnemonic) {
-        // Disconnect old
-        await walletManager.disconnectAll();
-
-        // Re-init new
-        const walletNetworks = wallet.networks?.map(n => ({
-          type: n.type as any,
+        // Disconnect old accounts, then bring up the new wallet's own.
+        await protocolManager.disconnectAll();
+        const walletNetworks = (wallet.networks ?? []).map(n => ({
+          type: n.type,
           enabled: n.enabled,
-          config: n.config ? JSON.parse(n.config) : {},
-        })) || [];
-
-        await walletManager.initialize(wallet.encrypted_mnemonic, walletNetworks);
+          config: n.config,
+        }));
+        await initializeProtocols(wallet.encrypted_mnemonic, walletNetworks);
       }
 
       return wallet;
@@ -402,26 +364,6 @@ const walletSlice = createSlice({
     resetWallet: () => initialState,
   },
   extraReducers: (builder) => {
-    // Initialize wallet
-    builder
-      .addCase(initializeWallet.pending, (state) => {
-        state.isLoading = true;
-        state.error = null;
-      })
-      .addCase(initializeWallet.fulfilled, (state, action) => {
-        state.isLoading = false;
-        state.activeWallet = action.payload.wallet;
-        state.isInitialized = true;
-        state.isUnlocked = true;
-        if (action.payload.wallet) {
-          state.wallets = [...state.wallets, action.payload.wallet];
-        }
-      })
-      .addCase(initializeWallet.rejected, (state, action) => {
-        state.isLoading = false;
-        state.error = action.payload as string;
-      });
-
     // Load wallets
     builder
       .addCase(loadWallets.fulfilled, (state, action) => {

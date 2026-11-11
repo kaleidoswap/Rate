@@ -52,9 +52,6 @@ Always use the typed hooks from `store/hooks.ts`: `useAppDispatch()`, `useAppSel
 
 `services/` contains all business logic, keeping screens/components free of direct API calls:
 - `protocols/index.ts` – **ProtocolManager** singleton from `@kaleidorg/wallet-engine` shared lib; adapters for Spark, Arkade, RGB (kaleido-sdk). Entry point: `protocolManager`
-- `RGBApiService.ts` – **DEPRECATED** legacy RGB node REST API (being replaced by ProtocolManager)
-- `WalletManager.ts` – **DEPRECATED** thin facade over ProtocolManager
-- `DatabaseService.ts` – SQLite (expo-sqlite). The file is **not** encrypted (no SQLCipher yet), so it must never hold secrets: seeds live in SecureStore via `SecurityService`, and `setSetting(..., encrypted=true)` throws unless a key is set
 - `NostrService.ts` / `NWCService.ts` – Nostr protocol + NIP-47 Wallet Connect
 - `SecurityService.ts` – biometric auth, SecureStore encryption
 - `QVACService.ts` – on-device AI model lifecycle (LLM + Whisper via @qvac/sdk)
@@ -82,7 +79,7 @@ Utility files:
 
 - Async operations use Redux Toolkit `createAsyncThunk`; dispatch thunks from screens via action hooks
 - `metro.config.js` includes Node.js polyfills (crypto, stream, buffer) required for Bitcoin libs
-- Multi-protocol wallet via `protocolManager` (Spark, Arkade, RGB); screens use `protocolManager.getAdapter('PROTOCOL')` with legacy `RGBApiService` fallback
+- Multi-protocol wallet via `protocolManager` (Spark, Arkade, RGB); screens use `protocolManager.getAdapter('PROTOCOL')` — the deprecated `RGBApiService` and `WalletManager` facades are gone
 - RGB Lightning node accessed via kaleido-sdk through the shared `@kaleidorg/wallet-engine` library
 - Swaps support two venues: KaleidoSwap (maker-based atomic swaps) and Flashnet (Spark AMM pools)
 - AI assistant uses QVAC SDK for on-device LLM (Qwen3.5 0.8B / 2B by device RAM, catalog in `services/qvacModels.ts`) and Whisper transcription — see `services/QVACService.ts`, `services/qvacTools.ts`, and `services/aiAssistantFunctions.ts`

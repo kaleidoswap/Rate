@@ -25,7 +25,6 @@ import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { useIsFocused } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { RootState } from '../store';
-// RGBApiService removed — all operations via protocolManager
 import { protocolManager, rgbAccountAdapter, rgbAccountIsOnDevice } from '../services/protocols';
 import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel, setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
