@@ -21,10 +21,18 @@ jest.mock('../services/agentWallet/store', () => ({ AgentWalletStore: class { en
 jest.mock('../components/ActivityDetailSheet', () => ({ ActivityDetailSheet: ({ item }: any) => item ? <>{require('react').createElement(require('react-native').Text, {}, `Details ${item.id}`)}</> : null }));
 jest.mock('../components/Sheet', () => ({ Sheet: ({ visible, children, footer }: any) => visible ? <>{children}{footer}</> : null }));
 beforeAll(() => { (require('react-native') as any).SectionList = ({ sections, renderItem, renderSectionHeader, ListEmptyComponent }: any) => sections.length ? sections.map((section: any) => <React.Fragment key={section.title}>{renderSectionHeader({ section })}{section.data.map((item: any) => <React.Fragment key={item.id}>{renderItem({ item })}</React.Fragment>)}</React.Fragment>) : ListEmptyComponent; });
-test('has no search field; rows show the saved contact and open their detail', async () => {
+test('search opens from the header, filters the rows, and rows open their detail', async () => {
   const ui = render(<HistoryScreen />);
   await act(async () => {});
-  expect(ui.queryByLabelText('Search activity')).toBeNull();
+  expect(ui.queryByLabelText('Search activity')).toBeTruthy();
+  fireEvent.press(ui.getByLabelText('Search activity'));
+  expect(ui.getByLabelText('Search activity')).toBeTruthy(); // the placeholder labels the input
+  expect(ui.getByLabelText(/Alice.*Open details/)).toBeTruthy();
+  fireEvent.changeText(ui.getByLabelText('Search activity'), '100');
+  expect(ui.queryByLabelText(/Alice.*Open details/)).toBeNull();
+  expect(ui.getByLabelText(/100 sats.*Open details/)).toBeTruthy();
+  fireEvent.press(ui.getByLabelText('Clear search'));
+  expect(ui.getByLabelText(/Alice.*Open details/)).toBeTruthy();
   fireEvent.press(ui.getByLabelText(/Alice.*Open details/));
   expect(ui.getByText('Details one')).toBeTruthy();
 });

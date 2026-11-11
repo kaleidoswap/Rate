@@ -6,7 +6,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { useAppSelector } from '../store/hooks';
-import { formatBitcoinAmount } from '../utils/bitcoinUnits';
+import { formatBitcoinAmount, formatSatoshisToUSD } from '../utils/bitcoinUnits';
+import { activityAmountPrefix, activityIcon, activityTypeLabel, activityToneColor } from '../utils/activity-presentation';
+import { useFiatRates } from '../hooks/useFiatRates';
 import {
     Modal,
     View,
@@ -43,45 +45,17 @@ interface Props {
     onRefresh?: () => Promise<boolean | void>;
 }
 
-function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
-    switch (type) {
-        case 'receive': return { icon: 'arrow-down', color: theme.colors.tx.receive };
-        case 'send': return { icon: 'arrow-up', color: theme.colors.tx.sent };
-        case 'swap': return { icon: 'swap-horizontal', color: theme.colors.tx.swap };
-        case 'issuance': return { icon: 'add-circle-outline', color: theme.colors.accent[500] };
-        case 'channel_open': return { icon: 'git-branch-outline', color: theme.colors.accent[500] };
-        case 'channel_close': return { icon: 'close-circle-outline', color: theme.colors.warning[500] };
-        default: return { icon: 'ellipse-outline', color: theme.colors.text.tertiary };
-    }
-}
-
-function typeLabel(item: ActivityItem): string {
-    if (item.crossChain) return item.crossChain.direction === 'deposit' ? 'Deposit from another chain' : 'Sent to another chain';
-    if (item.kind === 'unilateral_exit') return 'Exit to Bitcoin';
-    const onchainKind = item.source === 'onchain' ? rgbOnchainKindLabel(item.kind) : null;
-    if (onchainKind) return onchainKind;
-    switch (item.type) {
-        case 'receive': return item.status === 'confirmed' ? 'Received' : 'Receive';
-        case 'send': return item.status === 'confirmed' ? 'Sent' : 'Payment';
-        case 'swap': return 'Atomic Swap';
-        case 'issuance': return item.kind === 'Inflation' ? 'Inflation' : 'Issuance';
-        case 'channel_open': return 'Channel Open';
-        case 'channel_close': return 'Channel Close';
-        default: return 'Transaction';
-    }
-}
-
-function amountPrefix(type: ActivityItemType): string {
-    if (type === 'receive' || type === 'issuance') return '+';
-    if (type === 'send') return '−';
-    return '';
-}
+// Type names, icons and signs come from utils/activity-presentation, shared
+// with the Activity rows and the dashboard widget: one payment, one story.
+const typeLabel = activityTypeLabel;
+const amountPrefix = activityAmountPrefix;
 
 
 export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh }) => {
     const theme = useAppTheme();
     const styles = useMemo(() => createStyles(theme), [theme]);
     const unit = useAppSelector(state => state.settings.bitcoinUnit);
+    const usdRate = useFiatRates().usd;
     const [detailsExpanded, setDetailsExpanded] = useState(false);
     const [cancelledId, setCancelledId] = useState<string | null>(null);
     useEffect(() => { setDetailsExpanded(false); setCancelledId(null); }, [item?.id]);
@@ -104,11 +78,13 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     }, [item]);
     if (!item) return null;
 
-    const v = typeVisual(item.type);
+    const v = activityIcon(item.type);
+    const vColor = activityToneColor(v.tone, theme);
     const cancelled = cancelledId === item.id;
     const st = ACTIVITY_STATUS_VISUAL[cancelled ? 'failed' : item.status];
     const onchain = item.source === 'onchain' || item.layer === 'L1' || item.layer === 'RGB-L1';
-    const statusLabel = cancelled ? 'Cancelled' : onchain && item.status === 'pending' ? 'Awaiting confirmation' : onchain && item.status === 'confirmed' ? 'Confirmed on-chain' : st.label;
+    // One status vocabulary everywhere: the same label the rows show.
+    const statusLabel = cancelled ? 'Cancelled' : st.label;
     const hasAmount = item.amount !== '';
     const isIncoming = item.type === 'receive' || item.type === 'issuance';
     const txLabel = item.crossChain ? 'Order ID' : item.paymentHash ? 'Payment hash' : 'Transaction ID';
@@ -125,8 +101,9 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
     const removable = !!rgb && canDeleteRgbTransfer(rgb, rgbSupport);
     const rgbSettled = rgb?.status === 'settled';
     const statusDetail = rgb ? (rgbSettled ? '' : rgbTransferStatusDetail(rgb.status, rgb.direction))
-        : item.status === 'unknown' ? 'The provider has not confirmed the outcome. Check the status before sending again.'
-        : item.status === 'pending' ? 'Submitted and waiting for confirmation. You can leave this screen and check again later.' : '';
+        : item.status === 'unknown' ? 'The provider has not confirmed the outcome. Check the status before paying again.'
+        : item.status === 'pending' ? 'Submitted and waiting for confirmation. You can leave this screen and check again later.'
+        : onchain && item.status === 'confirmed' ? 'Included in a Bitcoin block.' : '';
     // Method, account and network in one line: "RGB · mutinynet", the account only when it says more.
     const accountName = item.account ?? (['LN', 'RGB-LN', 'RGB-L1', 'L1'].includes(item.layer) ? 'RGB' : item.layer);
     const methodText = [LAYER_LABEL[item.layer], accountName !== LAYER_LABEL[item.layer] && accountName !== item.layer ? accountName : null, item.network]
@@ -230,14 +207,19 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                 <ScrollView contentContainerStyle={styles.body}>
                 {/* Icon + type + amount */}
                 <View style={styles.header}>
-                    <View style={[styles.bigIcon, { backgroundColor: v.color + '1A' }]}>
-                        <Ionicons name={v.icon} size={26} color={v.color} />
+                    <View style={[styles.bigIcon, { backgroundColor: vColor + '1A' }]}>
+                        <Ionicons name={v.icon} size={26} color={vColor} />
                     </View>
                     <Text style={styles.typeLabel}>{typeLabel(item)}</Text>
                     {hasAmount && (
-                        <Text style={[styles.amount, { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary }]}>
-                            {cancelled || item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
-                        </Text>
+                        <View style={styles.amountColumn}>
+                            <Text style={[styles.amount, { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary }]}>
+                                {cancelled || item.status === 'failed' ? '' : amountPrefix(item.type)}{item.rawSats != null ? `${formatBitcoinAmount(item.rawSats, unit)} ${unit}` : `${item.amount} ${item.assetTicker}`}
+                            </Text>
+                            {item.rawSats != null && !!usdRate && (
+                                <Text style={styles.amountFiat}>≈ ${formatSatoshisToUSD(item.rawSats, usdRate)}</Text>
+                            )}
+                        </View>
                     )}
                     {/* Status: an RGB transfer's own step reads better than "Confirmed on-chain" + "Settled". */}
                     <View style={styles.headerStatus}>
@@ -399,6 +381,14 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         fontSize: theme.typography.fontSize['2xl'],
         fontWeight: '800',
     },
+    amountColumn: {
+        alignItems: 'center',
+        gap: 2,
+    },
+    amountFiat: {
+        fontSize: theme.typography.fontSize.sm,
+        color: theme.colors.text.tertiary,
+    },
     body: {
         paddingHorizontal: theme.spacing[4],
         paddingTop: theme.spacing[3],
@@ -424,8 +414,8 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         borderTopColor: theme.colors.border.light,
     },
     monoValue: {
-        fontSize: 12,
-        fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+        fontSize: theme.typography.fontSize.xs,
+        fontFamily: theme.typography.fontFamily.mono,
         color: theme.colors.text.primary,
         flexShrink: 1,
     },
@@ -509,8 +499,8 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         marginBottom: theme.spacing[2],
     },
     txidText: {
-        fontSize: 12,
-        fontFamily: Platform.OS === 'ios' ? 'Courier New' : 'monospace',
+        fontSize: theme.typography.fontSize.xs,
+        fontFamily: theme.typography.fontFamily.mono,
         color: theme.colors.text.secondary,
         lineHeight: 18,
     },

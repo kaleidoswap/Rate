@@ -11,6 +11,11 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Added
+- **Search in Activity.** The header gains a search toggle: typing filters by
+  contact, amount, asset or transaction id, live across the whole list (the
+  search machinery existed; it had never been wired up).
+- Bitcoin amounts in Activity rows, the dashboard's recent-activity card and
+  the detail sheet now carry their ≈ fiat value too.
 - **The wallet's own number pad.** Amounts are entered on big keys with a tick
   of haptics each press — no OS keyboard in the middle of a payment. The
   decimal point only appears where one belongs (never in sats), the display
@@ -25,6 +30,19 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   receive side. One moment, one look, both directions.
 
 ### Changed
+- **One payment, one story.** Type names ("Received", "Payment", "Swap"),
+  signs, colors, statuses and timestamps are decided once in
+  `utils/activity-presentation` and used by the Activity rows, the dashboard
+  widget and the detail sheet. A swap no longer looks like a green inflow on
+  the dashboard and a neutral row in Activity; "Atomic Swap", "Sent vs
+  Payment" and "Confirmed on-chain vs Completed" divergences are gone
+  (on-chain confirmation is said in words under the status). Rows everywhere
+  tell one compact age ("2h"), the sheet keeps the full date.
+- The dashboard's recent-activity card shows the type next to a contact
+  ("Payment · Alice") and speaks as one element to screen readers.
+- Cleanup: 11 legacy header styles and a dead `onIssueAsset` prop removed
+  from the dashboard; hash and id text uses the design-system mono font
+  (was Courier New); sub-12px label sizes raised to the token scale.
 - **One amount editor everywhere.** Sending bitcoin, a Spark token or an RGB
   asset now opens the same amount sheet (big display, quick Max chip for
   tokens, validation against the available balance) instead of three different

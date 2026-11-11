@@ -31,7 +31,6 @@ interface AssetListProps {
     assets: NiaAsset[];
     onViewAll: () => void;
     onAssetPress: (asset: NiaAsset) => void;
-    onIssueAsset: () => void;
 }
 
 const VISIBLE = 4;
