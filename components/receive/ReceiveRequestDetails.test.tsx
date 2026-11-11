@@ -28,10 +28,10 @@ test('names each code and where it lands', () => {
 test('the universal code folds its formats away, then lists each on its own QR', () => {
   const screen = render(<ReceiveRequestDetails methods={methods} universal qrSize={200}
     notes={["Bark isn't included: it's on Signet."]} />);
-  // Folded: the summary names the formats; the notes stay visible.
+  // Folded: the summary names the formats; the notes and codes stay out of sight.
   expect(screen.getByText('Other formats')).toBeTruthy();
   expect(screen.queryByText(/^Bark · lntb1/)).toBeNull();
-  expect(screen.getByText("Bark isn't included: it's on Signet.")).toBeTruthy();
+  expect(screen.queryByText("Bark isn't included: it's on Signet.")).toBeNull();
   fireEvent.press(screen.getByLabelText(/^Show the codes inside this one/));
   expect(screen.getByText('Lightning invoice')).toBeTruthy();
   expect(screen.getByText(/^Bark · lntb1/)).toBeTruthy();

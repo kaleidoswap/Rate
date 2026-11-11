@@ -135,25 +135,27 @@ export function ReceiveRequestDetails({ methods, universal, notes = [], qrSize, 
       </View>
       <Ionicons name={showFormats ? 'chevron-up' : 'chevron-down'} size={18} color={t.colors.text.secondary} />
     </TouchableOpacity>
-    {showFormats && methods.map((method, i) => <View key={method.key}
-      style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], paddingHorizontal: t.spacing[4], paddingVertical: t.spacing[3],
-        borderTopWidth: 1, borderTopColor: t.colors.border.light }}>
-      <NetworkIcon network={iconFor(method)} size={22} />
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>{requestKind(method)}</Text>
-        <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }} numberOfLines={1}>
-          {accountName(method, rgbLabel)} · {middleEllipsis(method.value)}
-        </Text>
-      </View>
-      <CopyButton value={method.value} />
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Show the ${requestKind(method)} on its own`}
-        onPress={() => setShown(method)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ padding: t.spacing[1] }}>
-        <Ionicons name="qr-code-outline" size={18} color={t.colors.text.secondary} />
-      </TouchableOpacity>
-    </View>)}
-    {notes.map(note => <Text key={note} style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, paddingHorizontal: t.spacing[4], paddingBottom: t.spacing[3] }}>
-      {note}
-    </Text>)}
+    {showFormats && <>
+      {methods.map((method, i) => <View key={method.key}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], paddingHorizontal: t.spacing[4], paddingVertical: t.spacing[3],
+          borderTopWidth: 1, borderTopColor: t.colors.border.light }}>
+        <NetworkIcon network={iconFor(method)} size={22} />
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>{requestKind(method)}</Text>
+          <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }} numberOfLines={1}>
+            {accountName(method, rgbLabel)} · {middleEllipsis(method.value)}
+          </Text>
+        </View>
+        <CopyButton value={method.value} />
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Show the ${requestKind(method)} on its own`}
+          onPress={() => setShown(method)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ padding: t.spacing[1] }}>
+          <Ionicons name="qr-code-outline" size={18} color={t.colors.text.secondary} />
+        </TouchableOpacity>
+      </View>)}
+      {notes.map(note => <Text key={note} style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, paddingHorizontal: t.spacing[4], paddingBottom: t.spacing[3] }}>
+        {note}
+      </Text>)}
+    </>}
     <CodeSheet method={shown} onClose={() => setShown(null)} qrSize={qrSize} rgbLabel={rgbLabel} onRefresh={onRefresh} />
   </View>;
 }

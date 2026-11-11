@@ -26,6 +26,7 @@ import { AmountText } from '../components/AmountText';
 import { ProviderSheet } from '../components/payments/ProviderSheet';
 import { NetworkIcon } from '../components/NetworkIcon';
 import { AmountEditorModal } from '../components/AmountEditorModal';
+import PaymentSuccessOverlay from '../components/PaymentSuccessOverlay';
 import { SendDestinationsHint } from '../components/payments/SendDestinationsHint';
 import { CrossChainSendPanel } from '../components/payments/CrossChainSendPanel';
 import { detectCrossChainAddress } from '../utils/crosschain';
@@ -136,8 +137,22 @@ export default function SendScreen({ navigation, route }: Props) {
   const checking = useRef(false);
   const autoRefreshes = useRef(0);
   const requestId = useRef(Crypto.randomUUID());
+  // The payment this screen sent: only its completion gets the celebration,
+  // receipts reopened from Activity do not celebrate a second time.
+  const sentId = useRef<string | null>(null);
+  const celebratedId = useRef<string | null>(null);
+  const [celebrateAttempt, setCelebrateAttempt] = useState<PaymentAttempt | null>(null);
 
   const { target, error: decodeError } = useMemo(() => decodeQuietly(input), [input]);
+  // People-first: while typing, matching contacts autocomplete above everything else.
+  const matchingContacts = useMemo(() => {
+    const q = input.trim().toLowerCase();
+    if (!q || target) return [];
+    return (contacts ?? [])
+      .filter(c => c.lightning_address || c.node_pubkey)
+      .filter(c => c.name.toLowerCase().includes(q) || c.lightning_address?.toLowerCase().includes(q) || c.node_pubkey?.toLowerCase().includes(q))
+      .slice(0, 4);
+  }, [contacts, input, target]);
   // Only what the wallet's own decoding rejects can be an address on another chain.
   const crossChain = useMemo(() => (target ? null : detectCrossChainAddress(unwrapCrossChainUri(input))), [target, input]);
   const fixedSat = target?.amountSat;
@@ -355,6 +370,7 @@ export default function SendScreen({ navigation, route }: Props) {
       setError('Could not start a new payment. Reopen Send to check your previous payment.');
       setJournalReady(false); paying.current = false; setBusy(false); return;
     }
+    sentId.current = next.id;
     setAttempt(next);
     // A payment to a picked contact goes into that contact's history too.
     const toContact = contactName && input.trim() ? { contactKey: contactKeyFor(input), contactName } : null;
@@ -420,6 +436,13 @@ export default function SendScreen({ navigation, route }: Props) {
     } catch { if (!quiet) setError('Could not update payment status. Check again before making another payment.'); }
     finally { lock.current = false; setStatusChecking(false); if (!quiet) setBusy(false); }
   }
+  // A payment sent from this screen celebrates once when it completes.
+  useEffect(() => {
+    if (!attempt || attempt.status !== 'completed' || attempt.id !== sentId.current || celebratedId.current === attempt.id) return;
+    celebratedId.current = attempt.id;
+    setCelebrateAttempt(attempt);
+  }, [attempt]);
+
   checkStatusRef.current = checkStatus;
   attemptRef.current = attempt;
 
@@ -459,7 +482,15 @@ export default function SendScreen({ navigation, route }: Props) {
     catch { setError('Could not read the clipboard.'); }
   }
 
-  const pickContact = (c: Contact) => { const dest = c.lightning_address || c.node_pubkey; if (dest) { feedback.select(); setInput(dest); setContactName(c.name); } };
+  const pickContact = (c: Contact) => {
+    const dest = c.lightning_address || c.node_pubkey;
+    if (!dest) return;
+    feedback.select();
+    setInput(dest); setContactName(c.name);
+    // Amount-first: a contact's Lightning address never carries an amount, so ask now
+    // and go straight to the review once it is set.
+    if (c.lightning_address) { setAmountEditorFor('btc'); continueAfterAmount.current = true; setShowAmountEditor(true); }
+  };
   const iconButton = { width: 40, height: 40, borderRadius: t.borderRadius.md, alignItems: 'center' as const, justifyContent: 'center' as const, backgroundColor: t.colors.background.secondary };
 
   const resetToInput = () => { revision.current++; setBusy(false); setPreview(null); setOffers([]); };
@@ -632,25 +663,43 @@ export default function SendScreen({ navigation, route }: Props) {
     ) : null}
 
     {!target && <View style={{ marginTop: t.spacing[5], gap: t.spacing[3] }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Text style={caption}>{recentContacts.length ? 'Recent' : 'Contacts'}</Text>
-        <TouchableOpacity accessibilityRole="button" onPress={() => setShowContacts(true)} hitSlop={8}>
-          <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>All contacts</Text>
-        </TouchableOpacity>
-      </View>
-      {recentContacts.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.spacing[3] }}>
-        {recentContacts.map((c, i) => (
-          <PressableScale key={c.id} accessibilityRole="button" accessibilityLabel={`Pay ${c.name}`} onPress={() => pickContact(c)} style={{ alignItems: 'center', gap: t.spacing[1], width: 60 }}>
-            <View style={{ width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColors[i % avatarColors.length] }}>
+      {matchingContacts.length > 0 ? <View style={{ gap: t.spacing[2] }}>
+        <Text style={caption}>Contacts</Text>
+        {matchingContacts.map((c, i) => (
+          <PressableScale key={c.id} accessibilityRole="button" accessibilityLabel={`Pay ${c.name}`}
+            onPress={() => pickContact(c)} scaleTo={0.98}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg, borderWidth: 1, borderColor: t.colors.border.light, backgroundColor: t.colors.surface.primary }}>
+            <View style={{ width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColors[i % avatarColors.length] }}>
               <Text style={{ color: t.colors.text.inverse, fontWeight: '700' }}>{initials(c.name)}</Text>
             </View>
-            <Text numberOfLines={1} style={{ ...small, color: t.colors.text.secondary }}>{c.name.split(' ')[0]}</Text>
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ ...text, fontWeight: '600' }}>{c.name}</Text>
+              <Text numberOfLines={1} style={{ ...small, fontFamily: t.typography.fontFamily.mono }}>{c.lightning_address || c.node_pubkey}</Text>
+            </View>
+            <Ionicons name="arrow-forward" size={16} color={t.colors.text.tertiary} />
           </PressableScale>
         ))}
-      </ScrollView> : <Text style={muted}>People you pay often will show here.</Text>}
+      </View> : !input.trim() && <>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <Text style={caption}>{recentContacts.length ? 'Recent' : 'Contacts'}</Text>
+          <TouchableOpacity accessibilityRole="button" onPress={() => setShowContacts(true)} hitSlop={8}>
+            <Text style={{ ...small, color: t.colors.primary[500], fontWeight: '600' }}>All contacts</Text>
+          </TouchableOpacity>
+        </View>
+        {recentContacts.length ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: t.spacing[3] }}>
+          {recentContacts.map((c, i) => (
+            <PressableScale key={c.id} accessibilityRole="button" accessibilityLabel={`Pay ${c.name}`} onPress={() => pickContact(c)} style={{ alignItems: 'center', gap: t.spacing[1], width: 60 }}>
+              <View style={{ width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', backgroundColor: avatarColors[i % avatarColors.length] }}>
+                <Text style={{ color: t.colors.text.inverse, fontWeight: '700' }}>{initials(c.name)}</Text>
+              </View>
+              <Text numberOfLines={1} style={{ ...small, color: t.colors.text.secondary }}>{c.name.split(' ')[0]}</Text>
+            </PressableScale>
+          ))}
+        </ScrollView> : <Text style={muted}>People you pay often will show here.</Text>}
+      </>}
     </View>}
 
-    {!target && <View style={{ marginTop: t.spacing[5] }}><SendDestinationsHint /></View>}
+    {!target && !input.trim() && <View style={{ marginTop: t.spacing[5] }}><SendDestinationsHint /></View>}
   </>;
 
   const renderReview = () => {
@@ -828,6 +877,19 @@ export default function SendScreen({ navigation, route }: Props) {
         onConfirmAssetUnits={u => { setAssetAmount(u > 0 ? String(u) : ''); setShowAmountEditor(false); }} />
       <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)}
         onSelectContact={c => { setShowContacts(false); const dest = c.lightning_address || c.node_pubkey; if (dest) { setInput(dest); setContactName(c.name); } }} />
+      <PaymentSuccessOverlay
+        visible={!!celebrateAttempt}
+        title="Sent"
+        amountLabel={celebrateAttempt?.recipient}
+        subtitle={celebrateAttempt?.recipientName ? `to ${celebrateAttempt.recipientName}` : undefined}
+        rows={celebrateAttempt ? [
+          { label: 'From', value: celebrateAttempt.accountName || celebrateAttempt.provider || '' },
+          { label: 'Total', value: celebrateAttempt.total },
+          ...(celebrateAttempt.feeDisplay ? [{ label: 'Fee', value: celebrateAttempt.feeDisplay }] : []),
+        ] : []}
+        onDone={() => { setCelebrateAttempt(null); navigation.goBack(); }}
+        secondary={{ label: 'See receipt', onPress: () => { setCelebrateAttempt(null); setReceiptExpanded(true); } }}
+      />
     </SafeAreaView>
   );
 }

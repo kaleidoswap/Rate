@@ -273,6 +273,7 @@ jest.mock('react-native', () => ({
     })),
     timing: jest.fn(() => ({
       start: jest.fn((callback) => callback && callback()),
+      stop: jest.fn(),
     })),
     spring: jest.fn(() => ({
       start: jest.fn((callback) => callback && callback()),
