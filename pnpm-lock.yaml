@@ -93,8 +93,8 @@ importers:
         specifier: ^0.14.1
         version: 0.14.1(353bc03da4774e0dd557e9ed001fa004)
       '@kaleidorg/wallet-engine':
-        specifier: 1.0.0-beta.80
-        version: 1.0.0-beta.80(010060dc72df574fc1ad113caf949731)
+        specifier: 1.0.0-beta.85
+        version: 1.0.0-beta.85(d81ad0ccc82ddb4688d672fbd10c5049)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
@@ -255,8 +255,8 @@ importers:
         specifier: ~3.0.9
         version: 3.0.9(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       kaleido-sdk:
-        specifier: ^0.1.18
-        version: 0.1.18(typescript@5.9.3)
+        specifier: ^0.1.23
+        version: 0.1.23(typescript@5.9.3)
       light-bolt11-decoder:
         specifier: ^3.2.0
         version: 3.2.0
@@ -1400,21 +1400,20 @@ packages:
       '@arkade-os/swap':
         optional: true
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.80':
-    resolution: {integrity: sha512-4qBvVL3e6Gis3Wk5bC8zugSJT0k3NGG6aF2SVrXnLvJnTgllZA02j+TZnJN6CICb4DISLZ0rmLLfOAMRWhw/Vg==}
+  '@kaleidorg/wallet-engine@1.0.0-beta.85':
+    resolution: {integrity: sha512-yF/eIex1zPnb9zZA4nJ7wlYFpY4zjvVYfnOzwlCHD1dFTm8AMsSTjkiSQUexqmiRRRWegGfSrmopGOaamc84Og==}
     peerDependencies:
       '@arkade-os/sdk': ^0.4.72
       '@buildonspark/spark-sdk': ^0.7.10
       '@flashnet/sdk': ^0.5.7
-      '@kaleidorg/swap-sdk': ^0.12.0
+      '@kaleidorg/swap-sdk': ^0.12.0 || ^0.14.0
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': ^1.0.0-beta.3
-      '@kaleidorg/wdk-wallet-liquid': ^1.0.0-beta.9
+      '@kaleidorg/wdk-wallet-liquid': ^1.0.0-beta.11
       '@kaleidorg/wdk-wallet-rln': ^1.0.0-beta.5
       '@secondts/bark': ^0.24.0
       '@secondts/bark-react-native': 0.25.0
       '@tetherto/wdk-wallet-spark': ^1.0.0-beta.17
-      '@utexo/rgb-lib-wasm': ^1.0.0-beta.3
-      '@utexo/wdk-wallet-rgb': ^2.0.3
+      '@utexo/rgb-lib-wasm': ^1.0.0-beta.4
       kaleido-sdk: ^0.1.18
     peerDependenciesMeta:
       '@arkade-os/sdk':
@@ -1438,8 +1437,6 @@ packages:
       '@tetherto/wdk-wallet-spark':
         optional: true
       '@utexo/rgb-lib-wasm':
-        optional: true
-      '@utexo/wdk-wallet-rgb':
         optional: true
       kaleido-sdk:
         optional: true
@@ -2278,9 +2275,6 @@ packages:
     resolution: {integrity: sha512-TQMCz2pFJMfpNxmSfX1VSfTjwUIFx/mL+p1bnfM1xjjdla7Z+KnGMW/EhFbpckp3LyWAH4PgOsMwOMnIN+MBFg==}
     peerDependencies:
       '@urql/core': ^5.0.0
-
-  '@utexo/rgb-lib-wasm@1.0.0-beta.3':
-    resolution: {integrity: sha512-N0HL53PaVzbwGXch647iGkNN51r1T8mAm4hGnrBNf55gmt0ALuDf0LM0HvrNPgZbicHs4SH2gBRpJSqL3ePnog==}
 
   '@xmldom/xmldom@0.8.15':
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
@@ -4554,8 +4548,8 @@ packages:
   kademlia-routing-table@1.0.6:
     resolution: {integrity: sha512-Ve6jwIlUCYvUzBnXnzVRHDZCFgXURW9gmF3r7n05kZs/2rNbLHXwGdcq0qIaSwdmJCvtosgR4JensnVU65hzNQ==}
 
-  kaleido-sdk@0.1.18:
-    resolution: {integrity: sha512-+qnJMpFMZxqIS5ws0zJT8IvI5J1BzWw+MegSEO/VhVn8V1BVQsJBgsxQ+gHZkqRTvE3KEfypTJGToNB9K0uNNQ==}
+  kaleido-sdk@0.1.23:
+    resolution: {integrity: sha512-lOmqhAlatVKj+PT43As1zpRFPszd5yy93yKfhkq+tBEa+SVW4QPlJlfhQrOJTnDaSZEBI441asLXj8WRwnPTsA==}
     engines: {node: '>=18.0.0'}
 
   kaleido-ui@0.1.119:
@@ -5155,14 +5149,6 @@ packages:
   normalize-url@6.1.0:
     resolution: {integrity: sha512-DlL+XwOy3NxAQ8xuC0okPgK46iuVNAK01YN7RueYBqqFeGsBjV9XmCAzAdgt+667bCl5kPh9EqKKDwnaPG1I7A==}
     engines: {node: '>=10'}
-
-  nostr-tools@2.23.5:
-    resolution: {integrity: sha512-Fa7ZlUdjfUW1P4E7H3yBexhOHYi18XNyvd2n7eNHkYR085xADX6Y8V8Vm7nT/XQajaFOBrptXmVIGkJ2E4vfVw==}
-    peerDependencies:
-      typescript: '>=5.0.0'
-    peerDependenciesMeta:
-      typescript:
-        optional: true
 
   nostr-tools@2.25.0:
     resolution: {integrity: sha512-AFdf2jv7F5CtLTwZ0JlQS+Ms+Mo7a8w3pASikHEA2dr4M2Mk5eCDZGaOYfDXlauVzx5b7c5H0F6WQsEFiKlW3Q==}
@@ -8109,7 +8095,7 @@ snapshots:
       '@arkade-os/sdk': 0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
       '@arkade-os/swap': 0.0.24(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.80(010060dc72df574fc1ad113caf949731)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.85(d81ad0ccc82ddb4688d672fbd10c5049)':
     dependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
@@ -8126,20 +8112,19 @@ snapshots:
       '@kaleidorg/wdk-wallet-rln': 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
       '@secondts/bark-react-native': 0.25.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@tetherto/wdk-wallet-spark': 1.0.0-beta.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))(bare-url@2.5.4)(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(sodium-javascript@0.8.0)(ws@8.21.0)
-      '@utexo/rgb-lib-wasm': 1.0.0-beta.3
-      kaleido-sdk: 0.1.18(typescript@5.9.3)
+      kaleido-sdk: 0.1.23(typescript@5.9.3)
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))
-      kaleido-sdk: 0.1.18(typescript@5.9.3)
+      kaleido-sdk: 0.1.23(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
   '@kaleidorg/wdk-wallet-rln@1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))
-      kaleido-sdk: 0.1.18(typescript@5.9.3)
+      kaleido-sdk: 0.1.23(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
@@ -9290,9 +9275,6 @@ snapshots:
     dependencies:
       '@urql/core': 5.2.0(graphql@16.14.2)
       wonka: 6.3.6
-
-  '@utexo/rgb-lib-wasm@1.0.0-beta.3':
-    optional: true
 
   '@xmldom/xmldom@0.8.15': {}
 
@@ -12936,9 +12918,9 @@ snapshots:
     transitivePeerDependencies:
       - bare-abort-controller
 
-  kaleido-sdk@0.1.18(typescript@5.9.3):
+  kaleido-sdk@0.1.23(typescript@5.9.3):
     dependencies:
-      nostr-tools: 2.23.5(typescript@5.9.3)
+      nostr-tools: 2.25.0(typescript@5.9.3)
       openapi-fetch: 0.15.2
     transitivePeerDependencies:
       - typescript
@@ -13876,18 +13858,6 @@ snapshots:
   normalize-path@3.0.0: {}
 
   normalize-url@6.1.0: {}
-
-  nostr-tools@2.23.5(typescript@5.9.3):
-    dependencies:
-      '@noble/ciphers': 2.1.1
-      '@noble/curves': 2.0.1
-      '@noble/hashes': 2.0.1
-      '@scure/base': 2.0.0
-      '@scure/bip32': 2.0.1
-      '@scure/bip39': 2.0.1
-      nostr-wasm: 0.1.0
-    optionalDependencies:
-      typescript: 5.9.3
 
   nostr-tools@2.25.0(typescript@5.9.3):
     dependencies:
