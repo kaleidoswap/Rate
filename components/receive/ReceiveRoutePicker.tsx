@@ -26,55 +26,28 @@ interface Choice<K extends string> {
   disabled?: string;
 }
 
-/** A labelled row showing the current choice; opens a sheet with the options. */
-function ChoiceRow<K extends string>({ label, title, choices, selected, onSelect, icon, sheetTitle, footnote }: {
-  label: string; title: string; choices: Choice<K>[]; selected: K | null; onSelect: (key: K) => void;
-  icon?: string; sheetTitle: string; footnote?: string;
-}) {
+function OptionRow<K extends string>({ choice, active, onSelect }: { choice: Choice<K>; active: boolean; onSelect: () => void }) {
   const t = useAppTheme();
-  const [open, setOpen] = useState(false);
-  const many = choices.length > 1;
-  return <>
-    <TouchableOpacity
-      accessibilityRole="button" accessibilityLabel={`${label}: ${title}${many ? '. Change' : ''}`}
-      disabled={!many} onPress={() => { feedback.select(); setOpen(true); }} activeOpacity={0.7}
-      style={{ minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], paddingHorizontal: t.spacing[4],
-        borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: t.colors.border.light }}>
-      <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>{label}</Text>
-      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: t.spacing[2] }}>
-        {!!icon && <NetworkIcon network={icon} size={18} />}
-        <Text style={{ color: t.colors.text.primary, fontWeight: '600', flexShrink: 1 }} numberOfLines={1}>{title}</Text>
+  const disabled = !!choice.disabled;
+  return <TouchableOpacity
+    accessibilityRole="radio" accessibilityState={{ checked: active, disabled }}
+    accessibilityLabel={[choice.title, choice.badge, choice.detail, choice.disabled].filter(Boolean).join(', ')}
+    disabled={disabled} activeOpacity={0.7}
+    onPress={() => { feedback.select(); onSelect(); }}
+    style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg,
+      borderWidth: 1, borderColor: active ? t.colors.primary[500] : t.colors.border.light, opacity: disabled ? 0.5 : 1 }}>
+    {!!choice.icon && <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: t.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
+      <NetworkIcon network={choice.icon} size={20} />
+    </View>}
+    <View style={{ flex: 1, gap: 2 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
+        <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>{choice.title}</Text>
+        {!!choice.badge && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }}>{choice.badge}</Text>}
       </View>
-      {many && <Ionicons name="chevron-down" size={18} color={t.colors.text.secondary} />}
-    </TouchableOpacity>
-    <Sheet visible={open} onClose={() => setOpen(false)} title={sheetTitle}>
-        <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingBottom: t.spacing[2], gap: t.spacing[2] }}>
-          {choices.map(choice => {
-            const active = choice.key === selected;
-            return <TouchableOpacity key={choice.key}
-              accessibilityRole="radio" accessibilityState={{ checked: active, disabled: !!choice.disabled }}
-              accessibilityLabel={[choice.title, choice.badge, choice.detail, choice.disabled].filter(Boolean).join(', ')}
-              disabled={!!choice.disabled} activeOpacity={0.7}
-              onPress={() => { feedback.select(); setOpen(false); if (!active) onSelect(choice.key); }}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], padding: t.spacing[3], borderRadius: t.borderRadius.lg,
-                borderWidth: 1, borderColor: active ? t.colors.primary[500] : t.colors.border.light, opacity: choice.disabled ? 0.5 : 1 }}>
-              {!!choice.icon && <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: t.colors.surface.secondary, alignItems: 'center', justifyContent: 'center' }}>
-                <NetworkIcon network={choice.icon} size={20} />
-              </View>}
-              <View style={{ flex: 1, gap: 2 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
-                  <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>{choice.title}</Text>
-                  {!!choice.badge && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }}>{choice.badge}</Text>}
-                </View>
-                {!!(choice.disabled ?? choice.detail) && <Text style={{ color: choice.disabled ? t.colors.warning[500] : t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>{choice.disabled ?? choice.detail}</Text>}
-              </View>
-              <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={20} color={active ? t.colors.primary[500] : t.colors.text.tertiary} />
-            </TouchableOpacity>;
-          })}
-          {!!footnote && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, paddingTop: t.spacing[2] }}>{footnote}</Text>}
-        </ScrollView>
-    </Sheet>
-  </>;
+      {!!(choice.disabled ?? choice.detail) && <Text style={{ color: choice.disabled ? t.colors.warning[500] : t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>{choice.disabled ?? choice.detail}</Text>}
+    </View>
+    <Ionicons name={active ? 'radio-button-on' : 'radio-button-off'} size={20} color={active ? t.colors.primary[500] : t.colors.text.tertiary} />
+  </TouchableOpacity>;
 }
 
 function destinationChoices(destinations: ReceiveDestination[], amountSats: number, showChain: boolean, iconOf: (account: AccountId) => string): Choice<AccountId>[] {
@@ -89,8 +62,9 @@ function destinationChoices(destinations: ReceiveDestination[], amountSats: numb
 }
 
 /**
- * How the payment arrives (a vertical method picker) and where it lands (the account). The
- * universal code also shows which network it is for when accounts span several.
+ * How the payment arrives and where it lands — one row, one sheet. The sheet
+ * lists the methods and, for the chosen one, the accounts side by side, so a
+ * payment route is picked in a single place instead of a sheet inside a sheet.
  */
 export function ReceiveRoutePicker({
   methods, method, onMethod, destinations, destination, onDestination, amountSats,
@@ -119,30 +93,57 @@ export function ReceiveRoutePicker({
   methodIcons?: Partial<Record<ReceiveMethodId, string[]>>;
 }) {
   const t = useAppTheme();
+  const [open, setOpen] = useState(false);
   const iconOf = (lightning: boolean) => (account: AccountId) => (iconFor ? iconFor(account) : accountIcon(account, lightning));
   const showChain = new Set([...destinations, ...(lightningDestinations ?? [])].map(d => d.chain)).size > 1;
   const current = destinations.find(d => d.account === destination);
   const currentLn = lightningDestinations?.find(d => d.account === lightningDestination);
-  const accountTitle = (d?: ReceiveDestination) => (d ? `${d.label}${showChain ? ` · ${chainLabel(d.chain)}` : ''}` : 'Choose an account');
+  const summary = method === 'universal'
+    ? `${METHOD_LABELS[method]}${currentLn ? ` · ${currentLn.label}` : ''}`
+    : `${METHOD_LABELS[method]}${current ? ` · ${current.label}` : ''}`;
+  const caption = { color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, fontWeight: '600' as const, letterSpacing: 0.6, textTransform: 'uppercase' as const, marginTop: t.spacing[2] };
+  const footnote = { color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, paddingTop: t.spacing[1] };
   return <View style={{ gap: t.spacing[3], marginBottom: t.spacing[4] }}>
-    <ChoiceRow<ReceiveMethodId> label="Payment method" sheetTitle="How they pay"
-      title={METHOD_LABELS[method]} selected={method} onSelect={onMethod}
-      choices={methods.map(m => ({ key: m, title: METHOD_LABELS[m], icon: methodIcons?.[m]?.[0] }))} />
-    {method === 'universal' && !!chains && chains.length > 1 && onChain && <ChoiceRow<ReceiveChain>
-      label="Network" sheetTitle="Which network is this code for?"
-      title={`${chainLabel(chain ?? chains[0].chain)} · ${(chains.find(g => g.chain === chain) ?? chains[0]).accounts.length} accounts`}
-      selected={chain ?? chains[0].chain} onSelect={onChain}
-      footnote="One code can only ask for payment on one network. Accounts on other networks are left out."
-      choices={chains.map(g => ({ key: g.chain, title: chainLabel(g.chain), detail: g.accounts.map(accountLabel).join(', ') }))} />}
-    {method === 'universal' && !!lightningDestinations?.length && onLightningDestination && <ChoiceRow<AccountId>
-      label="Lightning to" sheetTitle="Where should Lightning payments land?"
-      title={accountTitle(currentLn)} icon={currentLn ? iconOf(true)(currentLn.account) : undefined}
-      selected={lightningDestination ?? null} onSelect={onLightningDestination}
-      choices={destinationChoices(lightningDestinations, amountSats, showChain, iconOf(true))} />}
-    {method !== 'universal' && destinations.length > 0 && <ChoiceRow<AccountId>
-      label="Deposit to" sheetTitle={`Where should this ${METHOD_LABELS[method]} payment land?`}
-      title={accountTitle(current)} icon={current ? iconOf(method === 'lightning')(current.account) : undefined}
-      selected={destination} onSelect={onDestination}
-      choices={destinationChoices(destinations, amountSats, showChain, iconOf(method === 'lightning'))} />}
+    <TouchableOpacity
+      accessibilityRole="button" accessibilityLabel={`How they pay: ${summary}. Change`}
+      onPress={() => { feedback.select(); setOpen(true); }} activeOpacity={0.7}
+      style={{ minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], paddingHorizontal: t.spacing[4],
+        borderRadius: t.borderRadius.lg, backgroundColor: t.colors.surface.primary, borderWidth: 1, borderColor: t.colors.border.light }}>
+      <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>How they pay</Text>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: t.spacing[2] }}>
+        <Text style={{ color: t.colors.text.primary, fontWeight: '600', flexShrink: 1 }} numberOfLines={1}>{summary}</Text>
+      </View>
+      <Ionicons name="chevron-down" size={18} color={t.colors.text.secondary} />
+    </TouchableOpacity>
+    <Sheet visible={open} onClose={() => setOpen(false)} title="How they pay">
+      <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingBottom: t.spacing[2], gap: t.spacing[2] }}>
+        <Text style={caption}>Method</Text>
+        {methods.map(key => <OptionRow<ReceiveMethodId> key={key} active={key === method}
+          choice={{ key, title: METHOD_LABELS[key], icon: methodIcons?.[key]?.[0] }}
+          onSelect={() => onMethod(key)} />)}
+
+        {method === 'universal' && !!chains && chains.length > 1 && onChain && <>
+          <Text style={caption}>Network</Text>
+          {chains.map(g => <OptionRow<ReceiveChain> key={g.chain} active={(chain ?? chains[0].chain) === g.chain}
+            choice={{ key: g.chain, title: chainLabel(g.chain), detail: g.accounts.map(accountLabel).join(', ') }}
+            onSelect={() => onChain(g.chain)} />)}
+          <Text style={footnote}>One code can only ask for payment on one network. Accounts on other networks are left out.</Text>
+        </>}
+
+        {method === 'universal' && !!lightningDestinations?.length && onLightningDestination && <>
+          <Text style={caption}>Lightning lands in</Text>
+          {destinationChoices(lightningDestinations, amountSats, showChain, iconOf(true)).map(c =>
+            <OptionRow<AccountId> key={c.key} active={c.key === lightningDestination} choice={c}
+              onSelect={() => { onLightningDestination(c.key); setOpen(false); }} />)}
+        </>}
+
+        {method !== 'universal' && destinations.length > 0 && <>
+          <Text style={caption}>{METHOD_LABELS[method]} lands in</Text>
+          {destinationChoices(destinations, amountSats, showChain, iconOf(method === 'lightning')).map(c =>
+            <OptionRow<AccountId> key={c.key} active={c.key === destination} choice={c}
+              onSelect={() => { onDestination(c.key); setOpen(false); }} />)}
+        </>}
+      </ScrollView>
+    </Sheet>
   </View>;
 }

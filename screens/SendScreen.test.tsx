@@ -17,7 +17,6 @@ jest.mock('../store/hooks', () => ({
 jest.mock('../store/slices/walletSlice', () => ({ loadBtcBalance: () => ({ type: 'loadBtcBalance' }) }));
 jest.mock('../hooks/useFiatRates', () => ({ useFiatRates: () => ({ usd: 100000 }) }));
 jest.mock('../components/ScreenHeader', () => ({ ScreenHeader: 'ScreenHeader' }));
-jest.mock('../components/AmountEditorModal', () => ({ AmountEditorModal: () => null }));
 jest.mock('../components/NostrContactsSelector', () => () => null);
 jest.mock('../components/Button', () => ({ Button: ({ title, onPress, disabled }: any) => {
   const { Text, TouchableOpacity } = require('react-native'); return <TouchableOpacity disabled={disabled} onPress={onPress}><Text>{title}</Text></TouchableOpacity>;
@@ -102,13 +101,21 @@ test('a completed payment can be closed and refreshes balances', async () => {
   const navigation = nav();
   const screen = await reviewed(navigation);
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  // The sent payment celebrates full screen, once, over the receipt.
+  expect(screen.getByText('Sent')).toBeTruthy();
+  expect(screen.getByText('1,000 sats')).toBeTruthy();
+  expect(screen.getByText('See receipt')).toBeTruthy();
+  fireEvent.press(screen.getByText('See receipt'));
+  expect(screen.queryByText('See receipt')).toBeNull();
+  // Behind it, the receipt — already expanded by "See receipt".
   expect(screen.getByText('Payment completed')).toBeTruthy();
   expect(screen.queryByText('Pay again')).toBeNull();
   expect(require('../services/kaleidoPay/attempts').beginPaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ recipientName: expect.any(String), feeDisplay: '10 sats', accountName: 'Account Spark' }));
-  expect(screen.queryByText('Quoted fees · 10 sats')).toBeNull();
-  expect(screen.queryByText('Requested')).toBeNull();
-  fireEvent.press(screen.getByText('Payment details'));
   expect(screen.getByText('Quoted fees')).toBeTruthy();
+  expect(screen.getByText('Requested')).toBeTruthy();
+  // The receipt still folds away.
+  fireEvent.press(screen.getByText('Hide details'));
+  expect(screen.queryByText('Quoted fees')).toBeNull();
   expect(screen.getByText('Done')).toBeTruthy();
   expect(mockFeedback.send).toHaveBeenCalledTimes(1);
   fireEvent.press(screen.getByText('Done'));
@@ -141,6 +148,9 @@ test('a payment in progress is re-checked on its own until it settles', async ()
     (checkPaymentStatus as jest.Mock).mockResolvedValue({ status: 'completed', reference: 'h' });
     await act(async () => { jest.advanceTimersByTime(5_000); });
     expect((checkPaymentStatus as jest.Mock).mock.calls.length).toBe(calls + 1);
+    // Settling while the screen is open celebrates the completion.
+    expect(screen.getByText('Sent')).toBeTruthy();
+    fireEvent.press(screen.getByText('See receipt'));
     expect(screen.getByText('Payment completed')).toBeTruthy();
     expect(screen.queryByText('Verify payment')).toBeNull();
     await act(async () => { jest.advanceTimersByTime(60_000); });
@@ -254,13 +264,29 @@ test('Lite leaves Bark out unless it holds funds', async () => {
   expect(screen.getByLabelText(/^Pay from Bark, balance 5,000 sats/)).toBeTruthy();
 });
 
+test('typing a name autocompletes contacts and jumps straight to the amount', async () => {
+  mockState = { ...baseState(), contacts: { contacts: [{ id: 'c1', name: 'Mario Rossi', lightning_address: 'mario@getalby.com', is_favorite: true, updated_at: 2 }] } };
+  const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
+  await act(async () => {});
+  fireEvent.changeText(screen.getByLabelText('Payment request'), 'mar');
+  expect(screen.getByText('Mario Rossi')).toBeTruthy();
+  fireEvent.press(screen.getByLabelText('Pay Mario Rossi'));
+  // Amount-first: the keypad opens without pressing Continue.
+  expect(screen.getByText('Amount to send')).toBeTruthy();
+  fireEvent.changeText(screen.getByLabelText('Requested amount'), '2');
+  await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
+  expect(previewInput).toHaveBeenCalledWith('mario@getalby.com', 2, 'test-uuid', { asset: undefined });
+});
+
 test('a Spark address can be paid in a Spark token the wallet holds', async () => {
   const { prepareSparkTokenRequest } = require('../services/kaleidoPay/connect');
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('spark-token', 1000)]);
   const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'spark1recipient' } }} />);
   await act(async () => {});
   fireEvent.press(screen.getByLabelText(/^Pay in USDB/));
-  fireEvent.changeText(screen.getByLabelText('Amount in USDB'), '2.5');
+  fireEvent.press(screen.getByLabelText('Amount in USDB'));
+  fireEvent.changeText(screen.getByLabelText('Requested amount'), '2.5');
+  await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   expect(prepareSparkTokenRequest).toHaveBeenLastCalledWith(mockUsdb);
   expect(previewInput).toHaveBeenCalledWith('spark1recipient', undefined, 'test-uuid',
@@ -283,7 +309,7 @@ test('an empty Send lists what it can send to, including other chains', async ()
   const screen = render(<SendScreen navigation={nav()} route={{ params: {} }} />);
   await act(async () => {});
   expect(screen.getByText('You can send to')).toBeTruthy();
-  expect(screen.getByText('Invoice · LNURL · Lightning address · BOLT12 offer')).toBeTruthy();
+  expect(screen.getByText('Lightning invoice or address')).toBeTruthy();
   expect(screen.getByText('USDC / USDT to other chains')).toBeTruthy();
   expect(screen.queryByText('Liquid')).toBeNull();
 });
@@ -325,11 +351,11 @@ test('paying from RGB on this phone offers Slow, Normal and Fast with their fee;
   (quotePaymentOffers as jest.Mock).mockResolvedValue([rgbOffer]);
   const screen = await reviewed();
   expect(screen.getByText('Network fee')).toBeTruthy();
-  expect(screen.getByText(/About 2,100 sats at 7 sat\/vB/)).toBeTruthy();
+  expect(screen.getByText(/About 2,100 sats network fee/)).toBeTruthy();
   await act(async () => { fireEvent.press(screen.getByText('Fast · 3,600 sats')); });
   expect(mockSetSpeed).toHaveBeenLastCalledWith('fast');
   expect(quotePaymentOffers).toHaveBeenCalledTimes(2);
-  expect(screen.getByText(/About 3,600 sats at 12 sat\/vB/)).toBeTruthy();
+  expect(screen.getByText(/About 3,600 sats network fee/)).toBeTruthy();
   expect(screen.queryByText('Review updated quote')).toBeNull(); // the user chose it: no second review
   mockFeeOptions = null;
 });
@@ -359,10 +385,10 @@ test('completed address payments have one exit and optional receipt sharing', as
   await act(async () => {});
   await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  // The celebration covers the receipt; see through it and the receipt is open.
+  fireEvent.press(screen.getByText('See receipt'));
   expect(screen.queryByText('Save contact')).toBeNull();
   expect(screen.queryByText('Pay again')).toBeNull();
-  expect(screen.queryByText('Share receipt')).toBeNull();
-  fireEvent.press(screen.getByText('Payment details'));
   expect(screen.getByText('Share receipt')).toBeTruthy();
   fireEvent.press(screen.getByText('Done'));
   expect(navigation.goBack).toHaveBeenCalled();
@@ -374,6 +400,7 @@ test.each([[false, 'Sent to the network'], [true, 'Confirmed on-chain']] as cons
   (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'completed', reference: 'provider-receipt', onchainConfirmed: confirmed });
   const screen = await reviewed();
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
+  fireEvent.press(screen.getByText('See receipt'));
   expect(screen.getByText(title)).toBeTruthy();
   expect(screen.queryByText('Payment completed')).toBeNull();
   if (!confirmed) expect(screen.getByText('Waiting for a Bitcoin block confirmation. Do not send again.')).toBeTruthy();
@@ -440,7 +467,9 @@ test('RGB has a visible balance and amount, accepts decimal comma and reviews a 
   await act(async () => {});
   expect(screen.getByText('Bitcoin available for fees: 2,500 sats')).toBeTruthy();
   expect(screen.getByText('Available: 500 sats')).toBeTruthy(); // shared formatter mocked above
-  fireEvent.changeText(screen.getByLabelText('Amount in USD'), '1,25');
+  fireEvent.press(screen.getByLabelText('Amount in USD'));
+  fireEvent.changeText(screen.getByLabelText('Requested amount'), '1,25');
+  await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   await act(async () => { fireEvent.press(screen.getByText('Review transfer')); });
   expect(previewInput).toHaveBeenCalledWith('rgb:any', undefined, expect.any(String), { asset: { id: 'rgb-usd', ticker: 'USD', precision: 2, amount: 125 } });
   expect(screen.getByText('Review RGB transfer')).toBeTruthy();

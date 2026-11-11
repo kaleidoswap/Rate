@@ -15,7 +15,7 @@ import { assetIcon, chainIcon } from '../../utils/orchestra-ui';
 
 type Leg = 'lightning' | 'onchain' | 'spark' | 'arkade' | 'rgb';
 const FORMATS: { network: Leg; name: string; formats: string }[] = [
-  { network: 'lightning', name: 'Lightning', formats: 'Invoice · LNURL · Lightning address · BOLT12 offer' },
+  { network: 'lightning', name: 'Lightning', formats: 'Lightning invoice or address' },
   { network: 'onchain', name: 'Bitcoin', formats: 'On-chain address' },
   { network: 'spark', name: 'Spark', formats: 'Spark address, in bitcoin or USDB' },
   { network: 'arkade', name: 'Arkade', formats: 'Ark address' },

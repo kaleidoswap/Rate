@@ -51,7 +51,7 @@ test('shows the balance in the asset unit, its breakdown and details', () => {
 test('actions open Receive and Send for this asset', () => {
   const { screen, navigation } = open(usdt);
   fireEvent.press(screen.getByLabelText('Receive USDT'));
-  expect(navigation.navigate).toHaveBeenCalledWith('Receive', { selectedAsset: { asset_id: usdt.asset_id, ticker: 'USDT', name: 'Tether USD', isRGB: true } });
+  expect(navigation.navigate).toHaveBeenCalledWith('Receive', { selectedAsset: { asset_id: usdt.asset_id, ticker: 'USDT', name: 'Tether USD', isRGB: true }, prefilledAssetTicker: 'USDT' });
   fireEvent.press(screen.getByLabelText('Send USDT'));
   expect(navigation.navigate).toHaveBeenCalledWith('Send', expect.anything());
 });

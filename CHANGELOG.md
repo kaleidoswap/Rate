@@ -10,6 +10,43 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Added
+- **People-first Send.** Typing a name autocompletes your contacts; picking
+  one jumps straight to the amount — keypad, then the usual review. No
+  Continue tap in between.
+- **A shared success overlay.** A payment sent from this screen (or settled
+  while it is open) celebrates full screen — check, amount, recipient, what
+  you paid from — with "See receipt" behind it and "View in Activity" on the
+  receive side. One moment, one look, both directions.
+
+### Changed
+- **One amount editor everywhere.** Sending bitcoin, a Spark token or an RGB
+  asset now opens the same amount sheet (big display, quick Max chip for
+  tokens, validation against the available balance) instead of three different
+  inline inputs.
+- **No more refresh stairs.** An expired price refreshes itself and the
+  slide-to-pay stays armed; after a manual refresh the new total is noted
+  briefly ("Price updated · now N") instead of demanding a second review.
+  "quote" is now "price" in the payment flow.
+- **How they pay, in one place.** Receive options no longer nest a sheet in a
+  sheet: one "How they pay" row opens a single sheet with the methods, the
+  network and the account side by side.
+- The receive QR keeps its calm: the "Other formats" card folds its exclusion
+  notes away with the formats themselves, and the asset tabs stay above the QR
+  (out of the options sheet).
+- Friendlier scanner: a bad QR code auto-resumes scanning after a moment
+  instead of waiting for "Scan again", and the error and instruction copy is
+  plain language.
+- Maker routes say "Accepts N–M sats" instead of "Published range".
+- The fee-speed choice no longer shows "sat/vB"; the destinations hint lists
+  "Lightning invoice or address" instead of every format name.
+- Receiving from an asset's page now actually opens that asset's receive
+  request (the parameter it passed was being ignored).
+
+### Fixed
+- RGB receive retry message no longer talks about "blocking the screen in the
+  background" — it just says the request is ready.
+
 ## [0.12.0] — 2026-11-10
 
 ### Added

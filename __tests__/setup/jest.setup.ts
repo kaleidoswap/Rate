@@ -222,6 +222,7 @@ jest.mock('react-native', () => ({
   Dimensions: { get: () => ({ width: 393, height: 852 }) },
   useWindowDimensions: () => ({ width: 393, height: 852, scale: 3, fontScale: 1 }),
   KeyboardAvoidingView: 'KeyboardAvoidingView',
+  Keyboard: { dismiss: jest.fn(), addListener: () => ({ remove: jest.fn() }), removeListener: jest.fn() },
   Share: { share: jest.fn(() => Promise.resolve({ action: 'sharedAction' })) },
   AccessibilityInfo: { setAccessibilityFocus: jest.fn() },
   findNodeHandle: jest.fn(() => 1),
@@ -272,6 +273,7 @@ jest.mock('react-native', () => ({
     })),
     timing: jest.fn(() => ({
       start: jest.fn((callback) => callback && callback()),
+      stop: jest.fn(),
     })),
     spring: jest.fn(() => ({
       start: jest.fn((callback) => callback && callback()),

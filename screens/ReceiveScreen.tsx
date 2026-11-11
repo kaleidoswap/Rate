@@ -1307,7 +1307,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       });
       setUnifiedError(
         rgb?.isConnected() && reason !== 'manual'
-          ? 'RGB receive is available. Tap Try Again to generate it explicitly without blocking the screen in the background.'
+          ? 'RGB receive is ready. Tap Try Again to show it.'
           : 'None of your accounts could create a payment code. Check that they are connected, then try again.',
       );
       setUnifiedLoading(false);
@@ -1942,8 +1942,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
               onCreateUtxos={rgbSupport.createUtxos ? () => afterOptions(() => setShowCreateUtxos(true)) : undefined}
             />
           )}
-          <Text style={styles.optionsCaption}>Asset</Text>
-          {renderAssetTabs()}
+          {/* The asset tabs live above the QR; the sheet holds what they don't cover. */}
           <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showOtherAssets }} onPress={() => setShowOtherAssets(v => !v)} style={styles.rgbEntry}>
             <Text style={[styles.rgbEntryTitle, { flex: 1 }]}>Other assets & networks</Text>
             <Ionicons name={showOtherAssets ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.secondary} />
