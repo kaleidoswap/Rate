@@ -89,9 +89,10 @@ interface Channel {
 
 /**
  * A time-of-day greeting with a little variety so it changes between opens.
- * `name` is appended when given.
+ * The name is never part of it: the profile chip shows the name right under
+ * the greeting, so appending it here would only repeat it.
  */
-function buildGreeting(name?: string): string {
+function buildGreeting(): string {
   const hour = new Date().getHours();
   const pool =
     hour < 5 ? ['Still up', 'Good night', 'Hi']
@@ -99,8 +100,7 @@ function buildGreeting(name?: string): string {
     : hour < 17 ? ['Good afternoon', 'Hey there', 'Hi']
     : hour < 21 ? ['Good evening', 'Evening', 'Welcome back']
     : ['Good night', 'Winding down', 'Hi'];
-  const phrase = pool[Math.floor(Math.random() * pool.length)];
-  return name ? `${phrase}, ${name}` : phrase;
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 /**
@@ -975,7 +975,7 @@ export default function DashboardScreen({ navigation }: Props) {
           />}
         </View>
 
-        <RecentActivityWidget title="Recent activity" limit={3} refreshKey={balanceUpdatedAt} onOpenPaymentAttempt={id => navigation.getParent()?.navigate('Send', { resumePayment: true, paymentAttemptId: id })} onViewAll={() => navigation.navigate('Activity')} />
+        <RecentActivityWidget title="Recent activity" limit={3} refreshKey={balanceUpdatedAt} onOpenPaymentAttempt={id => navigation.getParent()?.navigate('Send', { resumePayment: true, paymentAttemptId: id })} onViewAll={() => navigation.navigate('Activity')} emptyAction={{ label: 'Receive', onPress: () => navigation.getParent()?.navigate('Receive') }} />
         <InsightCards
           channels={channels}
           onAction={(action) => (action.kind === 'navigate'

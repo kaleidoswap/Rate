@@ -13,6 +13,6 @@ export function AllocationBar({ items, hideAmounts = false }: { items: Allocatio
       style={{ height: t.spacing[2], flexDirection: 'row', gap: t.spacing[0.5], overflow: 'hidden', borderRadius: t.borderRadius.full }}>
       {positive.map((i, index) => <View key={`${i.label}-${index}`} style={{ flex: i.value / total, backgroundColor: i.color }} />)}
     </View>
-    <Text style={{ fontSize: t.typography.fontSize.xs, color: t.colors.text.tertiary }}>Current allocation · {positive.length} {positive.length === 1 ? 'location' : 'locations'}</Text>
+    <Text style={{ fontSize: t.typography.fontSize.xs, color: t.colors.text.tertiary }}>Across {positive.length} {positive.length === 1 ? 'account' : 'accounts'}</Text>
   </View>;
 }

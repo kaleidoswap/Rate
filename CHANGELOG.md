@@ -11,6 +11,22 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Added
+- **A dashboard that settles.** Loading states are skeletons in the shape of
+  the content they become — the balance card and the activity rows no longer
+  jump when the data lands — and a wallet with no activity keeps its "Recent
+  activity" section, pointing at receiving instead of leaving a hole.
+- The UI preview gallery (`npm run ui-preview`) now also shows the dashboard
+  states: loading skeletons, the first-day empty state and the balance card
+  with its details open.
+
+### Changed
+- **One control per job on the balance card.** Refresh keeps its corner; the
+  network breakdown now opens from a written "Details" toggle under the
+  balance — no more twin icon buttons to tell apart.
+- Calmer words on the balance card: "Some funds are still confirming."
+  replaces "Awaiting confirmation or temporarily unavailable in an account.",
+  the allocation caption counts accounts, and test funds drop their lecture.
+- The balance figure uses the type scale's own 4xl/black tokens.
 - **Search in Activity.** The header gains a search toggle: typing filters by
   contact, amount, asset or transaction id, live across the whole list (the
   search machinery existed; it had never been wired up).

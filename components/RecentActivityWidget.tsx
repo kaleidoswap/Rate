@@ -11,7 +11,6 @@ import {
     type StyleProp,
     type ViewStyle,
     TouchableOpacity,
-    ActivityIndicator,
 } from 'react-native';
 import { useAppSelector } from '../store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +18,8 @@ import { RootState } from '../store';
 import { theme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { SectionHeader } from './SectionHeader';
+import { EmptyState } from './EmptyState';
+import { Skeleton } from './Skeleton';
 import { ActivityDetailSheet } from './ActivityDetailSheet';
 import {
     type ActivityItem,
@@ -34,6 +35,8 @@ import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
 
 interface Props {
     onViewAll?: () => void;
+    /** The dashboard's empty state action: receiving is the natural next step. */
+    emptyAction?: { label: string; onPress: () => void };
     onOpenPaymentAttempt?: (id: string) => void;
     /** Only this asset's items (an asset id, or 'BTC'), newest first. */
     assetId?: string;
@@ -53,7 +56,7 @@ interface Props {
 
 const MAX_ITEMS = 4;
 
-export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPaymentAttempt, assetId, assetTicker, title = 'Activity', limit, style, refreshKey }) => {
+export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPaymentAttempt, assetId, assetTicker, title = 'Activity', limit, style, refreshKey, emptyAction }) => {
     const theme = useAppTheme();
     const styles = useMemo(() => createStyles(theme), [theme]);
     const usdRate = useFiatRates().usd;
@@ -98,9 +101,10 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
     }, [feed.items, assetId, assetTicker, limit]);
     const loading = feed.updating && items.length === 0;
 
-    // Don't render the section if there's nothing to show after loading
-    // (an asset's history says so instead).
-    if (!loading && items.length === 0 && !assetId) return null;
+    // A wallet with no activity yet keeps its place on the dashboard: the empty
+    // state points at receiving instead of leaving a hole (asset pages say so
+    // in their own words).
+    const showEmptyState = !loading && items.length === 0 && !assetId;
 
     const renderRow = (item: ActivityItem) => {
         const v = activityIcon(item.type);
@@ -161,9 +165,26 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
             />
 
             {loading ? (
-                <View style={styles.loadingWrap}>
-                    <ActivityIndicator size="small" color={theme.colors.primary[500]} />
+                <View style={styles.list}>
+                    {[0, 1, 2].map(i => (
+                        <View key={i} style={styles.row}>
+                            <Skeleton width={36} height={36} radius={18} />
+                            <View style={[styles.rowBody, { gap: theme.spacing[1] }]}>
+                                <Skeleton width="55%" height={12} />
+                                <Skeleton width="35%" height={10} />
+                            </View>
+                            <Skeleton width={64} height={14} />
+                        </View>
+                    ))}
                 </View>
+            ) : showEmptyState ? (
+                <EmptyState
+                    icon="arrow-down"
+                    title="No payments yet"
+                    message="Receive your first payment and it will show up here."
+                    actionLabel={emptyAction ? emptyAction.label : undefined}
+                    onAction={emptyAction?.onPress}
+                />
             ) : items.length === 0 ? (
                 <Text style={styles.empty}>No activity for this asset yet.</Text>
             ) : (
@@ -182,10 +203,6 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
     },
     sectionHeader: {
         marginBottom: theme.spacing[3],
-    },
-    loadingWrap: {
-        paddingVertical: theme.spacing[6],
-        alignItems: 'center',
     },
     list: {
         gap: theme.spacing[3],

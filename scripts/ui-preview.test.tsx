@@ -131,6 +131,32 @@ const widgetItems = [
   { id: 'c', type: 'swap', source: 'swap', asset: 'BTC', assetTicker: 'sats', assetPrecision: 0, amount: '5,000', txid: 'h3', status: 'confirmed', layer: 'Swap', timestamp: Date.now() - 26 * 3600_000 },
   { id: 'd', type: 'send', source: 'payment', asset: 'BTC', assetTicker: 'sats', assetPrecision: 0, amount: '800', rawSats: 800, txid: 'h4', status: 'failed', layer: 'LN', timestamp: Date.now() - 3 * 86400_000 },
 ];
+const emptyFeedFor = (items: any[], updating: boolean) => () => ({ items, updating, result: null, refresh: jest.fn() });
+const { BalanceCard } = require('../components/BalanceCard');
+const balanceCardProps = {
+  totalBalance: 0, bitcoinUnit: 'sats', onRefresh: () => {}, refreshing: false,
+  formatSatoshis: (n: number) => n.toLocaleString('en-US'), formatUSD: (n: number) => (n / 1e8 * 100000).toFixed(2),
+  byProtocol: { SPARK: { confirmed: 21_000, unconfirmed: 0, total: 21_000 }, ARKADE: { confirmed: 9_000, unconfirmed: 0, total: 9_000 } },
+  primaryText: '30,000', primaryUnitLabel: 'sats', onCycleDenomination: () => {},
+};
+
+const activityFeedMock = require('../hooks/useActivityFeed').useActivityFeed;
+const withFeed = <T,>(setup: () => void, renderScene: () => T): T => {
+  setup();
+  try { return renderScene(); } finally { activityFeedMock.mockImplementation(emptyFeedFor(widgetItems, false)); }
+};
+const activityScene = withFeed(
+  () => activityFeedMock.mockImplementation(emptyFeedFor(widgetItems, false)),
+  () => sceneToHtml(<RecentActivityWidget onViewAll={() => {}} />, 'padding: 20px'),
+);
+const loadingScene = withFeed(
+  () => activityFeedMock.mockImplementation(emptyFeedFor([], true)),
+  () => sceneToHtml(<RecentActivityWidget />, 'padding: 20px'),
+);
+const emptyScene = withFeed(
+  () => activityFeedMock.mockImplementation(emptyFeedFor([], false)),
+  () => sceneToHtml(<RecentActivityWidget emptyAction={{ label: 'Receive', onPress: () => {} }} />, 'padding: 20px'),
+);
 require('../hooks/useActivityFeed').useActivityFeed.mockImplementation(() => ({ items: widgetItems, updating: false, result: null, refresh: jest.fn() }));
 
 test('renders the UI gallery to output/ui-preview.html', () => {
@@ -179,7 +205,27 @@ test('renders the UI gallery to output/ui-preview.html', () => {
     {
       title: 'Recent activity — one payment, one story',
       caption: 'Unified names, signs and ages from utils/activity-presentation; fiat under BTC amounts; Payment · Contact titles.',
-      html: sceneToHtml(<RecentActivityWidget onViewAll={() => {}} />, 'padding: 20px; justify-content:center'),
+      html: activityScene,
+    },
+    {
+      title: 'Recent activity — loading',
+      caption: 'Skeleton rows hold the layout while the feed loads: nothing jumps when the data lands.',
+      html: loadingScene,
+    },
+    {
+      title: 'Recent activity — a wallet’s first day',
+      caption: 'The section keeps its place and points at receiving, instead of leaving a hole in the dashboard.',
+      html: emptyScene,
+    },
+    {
+      title: 'Balance card — loading',
+      caption: 'The balance arrives into its own silhouette; the caption stays honest about it.',
+      html: sceneToHtml(<BalanceCard {...balanceCardProps} loading primaryText={undefined} />, 'justify-content:center'),
+    },
+    {
+      title: 'Balance card — details open',
+      caption: 'Refresh keeps its corner; the breakdown opens from the written Details toggle, one control per job.',
+      html: sceneToHtml(<BalanceCard {...balanceCardProps} />),
     },
   ];
 
