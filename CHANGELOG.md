@@ -10,33 +10,21 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
-### Added
-- **A dashboard that settles.** Loading states are skeletons in the shape of
-  the content they become — the balance card and the activity rows no longer
-  jump when the data lands — and a wallet with no activity keeps its "Recent
-  activity" section, pointing at receiving instead of leaving a hole.
-- The UI preview gallery (`npm run ui-preview`) now also shows the dashboard
-  states: loading skeletons, the first-day empty state and the balance card
-  with its details open.
+## [0.13.0] — 2026-11-11
 
-### Changed
-- **One control per job on the balance card.** Refresh keeps its corner; the
-  network breakdown now opens from a written "Details" toggle under the
-  balance — no more twin icon buttons to tell apart.
-- Calmer words on the balance card: "Some funds are still confirming."
-  replaces "Awaiting confirmation or temporarily unavailable in an account.",
-  the allocation caption counts accounts, and test funds drop their lecture.
-- The balance figure uses the type scale's own 4xl/black tokens.
-- **Search in Activity.** The header gains a search toggle: typing filters by
-  contact, amount, asset or transaction id, live across the whole list (the
-  search machinery existed; it had never been wired up).
-- Bitcoin amounts in Activity rows, the dashboard's recent-activity card and
-  the detail sheet now carry their ≈ fiat value too.
+The payments-and-cards release: one gesture for every amount, people-first
+sending, one story per payment, and a dashboard that settles.
+
+### Added
 - **The wallet's own number pad.** Amounts are entered on big keys with a tick
   of haptics each press — no OS keyboard in the middle of a payment. The
   decimal point only appears where one belongs (never in sats), the display
   groups thousands as you type, and every composed value is a plain decimal
   by construction.
+- **One amount editor everywhere.** Sending bitcoin, a Spark token or an RGB
+  asset opens the same amount sheet (big display, quick Max chip for tokens,
+  validation against the available balance) instead of three different
+  inline inputs.
 - **People-first Send.** Typing a name autocompletes your contacts; picking
   one jumps straight to the amount — keypad, then the usual review. No
   Continue tap in between.
@@ -44,6 +32,17 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   while it is open) celebrates full screen — check, amount, recipient, what
   you paid from — with "See receipt" behind it and "View in Activity" on the
   receive side. One moment, one look, both directions.
+- **Search in Activity.** The header gains a search toggle: typing filters by
+  contact, amount, asset or transaction id, live across the whole list (the
+  search machinery existed; it had never been wired up).
+- **A dashboard that settles.** Loading states are skeletons in the shape of
+  the content they become — the balance card and the activity rows no longer
+  jump when the data lands — and a wallet with no activity keeps its "Recent
+  activity" section, pointing at receiving instead of leaving a hole.
+- Bitcoin amounts in Activity rows, the dashboard's recent-activity card and
+  the detail sheet now carry their ≈ fiat value too.
+- **UI previews without running the app** (`npm run ui-preview`): jest renders
+  the wallet's real components into a dark HTML gallery.
 
 ### Changed
 - **One payment, one story.** Type names ("Received", "Payment", "Swap"),
@@ -53,16 +52,8 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   the dashboard and a neutral row in Activity; "Atomic Swap", "Sent vs
   Payment" and "Confirmed on-chain vs Completed" divergences are gone
   (on-chain confirmation is said in words under the status). Rows everywhere
-  tell one compact age ("2h"), the sheet keeps the full date.
-- The dashboard's recent-activity card shows the type next to a contact
-  ("Payment · Alice") and speaks as one element to screen readers.
-- Cleanup: 11 legacy header styles and a dead `onIssueAsset` prop removed
-  from the dashboard; hash and id text uses the design-system mono font
-  (was Courier New); sub-12px label sizes raised to the token scale.
-- **One amount editor everywhere.** Sending bitcoin, a Spark token or an RGB
-  asset now opens the same amount sheet (big display, quick Max chip for
-  tokens, validation against the available balance) instead of three different
-  inline inputs.
+  tell one compact age ("2h"), the sheet keeps the full date, and the
+  recent-activity card shows the type next to a contact ("Payment · Alice").
 - **No more refresh stairs.** An expired price refreshes itself and the
   slide-to-pay stays armed; after a manual refresh the new total is noted
   briefly ("Price updated · now N") instead of demanding a second review.
@@ -73,6 +64,11 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 - The receive QR keeps its calm: the "Other formats" card folds its exclusion
   notes away with the formats themselves, and the asset tabs stay above the QR
   (out of the options sheet).
+- **One control per job on the balance card.** Refresh keeps its corner; the
+  network breakdown opens from a written "Details" toggle under the balance —
+  no more twin icon buttons to tell apart. Calmer words follow: "Some funds
+  are still confirming." replaces the engineer-speak, the allocation caption
+  counts accounts, and test funds drop their lecture.
 - Friendlier scanner: a bad QR code auto-resumes scanning after a moment
   instead of waiting for "Scan again", and the error and instruction copy is
   plain language. Its chrome (spacing, type, corners) now follows the design
@@ -80,17 +76,26 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 - The AI chat's invoice and address cards show the same QR as the rest of the
   wallet (tap to enlarge and brighten included) instead of a private copy of
   the renderer.
-- Maker routes say "Accepts N–M sats" instead of "Published range".
-- The fee-speed choice no longer shows "sat/vB"; the destinations hint lists
-  "Lightning invoice or address" instead of every format name.
-- Receiving from an asset's page now actually opens that asset's receive
+- Maker routes say "Accepts N–M sats"; the fee-speed choice no longer shows
+  "sat/vB"; the destinations hint lists "Lightning invoice or address"; and
+  receiving from an asset's page now actually opens that asset's receive
   request (the parameter it passed was being ignored).
 - One calm safety line everywhere a payment is being checked: "Don't pay this
   twice." replaces the six repetitions of "Do not send again."
+- Cleanup: 11 legacy header styles and a dead `onIssueAsset` prop removed
+  from the dashboard; hash and id text uses the design-system mono font
+  (was Courier New); sub-12px label sizes raised to the token scale; the
+  balance figure uses the type scale's own 4xl/black tokens.
 
 ### Fixed
 - RGB receive retry message no longer talks about "blocking the screen in the
   background" — it just says the request is ready.
+
+### Validation
+- CI (type-check, tests, iOS and Android production bundles) passed on every
+  pull request of this release. Device testing of the 0.11.0 items (RGB
+  runtime-lock clearing, mempool deposit detection, voice audio route)
+  is still pending.
 
 ## [0.12.0] — 2026-11-10
 
