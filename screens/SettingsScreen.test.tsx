@@ -40,7 +40,9 @@ test('home shows categories and keeps sensitive and technical actions in their s
   expect(screen.queryByText('Daily wallet')).toBeNull();
   expect(screen.queryByText('Your wallet')).toBeNull();
   expect(screen.queryByText('Sats')).toBeNull();
-  expect(screen.getByLabelText('Mind')).toBeTruthy();
+  // The assistant's settings live under Connections, one name: Prismo.
+  expect(screen.queryByLabelText('Mind')).toBeNull();
+  expect(screen.getByLabelText('Connections')).toBeTruthy();
   expect(screen.getByLabelText('Preferences')).toBeTruthy();
   expect(screen.queryByText('View recovery phrase')).toBeNull();
   expect(screen.queryByText('Remove Wallet')).toBeNull();
@@ -73,23 +75,18 @@ test('preferences remain actionable and connections retain their destinations', 
   expect(navigation.navigate).toHaveBeenCalledWith('NWCConnect');
 });
 
-test('Bark’s network is changed from its account page, which describes real versus test bitcoin', async () => {
-  const { Alert } = require('react-native');
-  const alert = jest.spyOn(Alert, 'alert');
+test('Bark’s network is picked on the same bottom sheet as every other setting', async () => {
   const screen = render(<SettingsScreen navigation={navigation} />);
   await act(async () => {});
   fireEvent.press(screen.getByLabelText('Advanced'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
-  expect(alert).toHaveBeenCalledWith('Bark network', expect.stringContaining('real bitcoin'), expect.arrayContaining([
-    expect.objectContaining({ text: 'Mainnet', onPress: expect.any(Function) }),
-    expect.objectContaining({ text: 'Signet (test bitcoin)  ✓', onPress: expect.any(Function) }),
-  ]));
+  // An OptionSheet, not a native alert: both networks visible, the current one explained.
+  expect(screen.getByText('Bark network: Mainnet')).toBeTruthy();
+  expect(screen.getByText('Bark network: Signet')).toBeTruthy();
 });
 
 test('selecting Bark mainnet saves the preference and reconnects through protocol initialization', async () => {
-  const { Alert } = require('react-native');
-  const alert = jest.spyOn(Alert, 'alert');
   const { saveBarkNetwork } = require('../services/protocols/barkPreferences');
   const { protocolManager, initializeProtocols } = require('../services/protocols');
   const screen = render(<SettingsScreen navigation={navigation} />);
@@ -97,8 +94,7 @@ test('selecting Bark mainnet saves the preference and reconnects through protoco
   fireEvent.press(screen.getByLabelText('Advanced'));
   fireEvent.press(screen.getByLabelText('Bark account settings'));
   fireEvent.press(screen.getByText('Change network'));
-  const choices = alert.mock.calls[0][2];
-  await act(async () => { choices.find((choice: any) => choice.text === 'Mainnet').onPress(); });
+  await act(async () => { fireEvent.press(screen.getByText('Bark network: Mainnet')); });
   expect(saveBarkNetwork).toHaveBeenCalledWith('public test fixture', 'mainnet');
   expect(protocolManager.disconnect).toHaveBeenCalledWith('BARK');
   expect(initializeProtocols).toHaveBeenCalledWith('public test fixture', []);

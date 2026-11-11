@@ -10,6 +10,21 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **One name for the assistant in Settings.** The "Mind" page with a single
+  row is gone: Prismo's settings live under Connections, and the home keeps
+  only what matters daily. Search finds them by "prismo", "voice" or "ai".
+- **Networks are picked on the same sheet as everything else.** Changing an
+  account's network opens the standard option sheet (with the current
+  selection marked) instead of a native alert with buttons.
+- **Display detail leads Preferences.** The Simple/Advanced choice is the
+  first thing on the page, with plainer descriptions: "Balances and payments,
+  without networks and technical options" vs "Networks, routes, channels and
+  wallet tools". The row's value now says "Simple" instead of "Lite".
+- Settings search answers more words: "sats" finds the balance unit,
+  "seed" the recovery phrase, "mainnet" the accounts, "simple view" the
+  display detail.
+
 ## [0.13.0] — 2026-11-11
 
 The payments-and-cards release: one gesture for every amount, people-first
