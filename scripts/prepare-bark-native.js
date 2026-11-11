@@ -29,7 +29,7 @@ function patchBarkRuntime(root = ROOT) {
   const requireBark = createRequire(path.join(bark, 'package.json'));
   const runtime = path.dirname(requireBark.resolve('uniffi-bindgen-react-native/package.json'));
   const runtimeVersion = JSON.parse(fs.readFileSync(path.join(runtime, 'package.json'), 'utf8')).version;
-  if (version !== '0.25.0' || runtimeVersion !== '0.31.0-5') {
+  if (version !== '0.27.0' || runtimeVersion !== '0.31.0-5') {
     throw new Error(`Review Bark's native isolation before upgrading: found Bark ${version}, UniFFI ${runtimeVersion}.`);
   }
   const source = path.join(runtime, 'cpp/includes');
