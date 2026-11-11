@@ -149,20 +149,20 @@ export default function SettingsScreen({ navigation }: Props) {
   );
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
   const [settingsQuery, setSettingsQuery] = useState('');
-  type SettingsPage = 'preferences' | 'security' | 'connections' | 'assistant' | 'advanced';
+  type SettingsPage = 'preferences' | 'security' | 'connections' | 'advanced';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', assistant: 'Mind', advanced: 'Advanced' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', advanced: 'Advanced' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
-    { page: 'assistant', terms: 'kaleidomind ai desktop model agent assistant personalize connection wallet budget limit' },
+    { page: 'connections', terms: 'prismo kaleidomind ai assistant mind personalize voice memory budget model' },
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: APP_LOCK_TERMS },
-    { page: 'security', terms: 'security backup view recovery phrase' },
-    { page: 'preferences', terms: 'preferences bitcoin balance unit sound sounds payment currency fiat notifications language lingua italiano english' },
-    { page: 'preferences', terms: 'display detail mode lite advanced' },
-    { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark' },
+    { page: 'security', terms: 'security backup view recovery phrase seed words mnemonic' },
+    { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english' },
+    { page: 'preferences', terms: 'display detail mode lite advanced simple view interface' },
+    { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet' },
     { page: 'security', terms: 'danger remove delete wallet' },
   ];
   const query = settingsQuery.trim().toLowerCase();
@@ -487,36 +487,10 @@ export default function SettingsScreen({ navigation }: Props) {
       setProtocolConnecting(prev => ({ ...prev, BARK: false }));
     }
   };
-  const pickBarkNetwork = () => {
-    const current = protoNetworks.bark ?? currentBarkHost()?.network;
-    Alert.alert('Bark network', 'Mainnet uses real bitcoin. Signet uses test bitcoin. Each network keeps a separate balance.', [
-      ...(['mainnet', 'signet'] as const).map(network => ({
-        text: `${network === 'mainnet' ? 'Mainnet' : 'Signet (test bitcoin)'}${current === network ? '  ✓' : ''}`,
-        onPress: () => { if (network !== current || !protocolStatus.BARK) void changeBarkNetwork(network); },
-      })),
-      { text: 'Cancel', style: 'cancel' },
-    ]);
-  };
+  const [networkPicker, setNetworkPicker] = useState<WalletProtocol | 'BARK' | null>(null);
+  const pickBarkNetwork = () => setNetworkPicker('BARK');
 
-  const pickProtocolNetwork = (proto: WalletProtocol) => {
-    const type = PROTOCOL_TO_NETWORK_TYPE[proto];
-    const current = (protoNetworks[type] ?? PROTOCOL_DEFAULT_NETWORK[type]) as ProtocolNetwork;
-    const connected = protocolStatus[proto];
-    const options = PROTOCOL_SUPPORTED_NETWORKS[proto];
-    Alert.alert(
-      `${({ RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade', BARK: 'Bark' } as Record<string, string>)[proto] ?? proto} network`,
-      `Currently ${NETWORK_LABEL[current] ?? current}. Choose a network:`,
-      [
-        ...options.map((n) => ({
-          text: `${NETWORK_LABEL[n] ?? n}${n === current ? '  ✓' : ''}`,
-          onPress: () => {
-            if (n !== current || !connected) changeProtocolNetwork(proto, n);
-          },
-        })),
-        { text: 'Cancel', style: 'cancel' as const },
-      ],
-    );
-  };
+  const pickProtocolNetwork = (proto: WalletProtocol) => setNetworkPicker(proto);
 
   const handleNodeTypeChange = async (useRemoteNode: boolean) => {
     const newType = useRemoteNode ? 'remote' : 'local';
@@ -584,8 +558,8 @@ export default function SettingsScreen({ navigation }: Props) {
   const autoLockMinutes = settings.autoLockTimeout ?? 5;
   const autoLockOptions: SheetOption[] = AUTO_LOCK_MINUTES.map((m) => ({ id: String(m), label: autoLockLabel(m), badge: m === 5 ? 'Default' : undefined }));
   const displayModeOptions: SheetOption[] = [
-    { id: 'lite', label: 'Lite', description: 'BTC, USD & assets only' },
-    { id: 'advanced', label: 'Advanced', description: 'Networks, routes & channels' },
+    { id: 'lite', label: 'Simple', description: 'Balances and payments, without networks and technical options' },
+    { id: 'advanced', label: 'Advanced', description: 'Shows networks, routes, channels and wallet tools' },
   ];
 
   // soundEnabled may be undefined in state persisted before this setting existed.
@@ -662,7 +636,6 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row first icon="sparkles-outline" label="Mind" onPress={() => openPage('assistant')} />
             <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />
             <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
 
@@ -756,9 +729,9 @@ export default function SettingsScreen({ navigation }: Props) {
           </>
         )}
 
-        {/* KaleidoMind */}
-        {showSection('kaleidomind ai desktop model agent assistant personalize connection wallet budget limit') && <>
-        <SectionLabel>KaleidoMind</SectionLabel>
+        {/* Prismo — the assistant's settings, one name everywhere. */}
+        {showSection('prismo kaleidomind ai assistant mind personalize voice memory budget model') && <>
+        <SectionLabel>Prismo</SectionLabel>
         <Group>
           <Row first icon="sparkles-outline" label="Prismo settings" description="Voice, responses, memory and payments" onPress={() => navigation.navigate('MindSettings')} />
         </Group>
@@ -828,7 +801,7 @@ export default function SettingsScreen({ navigation }: Props) {
         </>}
 
         {/* Security */}
-        {showSection('security backup view recovery phrase') && <>
+        {showSection('security backup view recovery phrase seed words mnemonic') && <>
         <SectionLabel>Security</SectionLabel>
         <Group>
           <Row
@@ -847,8 +820,15 @@ export default function SettingsScreen({ navigation }: Props) {
         <Text style={styles.pageDescription}>Keep both your recovery phrase and any required account backups. A connected Lightning node has its own backup procedure.</Text>
         </>}
 
-        {/* Preferences */}
-        {showSection('preferences bitcoin balance unit sound sounds payment currency fiat notifications language lingua italiano english') && <>
+        {/* Preferences — display detail first: it shapes everything else. */}
+        {showSection('display detail mode lite advanced simple view interface') && <>
+          <SectionLabel>Interface detail</SectionLabel>
+          <Group>
+          <Row first icon="options-outline" label="Display detail" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Simple' : 'Advanced'} onPress={() => setActiveSheet('display')} />
+          </Group>
+        </>}
+
+        {showSection('preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english') && <>
         <SectionLabel>Preferences</SectionLabel>
         <Group>
 
@@ -907,15 +887,8 @@ export default function SettingsScreen({ navigation }: Props) {
           onSave={patch => { if (account === 'ARKADE') changeProtocolNetwork(account, (protoNetworks.arkade ?? 'signet') as ProtocolNetwork, patch); }}
         />}
 
-        {showSection('display detail mode lite advanced') && <>
-          <SectionLabel>Interface detail</SectionLabel>
-          <Group>
-          <Row first icon="options-outline" label="Display detail" description="How much detail the app shows" value={disclosureLevel === 'lite' ? 'Lite' : 'Advanced'} onPress={() => setActiveSheet('display')} />
-          </Group>
-        </>}
-
         {/* Network changes live in the explicit Advanced section in both display modes. */}
-        {showSection('advanced accounts wallet protocols network spark arkade rgb bark') && (
+        {showSection('advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet') && (
           <>
           <SectionLabel>Wallet tools</SectionLabel>
           <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>
@@ -1046,6 +1019,37 @@ export default function SettingsScreen({ navigation }: Props) {
         onSelect={(id) => dispatch(setDisclosureLevel(id as any))}
         onClose={() => setActiveSheet(null)}
       />
+      <OptionSheet
+        visible={networkPicker === 'BARK'}
+        title="Bark network"
+        options={[
+          { id: 'mainnet', label: 'Mainnet', description: 'Real bitcoin' },
+          { id: 'signet', label: 'Signet', description: 'Test bitcoin. Each network keeps a separate balance.' },
+        ]}
+        selectedId={protoNetworks.bark ?? currentBarkHost()?.network ?? 'mainnet'}
+        onSelect={id => {
+          const network = id as 'mainnet' | 'signet';
+          const current = protoNetworks.bark ?? currentBarkHost()?.network;
+          if (network !== current || !protocolStatus.BARK) void changeBarkNetwork(network);
+        }}
+        onClose={() => setNetworkPicker(null)}
+      />
+      {(['RGB', 'SPARK', 'ARKADE'] as WalletProtocol[]).map(proto => (
+        <OptionSheet
+          key={proto}
+          visible={networkPicker === proto}
+          title={`${({ RGB: 'RGB Lightning node', SPARK: 'Spark', ARKADE: 'Arkade' } as Record<string, string>)[proto] ?? proto} network`}
+          options={(PROTOCOL_SUPPORTED_NETWORKS[proto] as ProtocolNetwork[]).map(n => ({ id: n, label: NETWORK_LABEL[n] ?? n }))}
+          selectedId={(protoNetworks[PROTOCOL_TO_NETWORK_TYPE[proto]] ?? PROTOCOL_DEFAULT_NETWORK[PROTOCOL_TO_NETWORK_TYPE[proto]]) as ProtocolNetwork}
+          onSelect={id => {
+            const next = id as ProtocolNetwork;
+            const type = PROTOCOL_TO_NETWORK_TYPE[proto];
+            const current = (protoNetworks[type] ?? PROTOCOL_DEFAULT_NETWORK[type]) as ProtocolNetwork;
+            if (next !== current || !protocolStatus[proto]) changeProtocolNetwork(proto, next);
+          }}
+          onClose={() => setNetworkPicker(null)}
+        />
+      ))}
       <RevealMnemonicModal
         visible={showRevealModal}
         mnemonic={revealedMnemonic}
