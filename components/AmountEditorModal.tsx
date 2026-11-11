@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, Switch, ScrollView, Keyboard }
 import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { Sheet } from './Sheet';
+import { AmountPad, groupComposedAmount } from './AmountPad';
 import { receiveAmountSats } from '../utils/receive-request';
 import { feedback } from '../utils/feedback';
 
@@ -16,6 +17,8 @@ export interface AmountAssetContext {
   maxUnits?: number;
   /** e.g. "123.45 USDB available", shown under the amount. */
   availableLabel?: string;
+  /** Decimal places the asset uses (its precision). Default 8. */
+  decimals?: number;
 }
 interface Props {
   visible: boolean;
@@ -75,6 +78,7 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
     close();
   };
   const maxLabel = asset?.maxUnits !== undefined ? String(asset.maxUnits).replace(/\.?0+$/, '') : '';
+  const maxDecimals = asset ? Math.max(0, Math.min(8, asset.decimals ?? 8)) : fiat ? 2 : bitcoinUnit === 'BTC' ? 8 : 0;
   const muted = { color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm };
   const label = { color: t.colors.text.primary, fontSize: t.typography.fontSize.base, fontWeight: '600' as const };
   const hint = asset
@@ -90,20 +94,22 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
   return <Sheet visible={visible} onClose={close} title={requestOptions ? 'Edit request' : 'Enter amount'}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: t.spacing[4] }}>
       <Text style={label}>{asset ? `Amount in ${asset.unit}` : sending ? 'Amount to send' : 'Amount · optional'}</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3], borderBottomWidth: 1, borderColor: t.colors.border.light }}>
-        <TextInput accessibilityLabel="Requested amount" value={value} keyboardType={asset ? 'decimal-pad' : bitcoinUnit === 'sats' && !fiat ? 'number-pad' : 'decimal-pad'}
-          onChangeText={setValue} placeholder={sending ? '0' : 'Any amount'} autoFocus={sending} placeholderTextColor={t.colors.text.muted}
-          style={{ flex: 1, minHeight: 56, fontSize: t.typography.fontSize['2xl'], color: t.colors.text.primary }} />
-        {asset ? <Text style={{ ...label, minHeight: 44, textAlignVertical: 'center' }}>{asset.unit}</Text> : (
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change amount entry unit" disabled={!rate} onPress={() => {
-            if (valid && !empty) setValue(fiat ? tokenValue(sats) : ((sats / 1e8) * rate).toFixed(2));
-            setFiat(v => !v);
-          }} style={{ minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
+      <View style={{ alignItems: 'center', gap: t.spacing[2], paddingVertical: t.spacing[2] }}>
+        <Text accessibilityLabel="Requested amount" accessibilityLiveRegion="polite"
+          style={{ fontSize: t.typography.fontSize['4xl'], fontWeight: '700', color: value ? t.colors.text.primary : t.colors.text.muted, fontVariant: ['tabular-nums'] }}>
+          {value ? groupComposedAmount(value) : (sending ? '0' : 'Any amount')}
+        </Text>
+        {asset
+          ? <Text style={muted}>{asset.unit}</Text>
+          : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change amount entry unit" disabled={!rate} onPress={() => {
+              if (valid && !empty) setValue(fiat ? tokenValue(sats) : ((sats / 1e8) * rate).toFixed(2));
+              setFiat(v => !v);
+            }} style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], opacity: rate ? 1 : 0.5 }}>
             <Text style={label}>{fiat ? 'USD' : bitcoinUnit}</Text>
-            {!!rate && <Ionicons name="swap-vertical" size={18} color={t.colors.text.secondary} />}
-          </TouchableOpacity>
-        )}
+            {!!rate && <Ionicons name="swap-vertical" size={16} color={t.colors.text.secondary} />}
+          </TouchableOpacity>}
       </View>
+      <AmountPad value={value} onChange={setValue} maxDecimals={maxDecimals} />
       <Text style={muted}>{hint}</Text>
       {asset ? <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
         {asset.maxUnits !== undefined && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Send all ${asset.unit}`} onPress={() => { feedback.select(); setValue(maxLabel); }}

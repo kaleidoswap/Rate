@@ -454,7 +454,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
         <Text selectable style={small}>Reference: {s.order?.id ?? s.quoteId}</Text>
       </View>
 
-      {checking && <Callout tone="warning" message={`We couldn't confirm that the payment left Spark${s.lastError ? ` (${s.lastError})` : ''}. Do not send again. Check again in a moment; if your Spark activity shows nothing went out, you can start a new transfer.`} />}
+      {checking && <Callout tone="warning" message={`We couldn't confirm that the payment left Spark${s.lastError ? ` (${s.lastError})` : ''}. Don’t pay this twice. Check again in a moment; if your Spark activity shows nothing went out, you can start a new transfer.`} />}
       {s.phase === 'paid' && !!s.lastError && <Callout tone="warning" message={`Your payment left Spark, but the order wasn't accepted yet (${s.lastError}). Retrying moves no funds.`} />}
       {!!pollError && s.phase === 'submitted' && <Text style={{ ...small, color: t.colors.warning[500], textAlign: 'center' }}>Status updates paused: {pollError}. The transfer continues.</Text>}
       {failed && <Text style={{ ...muted, textAlign: 'center' }}>{status === 'refunded' ? 'The funds went back to your Spark wallet.' : 'The transfer did not complete. If funds left Spark they are refunded there.'}</Text>}

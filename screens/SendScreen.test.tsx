@@ -273,7 +273,7 @@ test('typing a name autocompletes contacts and jumps straight to the amount', as
   fireEvent.press(screen.getByLabelText('Pay Mario Rossi'));
   // Amount-first: the keypad opens without pressing Continue.
   expect(screen.getByText('Amount to send')).toBeTruthy();
-  fireEvent.changeText(screen.getByLabelText('Requested amount'), '2');
+  fireEvent.press(screen.getByLabelText('2'));
   await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   expect(previewInput).toHaveBeenCalledWith('mario@getalby.com', 2, 'test-uuid', { asset: undefined });
 });
@@ -285,7 +285,9 @@ test('a Spark address can be paid in a Spark token the wallet holds', async () =
   await act(async () => {});
   fireEvent.press(screen.getByLabelText(/^Pay in USDB/));
   fireEvent.press(screen.getByLabelText('Amount in USDB'));
-  fireEvent.changeText(screen.getByLabelText('Requested amount'), '2.5');
+  fireEvent.press(screen.getByLabelText('2'));
+  fireEvent.press(screen.getByLabelText('Decimal point'));
+  fireEvent.press(screen.getByLabelText('5'));
   await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   await act(async () => { fireEvent.press(screen.getByText('Continue')); });
   expect(prepareSparkTokenRequest).toHaveBeenLastCalledWith(mockUsdb);
@@ -403,7 +405,7 @@ test.each([[false, 'Sent to the network'], [true, 'Confirmed on-chain']] as cons
   fireEvent.press(screen.getByText('See receipt'));
   expect(screen.getByText(title)).toBeTruthy();
   expect(screen.queryByText('Payment completed')).toBeNull();
-  if (!confirmed) expect(screen.getByText('Waiting for a Bitcoin block confirmation. Do not send again.')).toBeTruthy();
+  if (!confirmed) expect(screen.getByText("Waiting for a Bitcoin block confirmation. Don’t pay this twice.")).toBeTruthy();
   screen.unmount();
 });
 
@@ -468,7 +470,10 @@ test('RGB has a visible balance and amount, accepts decimal comma and reviews a 
   expect(screen.getByText('Bitcoin available for fees: 2,500 sats')).toBeTruthy();
   expect(screen.getByText('Available: 500 sats')).toBeTruthy(); // shared formatter mocked above
   fireEvent.press(screen.getByLabelText('Amount in USD'));
-  fireEvent.changeText(screen.getByLabelText('Requested amount'), '1,25');
+  fireEvent.press(screen.getByLabelText('1'));
+  fireEvent.press(screen.getByLabelText('Decimal point'));
+  fireEvent.press(screen.getByLabelText('2'));
+  fireEvent.press(screen.getByLabelText('5'));
   await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
   await act(async () => { fireEvent.press(screen.getByText('Review transfer')); });
   expect(previewInput).toHaveBeenCalledWith('rgb:any', undefined, expect.any(String), { asset: { id: 'rgb-usd', ticker: 'USD', precision: 2, amount: 125 } });

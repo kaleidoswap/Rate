@@ -48,7 +48,7 @@ export default function WalletReviewScreen({ navigation }: { navigation: any }) 
       </>}
       {page === 'receipt' && <>
         <Text style={title}>{payment === 'review' ? 'Review payment' : payment === 'unknown' ? 'Payment needs checking' : 'Payment completed'}</Text>
-        <Text style={text}>{payment === 'unknown' ? 'Do not send again. Verify the outcome of this payment first.' : payment === 'completed' ? '5,000 sats sent to Alice · simulated' : 'Review the recipient and all costs before approving.'}</Text>
+        <Text style={text}>{payment === 'unknown' ? "Don’t pay this twice. Verify the outcome of this payment first." : payment === 'completed' ? '5,000 sats sent to Alice · simulated' : 'Review the recipient and all costs before approving.'}</Text>
         <PaymentReceiptDetails details={details} />
         <Text style={{ ...text, fontSize: t.typography.fontSize.sm }}>Fees and total are from the approved quote. The provider may settle an estimated fee differently.</Text>
         {payment === 'review' && <Button title="Confirm demo payment" onPress={() => setPayment('unknown')} />}
