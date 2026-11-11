@@ -1,6 +1,6 @@
 import { reconcilePendingActivity } from '../utils/activity-reconciliation';
 import { ActiveFilterBar, FilterButton, FilterChipGroup, type ActiveFilter, type FilterOption } from '../components/FilterChips';
-import { matchesActivityPeriod, type ActivityPeriod } from '../utils/activity-search';
+import { matchesActivityPeriod, matchesActivitySearch, type ActivityPeriod } from '../utils/activity-search';
 import { walletContactEvents, type ContactEvent } from '../services/contactHistory';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -44,6 +44,10 @@ import {
 import { dismissPendingPayment, loadPendingPaymentActivity, loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND, paymentAttemptIdOf } from '../services/kaleidoPay/activity';
 import { confirmRemovePayment } from '../components/payments/confirmRemovePayment';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { activityAmountIsIncoming, activityAmountPrefix, activityIcon, activityShortTime, activityTypeLabel, activityToneColor } from '../utils/activity-presentation';
+import { SearchField } from '../components/SearchField';
+import { useFiatRates } from '../hooks/useFiatRates';
+import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
 import { ActivityDetailSheet } from '../components/ActivityDetailSheet';
 import { AgentWalletStore, type AgentLedgerEntry } from '../services/agentWallet/store';
 import { AGENT_ACTIVITY_KIND, agentActivityItems } from '../services/agentWallet/activity';
@@ -64,27 +68,10 @@ const PERIODS: FilterOption<ActivityPeriod>[] = [
     { key: '90d', label: '90 days' },
 ];
 
-// Per-type visual identity: icon + accent colour. Direction colours come from
-// the shared `tx` tokens (sent/receive/swap) so the activity feed matches web.
-function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
-    switch (type) {
-        case 'receive':
-            return { icon: 'arrow-down', color: theme.colors.tx.receive };
-        case 'send':
-            return { icon: 'arrow-up', color: theme.colors.tx.sent };
-        case 'swap':
-            return { icon: 'swap-horizontal', color: theme.colors.tx.swap };
-        case 'issuance':
-            return { icon: 'add-circle-outline', color: theme.colors.accent[500] };
-        case 'channel_open':
-            return { icon: 'git-branch-outline', color: theme.colors.accent[500] };
-        case 'channel_close':
-            return { icon: 'close-circle-outline', color: theme.colors.warning[500] };
-        default:
-            return { icon: 'ellipse-outline', color: theme.colors.text.tertiary };
-    }
-}
-
+// Per-type visual identity and names live in utils/activity-presentation,
+// shared with the recent-activity widget and the detail sheet so one payment
+// looks the same wherever it appears.
+const typeLabel = activityTypeLabel;
 
 // Map an activity layer to a per-network chip colour pair (background + text)
 // sourced from the shared kaleido-ui tokens, so the chips stay contrast-safe
@@ -108,28 +95,8 @@ function layerChipColors(layer: ActivityLayer): { bg: string; text: string } {
     }
 }
 
-function typeLabel(item: ActivityItem): string {
-    if (item.kind === 'unilateral_exit') return 'Exit to Bitcoin';
-    if (item.kind === AGENT_ACTIVITY_KIND && item.assetName) return item.assetName;
-    switch (item.type) {
-        case 'receive': return 'Receive';
-        case 'send': return 'Payment';
-        case 'swap': return 'Swap';
-        case 'issuance': return item.kind === 'Inflation' ? 'Inflation' : 'Issuance';
-        case 'channel_open': return 'Channel Open';
-        case 'channel_close': return 'Channel Close';
-        default: return 'Transaction';
-    }
-}
-
 // Status → label/color now lives in utils/paymentStatus (single source of truth).
 const statusVisual = ACTIVITY_STATUS_VISUAL;
-
-function amountPrefix(type: ActivityItemType): string {
-    if (type === 'receive' || type === 'issuance') return '+';
-    if (type === 'send') return '−';
-    return '';
-}
 
 // Group items by relative day for section headers.
 function sectionTitle(ts?: number): string {
@@ -161,6 +128,11 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
     const [filter, setFilter] = useState<ActivityTab>('all');
     const [network, setNetwork] = useState<ActivityNetwork | 'all'>('all');
     const [selectedItem, setSelectedItem] = useState<ActivityItem | null>(null);
+    // Search over everything the filters leave visible; the field toggles from the header.
+    const [query, setQuery] = useState('');
+    const [searchVisible, setSearchVisible] = useState(false);
+    const rates = useFiatRates();
+    const usdRate = rates.usd;
 
     const feedOptions = useMemo(() => ({
         assets: (rgbAssets || []).map((a: any): AssetMeta => ({
@@ -254,11 +226,14 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
     const filtered = (filter === 'agent' ? agentItems : items)
         .filter((it) => matchesActivityFilter(it, filter, activeNetwork) && matchesActivityPeriod(it, period))
         .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+    const searched = query.trim()
+        ? filtered.filter((it) => matchesActivitySearch(it, query.trim(), 'all'))
+        : filtered;
 
     // Build sections grouped by day.
     const sections = (() => {
         const map = new Map<string, ActivityItem[]>();
-        for (const it of filtered) {
+        for (const it of searched) {
             const key = it.status === 'unknown' ? 'Needs checking' : it.status === 'pending' ? 'In progress' : sectionTitle(it.timestamp);
             if (!map.has(key)) map.set(key, []);
             map.get(key)!.push(it);
@@ -278,32 +253,37 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
     };
 
     const renderItem = ({ item }: { item: ActivityItem }) => {
-        const v = typeVisual(item.type);
+        const v = activityIcon(item.type);
+        const vColor = activityToneColor(v.tone, theme);
         const st = statusVisual[item.status];
         const chip = layerChipColors(item.layer);
         const hasAmount = item.amount !== '';
+        const fiat = hasAmount && item.rawSats != null && usdRate ? `≈ $${formatSatoshisToUSD(item.rawSats, usdRate)}` : '';
         return (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${typeLabel(item)}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}${fiat ? `, ${fiat}` : ''}, ${st.label}. Open details`} activeOpacity={0.7} style={styles.row} onPress={() => item.kind === PAYMENT_ATTEMPT_KIND ? navigation.navigate('Send', { resumePayment: true, paymentAttemptId: item.id.replace('payment-attempt-', '') }) : setSelectedItem(item)}
                 onLongPress={paymentAttemptIdOf(item) ? () => removePayment(item) : undefined}
                 accessibilityActions={paymentAttemptIdOf(item) ? [{ name: 'longpress', label: 'Remove from Activity' }] : undefined}
                 onAccessibilityAction={(e) => { if (e.nativeEvent.actionName === 'longpress') removePayment(item); }}>
-                <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
-                    <Ionicons name={v.icon} size={20} color={v.color} />
+                <View style={[styles.iconWrap, { backgroundColor: vColor + '1A' }]}>
+                    <Ionicons name={v.icon} size={20} color={vColor} />
                 </View>
 
                 <View style={styles.rowBody}>
                     <View style={styles.rowTopLine}>
                         <Text style={styles.rowTitle} numberOfLines={1}>{item.contactName ? `${typeLabel(item)} · ${item.contactName}` : typeLabel(item)}</Text>
                         {hasAmount && (
-                            <Text
-                                style={[
-                                    styles.rowAmount,
-                                    { color: item.type === 'receive' || item.type === 'issuance' ? theme.colors.tx.receive : theme.colors.text.primary },
-                                ]}
-                                numberOfLines={1}
-                            >
-                                {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.amount} {item.assetTicker}
-                            </Text>
+                            <View style={styles.amountColumn}>
+                                <Text
+                                    style={[
+                                        styles.rowAmount,
+                                        { color: activityAmountIsIncoming(item.type) ? theme.colors.tx.receive : theme.colors.text.primary },
+                                    ]}
+                                    numberOfLines={1}
+                                >
+                                    {item.status === 'failed' ? '' : activityAmountPrefix(item.type)}{item.amount} {item.assetTicker}
+                                </Text>
+                                {!!fiat && <Text style={styles.fiatText} numberOfLines={1}>{fiat}</Text>}
+                            </View>
                         )}
                     </View>
                     <View style={styles.rowBottomLine}>
@@ -317,7 +297,7 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
                             )}
                             {item.timestamp != null && (
                                 <Text style={styles.timeText}>
-                                    {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {activityShortTime(item.timestamp)}
                                 </Text>
                             )}
                         </View>
@@ -335,7 +315,18 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
             {!demo && <MainHeader title="Activity"
-                rightAction={<FilterButton activeCount={activeFilters.length} onPress={() => setFiltersVisible(true)} />} />}
+                rightAction={<View style={styles.headerActions}>
+                    <TouchableOpacity accessibilityRole="button" accessibilityLabel={searchVisible ? 'Hide search' : 'Search activity'} onPress={() => { setSearchVisible(v => !v); if (searchVisible) setQuery(''); }} activeOpacity={0.7} style={styles.headerActionButton}>
+                        <Ionicons name={searchVisible ? 'close' : 'search'} size={20} color={searchVisible || query ? theme.colors.primary[500] : theme.colors.text.primary} />
+                    </TouchableOpacity>
+                    <FilterButton activeCount={activeFilters.length} onPress={() => setFiltersVisible(true)} />
+                </View>} />}
+
+            {!demo && searchVisible && (
+                <View style={styles.searchRow}>
+                    <SearchField value={query} onChangeText={setQuery} placeholder="Search activity" autoFocus />
+                </View>
+            )}
 
             {demo && (
                 <View style={styles.previewRow}>
@@ -394,10 +385,10 @@ export default function HistoryScreen({ previewItems, previewPeriod }: { preview
                     ) : (
                         <EmptyState
                             icon="receipt-outline"
-                            actionLabel={activeFilters.length > 0 ? 'Reset filters' : undefined}
-                            onAction={resetFilters}
-                            title={period !== 'all' || activeNetwork !== 'all' ? 'No matching activity' : filter === 'pending' ? 'No pending payments' : filter === 'agent' ? 'No agent payments yet' : 'No activity yet'}
-                            message={period !== 'all' || activeNetwork !== 'all' ? 'Try a wider period or another network.' : filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : filter === 'agent' ? 'What the assistant pays from its Agent wallet, and your top-ups, appear here.' : 'Your payments and transfers will appear here.'}
+                            actionLabel={activeFilters.length > 0 || !!query.trim() ? 'Reset filters' : undefined}
+                            onAction={() => { resetFilters(); setQuery(''); }}
+                            title={period !== 'all' || activeNetwork !== 'all' || !!query.trim() ? 'No matching activity' : filter === 'pending' ? 'No pending payments' : filter === 'agent' ? 'No agent payments yet' : 'No activity yet'}
+                            message={period !== 'all' || activeNetwork !== 'all' || !!query.trim() ? 'Try different search terms, a wider period or another network.' : filter === 'pending' ? 'Payments waiting for confirmation or needing a check appear here.' : filter === 'agent' ? 'What the assistant pays from its Agent wallet, and your top-ups, appear here.' : 'Your payments and transfers will appear here.'}
                         />
                     )}
                 />
@@ -539,7 +530,7 @@ const styles = StyleSheet.create({
         backgroundColor: theme.colors.surface.tertiary,
     },
     layerChipText: {
-        fontSize: 11,
+        fontSize: theme.typography.fontSize.xs,
         fontWeight: '600',
         color: theme.colors.text.secondary,
     },
@@ -560,5 +551,28 @@ const styles = StyleSheet.create({
     statusText: {
         fontSize: theme.typography.fontSize.xs,
         fontWeight: '600',
+    },
+    amountColumn: {
+        alignItems: 'flex-end',
+        gap: 1,
+    },
+    fiatText: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.tertiary,
+    },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.spacing[2],
+    },
+    headerActionButton: {
+        width: 44,
+        height: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    searchRow: {
+        paddingHorizontal: theme.spacing[4],
+        paddingTop: theme.spacing[2],
     },
 });

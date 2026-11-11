@@ -120,7 +120,7 @@ test('details are condensed: the asset id can be copied, no "Not provided" fee, 
   expect(screen.getByText('rgb:2dkSTbr-…ou5-M98k')).toBeTruthy();
   expect(screen.getByText('Tether (USDT)')).toBeTruthy();
   expect(screen.getByText('RGB · signet')).toBeTruthy();
-  expect(screen.getByText('Confirmed on-chain')).toBeTruthy();
+  expect(screen.getByText('Completed')).toBeTruthy();
   expect(screen.queryByText('Settled')).toBeNull();
   expect(screen.queryByText(/Not provided/)).toBeNull();
   expect(screen.queryByText('Account')).toBeNull();

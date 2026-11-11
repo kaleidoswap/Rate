@@ -28,6 +28,9 @@ import {
 import { loadSwapAttemptActivity, PAYMENT_ATTEMPT_KIND } from '../services/kaleidoPay/activity';
 import { useActivityFeed } from '../hooks/useActivityFeed';
 import { ACTIVITY_STATUS_VISUAL } from '../utils/paymentStatus';
+import { activityAmountIsIncoming, activityAmountPrefix, activityIcon, activityShortTime, activityTypeLabel, activityToneColor } from '../utils/activity-presentation';
+import { useFiatRates } from '../hooks/useFiatRates';
+import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
 
 interface Props {
     onViewAll?: () => void;
@@ -43,35 +46,9 @@ interface Props {
     refreshKey?: number;
 }
 
-function typeVisual(type: ActivityItemType): { icon: keyof typeof Ionicons.glyphMap; color: string } {
-    switch (type) {
-        case 'receive': return { icon: 'arrow-down', color: theme.colors.tx.receive };
-        case 'send': return { icon: 'arrow-up', color: theme.colors.tx.sent };
-        case 'swap': return { icon: 'swap-horizontal', color: theme.colors.tx.swap };
-        case 'issuance': return { icon: 'add-circle-outline', color: theme.colors.accent[500] };
-        case 'channel_open': return { icon: 'git-branch-outline', color: theme.colors.accent[500] };
-        case 'channel_close': return { icon: 'close-circle-outline', color: theme.colors.warning[500] };
-        default: return { icon: 'ellipse-outline', color: theme.colors.text.tertiary };
-    }
-}
-
-function typeLabel(type: ActivityItemType): string {
-    switch (type) {
-        case 'receive': return 'Receive';
-        case 'send': return 'Payment';
-        case 'swap': return 'Swap';
-        case 'issuance': return 'Issuance';
-        case 'channel_open': return 'Channel Open';
-        case 'channel_close': return 'Channel Close';
-        default: return 'Transaction';
-    }
-}
-
-function amountPrefix(type: ActivityItemType): string {
-    if (type === 'receive' || type === 'issuance' || type === 'swap') return '+';
-    if (type === 'send') return '−';
-    return '';
-}
+// Type names, icons, signs and compact ages come from utils/activity-presentation,
+// shared with the Activity rows and the detail sheet so one payment reads the
+// same wherever it appears.
 
 
 const MAX_ITEMS = 4;
@@ -79,6 +56,7 @@ const MAX_ITEMS = 4;
 export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPaymentAttempt, assetId, assetTicker, title = 'Activity', limit, style, refreshKey }) => {
     const theme = useAppTheme();
     const styles = useMemo(() => createStyles(theme), [theme]);
+    const usdRate = useFiatRates().usd;
     const swapHistory = useAppSelector((state: RootState) => state.swap.swapHistory);
     const rgbAssets = useAppSelector((state: RootState) => state.assets.rgbAssets);
     const walletId = useAppSelector((state: RootState) => state.wallet.activeWallet?.id);
@@ -125,45 +103,48 @@ export const RecentActivityWidget: React.FC<Props> = ({ onViewAll, onOpenPayment
     if (!loading && items.length === 0 && !assetId) return null;
 
     const renderRow = (item: ActivityItem) => {
-        const v = typeVisual(item.type);
+        const v = activityIcon(item.type);
+        const vColor = activityToneColor(v.tone, theme);
         const st = ACTIVITY_STATUS_VISUAL[item.status];
         const hasAmount = item.amount !== '';
-        // Swaps net into the received asset, so colour them like an inflow.
-        const isIncoming = item.type === 'receive' || item.type === 'issuance' || item.type === 'swap';
-        // Swaps carry the full "X sats → Y USDB" route in assetName; show it as a
-        // subtitle so the route is visible without crowding the amount column.
-
+        const label = activityTypeLabel(item);
+        const fiat = hasAmount && item.rawSats != null && usdRate ? `≈ $${formatSatoshisToUSD(item.rawSats, usdRate)}` : '';
 
         return (
             <TouchableOpacity
                 key={item.id}
                 activeOpacity={0.7}
                 style={styles.row}
+                accessibilityRole="button"
+                accessibilityLabel={`${label}${item.contactName ? ` · ${item.contactName}` : ''}, ${item.amount} ${item.assetTicker}${fiat ? `, ${fiat}` : ''}, ${st.label}. Open details`}
                 onPress={() => item.kind === PAYMENT_ATTEMPT_KIND && onOpenPaymentAttempt ? onOpenPaymentAttempt(item.id.replace('payment-attempt-', '')) : setSelected(item)}
             >
-                <View style={[styles.iconWrap, { backgroundColor: v.color + '1A' }]}>
-                    <Ionicons name={v.icon} size={18} color={v.color} />
+                <View style={[styles.iconWrap, { backgroundColor: vColor + '1A' }]}>
+                    <Ionicons name={v.icon} size={18} color={vColor} />
                 </View>
 
                 <View style={styles.rowBody}>
-                    <Text style={styles.rowTitle} numberOfLines={1}>{item.contactName || typeLabel(item.type)}</Text>
+                    <Text style={styles.rowTitle} numberOfLines={1}>{item.contactName ? `${label} · ${item.contactName}` : label}</Text>
                     <View style={styles.rowMeta}>
-                        {item.timestamp != null && <Text style={styles.rowSubtitle}>{new Date(item.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Text>}
+                        {item.timestamp != null && <Text style={styles.rowSubtitle}>{activityShortTime(item.timestamp)}</Text>}
                         <View style={[styles.statusDot, { backgroundColor: st.color }]} />
                         <Text style={[styles.statusText, { color: st.color }]}>{st.label}</Text>
                     </View>
                 </View>
 
                 {hasAmount && (
-                    <Text
-                        style={[
-                            styles.rowAmount,
-                            { color: isIncoming ? theme.colors.tx.receive : theme.colors.text.primary },
-                        ]}
-                        numberOfLines={1}
-                    >
-                        {item.status === 'failed' ? '' : amountPrefix(item.type)}{item.amount} {item.assetTicker}
-                    </Text>
+                    <View style={styles.amountColumn}>
+                        <Text
+                            style={[
+                                styles.rowAmount,
+                                { color: activityAmountIsIncoming(item.type) ? theme.colors.tx.receive : theme.colors.text.primary },
+                            ]}
+                            numberOfLines={1}
+                        >
+                            {item.status === 'failed' ? '' : activityAmountPrefix(item.type)}{item.amount} {item.assetTicker}
+                        </Text>
+                        {!!fiat && <Text style={styles.fiatText} numberOfLines={1}>{fiat}</Text>}
+                    </View>
                 )}
             </TouchableOpacity>
         );
@@ -263,18 +244,13 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         borderRadius: theme.borderRadius.sm,
         backgroundColor: theme.colors.surface.tertiary,
     },
-    layerChipText: {
-        fontSize: 10,
-        fontWeight: '600',
-        color: theme.colors.text.secondary,
-    },
     statusDot: {
         width: 5,
         height: 5,
         borderRadius: 3,
     },
     statusText: {
-        fontSize: 11,
+        fontSize: theme.typography.fontSize.xs,
         fontWeight: '600',
     },
     rowAmount: {
@@ -282,6 +258,16 @@ const createStyles = (theme: ReturnType<typeof useAppTheme>) => StyleSheet.creat
         fontWeight: '700',
         flexShrink: 1,
         marginLeft: theme.spacing[2],
+        textAlign: 'right',
+    },
+    amountColumn: {
+        alignItems: 'flex-end',
+        gap: 1,
+        flexShrink: 1,
+    },
+    fiatText: {
+        fontSize: theme.typography.fontSize.xs,
+        color: theme.colors.text.tertiary,
         textAlign: 'right',
     },
 });

@@ -1017,7 +1017,6 @@ export default function DashboardScreen({ navigation }: Props) {
               }
             });
           }}
-          onIssueAsset={() => navigation.getParent()?.navigate('Assets', { issue: true })}
         />
 
 
@@ -1069,64 +1068,6 @@ const styles = StyleSheet.create({
     marginHorizontal: theme.spacing[4],
     marginTop: theme.spacing[4],
     marginBottom: theme.spacing[4],
-  },
-  headerContainer: {
-    marginBottom: theme.spacing[4],
-  },
-  headerGradient: {
-    paddingBottom: theme.spacing[12],
-    borderBottomLeftRadius: theme.borderRadius['3xl'],
-    borderBottomRightRadius: theme.borderRadius['3xl'],
-  },
-  headerSafeArea: {
-    backgroundColor: 'transparent',
-  },
-  headerContent: {
-    paddingHorizontal: theme.spacing[4],
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacing[6],
-    marginTop: theme.spacing[2],
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  greeting: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.inverse,
-    opacity: 0.8,
-    marginBottom: 4,
-  },
-  headerTitle: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.inverse,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    gap: theme.spacing[3],
-  },
-  headerActionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  notificationDot: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: theme.colors.error[500],
-    borderWidth: 1,
-    borderColor: theme.colors.primary[600],
   },
   // Modal Styles
   modalSection: {
