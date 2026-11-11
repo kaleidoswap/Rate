@@ -139,7 +139,7 @@ export default function WalletRestoreScreen({ navigation }: Props) {
       const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = walletNetworksFor(choice);
       await saveAccountPreferences(phrase, choice);
 
-      // @ts-ignore
+      // @ts-expect-error — redux-thunk dispatch types do not cover createAsyncThunk results
       const resultAction = await dispatch(createNewWallet({
         name,
         mnemonic: phrase,

@@ -701,7 +701,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
             };
           }
         } catch (err: any) {
-          throw new Error(`Spark: ${err.message || 'Failed to generate address'}`);
+          throw new Error(`Spark: ${err.message || 'Failed to generate address'}`, { cause: err });
         }
       }
       // ── Arkade network ──
@@ -740,7 +740,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
             };
           }
         } catch (err: any) {
-          throw new Error(`Arkade: ${err.message || 'Failed to generate address'}`);
+          throw new Error(`Arkade: ${err.message || 'Failed to generate address'}`, { cause: err });
         }
       }
       // ── Bark (Second's Ark) ──
@@ -782,7 +782,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
             };
           }
         } catch (err: any) {
-          throw new Error(`Bark: ${err.message || 'Failed to generate address'}`);
+          throw new Error(`Bark: ${err.message || 'Failed to generate address'}`, { cause: err });
         }
       }
       // ── RGB / Legacy: on-chain + lightning ──

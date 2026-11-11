@@ -657,7 +657,7 @@ class QVACService {
       result = await resumable.downloadAsync();
     } catch (err) {
       discardPart();
-      throw new Error(`Download failed for ${model.name}: ${errorMessage(err)}`);
+      throw new Error(`Download failed for ${model.name}: ${errorMessage(err)}`, { cause: err });
     }
     if (!result?.uri) {
       discardPart();
@@ -771,7 +771,7 @@ class QVACService {
       // Report the CPU failure, and the GPU one too when it was different, so
       // the banner and logs carry both reasons.
       const cpuError = errorMessage(cpuErr);
-      throw new Error(gpuError && gpuError !== cpuError ? `${cpuError} (GPU: ${gpuError})` : cpuError);
+      throw new Error(gpuError && gpuError !== cpuError ? `${cpuError} (GPU: ${gpuError})` : cpuError, { cause: cpuErr });
     }
   }
 
@@ -1110,7 +1110,7 @@ class QVACService {
       return await this.ttsLoadPromise;
     } catch (e) {
       this.ttsLoadPromise = null; // allow a retry
-      throw new Error(`Supertonic model download/load: ${e instanceof Error ? e.message : String(e)}`);
+      throw new Error(`Supertonic model download/load: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
     }
   }
 
@@ -1231,7 +1231,7 @@ class QVACService {
         recordVoiceDiagnostic('model_unloaded');
       } catch (error) {
         recordVoiceDiagnostic('model_unload_failed');
-        throw new Error(`Supertonic model unload failed: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Supertonic model unload failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
       }
       this.ttsModelId = null;
       this.ttsLanguage = null;

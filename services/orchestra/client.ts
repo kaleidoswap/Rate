@@ -212,7 +212,7 @@ async function request<T>(
       signal: controller.signal,
     });
   } catch (err) {
-    if (controller.signal.aborted) throw new Error(`Orchestra ${method} ${path} timed out: network request failed`);
+    if (controller.signal.aborted) throw new Error(`Orchestra ${method} ${path} timed out: network request failed`, { cause: err });
     throw err;
   } finally {
     clearTimeout(timer);

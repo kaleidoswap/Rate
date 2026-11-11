@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["jest", "node"]
+  },
+  // The base config excludes every *.test.* file — tests were therefore
+  // never type-checked (the web extension checks them separately; this
+  // closes the same gap for the app). Include them, and everything they
+  // import follows.
+  "include": [
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "__tests__/**/*.ts",
+    "__tests__/**/*.tsx"
+  ],
+  "exclude": ["node_modules", "ios", "android"]
+}

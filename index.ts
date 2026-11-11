@@ -1,7 +1,7 @@
 // Polyfills - must be imported first
 import 'react-native-get-random-values';
 import { Buffer } from 'buffer';
-// @ts-ignore — no types for this polyfill
+// @ts-expect-error — no types for this polyfill
 import { EventSourcePolyfill } from 'event-source-polyfill';
 // Wrap EventSource with longer heartbeat timeout to avoid noisy reconnect errors
 (global as any).EventSource = class extends EventSourcePolyfill {

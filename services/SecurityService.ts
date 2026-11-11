@@ -251,7 +251,7 @@ export class SecurityService {
       };
     } catch (error) {
       console.error('Failed to get security settings:', error);
-      throw new Error('Security settings are unavailable. Please try again.');
+      throw new Error('Security settings are unavailable. Please try again.', { cause: error });
     }
   }
 

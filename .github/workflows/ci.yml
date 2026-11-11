@@ -56,6 +56,12 @@ jobs:
       - name: Type-check
         run: pnpm exec tsc --noEmit
 
+      # Lint passes today (0 errors); the ~1900 warnings are the ratchet
+      # worklist — `pnpm lint:strict` is the zero-warning budget the web
+      # extension already runs, adopted once the list is worked down.
+      - name: Lint
+        run: pnpm lint
+
       - name: Dependency security regressions
         run: pnpm test:dependency-security
 
