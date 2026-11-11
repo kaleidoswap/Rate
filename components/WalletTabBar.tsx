@@ -6,21 +6,26 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { theme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { usePendingPaymentsCount } from '../hooks/usePendingPaymentsCount';
 
 /** Stable, in-flow navigation keeps every screen above the home indicator. */
 export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { t } = useAppLanguage();
   const insets = useSafeAreaInsets();
   const theme = useAppTheme();
+  const pending = usePendingPaymentsCount();
   const renderItem = (route: typeof state.routes[number], index: number) => {
     const { options } = descriptors[route.key];
     const focused = state.index === index;
     const color = focused ? theme.colors.primary[500] : theme.colors.text.secondary;
+    const label = t(String(options.tabBarLabel ?? route.name));
+    // Payments waiting for a check surface on the Activity tab; the badge says how many.
+    const badge = route.name === 'Activity' ? pending : 0;
     return (
       <TouchableOpacity
         key={route.key}
         accessibilityRole="tab"
-        accessibilityLabel={t(String(options.tabBarLabel ?? route.name))}
+        accessibilityLabel={`${label}${badge ? `, ${badge} ${badge === 1 ? 'payment needs attention' : 'payments need attention'}` : ''}`}
         accessibilityState={{ selected: focused }}
         onPress={() => {
           const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
@@ -28,8 +33,15 @@ export function WalletTabBar({ state, descriptors, navigation }: BottomTabBarPro
         }}
         style={tabStyles.item}
       >
-        {options.tabBarIcon?.({ focused, color, size: 22 })}
-        <Text style={[tabStyles.label, { color }]}>{t(String(options.tabBarLabel ?? route.name))}</Text>
+        <View style={tabStyles.iconWrap}>
+          {options.tabBarIcon?.({ focused, color, size: 22 })}
+          {!!badge && (
+            <View style={tabStyles.badge}>
+              <Text style={tabStyles.badgeText}>{badge > 9 ? '9+' : badge}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={[tabStyles.label, { color }]}>{label}</Text>
       </TouchableOpacity>
     );
   };
@@ -65,6 +77,13 @@ const tabStyles = StyleSheet.create({
     paddingTop: theme.spacing[1.5], paddingHorizontal: theme.spacing[2],
   },
   item: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', gap: 2 },
+  iconWrap: { position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  badge: {
+    position: 'absolute', top: -5, right: -14,
+    minWidth: 17, height: 17, paddingHorizontal: 4, borderRadius: theme.borderRadius.full,
+    backgroundColor: theme.colors.error[500], alignItems: 'center', justifyContent: 'center',
+  },
+  badgeText: { color: theme.colors.text.inverse, fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.bold },
   label: { fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.semibold },
   scan: { width: 44, height: 32, borderRadius: theme.borderRadius.lg, alignItems: 'center', justifyContent: 'center' },
 });

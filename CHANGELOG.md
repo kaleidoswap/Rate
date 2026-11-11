@@ -10,6 +10,14 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Added
+- **The identity is payable.** The dashboard's profile chip shows your
+  lightning address under your name — your kaleidoswap.me handle when set,
+  else your Nostr address — one glance from "who am I" to "how people pay me".
+- **The Activity tab counts what needs you.** Payments pending or needing a
+  check wear a badge on the tab bar, so waiting payments are not discoverable
+  only by opening the list.
+
 ### Changed
 - **One name for the assistant in Settings.** The "Mind" page with a single
   row is gone: Prismo's settings live under Connections, and the home keeps
