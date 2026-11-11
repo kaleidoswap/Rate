@@ -16,10 +16,12 @@ interface Props {
   hasIdentity: boolean;
   /** Small welcome line above the name, e.g. "Good morning". */
   greeting?: string;
+  /** Where people can pay you (your lightning address), under the name. */
+  subtitle?: string | null;
   onPress: () => void;
 }
 
-export function ProfileChip({ profile, hasIdentity, greeting, onPress }: Props) {
+export function ProfileChip({ profile, hasIdentity, greeting, subtitle, onPress }: Props) {
   const name = profileDisplayName(profile);
   const title = name || (hasIdentity ? 'Add your name' : 'Set up profile');
 
@@ -29,7 +31,7 @@ export function ProfileChip({ profile, hasIdentity, greeting, onPress }: Props) 
       onPress={onPress}
       activeOpacity={0.7}
       accessibilityRole="button"
-      accessibilityLabel={hasIdentity ? `${title}. Open profile` : 'Set up your profile'}
+      accessibilityLabel={`${hasIdentity ? `${title}. Open profile` : 'Set up your profile'}${subtitle ? ` · ${subtitle}` : ''}`}
       hitSlop={{ top: 6, bottom: 6 }}
     >
       <ProfileAvatar uri={profile?.picture} name={name} size={40} />
@@ -39,6 +41,7 @@ export function ProfileChip({ profile, hasIdentity, greeting, onPress }: Props) 
           <Text style={styles.name} numberOfLines={1}>{title}</Text>
           <Ionicons name="chevron-forward" size={14} color={theme.colors.text.tertiary} />
         </View>
+        {!!subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
       </View>
     </TouchableOpacity>
   );
@@ -60,5 +63,10 @@ const styles = StyleSheet.create({
     fontWeight: theme.typography.fontWeight.medium,
     color: theme.colors.text.secondary,
     marginBottom: 2,
+  },
+  subtitle: {
+    fontSize: theme.typography.fontSize.xs,
+    color: theme.colors.text.tertiary,
+    marginTop: 1,
   },
 });

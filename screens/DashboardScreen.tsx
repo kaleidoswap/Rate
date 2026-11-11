@@ -59,6 +59,7 @@ import { assetUsdValue, breakdownAssetRows, tokenValueSats as priceTokensInSats 
 
 const LITE_USD_ID = 'lite-usd';
 import { readBarkRecovery, syncBarkForUpdates } from '../services/BarkService';
+import { getStoredHandle } from '../services/kaleidoswapMe';
 
 const { width } = Dimensions.get('window');
 
@@ -147,6 +148,18 @@ export default function DashboardScreen({ navigation }: Props) {
     () => navigation.navigate(hasNostrIdentity ? 'Profile' : 'NostrSettings'),
     [navigation, hasNostrIdentity],
   );
+  // The identity's payable line: the kaleidoswap.me handle when set, else the
+  // Nostr lightning address. Under the name in the profile chip.
+  const [payableLine, setPayableLine] = useState<string | null>(null);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    const id = activeWallet?.id;
+    if (id == null) { setPayableLine(null); return; }
+    void getStoredHandle(id).then(handle => {
+      if (active) setPayableLine(handle?.lightningAddress ?? (nostrProfile?.lud16?.trim() || null));
+    }, () => {});
+    return () => { active = false; };
+  }, [activeWallet?.id, nostrProfile?.lud16]));
 
   // If Nostr is connected but we never pulled the profile (the wallet-side
   // connect path doesn't fetch it, and a restored connection doesn't either),
@@ -880,6 +893,7 @@ export default function DashboardScreen({ navigation }: Props) {
             profile={nostrProfile}
             hasIdentity={hasNostrIdentity}
             greeting={greeting}
+            subtitle={payableLine}
             onPress={openProfile}
           />
         }

@@ -10,6 +10,14 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Added
+- **The identity is payable.** The dashboard's profile chip shows your
+  lightning address under your name — your kaleidoswap.me handle when set,
+  else your Nostr address — one glance from "who am I" to "how people pay me".
+- **The Activity tab counts what needs you.** Payments pending or needing a
+  check wear a badge on the tab bar, so waiting payments are not discoverable
+  only by opening the list.
+
 ## [0.13.0] — 2026-11-11
 
 The payments-and-cards release: one gesture for every amount, people-first
