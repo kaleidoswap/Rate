@@ -607,12 +607,23 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
 
         // If an invoice was just generated, remember it (so "share" can act on
         // it) and offer to share it if the model didn't already mention it.
+        // The last bubble says what was done, not just that it finished.
+        const TOOL_SUMMARY: Record<string, string> = {
+          generate_invoice: 'Your invoice is ready.',
+          spark_create_invoice: 'Your invoice is ready.',
+          rln_create_ln_invoice: 'Your invoice is ready.',
+          rln_create_rgb_invoice: 'Your invoice is ready.',
+          get_balances: "I've checked your balances.",
+          spark_get_balance: "I've checked your Spark balance.",
+          get_price: "Here's the conversion.",
+          fiat_to_sats: "Here's the conversion.",
+        };
         let finalText =
           res.text?.trim() ||
           (stopped
-            ? 'Stopped.'
+            ? 'Stopped — nothing was completed.'
             : lastCall
-            ? 'Done.'
+            ? TOOL_SUMMARY[lastCall.name] ?? 'Done.'
             : "Sorry, I can't help with that just yet. Try rephrasing, or ask me about your balance, payments, Bitcoin merchants, or how Bitcoin, Lightning and RGB work.");
         const INVOICE_TOOLS = ['generate_invoice', 'spark_create_invoice', 'rln_create_ln_invoice', 'rln_create_rgb_invoice'];
         const invResult: any = INVOICE_TOOLS.includes(lastCall?.name ?? '') ? lastCall?.result : null;

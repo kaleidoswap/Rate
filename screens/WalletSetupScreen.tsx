@@ -379,6 +379,10 @@ export default function WalletSetupScreen({ navigation }: Props) {
     const steps: SetupStep[] = mode === 'advanced'
       ? ['welcome', 'rln', 'networks', 'backup', 'confirmBackup']
       : ['welcome', 'backup', 'confirmBackup'];
+    const labels: Record<SetupStep, string> = {
+      welcome: 'Start', rln: 'Lightning', networks: 'Accounts',
+      backup: 'Backup', confirmBackup: 'Verify', creating: '',
+    };
     const currentIdx = steps.indexOf(step);
 
     if (step === 'creating') return null;
@@ -398,6 +402,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
                 <Ionicons name="checkmark" size={10} color="white" />
               )}
             </View>
+            {idx === currentIdx && (
+              <Text style={styles.stepDotLabel}>{labels[s]}</Text>
+            )}
             {idx < steps.length - 1 && (
               <View style={[
                 styles.stepLine,
@@ -868,6 +875,12 @@ const styles = StyleSheet.create({
   },
   stepDotInactive: {
     backgroundColor: 'transparent',
+  },
+  stepDotLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.primary[500],
+    marginTop: 2,
   },
   stepLine: {
     width: 60,

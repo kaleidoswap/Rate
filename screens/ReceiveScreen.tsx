@@ -2017,7 +2017,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       />
 
       {/* Amount editor — WDK AmountInput (BTC ↔ USD) inside a bottom sheet */}
-      <NostrContactsSelector visible={showContactPicker} onClose={() => setShowContactPicker(false)}
+      <NostrContactsSelector visible={showContactPicker} onClose={() => setShowContactPicker(false)} intent="request"
         onConnectNostr={() => navigation.navigate('NostrSettings')}
         onSelectContact={(c) => { const dest = c.lightning_address || c.npub || c.node_pubkey; if (dest) { requestEventId.current = null; setRequestContact({ name: c.name, key: contactKeyFor(dest) }); } setShowContactPicker(false); }} />
       <AmountEditorModal

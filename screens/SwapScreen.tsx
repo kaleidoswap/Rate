@@ -66,6 +66,7 @@ import { feedback } from '../utils/feedback';
 import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
+import { CopyButton } from '../components/CopyButton';
 import { ExplainButton } from '../components/mind/ExplainSheet';
 
 interface Props {
@@ -1234,12 +1235,16 @@ export default function SwapScreen({ navigation, route }: Props) {
               {formatDisplayAmount(swapSuccess.toAmount, swapSuccess.toTicker)} {unitLabelFor(swapSuccess.toTicker)}
             </Text>
             {!!swapSuccess.txid && (
-              <Text style={{ color: theme.colors.text.tertiary, marginTop: theme.spacing[2], fontSize: theme.typography.fontSize.xs }}>
-                {swapSuccess.txid.substring(0, 18)}…
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing[2], marginTop: theme.spacing[2] }}>
+                <Text selectable style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, fontFamily: 'monospace' }}>
+                  {swapSuccess.txid.substring(0, 18)}…
+                </Text>
+                <CopyButton value={swapSuccess.txid} />
+              </View>
             )}
           </View>
-          <Button title="Done" variant="primary" fullWidth style={{ marginTop: theme.spacing[4] }} onPress={finishSwap} />
+          <Button title="View in Activity" variant="secondary" fullWidth style={{ marginTop: theme.spacing[4] }} onPress={() => { finishSwap(); navigation.navigate('Dashboard', { screen: 'Activity' }); }} />
+          <Button title="Done" variant="primary" fullWidth style={{ marginTop: theme.spacing[2] }} onPress={finishSwap} />
         </View>
       );
     }

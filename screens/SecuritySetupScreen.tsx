@@ -44,6 +44,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
   const [confirmPin, setConfirmPin] = useState('');
   const [currentPin, setCurrentPin] = useState('');
   const [currentPinError, setCurrentPinError] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
   const [biometricUnlock, setBiometricUnlock] = useState(false);
   const verifyingCurrent = useRef(false);
   const [enablePin, setEnablePin] = useState(fromSettings);
@@ -181,6 +182,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       }
     } else if (step === 'confirmPin') {
       if (confirmPin.length < 6) {
+        setConfirmError(null);
         const newConfirmPin = confirmPin + digit;
         setConfirmPin(newConfirmPin);
         if (newConfirmPin.length === 6) {
@@ -193,9 +195,9 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
             }
           } else {
             shakeError();
+            setConfirmError("PINs don't match — try again.");
             setTimeout(() => {
               setConfirmPin('');
-              Alert.alert('PINs Don\'t Match', 'Please try again.');
             }, 200);
           }
         }
@@ -407,7 +409,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
   const renderConfirmPinStep = () => (
     <View style={styles.pinStepContent}>
       <Text style={styles.pinTitle}>Confirm PIN</Text>
-      <Text style={styles.pinSubtitle}>Re-enter your PIN to confirm</Text>
+      <Text style={[styles.pinSubtitle, !!confirmError && { color: theme.colors.error[500] }]} accessibilityLiveRegion="polite">{confirmError ?? 'Re-enter your PIN to confirm'}</Text>
       {renderPinDots(confirmPin)}
       {renderNumpad()}
     </View>

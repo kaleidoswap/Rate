@@ -105,9 +105,9 @@ export function DrainSheet({ visible, onClose, adapter: given, onDrained }: {
         <Input label="Bitcoin address" placeholder={network === 'mainnet' ? 'bc1…' : 'tb1…'} autoCapitalize="none" autoCorrect={false}
           value={address} onChangeText={setAddress} error={addressError ?? undefined} accessibilityLabel="Bitcoin address" />
         <SegmentedTabs<Speed> scrollable={false} fill value={speed} onChange={setSpeed}
-          options={(['slow', 'normal', 'fast'] as Speed[]).map(s => ({ key: s, label: `${SPEED_LABEL[s]} · ${fees[s]}` }))} />
+          options={(['slow', 'normal', 'fast'] as Speed[]).map(s => ({ key: s, label: `${SPEED_LABEL[s]} · ${sats(fees[s] * 250)}` }))} />
         <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }}>
-          {`Network fee rate ${fees[speed]} sat/vB${fees.live ? '' : ' (default rate)'}, taken from the amount sent.`}
+          {`Network fee about ${sats(fees[speed] * 250)}${fees.live ? '' : ' (estimate)'}, taken from the amount sent.`}
         </Text>
         <TouchableOpacity accessibilityRole="checkbox" accessibilityState={{ checked: understood }} accessibilityLabel="I understand this sends all my plain bitcoin and can’t be undone"
           onPress={() => { feedback.select(); setUnderstood(u => !u); }} style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], paddingVertical: t.spacing[1] }}>
