@@ -28,6 +28,8 @@ interface Props {
   initialAssetValue?: string;
   /** Present when the amount is in a Spark token or RGB asset instead of bitcoin. */
   asset?: AmountAssetContext;
+  /** For bitcoin sends: the total spendable, shown as a Max chip. */
+  maxSats?: number;
   rates: Record<string, number>;
   bitcoinUnit?: 'BTC' | 'sats';
   requestOptions?: ReceiveRequestOptions;
@@ -42,7 +44,7 @@ interface Props {
  * it asks for the amount to send (required). The same one amount editor
  * serves bitcoin (sats/USD toggle) and Spark/RGB assets (Max, no fiat).
  */
-export function AmountEditorModal({ visible, onClose, initialSats, initialAssetValue, asset, rates, bitcoinUnit = 'sats', requestOptions, onConfirm, onConfirmAssetUnits }: Props) {
+export function AmountEditorModal({ visible, onClose, initialSats, initialAssetValue, asset, maxSats, rates, bitcoinUnit = 'sats', requestOptions, onConfirm, onConfirmAssetUnits }: Props) {
   const t = useAppTheme();
   const [value, setValue] = useState('');
   const [fiat, setFiat] = useState(false);
@@ -116,8 +118,14 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
           style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary }}>
           <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>Max</Text>
         </TouchableOpacity>}
-      </View> : !sending && <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
-        {/* Quick amounts in dollars, and "any amount" so the payer decides. */}
+      </View> : null}
+      {sending && !asset && maxSats !== undefined && maxSats > 0 && (
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send the maximum" onPress={() => { feedback.select(); setValue(bitcoinUnit === 'sats' ? String(maxSats) : (maxSats / 1e8).toFixed(8)); }}
+          style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary, alignSelf: 'flex-start' }}>
+          <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>Max</Text>
+        </TouchableOpacity>
+      )}
+      {!sending && !asset && <View style={{ flexDirection: 'row', gap: t.spacing[2], flexWrap: 'wrap' }}>
         {!!rate && [1, 5, 20].map(usd => <TouchableOpacity key={usd} accessibilityRole="button" accessibilityLabel={`Request ${usd} dollars`}
           onPress={() => { feedback.select(); setFiat(true); setValue(String(usd)); }}
           style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary }}>

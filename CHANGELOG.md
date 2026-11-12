@@ -29,6 +29,19 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 - A PIN mismatch says "PINs don't match — try again." inline under the dots,
   not in a native alert.
 - The drain fee tabs show sats ("Slow · 250 sats"), not the raw sat/vB rate.
+
+### Added
+- **Send shows what you have and what it costs, immediately.**
+  - A request that arrives complete (scanned, pasted, a contact, a
+    Lightning invoice with an amount) goes straight to the routes and fees:
+    no Continue tap. The quote loads while you read the target.
+  - Your account balances appear under the amount display in the input
+    phase — "Spark 5,000 sats · Arkade 9,000 sats" — so you know what you
+    can pay with before committing.
+  - The amount editor gains a Max chip for bitcoin sends (fills the total
+    spendable across all accounts), matching the Max that already exists
+    for tokens and RGB assets.
+
 - **The assistant's tab is Prismo.** The bottom-bar tab "Mind" becomes
   "Prismo", completing the one-name work across Settings, chat, voice and
   onboarding.
