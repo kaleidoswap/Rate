@@ -10,25 +10,10 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
-### Changed
-- **RGB receive is one tap away.** The asset tab row on the Receive screen
-  gains an "RGB" tab when the RGB wallet is connected — no more digging
-  through options → other assets → receive an RGB asset (three taps became
-  one).
+## [0.15.0] — 2026-11-12
 
-### Fixed
-- Swap success: the txid is selectable and copyable, and a "View in Activity"
-  button takes you to the entry (it was a dead string with no actions).
-- The contact picker says the right thing: "Choose a friend to request
-  payment from" when opened from Receive, not "to send payment to".
-- The AI chat's last bubble says what was done ("Your invoice is ready.",
-  "I've checked your balances.") instead of just "Done." — and a stopped
-  turn says "Stopped — nothing was completed.", not "Stopped."
-- The onboarding step indicator names the current step ("Start", "Backup",
-  "Verify") instead of showing anonymous dots.
-- A PIN mismatch says "PINs don't match — try again." inline under the dots,
-  not in a native alert.
-- The drain fee tabs show sats ("Slow · 250 sats"), not the raw sat/vB rate.
+The you-already-know release: Send shows what you have before you commit,
+Receive is the QR, the assistant has one name and the phone speaks Italian.
 
 ### Added
 - **Send shows what you have and what it costs, immediately.**
@@ -47,7 +32,6 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   routing sheet directly (one sheet, not a sheet inside a sheet); choosing
   a method closes it. Receiving via Lightning went from five taps across
   two stacked sheets to two.
-
 - **The assistant's tab is Prismo.** The bottom-bar tab "Mind" becomes
   "Prismo", completing the one-name work across Settings, chat, voice and
   onboarding.
@@ -59,6 +43,26 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   that raises a local "Payment received" notification while the app is
   backgrounded) and the app defines the task at start. Previously the
   infrastructure existed but was never wired.
+
+### Changed
+- **RGB receive is one tap away.** The asset tab row on the Receive screen
+  gains an "RGB" tab when the RGB wallet is connected — it opens the asset
+  picker (Any RGB asset first, then held assets and contract ID), not a
+  dead-end.
+
+### Fixed
+- Swap success: the txid is selectable and copyable, and a "View in Activity"
+  button takes you to the entry (it was a dead string with no actions).
+- The contact picker says the right thing: "Choose a friend to request
+  payment from" when opened from Receive, not "to send payment to".
+- The AI chat's last bubble says what was done ("Your invoice is ready.",
+  "I've checked your balances.") instead of just "Done." — and a stopped
+  turn says "Stopped — nothing was completed.", not "Stopped."
+- The onboarding step indicator names the current step ("Start", "Backup",
+  "Verify") instead of showing anonymous dots.
+- A PIN mismatch says "PINs don't match — try again." inline under the dots,
+  not in a native alert.
+- The drain fee tabs show sats ("Slow · 250 sats"), not the raw sat/vB rate.
 
 ## [0.14.0] — 2026-11-12
 
