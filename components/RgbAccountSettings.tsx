@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import { Callout } from './Callout';
 import DatabaseService from '../services/DatabaseService';
 import { protocolManager } from '../services/protocols';
 import { RGB_L1_ENABLED, RGB_L1_NETWORK_LABEL, loadRgbL1Network, type RgbL1Network } from '../services/protocols/rgbL1';
@@ -84,6 +85,13 @@ export function RgbAccountSettings({ walletId, node, onOpenNode, onChanged }: {
       <Text accessibilityRole="header" style={styles.sectionLabel}>Where your RGB assets live</Text>
       {RGB_L1_ENABLED && (
         <>
+          {inUse && (
+            <View style={{ marginBottom: theme.spacing[2] }}>
+              <Callout tone="info" message={inUse === 'node'
+                ? 'Your RGB node is the RGB account right now. RGB on this phone comes back when you remove the node.'
+                : 'This phone is the RGB account right now. Connecting a node replaces it while the node stays connected.'} />
+            </View>
+          )}
           <SegmentedTabs<Place> scrollable={false} fill value={place} onChange={setPlace}
             options={[
               { key: 'phone', label: 'This phone', icon: inUse === 'phone' ? 'checkmark-circle' : 'phone-portrait-outline' },

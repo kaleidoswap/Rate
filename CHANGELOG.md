@@ -25,6 +25,16 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   the protocol. Fee-speed tabs in the slot sheet show sats (like everywhere
   else), and the RGB review in Send explains what slower costs. `sat/vB`
   stays only in the technical sheet where the fee rate itself is the choice.
+- **Connecting RGB on this phone is one decision, not three.** The ~55-word
+  informational alert is gone: the screen above the Connect button already
+  says what RGB on this phone is (real funds, cloud backup, separate
+  wallets per network). Connect goes straight to the backup check. When a
+  cloud backup exists, one confirmation shows what Restore and Start empty
+  each mean — the double "Start without the backup?" follow-up is gone.
+  A missing backup on "Restore from cloud" answers on the screen, not in
+  an alert.
+- The RGB account page always says which side is active (the phone or the
+  node), and what happens when you connect the other.
 - `ERR_RGB_*` codes no longer appear in user-facing copy: connection errors
   in Settings describe the problem in plain words and point at diagnostics;
   uncertain RGB payments say what to do without the code; and the
