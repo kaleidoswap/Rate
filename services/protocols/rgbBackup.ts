@@ -167,10 +167,10 @@ export async function restoreRgbFromFile(opts: {
   } catch (e: any) {
     const why = `${e?.code ?? ''} ${e?.message ?? ''}`;
     if (/WalletDirAlreadyExists|WALLET_DIR_ALREADY_EXISTS|already exists/i.test(why)) {
-      throw new Error('This phone already has RGB data for this wallet, so the file wasn’t restored.');
+      throw new Error('This phone already has RGB data for this wallet, so the file wasn’t restored.', { cause: e });
     }
     if (/password|decrypt|InvalidBackup|WrongPassword|WRONG_PASSWORD|UnsupportedBackupVersion/i.test(why)) {
-      throw new Error('This backup file isn’t for this wallet, or it’s damaged.');
+      throw new Error('This backup file isn’t for this wallet, or it’s damaged.', { cause: e });
     }
     throw e;
   }

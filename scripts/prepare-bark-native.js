@@ -58,7 +58,7 @@ function patchBarkRuntime(root = ROOT) {
   const podspec = path.join(bark, 'BarkReactNative.podspec');
   let spec = fs.readFileSync(podspec, 'utf8');
   if (!spec.includes(MARKER)) {
-    const dependency = /  s\.dependency\s+"uniffi-bindgen-react-native", "0\.31\.0-5"/;
+    const dependency = / {2}s\.dependency\s+"uniffi-bindgen-react-native", "0\.31\.0-5"/;
     if (!dependency.test(spec)) throw new Error('Bark podspec changed; review the runtime isolation patch.');
     spec = spec.replace(dependency, `  ${MARKER}\n  s.private_header_files = "cpp/bark-runtime/*.h"`);
     writeChanged(podspec, spec);

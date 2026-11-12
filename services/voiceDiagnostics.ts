@@ -23,7 +23,7 @@ export function diagnosticError(message: string, utterances: string[]): string {
   if (/prompt|transcript|history|inputText|\btext\s*[:=]/i.test(safe)) return '[content-bearing log omitted]';
   return safe.replace(/https?:\/\/[^\s]+/gi, '[url]')
     .replace(/(?:\/Users\/|\/var\/|file:\/\/)[^\s]+/g, '[path]')
-    .replace(/[a-zA-Z0-9_+\/=-]{40,}/g, '[identifier]').slice(0, 220);
+    .replace(/[a-zA-Z0-9_+/=-]{40,}/g, '[identifier]').slice(0, 220);
 }
 export function voiceDiagnosticReport(): string {
   return JSON.stringify({

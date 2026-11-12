@@ -348,7 +348,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
         });
       }
 
-      // @ts-ignore
       const resultAction = await dispatch(createNewWallet({
         name,
         mnemonic: generatedMnemonic,
