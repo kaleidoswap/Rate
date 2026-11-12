@@ -14,6 +14,7 @@ import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { theme } from '../theme';
 import DatabaseService from '../services/DatabaseService';
+import { rgbWalletErrorMessage } from '../utils/rgb-wallet';
 import { protocolManager, reconcileRgbOnDevice, switchRgbOnDeviceNetwork } from '../services/protocols';
 import {
   loadRgbL1Network, saveRgbL1Network, rgbBackupPassword, isRgbLibNativeAvailable, loadRgbL1Host, saveRgbL1Endpoints,
@@ -519,7 +520,7 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
         )}
         {errorText}
         {!error && !busy && enabled && lastFailure && (
-          <Callout tone="error" message={`Last connection${lastFailure.network ? ` (${RGB_L1_NETWORK_LABEL[lastFailure.network as RgbL1Network] ?? lastFailure.network})` : ''} failed: ${lastFailure.message}`} />
+          <Callout tone="error" message={`Last connection${lastFailure.network ? ` (${RGB_L1_NETWORK_LABEL[lastFailure.network as RgbL1Network] ?? lastFailure.network})` : ''} failed. ${rgbWalletErrorMessage(lastFailure.message, 'connect')} The full error is in diagnostics below.`} />
         )}
         <Button title={connectTitle} onPress={connect} disabled={busy} loading={phase === 'connecting' || phase === 'checking'} fullWidth style={styles.primary} />
       </View>

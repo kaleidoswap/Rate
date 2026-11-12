@@ -17,6 +17,20 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   directly, and the never-dispatched `initializeWallet` thunk (with its hook
   wrapper) is deleted. AGENTS.md no longer points anyone at the facades.
 
+### Changed
+- **RGB speaks people.** "UTXO" is now "receive slot" everywhere the user
+  sees it — 21 strings in the receive flow, the slot sheet, the wallet tools
+  and every error message. "Witness" and "Blinded" invoice types are
+  "Standard" and "Private", with the sender's privacy the explanation, not
+  the protocol. Fee-speed tabs in the slot sheet show sats (like everywhere
+  else), and the RGB review in Send explains what slower costs. `sat/vB`
+  stays only in the technical sheet where the fee rate itself is the choice.
+- `ERR_RGB_*` codes no longer appear in user-facing copy: connection errors
+  in Settings describe the problem in plain words and point at diagnostics;
+  uncertain RGB payments say what to do without the code; and the
+  receive-error fallback translates adapter errors instead of passing them
+  through raw.
+
 ### Added
 - **The identity is payable.** The dashboard's profile chip shows your
   lightning address under your name — your kaleidoswap.me handle when set,

@@ -128,7 +128,7 @@ describe('issuance', () => {
 
 describe('rgbWalletErrorMessage', () => {
   it('never shows the raw error', () => {
-    expect(rgbWalletErrorMessage(new Error('rgb-lib: InsufficientAllocationSlots'), 'issue')).toMatch(/free colorable UTXO/);
+    expect(rgbWalletErrorMessage(new Error('rgb-lib: InsufficientAllocationSlots'), 'issue')).toMatch(/free receive slot/);
     expect(rgbWalletErrorMessage(new Error('InsufficientBitcoins { needed: 3000, available: 10 }'), 'utxos')).toMatch(/Not enough bitcoin/);
     expect(rgbWalletErrorMessage(new Error('CannotFailBatchTransfer'), 'cancel')).toMatch(/no longer be cancelled/);
     expect(rgbWalletErrorMessage(new Error('weird internal panic at 0x1'), 'issue')).toBe('The asset couldn’t be issued. Try again.');
@@ -193,9 +193,9 @@ describe('rgb-lib 0.3 transfer steps', () => {
 });
 
 describe('rgbOnchainKindLabel', () => {
-  it('names UTXO creation and drains; incoming and plain sends keep their usual label', () => {
-    expect(rgbOnchainKindLabel('CREATE_UTXOS')).toBe('UTXOs created');
-    expect(rgbOnchainKindLabel('CreateUtxos')).toBe('UTXOs created');
+  it('names slot creation and drains; incoming and plain sends keep their usual label', () => {
+    expect(rgbOnchainKindLabel('CREATE_UTXOS')).toBe('Slots created');
+    expect(rgbOnchainKindLabel('CreateUtxos')).toBe('Slots created');
     expect(rgbOnchainKindLabel('DRAIN')).toBe('Bitcoin drained');
     for (const kind of ['INCOMING', 'User', 'SEND_BTC', 'RGB_SEND', undefined]) expect(rgbOnchainKindLabel(kind)).toBeNull();
   });

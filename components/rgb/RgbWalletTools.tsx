@@ -30,7 +30,7 @@ export function useRgbWalletSheets({ onViewAsset }: { onViewAsset?: (asset: Issu
     <>
       <RgbUtxoSheet visible={open === 'utxos'} onClose={close} assets={assets} reason={reason} onCreated={refresh} />
       <IssueAssetSheet visible={open === 'issue'} onClose={close} onIssued={refresh}
-        onCreateUtxos={() => { setReason('Issuing needs a free colorable UTXO. Create some here, then issue once they confirm.'); setOpen('utxos'); }}
+        onCreateUtxos={() => { setReason('Issuing needs a free receive slot. Create some here, then issue once they confirm.'); setOpen('utxos'); }}
         onViewAsset={onViewAsset ? (asset) => { close(); onViewAsset(asset); } : undefined} />
       {open === 'drain' && <DrainSheet visible onClose={close} onDrained={() => { void dispatch(loadBtcBalance()); }} />}
     </>

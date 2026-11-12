@@ -2,6 +2,7 @@
  * RGB on-chain receive: the invoice options the RGB account supports, the params
  * they map to, and its UTXOs. Pure apart from the adapter calls in the UTXO helpers.
  */
+import { rgbWalletErrorMessage } from './rgb-wallet';
 
 /** Sentinel asset id for an invoice that accepts any RGB asset (no asset id). */
 export const ANY_RGB_ASSET_ID = 'RGB_NEW';
@@ -179,10 +180,15 @@ export function rgbReceiveErrorMessage(message: string, { advanced, onDevice }: 
   if (/No uncolored UTXOs|InsufficientAllocationSlots|NoAvailableUtxos/i.test(message)) {
     const where = onDevice ? 'Your RGB wallet' : 'Your RGB Lightning node';
     return advanced
-      ? `${where} has no free bitcoin output (UTXO) to receive this asset into. Create UTXOs under Advanced, or switch the invoice type to Witness.`
+      ? `${where} has no free receive slot for this asset. Create slots under Advanced, or switch to a Standard invoice.`
       : `${where} has no free bitcoin output to receive this asset into. Send a small amount of bitcoin to it on-chain first${onDevice ? '.' : ', or receive over Lightning.'}`;
   }
-  return message;
+  // Unmapped adapter errors never reach the user raw: they keep the code for
+  // diagnostics and get a plain sentence here.
+  if (/ERR_RGB_/i.test(message)) {
+    return `Receiving didn't work (${message.split(':')[0]}). Try again — if it keeps failing, share RGB diagnostics from Settings.`;
+  }
+  return rgbWalletErrorMessage(message, 'receive');
 }
 
 export const RGB_EXPIRY_PRESETS: Array<{ label: string; seconds: number }> = [

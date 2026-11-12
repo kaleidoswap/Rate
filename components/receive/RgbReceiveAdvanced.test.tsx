@@ -22,10 +22,10 @@ test('choosing blinded with no free UTXO warns and offers to create some', () =>
   const screen = render(<RgbReceiveAdvanced support={all} options={{ ...DEFAULT_RGB_RECEIVE_OPTIONS, kind: 'blinded' }} onChange={onChange}
     requestExpirySeconds={3600} utxos={{ loading: false, list: [{ outpoint: 'aa:0', sats: 1000, colorable: true, allocations: 1, pending: 0, assets: [] }] }}
     onLoadUtxos={jest.fn()} onCreateUtxos={onCreate} />);
-  fireEvent.press(screen.getByLabelText('Advanced RGB options: Blinded'));
-  expect(screen.getByText('No free UTXO to receive into. Create some below, or use Witness.')).toBeTruthy();
-  expect(screen.getByText('0 free of 1 colorable UTXO')).toBeTruthy();
-  fireEvent.press(screen.getByText('Create UTXOs'));
+  fireEvent.press(screen.getByLabelText('Advanced RGB options: Private'));
+  expect(screen.getByText('No free receive slot. Create some below, or switch to Standard.')).toBeTruthy();
+  expect(screen.getByText('0 free of 1 receive slot')).toBeTruthy();
+  fireEvent.press(screen.getByText('Create receive slots'));
   expect(onCreate).toHaveBeenCalled();
   fireEvent.press(screen.getByText('1 day'));
   expect(onChange).toHaveBeenCalledWith({ kind: 'blinded', durationSeconds: 86_400, minConfirmations: 1 });
@@ -36,14 +36,14 @@ test('the node over NWC offers invoice kind, expiry and confirmations without lo
     requestExpirySeconds={3600} utxos={null} onLoadUtxos={jest.fn()} />);
   fireEvent.press(screen.getByLabelText('Advanced RGB options: Default'));
   expect(screen.getByText('Invoice type')).toBeTruthy();
-  expect(screen.getByText('Witness')).toBeTruthy();
-  expect(screen.getByText('Blinded')).toBeTruthy();
+  expect(screen.getByText('Standard')).toBeTruthy();
+  expect(screen.getByText('Private')).toBeTruthy();
   expect(screen.queryByText('UTXOs')).toBeNull();
   expect(screen.getByText('Expires in')).toBeTruthy();
   expect(screen.getByText('Confirmations')).toBeTruthy();
 });
 
 test('the summary lists only what differs from the default', () => {
-  expect(rgbAdvancedSummary({ kind: 'blinded', durationSeconds: 604_800, minConfirmations: 3 }, all)).toBe('Blinded · 7 days · 3 confirmations');
-  expect(rgbAdvancedSummary({ kind: 'blinded', durationSeconds: null, minConfirmations: 1 }, nwc)).toBe('Blinded');
+  expect(rgbAdvancedSummary({ kind: 'blinded', durationSeconds: 604_800, minConfirmations: 3 }, all)).toBe('Private · 7 days · 3 confirmations');
+  expect(rgbAdvancedSummary({ kind: 'blinded', durationSeconds: null, minConfirmations: 1 }, nwc)).toBe('Private');
 });
