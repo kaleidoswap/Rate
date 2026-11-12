@@ -75,14 +75,14 @@ importers:
         specifier: github:arkade-os/arkade-wdk#102967daf634759f1602f06dd27f3b21a0a88d9a
         version: https://codeload.github.com/arkade-os/arkade-wdk/tar.gz/102967daf634759f1602f06dd27f3b21a0a88d9a(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)))(bare-url@2.5.4)(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(sodium-javascript@0.8.0)
       '@buildonspark/spark-sdk':
-        specifier: ^0.7.17
-        version: 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
+        specifier: ^0.15.0
+        version: 0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
       '@expo/vector-icons':
         specifier: ^15.1.1
         version: 15.1.1(expo-font@14.0.12(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
       '@flashnet/sdk':
         specifier: ^0.5.10
-        version: 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)
+        version: 0.5.10(@buildonspark/spark-sdk@0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)
       '@kaleidorg/kaleido-ui':
         specifier: npm:kaleido-ui@^0.1.119
         version: kaleido-ui@0.1.119(react-dom@19.1.4(react@19.1.4))(react-native-svg@15.15.5(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)
@@ -93,8 +93,8 @@ importers:
         specifier: ^0.14.1
         version: 0.14.1(353bc03da4774e0dd557e9ed001fa004)
       '@kaleidorg/wallet-engine':
-        specifier: 1.0.0-beta.86
-        version: 1.0.0-beta.86(57449bb2c8c76b161e09d21af0776b94)
+        specifier: 1.0.0-beta.88
+        version: 1.0.0-beta.88(e14bdf2726f4d44f1367b11e7503b04b)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: 1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
@@ -1027,8 +1027,8 @@ packages:
   '@buildonspark/spark-frost-bare-addon@0.0.11':
     resolution: {integrity: sha512-JUDWTgvJ4HuDHDXDGIRmCwrG9UZ8U4lwYoJjFeiPh9Weczdil+32UK3w9ckvQMwl0nGtsL/7x/VNakjaTSVvLQ==}
 
-  '@buildonspark/spark-sdk@0.7.13':
-    resolution: {integrity: sha512-DNnYIi9475XFgqGdcVe2yHTFnvIVAwu5sHv4zjTDTJSPyrcS+zEhsCLN25D0r2VYBBvnBJ8E+u1luvQ4OFNcmQ==}
+  '@buildonspark/spark-sdk@0.15.0':
+    resolution: {integrity: sha512-pzvax8+z34w/v1GNSEbXf905EZeSwpAvD8iREvpDWrFHEowZzV3S3S8G4h8GI+9+OAnVGg9M55ikDzr3G8v1Dw==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       react: '>=18.2.0'
@@ -1042,8 +1042,8 @@ packages:
       react-native-get-random-values:
         optional: true
 
-  '@buildonspark/spark-sdk@0.7.17':
-    resolution: {integrity: sha512-0lLDSmJcZJmIsetKybjragJg2pZ0x9ECiIYNldc6NAKIWq/oQ9o12aQ8qLIHeZ3HDawJCY9G3AH+uD+QP8E24Q==}
+  '@buildonspark/spark-sdk@0.7.13':
+    resolution: {integrity: sha512-DNnYIi9475XFgqGdcVe2yHTFnvIVAwu5sHv4zjTDTJSPyrcS+zEhsCLN25D0r2VYBBvnBJ8E+u1luvQ4OFNcmQ==}
     engines: {node: '>=18.0.0'}
     peerDependencies:
       react: '>=18.2.0'
@@ -1483,11 +1483,11 @@ packages:
       '@arkade-os/swap':
         optional: true
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.86':
-    resolution: {integrity: sha512-c/AodE9rhN3+DCmiIsT9nvI5AOb/rRQ/aejfMewbbGylngy0VhwRAIxzBZE+plDe3iTFBi836LzlnQ1z5Ommzw==}
+  '@kaleidorg/wallet-engine@1.0.0-beta.88':
+    resolution: {integrity: sha512-4rSQA2BCL8ohLfzd04o3yyDsCMZAI4H/fPIowChPcEJ+cNYv0U6y/GfioZmEYw98oRAj/w1oad+aCirsDQv2pQ==}
     peerDependencies:
       '@arkade-os/sdk': ^0.4.72
-      '@buildonspark/spark-sdk': ^0.7.10
+      '@buildonspark/spark-sdk': ^0.15.0
       '@flashnet/sdk': ^0.5.7
       '@kaleidorg/swap-sdk': ^0.12.0 || ^0.14.0
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': ^1.0.0-beta.3
@@ -7679,6 +7679,44 @@ snapshots:
 
   '@buildonspark/spark-frost-bare-addon@0.0.11': {}
 
+  '@buildonspark/spark-sdk@0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)':
+    dependencies:
+      '@bufbuild/protobuf': 2.12.0
+      '@lightsparkdev/core': 1.5.2
+      '@noble/curves': 1.9.7
+      '@noble/hashes': 1.8.0
+      '@scure/base': 1.2.6
+      '@scure/bip32': 1.7.0
+      '@scure/bip39': 1.6.0
+      '@scure/btc-signer': 1.8.1
+      abort-controller-x: 0.4.3
+      abortcontroller-polyfill: 1.7.8
+      async-mutex: 0.5.0
+      bare-crypto: 1.15.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
+      bare-fetch: 3.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))
+      buffer: 6.0.3
+      eventemitter3: 5.0.4
+      js-base64: 3.7.8
+      light-bolt11-decoder: 3.2.0
+      nice-grpc: 2.1.16
+      nice-grpc-client-middleware-retry: 3.1.15
+      nice-grpc-common: 2.0.3
+      nice-grpc-web: 3.3.10(ws@8.21.0)
+      uuidv7: 1.2.1
+    optionalDependencies:
+      react: 19.1.4
+      react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
+      react-native-get-random-values: 1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bare-events
+      - bare-pipe
+      - bufferutil
+      - react-native-b4a
+      - utf-8-validate
+      - ws
+
   '@buildonspark/spark-sdk@0.7.13(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)':
     dependencies:
       '@bufbuild/protobuf': 2.12.0
@@ -7726,46 +7764,6 @@ snapshots:
       - bufferutil
       - react-native-b4a
       - supports-color
-      - utf-8-validate
-      - ws
-
-  '@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)':
-    dependencies:
-      '@bufbuild/protobuf': 2.12.0
-      '@lightsparkdev/core': 1.5.2
-      '@noble/curves': 1.9.7
-      '@noble/hashes': 1.8.0
-      '@scure/base': 1.2.6
-      '@scure/bip32': 1.7.0
-      '@scure/bip39': 1.6.0
-      '@scure/btc-signer': 1.8.1
-      abort-controller-x: 0.4.3
-      abortcontroller-polyfill: 1.7.8
-      async-mutex: 0.5.0
-      bare-crypto: 1.15.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
-      bare-fetch: 3.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))
-      buffer: 6.0.3
-      eventemitter3: 5.0.4
-      js-base64: 3.7.8
-      light-bolt11-decoder: 3.2.0
-      nice-grpc: 2.1.16
-      nice-grpc-client-middleware-retry: 3.1.15
-      nice-grpc-common: 2.0.3
-      nice-grpc-web: 3.3.10(ws@8.21.0)
-      ts-proto: 2.8.3
-      ua-parser-js: 2.0.10
-      uuidv7: 1.2.1
-    optionalDependencies:
-      react: 19.1.4
-      react-native: 0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)
-      react-native-get-random-values: 1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - bare-buffer
-      - bare-events
-      - bare-pipe
-      - bufferutil
-      - react-native-b4a
       - utf-8-validate
       - ws
 
@@ -8203,14 +8201,14 @@ snapshots:
       chalk: 4.1.2
       js-yaml: 4.3.2
 
-  '@flashnet/sdk@0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)':
+  '@flashnet/sdk@0.5.10(@buildonspark/spark-sdk@0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)':
     dependencies:
       bech32: 2.0.0
       fast-sha256: 1.3.0
       light-bolt11-decoder: 3.2.0
       typescript: 5.9.3
     optionalDependencies:
-      '@buildonspark/spark-sdk': 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
+      '@buildonspark/spark-sdk': 0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
       react-native-get-random-values: 1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))
 
   '@grpc/grpc-js@1.14.5':
@@ -8500,7 +8498,7 @@ snapshots:
       '@arkade-os/sdk': 0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
       '@arkade-os/swap': 0.0.24(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)(nostr-tools@2.25.0(typescript@5.9.3))
 
-  '@kaleidorg/wallet-engine@1.0.0-beta.86(57449bb2c8c76b161e09d21af0776b94)':
+  '@kaleidorg/wallet-engine@1.0.0-beta.88(e14bdf2726f4d44f1367b11e7503b04b)':
     dependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
@@ -8510,8 +8508,8 @@ snapshots:
       '@scure/btc-signer': 2.2.0
     optionalDependencies:
       '@arkade-os/sdk': 0.4.78(@react-native-async-storage/async-storage@2.2.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(bip32@5.0.1(typescript@5.9.3))(expo-background-task@1.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo-sqlite@16.0.10(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4))(expo-task-manager@14.0.9(expo@54.0.37)(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(expo@54.0.37)
-      '@buildonspark/spark-sdk': 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
-      '@flashnet/sdk': 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)
+      '@buildonspark/spark-sdk': 0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0)
+      '@flashnet/sdk': 0.5.10(@buildonspark/spark-sdk@0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4))(react@19.1.4)(ws@8.21.0))(react-native-get-random-values@1.11.0(react-native@0.81.6(@babel/core@7.29.7)(@types/react@19.1.17)(react@19.1.4)))(typescript@5.9.3)
       '@kaleidorg/swap-sdk': 0.14.1(353bc03da4774e0dd557e9ed001fa004)
       '@kaleidorg/wdk-protocol-swap-kaleidoswap': 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
       '@kaleidorg/wdk-wallet-rln': 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.10(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))))(typescript@5.9.3)
@@ -10200,11 +10198,11 @@ snapshots:
   bare-fetch@3.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)):
     dependencies:
       bare-form-data: 1.2.2(bare-abort-controller@1.1.2)(bare-events@2.9.1(bare-abort-controller@1.1.2))
-      bare-http1: 4.5.7(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.4.5)
-      bare-https: 3.0.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.4.5)
+      bare-http1: 4.6.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.5.4)
+      bare-https: 3.0.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.5.4)
       bare-mime: 1.0.0
       bare-stream: 2.13.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
-      bare-url: 2.4.5
+      bare-url: 2.5.4
       bare-zlib: 1.4.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
     optionalDependencies:
       bare-abort-controller: 1.1.2
@@ -10298,6 +10296,21 @@ snapshots:
       - bare-pipe
       - react-native-b4a
 
+  bare-http1@4.6.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.5.4):
+    dependencies:
+      bare-events: 2.9.1(bare-abort-controller@1.1.2)
+      bare-hrtime: 2.1.1
+      bare-http-parser: 2.1.4
+      bare-stream: 2.13.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
+      bare-tcp: 2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))
+    optionalDependencies:
+      bare-buffer: 3.7.1
+      bare-url: 2.5.4
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-pipe
+      - react-native-b4a
+
   bare-https@3.0.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.4.5):
     dependencies:
       bare-http1: 4.5.7(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.4.5)
@@ -10352,7 +10365,7 @@ snapshots:
   bare-inspector@6.1.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))):
     dependencies:
       bare-events: 2.9.1(bare-abort-controller@1.1.2)
-      bare-http1: 4.5.7(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.5.4)
+      bare-http1: 4.6.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.5.4)
       bare-stream: 2.13.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))
       bare-url: 2.5.4
       bare-ws: 3.0.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.7.1))(bare-url@2.5.4)
