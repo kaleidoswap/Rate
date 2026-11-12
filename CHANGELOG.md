@@ -10,50 +10,43 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-11-12
+
+The RGB-and-honesty release: RGB speaks people, the launch never strands
+a wallet, one name for the assistant, fiat everywhere money appears.
+
 ### Removed
 - **The deprecated service facades are gone.** `WalletManager` (a thin
   leftover over ProtocolManager) and the last `RGBApiService` references:
   switching wallets talks to `protocolManager` and `initializeProtocols`
   directly, and the never-dispatched `initializeWallet` thunk (with its hook
   wrapper) is deleted. AGENTS.md no longer points anyone at the facades.
-- **Dead code swept.** The never-mounted IntentSheet/IntentCards/
-  useIntentRunner trio (~320 lines), WalletSetup's unreachable "Wallet
-  Created!" step, the duplicate "Swap Status" card under the swap form
-  (the sheet and Activity cover it), and the unwired
-  `paymentConfirmed` hook in the AI chat.
+- **Dead code swept** (~800 net lines across four PRs): the never-mounted
+  IntentSheet/IntentCards/useIntentRunner trio, WalletSetup's unreachable
+  "Wallet Created!" step, the duplicate "Swap Status" card under the swap
+  form, the unwired `paymentConfirmed` hook in the AI chat, and
+  SecuritySetup's entire unreachable "Secure Your Wallet" card step with
+  its handlers, "Complete" step and 13 orphaned styles.
 
 ### Fixed
-- The "Connect to Nostr" button in the contact picker (Send, Receive, chat)
-  actually navigates to Nostr settings — it was a dead button.
-- Cross-chain Activity records respect the chosen bitcoin unit (BTC vs
-  sats) like the rest of the app.
-- Swap says "Enter amount" like every other button; the "Explore maker
-  routes" tile is hidden in Simple view (it was noise for Lite users).
-
-### Changed
 - **The launch never strands an existing wallet on "Create wallet."** A
   database error at startup now tries to read the wallet list before
   deciding where to go: users with wallets land on the dashboard (the
   banner there says what failed), only a truly empty phone sees setup.
-- **One microphone per job in the chat.** The dictation mic stays in the
-  input bar; "Talk to Prismo" becomes a labelled pill beside it, not a
-  second unlabeled mic button.
-- Swap tells you when it caps your amount ("Capped to your maximum of N"),
-  instead of silently rewriting the number you typed.
-- SecuritySetup loses ~200 unreachable lines: the "Secure Your Wallet"
-  card-based step, its handlers and the dead "Complete" step are gone —
-  every caller reaches the simple Protect-your-wallet flow.
-- **One name for the assistant.** Prismo everywhere: the onboarding modal,
-  chat empty state, voice overlay, error banners and agent-wallet messages
-  no longer mix "Agent", "KaleidoMind" and "Prismo".
-- **Fiat in the Swap.** "You Receive" carries its ≈ dollar value under the
-  amount, like every other surface that shows money.
-- The Bridge's two contradictory sentences — "Keep the app open" vs "You
-  can leave" — now say what they mean: "Keep the app open while we pay
-  from Spark (a few seconds)" and "Payment sent. After this you can
-  leave; we keep following the order."
-- The Bridge fee note says "charged in USDC during the swap", not
-  "on the routing leg".
+- The "Connect to Nostr" button in the contact picker (Send, Receive, chat)
+  actually navigates to Nostr settings — it was a dead button.
+- Cross-chain Activity records respect the chosen bitcoin unit (BTC vs
+  sats) like the rest of the app.
+
+### Added
+- **The identity is payable.** The dashboard's profile chip shows your
+  lightning address under your name — your kaleidoswap.me handle when set,
+  else your Nostr address — one glance from "who am I" to "how people pay me".
+- **The Activity tab counts what needs you.** Payments pending or needing a
+  check wear a badge on the tab bar, so waiting payments are not discoverable
+  only by opening the list.
+- **UI previews without running the app** (`npm run ui-preview`): jest
+  renders the wallet's real components into a dark HTML gallery.
 
 ### Changed
 - **RGB speaks people.** "UTXO" is now "receive slot" everywhere the user
@@ -78,21 +71,25 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   uncertain RGB payments say what to do without the code; and the
   receive-error fallback translates adapter errors instead of passing them
   through raw.
-
-### Added
-- **The identity is payable.** The dashboard's profile chip shows your
-  lightning address under your name — your kaleidoswap.me handle when set,
-  else your Nostr address — one glance from "who am I" to "how people pay me".
-- **The Activity tab counts what needs you.** Payments pending or needing a
-  check wear a badge on the tab bar, so waiting payments are not discoverable
-  only by opening the list.
-
-### Changed
-- **One name for the assistant in Settings.** The "Mind" page with a single
-  row is gone: Prismo's settings live under Connections, and the home keeps
-  only what matters daily. Search finds them by "prismo", "voice" or "ai".
-- **Networks are picked on the same sheet as everything else.** Changing an
-  account's network opens the standard option sheet (with the current
+- **One name for the assistant.** Prismo everywhere: the onboarding modal,
+  chat empty state, voice overlay, error banners, agent-wallet messages and
+  Settings — no more mixing "Agent", "KaleidoMind" and "Prismo".
+  The one-row "Mind" settings page is gone; Prismo's settings live under
+  Connections.
+- **Fiat in the Swap.** "You Receive" carries its ≈ dollar value under the
+  amount, like every other surface that shows money. Swap also tells you
+  when it caps your amount ("Capped to your maximum of N"), instead of
+  silently rewriting the number you typed.
+- **One microphone per job in the chat.** The dictation mic stays in the
+  input bar; "Talk to Prismo" becomes a labelled pill beside it, not a
+  second unlabeled mic button.
+- The Bridge's two contradictory sentences — "Keep the app open" vs "You
+  can leave" — now say what they mean: "Keep the app open while we pay
+  from Spark (a few seconds)" and "Payment sent. After this you can
+  leave; we keep following the order." The fee note says "during the
+  swap", not "on the routing leg".
+- **Networks are picked on the same sheet as everything else.** Changing
+  an account's network opens the standard option sheet (with the current
   selection marked) instead of a native alert with buttons.
 - **Display detail leads Preferences.** The Simple/Advanced choice is the
   first thing on the page, with plainer descriptions: "Balances and payments,
@@ -101,6 +98,10 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 - Settings search answers more words: "sats" finds the balance unit,
   "seed" the recovery phrase, "mainnet" the accounts, "simple view" the
   display detail.
+- Swap says "Enter amount" like every other button; the "Explore maker
+  routes" tile is hidden in Simple view (it was noise for Lite users).
+
+## [0.13.0] — 2026-11-11
 
 ## [0.13.0] — 2026-11-11
 
