@@ -878,7 +878,7 @@ export default function SendScreen({ navigation, route }: Props) {
         rates={rates} bitcoinUnit={bitcoinUnit}
         onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }}
         onConfirmAssetUnits={u => { setAssetAmount(u > 0 ? String(u) : ''); setShowAmountEditor(false); }} />
-      <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)}
+      <NostrContactsSelector visible={showContacts} onClose={() => setShowContacts(false)} onConnectNostr={() => navigation.navigate('NostrSettings')}
         onSelectContact={c => { setShowContacts(false); const dest = c.lightning_address || c.node_pubkey; if (dest) { setInput(dest); setContactName(c.name); } }} />
       <PaymentSuccessOverlay
         visible={!!celebrateAttempt}

@@ -27,7 +27,7 @@ export function ExplainSheet({ subject, onClose }: { subject: ExplainSubject | n
           <Text style={styles.text} accessibilityLiveRegion="polite">{result?.text ?? 'Thinking…'}</Text>
           {!!result && (
             <Text style={styles.caption}>
-              {result.source === 'model' ? 'Explained on this phone by KaleidoMind.' : 'Built-in explanation. Turn on KaleidoMind for one written for this item.'}
+              {result.source === 'model' ? 'Explained on this phone by Prismo.' : 'Built-in explanation. Turn on Prismo for one written for this item.'}
             </Text>
           )}
         </View>

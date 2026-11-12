@@ -87,7 +87,7 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
               <Ionicons name="sparkles" size={30} color={theme.colors.primary[500]} />
             </View>
             <View style={styles.titleRow}>
-              <Text style={styles.title}>{prismoText("Meet KaleidoMind")}</Text>
+              <Text style={styles.title}>{prismoText("Meet Prismo")}</Text>
               <View style={styles.experimentalBadge}>
                 <Text style={styles.experimentalText}>{prismoText("Experimental")}</Text>
               </View>
@@ -125,7 +125,7 @@ export const KaleidoMindOnboarding: React.FC<Props> = ({
           <Option
             icon="moon-outline"
             title={prismoText("Not now")}
-            subtitle={prismoText("Keep KaleidoMind off. You can turn it on anytime from Settings.")}
+            subtitle={prismoText("Keep Prismo off. You can turn it on anytime from Settings.")}
             onPress={onSkip}
           />
 

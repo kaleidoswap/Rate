@@ -154,7 +154,7 @@ export function describeOrchestraFee(
     : amountText;
 
   const sourceTicker = (ctx?.sourceAsset ?? '').toUpperCase();
-  const note = asset && sourceTicker && asset !== sourceTicker ? `charged in ${asset} on the routing leg` : undefined;
+  const note = asset && sourceTicker && asset !== sourceTicker ? `charged in ${asset} during the swap` : undefined;
   return { text, note };
 }
 

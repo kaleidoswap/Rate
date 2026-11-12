@@ -62,7 +62,7 @@ const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; ic
   ...(BARK_ENABLED ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
 ];
 
-type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' | 'success';
+type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' ;;
 
 export default function WalletSetupScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
@@ -375,21 +375,13 @@ export default function WalletSetupScreen({ navigation }: Props) {
     }
   };
 
-  const handleSetupSecurity = () => {
-    navigation.replace('SecuritySetup', { walletId: createdWalletId, isInitialSetup: true });
-  };
-
-  const handleSkipSecurity = () => {
-    navigation.replace('OnboardingProfile');
-  };
-
   const renderStepIndicator = () => {
     const steps: SetupStep[] = mode === 'advanced'
       ? ['welcome', 'rln', 'networks', 'backup', 'confirmBackup']
       : ['welcome', 'backup', 'confirmBackup'];
     const currentIdx = steps.indexOf(step);
 
-    if (step === 'creating' || step === 'success') return null;
+    if (step === 'creating') return null;
 
     // Five steps at 60px lines overflow a phone: shrink the lines to fit.
     const lineWidth = Math.max(12, Math.min(60, (windowWidth - 48 - steps.length * 24) / (steps.length - 1) - 16));
@@ -718,55 +710,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
     </ScrollView>
   );
 
-  const renderSuccessStep = () => (
-    <ScrollView
-      style={styles.stepContent}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={[styles.centerContent, { paddingBottom: insets.bottom + 24 }]}
-    >
-      <Animated.View style={[
-        styles.successIconContainer,
-        { transform: [{ scale: scaleAnim }] }
-      ]}>
-        <LinearGradient
-          colors={theme.colors.success.gradient || [theme.colors.success[500], theme.colors.success[500]]}
-          style={styles.successGradient}
-        >
-          <Ionicons name="checkmark" size={48} color="white" />
-        </LinearGradient>
-      </Animated.View>
-
-      <Text style={styles.successTitle}>Wallet Created!</Text>
-      <Text style={styles.successDesc}>
-        Your wallet "{name}" is ready to use.
-      </Text>
-
-      <View style={styles.securityPrompt}>
-        <View style={styles.securityHeader}>
-          <Ionicons name="shield-checkmark" size={24} color={theme.colors.primary[500]} />
-          <Text style={styles.securityTitle}>Add Security?</Text>
-        </View>
-        <Text style={styles.securityDesc}>
-          Protect your wallet with a PIN code or biometric authentication (Face ID / Fingerprint).
-        </Text>
-
-        <View style={styles.securityButtons}>
-          <Button
-            title="Set Up Security"
-            onPress={handleSetupSecurity}
-            style={styles.securityButton}
-          />
-          <TouchableOpacity
-            style={styles.skipButton}
-            onPress={handleSkipSecurity}
-          >
-            <Text style={styles.skipButtonText}>Skip for now</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </ScrollView>
-  );
-
   const getButtonTitle = () => {
     if (step === 'welcome') return 'Continue';
     if (step === 'networks') return 'Generate Wallet';
@@ -779,12 +722,12 @@ export default function WalletSetupScreen({ navigation }: Props) {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScreenHeader
-        title={step === 'success' ? 'Success' : 'New Wallet'}
+        title="New Wallet"
         // The first step is the app's entry point: there is nothing to go back to.
-        showBack={step === 'welcome' ? navigation.canGoBack() : step !== 'creating' && step !== 'success'}
+        showBack={step === 'welcome' ? navigation.canGoBack() : step !== 'creating'}
         onBack={handleBack}
       />
-      {(step !== 'creating' && step !== 'success') ? renderStepIndicator() : null}
+      {step !== 'creating' ? renderStepIndicator() : null}
 
       <KeyboardAvoidingView
         style={styles.keyboardAvoid}
@@ -807,7 +750,6 @@ export default function WalletSetupScreen({ navigation }: Props) {
             {step === 'backup' && renderBackupStep()}
             {step === 'confirmBackup' && renderConfirmBackupStep()}
             {step === 'creating' && renderCreatingStep()}
-            {step === 'success' && renderSuccessStep()}
           </View>
         </Animated.View>
 

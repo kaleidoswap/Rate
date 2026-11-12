@@ -23,7 +23,7 @@ export const NOT_UNDERSTOOD =
 export async function runIntent(text: string, deps: RunIntentDeps): Promise<IntentOutcome> {
   const result = await extractIntent(text, deps.model);
   if (!result) {
-    return { type: 'none', message: deps.model?.ready() ? NOT_UNDERSTOOD : `${NOT_UNDERSTOOD} Turn on KaleidoMind for anything else.` };
+    return { type: 'none', message: deps.model?.ready() ? NOT_UNDERSTOOD : `${NOT_UNDERSTOOD} Turn on Prismo for anything else.` };
   }
   const { intent } = result;
   if (intent.kind === 'balance') return { type: 'answer', answer: answerBalance(intent, deps.balance()), result };

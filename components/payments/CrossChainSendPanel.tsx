@@ -415,7 +415,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
       <Text accessibilityLiveRegion="polite" style={muted}>
         {stage === 'quoting' ? 'Getting your quote…' : stage === 'paying' ? 'Paying from Spark…' : 'Submitting the order…'}
       </Text>
-      <Text style={{ ...small, textAlign: 'center' }}>Keep the app open until this finishes.</Text>
+      <Text style={{ ...small, textAlign: 'center' }}>Keep the app open while we pay from Spark (a few seconds).</Text>
     </View>
   );
 
@@ -458,7 +458,7 @@ export function CrossChainSendPanel({ address, family, walletId, bitcoinUnit, he
       {s.phase === 'paid' && !!s.lastError && <Callout tone="warning" message={`Your payment left Spark, but the order wasn't accepted yet (${s.lastError}). Retrying moves no funds.`} />}
       {!!pollError && s.phase === 'submitted' && <Text style={{ ...small, color: t.colors.warning[500], textAlign: 'center' }}>Status updates paused: {pollError}. The transfer continues.</Text>}
       {failed && <Text style={{ ...muted, textAlign: 'center' }}>{status === 'refunded' ? 'The funds went back to your Spark wallet.' : 'The transfer did not complete. If funds left Spark they are refunded there.'}</Text>}
-      {s.phase === 'submitted' && <Text style={{ ...muted, textAlign: 'center' }}>You can leave this screen; reopening Send picks the transfer up again.</Text>}
+      {s.phase === 'submitted' && <Text style={{ ...muted, textAlign: 'center' }}>Payment sent. After this you can leave; we keep following the order.</Text>}
     </View>;
   };
 
