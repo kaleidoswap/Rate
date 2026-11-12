@@ -186,37 +186,32 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
     }
     setPhase(null);
     if (!manifest) {
-      if (mode === 'cloud') Alert.alert('No cloud backup', `There’s no RGB backup of this wallet on ${label}. Try the other network, or restore from a file.`);
+      if (mode === 'cloud') setError(`There’s no RGB backup of this wallet on ${label}. Try the other network, or restore from a file.`);
       else await run(null);
       return;
     }
+    // One confirmation: what the backup is, what Restore does, and what Start
+    // empty means. Two alerts for the same action would be a staircase.
     const when = new Date(manifest.createdAt).toLocaleString();
-    Alert.alert('Cloud backup found', `This wallet has an RGB backup on ${label} from ${when}. Restore it to get your RGB assets back on this phone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      ...(mode === 'connect' ? [{ text: 'Start empty', style: 'destructive' as const, onPress: confirmStartEmpty }] : []),
-      { text: 'Restore', onPress: () => run({ kind: 'cloud' }) },
-    ]);
+    Alert.alert(
+      'Cloud backup found',
+      `This wallet has an RGB backup on ${label} from ${when}.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        ...(mode === 'connect'
+          ? [{ text: 'Start empty', style: 'destructive' as const, onPress: () => run(null) }]
+          : []),
+        { text: 'Restore', onPress: () => run({ kind: 'cloud' }) },
+      ],
+    );
   };
 
-  const confirmStartEmpty = () => {
-    Alert.alert('Start without the backup?', 'The RGB assets in the cloud backup won’t be on this phone, and its next automatic backup replaces the cloud copy.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Start empty', style: 'destructive', onPress: () => run(null) },
-    ]);
-  };
-
+  /** The first connect goes straight to the backup check: the screen above
+   * already says what RGB on this phone is (real funds, cloud backup). */
   const connect = () => {
     if (busy) return;
-    if (locked || ready.includes(network)) { void run(null); return; } // its data is already on this phone
-    Alert.alert(
-      'RGB on this phone (beta)',
-      (network === 'mainnet'
-        ? 'Holds RGB assets on-chain on Bitcoin mainnet, with real funds. '
-        : `Holds RGB assets on-chain on ${label}, a test network. `)
-      + 'Each network is a separate RGB wallet with its own balances. '
-      + 'RGB assets need more than your recovery phrase: they are backed up to the cloud after every send and receive. You can also export a backup file.',
-      [{ text: 'Cancel', style: 'cancel' }, { text: 'Continue', onPress: () => lookForBackup('connect') }],
-    );
+    if (locked || ready.includes(network)) { void run(null); return; }
+    void lookForBackup('connect');
   };
 
   /** Switch to the selected network's own RGB wallet; this one's data stays on the phone. */
@@ -511,7 +506,10 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
               options={RGB_L1_NETWORKS.map((n) => ({ key: n, label: RGB_L1_NETWORK_LABEL[n], disabled: busy }))}
               value={network} onChange={setNetwork} />
             <Text style={styles.description}>
-              {network === 'mainnet' ? 'Real bitcoin and RGB assets.' : 'Test bitcoin, no value.'} Each network is a separate RGB wallet.
+              {network === 'mainnet' ? 'Real bitcoin and RGB assets. ' : 'Test bitcoin, no value. '}
+              Each network is a separate RGB wallet. RGB assets need more than your recovery
+              phrase: they are backed up to the cloud after every send and receive, and you can
+              export a backup file.
             </Text>
           </>
         )}

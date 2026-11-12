@@ -78,17 +78,14 @@ beforeEach(() => {
   mockReconcile.mockReset().mockImplementation(async () => { mockAdapters.RGB_L1 = connectedL1(true); return { success: true }; });
 });
 
-test('Connect asks first, finds no cloud backup, then saves mainnet and connects', async () => {
+test('Connect goes straight to the backup check, then saves mainnet and connects', async () => {
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
   expect(screen.getByText('Restore from cloud')).toBeTruthy();
   expect(screen.getByText('Restore from a backup file')).toBeTruthy();
   fireEvent.press(screen.getByText('Connect'));
-  const [title, message, buttons] = lastAlert();
-  expect(title).toBe('RGB on this phone (beta)');
-  expect(message).toMatch(/mainnet, with real funds.*separate RGB wallet with its own balances/);
-  expect(mockSave).not.toHaveBeenCalled(); // nothing is fixed before the user goes ahead
-  await act(async () => { await press(buttons, 'Continue'); });
+  await act(async () => {});
+  // The backup check runs; no cloud backup, no confirm needed.
   expect(mockFindBackup).toHaveBeenCalledWith('seed words', 'mainnet');
   expect(mockCalls).toEqual(['save:mainnet', 'reconcile']);
   expect(mockReconcile).toHaveBeenCalledWith({ skipCloudRestore: true });
@@ -115,18 +112,17 @@ test('before it starts, the network is picked; Mutinynet is saved on connect', a
   await act(async () => {});
   expect(screen.getByText(/Test bitcoin, no value/)).toBeTruthy();
   fireEvent.press(screen.getByText('Connect'));
-  expect(lastAlert()[1]).toMatch(/Mutinynet, a test network/);
-  await act(async () => { await press(lastAlert()[2], 'Continue'); });
+  await act(async () => {});
   expect(mockFindBackup).toHaveBeenCalledWith('seed words', 'mutinynet');
   expect(mockSave).toHaveBeenCalledWith('seed words', 'mutinynet');
 });
 
-test('a cloud backup found on Connect is restored only with consent', async () => {
+test('a cloud backup found on Connect is restored only with consent, in one ask', async () => {
   mockFindBackup.mockResolvedValue({ createdAt: Date.UTC(2026, 0, 2) });
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
   fireEvent.press(screen.getByText('Connect'));
-  await act(async () => { await press(lastAlert()[2], 'Continue'); });
+  await act(async () => {});
   const [title, , buttons] = lastAlert();
   expect(title).toBe('Cloud backup found');
   expect(buttons.map((b: any) => b.text)).toEqual(['Cancel', 'Start empty', 'Restore']);
@@ -137,15 +133,15 @@ test('a cloud backup found on Connect is restored only with consent', async () =
   expect(mockReconcile).toHaveBeenCalledWith({ skipCloudRestore: true });
 });
 
-test('starting empty over a cloud backup asks twice', async () => {
+test('starting empty over a cloud backup is one confirmation, not two', async () => {
   mockFindBackup.mockResolvedValue({ createdAt: 1 });
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
   fireEvent.press(screen.getByText('Connect'));
-  await act(async () => { await press(lastAlert()[2], 'Continue'); });
-  await act(async () => { press(lastAlert()[2], 'Start empty'); });
-  expect(lastAlert()[0]).toBe('Start without the backup?');
-  await act(async () => { await press(lastAlert()[2], 'Start empty'); });
+  await act(async () => {});
+  const [title, , buttons] = lastAlert();
+  expect(title).toBe('Cloud backup found');
+  await act(async () => { await press(buttons, 'Start empty'); });
   expect(mockCalls).toEqual(['save:mainnet', 'reconcile']);
 });
 
@@ -153,7 +149,7 @@ test('Restore from cloud with no backup says so and changes nothing', async () =
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
   await act(async () => { fireEvent.press(screen.getByText('Restore from cloud')); });
-  expect(lastAlert()[0]).toBe('No cloud backup');
+  expect(screen.getByText(/There’s no RGB backup of this wallet/)).toBeTruthy();
   expect(mockSave).not.toHaveBeenCalled();
 });
 
@@ -162,7 +158,7 @@ test('a backup check that fails never starts an empty wallet', async () => {
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
   fireEvent.press(screen.getByText('Connect'));
-  await act(async () => { await press(lastAlert()[2], 'Continue'); });
+  await act(async () => {});
   expect(screen.getByText(/Couldn’t check for a cloud backup \(Backup server error \(503\)\.\)/)).toBeTruthy();
   expect(mockSave).not.toHaveBeenCalled();
   expect(mockReconcile).not.toHaveBeenCalled();
@@ -173,13 +169,13 @@ test('a start that fails, or reports nothing, shows the error and leaves it off'
   const screen = render(<RgbOnDeviceSettings walletId={7} />);
   await act(async () => {});
   fireEvent.press(screen.getByText('Connect'));
-  await act(async () => { await press(lastAlert()[2], 'Continue'); });
+  await act(async () => {});
   expect(screen.getByText('Indexer unreachable')).toBeTruthy();
   expect(mockCalls).toEqual(['save:mainnet', 'reconcile', 'save:null']);
   mockCalls.length = 0;
   mockReconcile.mockResolvedValueOnce(undefined);
   fireEvent.press(screen.getByText('Connect'));
-  await act(async () => { await press(lastAlert()[2], 'Continue'); });
+  await act(async () => {});
   expect(screen.getByText('RGB on this phone didn’t start. Try again.')).toBeTruthy();
   expect(mockCalls).toEqual(['save:mainnet', 'reconcile', 'save:null']);
 });
