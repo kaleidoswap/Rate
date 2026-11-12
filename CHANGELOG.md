@@ -15,6 +15,20 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   gains an "RGB" tab when the RGB wallet is connected — no more digging
   through options → other assets → receive an RGB asset (three taps became
   one).
+
+### Fixed
+- Swap success: the txid is selectable and copyable, and a "View in Activity"
+  button takes you to the entry (it was a dead string with no actions).
+- The contact picker says the right thing: "Choose a friend to request
+  payment from" when opened from Receive, not "to send payment to".
+- The AI chat's last bubble says what was done ("Your invoice is ready.",
+  "I've checked your balances.") instead of just "Done." — and a stopped
+  turn says "Stopped — nothing was completed.", not "Stopped."
+- The onboarding step indicator names the current step ("Start", "Backup",
+  "Verify") instead of showing anonymous dots.
+- A PIN mismatch says "PINs don't match — try again." inline under the dots,
+  not in a native alert.
+- The drain fee tabs show sats ("Slow · 250 sats"), not the raw sat/vB rate.
 - **The assistant's tab is Prismo.** The bottom-bar tab "Mind" becomes
   "Prismo", completing the one-name work across Settings, chat, voice and
   onboarding.

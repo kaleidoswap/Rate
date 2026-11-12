@@ -42,8 +42,9 @@ interface Props {
   visible: boolean;
   onSelectContact: (contact: Contact) => void;
   onClose: () => void;
-  /** Where "Connect to Nostr" navigates; defaults to the Nostr settings screen. */
   onConnectNostr?: () => void;
+  /** What the picker is for; the subtitle and empty state say the right thing. */
+  intent?: 'send' | 'request';
 }
 
 export default function NostrContactsSelector({
@@ -51,6 +52,7 @@ export default function NostrContactsSelector({
   onSelectContact,
   onClose,
   onConnectNostr,
+  intent = 'send',
 }: Props) {
   const [slideAnim] = useState(new Animated.Value(screenHeight));
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -295,7 +297,7 @@ export default function NostrContactsSelector({
               <View style={styles.headerContent}>
                 <Text style={styles.title}>Select Contact</Text>
                 <Text style={styles.subtitle}>
-                  Choose a friend to send payment to
+                  {intent === 'request' ? 'Choose a friend to request payment from' : 'Choose a friend to send payment to'}
                 </Text>
               </View>
               <TouchableOpacity
