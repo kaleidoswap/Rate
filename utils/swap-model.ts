@@ -3,6 +3,7 @@
  * Pure functions for pair management, venue detection, amount conversion, and HTLC capacity.
  */
 
+import type { Layer } from 'kaleido-sdk'
 import {
   BTC_ASSET_PUBKEY,
   BTC_DECIMALS,
@@ -144,16 +145,20 @@ export function isBtcTicker(ticker: string): boolean {
   return ticker.toUpperCase() === 'BTC'
 }
 
-export function bestLayer(assetId: string): string {
-  return assetId.toLowerCase() === 'btc' ? 'BTC_LN' : 'RGB_LN'
+export function bestLayer(assetId: string): Layer {
+  // Type-only import: jest does not transpile kaleido-sdk (ESM-only), and a
+  // pure util takes no runtime dependency on the SDK for two literals.
+  return (assetId.toLowerCase() === 'btc' ? 'BTC_LN' : 'RGB_LN') as Layer
 }
 
-export function getQuoteLayers(pair: SwapPair, fromAssetId: string, toAssetId: string): { fromLayer: string; toLayer: string } {
+export function getQuoteLayers(pair: SwapPair, fromAssetId: string, toAssetId: string): { fromLayer: Layer; toLayer: Layer } {
   const defaultFrom = bestLayer(fromAssetId)
   const defaultTo = bestLayer(toAssetId)
   if (pair.is_active === false) throw new Error('This trading pair is unavailable.')
   const exact = pair.routes?.find(r => r.from_layer === defaultFrom && r.to_layer === defaultTo)
-  if (exact) return { fromLayer: exact.from_layer, toLayer: exact.to_layer }
+  // The maker's route table is the Layer union on the wire; the local pair
+  // model still carries it as a plain string.
+  if (exact) return { fromLayer: exact.from_layer as Layer, toLayer: exact.to_layer as Layer }
   throw new Error('This direction is not available over Lightning. Choose a supported route.')
 }
 

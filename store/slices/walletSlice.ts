@@ -6,6 +6,9 @@ import DatabaseService from '../../services/DatabaseService';
 import { clearBalanceSnapshots } from '../../services/balanceSnapshot';
 import type { BtcNetwork } from '../../utils/wallet-balance-summary';
 import { protocolManager, rgbAccountAdapter } from '../../services/protocols';
+import type { WalletType } from '../../services/WalletManager';
+import type { ProtocolConfig } from '@kaleidorg/wallet-engine';
+import { errorMessage } from '../../utils/errors';
 import type { ProtocolType } from '../../services/protocols';
 
 export interface ProtocolBalance {
@@ -101,7 +104,7 @@ export const initializeWallet = createAsyncThunk(
 
       // Initialize WalletManager
       const walletNetworks = params.networks.map(n => ({
-        type: n.type as any, // Cast to WalletType
+        type: n.type as WalletType,
         enabled: n.enabled,
         config: n.config ? JSON.parse(n.config) : {},
       }));
@@ -109,8 +112,8 @@ export const initializeWallet = createAsyncThunk(
       await walletManager.initialize(mnemonic, walletNetworks);
 
       return { wallet, mnemonic };
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -123,8 +126,8 @@ export const loadWallets = createAsyncThunk(
       const wallets = await dbService.getAllWallets();
       const activeWallet = await dbService.getActiveWallet();
       return { wallets, activeWallet };
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -152,7 +155,7 @@ export const switchWallet = createAsyncThunk(
 
         // Re-init new
         const walletNetworks = wallet.networks?.map(n => ({
-          type: n.type as any,
+          type: n.type as WalletType,
           enabled: n.enabled,
           config: n.config ? JSON.parse(n.config) : {},
         })) || [];
@@ -161,8 +164,8 @@ export const switchWallet = createAsyncThunk(
       }
 
       return wallet;
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -199,8 +202,8 @@ export const createNewWallet = createAsyncThunk(
       }
 
       return wallet;
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -214,8 +217,8 @@ export const deleteWallet = createAsyncThunk(
       await dbService.deleteWallet(walletId);
       await clearBalanceSnapshots(walletId);
       return walletId;
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -229,7 +232,7 @@ export const updateNetwork = createAsyncThunk(
       const wallet = await dbService.getActiveWallet(); // Refresh active wallet to get updated networks
 
       // Check if we updated the active wallet's RLN config
-      const state = getState() as any; // Need RootState type but avoiding circular dep
+      const state = getState() as { wallet: WalletState }; // RootState shape, without the circular import
       const activeWalletId = state.wallet?.activeWallet?.id;
 
       if (wallet && wallet.id === activeWalletId && params.type === 'rln') {
@@ -246,10 +249,15 @@ export const updateNetwork = createAsyncThunk(
 
             if (apiUrl) {
               try {
+                // wallet-engine's RgbConfig type trails its runtime: the
+                // adapter reads `nodeUrl` (missing from the shipped d.ts)
+                // and dispatches on this `protocol: 'RGB'` value, which the
+                // ProtocolType union does not list either. One scoped cast,
+                // not `any` — the drift is upstream and noted in the PR.
                 await protocolManager.connect('RGB_LN', {
                   protocol: 'RGB',
                   nodeUrl: apiUrl,
-                } as any);
+                } as unknown as ProtocolConfig);
               } catch (e) {
                 console.warn('Failed to connect RGB protocol:', e);
               }
@@ -261,17 +269,25 @@ export const updateNetwork = createAsyncThunk(
       }
 
       return wallet;
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
+
+/** The bitcoind RPC credentials the RGB node unlock needs. */
+export interface BitcoindConfig {
+  username: string;
+  password: string;
+  host: string;
+  port: string;
+}
 
 export const unlockWallet = createAsyncThunk(
   'wallet/unlock',
   async (params: {
     password: string;
-    bitcoindConfig: any;
+    bitcoindConfig: BitcoindConfig;
     indexerUrl: string;
     proxyEndpoint: string;
   }, { rejectWithValue }) => {
@@ -294,8 +310,8 @@ export const unlockWallet = createAsyncThunk(
 
       const wallet = await dbService.getActiveWallet();
       return wallet;
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -324,8 +340,8 @@ export const loadBtcBalance = createAsyncThunk(
         colored: { settled: 0, future: 0, spendable: 0 },
         byProtocol,
       };
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -339,8 +355,8 @@ export const fetchBitcoinPrice = createAsyncThunk(
       );
       const data = await response.json();
       return data.bitcoin.usd;
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
@@ -356,8 +372,8 @@ export const syncWallet = createAsyncThunk(
         await rgbAdapter.refreshBalances?.(); // RGB on this phone
       }
       return Date.now();
-    } catch (error: any) {
-      return rejectWithValue(error.message);
+    } catch (error: unknown) {
+      return rejectWithValue(errorMessage(error));
     }
   }
 );
