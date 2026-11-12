@@ -1080,10 +1080,11 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                       </Animated.View>
                     )}
                     {!isLoading && !isListening && !canSend && (
-                      <TouchableOpacity style={styles.voiceConversationButton} accessibilityRole="button"
+                      <TouchableOpacity style={styles.talkPill} accessibilityRole="button"
                         disabled={isLoading} accessibilityLabel={prismoText("Talk to Prismo")} accessibilityHint={prismoText("Start a voice conversation with spoken replies")}
                         onPress={() => { Keyboard.dismiss(); aiEnabled ? setVoiceAgentOpen(true) : setShowSettings(true); }}>
-                        <VoiceModeIcon color={theme.colors.text.inverse} />
+                        <VoiceModeIcon color={theme.colors.primary[500]} />
+                        <Text style={styles.talkPillText}>{prismoText('Talk')}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -1210,7 +1211,8 @@ const makeStyles = (theme: Theme) =>
     container: { flex: 1, backgroundColor: theme.colors.background.primary },
     chatContainer: { flex: 1 },
     agentMenu: { paddingHorizontal: theme.spacing[4], backgroundColor: theme.colors.surface.primary, borderBottomWidth: 1, borderColor: theme.colors.border.light },
-    voiceConversationButton: { height: 44, width: 44, justifyContent: 'center', borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.colors.primary[500] },
+    talkPill: { height: 36, paddingHorizontal: theme.spacing[3], justifyContent: 'center', borderRadius: theme.borderRadius.full, flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5], backgroundColor: theme.colors.surface.secondary, borderWidth: 1, borderColor: theme.colors.primary[500] },
+    talkPillText: { fontSize: theme.typography.fontSize.xs, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.primary[500] },
     background: { flex: 1 },
     skillsBackdrop: { flex: 1, backgroundColor: theme.colors.background.backdrop, justifyContent: 'flex-end' },
     skillsSheet: { backgroundColor: theme.colors.background.primary, borderTopLeftRadius: theme.borderRadius.xl, borderTopRightRadius: theme.borderRadius.xl, padding: theme.spacing[5], paddingBottom: theme.spacing[9] },

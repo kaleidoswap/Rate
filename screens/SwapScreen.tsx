@@ -41,6 +41,7 @@ import { syncAssets } from '../store/slices/assetsSlice';
 import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
 import { useFiatRates } from '../hooks/useFiatRates';
 import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
+import ToastService from '../services/ToastService';
 import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
 import { useAssetInventory } from '../hooks/useAssetInventory';
 import {
@@ -934,7 +935,10 @@ export default function SwapScreen({ navigation, route }: Props) {
               const max = maxSendable();
               const n = Number(normalized);
               if (max > 0 && Number.isFinite(n) && n > max) {
+                // Capped to what the account can actually send: the silent
+                // rewrite would leave the user wondering why the number changed.
                 dispatch(setFromAmount(String(max)));
+                ToastService.getInstance().info(`Capped to your maximum of ${max.toLocaleString('en-US')} ${unitLabelFor(swapState.fromAsset)}.`);
               } else {
                 dispatch(setFromAmount(normalized));
               }

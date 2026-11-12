@@ -74,8 +74,15 @@ export default function InitialLoadScreen({ navigation }: { navigation: any }) {
 
     } catch (error) {
       console.error('Initial state check error:', error);
-      // Fallback to Setup if something critical fails
-      navigation.replace('WalletSetup');
+      // A DB error with existing wallets must never land the user on "Create
+      // wallet": try to recover the wallet list, and only offer setup when
+      // there truly is nothing.
+      try {
+        const wallets = await DatabaseService.getInstance().getAllWallets();
+        navigation.replace(wallets.length > 0 ? 'Dashboard' : 'WalletSetup');
+      } catch {
+        navigation.replace('WalletSetup');
+      }
     }
   };
 
