@@ -31,6 +31,18 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   routes" tile is hidden in Simple view (it was noise for Lite users).
 
 ### Changed
+- **The launch never strands an existing wallet on "Create wallet."** A
+  database error at startup now tries to read the wallet list before
+  deciding where to go: users with wallets land on the dashboard (the
+  banner there says what failed), only a truly empty phone sees setup.
+- **One microphone per job in the chat.** The dictation mic stays in the
+  input bar; "Talk to Prismo" becomes a labelled pill beside it, not a
+  second unlabeled mic button.
+- Swap tells you when it caps your amount ("Capped to your maximum of N"),
+  instead of silently rewriting the number you typed.
+- SecuritySetup loses ~200 unreachable lines: the "Secure Your Wallet"
+  card-based step, its handlers and the dead "Complete" step are gone —
+  every caller reaches the simple Protect-your-wallet flow.
 - **One name for the assistant.** Prismo everywhere: the onboarding modal,
   chat empty state, voice overlay, error banners and agent-wallet messages
   no longer mix "Agent", "KaleidoMind" and "Prismo".

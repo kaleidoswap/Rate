@@ -32,7 +32,7 @@ interface Props {
 }
 
 export type SecurityMode = 'setup' | 'pin' | 'disablePin';
-type SecurityStep = 'loading' | 'currentPin' | 'options' | 'pin' | 'confirmPin' | 'biometric' | 'complete';
+type SecurityStep = 'loading' | 'currentPin' | 'options' | 'pin' | 'confirmPin' | 'biometric' ;
 
 export default function SecuritySetupScreen({ navigation, route }: Props) {
   const { isInitialSetup = false, mode = 'setup' } = route.params || {};
@@ -256,7 +256,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
         return;
       }
       if (isInitialSetup) { navigation.replace('OnboardingProfile'); return; }
-      setStep('complete');
+      
       animateComplete();
     } catch (error) {
       console.error('Error saving security settings:', error);
@@ -282,24 +282,6 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       } else {
         navigation.goBack();
       }
-    }
-  };
-
-  const handleStartSetup = () => {
-    if (enablePin) {
-      animateTransition('pin');
-    } else if (enableBiometric && biometricAvailable) {
-      animateTransition('biometric');
-    } else {
-      Alert.alert('Select an Option', 'Please enable at least one security method to continue, or skip this step.');
-    }
-  };
-
-  const handleFinish = () => {
-    if (isInitialSetup) {
-      navigation.replace('OnboardingProfile');
-    } else {
-      navigation.goBack();
     }
   };
 
@@ -388,7 +370,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const renderOptionsStep = () => isInitialSetup ? (
+  const renderOptionsStep = () => (
     <View style={styles.stepContent}>
       <View style={styles.optionsHeader}>
         <Ionicons name="shield-checkmark" size={48} color={theme.colors.primary[500]} />
@@ -398,74 +380,6 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
       {biometricAvailable && <Button title={`Enable ${getBiometricLabel()}`} loading={securityBusy} disabled={securityBusy} onPress={handleEnableBiometric} />}
       <Button title="Use a PIN" variant={biometricAvailable ? 'secondary' : 'primary'} disabled={securityBusy} onPress={() => { setEnablePin(true); animateTransition('pin'); }} />
       <Button title="Not now" variant="ghost" disabled={securityBusy} onPress={() => navigation.replace('OnboardingProfile')} />
-    </View>
-  ) : (
-    <View style={styles.stepContent}>
-      <View style={styles.optionsHeader}>
-        <View style={styles.shieldIcon}>
-          <Ionicons name="shield-checkmark" size={40} color={theme.colors.primary[500]} />
-        </View>
-        <Text style={styles.stepTitle}>Secure Your Wallet</Text>
-        <Text style={styles.stepDescription}>
-          Choose how you want to protect your wallet. You can enable both for maximum security.
-        </Text>
-      </View>
-
-      <View style={styles.optionsContainer}>
-        <TouchableOpacity
-          style={[styles.optionCard, enablePin && styles.optionCardActive]}
-          onPress={() => setEnablePin(!enablePin)}
-          activeOpacity={0.7}
-        >
-          <View style={[styles.optionIcon, enablePin && styles.optionIconActive]}>
-            <Ionicons name="keypad" size={28} color={enablePin ? 'white' : theme.colors.primary[500]} />
-          </View>
-          <View style={styles.optionTextContainer}>
-            <Text style={styles.optionTitle}>PIN Code</Text>
-            <Text style={styles.optionDesc}>6-digit code for quick access</Text>
-          </View>
-          <View style={[styles.optionCheckbox, enablePin && styles.optionCheckboxActive]}>
-            {enablePin && <Ionicons name="checkmark" size={18} color="white" />}
-          </View>
-        </TouchableOpacity>
-
-        {biometricAvailable && (
-          <TouchableOpacity
-            style={[styles.optionCard, enableBiometric && styles.optionCardActive]}
-            onPress={() => setEnableBiometric(!enableBiometric)}
-            activeOpacity={0.7}
-          >
-            <View style={[styles.optionIcon, enableBiometric && styles.optionIconActive]}>
-              <Ionicons 
-                name={getBiometricIcon()} 
-                size={28} 
-                color={enableBiometric ? 'white' : theme.colors.primary[500]} 
-              />
-            </View>
-            <View style={styles.optionTextContainer}>
-              <Text style={styles.optionTitle}>{getBiometricLabel()}</Text>
-              <Text style={styles.optionDesc}>Quick unlock with biometrics</Text>
-            </View>
-            <View style={[styles.optionCheckbox, enableBiometric && styles.optionCheckboxActive]}>
-              {enableBiometric && <Ionicons name="checkmark" size={18} color="white" />}
-            </View>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.optionsFooter}>
-        <Button
-          title="Continue"
-          onPress={handleStartSetup}
-          disabled={!enablePin && !enableBiometric}
-          style={styles.continueButton}
-        />
-        {isInitialSetup && (
-          <TouchableOpacity style={styles.skipLink} onPress={() => navigation.replace('OnboardingProfile')}>
-            <Text style={styles.skipLinkText}>Skip for now</Text>
-          </TouchableOpacity>
-        )}
-      </View>
     </View>
   );
 
@@ -520,60 +434,12 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
     </View>
   );
 
-  const renderCompleteStep = () => (
-    <View style={styles.completeContent}>
-      <Animated.View style={[
-        styles.completeIcon,
-        { transform: [{ scale: scaleAnim }] }
-      ]}>
-        <LinearGradient
-          colors={theme.colors.success.gradient || [theme.colors.success[500], theme.colors.success[500]]}
-          style={styles.completeGradient}
-        >
-          <Ionicons name="checkmark" size={48} color="white" />
-        </LinearGradient>
-      </Animated.View>
-      
-      <Text style={styles.completeTitle}>Security Enabled!</Text>
-      <Text style={styles.completeSubtitle}>
-        Your wallet is now protected
-        {enablePin && enableBiometric 
-          ? ` with PIN and ${getBiometricLabel()}`
-          : enablePin 
-            ? ' with PIN'
-            : ` with ${getBiometricLabel()}`
-        }.
-      </Text>
-
-      <View style={styles.securitySummary}>
-        {enablePin && (
-          <View style={styles.summaryItem}>
-            <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
-            <Text style={styles.summaryText}>PIN Code enabled</Text>
-          </View>
-        )}
-        {enableBiometric && (
-          <View style={styles.summaryItem}>
-            <Ionicons name="checkmark-circle" size={20} color={theme.colors.success[500]} />
-            <Text style={styles.summaryText}>{getBiometricLabel()} enabled</Text>
-          </View>
-        )}
-      </View>
-
-      <Button
-        title={isInitialSetup ? "Go to Wallet" : "Done"}
-        onPress={handleFinish}
-        style={styles.finishButton}
-      />
-    </View>
-  );
-
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
       <ScreenHeader
-        title={step === 'complete' ? 'Complete' : mode === 'pin' ? 'Wallet PIN' : mode === 'disablePin' ? 'Turn off PIN' : 'Security Setup'}
-        showBack={step !== 'complete'}
+        title={mode === 'pin' ? 'Wallet PIN' : mode === 'disablePin' ? 'Turn off PIN' : 'Security Setup'}
+        showBack={step !== 'loading'}
         onBack={handleBack}
       />
 
@@ -583,8 +449,7 @@ export default function SecuritySetupScreen({ navigation, route }: Props) {
         {step === 'pin' && renderPinStep()}
         {step === 'confirmPin' && renderConfirmPinStep()}
         {step === 'biometric' && renderBiometricStep()}
-        {step === 'complete' && renderCompleteStep()}
-      </Animated.View>
+              </Animated.View>
     </View>
   );
 }
@@ -636,15 +501,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: theme.spacing[8],
   },
-  shieldIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: theme.colors.primary[50],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: theme.spacing[4],
-  },
   stepTitle: {
     fontSize: theme.typography.fontSize['2xl'],
     fontWeight: '700',
@@ -658,55 +514,12 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     paddingHorizontal: theme.spacing[2],
   },
-  optionsContainer: {
-    gap: theme.spacing[3],
-  },
-  optionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: theme.spacing[4],
-    backgroundColor: theme.colors.background.secondary,
-    borderRadius: theme.borderRadius.xl,
-    borderWidth: 2,
-    borderColor: 'transparent',
-  },
   optionCardActive: {
     borderColor: theme.colors.primary[500],
     backgroundColor: theme.colors.primary[50],
   },
-  optionIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: theme.borderRadius.lg,
-    backgroundColor: theme.colors.primary[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: theme.spacing[4],
-  },
   optionIconActive: {
     backgroundColor: theme.colors.primary[500],
-  },
-  optionTextContainer: {
-    flex: 1,
-  },
-  optionTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-    marginBottom: 2,
-  },
-  optionDesc: {
-    fontSize: theme.typography.fontSize.sm,
-    color: theme.colors.text.secondary,
-  },
-  optionCheckbox: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: theme.colors.border.medium,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   optionCheckboxActive: {
     backgroundColor: theme.colors.primary[500],
@@ -820,15 +633,6 @@ const styles = StyleSheet.create({
     width: '100%',
     marginBottom: theme.spacing[3],
   },
-  completeContent: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: theme.spacing[6],
-  },
-  completeIcon: {
-    marginBottom: theme.spacing[6],
-  },
   completeGradient: {
     width: 96,
     height: 96,
@@ -840,12 +644,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 16,
     elevation: 10,
-  },
-  completeTitle: {
-    fontSize: theme.typography.fontSize['2xl'],
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing[2],
   },
   completeSubtitle: {
     fontSize: theme.typography.fontSize.base,
