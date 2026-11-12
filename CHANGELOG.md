@@ -10,6 +10,12 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **RGB receive is one tap away.** The asset tab row on the Receive screen
+  gains an "RGB" tab when the RGB wallet is connected — no more digging
+  through options → other assets → receive an RGB asset (three taps became
+  one).
+
 ## [0.14.0] — 2026-11-12
 
 The RGB-and-honesty release: RGB speaks people, the launch never strands
