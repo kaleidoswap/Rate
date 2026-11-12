@@ -54,15 +54,16 @@ export function ReceiveRequestActions({ value, label = 'Payment request', showVa
       {expanded && <Text selectable style={{ color: t.colors.text.primary, fontSize: t.typography.fontSize.sm }}>{value}</Text>}
     </View>}
     <View style={{ flexDirection: fontScale > 1.3 ? 'column' : 'row', gap: t.spacing[3] }}>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Copy ${label}`} disabled={!value} onPress={() => void copy()}
-        style={[button, { flex: 1, backgroundColor: t.colors.primary[500], opacity: value ? 1 : 0.5 }]}>
-        <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={ink} />
-        <Text style={{ color: ink, fontWeight: '600' }}>{copied ? 'Copied' : 'Copy request'}</Text>
-      </TouchableOpacity>
+      {/* Share is the primary: the code is meant to be shown, not pasted. */}
       <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Share ${label}`} disabled={!value} onPress={() => void share()}
+        style={[button, { flex: 1, backgroundColor: t.colors.primary[500], opacity: value ? 1 : 0.5 }]}>
+        <Ionicons name="share-outline" size={18} color={ink} />
+        <Text style={{ color: ink, fontWeight: '600' }}>Share</Text>
+      </TouchableOpacity>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Copy ${label}`} disabled={!value} onPress={() => void copy()}
         style={[button, { backgroundColor: t.colors.surface.secondary, opacity: value ? 1 : 0.5 }]}>
-        <Ionicons name="share-outline" size={18} color={t.colors.text.primary} />
-        <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>Share</Text>
+        <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={18} color={t.colors.text.primary} />
+        <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>{copied ? 'Copied' : 'Copy'}</Text>
       </TouchableOpacity>
     </View>
     {!!error && <Text accessibilityRole="alert" style={{ color: t.colors.warning[500] }}>{error}</Text>}

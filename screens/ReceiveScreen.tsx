@@ -1657,23 +1657,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     );
   };
 
-  const renderAmountRow = () => {
-    const row = renderAmountRowInner();
-    if (!row) return null;
-    return <>
-      {row}
-      <TouchableOpacity accessibilityRole="button"
-        accessibilityLabel={requestContact ? `Request from ${requestContact.name}. Remove` : 'Request from a contact'}
-        onPress={() => { feedback.select(); if (requestContact) { setRequestContact(null); requestEventId.current = null; } else setShowContactPicker(true); }}
-        style={{ alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: theme.spacing[1.5], minHeight: 32, marginBottom: theme.spacing[1] }}>
-        <Ionicons name={requestContact ? 'person' : 'person-add-outline'} size={14} color={theme.colors.text.secondary} />
-        <Text style={[styles.amountRowLabel, { color: theme.colors.text.secondary }]} numberOfLines={1}>
-          {requestContact ? `From ${requestContact.name}` : 'From a contact (optional)'}
-        </Text>
-        {requestContact && <Ionicons name="close" size={14} color={theme.colors.text.tertiary} />}
-      </TouchableOpacity>
-    </>;
-  };
+  const renderAmountRow = () => renderAmountRowInner();
 
   // Clean QR-sized loader (no copy text) — a spinner sitting where the QR will be.
   const renderQrLoading = () => (
@@ -1768,14 +1752,6 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
         {receiveMethods.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry showCountdown={showCountdown} key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
         <ReceiveRequestActions value={unifiedUri} network={unifiedReceiveNetwork} />
-        <ReceiveRequestDetails
-          methods={receiveMethods}
-          universal
-          notes={unifiedAsset === 'BTC' ? universalNotes : []}
-          qrSize={qrSize}
-          rgbLabel={rgbLabel}
-          onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }}
-        />
       </View>
     );
   };
@@ -1867,13 +1843,6 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
         <InvoiceExpiry showCountdown={showCountdown} invoice={address} onRefresh={() => { void generateAddress(); }} />
         <ReceiveRequestActions value={address} label={title} network={method ? receiveAccountChain(method.protocol) : undefined} />
-        <ReceiveRequestDetails
-          methods={method ? [method] : []}
-          universal={false}
-          qrSize={qrSize}
-          rgbLabel={rgbLabel}
-          extra={swapNote}
-        />
       </View>
     );
   };
@@ -1930,8 +1899,8 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
       </ScrollView>
 
-      {/* Everything that shapes the request, one tap away instead of above the QR. */}
-      <Sheet visible={showOptions} onClose={() => setShowOptions(false)} title="Receive options">
+      {/* The pill opens the routes directly: one sheet, not a sheet inside a sheet. */}
+      <Sheet visible={showOptions} onClose={() => setShowOptions(false)} title="How they pay">
         <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {showRgbAdvanced && (
             <RgbReceiveAdvanced
@@ -1944,35 +1913,13 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
               onCreateUtxos={rgbSupport.createUtxos ? () => afterOptions(() => setShowCreateUtxos(true)) : undefined}
             />
           )}
-          {/* The asset tabs live above the QR; the sheet holds what they don't cover. */}
-          <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showOtherAssets }} onPress={() => setShowOtherAssets(v => !v)} style={styles.rgbEntry}>
-            <Text style={[styles.rgbEntryTitle, { flex: 1 }]}>Other assets & networks</Text>
-            <Ionicons name={showOtherAssets ? 'chevron-up' : 'chevron-down'} size={18} color={theme.colors.text.secondary} />
-          </TouchableOpacity>
-          {showOtherAssets && <View>
-            {renderRgbEntry()}
-            <BridgeEntryCard onPress={() => afterOptions(() => { cancelReceiveWork(); navigation.navigate('Bridge'); })} />
-            {(['SPARK', 'ARKADE'] as const).map(account => <TouchableOpacity key={account} accessibilityRole="button"
-              onPress={() => {
-                if (!receiveAccounts.some(a => a.account === account)) { afterOptions(() => navigation.navigate('Settings')); return; }
-                setSelectedAsset(btcAsset()); setAmount('');
-                selectRoute(account === 'SPARK' ? 'spark' : 'ark', account);
-                setShowOptions(false);
-              }} style={styles.rgbEntry}>
-              <NetworkIcon network={account === 'SPARK' ? 'spark' : 'arkade'} size={20} />
-              <View style={{ flex: 1 }}><Text style={styles.rgbEntryTitle}>{account === 'SPARK' ? 'Spark' : 'Arkade'}</Text>
-                <Text style={styles.rgbEntryDetail}>{receiveAccounts.some(a => a.account === account) ? (account === 'SPARK' ? 'Native address · BTC and tokens' : 'Native Ark address · Bitcoin') : 'Connect in Settings'}</Text></View>
-              <Ionicons name="chevron-forward" size={18} color={theme.colors.text.secondary} />
-            </TouchableOpacity>)}
-          </View>}
-          <Text style={styles.optionsCaption}>How they pay</Text>
           <ReceiveRoutePicker
             methods={receiveMethodIds}
             method={route.method}
-            onMethod={(method) => selectRoute(method)}
+            onMethod={(method) => { selectRoute(method); if (method !== 'universal') setShowOptions(false); }}
             destinations={routeDestinations}
             destination={routeDestination}
-            onDestination={(account) => selectRoute(route.method, account)}
+            onDestination={(account) => { selectRoute(route.method, account); setShowOptions(false); }}
             amountSats={requestedSats}
             chains={unifiedAsset === 'BTC' ? chainGroups : undefined}
             accountLabel={(account) => accountLabel(account, caps)}
@@ -1992,11 +1939,10 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
               feedback.select();
               resetReceiveSurface();
               setUniversalLn(account);
+              setShowOptions(false);
             }}
           />
-          <TouchableOpacity accessibilityRole="button" onPress={() => setShowOptions(false)} activeOpacity={0.85} style={styles.optionsDone}>
-            <Text style={styles.optionsDoneText}>Done</Text>
-          </TouchableOpacity>
+          <BridgeEntryCard onPress={() => afterOptions(() => { cancelReceiveWork(); navigation.navigate('Bridge'); })} />
         </ScrollView>
       </Sheet>
 

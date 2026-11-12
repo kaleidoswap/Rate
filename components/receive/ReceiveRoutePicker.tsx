@@ -120,7 +120,7 @@ export function ReceiveRoutePicker({
         <Text style={caption}>Method</Text>
         {methods.map(key => <OptionRow<ReceiveMethodId> key={key} active={key === method}
           choice={{ key, title: METHOD_LABELS[key], icon: methodIcons?.[key]?.[0] }}
-          onSelect={() => onMethod(key)} />)}
+          onSelect={() => { onMethod(key); if (key !== 'universal') setOpen(false); }} />)}
 
         {method === 'universal' && !!chains && chains.length > 1 && onChain && <>
           <Text style={caption}>Network</Text>
