@@ -61,8 +61,8 @@ const offer = (id: string, total: number, expiresAt = Math.floor(Date.now() / 10
 const nav = () => ({ goBack: jest.fn(), navigate: jest.fn() });
 async function reviewed(navigation = nav()) {
   const screen = render(<SendScreen navigation={navigation} route={{ params: { prefilledAddress: 'lnbc1' } }} />);
-  await act(async () => {});
-  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  // The invoice has a fixed amount: the quotes load on their own, no Continue needed.
+  await act(async () => { await new Promise(r => setTimeout(r, 100)); });
   return screen;
 }
 const pay = (screen: any, label: string) => fireEvent(screen.getByLabelText(label), 'accessibilityAction', { nativeEvent: { actionName: 'activate' } });
@@ -374,8 +374,7 @@ test('an amount handed over in sats is used as is, whatever the display unit', a
   mockState = { ...baseState(), settings: { bitcoinUnit: 'BTC' } };
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 2510)]);
   const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'spark1abc', prefilledAmountSat: 2500, contactName: 'Mario' } }} />);
-  await act(async () => {});
-  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  await act(async () => { await new Promise(r => setTimeout(r, 100)); });
   expect(previewInput).toHaveBeenCalledWith('spark1abc', 2500, expect.anything(), expect.anything());
 });
 
@@ -384,8 +383,7 @@ test('completed address payments have one exit and optional receipt sharing', as
   (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'completed' });
   const navigation = nav();
   const screen = render(<SendScreen navigation={navigation} route={{ params: { prefilledAddress: 'alice@example.com', prefilledAmountSat: 1000 } }} />);
-  await act(async () => {});
-  await act(async () => { fireEvent.press(screen.getByText('Continue')); });
+  await act(async () => { await new Promise(r => setTimeout(r, 100)); });
   await act(async () => { pay(screen, 'Pay 1010 sats'); });
   // The celebration covers the receipt; see through it and the receipt is open.
   fireEvent.press(screen.getByText('See receipt'));
@@ -475,7 +473,7 @@ test('RGB has a visible balance and amount, accepts decimal comma and reviews a 
   fireEvent.press(screen.getByLabelText('2'));
   fireEvent.press(screen.getByLabelText('5'));
   await act(async () => { fireEvent.press(screen.getByText('Set amount')); });
-  await act(async () => { fireEvent.press(screen.getByText('Review transfer')); });
+  await act(async () => { await new Promise(r => setTimeout(r, 100)); });
   expect(previewInput).toHaveBeenCalledWith('rgb:any', undefined, expect.any(String), { asset: { id: 'rgb-usd', ticker: 'USD', precision: 2, amount: 125 } });
   expect(screen.getByText('Review RGB transfer')).toBeTruthy();
   expect(screen.queryByText(/quote valid|Best price|Compare all|Refresh quotes/)).toBeNull();
@@ -492,9 +490,7 @@ test('a definite RGB failure explains the cause and saves it for reopening', asy
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('rgb-asset', 125)]);
   (executePaymentOffer as jest.Mock).mockRejectedValueOnce(new PaymentNotSentError('Not enough bitcoin for the network fee.'));
   const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'rgb:any' } }} />);
-  await act(async () => {});
-  expect(screen.getByText('Amount set by the invoice')).toBeTruthy();
-  await act(async () => { fireEvent.press(screen.getByText('Review transfer')); });
+  await act(async () => { await new Promise(r => setTimeout(r, 100)); });
   await act(async () => { pay(screen, 'Send 125 sats'); });
   expect(screen.getByText('Not enough bitcoin for the network fee. Nothing was sent.')).toBeTruthy();
   expect(updatePaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ status: 'failed', detail: 'Not enough bitcoin for the network fee. Nothing was sent.' }));

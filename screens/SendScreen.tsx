@@ -95,6 +95,8 @@ export default function SendScreen({ navigation, route }: Props) {
     for (const k of ['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]) { const b = byProtocol?.[k]; if (b) out[k] = b.confirmed; }
     return out;
   }, [byProtocol]);
+  // What the user can pay with today: the sum across all accounts.
+  const totalSpendable = useMemo(() => Object.values(balancesSat).reduce((n, v) => n + (v ?? 0), 0), [balancesSat]);
   const contacts = useAppSelector(s => s.contacts?.contacts);
   const recentContacts = useMemo(() => (contacts ?? [])
     .filter(c => c.lightning_address || c.node_pubkey)
@@ -344,9 +346,28 @@ export default function SendScreen({ navigation, route }: Props) {
   // (The editor closes right after confirming, so the intent is latched on confirm.)
   const continueAfterAmount = useRef(false);
   const continueNow = useRef(false);
+  // A request that arrives whole (scanned, pasted, a contact, another screen)
+  // goes straight to review: the quotes load while the user reads the target.
+  const autoQuoted = useRef<string | null>(null);
+
   useEffect(() => {
     if (continueNow.current && amountSat) { continueNow.current = false; void getOffers(); }
   }, [amountSat, getOffers]);
+
+  // Auto-quote: when the target is parsed and the request carries its own
+  // amount (Lightning invoice, BIP21 with amount), there is nothing to ask —
+  // the routes and fees appear immediately.
+  useEffect(() => {
+    if (!target || busy || preview) return;
+    const hasAmount = fixedSat !== undefined || amountSat !== undefined;
+    const isRgbComplete = target.kind === 'rgb' && !!rgbAsset && (rgbAsset?.amount !== undefined || Number(assetAmount) > 0);
+    const isComplete = target.kind === 'rgb' ? isRgbComplete : (!sparkToken && hasAmount);
+    if (!isComplete) return;
+    const key = `${target.kind}:${input}:${fixedSat ?? amountSat ?? ''}:${rgbAsset?.id ?? ''}:${sparkToken?.id ?? ''}:${assetAmount}`;
+    if (autoQuoted.current === key) return;
+    autoQuoted.current = key;
+    void getOffers();
+  }, [target, fixedSat, amountSat, rgbAsset, sparkToken, assetAmount, busy, preview, input, getOffers]);
 
   function review() {
     if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }
@@ -661,6 +682,22 @@ export default function SendScreen({ navigation, route }: Props) {
         <Text style={{ ...small, color: t.colors.primary[500] }}>{shownSat ? `${usdOf(shownSat)} · tap to change` : 'Tap to enter an amount'}</Text>
       </TouchableOpacity>
     ) : null}
+      {/* What the user can pay with, visible from the moment the request is read. */}
+      {target && !preview && !sparkToken && target.kind !== 'rgb' && (
+        <View style={{ gap: t.spacing[1.5], paddingVertical: t.spacing[2] }}>
+          <Text style={caption}>Your accounts</Text>
+          {(['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]).filter(k => balancesSat[k] !== undefined && balancesSat[k]! > 0).map(k => (
+            <View key={k} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
+                <NetworkIcon network={k === 'RGB' ? 'rln' : k.toLowerCase()} size={16} />
+                <Text style={{ ...text, fontWeight: '600' }}>{PAY_ACCOUNT_NAME[k]}</Text>
+              </View>
+              <AmountText style={small}>{formatSats(balancesSat[k]!)}</AmountText>
+            </View>
+          ))}
+          {Object.values(balancesSat).every(v => !v) && <Text style={small}>No account has a balance yet.</Text>}
+        </View>
+      )}
 
     {!target && <View style={{ marginTop: t.spacing[5], gap: t.spacing[3] }}>
       {matchingContacts.length > 0 ? <View style={{ gap: t.spacing[2] }}>
@@ -875,6 +912,7 @@ export default function SendScreen({ navigation, route }: Props) {
           : amountEditorFor === 'rgb' && rgbAsset
             ? rgbAsset.available === undefined ? { unit: rgbAsset.ticker, decimals: rgbAsset.precision } : { unit: rgbAsset.ticker, maxUnits: rgbAsset.available / 10 ** rgbAsset.precision, availableLabel: `${formatSpend(rgbAsset.available, rgbAsset)} available`, decimals: rgbAsset.precision }
             : undefined}
+        maxSats={amountEditorFor === 'btc' ? totalSpendable : undefined}
         rates={rates} bitcoinUnit={bitcoinUnit}
         onConfirm={sats => { continueNow.current = continueAfterAmount.current && sats > 0; setAmountSat(sats > 0 ? sats : undefined); setShowAmountEditor(false); }}
         onConfirmAssetUnits={u => { setAssetAmount(u > 0 ? String(u) : ''); setShowAmountEditor(false); }} />
