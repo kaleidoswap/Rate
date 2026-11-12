@@ -26,7 +26,7 @@ const SPEED_LABEL: Record<Speed, string> = { slow: 'Slow', normal: 'Normal', fas
 const sats = (n: number) => `${n.toLocaleString('en-US')} sats`;
 
 /**
- * The RGB account's UTXOs: which hold assets, which are free to receive into,
+ * The RGB account's receive slots: which hold assets, which are free to receive into,
  * which are plain bitcoin, and creating new colorable ones.
  */
 export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, reason, onCreated }: {
@@ -35,7 +35,7 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
   /** Labels allocations with a ticker in the asset's precision. */
   assets?: RgbAssetLabel[];
   adapter?: unknown;
-  /** Why the sheet was opened (e.g. issuing needs a free UTXO), shown on top. */
+  /** Why the sheet was opened (e.g. issuing needs a free slot), shown on top. */
   reason?: string;
   onCreated?: () => void;
 }) {
@@ -58,7 +58,7 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
     try {
       setState({ loading: false, list: await listRgbUtxos(adapter) });
     } catch {
-      setState({ loading: false, error: 'Couldn’t load your UTXOs. Pull to try again.' });
+      setState({ loading: false, error: 'Couldn’t load your slots. Pull to try again.' });
     }
   }, [adapter, support.listUtxos]);
 
@@ -76,8 +76,8 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
   const create = () => {
     feedback.select();
     Alert.alert(
-      `Create ${num} UTXO${num === 1 ? '' : 's'}?`,
-      `${num} × ${sats(size)} plus about ${sats(estimate.feeSats)} in fees (${feeRate} sat/vB), from your plain bitcoin. The sats stay yours.`,
+      `Create ${num} slot${num === 1 ? '' : 's'}?`,
+      `${num} × ${sats(size)} plus about ${sats(estimate.feeSats)} in fees, from your plain bitcoin. The sats stay yours.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -153,12 +153,12 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
               ? 'No free receiving slots. Prepare slots below for blinded invoices or new assets.'
               : 'No free receiving slots. You can still receive with a witness invoice.'} />}
 
-          <Button title={details ? 'Hide outputs' : 'View outputs (UTXOs)'} variant="ghost" onPress={() => setDetails(!details)} />
+          <Button title={details ? 'Hide outputs' : 'View slots'} variant="ghost" onPress={() => setDetails(!details)} />
           {details && <>
           <View style={{ gap: t.spacing[1] }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               {caption('Holding assets')}
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh UTXOs" style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surface.secondary, borderWidth: 1, borderColor: t.colors.border.light, borderRadius: t.borderRadius.md }} onPress={() => void load()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh slots" style={{ minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', backgroundColor: t.colors.surface.secondary, borderWidth: 1, borderColor: t.colors.border.light, borderRadius: t.borderRadius.md }} onPress={() => void load()} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                 {state.loading ? <ActivityIndicator size="small" color={t.colors.text.tertiary} /> : <Ionicons name="refresh" size={14} color={t.colors.text.tertiary} />}
               </TouchableOpacity>
             </View>
@@ -189,17 +189,17 @@ export function RgbUtxoSheet({ visible, onClose, assets = [], adapter: given, re
           {caption('Bitcoin per slot')}
           <SegmentedTabs<string> scrollable={false} fill value={String(size)} onChange={(k) => setSize(Number(k))}
             options={RGB_UTXO_SIZES.map(n => ({ key: String(n), label: `${n.toLocaleString('en-US')} sats` }))} />
-          {caption('Network fee speed')}
+          {caption('Network fee')}
           <SegmentedTabs<Speed> scrollable={false} fill value={speed} onChange={setSpeed}
-            options={(['slow', 'normal', 'fast'] as Speed[]).map(s => ({ key: s, label: `${SPEED_LABEL[s]} · ${fees[s]}` }))} />
+            options={(['slow', 'normal', 'fast'] as Speed[]).map(s => ({ key: s, label: `${SPEED_LABEL[s]} · ${sats(createUtxosEstimate({ num, size, feeRate: fees[s], bitcoinSats: summary?.bitcoinSats }).feeSats)}` }))} />
           </>}
           <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>
-            {`${num} UTXO${num === 1 ? '' : 's'} of ${sats(size)}, about ${sats(estimate.feeSats)} in fees at ${feeRate} sat/vB${fees.live ? '' : ' (default rate)'}.`}
+            {`${num} slot${num === 1 ? '' : 's'} of ${sats(size)}, about ${sats(estimate.feeSats)} in fees${fees.live ? '' : ' (estimate)'}.`}
           </Text>
           {summary && !estimate.enough && <Callout tone="warning"
-            message={`This needs about ${sats(estimate.totalSats)} of plain bitcoin; you have ${sats(summary.bitcoinSats)}. Pick fewer or smaller UTXOs, or add bitcoin first.`} />}
+            message={`This needs about ${sats(estimate.totalSats)} of plain bitcoin; you have ${sats(summary.bitcoinSats)}. Pick fewer or smaller slots, or add bitcoin first.`} />}
           {result && <Callout tone={result.tone} message={result.message} />}
-          <Button title={`Create ${num} UTXO${num === 1 ? '' : 's'}`} onPress={create} loading={creating}
+          <Button title={`Create ${num} slot${num === 1 ? '' : 's'}`} onPress={create} loading={creating}
             disabled={creating || (!!summary && !estimate.enough)}
             icon={<Ionicons name="add-circle-outline" size={16} color={t.colors.text.primary} />} />
         </View>}

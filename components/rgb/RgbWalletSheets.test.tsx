@@ -38,25 +38,25 @@ async function confirmAlert(text: string) {
 beforeEach(() => (Alert.alert as jest.Mock).mockClear());
 
 describe('RgbUtxoSheet', () => {
-  it('splits UTXOs into holding assets, free and plain bitcoin, with allocations in asset precision', async () => {
+  it('splits slots into holding assets, free and plain bitcoin, with allocations in asset precision', async () => {
     const screen = render(<RgbUtxoSheet visible onClose={jest.fn()} adapter={device()} assets={[{ asset_id: 'rgb:usdt', ticker: 'USDT', precision: 6 }]} />);
-    await screen.findByText('View outputs (UTXOs)');
+    await screen.findByText('View slots');
     expect(screen.queryByText('2.5 USDT')).toBeNull();
-    fireEvent.press(screen.getByText('View outputs (UTXOs)'));
+    fireEvent.press(screen.getByText('View slots'));
     expect(await screen.findByText('2.5 USDT')).toBeTruthy();
     expect(screen.getAllByText('Holding assets').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('60,000 sats').length).toBe(2); // the plain-bitcoin total and its one UTXO
+    expect(screen.getAllByText('60,000 sats').length).toBe(2); // the plain-bitcoin total and its one slot
     expect(screen.getByText(/^b{8}/)).toBeTruthy();
   });
 
-  it('creates UTXOs after confirming, then reloads', async () => {
+  it('creates slots after confirming, then reloads', async () => {
     const adapter = device();
     const onCreated = jest.fn();
     const screen = render(<RgbUtxoSheet visible onClose={jest.fn()} adapter={adapter} onCreated={onCreated} />);
     await screen.findAllByText('60,000 sats');
     fireEvent.press(screen.getByText('Customize slots and fee'));
     fireEvent.press(screen.getByText('5'));
-    fireEvent.press(screen.getByText('Create 5 UTXOs'));
+    fireEvent.press(screen.getByText('Create 5 slots'));
     await confirmAlert('Create');
     expect(adapter.createRgbUtxos).toHaveBeenCalledWith({ num: 5, size: 3000, feeRate: 2, upTo: false });
     expect(onCreated).toHaveBeenCalled();
@@ -74,17 +74,17 @@ describe('RgbUtxoSheet', () => {
     fireEvent.press(screen.getAllByText('1').at(-1)!);
     fireEvent.press(screen.getAllByText('1,000 sats').at(-1)!);
     expect(screen.queryByText(/This needs about/)).toBeNull();
-    fireEvent.press(screen.getByText('Create 1 UTXO'));
+    fireEvent.press(screen.getByText('Create 1 slot'));
     await confirmAlert('Create');
     expect(screen.getByText(/Not enough bitcoin in your RGB wallet/)).toBeTruthy();
     expect(screen.queryByText(/InsufficientBitcoins/)).toBeNull();
   });
 
-  it('a node that does not share UTXOs says so', () => {
+  it('a node that does not share slots says so', () => {
     const nwc = { protocolName: 'RGB_LN', isConnected: () => true, walletType: () => 'rln', hasRlnMethod: () => false };
     const screen = render(<RgbUtxoSheet visible onClose={jest.fn()} adapter={nwc} />);
     expect(screen.getByText(/doesn’t share its UTXOs/)).toBeTruthy();
-    expect(screen.queryByText(/Create \d UTXO/)).toBeNull();
+    expect(screen.queryByText(/Create \d slot/)).toBeNull();
   });
 });
 
@@ -163,11 +163,11 @@ describe('IssueAssetSheet', () => {
     expect((adapter.account as any).issueAssetIfa).toHaveBeenCalledWith({ ticker: 'INF', name: 'Inflatable', precision: 0, amounts: [100], inflationAmounts: [50] });
   });
 
-  it('without a free colorable UTXO, offers to create some and blocks issuing', async () => {
+  it('without a free receive slot, offers to create some and blocks issuing', async () => {
     const onCreateUtxos = jest.fn();
     const screen = render(<IssueAssetSheet visible onClose={jest.fn()} adapter={device([unspents[0], unspents[2]])} onCreateUtxos={onCreateUtxos} />);
-    expect(await screen.findByText('Needs a free colorable UTXO')).toBeTruthy();
-    fireEvent.press(screen.getByText('Create UTXOs'));
+    expect(await screen.findByText('Needs a free receive slot')).toBeTruthy();
+    fireEvent.press(screen.getByText('Create receive slots'));
     expect(onCreateUtxos).toHaveBeenCalled();
   });
 
@@ -180,7 +180,7 @@ describe('IssueAssetSheet', () => {
     fireEvent.changeText(screen.getByLabelText('Supply'), '5');
     fireEvent.press(screen.getByText('Issue 5 PTS'));
     await confirmAlert('Issue');
-    expect(screen.getByText(/You need a free colorable UTXO first/)).toBeTruthy();
+    expect(screen.getByText(/You need a free receive slot first/)).toBeTruthy();
     expect(screen.queryByText(/InsufficientAllocationSlots/)).toBeNull();
   });
 

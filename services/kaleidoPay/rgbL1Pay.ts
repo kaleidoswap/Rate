@@ -71,7 +71,7 @@ export function rgbL1PayAdapter(l1: any, feeRate: () => number | undefined = () 
         // Transport errors and timeouts must remain unknown: never auto-resend.
         if (error?.code === 'RGB_INVOICE_INVALID') throw new PaymentNotSentError(error.message);
         if (error?.code === 'ERR_RGB_INSUFFICIENT_ALLOCATION_SLOTS') {
-          throw new PaymentNotSentError('Your RGB wallet needs a free output for asset change. Open RGB wallet tools → UTXOs, create outputs and wait for confirmation.');
+          throw new PaymentNotSentError('Your RGB wallet needs a free receive slot for asset change. Open RGB wallet tools → slots, create some and wait for confirmation.');
         }
         if (error?.code === 'ERR_RGB_INSUFFICIENT_BITCOINS') {
           throw new PaymentNotSentError('Not enough bitcoin for the RGB transfer and network fee. Add bitcoin to this RGB wallet on the selected network.');
@@ -82,8 +82,8 @@ export function rgbL1PayAdapter(l1: any, feeRate: () => number | undefined = () 
         if (error?.code === 'ERR_RGB_INVALID_TRANSPORT_ENDPOINTS') {
           throw new PaymentNotSentError('The invoice’s RGB delivery service could not be reached. Check your connection and ask the recipient for a fresh invoice.');
         }
-        const code = typeof error?.code === 'string' && /^ERR_RGB_[A-Z_]+$/.test(error.code) ? ` (${error.code})` : '';
-        throw new PaymentUncertainError(`The RGB wallet could not confirm submission${code}. Check your connection and verify this payment in Activity. Don’t pay this twice until its status is known.`);
+        // The ERR_RGB_* code belongs to the diagnostics report, not to the user.
+        throw new PaymentUncertainError(`The RGB wallet could not confirm submission. Check your connection and verify this payment in Activity. Don’t pay this twice until its status is known.`);
       }
     },
     listAssets: () => l1.listAssets(),

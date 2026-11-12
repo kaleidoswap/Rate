@@ -716,8 +716,11 @@ export default function SendScreen({ navigation, route }: Props) {
         <Text style={text}>Bitcoin network fee: {quote ? `approximately ${quote.feeSat} sats` : 'Not available'}</Text>
         <Text style={small}>The recipient receives {amountLabel}. The network fee is paid separately in bitcoin.</Text>
       </View>
-      {feeOptions && <SegmentedTabs<RgbFeeSpeed> scrollable={false} fill value={feeSpeed} onChange={chooseSpeed}
-        options={feeOptions.map(o => ({ key: o.speed, label: `${SPEED_LABEL[o.speed]} · ${formatSats(o.feeSat)}` }))} />}
+      {feeOptions && <View style={{ gap: t.spacing[2] }}>
+        <SegmentedTabs<RgbFeeSpeed> scrollable={false} fill value={feeSpeed} onChange={chooseSpeed}
+          options={feeOptions.map(o => ({ key: o.speed, label: `${SPEED_LABEL[o.speed]} · ${formatSats(o.feeSat)}` }))} />
+        <Text style={small}>Slower costs less, faster confirms sooner.</Text>
+      </View>}
       {offers.filter(o => o.unavailable).map(o => <Text key={o.id} accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500] }}>{o.unavailable}</Text>)}
       {expired && <Text style={muted}>Refresh the transfer details before sending.</Text>}
       {busy && <ActivityIndicator color={t.colors.primary[500]} />}

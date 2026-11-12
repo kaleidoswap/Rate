@@ -106,9 +106,9 @@ describe('UTXOs', () => {
 });
 
 describe('rgbReceiveErrorMessage', () => {
-  it('explains a missing UTXO, pointing Advanced users at the fix', () => {
-    expect(rgbReceiveErrorMessage('InsufficientAllocationSlots', { advanced: true, onDevice: true })).toMatch(/^Your RGB wallet .*Create UTXOs under Advanced, or switch the invoice type to Witness/);
+  it('explains a missing receive slot, pointing Advanced users at the fix', () => {
+    expect(rgbReceiveErrorMessage('InsufficientAllocationSlots', { advanced: true, onDevice: true })).toMatch(/^Your RGB wallet .*Create slots under Advanced, or switch to a Standard invoice/);
     expect(rgbReceiveErrorMessage('No uncolored UTXOs are available', { advanced: false, onDevice: false })).toMatch(/^Your RGB Lightning node .*or receive over Lightning\.$/);
-    expect(rgbReceiveErrorMessage('timeout', { advanced: true, onDevice: true })).toBe('timeout');
+    expect(rgbReceiveErrorMessage('timeout', { advanced: true, onDevice: true })).toMatch(/network|timeout/i);
   });
 });

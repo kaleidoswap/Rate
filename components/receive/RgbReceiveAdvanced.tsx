@@ -25,7 +25,7 @@ const expiryLabel = (seconds: number) =>
 export function rgbAdvancedSummary(options: RgbReceiveOptions, support: RgbReceiveSupport): string {
   if (isDefaultRgbOptions(options)) return 'Default';
   return [
-    support.invoiceKind && options.kind === 'blinded' ? 'Blinded' : null,
+    support.invoiceKind && options.kind === 'blinded' ? 'Private' : null,
     support.expiry && options.durationSeconds ? expiryLabel(options.durationSeconds) : null,
     support.minConfirmations && options.minConfirmations !== 1 ? `${options.minConfirmations} confirmations` : null,
   ].filter(Boolean).join(' · ') || 'Default';
@@ -78,15 +78,15 @@ export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySe
         {support.invoiceKind && <View style={{ gap: t.spacing[2] }}>
           {caption('Invoice type')}
           <SegmentedTabs<RgbInvoiceKind> scrollable={false} fill
-            options={[{ key: 'witness', label: 'Witness' }, { key: 'blinded', label: 'Blinded' }]}
+            options={[{ key: 'witness', label: 'Standard' }, { key: 'blinded', label: 'Private' }]}
             value={options.kind} onChange={(kind) => onChange({ ...options, kind })} />
           {hint(options.kind === 'witness'
-            ? 'The sender creates the output the asset lands on and adds a little bitcoin for it. Nothing to prepare here.'
-            : 'The asset lands on one of your free UTXOs, and the sender never learns which. Needs a free UTXO.')}
+            ? 'Simplest: the sender covers the receiving output. Nothing to prepare here.'
+            : 'The asset lands on one of your free receive slots, and the sender never learns which. Needs a free slot.')}
           {options.kind === 'blinded' && counts?.free === 0 && <Callout tone="warning"
             message={support.createUtxos
-              ? 'No free UTXO to receive into. Create some below, or use Witness.'
-              : 'No free UTXO to receive into. Use Witness, or create UTXOs on your node.'} />}
+              ? 'No free receive slot. Create some below, or switch to Standard.'
+              : 'No free receive slot. Switch to Standard, or create slots on your node.'} />}
         </View>}
 
         {support.expiry && <View style={{ gap: t.spacing[2] }}>
@@ -108,25 +108,25 @@ export function RgbReceiveAdvanced({ support, options, onChange, requestExpirySe
 
         {support.listUtxos && <View style={{ gap: t.spacing[2] }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            {caption('UTXOs')}
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh UTXOs" onPress={onLoadUtxos} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            {caption('Receive slots')}
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Refresh receive slots" onPress={onLoadUtxos} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
               <Ionicons name="refresh" size={14} color={t.colors.text.tertiary} />
             </TouchableOpacity>
           </View>
           {utxos?.loading && <ActivityIndicator size="small" color={t.colors.primary[500]} />}
           {!utxos?.loading && utxos?.error && hint(utxos.error, true)}
           {!utxos?.loading && counts && <>
-            {hint(`${counts.free} free of ${counts.colorable} colorable UTXO${counts.colorable === 1 ? '' : 's'}`, counts.free === 0 && options.kind === 'blinded')}
-            {utxos!.list!.filter(u => u.colorable).slice(0, 6).map(u => (
+            {hint(`${counts.free} free of ${counts.colorable} receive slot${counts.colorable === 1 ? '' : 's'}`, counts.free === 0 && options.kind === 'blinded')}
+            {utxos!.list!.filter(u => u.colorable).slice(0, 6).map((u, i) => (
               <View key={u.outpoint} style={{ flexDirection: 'row', justifyContent: 'space-between', gap: t.spacing[2] }}>
-                <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.xs, flexShrink: 1 }} numberOfLines={1} ellipsizeMode="middle">{u.outpoint}</Text>
+                <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.xs, flexShrink: 1 }}>Slot {i + 1}</Text>
                 <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs }}>
                   {u.sats.toLocaleString('en-US')} sats · {u.allocations || u.pending ? 'in use' : 'free'}
                 </Text>
               </View>
             ))}
           </>}
-          {support.createUtxos && onCreateUtxos && <Button title="Create UTXOs" variant="secondary" size="sm" onPress={onCreateUtxos}
+          {support.createUtxos && onCreateUtxos && <Button title="Create receive slots" variant="secondary" size="sm" onPress={onCreateUtxos}
             icon={<Ionicons name="add-circle-outline" size={16} color={t.colors.text.primary} />} />}
         </View>}
       </View>}

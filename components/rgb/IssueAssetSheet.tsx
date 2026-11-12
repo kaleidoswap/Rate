@@ -162,9 +162,9 @@ export function IssueAssetSheet({ visible, onClose, adapter: given, onIssued, on
           options={schemas.map(s => ({ key: s, label: `${SCHEMA_LABEL[s]} (${s})` }))} />}
         <Text style={{ color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>{SCHEMA_HINT[schema]}</Text>
 
-        {freeUtxos === 0 && <Callout tone="warning" title="Needs a free colorable UTXO"
-          message={support.createUtxos ? 'The new asset is placed on a free colorable UTXO. Create some, wait for them to confirm, then issue.' : 'The new asset is placed on a free colorable UTXO, and there is none.'}>
-          {support.createUtxos && onCreateUtxos && <Button title="Create UTXOs" variant="secondary" size="sm" onPress={onCreateUtxos} style={{ marginTop: t.spacing[2] }} />}
+        {freeUtxos === 0 && <Callout tone="warning" title="Needs a free receive slot"
+          message={support.createUtxos ? 'The new asset is placed on a free receive slot. Create some, wait for them to confirm, then issue.' : 'The new asset is placed on a free receive slot, and there is none.'}>
+          {support.createUtxos && onCreateUtxos && <Button title="Create receive slots" variant="secondary" size="sm" onPress={onCreateUtxos} style={{ marginTop: t.spacing[2] }} />}
         </Callout>}
 
         {WITH_TICKER.includes(schema) && <Input label="Ticker" placeholder={schema === 'UDA' ? 'e.g. ART1' : 'e.g. PTS'} autoCapitalize="characters" autoCorrect={false} maxLength={8}

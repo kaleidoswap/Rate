@@ -1474,7 +1474,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
       const list = await runReceiveOperation('List RGB UTXOs', () => listRgbUtxos(adapter), 15_000);
       setRgbUtxos({ loading: false, list });
     } catch {
-      setRgbUtxos({ loading: false, error: 'Couldn’t load UTXOs. Try again.' });
+      setRgbUtxos({ loading: false, error: 'Couldn’t load your receive slots. Try again.' });
     }
   };
 
@@ -2009,7 +2009,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         visible={showCreateUtxos}
         onClose={() => setShowCreateUtxos(false)}
         assets={rgbAssets}
-        reason="A blinded invoice needs a free colorable UTXO to receive into."
+        reason="A private invoice needs a free receive slot to receive into."
         onCreated={() => { void loadRgbUtxos(); }}
       />
 

@@ -245,7 +245,7 @@ export function normalizeRgbTransfers(raw: unknown): RgbTransfer[] {
  */
 export function rgbOnchainKindLabel(kind: unknown): string | null {
   const k = String(kind ?? '').replace(/[\s_-]/g, '').toLowerCase();
-  if (k === 'createutxos') return 'UTXOs created';
+  if (k === 'createutxos') return 'Slots created';
   if (k === 'drain') return 'Bitcoin drained';
   return null;
 }
@@ -422,15 +422,15 @@ export function validateDrainAddress(address: string, addressNetworks: string[] 
 }
 
 /** Plain wording for the ways issuing, creating UTXOs or cancelling can fail. */
-export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' | 'cancel' | 'delete' | 'inflate' | 'drain'): string {
+export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' | 'cancel' | 'delete' | 'inflate' | 'drain' | 'receive' | 'connect'): string {
   const message = error instanceof Error ? error.message : String(error ?? '');
   if (/InsufficientAllocationSlots|No uncolored UTXOs|NoAvailableUtxos|no colorable UTXO/i.test(message)) {
-    return 'You need a free colorable UTXO first. Create some, wait for them to confirm, then try again.';
+    return 'You need a free receive slot first. Create some, wait for them to confirm, then try again.';
   }
   if (/InsufficientBitcoins|insufficient funds|InsufficientFunds|not enough/i.test(message)) {
     return 'Not enough bitcoin in your RGB wallet to pay for this. Add some on-chain bitcoin first.';
   }
-  if (/AllocationsAlreadyAvailable/i.test(message)) return 'You already have enough free UTXOs.';
+    if (/AllocationsAlreadyAvailable/i.test(message)) return 'You already have enough free slots.';
   if (/CannotFailBatchTransfer/i.test(message)) return 'This transfer can no longer be cancelled.';
   if (/CannotDeleteBatchTransfer/i.test(message)) return 'Only failed transfers can be removed.';
   if (/CannotUseIfaOnMainnet/i.test(message)) return 'Inflatable assets aren’t available on mainnet yet.';
@@ -443,7 +443,7 @@ export function rgbWalletErrorMessage(error: unknown, action: 'issue' | 'utxos' 
   if (/OutputBelowDustLimit/i.test(message)) return 'Each UTXO must hold more bitcoin. Pick a bigger size.';
   if (/timed out|timeout|Network|Indexer|Proxy|fetch/i.test(message)) return 'Couldn’t reach the network. Check your connection and try again.';
   if (action === 'issue') return 'The asset couldn’t be issued. Try again.';
-  if (action === 'utxos') return 'The UTXOs couldn’t be created. Try again.';
+  if (action === 'utxos') return 'The slots couldn’t be created. Try again.';
   if (action === 'delete') return 'The transfer couldn’t be removed. Try again.';
   if (action === 'inflate') return 'The new supply couldn’t be issued. Try again.';
   if (action === 'drain') return 'The bitcoin couldn’t be sent. Nothing left your wallet. Try again.';

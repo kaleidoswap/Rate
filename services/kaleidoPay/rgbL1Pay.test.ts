@@ -212,7 +212,7 @@ test.each([
 });
 
 test.each([
-  ['ERR_RGB_INSUFFICIENT_ALLOCATION_SLOTS', /UTXOs/],
+  ['ERR_RGB_INSUFFICIENT_ALLOCATION_SLOTS', /free receive slot/],
   ['ERR_RGB_INSUFFICIENT_BITCOINS', /Not enough bitcoin/],
   ['RGB_INVOICE_INVALID', /expired/],
 ])('definite refusal is not an uncertain payment: %s', async (code, message) => {
@@ -229,7 +229,7 @@ test('a transport failure is never classified as definitely unpaid or retried', 
   const wallet = l1();
   const error = Object.assign(new Error('connection lost'), { code: 'ERR_RGB_PROXY' });
   wallet.sendAsset.mockRejectedValueOnce(error);
-  await expect(rgbL1PayAdapter(wallet).sendAsset!({ asset_id: USDT.id, recipientId: 'invoice', amount: 25 })).rejects.toThrow(/ERR_RGB_PROXY.*Check your connection/);
+  await expect(rgbL1PayAdapter(wallet).sendAsset!({ asset_id: USDT.id, recipientId: 'invoice', amount: 25 })).rejects.toThrow(/could not confirm submission.*Check your connection/);
   expect(wallet.sendAsset).toHaveBeenCalledTimes(1);
 });
 
