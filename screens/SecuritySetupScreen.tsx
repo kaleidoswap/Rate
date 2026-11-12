@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { theme } from '../theme';
+import { prismoText } from '../localization/prismo';
 import { Button, ScreenHeader } from '../components';
 import SecurityService from '../services/SecurityService';
 

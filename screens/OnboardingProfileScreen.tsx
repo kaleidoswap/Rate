@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, ScrollView, Switch, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppTheme } from '../theme/ThemeProvider';
+import { prismoText } from '../localization/prismo';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -72,12 +73,12 @@ export default function OnboardingProfileScreen({ navigation, route }: { navigat
         {preview && <Text style={{ ...text, color: t.colors.warning[500] }}>PREVIEW · No profile published</Text>}
         <View style={{ alignItems: 'center', gap: t.spacing[3], paddingTop: t.spacing[8] }}>
           <ProfileAvatar name={name} uri={profile?.picture} size={80} />
-          <Text accessibilityRole="header" style={{ ...text, fontSize: t.typography.fontSize['2xl'], fontWeight: '700' }}>Your profile</Text>
+          <Text accessibilityRole="header" style={{ ...text, fontSize: t.typography.fontSize['2xl'], fontWeight: '700' }}>{prismoText('Your profile')}</Text>
           <Text style={{ ...text, color: t.colors.text.secondary, textAlign: 'center' }}>{identity?.fromWallet ? 'One recovery phrase for your wallet and Nostr.' : identity ? 'Using your existing Nostr identity and its backup.' : 'Preparing your identity…'}</Text>
         </View>
         <Input label="Username" accessibilityLabel="Username" value={name} onChangeText={setName} autoCapitalize="none" autoCorrect={false} placeholder="yourname" maxLength={32} editable={!busy} />
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[3] }}>
-          <View style={{ flex: 1 }}><Text style={text}>Get a Lightning address</Text><Text style={{ ...text, color: t.colors.text.secondary }}>{username || 'yourname'}@{KALEIDOSWAP_ME_DOMAIN}</Text></View>
+          <View style={{ flex: 1 }}><Text style={text}>{prismoText('Get a Lightning address')}</Text><Text style={{ ...text, color: t.colors.text.secondary }}>{username || 'yourname'}@{KALEIDOSWAP_ME_DOMAIN}</Text></View>
           <Switch accessibilityLabel="Get a Lightning address" value={withAddress} disabled={busy} onValueChange={setWithAddress} />
         </View>
         {!!availability && <Text accessibilityLiveRegion="polite" style={{ ...text, color: t.colors.text.secondary }}>{availability}</Text>}
@@ -85,7 +86,7 @@ export default function OnboardingProfileScreen({ navigation, route }: { navigat
         {!!error && <Text accessibilityLiveRegion="polite" style={{ ...text, color: t.colors.warning[500] }}>{error}</Text>}
         <Text style={{ ...text, color: t.colors.text.secondary, fontSize: t.typography.fontSize.sm }}>Your profile is public on Nostr.</Text>
         <Button title={busy ? 'Creating profile…' : 'Create profile'} onPress={save} loading={busy} disabled={busy || !username} />
-        <Button title="Not now" variant="ghost" disabled={busy} onPress={() => navigation.replace('Dashboard')} />
+        <Button title={prismoText('Not now')} variant="ghost" disabled={busy} onPress={() => navigation.replace('Dashboard')} />
       </ScrollView>
     </KeyboardAvoidingView>
   </SafeAreaView>;

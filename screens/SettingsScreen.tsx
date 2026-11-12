@@ -40,7 +40,7 @@ import { useAppTheme } from '../theme/ThemeProvider';
 import { protocolColor } from '../theme';
 import DatabaseService from '../services/DatabaseService';
 import { getStoredHandle } from '../services/kaleidoswapMe';
-import { syncPaymentPush } from '../services/paymentNotifications';
+import { syncPaymentPush, setPaymentNotificationsEnabled, scheduleBackgroundPaymentCheck, defineBackgroundPaymentCheck } from '../services/paymentNotifications';
 import SecurityService, { type SecuritySettings } from '../services/SecurityService';
 import { RevealMnemonicModal } from '../components/RevealMnemonicModal';
 import { initializeProtocols, protocolManager, rgbAccountAdapter, rgbNodeConnected } from '../services/protocols';
@@ -198,6 +198,8 @@ export default function SettingsScreen({ navigation }: Props) {
   }, [activeWallet?.id]));
   const toggleTransactionNotifications = (on: boolean) => {
     dispatch(setTransactionNotifications(on));
+    void setPaymentNotificationsEnabled(on).catch(e => console.warn('[push] setting failed', e));
+    void scheduleBackgroundPaymentCheck(on).catch(e => console.warn('[push] schedule failed', e));
     if (activeWallet?.id != null) void syncPaymentPush(activeWallet.id, on).catch(e => console.warn('[push] sync failed', e));
   };
   const isWalletUnlocked = useAppSelector((state: RootState) => state.wallet?.isUnlocked);
