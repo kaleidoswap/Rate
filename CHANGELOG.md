@@ -15,6 +15,17 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   gains an "RGB" tab when the RGB wallet is connected — no more digging
   through options → other assets → receive an RGB asset (three taps became
   one).
+- **The assistant's tab is Prismo.** The bottom-bar tab "Mind" becomes
+  "Prismo", completing the one-name work across Settings, chat, voice and
+  onboarding.
+- **Onboarding speaks Italian.** The wallet setup, security and profile
+  screens follow the app language: titles, buttons and descriptions render
+  through the same localization dictionary the assistant uses.
+- **Deposit notifications wake up.** The payment-notification toggle now
+  registers the expo background task (a balance check every ~15 minutes
+  that raises a local "Payment received" notification while the app is
+  backgrounded) and the app defines the task at start. Previously the
+  infrastructure existed but was never wired.
 
 ## [0.14.0] — 2026-11-12
 

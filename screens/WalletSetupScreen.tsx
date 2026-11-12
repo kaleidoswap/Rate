@@ -25,6 +25,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { createNewWallet, setInitialized, setUnlocked } from '../store/slices/walletSlice';
 import { setDisclosureLevel } from '../store/slices/settingsSlice';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
+import { prismoText } from '../localization/prismo';
 import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
 import { PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
@@ -424,7 +425,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <Text style={styles.stepTitle}>Create Your Wallet</Text>
+      <Text style={styles.stepTitle}>{prismoText('Create Your Wallet')}</Text>
       <Text style={styles.stepDescription}>
         Name your wallet, save your recovery phrase, and you’re ready to receive bitcoin.
       </Text>
@@ -462,7 +463,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           animateTransition('rln');
         }}
       >
-        <Text style={styles.skipButtonText}>Advanced setup · choose accounts</Text>
+        <Text style={styles.skipButtonText}>{prismoText('Advanced setup · choose accounts')}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.skipButton}
@@ -470,7 +471,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         accessibilityLabel="Restore an existing wallet from its recovery phrase"
         onPress={() => navigation.navigate('WalletRestore')}
       >
-        <Text style={[styles.skipButtonText, { color: theme.colors.primary[500] }]}>I already have a wallet · Restore</Text>
+        <Text style={[styles.skipButtonText, { color: theme.colors.primary[500] }]}>{prismoText('I already have a wallet · Restore')}</Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -489,7 +490,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <Text style={styles.stepTitle}>Choose accounts</Text>
+      <Text style={styles.stepTitle}>{prismoText('Choose accounts')}</Text>
       <Text style={styles.stepDescription}>
         Pick the layers this wallet uses. You can turn them on or off anytime in Settings.
       </Text>
@@ -541,7 +542,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <Text style={styles.stepTitle}>Lightning wallet</Text>
+      <Text style={styles.stepTitle}>{prismoText('Lightning wallet')}</Text>
       <Text style={styles.stepDescription}>
         Connect any Lightning wallet over Nostr Wallet Connect. Compatible RGB Lightning
         nodes also unlock RGB assets and channel management.
@@ -622,7 +623,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           </View>
         </View>
 
-        <Text style={styles.stepTitle}>Backup Recovery Phrase</Text>
+        <Text style={styles.stepTitle}>{prismoText('Backup Recovery Phrase')}</Text>
         <Text style={styles.stepDescription}>
           Write down these 12 words in order. You'll need them to restore your wallet if you lose access.
         </Text>
@@ -687,7 +688,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
         </View>
       </View>
 
-      <Text style={styles.stepTitle}>Check your backup</Text>
+      <Text style={styles.stepTitle}>{prismoText('Check your backup')}</Text>
       <Card style={styles.confirmCard}>
         <BackupWordCheck answers={backupAnswers} onChange={setBackupAnswers} />
       </Card>

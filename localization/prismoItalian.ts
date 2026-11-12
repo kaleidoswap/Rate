@@ -268,5 +268,23 @@ export const prismoItalian: Record<string, string> = {
   "Delete unused models": "Elimina modelli inutilizzati",
   "Delete unused models?": "Eliminare i modelli inutilizzati?",
   "Removes downloaded models you are not using. You can download them again later.": "Rimuove i modelli scaricati che non stai usando. Potrai scaricarli di nuovo in seguito.",
-  "Delete all saved memories": "Elimina tutti i ricordi salvati"
+  "Delete all saved memories": "Elimina tutti i ricordi salvati",
+
+  // Onboarding
+  "Create Your Wallet": "Crea il tuo wallet",
+  "Choose accounts": "Scegli gli account",
+  "Lightning wallet": "Wallet Lightning",
+  "Backup Recovery Phrase": "Salva la frase di recupero",
+  "Check your backup": "Verifica il tuo backup",
+  "I've Backed It Up": "L'ho salvata",
+  "Create Wallet": "Crea wallet",
+  "Advanced setup · choose accounts": "Configurazione avanzata · scegli gli account",
+  "I already have a wallet · Restore": "Ho già un wallet · Ripristina",
+  "Protect your wallet": "Proteggi il tuo wallet",
+  "Choose how to unlock it.": "Scegli come sbloccarlo.",
+  "Your profile": "Il tuo profilo",
+  "Get a Lightning address": "Ottieni un indirizzo Lightning",
+  "Create profile": "Crea profilo",
+  "Creating profile…": "Creazione profilo…",
+  "Use a PIN": "Usa un PIN"
 };

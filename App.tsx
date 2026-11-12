@@ -14,6 +14,7 @@ import { View, Text, ActivityIndicator, Platform, SafeAreaView, Linking } from '
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { WalletTabBar } from './components/WalletTabBar';
 import { MindCharacterBadge } from './components/mind/MindCharacter';
+import { defineBackgroundPaymentCheck, scheduleBackgroundPaymentCheck } from './services/paymentNotifications';
 import { ThemeProvider } from '@react-navigation/native';
 import { BrandLoading } from './components/brand/BrandLoading';
 import { BrandIntro } from './components/brand/BrandIntro';
@@ -198,10 +199,10 @@ function DashboardTabs() {
         }}
       />
       <Tab.Screen
-        name="Mind"
-        component={MindTabScreen}
+        name="Prismo"
+        component={AIAssistantScreen}
         options={{
-          tabBarLabel: 'Mind',
+          tabBarLabel: 'Prismo',
           tabBarIcon: ({ focused, color }: TabBarIconProps) => (
             <MindCharacterBadge size={24} color={color} focused={focused} />
           ),
@@ -330,6 +331,11 @@ export default function App() {
   const [fontsLoaded] = useFonts(kaleidoFonts);
 
   React.useEffect(() => {
+    // The background balance check and its task definition live outside Redux
+    // (a background task has no store); both are set up here, at app start.
+    defineBackgroundPaymentCheck();
+    void scheduleBackgroundPaymentCheck(true).catch(e => console.warn('[push] could not schedule background check', e));
+
     // Initialize network monitoring
     const networkService = NetworkService.getInstance();
     networkService.initialize().catch(error => {
