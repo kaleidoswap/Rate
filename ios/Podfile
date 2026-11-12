@@ -52,6 +52,11 @@ target 'KaleidoSwap' do
     :privacy_file_aggregation_enabled => podfile_properties['apple.privacyManifestAggregationEnabled'] != 'false',
   )
 
+  # Spark SDK 0.15's gRPC-Swift brings SwiftNIO C targets that need module
+  # maps when built as static libraries. Without this, pod install warns
+  # and xcodebuild fails on Swift imports.
+  use_modular_headers!
+
   post_install do |installer|
     react_native_post_install(
       installer,
@@ -66,6 +71,16 @@ target 'KaleidoSwap' do
         current = build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
         if current && Gem::Version.new(current) < Gem::Version.new(minimum_ios)
           build_config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = minimum_ios
+        end
+      end
+    end
+    # Spark SDK 0.15's gRPC-Swift pulls SwiftNIO C targets that need module
+    # maps to be importable from Swift. CocoaPods warns; Xcode fails without.
+    %w[CNIOAtomics CNIODarwin CNIOLinux CNIOWindows CGRPCZlib].each do |c_target|
+      installer.pods_project.targets.each do |t|
+        next unless t.name == c_target
+        t.build_configurations.each do |bc|
+          bc.build_settings['DEFINES_MODULE'] = 'YES'
         end
       end
     end
