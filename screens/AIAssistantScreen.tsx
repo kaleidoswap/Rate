@@ -1,7 +1,6 @@
 import { prismoText } from '../localization/prismo';
 import { PrismoAnimatedCharacter } from '../components/mind/PrismoAnimatedCharacter';
 import { VoiceModeIcon } from '../components/mind/VoiceModeIcon';
-import { useAgentPaymentFeedback } from "../components/mind/useAgentPaymentFeedback";
 // screens/AIAssistantScreen.tsx
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
@@ -84,7 +83,7 @@ const skillRouteHint = (skill: Skill): string =>
     : skill.name.replace(/-/g, ' '));
 
 export default function AIAssistantScreen({ navigation, route }: Props) {
-  const paymentConfirmed = useAgentPaymentFeedback();
+  // The agent-payment haptic/flash is wired in the confirm modal itself.
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
@@ -704,7 +703,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             <TouchableOpacity
               onPress={openMindSetup}
               style={styles.modelRetry}
-              accessibilityLabel={prismoText("Set up Agent")}
+              accessibilityLabel={prismoText("Set up Prismo")}
             >
               <Text style={styles.modelRetryText}>{prismoText("Set up")}</Text>
             </TouchableOpacity>
@@ -729,7 +728,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
             <TouchableOpacity
               onPress={() => dispatch(setAiMode('off'))}
               style={[styles.modelRetry, styles.modelRetryGhost]}
-              accessibilityLabel={prismoText("Turn off Agent")}
+              accessibilityLabel={prismoText("Turn off Prismo")}
             >
               <Text style={styles.modelRetryText}>{prismoText("Off")}</Text>
             </TouchableOpacity>
@@ -892,7 +891,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
                 <Ionicons name="chevron-forward" size={18} color={theme.colors.text.tertiary} />
               </TouchableOpacity>
             ))}
-            <Text style={{ color: theme.colors.text.secondary, fontSize: 12, paddingVertical: 12 }}>{prismoText("Agent is experimental. Review important details.")}</Text>
+            <Text style={{ color: theme.colors.text.secondary, fontSize: 12, paddingVertical: 12 }}>{prismoText("Prismo is experimental. Review important details.")}</Text>
           </View>}
 
       <View style={styles.chatContainer}>

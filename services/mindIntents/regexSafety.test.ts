@@ -4,7 +4,7 @@ import path from 'path';
 const ROOT = path.resolve(__dirname, '../..');
 const FILES = [
   'services/mindIntents', 'services/mindExplain.ts', 'services/insights.ts',
-  'components/mind', 'hooks/useIntentRunner.ts', 'hooks/useInsights.ts',
+  'components/mind', 'hooks/useInsights.ts',
 ].flatMap((p) => {
   const abs = path.join(ROOT, p);
   return fs.statSync(abs).isDirectory()

@@ -121,7 +121,7 @@ export function payFromAgentWallet(req: AgentPayRequest, deps: AgentPayDeps): Pr
 async function payNow(req: AgentPayRequest, deps: AgentPayDeps): Promise<AgentPayResult> {
   const now = deps.now ?? Date.now;
   const { store, wallet } = deps;
-  if (!store || !wallet || !(await store.isEnabled())) return fail('disabled', 'The Agent wallet is off. Turn it on in Settings, KaleidoMind.');
+  if (!store || !wallet || !(await store.isEnabled())) return fail('disabled', 'The Agent wallet is off. Turn it on in Settings, Prismo.');
 
   const service = normalizeService(req.service);
   const invoice = String(req.invoice ?? '').trim();

@@ -212,6 +212,6 @@ describe('runIntent', () => {
   test('anything else gets examples and a hint to turn on KaleidoMind', async () => {
     const r = await run('tell me a joke');
     expect(r.type).toBe('none');
-    expect((r as any).message).toMatch(/Turn on KaleidoMind/);
+    expect((r as any).message).toMatch(/Turn on Prismo/);
   });
 });

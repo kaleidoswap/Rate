@@ -39,6 +39,8 @@ import { protocolManager } from '../services/protocols';
 import { kaleidoClientManager, flashnetClientManager } from '../services/protocols';
 import { syncAssets } from '../store/slices/assetsSlice';
 import { getAssetDisplayBalance, resolvePrecision } from '../utils/assetAmount';
+import { useFiatRates } from '../hooks/useFiatRates';
+import { formatSatoshisToUSD } from '../utils/bitcoinUnits';
 import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
 import { useAssetInventory } from '../hooks/useAssetInventory';
 import {
@@ -81,6 +83,7 @@ interface Asset {
 
 export default function SwapScreen({ navigation, route }: Props) {
   const dispatch = useAppDispatch();
+  const usdRate = useFiatRates().usd;
   const { height: screenHeight } = useWindowDimensions();
   const swapState = useAppSelector((state: RootState) => state.swap);
   const walletState = useAppSelector((state: RootState) => state.wallet);
@@ -976,12 +979,20 @@ export default function SwapScreen({ navigation, route }: Props) {
           {swapState.isQuoteLoading ? (
             <ActivityIndicator color={theme.colors.text.secondary} style={{ alignSelf: 'flex-start', marginLeft: 4, height: 48 }} />
           ) : (
-            <Text style={[
-              styles.amountText,
-              !swapState.currentQuote?.to_amount && styles.amountTextPlaceholder
-            ]}>
-              {swapState.currentQuote?.to_amount ? formatDisplayAmount(swapState.currentQuote.to_amount, swapState.toAsset) : '0'}
-            </Text>
+            <View>
+              <Text style={[
+                styles.amountText,
+                !swapState.currentQuote?.to_amount && styles.amountTextPlaceholder
+              ]}>
+                {swapState.currentQuote?.to_amount ? formatDisplayAmount(swapState.currentQuote.to_amount, swapState.toAsset) : '0'}
+                <Text style={styles.amountUnit}> {unitLabelFor(swapState.toAsset)}</Text>
+              </Text>
+              {swapState.currentQuote?.to_amount != null && !!usdRate && (
+                <Text style={styles.fiatHint}>
+                  ≈ ${isBtcTicker(swapState.toAsset) ? formatSatoshisToUSD(btcDisplayToSats(swapState.currentQuote.to_amount), usdRate) : (swapState.currentQuote.to_amount * usdRate / 1e8).toFixed(2)}
+                </Text>
+              )}
+            </View>
           )}
 
           {renderTokenButton('to')}
@@ -1005,7 +1016,7 @@ export default function SwapScreen({ navigation, route }: Props) {
 
       {/* Main Action Button */}
       <Button
-        title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : Number(swapState.fromAmount) > 0 ? 'Refresh quotes' : 'Enter Amount')}
+        title={swapState.isQuoteLoading ? 'Comparing quotes…' : (swapState.currentQuote ? 'Review swap' : Number(swapState.fromAmount) > 0 ? 'Refresh quotes' : 'Enter amount')}
         onPress={() => {
           if (!swapState.currentQuote) { void getQuote(); return; }
           if (liquidityShortfall) return;
@@ -1346,58 +1357,6 @@ export default function SwapScreen({ navigation, route }: Props) {
     </Sheet>
   );
 
-  const renderExecutionStatus = () => {
-    if (!swapState.currentExecution) return null;
-
-    return (
-      <Card style={styles.statusCard}>
-        <Text style={styles.statusTitle}>Swap Status</Text>
-        <View style={styles.statusContent}>
-          <View style={styles.statusRow}>
-            <Text style={styles.statusLabel}>Status:</Text>
-            <Text style={[styles.statusValue, { color: swapStatusVisual(swapState.currentExecution.status).color }]}>
-              {swapStatusVisual(swapState.currentExecution.status).label}
-            </Text>
-          </View>
-
-          {swapState.currentExecution.status === 'failed' && !!swapState.currentExecution.error_message && (
-            <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>Reason:</Text>
-              <Text style={[styles.statusValue, { color: theme.colors.error[500], flexShrink: 1, textAlign: 'right' }]}>
-                {swapState.currentExecution.error_message}
-              </Text>
-            </View>
-          )}
-
-          {swapState.currentExecution.txid && (
-            <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>Transaction:</Text>
-              <Text style={styles.statusValue}>
-                {swapState.currentExecution.txid.substring(0, 16)}...
-              </Text>
-            </View>
-          )}
-
-          {swapState.currentExecution.status === 'executing' && (
-            <View style={styles.statusProgress}>
-              <ActivityIndicator size="small" color={theme.colors.primary[500]} />
-              <Text style={styles.statusProgressText}>Processing swap...</Text>
-            </View>
-          )}
-        </View>
-
-        {(swapState.currentExecution.status === 'completed' || swapState.currentExecution.status === 'failed') && (
-          <Button
-            title="New Swap"
-            variant="primary"
-            onPress={() => dispatch(resetSwap())}
-            style={styles.newSwapButton}
-          />
-        )}
-      </Card>
-    );
-  };
-
   return (
     <View style={styles.container}>
       <MainHeader
@@ -1434,12 +1393,13 @@ export default function SwapScreen({ navigation, route }: Props) {
           </Card>
         )}
 
-        <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('MakerRoutes')} style={{ minHeight: 48, padding: theme.spacing[4], marginBottom: theme.spacing[4], borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary }}>
-          <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Explore maker routes →</Text>
-          <Text style={{ color: theme.colors.text.secondary }}>Bitcoin, Lightning, Arkade and supported assets</Text>
-        </TouchableOpacity>
+        {policy.showRouteSelector && (
+          <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('MakerRoutes')} style={{ minHeight: 48, padding: theme.spacing[4], marginBottom: theme.spacing[4], borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary }}>
+            <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Explore maker routes →</Text>
+            <Text style={{ color: theme.colors.text.secondary }}>Bitcoin, Lightning, Arkade and supported assets</Text>
+          </TouchableOpacity>
+        )}
         {renderSwapInterface()}
-        {renderExecutionStatus()}
       </ScrollView>
 
       {renderAssetPicker()}
@@ -1608,6 +1568,16 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '600',
     color: theme.colors.text.primary,
+  },
+  amountUnit: {
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
+    color: theme.colors.text.secondary,
+  },
+  fiatHint: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.tertiary,
+    marginTop: 2,
   },
 
   amountTextPlaceholder: {

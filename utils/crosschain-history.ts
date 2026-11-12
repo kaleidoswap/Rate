@@ -117,8 +117,8 @@ export function activityStatusOf(rec: CrossChainRecord): 'confirmed' | 'failed' 
 }
 
 /** "1,000 USDT" — amounts are kept raw with their decimals. */
-export function formatRecordAmount(raw: string | undefined, decimals: number, asset: string): string {
+export function formatRecordAmount(raw: string | undefined, decimals: number, asset: string, bitcoinUnit: 'sats' | 'BTC' = 'sats'): string {
   if (!raw) return '';
-  if (asset.toUpperCase() === 'BTC') return `${formatSmallUnits(raw, 0)} sats`;
+  if (asset.toUpperCase() === 'BTC') return `${formatSmallUnits(raw, bitcoinUnit === 'BTC' ? 8 : 0)} ${bitcoinUnit}`;
   return `${formatSmallUnits(raw, decimals)} ${asset}`;
 }

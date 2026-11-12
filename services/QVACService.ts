@@ -795,7 +795,7 @@ class QVACService {
       console.warn('[QVAC] LLM init skipped — worklet runtime unavailable on this device');
       this.setState({
         llmStatus: 'error',
-        llmError: 'unavailable: KaleidoMind needs a physical device.',
+        llmError: 'unavailable: Prismo needs a physical device.',
       });
       return;
     }

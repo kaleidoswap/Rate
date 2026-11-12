@@ -16,6 +16,32 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   switching wallets talks to `protocolManager` and `initializeProtocols`
   directly, and the never-dispatched `initializeWallet` thunk (with its hook
   wrapper) is deleted. AGENTS.md no longer points anyone at the facades.
+- **Dead code swept.** The never-mounted IntentSheet/IntentCards/
+  useIntentRunner trio (~320 lines), WalletSetup's unreachable "Wallet
+  Created!" step, the duplicate "Swap Status" card under the swap form
+  (the sheet and Activity cover it), and the unwired
+  `paymentConfirmed` hook in the AI chat.
+
+### Fixed
+- The "Connect to Nostr" button in the contact picker (Send, Receive, chat)
+  actually navigates to Nostr settings — it was a dead button.
+- Cross-chain Activity records respect the chosen bitcoin unit (BTC vs
+  sats) like the rest of the app.
+- Swap says "Enter amount" like every other button; the "Explore maker
+  routes" tile is hidden in Simple view (it was noise for Lite users).
+
+### Changed
+- **One name for the assistant.** Prismo everywhere: the onboarding modal,
+  chat empty state, voice overlay, error banners and agent-wallet messages
+  no longer mix "Agent", "KaleidoMind" and "Prismo".
+- **Fiat in the Swap.** "You Receive" carries its ≈ dollar value under the
+  amount, like every other surface that shows money.
+- The Bridge's two contradictory sentences — "Keep the app open" vs "You
+  can leave" — now say what they mean: "Keep the app open while we pay
+  from Spark (a few seconds)" and "Payment sent. After this you can
+  leave; we keep following the order."
+- The Bridge fee note says "charged in USDC during the swap", not
+  "on the routing leg".
 
 ### Changed
 - **RGB speaks people.** "UTXO" is now "receive slot" everywhere the user

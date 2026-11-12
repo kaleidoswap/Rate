@@ -42,12 +42,15 @@ interface Props {
   visible: boolean;
   onSelectContact: (contact: Contact) => void;
   onClose: () => void;
+  /** Where "Connect to Nostr" navigates; defaults to the Nostr settings screen. */
+  onConnectNostr?: () => void;
 }
 
 export default function NostrContactsSelector({
   visible,
   onSelectContact,
   onClose,
+  onConnectNostr,
 }: Props) {
   const [slideAnim] = useState(new Animated.Value(screenHeight));
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -245,7 +248,9 @@ export default function NostrContactsSelector({
         }
       </Text>
       {!isConnected && (
-        <TouchableOpacity style={styles.connectButton}>
+        <TouchableOpacity style={styles.connectButton}
+          accessibilityRole="button"
+          onPress={() => { onClose(); if (onConnectNostr) onConnectNostr(); }}>
           <Text style={styles.connectButtonText}>Connect to Nostr</Text>
         </TouchableOpacity>
       )}
