@@ -41,6 +41,12 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   - The amount editor gains a Max chip for bitcoin sends (fills the total
     spendable across all accounts), matching the Max that already exists
     for tokens and RGB assets.
+- **Receive is the QR.** Under the code: status, amount, and Share as the
+  primary action — the "Other formats" card, the exclusion notes and the
+  contact picker are gone from the main flow. The options pill opens the
+  routing sheet directly (one sheet, not a sheet inside a sheet); choosing
+  a method closes it. Receiving via Lightning went from five taps across
+  two stacked sheets to two.
 
 - **The assistant's tab is Prismo.** The bottom-bar tab "Mind" becomes
   "Prismo", completing the one-name work across Settings, chat, voice and
