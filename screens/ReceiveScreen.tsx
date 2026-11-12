@@ -1574,7 +1574,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         {Tab('USD', isUsd, selectUsd, <UsdCoinIcon size={20} />, 'USD')}
         {/* RGB one tap away, not three levels deep in the options sheet. */}
         {rgbConnected && selectedAsset.asset_id !== NEW_RGB_ASSET_ID &&
-          Tab('RGB', false, () => receiveRgbAsset(null), <RgbIcon size={20} />, 'RGB')}
+          Tab('RGB', false, () => { feedback.select(); setShowRgbAssets(true); }, <RgbIcon size={20} />, 'RGB')}
         {isCustom &&
           Tab('custom', true, () => {}, (
             <AssetIcon

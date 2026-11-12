@@ -227,6 +227,113 @@ test('renders the UI gallery to output/ui-preview.html', () => {
       caption: 'Refresh keeps its corner; the breakdown opens from the written Details toggle, one control per job.',
       html: sceneToHtml(<BalanceCard {...balanceCardProps} />),
     },
+    {
+      title: 'Receive — the QR is the screen',
+      caption: 'Under the code: status, amount pill, Share as the primary. Three things, not eight. The options pill opens routing in one tap.',
+      html: sceneToHtml(<View style={{ padding: 20, gap: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'center' }}>
+          <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm }}>Bitcoin · Any wallet</Text>
+          <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#2BEE79', fontSize: 8 }}>↓</Text>
+          </View>
+          <Text style={{ color: '#2BEE79', fontSize: theme.typography.fontSize.sm, fontWeight: '600' }}>Share</Text>
+        </View>
+        <View style={{ backgroundColor: '#fff', padding: 20, borderRadius: 16, alignSelf: 'center' }}>
+          <View style={{ width: 160, height: 160, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#fff', fontSize: 48 }}>⬛</Text>
+          </View>
+        </View>
+        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, textAlign: 'center' }}>Tap the code to enlarge</Text>
+        <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, textAlign: 'center' }}>Waiting for payment</Text>
+        <TouchableOpacity style={{ alignSelf: 'center', paddingVertical: 6, paddingHorizontal: 14, borderRadius: 999, backgroundColor: '#0F1C33', borderWidth: 1, borderColor: '#1a2a44' }}>
+          <Text style={{ color: '#2BEE79', fontSize: theme.typography.fontSize.sm, fontWeight: '600' }}>Add amount or note</Text>
+        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center' }}>
+          <View style={{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, backgroundColor: '#2BEE79', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: '#0A1326', fontWeight: '600' }}>↗ Share</Text>
+          </View>
+          <View style={{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, backgroundColor: '#0F1C33', borderWidth: 1, borderColor: '#1a2a44', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Text style={{ color: theme.colors.text.primary, fontWeight: '600' }}>⧉ Copy</Text>
+          </View>
+        </View>
+      </View>, 'justify-content:center'),
+    },
+    {
+      title: 'Receive RGB — asset picker',
+      caption: 'The RGB tab opens the picker: Any asset is the default (the sender chooses), or pick one you hold. One tap more than "any asset", but you can name the asset.',
+      html: sceneToHtml(<View style={{ padding: 20, gap: 12 }}>
+        <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '700', textAlign: 'center' }}>Receive an RGB asset</Text>
+        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, textAlign: 'center' }}>Received on-chain into RGB on this phone</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#1a2a44', backgroundColor: '#0F1C33' }}>
+          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#DD352E', fontSize: 16 }}>◆</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.colors.text.primary, fontWeight: '600' }}>Any RGB asset</Text>
+            <Text style={{ color: theme.colors.text.tertiary, fontSize: 10 }}>The sender chooses the asset. Use this for one you don't hold yet.</Text>
+          </View>
+          <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#2BEE79', alignItems: 'center', justifyContent: 'center' }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#2BEE79' }} />
+          </View>
+        </View>
+        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 8 }}>Assets you hold</Text>
+        {['USDT', 'KALEIDO'].map(t => (
+          <View key={t} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: '#1a2a44' }}>
+            <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: '#DD352E', fontSize: 12, fontWeight: '700' }}>{t[0]}</Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: theme.colors.text.primary, fontWeight: '600' }}>{t}</Text>
+              <Text style={{ color: theme.colors.text.tertiary, fontSize: 10 }}>Tether USD · 40.5 available</Text>
+            </View>
+            <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#2a3a54' }} />
+          </View>
+        ))}
+        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 8 }}>A specific asset</Text>
+        <Text style={{ color: theme.colors.text.tertiary, fontSize: 10 }}>Only accepts the asset with this contract ID · rgb:…</Text>
+      </View>),
+    },
+    {
+      title: 'Receive RGB — invoice ready',
+      caption: 'After picking: same clean QR, the title says RGB invoice, and the Advanced options live in the routing sheet.',
+      html: sceneToHtml(<View style={{ padding: 20, gap: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'center' }}>
+          <Text style={{ color: '#DD352E', fontSize: 16 }}>◆</Text>
+          <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm }}>USDT · On-chain to RGB on this phone</Text>
+        </View>
+        <View style={{ backgroundColor: '#fff', padding: 20, borderRadius: 16, alignSelf: 'center' }}>
+          <View style={{ width: 160, height: 160, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' }}>
+            <Text style={{ color: '#fff', fontSize: 48 }}>⬛</Text>
+          </View>
+        </View>
+        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, textAlign: 'center' }}>Tap the code to enlarge</Text>
+        <Text style={{ color: theme.colors.text.secondary, fontSize: theme.typography.fontSize.sm, textAlign: 'center' }}>Waiting for the sender to send the asset.</Text>
+        <View style={{ flexDirection: 'row', gap: 12, justifyContent: 'center' }}>
+          <View style={{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, backgroundColor: '#2BEE79' }}>
+            <Text style={{ color: '#0A1326', fontWeight: '600' }}>↗ Share</Text>
+          </View>
+          <View style={{ paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12, backgroundColor: '#0F1C33', borderWidth: 1, borderColor: '#1a2a44' }}>
+            <Text style={{ color: theme.colors.text.primary, fontWeight: '600' }}>⧉ Copy</Text>
+          </View>
+        </View>
+      </View>, 'justify-content:center'),
+    },
+    {
+      title: 'Receive — routing (one sheet, not two)',
+      caption: 'The pill opens this directly. Choosing a method closes it: Lightning went from 5 taps across 2 sheets to 2 taps.',
+      html: sceneToHtml(<View style={{ padding: 20, gap: 12 }}>
+        <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg, fontWeight: '700', textAlign: 'center' }}>How they pay</Text>
+        {['Any wallet', 'Lightning', 'On-chain', 'Spark', 'Ark'].map((m, i) => (
+          <View key={m} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: i === 0 ? '#2BEE79' : '#1a2a44', backgroundColor: i === 0 ? '#0F1C33' : 'transparent' }}>
+            <View style={{ width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: i === 0 ? '#2BEE79' : '#2a3a54', alignItems: 'center', justifyContent: 'center' }}>
+              {i === 0 && <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#2BEE79' }} />}
+            </View>
+            <Text style={{ color: theme.colors.text.primary, fontWeight: i === 0 ? '700' : '500', flex: 1 }}>{m}</Text>
+          </View>
+        ))}
+        <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, marginTop: 8 }}>Deposit from another chain</Text>
+      </View>),
+    },
   ];
 
   const page = `<!doctype html>
@@ -268,4 +375,4 @@ ${scenes.map(s => `<section class="scene"><h2>${s.title}</h2><p>${s.caption}</p>
 });
 
 // The View import is only for wrapping scenes; keep it honest for the linter.
-import { View } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
