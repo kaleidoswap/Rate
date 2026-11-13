@@ -1,17 +1,16 @@
 import React from 'react';
-import { render, fireEvent } from '@testing-library/react-native';
+import { render } from '@testing-library/react-native';
 import { PaymentOutcome } from './PaymentOutcome';
 import type { PaymentAttempt } from '../../services/kaleidoPay/attempts';
 const attempt: PaymentAttempt = { id: 'example', sourceId: 'arkade', provider: 'Arkade', status: 'unknown', recipient: '500 sats', total: '500 sats', recipientName: 'Alice', feeDisplay: '0 sats', createdAt: 1791900000000 };
-it('keeps unknown results explicit and lets the user reveal receipt details', () => {
+it('keeps unknown results explicit and shows key info without a toggle', () => {
   const ui = render(<PaymentOutcome attempt={attempt} />);
   expect(ui.getByText('Payment outcome unknown')).toBeTruthy();
-  expect(ui.queryByLabelText('Checking payment automatically')).toBeNull();
-  expect(ui.queryByText('Requested')).toBeNull();
-  fireEvent.press(ui.getByText('Payment details'));
-  expect(ui.getByText('Requested')).toBeTruthy();
-  fireEvent.press(ui.getByText('Hide details'));
-  expect(ui.queryByText('Requested')).toBeNull();
+  expect(ui.queryByLabelText('Checking payment')).toBeNull();
+  // Key rows are always visible, no toggle needed.
+  expect(ui.getByText('To')).toBeTruthy();
+  expect(ui.getAllByText('Alice').length).toBeGreaterThan(0);
+  expect(ui.getByText('Fee')).toBeTruthy();
 });
 it('does not present a broadcast as a confirmed on-chain payment', () => {
   const ui = render(<PaymentOutcome attempt={{ ...attempt, sourceId: 'rgb-btc', status: 'completed' }} />);
