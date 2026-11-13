@@ -135,7 +135,7 @@ export default function SwapScreen({ navigation, route }: Props) {
   const executingRef = React.useRef(false);
   const quoteRequestRef = React.useRef(0);
   const lastAutoRefreshRef = React.useRef(0);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [pollingInterval, setPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null);
   const [tradingPairs, setTradingPairs] = useState<SwapPair[]>([]);
   const [venueFilter, setVenueFilter] = useState<SwapVenueFilter>('all');
   // Lite hides venues, the maker and account names: the best price is picked for you.

@@ -7,6 +7,6 @@ describe('Callout (kaleido-ui AlertBanner)', () => {
     const screen = render(<Callout tone="error" title="Failed" message="Try again.">{null}</Callout>);
     expect(screen.getByText('Failed')).toBeTruthy();
     expect(screen.getByText('Try again.')).toBeTruthy();
-    expect(screen.UNSAFE_root.findAll((n) => n.props.accessibilityRole === 'alert').length).toBeGreaterThan(0);
+    expect(screen.UNSAFE_root.findAll((n: { props: { accessibilityRole?: string } }) => n.props.accessibilityRole === 'alert').length).toBeGreaterThan(0);
   });
 });

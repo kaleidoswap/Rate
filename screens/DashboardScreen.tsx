@@ -509,7 +509,7 @@ export default function DashboardScreen({ navigation }: Props) {
   // such as Receive keeps this component mounted; polling behind it can otherwise
   // collide with receive-address generation and monopolize the same adapters.
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
+    let intervalId: ReturnType<typeof setInterval>;
 
     if (!protocolsReady || !isScreenFocused) return;
 

@@ -23,7 +23,7 @@ function fakeLib() {
     })),
     witnessReceive: jest.fn(async () => ({ invoice: 'rgb:~/~/~/tb/w-invoice', recipientId: 'w-rid', expirationTimestamp: 1_900_000_000, batchTransferIdx: 1 })),
     blindReceive: jest.fn(async () => ({ invoice: 'rgb:~/~/~/tb/b-invoice', recipientId: 'b-rid', expirationTimestamp: null, batchTransferIdx: 2 })),
-    send: jest.fn(async () => ({ txid: 'send-txid', batchTransferIdx: 3 })),
+    send: jest.fn(async (_invoice: Record<string, { assignment?: unknown; witnessData?: unknown }[]>) => ({ txid: 'send-txid', batchTransferIdx: 3 })),
     sendBtc: jest.fn(async () => 'btc-txid'),
     listTransactions: jest.fn(async () => [{ transactionType: 'INCOMING', txid: 't1', received: 10_000, sent: 0, fee: 0, confirmationTime: { height: 100, timestamp: 1_700_000_000 } }]),
     listTransfers: jest.fn(async () => [{
@@ -404,7 +404,7 @@ test('an invoice expiring while queued behind a backup is never sent', async () 
   const account = await open(lib);
   const now = jest.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000);
   let release!: () => void;
-  wallet.backup.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
+  wallet.backup.mockImplementationOnce(() => new Promise<undefined>(resolve => { release = () => resolve(undefined); }));
   const backup = account.backup('/test/backup', 'password');
   await Promise.resolve();
   const decoded = await lib.decodeInvoice();

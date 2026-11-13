@@ -96,7 +96,7 @@ describe('receive routes', () => {
 
 describe('receive by account', () => {
   const { accountMethods, receivableAccounts, accountDefaultMethod } = require('./receive-routes');
-  const all = [
+  const all: ReceiveAccountInfo[] = [
     { account: 'RGB', chain: 'mainnet' }, { account: 'SPARK', chain: 'mainnet' },
     { account: 'ARKADE', chain: 'mainnet' }, { account: 'BARK', chain: 'mainnet' },
   ];

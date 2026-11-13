@@ -192,8 +192,13 @@ export const QUOTE_TOLERANCE_BPS = 100;
  * the tolerance: less delivered for exact-in, more spent for exact-out.
  */
 export function quoteWorseThanReviewed(
-  reviewed: Pick<OrchestraEstimate, 'estimatedOut' | 'requiredAmountIn'>,
-  quote: Pick<OrchestraQuote, 'estimatedOut' | 'requiredAmountIn' | 'amountIn'>,
+  // Partial by contract: exact_in quotes carry no requiredAmountIn, and the
+  // body below reads amountIn as its fallback — the parameter types say so
+  // instead of demanding fields the mode does not use.
+  reviewed: Pick<OrchestraEstimate, 'estimatedOut'> &
+    Partial<Pick<OrchestraEstimate, 'requiredAmountIn'>>,
+  quote: Pick<OrchestraQuote, 'estimatedOut'> &
+    Partial<Pick<OrchestraQuote, 'requiredAmountIn' | 'amountIn'>>,
   mode: OrchestraAmountMode,
   toleranceBps = QUOTE_TOLERANCE_BPS,
 ): boolean {

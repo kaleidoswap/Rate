@@ -35,6 +35,7 @@ async function setup(policy: Partial<typeof DEFAULT_POLICY> = {}) {
     balanceSats: jest.fn(async () => 5000),
     quoteLightningFee: jest.fn(async () => 0),
     payInvoice: jest.fn(async () => ({ preimage: PREIMAGE, feeSats: 0, status: 'confirmed' as const })),
+    paymentStatus: jest.fn(async () => ({ status: 'pending' as const })),
   };
   return { store, wallet };
 }

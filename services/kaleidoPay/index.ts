@@ -80,7 +80,10 @@ let preparing: Promise<unknown> | null = null;
  */
 export async function prepareKaleidoPay(maxWaitMs = 3000): Promise<void> {
   preparing ??= Promise.allSettled([...preparers].map(p => p())).finally(() => { preparing = null; });
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  // number | NodeJS.Timeout, not ReturnType<typeof setTimeout>: the app and
+  // jest type programs resolve the ambient setTimeout differently, and the
+  // union is the one spelling true under both.
+  let timer: number | NodeJS.Timeout | undefined;
   await Promise.race([preparing, new Promise(r => { timer = setTimeout(r, maxWaitMs); })]);
   clearTimeout(timer);
 }

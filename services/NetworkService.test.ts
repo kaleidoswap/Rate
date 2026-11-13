@@ -1,4 +1,5 @@
 // services/NetworkService.test.ts
+import { NetInfoStateType } from '@react-native-community/netinfo';
 import NetworkService from './NetworkService';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -20,7 +21,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -33,7 +34,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
-        type: 'none',
+        type: NetInfoStateType.none,
         details: null,
       };
 
@@ -56,7 +57,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -69,7 +70,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: false,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -92,7 +93,7 @@ describe('NetworkService', () => {
       const mockStatus = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi' as const,
+        type: NetInfoStateType.wifi as const,
         details: {},
       };
 
@@ -117,7 +118,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -138,7 +139,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'cellular',
+        type: NetInfoStateType.cellular,
         details: { cellularGeneration: '4g' },
       };
 
@@ -153,7 +154,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -164,7 +165,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'cellular',
+        type: NetInfoStateType.cellular,
         details: null,
       };
 
@@ -177,7 +178,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'cellular',
+        type: NetInfoStateType.cellular,
         details: null,
       };
 
@@ -188,7 +189,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -202,7 +203,7 @@ describe('NetworkService', () => {
       const mockStatus = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi' as const,
+        type: NetInfoStateType.wifi as const,
         details: null,
       };
 
@@ -227,7 +228,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -248,7 +249,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -264,7 +265,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
-        type: 'none',
+        type: NetInfoStateType.none,
         details: null,
       };
 
@@ -279,7 +280,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
-        type: 'none',
+        type: NetInfoStateType.none,
         details: null,
       };
 
@@ -292,7 +293,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: false,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -305,7 +306,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -318,7 +319,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'cellular',
+        type: NetInfoStateType.cellular,
         details: null,
       };
 
@@ -333,7 +334,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -341,7 +342,7 @@ describe('NetworkService', () => {
 
       expect(stats).toEqual({
         isConnected: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         quality: 'excellent',
         hasInternet: true,
       });
@@ -351,7 +352,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
-        type: 'none',
+        type: NetInfoStateType.none,
         details: null,
       };
 
@@ -359,7 +360,7 @@ describe('NetworkService', () => {
 
       expect(stats).toEqual({
         isConnected: false,
-        type: 'none',
+        type: NetInfoStateType.none,
         quality: 'offline',
         hasInternet: false,
       });
@@ -371,7 +372,7 @@ describe('NetworkService', () => {
       const mockState = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi' as const,
+        type: NetInfoStateType.wifi as const,
         details: {},
       };
 
@@ -390,7 +391,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: true,
         isInternetReachable: true,
-        type: 'wifi',
+        type: NetInfoStateType.wifi,
         details: null,
       };
 
@@ -406,7 +407,7 @@ describe('NetworkService', () => {
       networkService['currentStatus'] = {
         isConnected: false,
         isInternetReachable: false,
-        type: 'none',
+        type: NetInfoStateType.none,
         details: null,
       };
 

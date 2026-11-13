@@ -2,7 +2,7 @@
 // No need to import jest-native as @testing-library/react-native v12.4+ has built-in matchers
 
 // Polyfill for React Native
-global.setImmediate = global.setImmediate || ((fn, ...args) => global.setTimeout(fn, 0, ...args));
+global.setImmediate = global.setImmediate || ((fn: (...args: unknown[]) => void, ...args: unknown[]) => global.setTimeout(() => fn(...args), 0));
 
 // Mock Expo SecureStore
 jest.mock('expo-secure-store', () => ({
@@ -55,6 +55,11 @@ jest.mock('@react-native-community/netinfo', () => ({
     })
   ),
   addEventListener: jest.fn(() => jest.fn()),
+  // The real module's string enum, mirrored so tests can use its members.
+  NetInfoStateType: {
+    unknown: 'unknown', none: 'none', cellular: 'cellular', wifi: 'wifi',
+    bluetooth: 'bluetooth', ethernet: 'ethernet', wimax: 'wimax', vpn: 'vpn', other: 'other',
+  },
 }));
 
 // Mock React Native modules
@@ -72,29 +77,29 @@ jest.mock('react-native/Libraries/EventEmitter/NativeEventEmitter', () => {
 // shared values behave synchronously (no reactivity, no animation), which is
 // enough since these tests only assert on rendering/interaction, not motion.
 jest.mock('react-native-reanimated', () => {
-  const identity = (t) => t;
+  const identity = <T,>(t: T): T => t;
   // Animations finish at once: the completion callback fires synchronously.
-  const withHelper = (toValue, _config, callback) => { callback?.(true); return toValue; };
+  const withHelper = (toValue: number, _config?: unknown, callback?: (finished: boolean) => void) => { callback?.(true); return toValue; };
   // Layout animations (FadeIn.delay(…).springify()…) are chainable no-ops.
   const layoutAnimation = new Proxy({}, { get: () => () => layoutAnimation });
   return {
     __esModule: true,
     default: {
-      createAnimatedComponent: (Component) => Component,
+      createAnimatedComponent: <T,>(Component: T): T => Component,
       View: 'Animated.View',
       Text: 'Animated.Text',
       Image: 'Animated.Image',
     },
-    useSharedValue: (initial) => ({ value: initial }),
-    useAnimatedStyle: (styleFactory) => styleFactory(),
+    useSharedValue: <T,>(initial: T) => ({ value: initial }),
+    useAnimatedStyle: <T,>(styleFactory: () => T): T => styleFactory(),
     withSpring: withHelper,
     withTiming: withHelper,
-    withDelay: (_delay, animation) => animation,
-    withSequence: (...animations) => animations[animations.length - 1],
-    withRepeat: (animation) => animation,
-    interpolate: (_value, _input, output) => output[0],
+    withDelay: (_delay: number, animation: unknown) => animation,
+    withSequence: (...animations: unknown[]) => animations[animations.length - 1],
+    withRepeat: (animation: unknown) => animation,
+    interpolate: (_value: number, _input: unknown[], output: unknown[]) => output[0],
     cancelAnimation: () => {},
-    runOnJS: (fn) => fn,
+    runOnJS: <T,>(fn: T): T => fn,
     useReducedMotion: () => false,
     FadeIn: layoutAnimation,
     FadeOut: layoutAnimation,
@@ -117,7 +122,7 @@ jest.mock('react-native-reanimated', () => {
 
 // SVG: shapes render as plain host elements (tests assert on text and labels, not paths).
 jest.mock('react-native-svg', () => {
-  const host = (name) => name;
+  const host = (name: string): string => name;
   return {
     __esModule: true,
     default: host('Svg'),
@@ -133,7 +138,7 @@ jest.mock('react-native-gesture-handler', () => {
   return {
     __esModule: true,
     Gesture: { Pan: () => chain, Tap: () => chain },
-    GestureDetector: ({ children }) => children,
+    GestureDetector: ({ children }: { children?: React.ReactNode }) => children,
     GestureHandlerRootView: 'GestureHandlerRootView',
   };
 });
@@ -159,7 +164,7 @@ jest.mock('@expo/vector-icons', () => ({
 // react-native internals (TurboModuleRegistry) not present under this
 // project's lightweight react-native mock.
 jest.mock('react-native-safe-area-context', () => ({
-  SafeAreaProvider: ({ children }) => children,
+  SafeAreaProvider: ({ children }: { children?: React.ReactNode }) => children,
   SafeAreaView: 'SafeAreaView',
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
@@ -232,11 +237,11 @@ jest.mock('react-native', () => ({
   DeviceEventEmitter: { addListener: jest.fn(() => ({ remove: jest.fn() })) },
   Platform: {
     OS: 'ios',
-    select: jest.fn((obj) => obj.ios || obj.default),
+    select: jest.fn((obj: { ios?: unknown; default?: unknown }) => obj.ios || obj.default),
   },
   StyleSheet: {
-    create: jest.fn((styles) => styles),
-    flatten: jest.fn((style) => {
+    create: jest.fn((styles: unknown) => styles),
+    flatten: jest.fn((style: unknown) => {
       const flat = Array.isArray(style) ? style.flat(Infinity) : [style];
       return Object.assign({}, ...flat.filter(Boolean));
     }),
@@ -249,17 +254,17 @@ jest.mock('react-native', () => ({
   // is missing — so onPress must stay a function that checks disabled at
   // call time (mirroring how the real TouchableOpacity/Pressability works),
   // rather than being conditionally omitted.
-  TouchableOpacity: ({ onPress, disabled, children, ...props }) =>
+  TouchableOpacity: ({ onPress, disabled, children, ...props }: { onPress?: (...args: unknown[]) => void; disabled?: boolean; children?: React.ReactNode } & Record<string, unknown>) =>
     require('react').createElement(
       'TouchableOpacity',
-      { ...props, disabled, onPress: (...args) => { if (!disabled) onPress?.(...args); } },
+      { ...props, disabled, onPress: (...args: unknown[]) => { if (!disabled) onPress?.(...args); } },
       children
     ),
   ScrollView: 'ScrollView',
   Switch: 'Switch',
   Modal: 'Modal',
-  Pressable: ({ onPress, disabled, children, ...props }) =>
-    require('react').createElement('Pressable', { ...props, disabled, onPress: (...args) => { if (!disabled) onPress?.(...args); } }, children),
+  Pressable: ({ onPress, disabled, children, ...props }: { onPress?: (...args: unknown[]) => void; disabled?: boolean; children?: React.ReactNode } & Record<string, unknown>) =>
+    require('react').createElement('Pressable', { ...props, disabled, onPress: (...args: unknown[]) => { if (!disabled) onPress?.(...args); } }, children),
   FlatList: 'FlatList',
   Image: 'Image',
   ActivityIndicator: 'ActivityIndicator',
@@ -273,19 +278,19 @@ jest.mock('react-native', () => ({
       })),
     })),
     timing: jest.fn(() => ({
-      start: jest.fn((callback) => callback && callback()),
+      start: jest.fn((callback?: () => void) => callback && callback()),
       stop: jest.fn(),
     })),
     spring: jest.fn(() => ({
-      start: jest.fn((callback) => callback && callback()),
+      start: jest.fn((callback?: () => void) => callback && callback()),
     })),
-    parallel: jest.fn((animations) => ({
-      start: jest.fn((callback) => callback && callback()),
+    parallel: jest.fn((_animations: unknown[]) => ({
+      start: jest.fn((callback?: () => void) => callback && callback()),
     })),
-    sequence: jest.fn((animations) => ({
-      start: jest.fn((callback) => callback && callback()),
+    sequence: jest.fn((_animations: unknown[]) => ({
+      start: jest.fn((callback?: () => void) => callback && callback()),
     })),
-    loop: jest.fn((animation) => ({
+    loop: jest.fn((_animation: unknown) => ({
       start: jest.fn(),
       stop: jest.fn(),
     })),
