@@ -59,19 +59,6 @@ export function RgbAssetSheet({ visible, onClose, accountLabel, held, onPickAny,
     <Sheet visible={visible} onClose={onClose} title="Receive an RGB asset" subtitle={`Received on-chain into ${accountLabel}`}>
       <ScrollView style={{ maxHeight: 520 }} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: t.spacing[2], paddingBottom: t.spacing[2] }}>
         {row('any', <RgbIcon size={22} />, 'Any RGB asset', 'The sender chooses the asset. Use this for one you don’t hold yet.', () => { onPickAny(); onClose(); })}
-        {row('id', <Ionicons name="key-outline" size={20} color={t.colors.text.secondary} />, 'A specific asset', 'Only accepts the asset with this contract ID', () => setById(!byId), byId ? 'chevron-up' : 'chevron-down')}
-        {byId && <View style={{ gap: t.spacing[2] }}>
-          <Input
-            accessibilityLabel="Contract ID"
-            placeholder="rgb:…"
-            value={contractId}
-            onChangeText={setContractId}
-            autoCapitalize="none"
-            autoCorrect={false}
-            error={contractId.trim() && !parsed ? 'This isn’t an RGB contract ID. It starts with rgb:' : undefined}
-          />
-          <Button title="Receive this asset" onPress={pickById} disabled={!parsed} fullWidth />
-        </View>}
         {held.length > 0 && <Text style={{ color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: t.spacing[2] }}>
           Assets you hold
         </Text>}

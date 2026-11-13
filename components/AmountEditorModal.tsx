@@ -48,10 +48,14 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
   const t = useAppTheme();
   const [value, setValue] = useState('');
   const [fiat, setFiat] = useState(false);
+  const [fiatCode, setFiatCode] = useState('USD');
   const [expirySeconds, setExpirySeconds] = useState(3600);
   const [showCountdown, setShowCountdown] = useState(false);
   const [note, setNote] = useState('');
-  const rate = rates.usd;
+  // Which fiat the user is typing in; tap the unit to cycle through the available ones.
+  const availableFiats = Object.entries(rates).filter(([, v]) => !!v && v > 0).map(([code]) => code);
+  const rate = rates[fiatCode] ?? rates.usd;
+  const fiatSymbol = fiatCode === 'USD' ? '$' : fiatCode === 'EUR' ? '€' : fiatCode === 'GBP' ? '£' : fiatCode === 'JPY' ? '¥' : fiatCode === 'CHF' ? 'CHF ' : fiatCode === 'CAD' ? 'CA$' : fiatCode === 'AUD' ? 'A$' : fiatCode + ' ';
   const sending = !requestOptions;
   const tokenValue = (sats: number) => bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8);
   useEffect(() => {
@@ -88,10 +92,10 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
       : !Number.isFinite(units) || units <= 0 ? 'Enter a valid amount.'
       : overMax ? `Not enough ${asset.unit}${asset.availableLabel ? ` · ${asset.availableLabel}` : ''}.`
       : asset.availableLabel ?? ''
-    : empty ? (sending ? 'This request has no amount: you choose how much to send.' : 'The sender chooses the amount.')
+    : empty ? (sending ? (maxSats !== undefined && maxSats > 0 ? `Available: ${maxSats.toLocaleString('en-US')} ${bitcoinUnit}.` : 'This request has no amount: you choose how much to send.') : 'The sender chooses the amount.')
       : !valid ? 'Enter a valid amount of at least 1 sat.'
       : fiat ? `${tokenValue(sats)} ${bitcoinUnit}`
-      : rate ? `≈ $${((sats / 1e8) * rate).toFixed(2)} USD`
+      : rate ? `≈ ${fiatSymbol}${((sats / 1e8) * rate).toFixed(2)} ${fiatCode}`
       : `${sats.toLocaleString('en-US')} sats`;
   return <Sheet visible={visible} onClose={close} title={requestOptions ? 'Edit request' : 'Enter amount'}>
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: t.spacing[4] }}>
@@ -104,10 +108,14 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
         {asset
           ? <Text style={muted}>{asset.unit}</Text>
           : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change amount entry unit" disabled={!rate} onPress={() => {
-              if (valid && !empty) setValue(fiat ? tokenValue(sats) : ((sats / 1e8) * rate).toFixed(2));
-              setFiat(v => !v);
+              if (!fiat) { setFiat(true); return; }
+              // Cycle through the available fiats, then back to the bitcoin unit.
+              const idx = availableFiats.indexOf(fiatCode);
+              if (idx < 0 || idx + 1 >= availableFiats.length) { setFiat(false); setFiatCode(availableFiats[0] ?? 'USD'); }
+              else { const next = availableFiats[idx + 1]; setFiatCode(next); }
+              if (valid && !empty) { const nextRate = rates[availableFiats[Math.min((idx < 0 ? 0 : idx + 1), availableFiats.length - 1)] ?? 'usd'] ?? rate; if (!fiat) setValue(((sats / 1e8) * (rates[availableFiats[0]] ?? rate)).toFixed(2)); else if (idx + 1 >= availableFiats.length) setValue(tokenValue(sats)); else setValue(((sats / 1e8) * nextRate).toFixed(2)); }
             }} style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], opacity: rate ? 1 : 0.5 }}>
-            <Text style={label}>{fiat ? 'USD' : bitcoinUnit}</Text>
+            <Text style={label}>{fiat ? fiatCode : bitcoinUnit}</Text>
             {!!rate && <Ionicons name="swap-vertical" size={16} color={t.colors.text.secondary} />}
           </TouchableOpacity>}
       </View>

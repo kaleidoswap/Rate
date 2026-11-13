@@ -18,15 +18,6 @@ test('any RGB asset is one plain tap', () => {
   expect(onClose).toHaveBeenCalled();
 });
 
-test('a specific asset by contract ID, validated', () => {
-  const { screen, onPickAsset } = setup();
-  fireEvent.press(screen.getByText('A specific asset'));
-  fireEvent.changeText(screen.getByLabelText('Contract ID'), 'nope');
-  expect(screen.getByText('This isn’t an RGB contract ID. It starts with rgb:')).toBeTruthy();
-  fireEvent.changeText(screen.getByLabelText('Contract ID'), ' rgb:2bFVTT9e-xUBBnkF-Pqnxb6Q-ZuDGdNd-iC5l8cC-dgPFjn8 ');
-  fireEvent.press(screen.getByText('Receive this asset'));
-  expect(onPickAsset).toHaveBeenCalledWith({ asset_id: 'rgb:2bFVTT9e-xUBBnkF-Pqnxb6Q-ZuDGdNd-iC5l8cC-dgPFjn8', ticker: 'RGB', name: 'rgb:2bFVTT9e…gPFjn8' });
-});
 
 test('assets the wallet holds are listed', () => {
   const { screen, onPickAsset } = setup();

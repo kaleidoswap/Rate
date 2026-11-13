@@ -10,6 +10,32 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **Send knows more currencies.** The amount editor cycles through the fiat
+  currencies the app tracks (USD, EUR, GBP, CHF, CAD, JPY, AUD) when you tap
+  the unit — and shows your available balance above the number pad for
+  bitcoin sends.
+- **RGB is on-chain, not a Lightning node.** The "Your accounts" list in
+  Send names the RGB account "RGB on-chain" with the RGB icon, not "RLN".
+- **Send's account cards explain the route.** Each card says what actually
+  happens — "Lightning direct" or "Swap via KaleidoSwap" — instead of just
+  the account name and balance.
+- **Receive shows where the money lands.** For non-universal methods, a
+  "Lands in [account]" line appears under the status, next to the QR.
+
+### Removed
+- **The USD tab is gone from Receive.** USD/USDT is reachable through the
+  RGB asset picker and Spark (its own method in the routing sheet); a
+  dedicated tab was duplicative.
+- **"A specific asset" is gone from the RGB picker.** Any RGB asset covers
+  the case; assets you hold are one tap below.
+- **Dashboard shows what you have, not what happened.** The Recent Activity
+  section is gone from the Dashboard — Activity has its own tab; Assets
+  stays.
+- **Profile fits on one screen.** The identity block (name, NIP-05, about,
+  Lightning address) and the QR card (npub, copy, share) are condensed
+  into a single page with no Nostr settings link.
+
 ## [0.15.0] — 2026-11-12
 
 The you-already-know release: Send shows what you have before you commit,

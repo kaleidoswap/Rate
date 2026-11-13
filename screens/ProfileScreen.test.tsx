@@ -71,7 +71,7 @@ it('shows the npub as a nostr: QR, with copy and share', () => {
   const share = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as any);
   const screen = render(<ProfileScreen navigation={navigation} />);
   expect(screen.getByTestId('qr').props.children).toBe(`nostr:${NPUB}`);
-  expect(screen.getByText(`Copy ${NPUB}`)).toBeTruthy();
+  expect(screen.getByText(`Copy npub ${NPUB}`)).toBeTruthy();
   fireEvent.press(screen.getByLabelText('Share'));
   expect(share).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining(`nostr:${NPUB}`) }));
 });
@@ -82,13 +82,10 @@ it('derives the npub from the public key when it was not stored', () => {
   expect(screen.getByTestId('qr').props.children).toBe('nostr:npub1ab');
 });
 
-it('keeps the QR visible and only Nostr settings directly accessible', () => {
-  const screen = render(<ProfileScreen navigation={navigation} />);
-  expect(screen.getByTestId('qr')).toBeTruthy();
-  expect(screen.queryByText('Settings')).toBeNull();
-  fireEvent.press(screen.getByLabelText('Nostr settings'));
-  expect(navigation.navigate).toHaveBeenCalledWith('NostrSettings');
-  expect(navigation.navigate).not.toHaveBeenCalledWith('Settings');
+it('the QR card is the main element, no Nostr settings link', () => {
+  const screen = render(<ProfileScreen navigation={navigation} route={undefined} />);
+  expect(screen.getByText('npub1alice')).toBeTruthy();
+  expect(screen.queryByLabelText('Nostr settings')).toBeNull();
 });
 
 it('sends people without a Nostr identity to setup', () => {
