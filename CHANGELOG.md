@@ -10,6 +10,11 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-13
+
+The refinement release: fiat in your currency, all routes visible at once,
+and the profile fits on one screen.
+
 ### Changed
 - **Send knows more currencies.** The amount editor opens a currency picker
   (a bottom sheet, not a cycle) listing the bitcoin unit and every fiat the
@@ -22,9 +27,6 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   account" sheet stays for the full comparison.
 - **RGB is on-chain, not a Lightning node.** The "Your accounts" list in
   Send names the RGB account "RGB on-chain" with the RGB icon, not "RLN".
-- **Send's account cards explain the route.** Each card says what actually
-  happens — "Lightning direct" or "Swap via KaleidoSwap" — instead of just
-  the account name and balance.
 - **Receive shows where the money lands.** For non-universal methods, a
   "Lands in [account]" line appears under the status, next to the QR.
 
