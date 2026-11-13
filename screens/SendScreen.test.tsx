@@ -75,9 +75,9 @@ test('one flow: decode, compare ways to pay, and pay only the reviewed total', a
   expect(previewInput).toHaveBeenCalledWith('lnbc1', 1000, 'test-uuid', { asset: undefined });
   expect(executePaymentOffer).not.toHaveBeenCalled();
   expect(screen.getByText('Slide to pay 1010 sats')).toBeTruthy();
-  // Pay from: one card per account, the cheapest picked.
+  // Pay from: all accounts visible inline, the cheapest picked.
   expect(screen.getByLabelText(/^Pay from Spark\. Total 1010 sats/).props.accessibilityState.checked).toBe(true);
-  expect(screen.queryByLabelText(/^Pay from Bark/)).toBeNull();
+  expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(false);
   fireEvent.press(screen.getByLabelText('Change account'));
   fireEvent.press(screen.getByLabelText(/^Bark\. Total you pay/));
   await act(async () => { pay(screen, 'Pay 1020 sats'); });
@@ -302,7 +302,7 @@ test('quotes show as they arrive; the first payable one is picked and kept', asy
   });
   const screen = await reviewed();
   expect(screen.getByLabelText(/^Pay from Bark/).props.accessibilityState.checked).toBe(true);
-  expect(screen.queryByLabelText(/^Pay from Spark/)).toBeNull();
+  expect(screen.getByLabelText(/^Pay from Spark/).props.accessibilityState.checked).toBe(false);
   fireEvent.press(screen.getByLabelText('Change account'));
   expect(screen.getByLabelText(/^Spark\. Total you pay/)).toBeTruthy();
 });

@@ -11,10 +11,15 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Changed
-- **Send knows more currencies.** The amount editor cycles through the fiat
-  currencies the app tracks (USD, EUR, GBP, CHF, CAD, JPY, AUD) when you tap
-  the unit — and shows your available balance above the number pad for
-  bitcoin sends.
+- **Send knows more currencies.** The amount editor opens a currency picker
+  (a bottom sheet, not a cycle) listing the bitcoin unit and every fiat the
+  app tracks — USD, EUR, GBP, CHF, CAD, JPY, AUD — with its symbol. It also
+  shows your available balance above the number pad for bitcoin sends.
+- **All accounts are visible in the review, not just the picked one.** The
+  cards that can pay this request sit side by side — the selected one
+  highlighted, tap to switch — each explaining what actually happens:
+  "Lightning direct" or "Swap via [provider]". The separate "Change
+  account" sheet stays for the full comparison.
 - **RGB is on-chain, not a Lightning node.** The "Your accounts" list in
   Send names the RGB account "RGB on-chain" with the RGB icon, not "RLN".
 - **Send's account cards explain the route.** Each card says what actually

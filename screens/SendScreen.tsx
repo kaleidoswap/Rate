@@ -780,7 +780,9 @@ export default function SendScreen({ navigation, route }: Props) {
       </View>
 
       <View style={{ gap: t.spacing[2] }}>
-        {choices.filter(c => c.account === selectedAccount).map((c, i) => {
+        {/* All accounts that can pay this request, with what each does.
+            The selected one is highlighted; tap to switch. */}
+        {choices.filter(c => !!c.best).map((c, i) => {
           const active = c.account === selectedAccount;
           const shown = active && selected ? selected : c.best;
           const s = shown?.quote ? quoteSpend(shown.quote) : null;

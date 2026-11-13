@@ -4,8 +4,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../theme/ThemeProvider';
 import { Sheet } from './Sheet';
 import { AmountPad, groupComposedAmount } from './AmountPad';
+import { OptionSheet } from './OptionSheet';
 import { receiveAmountSats } from '../utils/receive-request';
 import { feedback } from '../utils/feedback';
+
+/** The symbol for a fiat code, shown next to amounts and in the currency picker. */
+function fiatSymbolFor(code: string): string {
+  const symbols: Record<string, string> = { USD: '$', EUR: '€', GBP: '£', JPY: '¥', CHF: 'CHF ', CAD: 'CA$', AUD: 'A$' };
+  return symbols[code] ?? code + ' ';
+}
 
 export interface ReceiveRequestOptions { expirySeconds: number; showCountdown: boolean; /** What it's for: the invoice description. */ note?: string }
 
@@ -51,11 +58,12 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
   const [fiatCode, setFiatCode] = useState('USD');
   const [expirySeconds, setExpirySeconds] = useState(3600);
   const [showCountdown, setShowCountdown] = useState(false);
+  const [showFiatPicker, setShowFiatPicker] = useState(false);
   const [note, setNote] = useState('');
   // Which fiat the user is typing in; tap the unit to cycle through the available ones.
   const availableFiats = Object.entries(rates).filter(([, v]) => !!v && v > 0).map(([code]) => code);
   const rate = rates[fiatCode] ?? rates.usd;
-  const fiatSymbol = fiatCode === 'USD' ? '$' : fiatCode === 'EUR' ? '€' : fiatCode === 'GBP' ? '£' : fiatCode === 'JPY' ? '¥' : fiatCode === 'CHF' ? 'CHF ' : fiatCode === 'CAD' ? 'CA$' : fiatCode === 'AUD' ? 'A$' : fiatCode + ' ';
+  const fiatSymbol = fiatSymbolFor(fiatCode);
   const sending = !requestOptions;
   const tokenValue = (sats: number) => bitcoinUnit === 'sats' ? String(sats) : (sats / 1e8).toFixed(8);
   useEffect(() => {
@@ -108,12 +116,10 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
         {asset
           ? <Text style={muted}>{asset.unit}</Text>
           : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change amount entry unit" disabled={!rate} onPress={() => {
+              // First tap: enter fiat mode with the current currency.
+              // Tapping the currency label again opens the picker.
               if (!fiat) { setFiat(true); return; }
-              // Cycle through the available fiats, then back to the bitcoin unit.
-              const idx = availableFiats.indexOf(fiatCode);
-              if (idx < 0 || idx + 1 >= availableFiats.length) { setFiat(false); setFiatCode(availableFiats[0] ?? 'USD'); }
-              else { const next = availableFiats[idx + 1]; setFiatCode(next); }
-              if (valid && !empty) { const nextRate = rates[availableFiats[Math.min((idx < 0 ? 0 : idx + 1), availableFiats.length - 1)] ?? 'usd'] ?? rate; if (!fiat) setValue(((sats / 1e8) * (rates[availableFiats[0]] ?? rate)).toFixed(2)); else if (idx + 1 >= availableFiats.length) setValue(tokenValue(sats)); else setValue(((sats / 1e8) * nextRate).toFixed(2)); }
+              setShowFiatPicker(true);
             }} style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], opacity: rate ? 1 : 0.5 }}>
             <Text style={label}>{fiat ? fiatCode : bitcoinUnit}</Text>
             {!!rate && <Ionicons name="swap-vertical" size={16} color={t.colors.text.secondary} />}
@@ -170,6 +176,27 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
         </TouchableOpacity>
       </View>
     </ScrollView>
+    <OptionSheet
+      visible={showFiatPicker}
+      title="Currency"
+      options={[
+        { id: 'BTC', label: bitcoinUnit, description: bitcoinUnit === 'sats' ? 'Satoshis' : 'Bitcoin' },
+        ...availableFiats.map(code => ({ id: code, label: code, description: fiatSymbolFor(code) })),
+      ]}
+      selectedId={fiat ? fiatCode : bitcoinUnit}
+      onSelect={id => {
+        if (id === 'BTC' || id === bitcoinUnit) {
+          if (fiat && valid && !empty) setValue(tokenValue(sats));
+          setFiat(false);
+        } else {
+          const nextRate = rates[id] ?? rates.usd;
+          if (valid && !empty) setValue(((sats / 1e8) * nextRate).toFixed(2));
+          setFiatCode(id);
+          setFiat(true);
+        }
+      }}
+      onClose={() => setShowFiatPicker(false)}
+    />
   </Sheet>;
 }
 export default AmountEditorModal;
