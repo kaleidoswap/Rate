@@ -10,6 +10,14 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Changed
+- **Payment in progress has a design that moves.** The status hero (animated
+  icon, pulse ring while checking, amount, recipient) is the centre; the key
+  details — To, From, Fee, Total — sit in a card that's always visible
+  (no "Payment details" toggle); a timer counts while pending; "Don't pay
+  this twice" is gone from every message. The copy says what's happening:
+  "Broadcasting to the Bitcoin network…", "Checking automatically."
+
 ## [0.16.0] — 2026-11-13
 
 The refinement release: fiat in your currency, all routes visible at once,

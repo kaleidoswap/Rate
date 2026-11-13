@@ -107,15 +107,14 @@ test('a completed payment can be closed and refreshes balances', async () => {
   expect(screen.getByText('See receipt')).toBeTruthy();
   fireEvent.press(screen.getByText('See receipt'));
   expect(screen.queryByText('See receipt')).toBeNull();
-  // Behind it, the receipt — already expanded by "See receipt".
+  // Behind it, the outcome with key info always visible.
   expect(screen.getByText('Payment completed')).toBeTruthy();
   expect(screen.queryByText('Pay again')).toBeNull();
   expect(require('../services/kaleidoPay/attempts').beginPaymentAttempt).toHaveBeenCalledWith(1, expect.objectContaining({ recipientName: expect.any(String), feeDisplay: '10 sats', accountName: 'Account Spark' }));
-  expect(screen.getByText('Quoted fees')).toBeTruthy();
-  expect(screen.getByText('Requested')).toBeTruthy();
-  // The receipt still folds away.
-  fireEvent.press(screen.getByText('Hide details'));
-  expect(screen.queryByText('Quoted fees')).toBeNull();
+  // Key rows are always shown, no toggle.
+  expect(screen.getByText('From')).toBeTruthy();
+  expect(screen.getByText('Fee')).toBeTruthy();
+  expect(screen.getByText('Total')).toBeTruthy();
   expect(screen.getByText('Done')).toBeTruthy();
   expect(mockFeedback.send).toHaveBeenCalledTimes(1);
   fireEvent.press(screen.getByText('Done'));
@@ -141,7 +140,7 @@ test('a payment in progress is re-checked on its own until it settles', async ()
   jest.useFakeTimers();
   try {
     await act(async () => { pay(screen, 'Pay 1010 sats'); });
-    expect(screen.getByText('Confirming payment')).toBeTruthy();
+    expect(screen.getByText('Confirming')).toBeTruthy();
     await act(async () => { jest.advanceTimersByTime(3_000); });
     expect(checkPaymentStatus).toHaveBeenCalledWith('Spark', expect.any(String));
     const calls = (checkPaymentStatus as jest.Mock).mock.calls.length;
@@ -403,7 +402,7 @@ test.each([[false, 'Sent to the network'], [true, 'Confirmed on-chain']] as cons
   fireEvent.press(screen.getByText('See receipt'));
   expect(screen.getByText(title)).toBeTruthy();
   expect(screen.queryByText('Payment completed')).toBeNull();
-  if (!confirmed) expect(screen.getByText("Waiting for a Bitcoin block confirmation. Don’t pay this twice.")).toBeTruthy();
+  if (!confirmed) expect(screen.getByText("Broadcast. A Bitcoin block will confirm it shortly.")).toBeTruthy();
   screen.unmount();
 });
 
@@ -413,7 +412,7 @@ test('a reopened 26-minute-old unknown payment does not restart automatic checki
   loadPaymentAttempt.mockResolvedValueOnce({ id: 'old-arkade', sourceId: 'arkade', provider: 'Arkade', total: '10 sats', recipient: '10 sats', status: 'unknown', createdAt: Date.now() - 26 * 60_000 });
   const screen = render(<SendScreen navigation={nav()} route={{ params: { resumePayment: true } }} />);
   await act(async () => {});
-  expect(screen.getByText('Confirmation is taking longer')).toBeTruthy();
+  expect(screen.getByText('Taking longer')).toBeTruthy();
   expect(screen.queryByLabelText('Checking payment automatically')).toBeNull();
   expect(checkPaymentStatus).not.toHaveBeenCalled();
   expect(screen.getByText('Done')).toBeTruthy();
