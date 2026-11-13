@@ -989,7 +989,7 @@ export default function DashboardScreen({ navigation }: Props) {
           />}
         </View>
 
-        <RecentActivityWidget title="Recent activity" limit={3} refreshKey={balanceUpdatedAt} onOpenPaymentAttempt={id => navigation.getParent()?.navigate('Send', { resumePayment: true, paymentAttemptId: id })} onViewAll={() => navigation.navigate('Activity')} emptyAction={{ label: 'Receive', onPress: () => navigation.getParent()?.navigate('Receive') }} />
+        {/* Activity lives in its own tab; the dashboard shows what you have. */}
         <InsightCards
           channels={channels}
           onAction={(action) => (action.kind === 'navigate'

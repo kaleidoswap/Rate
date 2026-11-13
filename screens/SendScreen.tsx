@@ -689,8 +689,8 @@ export default function SendScreen({ navigation, route }: Props) {
           {(['SPARK', 'ARKADE', 'BARK', 'RGB'] as PayAccountId[]).filter(k => balancesSat[k] !== undefined && balancesSat[k]! > 0).map(k => (
             <View key={k} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
-                <NetworkIcon network={k === 'RGB' ? 'rln' : k.toLowerCase()} size={16} />
-                <Text style={{ ...text, fontWeight: '600' }}>{PAY_ACCOUNT_NAME[k]}</Text>
+                <NetworkIcon network={k === 'RGB' ? 'rgb' : k.toLowerCase()} size={16} />
+                <Text style={{ ...text, fontWeight: '600' }}>{k === 'RGB' ? 'RGB on-chain' : PAY_ACCOUNT_NAME[k]}</Text>
               </View>
               <AmountText style={small}>{formatSats(balancesSat[k]!)}</AmountText>
             </View>
@@ -795,6 +795,12 @@ export default function SendScreen({ navigation, route }: Props) {
                 {iconChip(c.account.toLowerCase(), 36)}
                 <View style={{ flex: 1, gap: 2 }}>
                   <Text style={{ ...text, fontWeight: '600' }}>{c.best?.accountName || PAY_ACCOUNT_NAME[c.account]}</Text>
+                  {/* What actually happens: the rail the payment takes, and whether there's a swap. */}
+                  {!!c.best && (
+                    <Text style={{ ...small, color: t.colors.text.tertiary }} numberOfLines={1}>
+                      {c.best.route.kind === 'swap' ? `Swap via ${c.best.provider}` : `${railLabel(c.best.route.to)} direct`}
+                    </Text>
+                  )}
                   {balancesSat[c.account] !== undefined && <AmountText style={small}>{formatSats(balancesSat[c.account]!)}</AmountText>}
                 </View>
                 <View style={{ alignItems: 'flex-end', gap: 2, maxWidth: '45%' }}>

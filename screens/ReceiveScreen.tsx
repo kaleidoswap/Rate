@@ -1571,7 +1571,6 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     return (
       <View style={styles.assetTabs}>
         {Tab('BTC', isBtc, selectBtc, <AssetIcon ticker="BTC" size={20} showBadge={false} />, 'BTC')}
-        {Tab('USD', isUsd, selectUsd, <UsdCoinIcon size={20} />, 'USD')}
         {/* RGB one tap away, not three levels deep in the options sheet. */}
         {rgbConnected && selectedAsset.asset_id !== NEW_RGB_ASSET_ID &&
           Tab('RGB', false, () => { feedback.select(); setShowRgbAssets(true); }, <RgbIcon size={20} />, 'RGB')}
@@ -1748,6 +1747,11 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
           <ReceiveQr value={unifiedUri} size={qrSize} />
         </View>
         {renderStatus()}
+        {networkType !== 'unified' && routeDestination && (
+          <Text style={{ color: theme.colors.text.tertiary, fontSize: theme.typography.fontSize.xs, textAlign: 'center' }}>
+            Lands in {accountLabel(routeDestination, caps)}
+          </Text>
+        )}
         {renderAmountRow()}
 
         {receiveMethods.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry showCountdown={showCountdown} key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
