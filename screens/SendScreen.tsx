@@ -362,12 +362,21 @@ export default function SendScreen({ navigation, route }: Props) {
     const hasAmount = fixedSat !== undefined || amountSat !== undefined;
     const isRgbComplete = target.kind === 'rgb' && !!rgbAsset && (rgbAsset?.amount !== undefined || Number(assetAmount) > 0);
     const isComplete = target.kind === 'rgb' ? isRgbComplete : (!sparkToken && hasAmount);
-    if (!isComplete) return;
+    if (!isComplete) {
+      // Auto-open the amount editor: the user has a target, just needs the amount.
+      // This eliminates the "tap on 0 to enter an amount" step for scanned/pasted requests.
+      if (target.kind !== 'rgb' && !sparkToken && fixedSat === undefined && !amountSat && !showAmountEditor) {
+        continueAfterAmount.current = true;
+        setAmountEditorFor('btc');
+        setShowAmountEditor(true);
+      }
+      return;
+    }
     const key = `${target.kind}:${input}:${fixedSat ?? amountSat ?? ''}:${rgbAsset?.id ?? ''}:${sparkToken?.id ?? ''}:${assetAmount}`;
     if (autoQuoted.current === key) return;
     autoQuoted.current = key;
     void getOffers();
-  }, [target, fixedSat, amountSat, rgbAsset, sparkToken, assetAmount, busy, preview, input, getOffers]);
+  }, [target, fixedSat, amountSat, rgbAsset, sparkToken, assetAmount, busy, preview, input, showAmountEditor, getOffers]);
 
   function review() {
     if (!target) { setError(decodeError ?? 'Paste or scan something to pay.'); return; }

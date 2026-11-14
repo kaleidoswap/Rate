@@ -124,17 +124,17 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       }
       // Anything payable opens Send as-is: it decodes the code and offers every way to pay it.
       if (isPayable(data)) {
-        navigation.navigate('Send', { prefilledAddress: data }); return;
+        navigation.replace('Send', { prefilledAddress: data }); return;
       }
       // An EVM or Solana address: Send offers USDC/USDT from Spark to that chain.
       const crossChain = detectCrossChainAddress(unwrapCrossChainUri(data));
       if (crossChain) {
-        navigation.navigate('Send', { prefilledAddress: crossChain.normalized }); return;
+        navigation.replace('Send', { prefilledAddress: crossChain.normalized }); return;
       }
       const paymentData = await processScannedData(data);
       if (current !== scanRevision.current) return;
       // Send decodes the request itself: only the string and its amount travel.
-      navigation.navigate('Send', {
+      navigation.replace('Send', {
         prefilledAddress: ('address' in paymentData ? paymentData.address : paymentData.invoice) || '',
         prefilledAmount: 'amount' in paymentData ? paymentData.amount : undefined,
       });

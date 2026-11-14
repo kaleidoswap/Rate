@@ -194,48 +194,12 @@ const makeStyles = (theme: ReturnType<typeof useAppTheme>) => {
       textAlign: 'center',
     },
 
-    listCard: { padding: 0, overflow: 'hidden' },
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: theme.spacing[3],
-      paddingHorizontal: theme.spacing[4],
-      paddingVertical: theme.spacing[3],
-      minHeight: theme.spacing[16],
-    },
-    rowIcon: {
-      width: theme.spacing[9],
-      height: theme.spacing[9],
-      borderRadius: theme.borderRadius.full,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: theme.colors.surface.elevated,
-    },
-    rowText: { flex: 1, minWidth: 0, gap: theme.spacing[0.5] },
-    rowLabel: {
-      fontSize: fs.xs,
-      lineHeight: leading(fs.xs, lh.normal),
-      color: theme.colors.text.tertiary,
-    },
-    rowValue: {
-      fontSize: fs.sm,
-      lineHeight: leading(fs.sm, lh.normal),
-      color: theme.colors.text.primary,
-      fontWeight: theme.typography.fontWeight.medium,
-    },
 
     qrCard: { alignItems: 'center', paddingBottom: 0 },
     qrFrame: {
       padding: theme.spacing[3],
       borderRadius: theme.borderRadius.xl,
       backgroundColor: theme.colors.surface.secondary,
-    },
-    qrHint: {
-      marginTop: theme.spacing[4],
-      fontSize: fs.sm,
-      lineHeight: leading(fs.sm, lh.normal),
-      color: theme.colors.text.secondary,
-      textAlign: 'center',
     },
     npub: {
       marginTop: theme.spacing[1],
@@ -244,26 +208,6 @@ const makeStyles = (theme: ReturnType<typeof useAppTheme>) => {
       fontFamily: theme.typography.fontFamily.mono,
       color: theme.colors.text.tertiary,
     },
-    qrDivider: { alignSelf: 'stretch', marginTop: theme.spacing[4] },
-    qrActions: { flexDirection: 'row', alignSelf: 'stretch', alignItems: 'center' },
-    qrAction: {
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: theme.spacing[1.5],
-      minHeight: theme.spacing[12],
-    },
-    qrActionSeparator: {
-      width: StyleSheet.hairlineWidth,
-      alignSelf: 'stretch',
-      marginVertical: theme.spacing[2],
-      backgroundColor: theme.colors.border.light,
-    },
-    actionText: {
-      fontSize: fs.sm,
-      fontWeight: theme.typography.fontWeight.semibold,
-      color: theme.colors.primary[500],
-    },
+    qrActions: { flexDirection: 'row', alignSelf: 'stretch', alignItems: 'center', gap: theme.spacing[2] },
   });
 };

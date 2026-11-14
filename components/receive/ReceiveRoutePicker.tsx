@@ -69,7 +69,7 @@ function destinationChoices(destinations: ReceiveDestination[], amountSats: numb
 export function ReceiveRoutePicker({
   methods, method, onMethod, destinations, destination, onDestination, amountSats,
   chains, chain, onChain, accountLabel = (account) => account, lightningDestinations, lightningDestination, onLightningDestination,
-  iconFor, methodIcons,
+  iconFor, methodIcons, embedded = false,
 }: {
   methods: ReceiveMethodId[];
   method: ReceiveMethodId;
@@ -91,6 +91,8 @@ export function ReceiveRoutePicker({
   iconFor?: (account: AccountId) => string;
   /** Icons per method tab; Ark lists each Ark account it can land in. */
   methodIcons?: Partial<Record<ReceiveMethodId, string[]>>;
+  /** When true: render the choices directly (no row, no nested sheet). */
+  embedded?: boolean;
 }) {
   const t = useAppTheme();
   const [open, setOpen] = useState(false);
@@ -104,6 +106,7 @@ export function ReceiveRoutePicker({
   const caption = { color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, fontWeight: '600' as const, letterSpacing: 0.6, textTransform: 'uppercase' as const, marginTop: t.spacing[2] };
   const footnote = { color: t.colors.text.tertiary, fontSize: t.typography.fontSize.xs, paddingTop: t.spacing[1] };
   return <View style={{ gap: t.spacing[3], marginBottom: t.spacing[4] }}>
+    {!embedded && (
     <TouchableOpacity
       accessibilityRole="button" accessibilityLabel={`How they pay: ${summary}. Change`}
       onPress={() => { feedback.select(); setOpen(true); }} activeOpacity={0.7}
@@ -115,8 +118,8 @@ export function ReceiveRoutePicker({
       </View>
       <Ionicons name="chevron-down" size={18} color={t.colors.text.secondary} />
     </TouchableOpacity>
-    <Sheet visible={open} onClose={() => setOpen(false)} title="How they pay">
-      <ScrollView style={{ maxHeight: 480 }} contentContainerStyle={{ paddingBottom: t.spacing[2], gap: t.spacing[2] }}>
+    )}
+    {(open || embedded) && <ScrollView style={{ maxHeight: embedded ? undefined : 480 }} contentContainerStyle={{ paddingBottom: t.spacing[2], gap: t.spacing[2] }}>
         <Text style={caption}>Method</Text>
         {methods.map(key => <OptionRow<ReceiveMethodId> key={key} active={key === method}
           choice={{ key, title: METHOD_LABELS[key], icon: methodIcons?.[key]?.[0] }}
@@ -143,7 +146,6 @@ export function ReceiveRoutePicker({
             <OptionRow<AccountId> key={c.key} active={c.key === destination} choice={c}
               onSelect={() => { onDestination(c.key); setOpen(false); }} />)}
         </>}
-      </ScrollView>
-    </Sheet>
+      </ScrollView>}
   </View>;
 }

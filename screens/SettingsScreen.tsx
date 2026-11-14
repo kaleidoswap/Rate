@@ -33,6 +33,7 @@ import {
 } from '../store/slices/settingsSlice';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
+import Constants from 'expo-constants';
 import { formatDenominatedAmount, useBitcoinPriceIn } from '../utils/bitcoinUnits';
 import { loadBtcBalance, setActiveWallet } from '../store/slices/walletSlice';
 import { Button, Input, MainHeader } from '../components';
@@ -148,6 +149,8 @@ export default function SettingsScreen({ navigation }: Props) {
     (connection) => connection.id === nostrState.selectedNwcConnectionId,
   );
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
+  const expoVersion = Constants.expoConfig?.version;
+  const expoBuildVersion = Constants.expoConfig?.ios?.buildNumber;
   const [settingsQuery, setSettingsQuery] = useState('');
   type SettingsPage = 'preferences' | 'security' | 'connections' | 'advanced';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
@@ -640,7 +643,7 @@ export default function SettingsScreen({ navigation }: Props) {
           <Group>
             <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />
             <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
-
+            <Row icon="information-circle-outline" label="About" value={`v${expoVersion ?? '—'}`} onPress={() => Alert.alert('KaleidoSwap Wallet', `Version ${expoVersion ?? '—'}\nBuild ${expoBuildVersion ?? '—'}\n\nA non-custodial Bitcoin & RGB wallet.`)} />
 
           </Group>
         </>}

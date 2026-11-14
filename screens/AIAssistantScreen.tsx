@@ -871,7 +871,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
       />}
       <VoiceAgentOverlay messages={messages} onMessagesChange={setMessages} visible={voiceAgentOpen} autoListen={true} onClose={() => setVoiceAgentOpen(false)} />
       <MainHeader
-        title="Agent"
+        title="Prismo"
         iconNode={<MindCharacterBadge size={22} color={theme.colors.text.primary} />}
         rightAction={
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

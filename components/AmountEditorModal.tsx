@@ -118,7 +118,12 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
           : <TouchableOpacity accessibilityRole="button" accessibilityLabel="Change amount entry unit" disabled={!rate} onPress={() => {
               // First tap: enter fiat mode with the current currency.
               // Tapping the currency label again opens the picker.
-              if (!fiat) { setFiat(true); return; }
+              if (!fiat) {
+                // Convert the typed sats/BTC into the fiat currency before switching.
+                if (valid && !empty) setValue(((sats / 1e8) * rate).toFixed(2));
+                setFiat(true);
+                return;
+              }
               setShowFiatPicker(true);
             }} style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary, flexDirection: 'row', alignItems: 'center', gap: t.spacing[2], opacity: rate ? 1 : 0.5 }}>
             <Text style={label}>{fiat ? fiatCode : bitcoinUnit}</Text>
@@ -134,7 +139,12 @@ export function AmountEditorModal({ visible, onClose, initialSats, initialAssetV
         </TouchableOpacity>}
       </View> : null}
       {sending && !asset && maxSats !== undefined && maxSats > 0 && (
-        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send the maximum" onPress={() => { feedback.select(); setValue(bitcoinUnit === 'sats' ? String(maxSats) : (maxSats / 1e8).toFixed(8)); }}
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send the maximum" onPress={() => {
+          feedback.select();
+          // In fiat mode, convert the max sats into the active currency.
+          if (fiat) setValue(((maxSats / 1e8) * rate).toFixed(2));
+          else setValue(bitcoinUnit === 'sats' ? String(maxSats) : (maxSats / 1e8).toFixed(8));
+        }}
           style={{ minHeight: 40, paddingHorizontal: t.spacing[4], justifyContent: 'center', borderRadius: t.borderRadius.full, backgroundColor: t.colors.surface.secondary, alignSelf: 'flex-start' }}>
           <Text style={{ color: t.colors.text.primary, fontWeight: '600' }}>Max</Text>
         </TouchableOpacity>
