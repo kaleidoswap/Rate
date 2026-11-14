@@ -178,7 +178,16 @@ export async function uploadBackupFile(client: VssClient, prefix: string, data: 
 export async function readBackupManifest(client: VssClient, prefix: string): Promise<BackupManifest | undefined> {
   const raw = await client.get(`${prefix}/manifest`);
   if (!raw) return undefined;
-  const manifest = JSON.parse(new TextDecoder().decode(raw)) as BackupManifest;
+  // Server bytes are untrusted: malformed JSON and non-objects read as the
+  // one guarded refusal, never as a raw SyntaxError/TypeError in restore UX.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(raw));
+  } catch {
+    throw new Error('Unsupported RGB backup.');
+  }
+  if (parsed === null || typeof parsed !== 'object') throw new Error('Unsupported RGB backup.');
+  const manifest = parsed as BackupManifest;
   if (![1, 2].includes(manifest.version) || !Number.isSafeInteger(manifest.size) || manifest.size < 0 || !Number.isInteger(manifest.chunks) || manifest.chunks !== Math.max(1, Math.ceil(manifest.size / VSS_CHUNK_SIZE)) || !/^[a-f0-9]{64}$/.test(manifest.sha256)) throw new Error('Unsupported RGB backup.');
   return manifest;
 }
