@@ -79,6 +79,8 @@ struct Args {
     guard let arr = value(key) as? [Any] else { throw error(key, "byte array") }
     return arr.compactMap { $0 as? Int }.map { UInt8(clamping: $0) }
   }
+  func obj(_ key: String) throws -> [String: Any] {
+    guard let o = value(key) as? [String: Any] else { throw InvalidArgument(description: "\(key) must be an object") }
     return o
   }
 }

@@ -81,10 +81,16 @@ function trimSlices(target) {
       continue;
     }
     if (lib.SupportedPlatformVariant === 'simulator' && lib.SupportedArchitectures.length > 1) {
-      const binary = path.join(slice, lib.LibraryPath, 'rgb_libFFI');
-      execFileSync('lipo', [binary, '-thin', 'arm64', '-output', `${binary}.arm64`], { stdio: 'inherit' });
-      fs.renameSync(`${binary}.arm64`, binary);
-      lib.SupportedArchitectures = ['arm64'];
+      // Find the binary: LibraryPath may be a directory (standard) or the .a file itself (BFA).
+      const libCandidate = path.join(slice, lib.LibraryPath);
+      const binary = fs.existsSync(libCandidate) && fs.statSync(libCandidate).isFile()
+        ? libCandidate
+        : path.join(slice, lib.LibraryPath, lib.BinaryPath || 'rgb_libFFI');
+      if (fs.existsSync(binary)) {
+        execFileSync('lipo', [binary, '-thin', 'arm64', '-output', `${binary}.arm64`], { stdio: 'inherit' });
+        fs.renameSync(`${binary}.arm64`, binary);
+        lib.SupportedArchitectures = ['arm64'];
+      }
     }
     kept.push(lib);
   }

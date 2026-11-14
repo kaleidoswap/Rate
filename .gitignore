@@ -50,3 +50,4 @@ coverage/
 
 # Local run/e2e artifacts (emulator logs, design reviews, audit output)
 output/
+modules/kaleido-rgb/android/libs/*.aar
