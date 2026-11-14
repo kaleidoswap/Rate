@@ -1,20 +1,34 @@
-plugins {
-  id 'com.android.library'
-  id 'expo-module-gradle-plugin'
-}
-
 group = 'com.kaleidoswap.rgb'
-version = '0.1.0'
+namespace "com.kaleidoswap.rgb"
+
+def bfaAar = file('libs/rgb-lib-bfa-android-0.3.0-beta.7-upstream-dev-bfa.6-bfa.aar')
 
 android {
-  namespace "com.kaleidoswap.rgb"
-  defaultConfig {
-    versionCode 1
-    versionName "0.1.0"
-  }
+    namespace "com.kaleidoswap.rgb"
+    compileSdk 36
+
+    defaultConfig {
+        minSdk 24
+        targetSdk 36
+    }
+
+    lintOptions {
+        abortOnError false
+    }
+}
+
+if (bfaAar.exists()) {
+    dependencies {
+        implementation files(bfaAar.path)
+    }
+} else {
+    // BFA AAR not downloaded yet: use the standard rgb-lib from Maven.
+    // See modules/kaleido-rgb/android/libs/README.md to download the BFA AAR.
+    dependencies {
+        implementation "org.rgbtools:rgb-lib-android:0.3.0-beta.7"
+    }
 }
 
 dependencies {
-  // RGB-Tools' official Kotlin bindings; needs compileSdk 36 (aar-metadata minCompileSdk).
-  implementation "org.rgbtools:rgb-lib-android:0.3.0-beta.7"
+    implementation "com.facebook.react:react-native:+"
 }

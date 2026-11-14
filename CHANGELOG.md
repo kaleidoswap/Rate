@@ -11,6 +11,17 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 ## [Unreleased]
 
 ### Changed
+- **RGB moves to the BFA (Bridged Fungible Asset) fork.** The native rgb-lib
+  binary and bindings come from UTEXO-Protocol's BFA fork (bfa.8 on iOS,
+  bfa.6 on Android — Android bumps to bfa.8 when published). BFA adds
+  bridged-fungible-asset support (USDT0, bridge smart contracts), VSS server
+  backup (`configureVssBackup`, `disableVssAutoBackup`, `vssBackup`), address
+  rotation (`rotateColoredAddress`, `rotateVanillaAddress`), and optional
+  expiration in blindReceive/send. The native module's `goOnline` now takes
+  individual params (including `hubUrl`/`hubToken` for VSS coordination)
+  instead of the `OnlineOptions` struct; `sync` drops its options param.
+
+### Changed (previous)
 - **Payment in progress has a design that moves.** The status hero (animated
   icon, pulse ring while checking, amount, recipient) is the centre; the key
   details — To, From, Fee, Total — sit in a card that's always visible

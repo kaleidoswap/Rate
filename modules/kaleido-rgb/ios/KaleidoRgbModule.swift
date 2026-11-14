@@ -198,11 +198,13 @@ public class KaleidoRgbModule: Module {
     }
 
     walletOp("goOnline") { s, a in
-      s.online = try s.wallet.goOnline(onlineOptions: OnlineOptions(
-        indexerUrl: try a.string("indexerUrl"),
+      // BFA binding: goOnline takes individual params (hubUrl/hubToken for VSS coordination).
+      s.online = try s.wallet.goOnline(
         skipConsistencyCheck: a.bool("skipConsistencyCheck", false),
-        vanillaSyncLookback: try a.u32("vanillaSyncLookback")
-      ))
+        indexerUrl: try a.string("indexerUrl"),
+        hubUrl: a.stringOrNil("hubUrl") ?? "",
+        hubToken: a.stringOrNil("hubToken") ?? ""
+      )
       return nil
     }
     walletOp("getBtcBalance") { s, a in Mappers.js(try s.wallet.getBtcBalance(online: s.online, skipSync: a.bool("skipSync", false))) }
@@ -211,7 +213,7 @@ public class KaleidoRgbModule: Module {
       Mappers.js(try s.wallet.refresh(online: try s.requireOnline(), assetId: a.stringOrNil("assetId"), filter: try a.objects("filter").map { try Mappers.refreshFilter($0) }, skipSync: a.bool("skipSync", false)))
     }
     walletOp("sync") { s, a in
-      try s.wallet.sync(online: try s.requireOnline(), options: try Mappers.syncOptions(a))
+      try s.wallet.sync(online: try s.requireOnline())
       return nil
     }
     walletOp("listAssets") { s, a in Mappers.js(try s.wallet.listAssets(filterAssetSchemas: try a.strings("schemas").map { try Mappers.schema($0) })) }
@@ -220,16 +222,16 @@ public class KaleidoRgbModule: Module {
     walletOp("getMediaDir") { s, _ in s.wallet.getMediaDir() }
     walletOp("getWalletDir") { s, _ in s.wallet.getWalletDir() }
     walletOp("blindReceive") { s, a in
-      Mappers.js(try s.wallet.blindReceive(assetId: a.stringOrNil("assetId"), assignment: try Mappers.assignment(try a.obj("assignment")), expirationTimestamp: try a.u64("expirationTimestamp"), transportEndpoints: try a.strings("transportEndpoints"), minConfirmations: try a.u8("minConfirmations")))
+      Mappers.js(try s.wallet.blindReceive(assetId: a.stringOrNil("assetId"), assignment: try Mappers.assignment(try a.obj("assignment")), expirationTimestamp: try a.u64OrNil("expirationTimestamp"), transportEndpoints: try a.strings("transportEndpoints"), minConfirmations: try a.u8("minConfirmations")))
     }
     walletOp("witnessReceive") { s, a in
-      Mappers.js(try s.wallet.witnessReceive(assetId: a.stringOrNil("assetId"), assignment: try Mappers.assignment(try a.obj("assignment")), expirationTimestamp: try a.u64("expirationTimestamp"), transportEndpoints: try a.strings("transportEndpoints"), minConfirmations: try a.u8("minConfirmations")))
+      Mappers.js(try s.wallet.witnessReceive(assetId: a.stringOrNil("assetId"), assignment: try Mappers.assignment(try a.obj("assignment")), expirationTimestamp: try a.u64OrNil("expirationTimestamp"), transportEndpoints: try a.strings("transportEndpoints"), minConfirmations: try a.u8("minConfirmations")))
     }
     walletOp("send") { s, a in
       let map = try a.raw("recipientMap")
       var recipients: [String: [Recipient]] = [:]
       for assetId in map.keys { recipients[assetId] = try Args(map).objects(assetId).map { try Mappers.recipient($0) } }
-      return Mappers.js(try s.wallet.send(online: try s.requireOnline(), recipientMap: recipients, donation: a.bool("donation", false), feeRate: try a.u64("feeRate"), minConfirmations: try a.u8("minConfirmations"), expirationTimestamp: try a.u64("expirationTimestamp")))
+      return Mappers.js(try s.wallet.send(online: try s.requireOnline(), recipientMap: recipients, donation: a.bool("donation", false), feeRate: try a.u64("feeRate"), minConfirmations: try a.u8("minConfirmations"), expirationTimestamp: try a.u64OrNil("expirationTimestamp"), skipSync: a.bool("skipSync", false)))
     }
     walletOp("sendBtc") { s, a in
       try s.wallet.sendBtc(online: try s.requireOnline(), address: try a.string("address"), amount: try a.u64("amount"), feeRate: try a.u64("feeRate"), skipSync: a.bool("skipSync", false))
@@ -271,6 +273,19 @@ public class KaleidoRgbModule: Module {
       return nil
     }
     walletOp("backupInfo") { s, _ in try s.wallet.backupInfo() }
+    walletOp("configureVssBackup") { s, a in
+      try s.wallet.configureVssBackup(config: VssBackupConfig(
+        serverUrl: try a.string("serverUrl"),
+        storeId: try a.string("storeId"),
+        signingKey: try a.bytes("signingKey"),
+        encryptionEnabled: a.bool("encryptionEnabled", false),
+        autoBackup: a.bool("autoBackup", false),
+        backupMode: a.stringOrNil("backupMode") == "blocking" ? .blocking : .async
+      ))
+      return nil
+    }
+    walletOp("disableVssAutoBackup") { s, _ in s.wallet.disableVssAutoBackup() }
+    walletOp("vssBackup") { s, _ in try s.wallet.vssBackup(client: VssBackupClient()) }
     walletOp("getFeeEstimation") { s, a in try s.wallet.getFeeEstimation(online: try s.requireOnline(), blocks: try a.u16("blocks")) }
   }
 }
