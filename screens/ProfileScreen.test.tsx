@@ -83,7 +83,7 @@ it('derives the npub from the public key when it was not stored', () => {
 });
 
 it('the QR card is the main element, no Nostr settings link', () => {
-  const screen = render(<ProfileScreen navigation={navigation} route={undefined} />);
+  const screen = render(<ProfileScreen navigation={navigation} />);
   expect(screen.getByText('npub1alice')).toBeTruthy();
   expect(screen.queryByLabelText('Nostr settings')).toBeNull();
 });

@@ -24,7 +24,7 @@ beforeEach(() => {
 afterEach(() => jest.clearAllMocks());
 test('camera denial leaves paste and image entry available, without automatic permission prompts', async () => {
   const request = jest.fn(); (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: false, canAskAgain: true }, request]);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { mode: 'contact' } }} />);
   expect(request).not.toHaveBeenCalled(); expect(screen.getByText('Choose image')).toBeTruthy();
   (Clipboard.getString as jest.Mock).mockResolvedValue('contact-value');
@@ -34,14 +34,14 @@ test('camera denial leaves paste and image entry available, without automatic pe
 test('image with multiple QR codes stays on scanner with a recoverable error', async () => {
   (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({ canceled: false, assets: [{ uri: 'local-image' }] });
   (scanFromURLAsync as jest.Mock).mockResolvedValue([{ data: 'a' }, { data: 'b' }]);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() }; const screen = render(<QRScannerScreen navigation={navigation} />);
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() }; const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Choose image')); });
   expect(screen.getByText(/More than one QR/)).toBeTruthy(); expect(navigation.navigate).not.toHaveBeenCalled();
   fireEvent.press(screen.getByText('Scan again')); expect(screen.queryByText(/More than one QR/)).toBeNull();
 });
 test('cancels late clipboard navigation after leaving the screen and ignores double taps', async () => {
   let resolve!: (s: string) => void; (Clipboard.getString as jest.Mock).mockReturnValue(new Promise(r => { resolve = r; }));
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() }; const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { mode: 'contact' } }} />);
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() }; const screen = render(<QRScannerScreen navigation={navigation} route={{ params: { mode: 'contact' } }} />);
   fireEvent.press(screen.getByText('Paste')); fireEvent.press(screen.getByText('Paste'));
   expect(Clipboard.getString).toHaveBeenCalledTimes(1); screen.unmount();
   await act(async () => { resolve('contact'); }); expect(navigation.navigate).not.toHaveBeenCalled();
@@ -50,40 +50,40 @@ test('cancels late clipboard navigation after leaving the screen and ignores dou
 const OFFER = require('@universal-bolt12/universal-code').encodeOffer([{ type: 10n, value: new TextEncoder().encode('Shop') }]);
 test.each([OFFER, `LIGHTNING:${OFFER}`, `bitcoin:?lno=${OFFER}`])('opens Send with the code as-is: %s', async code => {
   (Clipboard.getString as jest.Mock).mockResolvedValue(code);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
-  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: code });
+  expect(navigation.replace).toHaveBeenCalledWith('Send', { prefilledAddress: code });
 });
 test('a Lightning invoice opens Send as-is', async () => {
   (require('../utils/decodeInvoice').decodeBolt11 as jest.Mock).mockReturnValue({ amountSats: 1000, description: 'Coffee' });
   (Clipboard.getString as jest.Mock).mockResolvedValue('lnbc1000testinvoice');
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
-  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: 'lnbc1000testinvoice' });
+  expect(navigation.replace).toHaveBeenCalledWith('Send', { prefilledAddress: 'lnbc1000testinvoice' });
 });
 
 
 test('a universal request with a Lightning invoice opens Send with both legs', async () => {
   (require('../utils/decodeInvoice').decodeBolt11 as jest.Mock).mockReturnValue({ amountSats: 1000, description: 'Coffee' });
   (Clipboard.getString as jest.Mock).mockResolvedValue('bitcoin:?lightning=lnbc1000testinvoice');
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
-  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: 'bitcoin:?lightning=lnbc1000testinvoice' });
+  expect(navigation.replace).toHaveBeenCalledWith('Send', { prefilledAddress: 'bitcoin:?lightning=lnbc1000testinvoice' });
 });
 test('a Spark-only universal request opens Send with its address and amount', async () => {
   const address = `spark1${'q'.repeat(32)}`;
   (Clipboard.getString as jest.Mock).mockResolvedValue(`bitcoin:?spark=${address}&amount=0.00001`);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
-  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: `bitcoin:?spark=${address}&amount=0.00001` });
+  expect(navigation.replace).toHaveBeenCalledWith('Send', { prefilledAddress: `bitcoin:?spark=${address}&amount=0.00001` });
 });
 test('a token request is never silently treated as a BTC native request', async () => {
   (Clipboard.getString as jest.Mock).mockResolvedValue(`bitcoin:?spark=spark1${'q'.repeat(32)}&assetid=USD&assetamount=10`);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
   expect(navigation.navigate).not.toHaveBeenCalled();
@@ -94,7 +94,7 @@ test.each(['lnbc-expired', 'bitcoin:?lightning=lnbc-expired'])('rejects an expir
   const expiry = require('../components/payments/InvoiceExpiry').invoiceExpiry as jest.Mock;
   expiry.mockImplementation((value: string) => value === 'lnbc-expired' ? Date.now() - 1000 : null);
   (Clipboard.getString as jest.Mock).mockResolvedValue(code);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
   expect(navigation.navigate).not.toHaveBeenCalled(); expect(screen.getByText(/invoice has expired/)).toBeTruthy();
@@ -107,10 +107,10 @@ test.each([
   ['So11111111111111111111111111111111111111112', 'So11111111111111111111111111111111111111112'],
 ])('an address on another chain opens Send for a cross-chain transfer: %s', async (code, address) => {
   (Clipboard.getString as jest.Mock).mockResolvedValue(code);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   await act(async () => { fireEvent.press(screen.getByText('Paste')); });
-  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: address });
+  expect(navigation.replace).toHaveBeenCalledWith('Send', { prefilledAddress: address });
 });
 
 const NPUB = `npub1${'q'.repeat(58)}`;
@@ -118,7 +118,7 @@ test.each([NPUB, `nostr:${NPUB}`, `NOSTR:${NPUB.toUpperCase()}`, `nostr:nprofile
   "someone's Nostr code opens Add contact with their key: %s",
   async code => {
     (Clipboard.getString as jest.Mock).mockResolvedValue(code);
-    const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+    const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
     const screen = render(<QRScannerScreen navigation={navigation} />);
     await act(async () => { fireEvent.press(screen.getByText('Paste')); });
     const expected = code.replace(/^nostr:/i, '').toLowerCase();
@@ -130,17 +130,17 @@ test.each([NPUB, `nostr:${NPUB}`, `NOSTR:${NPUB.toUpperCase()}`, `nostr:nprofile
 
 test('releases the camera immediately after a payment QR, before navigation unmounts the scanner', async () => {
   (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, jest.fn()]);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   const camera = screen.UNSAFE_getByType('CameraView' as any);
   await act(async () => { await camera.props.onBarcodeScanned({ data: 'lnbc1000testinvoice' }); });
-  expect(navigation.navigate).toHaveBeenCalledWith('Send', { prefilledAddress: 'lnbc1000testinvoice' });
+  expect(navigation.replace).toHaveBeenCalledWith('Send', { prefilledAddress: 'lnbc1000testinvoice' });
   expect(screen.UNSAFE_queryByType('CameraView' as any)).toBeNull();
 });
 
 test('releases camera on blur and background, and returns with torch off', () => {
   (useCameraPermissions as jest.Mock).mockReturnValue([{ granted: true }, jest.fn()]);
-  const navigation = { navigate: jest.fn(), goBack: jest.fn() };
+  const navigation = { navigate: jest.fn(), replace: jest.fn(), goBack: jest.fn() };
   const screen = render(<QRScannerScreen navigation={navigation} />);
   fireEvent.press(screen.getByLabelText('Turn torch on'));
   expect(screen.UNSAFE_getByType('CameraView' as any).props.enableTorch).toBe(true);

@@ -1,4 +1,5 @@
 jest.mock('../components/ArkadeMaintenanceSettings', () => ({ ArkadeMaintenanceSettings: () => null }));
+jest.mock('expo-constants', () => ({ default: { expoConfig: { version: '0.16.0', ios: { buildNumber: '700' } } } }));
 import React from 'react';
 import { act, fireEvent, render } from '@testing-library/react-native';
 import SettingsScreen from './SettingsScreen';

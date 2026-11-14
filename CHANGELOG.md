@@ -10,6 +10,40 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+### Fixed
+- **Two amount-editor bugs that could cost money**: switching from sats to
+  a fiat currency now converts the typed value (was: "5000" became "$5,000"
+  when it meant 5,000 sats); Max in fiat mode converts the balance (was:
+  wrote raw sats into a field labelled USD).
+- **Swap showed token prices ÷ 100,000,000**: "≈ $0.07" for 100 USDT.
+  Now stablecoin estimates are 1:1 with USD.
+- The Receive USD tab exists again (was defined but never rendered) —
+  the unified RGB USDT + Spark flow is reachable.
+- The RGB asset picker renders the "A specific asset" contract-ID input
+  (was defined and promised in the subtitle but never shown).
+- The Dashboard never hides Send/Receive/Swap: when the balance can't be
+  read, the card shows "Balance unavailable" with a Retry button but the
+  action buttons stay.
+- The receive overlay says "Bark" for a Bark deposit (was: "Ark").
+- After paying a scanned code, the scanner is gone: `replace` instead of
+  `navigate` means Done returns you to the wallet, not to the reticle.
+
+### Changed
+- Receive routing is one sheet, not two: the route picker renders its
+  choices inline when embedded, removing the nested "How they pay" inside
+  the "How they pay" sheet.
+- Send auto-opens the amount editor when the request has no amount:
+  the most frequent gesture (pay a scanned/pasted invoice) skips the
+  "tap on 0" step.
+- Swap confirmation uses slide-to-confirm (was: a single tap on
+  "Confirm swap"), matching Send and the AI's hold-to-confirm.
+- The AI tab header says "Prismo" (was "Agent"); the error banner says
+  "Prismo" (was "KaleidoMind").
+- Settings gains an About row with the app version and build number.
+- The Swap venue filter has accessibility role and state (was: a bare
+  TouchableOpacity).
+- Profile screen: 12 dead styles removed; qrActions restored.
+
 ### Changed
 - **RGB moves to the BFA (Bridged Fungible Asset) fork.** The native rgb-lib
   binary and bindings come from UTEXO-Protocol's BFA fork (bfa.8 on iOS,

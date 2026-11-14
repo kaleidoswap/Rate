@@ -945,6 +945,9 @@ export default function DashboardScreen({ navigation }: Props) {
             <View style={{ padding: theme.spacing[6], gap: theme.spacing[2] }}>
               <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg }}>Balance unavailable</Text>
               <Text style={{ color: theme.colors.text.secondary }}>Reconnect to see your balance and make payments.</Text>
+              <TouchableOpacity accessibilityRole="button" onPress={() => void onRefresh()} style={{ alignSelf: 'flex-start', marginTop: theme.spacing[2], minHeight: 44, paddingHorizontal: theme.spacing[4], justifyContent: 'center', borderRadius: theme.borderRadius.md, backgroundColor: theme.colors.primary[50], borderWidth: 1, borderColor: theme.colors.primary[500] }}>
+                <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Retry</Text>
+              </TouchableOpacity>
             </View>
           ) :
 

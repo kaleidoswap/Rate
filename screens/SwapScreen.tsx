@@ -67,6 +67,7 @@ import { swapStatusVisual } from '../utils/paymentStatus';
 import { Card, Button, Input, MainHeader, AssetIcon, AssetSelector, PressableScale, Sheet, AmountText, Callout } from '../components';
 import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 import { CopyButton } from '../components/CopyButton';
+import { SlideToConfirm } from '../components/SlideToConfirm';
 import { ExplainButton } from '../components/mind/ExplainSheet';
 
 interface Props {
@@ -840,6 +841,9 @@ export default function SwapScreen({ navigation, route }: Props) {
         {venues.map(venue => (
           <TouchableOpacity
             key={venue.id}
+            accessibilityRole="tab"
+            accessibilityLabel={venue.label}
+            accessibilityState={{ selected: venueFilter === venue.id }}
             onPress={() => setVenueFilter(venue.id)}
             style={{
               flex: 1, paddingVertical: theme.spacing[2], borderRadius: theme.spacing[2], alignItems: 'center',
@@ -994,7 +998,7 @@ export default function SwapScreen({ navigation, route }: Props) {
               </Text>
               {swapState.currentQuote?.to_amount != null && !!usdRate && (
                 <Text style={styles.fiatHint}>
-                  ≈ ${isBtcTicker(swapState.toAsset) ? formatSatoshisToUSD(btcDisplayToSats(swapState.currentQuote.to_amount), usdRate) : (swapState.currentQuote.to_amount * usdRate / 1e8).toFixed(2)}
+                  ≈ ${isBtcTicker(swapState.toAsset) ? formatSatoshisToUSD(btcDisplayToSats(swapState.currentQuote.to_amount), usdRate) : (swapState.currentQuote.to_amount).toFixed(2)}
                 </Text>
               )}
             </View>
@@ -1336,14 +1340,23 @@ export default function SwapScreen({ navigation, route }: Props) {
               onPress={() => setShowConfirmModal(false)}
               style={styles.confirmActionButton}
             />
-            <Button
-              title={expired ? 'Refresh quote' : 'Confirm swap'}
-              variant="primary"
-              onPress={expired ? refreshReviewQuote : executeSwap}
-              loading={swapState.isQuoteLoading}
-              disabled={swapState.isQuoteLoading || !validOutput}
-              style={styles.confirmActionButton}
-            />
+            {expired ? (
+              <Button
+                title="Refresh quote"
+                variant="primary"
+                onPress={refreshReviewQuote}
+                loading={swapState.isQuoteLoading}
+                disabled={swapState.isQuoteLoading || !validOutput}
+                style={styles.confirmActionButton}
+              />
+            ) : (
+              <SlideToConfirm
+                label={`Swap ${formatDisplayAmount(swapState.currentQuote?.to_amount || 0, swapState.toAsset)} ${unitLabelFor(swapState.toAsset)}`}
+                loading={swapState.isQuoteLoading}
+                disabled={swapState.isQuoteLoading || !validOutput}
+                onConfirm={executeSwap}
+              />
+            )}
           </View>
         )}
       </View>
