@@ -62,6 +62,12 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Tests were excluded from tsconfig for years — 120 type errors hid
+      # fixture drift (#158 fixed them). Enforced like the web extension's
+      # check:test-types so they cannot come back.
+      - name: Type-check the tests
+        run: pnpm check:test-types
+
       - name: Dependency security regressions
         run: pnpm test:dependency-security
 

@@ -3,7 +3,7 @@ const mockAdapter = {
   backend: { sync: jest.fn(), syncOnchain: jest.fn(), getWalletInfo: jest.fn(), getBalance: jest.fn(), getOnchainBalance: jest.fn(), getOnchainAddress: jest.fn() },
   listTransactions: jest.fn(), getReceiveAddress: jest.fn(), createInvoice: jest.fn(), boardAmount: jest.fn(), boardingTerms: jest.fn(),
 }
-const mockManager = { getAdapterIfAvailable: jest.fn(() => mockAdapter), getActiveProtocol: jest.fn(() => 'SPARK'), setActiveProtocol: jest.fn(async () => {}), sendPayment: jest.fn() }
+const mockManager = { getAdapterIfAvailable: jest.fn((..._args: unknown[]) => mockAdapter), getActiveProtocol: jest.fn(() => 'SPARK'), setActiveProtocol: jest.fn(async (..._args: unknown[]) => {}), sendPayment: jest.fn() }
 jest.mock('../services/protocols', () => ({ protocolManager: {
   getAdapterIfAvailable: (...args: any[]) => mockManager.getAdapterIfAvailable(...args),
   getActiveProtocol: () => mockManager.getActiveProtocol(),

@@ -4,7 +4,7 @@ import React from 'react'
 import { fireEvent, render, waitFor } from '@testing-library/react-native'
 import { Alert } from 'react-native'
 
-const mockBoard = jest.fn(async () => ({}))
+const mockBoard = jest.fn(async (..._args: unknown[]) => ({}))
 const mockReadOnchain = jest.fn(async () => ({ confirmedSats: 20000, pendingSats: 500 }))
 jest.mock('../services/BarkService', () => ({
   barkNetworkLabel: () => 'Mainnet',

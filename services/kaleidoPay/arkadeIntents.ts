@@ -324,7 +324,7 @@ export function createArkadeIntentsSwap(opts: ArkadeIntentsOptions) {
   const { network } = opts;
   const to = `ln:${network}`;
   const store = opts.store ?? arkadeIntentsStore;
-  const fetchImpl = timedFetch(opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args)));
+  const fetchImpl = timedFetch(opts.fetchImpl ?? fetch);
   const providers = createProviderSource(
     { network, arkNetwork: opts.arkNetwork, makerUrl: opts.makerUrl, registryUrl: opts.registryUrl, fetchImpl },
     isLightningSendMarket, 'KaleidoSwap does not offer Arkade → Lightning right now.',
@@ -543,7 +543,7 @@ function receiveProviders(opts: ArkadeLightningReceiveOptions) {
   // An injected fetch (tests) gets a source of its own.
   let source = opts.fetchImpl ? undefined : receiveSources.get(key);
   if (!source) {
-    const fetchImpl = timedFetch(opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => fetch(...args)));
+    const fetchImpl = timedFetch(opts.fetchImpl ?? fetch);
     source = createProviderSource(
       { network: opts.network, arkNetwork: () => opts.arkNetwork, makerUrl: opts.makerUrl, registryUrl: opts.registryUrl, fetchImpl },
       isLightningReceiveMarket, 'KaleidoSwap does not offer Lightning → Arkade right now.',

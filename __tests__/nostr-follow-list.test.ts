@@ -101,7 +101,7 @@ describe('nostr slice', () => {
   const base = reducer(undefined, { type: 'init' });
 
   it('shows a new follow at once, with its profile', () => {
-    const next = reducer(base, followUser.fulfilled({ pubkey: key(1), petname: 'Dad', profile: { name: 'dave', banner: 'b' } }, 'r', { pubkey: key(1) }));
+    const next = reducer(base, followUser.fulfilled({ pubkey: key(1), petname: 'Dad', relay: undefined, profile: { name: 'dave', banner: 'b' } }, 'r', { pubkey: key(1) }));
     expect(next.contacts).toEqual([{ pubkey: key(1), petname: 'Dad', relay: undefined, profile: { name: 'dave' } }]);
   });
 

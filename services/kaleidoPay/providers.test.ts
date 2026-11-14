@@ -9,7 +9,7 @@ jest.mock('@react-native-async-storage/async-storage', () => {
 const code = encodePaymentCode({ offer: encodeOffer([{ type: 10n, value: new TextEncoder().encode('Coffee') }]), amountSat: 1000 }, 'signet');
 const cleanups: Array<() => void> = [];
 function account(id: string, fee = 10, overrides: Partial<PayAccount> = {}) {
-  const a: PayAccount = { source: { id, rail: 'ln', network: 'signet' }, swaps: [], quote: jest.fn(async () => ({ recipientSat: 1000, totalSat: 1000 + fee, feeSat: fee, expiresAt: Math.floor(Date.now() / 1000) + 60 })), execute: jest.fn(async () => ({ status: 'completed' })), ...overrides };
+  const a: PayAccount = { source: { id, rail: 'ln', network: 'signet' }, swaps: [], quote: jest.fn(async () => ({ recipientSat: 1000, totalSat: 1000 + fee, feeSat: fee, expiresAt: Math.floor(Date.now() / 1000) + 60 })), execute: jest.fn(async () => ({ status: 'completed' as const })), ...overrides };
   cleanups.push(registerKaleidoPayAccount(a)); return a;
 }
 const preview = () => previewPayment(code, 'signet', '', 'test');

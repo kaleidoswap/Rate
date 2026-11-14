@@ -115,7 +115,7 @@ export default function AIAssistantScreen({ navigation, route }: Props) {
   // Most recent successfully generated invoice — lets "share" act on it.
   const lastInvoiceRef = useRef<{ invoice: string; amount: number; description?: string } | null>(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const recordingTimer = useRef<NodeJS.Timeout | null>(null);
+  const recordingTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // MainHeader sits above the KeyboardAvoidingView; its height (safe-area top +
   // ~70 of bar padding/content) is the vertical offset the keyboard must clear

@@ -2,7 +2,7 @@
 import React, { ReactElement } from 'react';
 import { render, RenderOptions } from '@testing-library/react-native';
 import { Provider } from 'react-redux';
-import { configureStore } from '@reduxjs/toolkit';
+import { combineReducers, configureStore } from '@reduxjs/toolkit';
 import { NavigationContainer } from '@react-navigation/native';
 import walletReducer from '../../store/slices/walletSlice';
 import assetsReducer from '../../store/slices/assetsSlice';
@@ -23,18 +23,21 @@ interface ExtendedRenderOptions extends Omit<RenderOptions, 'wrapper'> {
  * Create a test store with optional preloaded state
  */
 export function createTestStore(preloadedState?: any) {
+  // combineReducers first, like the real store: it both proves the slice
+  // types combine and hands configureStore a single reducer.
+  const rootReducer = combineReducers({
+    wallet: walletReducer,
+    assets: assetsReducer,
+    settings: settingsReducer,
+    node: nodeReducer,
+    nostr: nostrReducer,
+    transactions: transactionsReducer,
+    swap: swapReducer,
+    ui: uiReducer,
+    contacts: contactsReducer,
+  });
   return configureStore({
-    reducer: {
-      wallet: walletReducer,
-      assets: assetsReducer,
-      settings: settingsReducer,
-      node: nodeReducer,
-      nostr: nostrReducer,
-      transactions: transactionsReducer,
-      swap: swapReducer,
-      ui: uiReducer,
-      contacts: contactsReducer,
-    },
+    reducer: rootReducer,
     preloadedState,
     middleware: (getDefaultMiddleware) =>
       getDefaultMiddleware({

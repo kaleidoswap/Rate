@@ -20,6 +20,9 @@ function wallet(patch: Partial<AgentPayWallet> = {}) {
     balanceSats: jest.fn(async () => 10_000),
     quoteLightningFee: jest.fn(async () => 1),
     payInvoice: jest.fn(async () => ({ preimage: PREIMAGE, feeSats: 1, status: 'confirmed' as const })),
+    // The reconciliation loop looks payments up by id or invoice; a default
+    // confirmed lookup keeps the fixture a real AgentPayWallet.
+    paymentStatus: jest.fn(async () => ({ status: 'pending' as const })),
     ...patch,
   };
 }

@@ -85,7 +85,7 @@ export function useBitcoinPrice() {
   const [bitcoinPrice, setBitcoinPrice] = useState<number>(0);
 
   useEffect(() => {
-    let priceIntervalId: NodeJS.Timeout;
+    let priceIntervalId: ReturnType<typeof setInterval>;
 
     const updatePrice = async () => {
       try {

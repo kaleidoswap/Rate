@@ -69,8 +69,8 @@ beforeEach(() => mockPayAttempt.mockClear());
 
 test('execute starts paying and status follows the swap to completion', async () => {
   let finish: (a: any) => void = () => {};
-  mockPayAttempt.mockImplementationOnce((a: any, _p: any, deps: any) => {
-    deps.onUpdate({ ...a, stage: 'waiting_lockup' });
+  mockPayAttempt.mockImplementationOnce((a: any, _p?: any, deps?: any) => {
+    deps?.onUpdate({ ...a, stage: 'waiting_lockup' });
     return new Promise(res => { finish = res; });
   });
   mockStartAttempt.mockImplementationOnce(async ({ quote }: any) => ({ id: 'a-silent-ok', stage: 'created', quote }));

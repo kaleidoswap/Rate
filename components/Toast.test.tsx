@@ -43,10 +43,11 @@ describe('Toast', () => {
     it('should render success toast', () => {
       mockToastService.subscribe.mockImplementation((callback) => {
         callback({
+          id: 'toast-success',
           type: 'success',
           message: 'Success message',
-          visible: true,
           duration: 3000,
+          timestamp: 1,
         });
         return jest.fn();
       });
@@ -59,10 +60,11 @@ describe('Toast', () => {
     it('should render error toast', () => {
       mockToastService.subscribe.mockImplementation((callback) => {
         callback({
+          id: 'toast-error',
           type: 'error',
           message: 'Error message',
-          visible: true,
           duration: 3000,
+          timestamp: 2,
         });
         return jest.fn();
       });
@@ -75,10 +77,11 @@ describe('Toast', () => {
     it('should render info toast', () => {
       mockToastService.subscribe.mockImplementation((callback) => {
         callback({
+          id: 'toast-info',
           type: 'info',
           message: 'Info message',
-          visible: true,
           duration: 3000,
+          timestamp: 3,
         });
         return jest.fn();
       });
@@ -91,10 +94,11 @@ describe('Toast', () => {
     it('should render warning toast', () => {
       mockToastService.subscribe.mockImplementation((callback) => {
         callback({
+          id: 'toast-warning',
           type: 'warning',
           message: 'Warning message',
-          visible: true,
           duration: 3000,
+          timestamp: 4,
         });
         return jest.fn();
       });
@@ -112,10 +116,11 @@ describe('Toast', () => {
 
       mockToastService.subscribe.mockImplementation((callback) => {
         callback({
+          id: 'toast-action',
           type: 'error',
           message: 'Error with action',
-          visible: true,
           duration: 3000,
+          timestamp: 5,
           action: mockAction,
         });
         return jest.fn();
@@ -136,10 +141,11 @@ describe('Toast', () => {
 
       mockToastService.subscribe.mockImplementation((callback) => {
         callback({
+          id: 'toast-action-2',
           type: 'error',
           message: 'Error',
-          visible: true,
           duration: 3000,
+          timestamp: 6,
           action: mockAction,
         });
         return jest.fn();
@@ -159,6 +165,7 @@ describe('Toast', () => {
           type: 'success',
           message: 'Success',
           duration: 3000,
+          timestamp: 9,
         });
         return jest.fn();
       });
@@ -207,10 +214,11 @@ describe('Toast', () => {
 
       // Show first toast
       callback({
+        id: 'toast-first',
         type: 'success',
         message: 'First toast',
-        visible: true,
         duration: 3000,
+        timestamp: 7,
       });
 
       rerender(<Toast />);
@@ -218,10 +226,11 @@ describe('Toast', () => {
 
       // Show second toast
       callback({
+        id: 'toast-second',
         type: 'error',
         message: 'Second toast',
-        visible: true,
         duration: 3000,
+        timestamp: 8,
       });
 
       rerender(<Toast />);
