@@ -4,7 +4,7 @@ const path = require('node:path');
 const { RGB_LIB_VERSION, XCFRAMEWORK_SHA256, isInstalled, verifyBinding } = require('./download-rgb-lib-ios');
 
 test('the vendored RgbLib.swift is the pinned rgb-lib-swift binding', () => {
-  expect(RGB_LIB_VERSION).toBe('0.3.0-beta.7');
+  expect(RGB_LIB_VERSION).toBe('0.3.0-beta.7-upstream-dev-bfa.8-bfa');
   expect(() => verifyBinding()).not.toThrow();
 });
 

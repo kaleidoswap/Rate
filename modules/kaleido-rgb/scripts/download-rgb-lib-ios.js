@@ -15,11 +15,12 @@ const https = require('node:https');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const RGB_LIB_VERSION = '0.3.0-beta.7';
-const XCFRAMEWORK_URL = `https://github.com/RGB-Tools/rgb-lib-swift/releases/download/${RGB_LIB_VERSION}/rgb_libFFI.xcframework.zip`;
-const XCFRAMEWORK_SHA256 = 'd3da4d3e24cd3ea2c88ba15a092d6e29b13f96fd116bf7b5a50cb3595eaa8f0e';
-// Sources/RgbLib/RgbLib.swift at rgb-lib-swift tag 0.3.0-beta.7.
-const BINDING_SHA256 = '50a9c605b6ae44cefce9c73ba4c6d273fb9ddd7036939795d0fe1f3c51508c57';
+const RGB_LIB_VERSION = '0.3.0-beta.7-upstream-dev-bfa.8-bfa';
+const RGB_LIB_REPO = 'UTEXO-Protocol/rgb-lib-swift';
+const XCFRAMEWORK_URL = `https://github.com/${RGB_LIB_REPO}/releases/download/${RGB_LIB_VERSION}/rgb_libFFI.xcframework.zip`;
+const XCFRAMEWORK_SHA256 = '56edde5c9207548fabbe5944fa8ff81c2b3740c9d85d60f4f63027be969d234a';
+// Sources/RgbLib/RgbLib.swift at the BFA mobile releases branch.
+const BINDING_SHA256 = 'faa8e4b72472cd187a36154229e405cf7bff436e4d335a3b1d8782f347694505';
 
 const IOS_DIR = path.join(__dirname, '..', 'ios');
 const FRAMEWORK = 'rgb_libFFI.xcframework';
