@@ -10,25 +10,44 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-11-15
+
+The BFA and polish release: RGB moves to the Bridged Fungible Asset fork,
+two fiat bugs are fixed, every feature built is now reachable.
+
+### Changed
+- **RGB moves to the BFA (Bridged Fungible Asset) fork.** The native
+  rgb-lib binary and bindings come from UTEXO-Protocol's BFA fork (bfa.8
+  on iOS, bfa.6 on Android — Android bumps to bfa.8 when published).
+  BFA adds bridged-fungible-asset support (USDT0, bridge smart
+  contracts), VSS server backup, address rotation, and optional
+  expiration in blindReceive/send. The native module's `goOnline` now
+  takes individual params (including `hubUrl`/`hubToken` for VSS
+  coordination); `sync` drops its options param.
+- **Payment in progress has a design that moves.** Animated icon with
+  pulse ring, amount front and centre, key details (To, From, Fee,
+  Total) always visible — no toggle. "Don't pay this twice" is gone
+  from every message.
+
 ### Fixed
-- **Two amount-editor bugs that could cost money**: switching from sats to
-  a fiat currency now converts the typed value (was: "5000" became "$5,000"
-  when it meant 5,000 sats); Max in fiat mode converts the balance (was:
-  wrote raw sats into a field labelled USD).
+- **Two amount-editor bugs that could cost money**: switching from sats
+  to a fiat currency now converts the typed value (was: "5000" became
+  "$5,000" when it meant 5,000 sats); Max in fiat mode converts the
+  balance (was: wrote raw sats into a field labelled USD).
 - **Swap showed token prices ÷ 100,000,000**: "≈ $0.07" for 100 USDT.
   Now stablecoin estimates are 1:1 with USD.
 - The Receive USD tab exists again (was defined but never rendered) —
   the unified RGB USDT + Spark flow is reachable.
 - The RGB asset picker renders the "A specific asset" contract-ID input
   (was defined and promised in the subtitle but never shown).
-- The Dashboard never hides Send/Receive/Swap: when the balance can't be
-  read, the card shows "Balance unavailable" with a Retry button but the
-  action buttons stay.
+- The Dashboard never hides Send/Receive/Swap: when the balance can't
+  be read, the card shows "Balance unavailable" with a Retry button but
+  the action buttons stay.
 - The receive overlay says "Bark" for a Bark deposit (was: "Ark").
-- After paying a scanned code, the scanner is gone: `replace` instead of
-  `navigate` means Done returns you to the wallet, not to the reticle.
+- After paying a scanned code, the scanner is gone: `replace` instead
+  of `navigate` means Done returns you to the wallet, not to the reticle.
 
-### Changed
+### Changed (UX refinements)
 - Receive routing is one sheet, not two: the route picker renders its
   choices inline when embedded, removing the nested "How they pay" inside
   the "How they pay" sheet.
@@ -43,25 +62,6 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 - The Swap venue filter has accessibility role and state (was: a bare
   TouchableOpacity).
 - Profile screen: 12 dead styles removed; qrActions restored.
-
-### Changed
-- **RGB moves to the BFA (Bridged Fungible Asset) fork.** The native rgb-lib
-  binary and bindings come from UTEXO-Protocol's BFA fork (bfa.8 on iOS,
-  bfa.6 on Android — Android bumps to bfa.8 when published). BFA adds
-  bridged-fungible-asset support (USDT0, bridge smart contracts), VSS server
-  backup (`configureVssBackup`, `disableVssAutoBackup`, `vssBackup`), address
-  rotation (`rotateColoredAddress`, `rotateVanillaAddress`), and optional
-  expiration in blindReceive/send. The native module's `goOnline` now takes
-  individual params (including `hubUrl`/`hubToken` for VSS coordination)
-  instead of the `OnlineOptions` struct; `sync` drops its options param.
-
-### Changed (previous)
-- **Payment in progress has a design that moves.** The status hero (animated
-  icon, pulse ring while checking, amount, recipient) is the centre; the key
-  details — To, From, Fee, Total — sit in a card that's always visible
-  (no "Payment details" toggle); a timer counts while pending; "Don't pay
-  this twice" is gone from every message. The copy says what's happening:
-  "Broadcasting to the Bitcoin network…", "Checking automatically."
 
 ## [0.16.0] — 2026-11-13
 
