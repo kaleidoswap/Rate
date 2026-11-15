@@ -16,7 +16,8 @@ android {
 }
 
 dependencies {
-    // BFA AAR from UTEXO-Protocol (bfa.6, matching iOS bfa.8 when available).
-    implementation files('libs/rgb-lib-bfa-android-0.3.0-beta.7-upstream-dev-bfa.6-bfa.aar')
+    // Standard rgb-lib from Maven. BFA AAR is in libs/ for when the
+    // binding/binary mismatch is resolved.
+    implementation "org.rgbtools:rgb-lib-android:0.3.0-beta.7"
     implementation "com.facebook.react:react-native:+"
 }
