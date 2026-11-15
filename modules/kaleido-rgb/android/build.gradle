@@ -1,22 +1,20 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
 group = 'com.kaleidoswap.rgb'
+version = '0.1.0'
 
 android {
-    namespace "com.kaleidoswap.rgb"
-    compileSdk 36
-
-    defaultConfig {
-        minSdk 24
-        targetSdk 36
-    }
-
-    lintOptions {
-        abortOnError false
-    }
+  namespace "com.kaleidoswap.rgb"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
 }
 
 dependencies {
-    // Standard rgb-lib from Maven. BFA AAR is in libs/ for when the
-    // binding/binary mismatch is resolved.
-    implementation "org.rgbtools:rgb-lib-android:0.3.0-beta.7"
-    implementation "com.facebook.react:react-native:+"
+  // RGB-Tools' official Kotlin bindings; needs compileSdk 36 (aar-metadata minCompileSdk).
+  implementation "org.rgbtools:rgb-lib-android:0.3.0-beta.7"
 }
