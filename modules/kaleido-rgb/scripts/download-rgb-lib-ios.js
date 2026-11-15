@@ -19,8 +19,9 @@ const RGB_LIB_VERSION = '0.3.0-beta.7-upstream-dev-bfa.8-bfa';
 const RGB_LIB_REPO = 'UTEXO-Protocol/rgb-lib-swift';
 const XCFRAMEWORK_URL = `https://github.com/${RGB_LIB_REPO}/releases/download/${RGB_LIB_VERSION}/rgb_libFFI.xcframework.zip`;
 const XCFRAMEWORK_SHA256 = '56edde5c9207548fabbe5944fa8ff81c2b3740c9d85d60f4f63027be969d234a';
-// Sources/RgbLib/RgbLib.swift at the BFA mobile releases branch.
-const BINDING_SHA256 = 'faa8e4b72472cd187a36154229e405cf7bff436e4d335a3b1d8782f347694505';
+// Sources/RgbLib/RgbLib.swift at the BFA mobile releases branch, with
+// validateConsignment/Offchain removed (binding/binary mismatch on bfa.8).
+const BINDING_SHA256 = 'cb098f08b8b318fc7a76c9fc771c76ed2c86f6f7b1fd9e34cff8d79833baffe1';
 
 const IOS_DIR = path.join(__dirname, '..', 'ios');
 const FRAMEWORK = 'rgb_libFFI.xcframework';

@@ -1,8 +1,6 @@
 group = 'com.kaleidoswap.rgb'
 namespace "com.kaleidoswap.rgb"
 
-def bfaAar = file('libs/rgb-lib-bfa-android-0.3.0-beta.7-upstream-dev-bfa.6-bfa.aar')
-
 android {
     namespace "com.kaleidoswap.rgb"
     compileSdk 36
@@ -17,18 +15,8 @@ android {
     }
 }
 
-if (bfaAar.exists()) {
-    dependencies {
-        implementation files(bfaAar.path)
-    }
-} else {
-    // BFA AAR not downloaded yet: use the standard rgb-lib from Maven.
-    // See modules/kaleido-rgb/android/libs/README.md to download the BFA AAR.
-    dependencies {
-        implementation "org.rgbtools:rgb-lib-android:0.3.0-beta.7"
-    }
-}
-
 dependencies {
+    // BFA AAR from UTEXO-Protocol (bfa.6, matching iOS bfa.8 when available).
+    implementation files('libs/rgb-lib-bfa-android-0.3.0-beta.7-upstream-dev-bfa.6-bfa.aar')
     implementation "com.facebook.react:react-native:+"
 }

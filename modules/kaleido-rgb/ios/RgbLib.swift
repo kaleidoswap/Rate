@@ -5916,66 +5916,22 @@ public func FfiConverterTypeUtxo_lower(_ value: Utxo) -> RustBuffer {
 }
 
 
-public struct ValidateConsignmentResult: Equatable, Hashable {
-    public var valid: Bool
-    public var warnings: [String]?
-    public var error: String?
-    public var details: String?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(valid: Bool, warnings: [String]?, error: String?, details: String?) {
-        self.valid = valid
-        self.warnings = warnings
-        self.error = error
-        self.details = details
-    }
-
-    
-
-    
-}
 
 #if compiler(>=6)
-extension ValidateConsignmentResult: Sendable {}
 #endif
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public struct FfiConverterTypeValidateConsignmentResult: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ValidateConsignmentResult {
-        return
-            try ValidateConsignmentResult(
-                valid: FfiConverterBool.read(from: &buf), 
-                warnings: FfiConverterOptionSequenceString.read(from: &buf), 
-                error: FfiConverterOptionString.read(from: &buf), 
-                details: FfiConverterOptionString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: ValidateConsignmentResult, into buf: inout [UInt8]) {
-        FfiConverterBool.write(value.valid, into: &buf)
-        FfiConverterOptionSequenceString.write(value.warnings, into: &buf)
-        FfiConverterOptionString.write(value.error, into: &buf)
-        FfiConverterOptionString.write(value.details, into: &buf)
-    }
-}
 
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeValidateConsignmentResult_lift(_ buf: RustBuffer) throws -> ValidateConsignmentResult {
-    return try FfiConverterTypeValidateConsignmentResult.lift(buf)
-}
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-public func FfiConverterTypeValidateConsignmentResult_lower(_ value: ValidateConsignmentResult) -> RustBuffer {
-    return FfiConverterTypeValidateConsignmentResult.lower(value)
-}
 
 
 public struct VssBackupConfig: Equatable, Hashable {
@@ -10011,25 +9967,6 @@ public func restoreKeys(bitcoinNetwork: BitcoinNetwork, mnemonic: String, witnes
     )
 })
 }
-public func validateConsignment(filePath: String, indexerUrl: String, bitcoinNetwork: BitcoinNetwork)throws  -> ValidateConsignmentResult  {
-    return try  FfiConverterTypeValidateConsignmentResult_lift(try rustCallWithError(FfiConverterTypeRgbLibError_lift) {
-    uniffi_rgblibuniffi_fn_func_validate_consignment(
-        FfiConverterString.lower(filePath),
-        FfiConverterString.lower(indexerUrl),
-        FfiConverterTypeBitcoinNetwork_lower(bitcoinNetwork),$0
-    )
-})
-}
-public func validateConsignmentOffchain(filePath: String, txid: String, indexerUrl: String, bitcoinNetwork: BitcoinNetwork)throws  -> ValidateConsignmentResult  {
-    return try  FfiConverterTypeValidateConsignmentResult_lift(try rustCallWithError(FfiConverterTypeRgbLibError_lift) {
-    uniffi_rgblibuniffi_fn_func_validate_consignment_offchain(
-        FfiConverterString.lower(filePath),
-        FfiConverterString.lower(txid),
-        FfiConverterString.lower(indexerUrl),
-        FfiConverterTypeBitcoinNetwork_lower(bitcoinNetwork),$0
-    )
-})
-}
 
 private enum InitializationResult {
     case ok
@@ -10056,12 +9993,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rgblibuniffi_checksum_func_restore_keys() != 2392) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_rgblibuniffi_checksum_func_validate_consignment() != 1840) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_rgblibuniffi_checksum_func_validate_consignment_offchain() != 14655) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_rgblibuniffi_checksum_method_cosigner_cosigner_data() != 1643) {
