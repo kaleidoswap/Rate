@@ -1,5 +1,4 @@
 group = 'com.kaleidoswap.rgb'
-namespace "com.kaleidoswap.rgb"
 
 android {
     namespace "com.kaleidoswap.rgb"
