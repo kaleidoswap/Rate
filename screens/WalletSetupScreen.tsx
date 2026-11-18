@@ -29,9 +29,7 @@ import { prismoText } from '../localization/prismo';
 import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
 import { PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
-import { ADVANCED_ACCOUNTS, LITE_ACCOUNTS, hasAnyAccount, saveAccountPreferences, walletNetworksFor, type AccountChoice } from '../services/protocols/accountChoices';
-import { BARK_ENABLED } from '../services/protocols/bark';
-import { RGB_L1_ENABLED } from '../services/protocols/rgbL1';
+import { ADVANCED_ACCOUNTS, LITE_ACCOUNTS, SETUP_OFFERS, hasAnyAccount, saveAccountPreferences, walletNetworksFor, type AccountChoice } from '../services/protocols/accountChoices';
 
 // New wallets start on the default networks; on a test build those hold test bitcoin.
 const TEST_BUILD = PROTOCOL_DEFAULT_NETWORK.spark !== 'mainnet' || PROTOCOL_DEFAULT_NETWORK.arkade !== 'mainnet';
@@ -50,6 +48,7 @@ import {
   saveAndSelectNwcCredential,
 } from '../services/nwc/connectionStore';
 import { upsertNwcConnection } from '../store/slices/nostrSlice';
+import { useFeature } from '../hooks/useFeature';
 
 interface Props {
   navigation: any;
@@ -58,14 +57,16 @@ interface Props {
 /** The layers Advanced setup offers (the RGB node is its own step, over NWC). */
 const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; icon: string }[] = [
   { key: 'spark', name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' },
-  ...(RGB_L1_ENABLED ? [{ key: 'rgbOnDevice' as const, name: 'RGB on this phone', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
-  { key: 'arkade', name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' },
-  ...(BARK_ENABLED ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
+  ...(SETUP_OFFERS.rgbOnDevice ? [{ key: 'rgbOnDevice' as const, name: 'RGB on this phone', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
+  ...(SETUP_OFFERS.arkade ? [{ key: 'arkade' as const, name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' }] : []),
+  ...(SETUP_OFFERS.bark ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
 ];
 
 type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' ;;
 
 export default function WalletSetupScreen({ navigation }: Props) {
+  // The RGB node step (NWC) only where the build ships it and Labs has it on.
+  const rgbNodeStep = useFeature('rgbNode');
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const dispatch = useAppDispatch();
@@ -285,7 +286,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const handleBack = () => {
     Keyboard.dismiss();
     if (step === 'networks') {
-      animateTransition('rln');
+      animateTransition(rgbNodeStep ? 'rln' : 'welcome');
     } else if (step === 'rln') {
       animateTransition('welcome');
     } else if (step === 'backup') {
@@ -467,7 +468,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           }
           setMode('advanced');
           dispatch(setDisclosureLevel('advanced'));
-          animateTransition('rln');
+          animateTransition(rgbNodeStep ? 'rln' : 'networks');
         }}
       >
         <Text style={styles.skipButtonText}>{prismoText('Advanced setup · choose accounts')}</Text>

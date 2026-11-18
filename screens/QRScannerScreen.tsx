@@ -33,6 +33,7 @@ import { decodeBolt11 } from '../utils/decodeInvoice';
 import { nostrIdentity } from '../utils/nostrProfile';
 import { theme } from '../theme';
 import type { RootState } from '../store';
+import { useFeature } from '../hooks/useFeature';
 
 const { width, height } = Dimensions.get('window');
 
@@ -42,6 +43,8 @@ interface Props {
 }
 
 export default function QRScannerScreen({ navigation, route }: Props) {
+  const nwcFeature = useFeature('nwc'); const rgbNodeFeature = useFeature('rgbNode'); const nwcOn = nwcFeature || rgbNodeFeature;
+  const socialOn = useFeature('social');
   // Contact-capture mode hands the raw scanned string back to the requesting
   // screen instead of decoding it as a payment (used by the Contacts screen).
   const captureMode: 'payment' | 'contact' = route?.params?.mode === 'contact' ? 'contact' : 'payment';
@@ -112,6 +115,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       if (expiresAt !== null && expiresAt <= Date.now()) throw new Error('This invoice has expired. Please request a new one.');
       if (!data) throw new Error('Nothing to read. Paste a payment request or choose another image.');
       if (data.toLowerCase().startsWith('nostr+walletconnect://')) {
+        if (!nwcOn) throw new Error('This is a wallet connection code. Turn on Wallet connections in Settings → Labs to use it.');
         navigation.navigate('NWCConnect', { scanned: data }); return;
       }
       if (captureMode === 'contact') {
@@ -120,6 +124,7 @@ export default function QRScannerScreen({ navigation, route }: Props) {
       // Someone's Nostr code (npub / nprofile): offer to add them as a contact.
       const nostrId = nostrIdentity(data);
       if (nostrId) {
+        if (!socialOn) throw new Error('This is a Nostr profile. Turn on Contacts and chat in Settings → Labs to add it.');
         navigation.navigate('Contacts', { scannedContact: nostrId }); return;
       }
       // Anything payable opens Send as-is: it decodes the code and offers every way to pay it.

@@ -33,6 +33,7 @@ import {
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
 import { CHANNEL, LABS_COPY, LABS_FEATURES, isFeatureOn } from '../services/features';
+import { useFeature } from '../hooks/useFeature';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
 import Constants from 'expo-constants';
@@ -152,6 +153,10 @@ export default function SettingsScreen({ navigation }: Props) {
     (connection) => connection.id === nostrState.selectedNwcConnectionId,
   );
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
+  const feature = {
+    arkade: useFeature('arkade'), prismo: useFeature('prismo'), map: useFeature('map'), nwc: useFeature('nwc'),
+    rgbNode: useFeature('rgbNode'), lsp: useFeature('lsp'), bark: useFeature('bark'), rgbOnDevice: useFeature('rgbOnDevice'),
+  };
   const expoVersion = Constants.expoConfig?.version;
   const expoBuildVersion = Constants.expoConfig?.ios?.buildNumber;
   const [settingsQuery, setSettingsQuery] = useState('');
@@ -645,7 +650,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />
+            {feature.map && <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />}
             <Row icon="flask-outline" label="Labs" description="Experimental features you can turn on" onPress={() => openPage('labs')} />
             <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
             <Row icon="information-circle-outline" label="About" value={`v${expoVersion ?? '—'}`} onPress={() => Alert.alert('KaleidoSwap Wallet', `Version ${expoVersion ?? '—'}\nBuild ${expoBuildVersion ?? '—'}\n\nA non-custodial Bitcoin & RGB wallet.`)} />
@@ -741,14 +746,14 @@ export default function SettingsScreen({ navigation }: Props) {
         )}
 
         {/* Prismo — the assistant's settings, one name everywhere. */}
-        {showSection('prismo kaleidomind ai assistant mind personalize voice memory budget model') && <>
+        {feature.prismo && showSection('prismo kaleidomind ai assistant mind personalize voice memory budget model') && <>
         <SectionLabel>Prismo</SectionLabel>
         <Group>
           <Row first icon="sparkles-outline" label="Prismo settings" description="Voice, responses, memory and payments" onPress={() => navigation.navigate('MindSettings')} />
         </Group>
         </>}
 
-        {showSection('wallet connection lightning nwc rgb node') && <>
+        {(feature.nwc || feature.rgbNode || (nostrState.nwcConnections ?? []).length > 0) && showSection('wallet connection lightning nwc rgb node') && <>
         <SectionLabel>Wallet connection</SectionLabel>
         <Group>
           <Row
@@ -883,7 +888,9 @@ export default function SettingsScreen({ navigation }: Props) {
         {account === 'RGB' && activeWallet?.id != null && (
           <RgbAccountSettings walletId={activeWallet.id}
             node={{ connected: rgbNodeConnected(), alias: selectedNwcConnection?.alias, network: selectedNwcConnection?.network ?? protoNetworks.rln }}
-            onOpenNode={() => navigation.navigate('RgbNode')}
+            onOpenNode={() => feature.rgbNode || (nostrState.nwcConnections ?? []).length > 0
+              ? navigation.navigate('RgbNode')
+              : Alert.alert(t('RGB Lightning node'), t('Turn on RGB Lightning node in Settings → Labs to connect one.'))}
             onChanged={() => { refreshProtocolStatus(); setRgbRevision((r) => r + 1); void dispatch(loadBtcBalance()); }} />
         )}
         {account === 'RGB' && <RgbWalletTools key={rgbRevision} />}
@@ -902,10 +909,13 @@ export default function SettingsScreen({ navigation }: Props) {
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet') && (
           <>
           <SectionLabel>Wallet tools</SectionLabel>
-          <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>
+          {feature.lsp && <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>}
           <SectionLabel>Accounts & networks</SectionLabel>
           <Group>
-          {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).map((proto, idx) => {
+          {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).filter(proto =>
+            // Never hide money: an account this wallet already uses stays, whatever its feature state.
+            proto === 'SPARK' || accountEnabled[proto] === true || protocolStatus[proto]
+            || (proto === 'ARKADE' ? feature.arkade : proto === 'BARK' ? feature.bark : feature.rgbOnDevice || feature.rgbNode)).map((proto, idx) => {
             const connected = protocolStatus[proto];
             const connecting = protocolConnecting[proto] ?? false;
             const error = protocolErrors[proto];

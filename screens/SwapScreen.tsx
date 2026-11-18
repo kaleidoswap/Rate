@@ -69,6 +69,7 @@ import { NetworkIcon, networkIconForLabel } from '../components/NetworkIcon';
 import { CopyButton } from '../components/CopyButton';
 import { SlideToConfirm } from '../components/SlideToConfirm';
 import { ExplainButton } from '../components/mind/ExplainSheet';
+import { useFeature } from '../hooks/useFeature';
 
 interface Props {
   navigation: any;
@@ -86,6 +87,7 @@ interface Asset {
 
 export default function SwapScreen({ navigation, route }: Props) {
   const dispatch = useAppDispatch();
+  const makerSwapsOn = useFeature('makerSwaps');
   const usdRate = useFiatRates().usd;
   const { height: screenHeight } = useWindowDimensions();
   const swapState = useAppSelector((state: RootState) => state.swap);
@@ -298,7 +300,7 @@ export default function SwapScreen({ navigation, route }: Props) {
       // Load Kaleidoswap pairs (via RGB adapter / kaleido-sdk maker)
       try {
         const rgbAdapter = protocolManager.getAdapterIfAvailable('RGB_LN');
-        if (rgbAdapter?.isConnected()) {
+        if (makerSwapsOn && rgbAdapter?.isConnected()) {
           const client = kaleidoClientManager.getClient();
           const rawPairs = await client.maker.listPairs();
           makerPairs = normalizeMakerPairs((rawPairs as any)?.pairs || rawPairs || []);
@@ -404,6 +406,7 @@ export default function SwapScreen({ navigation, route }: Props) {
 
   // Get filtered pairs based on venue selection
   const filteredPairs = tradingPairs.filter(p => {
+    if (!makerSwapsOn && (p.venue ?? 'kaleidoswap') === 'kaleidoswap') return false;
     if (venueFilter === 'all') return true;
     return p.venue === venueFilter;
   });
@@ -796,7 +799,8 @@ export default function SwapScreen({ navigation, route }: Props) {
 
 
 
-  const rgbConnected = protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false;
+  // Maker swaps count as connected only where the build ships them.
+  const rgbConnected = makerSwapsOn && (protocolManager.getAdapterIfAvailable('RGB_LN')?.isConnected() ?? false);
   const sparkConnected = protocolManager.getAdapterIfAvailable('SPARK')?.isConnected() ?? false;
 
   useEffect(() => { void refreshLiquidity(); }, [rgbConnected]);
@@ -874,7 +878,7 @@ export default function SwapScreen({ navigation, route }: Props) {
     }
     if (tradingPairs.length > 0) return null;
     const noAccount = !rgbConnected && !sparkConnected;
-    const message = noAccount ? 'Swaps need Spark or your RGB Lightning node. Connect one to see prices.'
+    const message = noAccount ? (makerSwapsOn ? 'Swaps need Spark or your RGB Lightning node. Connect one to see prices.' : 'Swaps need a Spark account. Turn it on in Settings to see prices.')
       : pairsFailed ? 'Swap prices could not be loaded.'
       : 'No swaps are available for your accounts right now.';
     return <View style={[styles.makerInfoRow, { flexWrap: 'wrap' }]}>
@@ -1415,7 +1419,7 @@ export default function SwapScreen({ navigation, route }: Props) {
           </Card>
         )}
 
-        {policy.showRouteSelector && (
+        {policy.showRouteSelector && makerSwapsOn && (
           <TouchableOpacity accessibilityRole="button" onPress={() => navigation.navigate('MakerRoutes')} style={{ minHeight: 48, padding: theme.spacing[4], marginBottom: theme.spacing[4], borderRadius: theme.borderRadius.xl, backgroundColor: theme.colors.surface.primary }}>
             <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Explore maker routes →</Text>
             <Text style={{ color: theme.colors.text.secondary }}>Bitcoin, Lightning, Arkade and supported assets</Text>

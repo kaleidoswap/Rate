@@ -47,6 +47,7 @@ const italian: Record<string, string> = {
   'Places to pay': 'Dove pagare', 'Nearby businesses accepting bitcoin': 'Attività vicine che accettano bitcoin',
   'Wallet connections': 'Connessioni portafoglio', 'Connect an NWC wallet to this app': 'Collega un portafoglio NWC a questa app',
   'RGB Lightning node': 'Nodo RGB Lightning', 'Use your own RGB Lightning node': 'Usa il tuo nodo RGB Lightning',
+  'Turn on RGB Lightning node in Settings → Labs to connect one.': 'Attiva Nodo RGB Lightning in Impostazioni → Labs per collegarne uno.',
   'Lightning channels': 'Canali Lightning', 'Open channels with a liquidity provider': 'Apri canali con un fornitore di liquidità',
   'Loading voice · first use may take a few minutes': 'Caricamento voce · il primo avvio può richiedere alcuni minuti',
 };

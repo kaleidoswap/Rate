@@ -21,7 +21,9 @@ import {
   StatusBar,
   DeviceEventEmitter,
   AppState,
+  Alert,
 } from 'react-native';
+import { useFeature } from '../hooks/useFeature';
 import { useDispatch, useSelector } from 'react-redux';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -135,6 +137,7 @@ function anyAccountConnected(): boolean {
 
 export default function DashboardScreen({ navigation }: Props) {
   const isScreenFocused = useIsFocused();
+  const lspOn = useFeature('lsp');
   const activeWallet = useAppSelector(state => state.wallet.activeWallet);
   const needsSetup = !activeWallet?.encrypted_mnemonic;
   const dispatch = useDispatch();
@@ -1039,7 +1042,7 @@ export default function DashboardScreen({ navigation }: Props) {
 
         </>}
 
-        {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (
+        {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (lspOn || channels.length > 0) && (
         <View>
         <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: showChannels }} style={styles.placesLink} onPress={() => setShowChannels(!showChannels)}>
           <Ionicons name="git-branch-outline" size={20} color={theme.colors.text.secondary} />
@@ -1056,7 +1059,9 @@ export default function DashboardScreen({ navigation }: Props) {
             setSelectedChannel(channel as unknown as Channel);
             setChannelModalVisible(true);
           }}
-          onOpenChannel={() => navigation.getParent()?.navigate('LSP')}
+          onOpenChannel={() => lspOn
+            ? navigation.getParent()?.navigate('LSP')
+            : Alert.alert('Lightning channels', 'Turn on Lightning channels in Settings → Labs to open one.')}
         />}
         </View>
         )}

@@ -8,6 +8,7 @@ import { Sheet } from '../Sheet';
 import { MindCharacter } from './MindCharacter';
 import { explain, explainTitle, type ExplainSubject, type Explanation } from '../../services/mindExplain';
 import { localTextModel } from '../../services/mindIntents/model';
+import { useFeature } from '../../hooks/useFeature';
 
 export function ExplainSheet({ subject, onClose }: { subject: ExplainSubject | null; onClose: () => void }) {
   const [result, setResult] = useState<Explanation | null>(null);
@@ -40,7 +41,9 @@ export function ExplainSheet({ subject, onClose }: { subject: ExplainSubject | n
 export function ExplainButton({ subject, label = 'Explain', style, compact }: {
   subject: ExplainSubject; label?: string; style?: StyleProp<ViewStyle>; compact?: boolean;
 }) {
+  const prismoOn = useFeature('prismo');
   const [open, setOpen] = useState<ExplainSubject | null>(null);
+  if (!prismoOn) return null;
   return (
     <>
       <TouchableOpacity
