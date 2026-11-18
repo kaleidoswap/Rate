@@ -13,6 +13,7 @@ import { buildDefaultNetworkConfig } from './networkConfig';
 import { BARK_ENABLED } from './bark';
 import { saveBarkNetwork, setBarkOff } from './barkPreferences';
 import { RGB_L1_DEFAULT_NETWORK, RGB_L1_ENABLED, pinnedRgbL1Network, saveRgbL1Network } from './rgbL1';
+import { isAvailable, isFeatureOn } from '../features';
 
 export interface AccountChoice {
   spark: boolean;
@@ -22,10 +23,19 @@ export interface AccountChoice {
   rgbOnDevice: boolean;
 }
 
-/** Lite: the everyday account (Spark) and RGB assets on the phone. */
-export const LITE_ACCOUNTS: AccountChoice = { spark: true, arkade: false, bark: false, rgbOnDevice: true };
-/** Advanced starts from everything available and lets the user turn accounts off. */
-export const ADVANCED_ACCOUNTS: AccountChoice = { spark: true, arkade: true, bark: BARK_ENABLED, rgbOnDevice: RGB_L1_ENABLED };
+/**
+ * Accounts setup can offer in this build: Held features are never offered, and
+ * Labs ones (Arkade) only where the build channel turns them on by default.
+ */
+export const SETUP_OFFERS = {
+  arkade: isFeatureOn('arkade', undefined),
+  bark: BARK_ENABLED && isAvailable('bark'),
+  rgbOnDevice: RGB_L1_ENABLED && isAvailable('rgbOnDevice'),
+} as const;
+/** Lite: the everyday account (Spark), plus RGB assets on the phone where the build ships them. */
+export const LITE_ACCOUNTS: AccountChoice = { spark: true, arkade: false, bark: false, rgbOnDevice: SETUP_OFFERS.rgbOnDevice };
+/** Advanced starts from everything offered and lets the user turn accounts off. */
+export const ADVANCED_ACCOUNTS: AccountChoice = { spark: true, ...SETUP_OFFERS };
 
 /** The wallet networks to store with a new wallet. */
 export function walletNetworksFor(choice: AccountChoice): Omit<NetworkConfig, 'id' | 'wallet_id'>[] {

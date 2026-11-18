@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../theme';
 import ErrorHandlingService from '../services/ErrorHandlingService';
+import { reportError } from '../services/crashReporting';
 
 interface Props {
   children: ReactNode;
@@ -43,6 +44,7 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     // Log error to error handling service
     console.error('ErrorBoundary caught an error:', error, errorInfo);
+    reportError(error, 'error-boundary');
     
     this.setState({
       error,

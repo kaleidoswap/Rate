@@ -37,6 +37,20 @@ const italian: Record<string, string> = {
   'Remove from this device': 'Rimuovi da questo dispositivo', Cancel: 'Annulla', Save: 'Salva',
   'Export voice diagnostics': 'Esporta diagnostica vocale', 'Voice details & retry': 'Dettagli voce e riprova',
   'Generating voice…': 'Generazione della voce…',
+  Labs: 'Labs', 'Experimental features you can turn on': 'Funzioni sperimentali da attivare',
+  'Experimental features are still being tested. Turn one on to try it; your funds stay in their accounts whether it is on or off.':
+    'Le funzioni sperimentali sono ancora in prova. Attivane una per provarla: i tuoi fondi restano nei loro account, che sia attiva o no.',
+  'Development build: every feature starts on.': 'Build di sviluppo: tutte le funzioni partono attive.',
+  'Arkade account': 'Account Arkade', 'Low-fee off-chain bitcoin on Ark': 'Bitcoin off-chain a basse commissioni su Ark',
+  'On-device assistant for chat and voice': 'Assistente sul dispositivo per chat e voce',
+  'Contacts and chat': 'Contatti e chat', 'Pay and message your Nostr contacts': 'Paga e scrivi ai tuoi contatti Nostr',
+  'Places to pay': 'Dove pagare', 'Nearby businesses accepting bitcoin': 'Attività vicine che accettano bitcoin',
+  'Wallet connections': 'Connessioni portafoglio', 'Connect an NWC wallet to this app': 'Collega un portafoglio NWC a questa app',
+  'RGB Lightning node': 'Nodo RGB Lightning', 'Use your own RGB Lightning node': 'Usa il tuo nodo RGB Lightning',
+  'Turn on RGB Lightning node in Settings → Labs to connect one.': 'Attiva Nodo RGB Lightning in Impostazioni → Labs per collegarne uno.',
+  'Send crash reports': 'Invia report dei crash',
+  'Crash details help us fix bugs. Never balances, addresses, keys or your recovery phrase.': 'I dettagli dei crash ci aiutano a correggere i bug. Mai saldi, indirizzi, chiavi o la frase di recupero.',
+  'Lightning channels': 'Canali Lightning', 'Open channels with a liquidity provider': 'Apri canali con un fornitore di liquidità',
   'Loading voice · first use may take a few minutes': 'Caricamento voce · il primo avvio può richiedere alcuni minuti',
 };
 export function translate(language: AppLanguage, text: string): string {

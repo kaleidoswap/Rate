@@ -29,8 +29,13 @@ import {
   setSoundEnabled,
   setTransactionNotifications,
   setAutoLockTimeout,
+  setLabsFeature,
+  setCrashReports,
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
+import { CHANNEL, LABS_COPY, LABS_FEATURES, isFeatureOn } from '../services/features';
+import { useFeature } from '../hooks/useFeature';
+import { CRASH_REPORTING_AVAILABLE } from '../services/crashReporting';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
 import Constants from 'expo-constants';
@@ -67,6 +72,7 @@ type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
 type SettingsAccount = WalletProtocol | 'BARK';
 const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
 const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0';
+const LABS_TERMS = 'labs experimental features beta arkade prismo assistant contacts chat places map nwc wallet connections rgb node lightning channels';
 const APP_LOCK_TERMS = 'app lock biometric face id touch fingerprint pin passcode auto-lock autolock timeout';
 const AUTO_LOCK_MINUTES = [0, 1, 5, 15, 30, 60];
 const autoLockLabel = (m: number) => m === 0 ? 'Immediately' : m === 60 ? 'After 1 hour' : `After ${m} minute${m === 1 ? '' : 's'}`;
@@ -149,13 +155,17 @@ export default function SettingsScreen({ navigation }: Props) {
     (connection) => connection.id === nostrState.selectedNwcConnectionId,
   );
   const disclosureLevel = useAppSelector(selectDisclosureLevel);
+  const feature = {
+    arkade: useFeature('arkade'), prismo: useFeature('prismo'), map: useFeature('map'), nwc: useFeature('nwc'),
+    rgbNode: useFeature('rgbNode'), lsp: useFeature('lsp'), bark: useFeature('bark'), rgbOnDevice: useFeature('rgbOnDevice'),
+  };
   const expoVersion = Constants.expoConfig?.version;
   const expoBuildVersion = Constants.expoConfig?.ios?.buildNumber;
   const [settingsQuery, setSettingsQuery] = useState('');
-  type SettingsPage = 'preferences' | 'security' | 'connections' | 'advanced';
+  type SettingsPage = 'preferences' | 'security' | 'connections' | 'advanced' | 'labs';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', advanced: 'Advanced' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', advanced: 'Advanced', labs: 'Labs' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
@@ -163,10 +173,11 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase seed words mnemonic' },
-    { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english' },
+    { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english crash reports bugs privacy' },
     { page: 'preferences', terms: 'display detail mode lite advanced simple view interface' },
     { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet' },
     { page: 'security', terms: 'danger remove delete wallet' },
+    { page: 'labs', terms: LABS_TERMS },
   ];
   const query = settingsQuery.trim().toLowerCase();
   const showSection = (terms: string) => account ? false : query
@@ -641,13 +652,15 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
           <SectionLabel>More</SectionLabel>
           <Group>
-            <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />
+            {feature.map && <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />}
+            <Row icon="flask-outline" label="Labs" description="Experimental features you can turn on" onPress={() => openPage('labs')} />
             <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
             <Row icon="information-circle-outline" label="About" value={`v${expoVersion ?? '—'}`} onPress={() => Alert.alert('KaleidoSwap Wallet', `Version ${expoVersion ?? '—'}\nBuild ${expoBuildVersion ?? '—'}\n\nA non-custodial Bitcoin & RGB wallet.`)} />
 
           </Group>
         </>}
         {page === 'advanced' && !account && <Text style={styles.pageDescription}>Manage your accounts, networks and wallet tools. Changing a network changes which balance you see.</Text>}
+        {page === 'labs' && !account && <Text style={styles.pageDescription}>{t('Experimental features are still being tested. Turn one on to try it; your funds stay in their accounts whether it is on or off.')}</Text>}
         {page === 'security' && !account && <Text style={styles.pageDescription}>Lock the app on this phone and keep your recovery phrase private. The phrase gives access to your funds.</Text>}
 
 
@@ -735,14 +748,14 @@ export default function SettingsScreen({ navigation }: Props) {
         )}
 
         {/* Prismo — the assistant's settings, one name everywhere. */}
-        {showSection('prismo kaleidomind ai assistant mind personalize voice memory budget model') && <>
+        {feature.prismo && showSection('prismo kaleidomind ai assistant mind personalize voice memory budget model') && <>
         <SectionLabel>Prismo</SectionLabel>
         <Group>
           <Row first icon="sparkles-outline" label="Prismo settings" description="Voice, responses, memory and payments" onPress={() => navigation.navigate('MindSettings')} />
         </Group>
         </>}
 
-        {showSection('wallet connection lightning nwc rgb node') && <>
+        {(feature.nwc || feature.rgbNode || (nostrState.nwcConnections ?? []).length > 0) && showSection('wallet connection lightning nwc rgb node') && <>
         <SectionLabel>Wallet connection</SectionLabel>
         <Group>
           <Row
@@ -833,7 +846,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
         </>}
 
-        {showSection('preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english') && <>
+        {showSection('preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english crash reports bugs privacy') && <>
         <SectionLabel>Preferences</SectionLabel>
         <Group>
 
@@ -871,13 +884,28 @@ export default function SettingsScreen({ navigation }: Props) {
             }
           />
           <Row icon="cash-outline" iconColor={theme.colors.success[500]} label="Currency" description="Used for fiat estimates" value={settings.currency} onPress={() => setActiveSheet('currency')} />
+          {CRASH_REPORTING_AVAILABLE && <Row
+            icon="bug-outline"
+            label="Send crash reports"
+            description="Crash details help us fix bugs. Never balances, addresses, keys or your recovery phrase."
+            right={
+              <Switch
+                accessibilityLabel="Send crash reports"
+                value={settings.crashReports ?? false}
+                onValueChange={(on) => { dispatch(setCrashReports(on)); }}
+                trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+              />
+            }
+          />}
         </Group>
         </>}
 
         {account === 'RGB' && activeWallet?.id != null && (
           <RgbAccountSettings walletId={activeWallet.id}
             node={{ connected: rgbNodeConnected(), alias: selectedNwcConnection?.alias, network: selectedNwcConnection?.network ?? protoNetworks.rln }}
-            onOpenNode={() => navigation.navigate('RgbNode')}
+            onOpenNode={() => feature.rgbNode || (nostrState.nwcConnections ?? []).length > 0
+              ? navigation.navigate('RgbNode')
+              : Alert.alert(t('RGB Lightning node'), t('Turn on RGB Lightning node in Settings → Labs to connect one.'))}
             onChanged={() => { refreshProtocolStatus(); setRgbRevision((r) => r + 1); void dispatch(loadBtcBalance()); }} />
         )}
         {account === 'RGB' && <RgbWalletTools key={rgbRevision} />}
@@ -896,10 +924,13 @@ export default function SettingsScreen({ navigation }: Props) {
         {showSection('advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet') && (
           <>
           <SectionLabel>Wallet tools</SectionLabel>
-          <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>
+          {feature.lsp && <Group><Row first icon="git-branch-outline" label="Open a Lightning channel" description="Add inbound or outbound liquidity" onPress={() => navigation.navigate('LSP')} /></Group>}
           <SectionLabel>Accounts & networks</SectionLabel>
           <Group>
-          {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).map((proto, idx) => {
+          {([...WALLET_PROTOCOLS, ...(BARK_ENABLED ? ['BARK' as const] : [])] as SettingsAccount[]).filter(proto =>
+            // Never hide money: an account this wallet already uses stays, whatever its feature state.
+            proto === 'SPARK' || accountEnabled[proto] === true || protocolStatus[proto]
+            || (proto === 'ARKADE' ? feature.arkade : proto === 'BARK' ? feature.bark : feature.rgbOnDevice || feature.rgbNode)).map((proto, idx) => {
             const connected = protocolStatus[proto];
             const connecting = protocolConnecting[proto] ?? false;
             const error = protocolErrors[proto];
@@ -965,6 +996,30 @@ export default function SettingsScreen({ navigation }: Props) {
             {__DEV__ && <Row icon="flask-outline" label="Wallet review" description="Backup, balance and payment examples" onPress={() => navigation.navigate('WalletReview')} />}
             {__DEV__ && <Row icon="color-palette-outline" label="Component preview" description="Review shared mobile components" onPress={() => navigation.navigate('DesignSystem')} />}
           </Group>
+        </>}
+
+        {showSection(LABS_TERMS) && <>
+        <SectionLabel>Labs</SectionLabel>
+        <Group>
+          {LABS_FEATURES.map((feature, idx) => (
+            <Row
+              key={feature}
+              first={idx === 0}
+              icon="flask-outline"
+              label={LABS_COPY[feature].label}
+              description={LABS_COPY[feature].description}
+              right={
+                <Switch
+                  accessibilityLabel={t(LABS_COPY[feature].label)}
+                  value={isFeatureOn(feature, settings.labs)}
+                  onValueChange={(enabled) => { dispatch(setLabsFeature({ feature, enabled })); }}
+                  trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+                />
+              }
+            />
+          ))}
+        </Group>
+        {CHANNEL === 'dev' && <Text style={styles.pageDescription}>{t('Development build: every feature starts on.')}</Text>}
         </>}
 
         {showSection('danger remove delete wallet') && <>

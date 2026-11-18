@@ -250,3 +250,29 @@ test('advanced tools and the map remain accessible without crowding everyday con
   fireEvent.press(screen.getByLabelText('Open a Lightning channel'));
   expect(navigation.navigate).toHaveBeenCalledWith('LSP');
 });
+
+test('Labs lists each experimental feature with a switch that records the choice', async () => {
+  const screen = render(<SettingsScreen navigation={navigation} />);
+  await act(async () => {});
+  fireEvent.press(screen.getByLabelText('Labs'));
+  expect(screen.getByText('Arkade account')).toBeTruthy();
+  fireEvent(screen.getByLabelText('Prismo'), 'valueChange', false);
+  expect(mockDispatch).toHaveBeenCalledWith({ type: 'settings/setLabsFeature', payload: { feature: 'prismo', enabled: false } });
+});
+
+test('a Labs feature turned off loses its entry points', async () => {
+  const settings = mockState.settings as typeof mockState.settings & { labs?: Record<string, boolean> };
+  settings.labs = { map: false, lsp: false, arkade: false };
+  try {
+    const screen = render(<SettingsScreen navigation={navigation} />);
+    await act(async () => {});
+    expect(screen.queryByLabelText('Places to pay')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Advanced'));
+    expect(screen.queryByLabelText('Open a Lightning channel')).toBeNull();
+    // Arkade is off and this wallet never set it up, so its account row is gone; Spark stays.
+    expect(screen.queryByLabelText('Arkade account settings')).toBeNull();
+    expect(screen.getByLabelText('Spark account settings')).toBeTruthy();
+  } finally {
+    delete settings.labs;
+  }
+});

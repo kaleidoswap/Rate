@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { View, Text, ActivityIndicator, Platform, SafeAreaView, Linking } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { WalletTabBar } from './components/WalletTabBar';
+import { useFeature } from './hooks/useFeature';
 import { MindCharacterBadge } from './components/mind/MindCharacter';
 import { defineBackgroundPaymentCheck, scheduleBackgroundPaymentCheck } from './services/paymentNotifications';
 import { ThemeProvider } from '@react-navigation/native';
@@ -31,8 +32,9 @@ import { preloadFeedback } from './utils/feedback';
 
 import { store, persistor } from './store';
 import { closeAgentWallet, watchAgentWalletLifecycle } from './services/agentWallet/lifecycle';
-import { selectAiMode } from './store/slices/settingsSlice';
+import { selectAiMode, selectCrashReports } from './store/slices/settingsSlice';
 import QVACService from './services/QVACService';
+import { setCrashReporting } from './services/crashReporting';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import { KaleidoThemeProvider } from '@kaleidorg/kaleido-ui/native';
@@ -130,6 +132,8 @@ const Tab = createBottomTabNavigator();
 
 function DashboardTabs() {
   const theme = useAppTheme();
+  const social = useFeature('social');
+  const prismo = useFeature('prismo');
 
   return (
     <Tab.Navigator
@@ -184,7 +188,7 @@ function DashboardTabs() {
           ),
         }}
       />
-      <Tab.Screen
+      {social && <Tab.Screen
         name="Contacts"
         component={ContactsScreen}
         options={{
@@ -197,8 +201,8 @@ function DashboardTabs() {
             />
           ),
         }}
-      />
-      <Tab.Screen
+      />}
+      {prismo && <Tab.Screen
         name="Prismo"
         component={AIAssistantScreen}
         options={{
@@ -207,7 +211,7 @@ function DashboardTabs() {
             <MindCharacterBadge size={24} color={color} focused={focused} />
           ),
         }}
-      />
+      />}
     </Tab.Navigator>
   );
 }
@@ -218,6 +222,13 @@ function AppNavigator() {
   const pendingReceiverLink = React.useRef(false);
   const pendingReviewLink = React.useRef<string | null>(null);
   const initialized = useAppSelector(s => s.wallet.isInitialized);
+  const merchantOffer = useFeature('merchantOffer');
+  const features = {
+    prismo: useFeature('prismo'), social: useFeature('social'), map: useFeature('map'), lsp: useFeature('lsp'),
+    nwc: useFeature('nwc'), rgbNode: useFeature('rgbNode'), makerSwaps: useFeature('makerSwaps'),
+  };
+  // A wallet connected before its feature went to Labs keeps its connection screens.
+  const hasNwc = useAppSelector(s => (s.nostr?.nwcConnections?.length ?? 0) > 0);
   const unlocked = useAppSelector(s => s.wallet.isUnlocked);
   const openPendingReceiver = React.useCallback(() => {
     const route = receiverNavigation.getCurrentRoute()?.name;
@@ -235,12 +246,12 @@ function AppNavigator() {
   }, [initialized, unlocked, receiverNavigation]);
   React.useEffect(() => {
     let active = true;
-    const accept = (url: string | null) => { if (__DEV__ && active && url && /^com\.kaleidoswap\.wallet:\/\/preview\/wallet-flows(?:\?|$)/.test(url)) { pendingReviewLink.current = url; openPendingReceiver(); return; } if (active && url && isReceiverLink(url)) { pendingReceiverLink.current = true; openPendingReceiver(); } };
+    const accept = (url: string | null) => { if (__DEV__ && active && url && /^com\.kaleidoswap\.wallet:\/\/preview\/wallet-flows(?:\?|$)/.test(url)) { pendingReviewLink.current = url; openPendingReceiver(); return; } if (active && url && merchantOffer && isReceiverLink(url)) { pendingReceiverLink.current = true; openPendingReceiver(); } };
     const subscription = Linking.addEventListener('url', event => accept(event.url));
     void Linking.getInitialURL().then(accept).catch(() => {});
     openPendingReceiver();
     return () => { active = false; subscription.remove(); };
-  }, [openPendingReceiver]);
+  }, [openPendingReceiver, merchantOffer]);
   const navigationTheme = createNavigationTheme();
   const theme = useAppTheme();
 
@@ -267,13 +278,13 @@ function AppNavigator() {
         <Stack.Screen name="Settings" component={SettingsScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="NostrSettings" component={NostrSettingsScreen} />
-        <Stack.Screen name="MindSettings" component={MindSettingsScreen} />
-        <Stack.Screen name="AgentWallet" component={AgentWalletScreen} />
-        <Stack.Screen name="NWCConnect" component={NWCConnectScreen} />
-        <Stack.Screen name="RgbNode" component={RgbNodeScreen} />
+        {features.prismo && <Stack.Screen name="MindSettings" component={MindSettingsScreen} />}
+        {features.prismo && <Stack.Screen name="AgentWallet" component={AgentWalletScreen} />}
+        {(features.nwc || features.rgbNode || hasNwc) && <Stack.Screen name="NWCConnect" component={NWCConnectScreen} />}
+        {(features.rgbNode || hasNwc) && <Stack.Screen name="RgbNode" component={RgbNodeScreen} />}
         <Stack.Screen name="OnboardingProfile" component={OnboardingProfileScreen} />
         <Stack.Screen name="LightningAddress" component={LightningAddressScreen} />
-        <Stack.Screen name="LSP" component={LSPScreen} />
+        {features.lsp && <Stack.Screen name="LSP" component={LSPScreen} />}
         {__DEV__ && <Stack.Screen name="PrismoReview" component={PrismoReviewScreen} />}
         {__DEV__ && <Stack.Screen name="WalletFlowsReview" component={WalletFlowsReviewScreen} />}
         {__DEV__ && <Stack.Screen name="WalletReview" component={WalletReviewScreen} />}
@@ -281,16 +292,16 @@ function AppNavigator() {
         {/* Short flows: full screen, slide up from the bottom, close button. */}
         <Stack.Screen name="Send" component={asModalScreen(SendScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="ProfileEdit" component={asModalScreen(ProfileEditScreen)} options={FLOW_OPTIONS} />
-        <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={FLOW_OPTIONS} />
+        {merchantOffer && <Stack.Screen name="MerchantOffer" component={asModalScreen(MerchantOfferScreen)} options={FLOW_OPTIONS} />}
         <Stack.Screen name="Receive" component={asModalScreen(ReceiveScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Bridge" component={asModalScreen(BridgeScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="QRScanner" component={asModalScreen(QRScannerScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="Assets" component={asModalScreen(AssetsScreen)} options={FLOW_OPTIONS} />
-        <Stack.Screen name="MakerRoutes" component={asModalScreen(MakerRoutesScreen)} options={FLOW_OPTIONS} />
+        {features.makerSwaps && <Stack.Screen name="MakerRoutes" component={asModalScreen(MakerRoutesScreen)} options={FLOW_OPTIONS} />}
         <Stack.Screen name="Swap" component={asModalScreen(SwapScreen)} options={FLOW_OPTIONS} />
         <Stack.Screen name="AssetDetail" component={asModalScreen(AssetDetailScreen)} options={FLOW_OPTIONS} />
-        <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />
-        <Stack.Screen name="Map" component={MapScreen} />
+        {features.social && <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'card', headerShown: false }} />}
+        {features.map && <Stack.Screen name="Map" component={MapScreen} />}
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -310,11 +321,19 @@ function MindTabScreen(props: React.ComponentProps<typeof AIAssistantScreen>) {
  * kill switch, so the on-device AI worklet can never start unless the user has
  * explicitly opted in. Rendered inside the Redux Provider + PersistGate.
  */
+/** Starts or stops crash reporting to match the user's opt-in. */
+function CrashReportingSync() {
+  const enabled = useSelector(selectCrashReports);
+  React.useEffect(() => { setCrashReporting(enabled); }, [enabled]);
+  return null;
+}
+
 function QVACEnabledSync() {
   const aiMode = useSelector(selectAiMode);
+  const prismo = useFeature('prismo');
   React.useEffect(() => {
-    QVACService.getInstance().setEnabled(aiMode !== 'off');
-  }, [aiMode]);
+    QVACService.getInstance().setEnabled(prismo && aiMode !== 'off');
+  }, [aiMode, prismo]);
   return null;
 }
 
@@ -365,6 +384,7 @@ export default function App() {
           <Provider store={store}>
             <PersistGate loading={<PersistenceLoading />} persistor={persistor}>
               <QVACEnabledSync />
+              <CrashReportingSync />
               <KaleidoPayRecovery />
               <ChatNotifications />
               <PaymentNotifications />

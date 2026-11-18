@@ -10,20 +10,37 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
 
 ## [Unreleased]
 
-## [0.17.0] — 2026-11-15
-
-The BFA and polish release: RGB moves to the Bridged Fungible Asset fork,
-two fiat bugs are fixed, every feature built is now reachable.
+### Added
+- **Settings → Labs.** Experimental features have a switch each: Arkade,
+  Prismo, contacts and chat, places to pay, wallet connections, the RGB
+  Lightning node and Lightning channels. Beta and store builds start them
+  off; development builds start them on.
+- **Build channels.** A build is `dev`, `beta` or `store`. Beta and store
+  builds leave out maker swaps, RGB on this phone, Bark and merchant offers.
 
 ### Changed
-- **RGB moves to the BFA (Bridged Fungible Asset) fork.** The native
-  rgb-lib binary and bindings come from UTEXO-Protocol's BFA fork (bfa.8
-  on iOS, bfa.6 on Android — Android bumps to bfa.8 when published).
-  BFA adds bridged-fungible-asset support (USDT0, bridge smart
-  contracts), VSS server backup, address rotation, and optional
-  expiration in blindReceive/send. The native module's `goOnline` now
-  takes individual params (including `hubUrl`/`hubToken` for VSS
-  coordination); `sync` drops its options param.
+- **A new wallet starts with Spark only** in beta and store builds. Advanced
+  setup offers only the accounts the build ships, and skips the RGB node step
+  unless it is turned on in Labs.
+- **An account the wallet already uses never disappears.** Arkade, Bark or
+  RGB set up in an earlier version stay in Settings and keep connecting, so
+  their funds can always be sent out.
+- **Swap shows Flashnet only** while maker swaps are left out of the build.
+- **The Android release no longer waits for iOS.** A failed iOS build still
+  publishes the APK, and the release notes say iOS is missing.
+
+## [0.17.0] — 2026-11-15
+
+The polish release: two fiat bugs are fixed and every feature built is
+now reachable. (The BFA move announced in an earlier draft of these notes
+did not ship; see below.)
+
+### Changed
+- **RGB stays on rgb-lib 0.3.0-beta.7.** The move to UTEXO-Protocol's
+  BFA (Bridged Fungible Asset) fork was prepared but reverted before the
+  release on both iOS and Android: the published BFA bindings and native
+  binaries did not match. Bridged assets (USDT0) are therefore not
+  supported yet.
 - **Payment in progress has a design that moves.** Animated icon with
   pulse ring, amount front and centre, key details (To, From, Fee,
   Total) always visible — no toggle. "Don't pay this twice" is gone
