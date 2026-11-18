@@ -3,6 +3,8 @@ const mockClose = jest.fn(async () => true);
 const mockCapture = jest.fn();
 jest.mock('@sentry/react-native', () => ({ init: mockInit, close: mockClose, captureException: mockCapture }));
 
+import type { ErrorEvent } from '@sentry/react-native';
+
 const MNEMONIC = 'abandon ability able about above absent absorb abstract absurd abuse access accident';
 
 const load = (dsn?: string) => {
@@ -10,7 +12,7 @@ const load = (dsn?: string) => {
   jest.isolateModules(() => {
     if (dsn) process.env.EXPO_PUBLIC_SENTRY_DSN = dsn;
     else delete process.env.EXPO_PUBLIC_SENTRY_DSN;
-    mod = require('./crashReporting');
+    mod = jest.requireActual<typeof import('./crashReporting')>('./crashReporting');
   });
   return mod!;
 };
@@ -39,6 +41,42 @@ test('scrubs seeds, keys, addresses, invoices and contacts', () => {
   }
 });
 
+test('scrubs partial, quoted, comma-separated and JSON recovery phrases', () => {
+  const { scrub } = load();
+  const words = MNEMONIC.split(' ');
+  for (const phrase of [
+    words.slice(0, 5).join(' '),
+    words.map(w => `"${w}"`).join(','),
+    JSON.stringify(words),
+    words.join(', '),
+    words.join('-'),
+  ]) {
+    const out = scrub(`restore failed: ${phrase} (#7)`);
+    expect(out).toContain('[redacted]');
+    expect(out).not.toMatch(/abandon|ability|absorb|accident/);
+    expect(out).toMatch(/^restore failed: .*\(#7\)$/);
+  }
+});
+
+test('scrubs WIF keys and addresses of any bech32 prefix', () => {
+  const { scrub } = load();
+  for (const secret of [
+    '5HueCGU8rMjxEXxiPuD5BDku4MkFqeZyd4dZ1jvhTVqvbTLvyTJ',
+    'KwdMAjGmerYanjeui5SHS7JkmpZvVipYvB2LJGU1ZxJwYvP98617',
+    'tex1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+  ]) expect(scrub(`key ${secret} bad`)).toBe('key [redacted] bad');
+});
+
+test('keeps only device and runtime contexts and scrubs tags', () => {
+  const { scrubEvent } = load();
+  const out = scrubEvent({
+    contexts: { device: { model: 'iPhone' }, os: { name: 'iOS' }, wallet: { address: 'bc1q' }, state: { redux: {} } },
+    tags: { where: 'send', address: 'bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq' },
+  } as unknown as ErrorEvent);
+  expect(Object.keys(out.contexts!)).toEqual(['device', 'os']);
+  expect(out.tags).toEqual({ where: 'send', address: '[redacted]' });
+});
+
 test('keeps ordinary error text readable', () => {
   const { scrub } = load();
   const message = 'TypeError: Cannot read property balance of undefined in SendScreen';
@@ -47,7 +85,7 @@ test('keeps ordinary error text readable', () => {
 
 test('drops user, request, extras, network and console breadcrumbs', () => {
   const { scrubEvent } = load();
-  const event: any = {
+  const event = {
     user: { id: 'u' }, request: { url: 'https://x' }, extra: { seed: MNEMONIC }, server_name: 'phone',
     message: `mnemonic: ${MNEMONIC}`,
     exception: { values: [{ value: 'bad address bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq', stacktrace: { frames: [{ vars: { k: 1 } }] } }] },
@@ -57,7 +95,7 @@ test('drops user, request, extras, network and console breadcrumbs', () => {
       { category: 'navigation', message: 'Send', data: { to: 'Send' } },
     ],
   };
-  const out = scrubEvent(event);
+  const out = scrubEvent(event as unknown as ErrorEvent);
   expect(out.user).toBeUndefined();
   expect(out.request).toBeUndefined();
   expect(out.extra).toBeUndefined();
@@ -84,7 +122,7 @@ test('with a DSN it starts only on opt-in and stops on opt-out', () => {
   setCrashReporting(true);
   setCrashReporting(true);
   expect(mockInit).toHaveBeenCalledTimes(1);
-  expect(mockInit.mock.calls[0][0]).toMatchObject({ sendDefaultPii: false, attachScreenshot: false, attachViewHierarchy: false, tracesSampleRate: 0 });
+  expect(mockInit.mock.calls[0][0]).toMatchObject({ sendDefaultPii: false, attachScreenshot: false, attachViewHierarchy: false, tracesSampleRate: 0, enableNativeCrashHandling: false });
   reportError(new Error('after'), 'test');
   expect(mockCapture).toHaveBeenCalledTimes(1);
   setCrashReporting(false);

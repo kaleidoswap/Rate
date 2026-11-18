@@ -3,7 +3,7 @@ const loadChoices = (channel: string | undefined) => {
   jest.isolateModules(() => {
     if (channel) process.env.EXPO_PUBLIC_CHANNEL = channel;
     else delete process.env.EXPO_PUBLIC_CHANNEL;
-    mod = require('./accountChoices');
+    mod = jest.requireActual<typeof import('./accountChoices')>('./accountChoices');
   });
   return mod!;
 };
