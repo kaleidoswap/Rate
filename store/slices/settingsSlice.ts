@@ -4,6 +4,7 @@
 import { createSlice, PayloadAction, createSelector } from '@reduxjs/toolkit';
 import type { DisclosureLevel } from '@kaleidorg/wallet-engine';
 import type { RootState } from '../index';
+import { isFeatureOn, type Feature, type LabsFeature, type LabsState } from '../../services/features';
 
 // KaleidoMind (on-device AI) mode. Chosen once in onboarding, changeable in
 // settings:
@@ -95,6 +96,8 @@ interface SettingsState {
   aiOnboarded: boolean;
   // User-tunable agent configuration (persona, sampling, context, RAG, memory).
   mindConfig: MindConfig;
+  // Labs features the user turned on or off; unset ones follow the build channel.
+  labs?: LabsState;
 }
 
 const initialState: SettingsState = {
@@ -121,6 +124,7 @@ const initialState: SettingsState = {
   aiMode: 'off',
   aiOnboarded: false,
   mindConfig: DEFAULT_MIND_CONFIG,
+  labs: {},
 };
 
 const settingsSlice = createSlice({
@@ -223,6 +227,9 @@ const settingsSlice = createSlice({
         state.aiMode = 'off';
       }
     },
+    setLabsFeature: (state, action: PayloadAction<{ feature: LabsFeature; enabled: boolean }>) => {
+      state.labs = { ...state.labs, [action.payload.feature]: action.payload.enabled };
+    },
     clearApiConfigUpdateFlag: (state) => {
       state.needsApiConfigUpdate = false;
     }
@@ -255,8 +262,14 @@ export const {
   setAiMode,
   setAiOnboarded,
   setAiEnabled,
+  setLabsFeature,
   clearApiConfigUpdateFlag
 } = settingsSlice.actions;
+
+// Whether a feature ships in this build and is on. State persisted before Labs
+// existed has no `labs` field, so unset features follow the build channel.
+export const selectFeatureOn = (state: RootState, feature: Feature): boolean =>
+  isFeatureOn(feature, state.settings.labs);
 
 // UI sound effects. Defaults true for state persisted before this field existed.
 export const selectSoundEnabled = (state: RootState): boolean =>

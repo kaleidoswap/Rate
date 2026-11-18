@@ -29,8 +29,10 @@ import {
   setSoundEnabled,
   setTransactionNotifications,
   setAutoLockTimeout,
+  setLabsFeature,
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
+import { CHANNEL, LABS_COPY, LABS_FEATURES, isFeatureOn } from '../services/features';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
 import Constants from 'expo-constants';
@@ -67,6 +69,7 @@ type WalletProtocol = 'RGB' | 'SPARK' | 'ARKADE';
 type SettingsAccount = WalletProtocol | 'BARK';
 const WALLET_PROTOCOLS: readonly WalletProtocol[] = ['RGB', 'SPARK', 'ARKADE'];
 const RGB_VIA_NWC = process.env.EXPO_PUBLIC_RGB_VIA_NWC !== '0';
+const LABS_TERMS = 'labs experimental features beta arkade prismo assistant contacts chat places map nwc wallet connections rgb node lightning channels';
 const APP_LOCK_TERMS = 'app lock biometric face id touch fingerprint pin passcode auto-lock autolock timeout';
 const AUTO_LOCK_MINUTES = [0, 1, 5, 15, 30, 60];
 const autoLockLabel = (m: number) => m === 0 ? 'Immediately' : m === 60 ? 'After 1 hour' : `After ${m} minute${m === 1 ? '' : 's'}`;
@@ -152,10 +155,10 @@ export default function SettingsScreen({ navigation }: Props) {
   const expoVersion = Constants.expoConfig?.version;
   const expoBuildVersion = Constants.expoConfig?.ios?.buildNumber;
   const [settingsQuery, setSettingsQuery] = useState('');
-  type SettingsPage = 'preferences' | 'security' | 'connections' | 'advanced';
+  type SettingsPage = 'preferences' | 'security' | 'connections' | 'advanced' | 'labs';
   const [account, setAccount] = useState<SettingsAccount | null>(null);
   const [page, setPage] = useState<SettingsPage | null>(null);
-  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', advanced: 'Advanced' };
+  const titles: Record<SettingsPage, string> = { preferences: 'Preferences', security: 'Security & backup', connections: 'Connections', advanced: 'Advanced', labs: 'Labs' };
   const sections = [
     { page: 'connections', terms: 'nostr profile relays keys identity' },
     ...(!RGB_VIA_NWC ? [{ page: 'advanced', terms: 'direct node connectivity url' }] : []),
@@ -167,6 +170,7 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'preferences', terms: 'display detail mode lite advanced simple view interface' },
     { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet' },
     { page: 'security', terms: 'danger remove delete wallet' },
+    { page: 'labs', terms: LABS_TERMS },
   ];
   const query = settingsQuery.trim().toLowerCase();
   const showSection = (terms: string) => account ? false : query
@@ -642,12 +646,14 @@ export default function SettingsScreen({ navigation }: Props) {
           <SectionLabel>More</SectionLabel>
           <Group>
             <Row icon="map-outline" label="Places to pay" description="Nearby businesses accepting bitcoin" onPress={() => navigation.navigate('Map')} />
+            <Row icon="flask-outline" label="Labs" description="Experimental features you can turn on" onPress={() => openPage('labs')} />
             <Row icon="construct-outline" label="Advanced" description="Accounts, networks and wallet tools" onPress={() => openPage('advanced')} />
             <Row icon="information-circle-outline" label="About" value={`v${expoVersion ?? '—'}`} onPress={() => Alert.alert('KaleidoSwap Wallet', `Version ${expoVersion ?? '—'}\nBuild ${expoBuildVersion ?? '—'}\n\nA non-custodial Bitcoin & RGB wallet.`)} />
 
           </Group>
         </>}
         {page === 'advanced' && !account && <Text style={styles.pageDescription}>Manage your accounts, networks and wallet tools. Changing a network changes which balance you see.</Text>}
+        {page === 'labs' && !account && <Text style={styles.pageDescription}>{t('Experimental features are still being tested. Turn one on to try it; your funds stay in their accounts whether it is on or off.')}</Text>}
         {page === 'security' && !account && <Text style={styles.pageDescription}>Lock the app on this phone and keep your recovery phrase private. The phrase gives access to your funds.</Text>}
 
 
@@ -965,6 +971,30 @@ export default function SettingsScreen({ navigation }: Props) {
             {__DEV__ && <Row icon="flask-outline" label="Wallet review" description="Backup, balance and payment examples" onPress={() => navigation.navigate('WalletReview')} />}
             {__DEV__ && <Row icon="color-palette-outline" label="Component preview" description="Review shared mobile components" onPress={() => navigation.navigate('DesignSystem')} />}
           </Group>
+        </>}
+
+        {showSection(LABS_TERMS) && <>
+        <SectionLabel>Labs</SectionLabel>
+        <Group>
+          {LABS_FEATURES.map((feature, idx) => (
+            <Row
+              key={feature}
+              first={idx === 0}
+              icon="flask-outline"
+              label={LABS_COPY[feature].label}
+              description={LABS_COPY[feature].description}
+              right={
+                <Switch
+                  accessibilityLabel={t(LABS_COPY[feature].label)}
+                  value={isFeatureOn(feature, settings.labs)}
+                  onValueChange={(enabled) => { dispatch(setLabsFeature({ feature, enabled })); }}
+                  trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+                />
+              }
+            />
+          ))}
+        </Group>
+        {CHANNEL === 'dev' && <Text style={styles.pageDescription}>{t('Development build: every feature starts on.')}</Text>}
         </>}
 
         {showSection('danger remove delete wallet') && <>

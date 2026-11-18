@@ -30,8 +30,11 @@ concurrency:
 
 # Inlined into the JS bundle at build time. The Flashnet Orchestra client key
 # (fnp_*) is public by design; without it, cross-chain deposit and send are off.
+# EXPO_PUBLIC_CHANNEL (dev | beta | store) sets which features the build ships
+# (services/features.ts); set the APP_CHANNEL repo variable to cut a beta.
 env:
   EXPO_PUBLIC_FLASHNET_ORCHESTRA_KEY: ${{ vars.FLASHNET_ORCHESTRA_KEY }}
+  EXPO_PUBLIC_CHANNEL: ${{ vars.APP_CHANNEL || 'dev' }}
 
 jobs:
   # ---------------------------------------------------------------------------
