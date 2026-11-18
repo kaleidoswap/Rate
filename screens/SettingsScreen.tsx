@@ -30,10 +30,12 @@ import {
   setTransactionNotifications,
   setAutoLockTimeout,
   setLabsFeature,
+  setCrashReports,
   type DisplayDenomination,
 } from '../store/slices/settingsSlice';
 import { CHANNEL, LABS_COPY, LABS_FEATURES, isFeatureOn } from '../services/features';
 import { useFeature } from '../hooks/useFeature';
+import { CRASH_REPORTING_AVAILABLE } from '../services/crashReporting';
 import { feedback } from '../utils/feedback';
 import { OptionSheet, type SheetOption } from '../components/OptionSheet';
 import Constants from 'expo-constants';
@@ -171,7 +173,7 @@ export default function SettingsScreen({ navigation }: Props) {
     { page: 'connections', terms: 'wallet connection lightning nwc rgb node' },
     { page: 'security', terms: APP_LOCK_TERMS },
     { page: 'security', terms: 'security backup view recovery phrase seed words mnemonic' },
-    { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english' },
+    { page: 'preferences', terms: 'preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english crash reports bugs privacy' },
     { page: 'preferences', terms: 'display detail mode lite advanced simple view interface' },
     { page: 'advanced', terms: 'advanced accounts wallet protocols network spark arkade rgb bark servers mutinynet signet regtest testnet mainnet' },
     { page: 'security', terms: 'danger remove delete wallet' },
@@ -844,7 +846,7 @@ export default function SettingsScreen({ navigation }: Props) {
           </Group>
         </>}
 
-        {showSection('preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english') && <>
+        {showSection('preferences bitcoin balance unit sats satoshis btc denomination sound sounds payment currency fiat notifications language lingua italiano english crash reports bugs privacy') && <>
         <SectionLabel>Preferences</SectionLabel>
         <Group>
 
@@ -882,6 +884,19 @@ export default function SettingsScreen({ navigation }: Props) {
             }
           />
           <Row icon="cash-outline" iconColor={theme.colors.success[500]} label="Currency" description="Used for fiat estimates" value={settings.currency} onPress={() => setActiveSheet('currency')} />
+          {CRASH_REPORTING_AVAILABLE && <Row
+            icon="bug-outline"
+            label="Send crash reports"
+            description="Crash details help us fix bugs. Never balances, addresses, keys or your recovery phrase."
+            right={
+              <Switch
+                accessibilityLabel="Send crash reports"
+                value={settings.crashReports ?? false}
+                onValueChange={(on) => { dispatch(setCrashReports(on)); }}
+                trackColor={{ true: theme.colors.primary[500], false: theme.colors.gray[300] }}
+              />
+            }
+          />}
         </Group>
         </>}
 

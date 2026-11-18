@@ -98,6 +98,8 @@ interface SettingsState {
   mindConfig: MindConfig;
   // Labs features the user turned on or off; unset ones follow the build channel.
   labs?: LabsState;
+  // Opt-in crash reports (Sentry); off until the user turns them on.
+  crashReports?: boolean;
 }
 
 const initialState: SettingsState = {
@@ -125,6 +127,7 @@ const initialState: SettingsState = {
   aiOnboarded: false,
   mindConfig: DEFAULT_MIND_CONFIG,
   labs: {},
+  crashReports: false,
 };
 
 const settingsSlice = createSlice({
@@ -227,6 +230,9 @@ const settingsSlice = createSlice({
         state.aiMode = 'off';
       }
     },
+    setCrashReports: (state, action: PayloadAction<boolean>) => {
+      state.crashReports = action.payload;
+    },
     setLabsFeature: (state, action: PayloadAction<{ feature: LabsFeature; enabled: boolean }>) => {
       state.labs = { ...state.labs, [action.payload.feature]: action.payload.enabled };
     },
@@ -263,8 +269,11 @@ export const {
   setAiOnboarded,
   setAiEnabled,
   setLabsFeature,
+  setCrashReports,
   clearApiConfigUpdateFlag
 } = settingsSlice.actions;
+
+export const selectCrashReports = (state: RootState): boolean => state.settings.crashReports ?? false;
 
 // Whether a feature ships in this build and is on. State persisted before Labs
 // existed has no `labs` field, so unset features follow the build channel.

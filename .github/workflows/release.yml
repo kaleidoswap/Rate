@@ -35,6 +35,9 @@ concurrency:
 env:
   EXPO_PUBLIC_FLASHNET_ORCHESTRA_KEY: ${{ vars.FLASHNET_ORCHESTRA_KEY }}
   EXPO_PUBLIC_CHANNEL: ${{ vars.APP_CHANNEL || 'dev' }}
+  # Sentry DSN (public by design). Without it the app has no crash reporting
+  # and Settings hides the opt-in switch.
+  EXPO_PUBLIC_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
 
 jobs:
   # ---------------------------------------------------------------------------

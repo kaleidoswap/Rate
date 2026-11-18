@@ -32,8 +32,9 @@ import { preloadFeedback } from './utils/feedback';
 
 import { store, persistor } from './store';
 import { closeAgentWallet, watchAgentWalletLifecycle } from './services/agentWallet/lifecycle';
-import { selectAiMode } from './store/slices/settingsSlice';
+import { selectAiMode, selectCrashReports } from './store/slices/settingsSlice';
 import QVACService from './services/QVACService';
+import { setCrashReporting } from './services/crashReporting';
 import { theme, createNavigationTheme } from './theme';
 import { AppThemeProvider, useAppTheme } from './theme/ThemeProvider';
 import { KaleidoThemeProvider } from '@kaleidorg/kaleido-ui/native';
@@ -320,6 +321,13 @@ function MindTabScreen(props: React.ComponentProps<typeof AIAssistantScreen>) {
  * kill switch, so the on-device AI worklet can never start unless the user has
  * explicitly opted in. Rendered inside the Redux Provider + PersistGate.
  */
+/** Starts or stops crash reporting to match the user's opt-in. */
+function CrashReportingSync() {
+  const enabled = useSelector(selectCrashReports);
+  React.useEffect(() => { setCrashReporting(enabled); }, [enabled]);
+  return null;
+}
+
 function QVACEnabledSync() {
   const aiMode = useSelector(selectAiMode);
   const prismo = useFeature('prismo');
@@ -376,6 +384,7 @@ export default function App() {
           <Provider store={store}>
             <PersistGate loading={<PersistenceLoading />} persistor={persistor}>
               <QVACEnabledSync />
+              <CrashReportingSync />
               <KaleidoPayRecovery />
               <ChatNotifications />
               <PaymentNotifications />
