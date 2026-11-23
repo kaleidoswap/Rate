@@ -22,34 +22,40 @@ interface RevealMnemonicModalProps {
 /**
  * Auth-gated recovery-phrase reveal. The caller is responsible for
  * authenticating the user (biometric / device passcode) BEFORE rendering this
- * with a non-null mnemonic. The words stay blurred behind a tap-to-reveal until
- * the user opts in, to guard against shoulder-surfing / accidental screenshots.
+ * with a non-null mnemonic. Recovery words enter the view only when the user
+ * taps to reveal them.
  */
 export const RevealMnemonicModal: React.FC<RevealMnemonicModalProps> = ({ visible, mnemonic, onClose }) => {
   const [revealed, setRevealed] = useState(false);
   // No screenshots / recordings while the recovery phrase can be shown.
   useScreenCaptureProtection(visible);
 
-  // Re-hide whenever the modal is re-opened.
+  // Reset the reveal when the parent dismisses the modal.
   useEffect(() => {
-    if (visible) setRevealed(false);
+    if (!visible) setRevealed(false);
   }, [visible]);
 
-  const words = (mnemonic ?? '').trim().split(/\s+/).filter(Boolean);
+  const showWords = visible && revealed;
+  const words = showWords ? (mnemonic ?? '').trim().split(/\s+/).filter(Boolean) : [];
+
+  const handleClose = () => {
+    setRevealed(false);
+    onClose();
+  };
 
   const handleCopy = () => {
-    if (!mnemonic) return;
+    if (!showWords || !mnemonic) return;
     copySensitive(mnemonic);
     Alert.alert('Copied', 'Recovery phrase copied. The clipboard will be cleared in 60 seconds.');
   };
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={handleClose}>
       <View style={styles.backdrop}>
         <View style={styles.sheet}>
           <View style={styles.header}>
             <Text style={styles.title}>Recovery Phrase</Text>
-            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close">
+            <TouchableOpacity onPress={handleClose} accessibilityRole="button" accessibilityLabel="Close">
               <Ionicons name="close" size={24} color={theme.colors.text.secondary} />
             </TouchableOpacity>
           </View>
@@ -63,37 +69,37 @@ export const RevealMnemonicModal: React.FC<RevealMnemonicModalProps> = ({ visibl
           </View>
 
           <View style={styles.gridWrap}>
-            <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
-              {words.map((word, i) => (
-                <View key={`${i}-${word}`} style={styles.wordChip}>
-                  <Text style={styles.wordIndex}>{i + 1}</Text>
-                  <Text style={styles.wordText}>{word}</Text>
-                </View>
-              ))}
-            </ScrollView>
-
-            {!revealed && (
+            {showWords ? (
+              <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
+                {words.map((word, i) => (
+                  <View key={i} style={styles.wordChip}>
+                    <Text style={styles.wordIndex}>{i + 1}</Text>
+                    <Text style={styles.wordText}>{word}</Text>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
               <TouchableOpacity
-                style={styles.blurCover}
+                style={styles.revealCover}
                 activeOpacity={0.9}
                 onPress={() => setRevealed(true)}
                 accessibilityRole="button"
                 accessibilityLabel="Tap to reveal recovery phrase"
               >
                 <Ionicons name="eye-off-outline" size={28} color={theme.colors.text.secondary} />
-                <Text style={styles.blurText}>Tap to reveal</Text>
+                <Text style={styles.revealText}>Tap to reveal</Text>
               </TouchableOpacity>
             )}
           </View>
 
-          {revealed && (
+          {showWords && (
             <TouchableOpacity style={styles.copyButton} onPress={handleCopy} accessibilityRole="button">
               <Ionicons name="copy-outline" size={18} color={theme.colors.primary[500]} />
               <Text style={styles.copyText}>Copy to clipboard</Text>
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={styles.doneButton} onPress={onClose} accessibilityRole="button">
+          <TouchableOpacity style={styles.doneButton} onPress={handleClose} accessibilityRole="button">
             <Text style={styles.doneText}>Done</Text>
           </TouchableOpacity>
         </View>
@@ -171,15 +177,15 @@ const styles = StyleSheet.create({
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.primary,
   },
-  blurCover: {
+  revealCover: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: theme.colors.background.secondary + 'F2', // ~95% opaque cover so the seed stays hidden until tapped
+    backgroundColor: theme.colors.background.secondary,
     borderRadius: theme.borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
     gap: theme.spacing[1.5],
   },
-  blurText: {
+  revealText: {
     fontSize: theme.typography.fontSize.sm,
     fontWeight: theme.typography.fontWeight.semibold,
     color: theme.colors.text.secondary,
