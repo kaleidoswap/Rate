@@ -67,9 +67,10 @@ test('a build holding phone setup still shows a previously configured phone acco
   expect(screen.queryByText('panel: set up')).toBeNull();
   expect(screen.getByText('Connect an RGB node')).toBeTruthy();
 
+  screen.unmount();
   mockNetwork = 'mainnet';
-  screen.rerender(<RgbAccountSettings key="configured" {...props} />);
+  const configured = render(<RgbAccountSettings {...props} />);
   await act(async () => {});
-  expect(screen.getByLabelText('This phone')).toBeTruthy();
-  expect(screen.getByText('panel: set up')).toBeTruthy();
+  expect(configured.getByLabelText('This phone')).toBeTruthy();
+  expect(configured.getByText('panel: set up')).toBeTruthy();
 });
