@@ -122,6 +122,7 @@ jobs:
         run: pnpm exec expo export --platform ${{ matrix.platform }} --source-maps --output-dir "$RUNNER_TEMP/bundle"
         env:
           NODE_ENV: production
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Verify unpatched tooling dependencies stay out of the app
         run: node scripts/check-release-dependencies.cjs "$RUNNER_TEMP/bundle"
