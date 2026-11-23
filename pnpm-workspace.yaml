@@ -65,7 +65,7 @@ overrides:
   minimatch@9: ^11.0.1
   minimatch@10: ^11.0.1
   nanoid@3: ^3.3.18
-  node-forge@1: ^1.4.2
+  node-forge@1: 1.4.3
   postcss@8: ^8.5.23
   protobufjs@7: ^7.6.5
   rocksdb-native: 3.18.1
