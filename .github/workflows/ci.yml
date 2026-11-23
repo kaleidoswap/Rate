@@ -23,6 +23,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # KaleidoPay imports packages from the sibling kaleidoswap/kaleido-pay
       # checkout (see services/kaleidoPay/README.md).
@@ -32,6 +34,7 @@ jobs:
         run: echo "ref=$(tr -d '[:space:]' < kaleido-pay.ref)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: kaleidoswap/kaleido-pay
           ref: ${{ steps.kaleido-pay.outputs.ref }}
           path: universal-bolt12
@@ -89,6 +92,8 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Same sibling checkout as the checks job.
       # Payment code from kaleido-pay is pinned to the commit in kaleido-pay.ref.
@@ -97,6 +102,7 @@ jobs:
         run: echo "ref=$(tr -d '[:space:]' < kaleido-pay.ref)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           repository: kaleidoswap/kaleido-pay
           ref: ${{ steps.kaleido-pay.outputs.ref }}
           path: universal-bolt12
@@ -116,6 +122,7 @@ jobs:
         run: pnpm exec expo export --platform ${{ matrix.platform }} --source-maps --output-dir "$RUNNER_TEMP/bundle"
         env:
           NODE_ENV: production
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Verify unpatched tooling dependencies stay out of the app
         run: node scripts/check-release-dependencies.cjs "$RUNNER_TEMP/bundle"

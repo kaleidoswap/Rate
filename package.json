@@ -91,7 +91,6 @@
     "expo-status-bar": "~3.0.9",
     "kaleido-sdk": "^0.1.23",
     "light-bolt11-decoder": "^3.2.0",
-    "metro": "^0.83.8",
     "metro-config": "^0.83.8",
     "nostr-tools": "^2.25.0",
     "react": "19.1.4",

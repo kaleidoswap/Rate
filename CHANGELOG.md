@@ -17,17 +17,40 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   off; development builds start them on.
 - **Build channels.** A build is `dev`, `beta` or `store`. Beta and store
   builds leave out maker swaps, RGB on this phone, Bark and merchant offers.
+- **Profile sharing.** The Nostr QR card explains how to add the profile and
+  has labeled copy and share actions.
 
 ### Changed
-- **A new wallet starts with Spark only** in beta and store builds. Advanced
-  setup offers only the accounts the build ships, and skips the RGB node step
-  unless it is turned on in Labs.
+- **Account selection** is part of setup and restore. Spark is preselected
+  in all builds, along with RGB on this phone where available. The optional
+  RGB node setup follows its Labs setting.
+- **Receive** shows BTC and the available RGB asset picker. Shared requests
+  include the asset or amount and the payment method.
+- **Send and Activity** show how to recover from a blocked payment and
+  distinguish an RGB transfer waiting for the counterparty from one waiting
+  for confirmations.
+- **RGB backup status** appears after an on-device RGB payment. The latest
+  successful backup time is saved per wallet and network. Connected RGB
+  Lightning node settings explain how to verify the operator's backup.
 - **An account the wallet already uses never disappears.** Arkade, Bark or
   RGB set up in an earlier version stay in Settings and keep connecting, so
   their funds can always be sent out.
 - **Swap shows Flashnet only** while maker swaps are left out of the build.
 - **The Android release no longer waits for iOS.** A failed iOS build still
   publishes the APK, and the release notes say iOS is missing.
+
+### Security
+- Expo's tooling uses the patched `node-forge` 1.4.3. The redundant direct
+  Metro dependency was removed.
+- Android release builds omit two unused permissions and the Expo development
+  URL scheme. The iOS map requests location only while the app is in use.
+- The recovery phrase enters the view only after the user taps to reveal it.
+  An interrupted migration retries removing the legacy SQLite copy when it
+  matches the value in secure storage.
+- CI and release checkouts use read-only repository access and discard
+  checkout credentials. The release publishing job keeps write access.
+- Opt-in JavaScript crash reports contain fixed error labels, bundle
+  locations and selected build and OS fields.
 
 ## [0.17.0] — 2026-11-15
 
