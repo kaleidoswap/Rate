@@ -28,6 +28,8 @@ import { RootState } from '../store';
 import { protocolManager, rgbAccountAdapter, rgbAccountIsOnDevice } from '../services/protocols';
 import { buildUnifiedReceiveURI } from '@kaleidorg/wallet-engine';
 import { selectDisclosureLevel, setLastBtcReceiveRoute } from '../store/slices/settingsSlice';
+import { isRgbConnecting, subscribeRgbConnecting } from '../services/protocols/wdk';
+import { rgbBackupStatus, onRgbBackupStatus, runRgbBackup } from '../services/protocols/rgbBackup';
 import { useRefreshableProtocolStatus } from '../hooks/useProtocol';
 import { useAssetInventory } from '../hooks/useAssetInventory';
 import { inventoryBtc, inventoryTokens } from '../utils/asset-inventory';
@@ -211,6 +213,8 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
   
   // Must call hooks first before any other code
+  const rgbConnecting = React.useSyncExternalStore(subscribeRgbConnecting, isRgbConnecting);
+  const backup = React.useSyncExternalStore(onRgbBackupStatus, rgbBackupStatus);
   const getProtocolStatus = useRefreshableProtocolStatus();
 
   const [selectedAsset, setSelectedAsset] = useState<Asset>(btcAsset);
@@ -1402,6 +1406,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     return (
       <View style={styles.assetTabs}>
         {Tab('BTC', isBtc, selectBtc, <AssetIcon ticker="BTC" size={20} showBadge={false} />, 'BTC')}
+        {rgbConnecting && !rgbConnected && <Text accessibilityLiveRegion="polite" style={styles.assetTabText}>RGB · Connecting…</Text>}
         {/* RGB one tap away, not three levels deep in the options sheet. */}
         {rgbConnected && selectedAsset.asset_id !== NEW_RGB_ASSET_ID &&
           Tab('RGB', false, () => { feedback.select(); setShowRgbAssets(true); }, <RgbIcon size={20} />, 'RGB')}
@@ -1512,6 +1517,10 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
     onActivity={claimsOnDevice && requestPresentation === 'pending' ? undefined : () => navigation.navigate('Dashboard', { screen: 'Activity' })}
     hint={claimsOnDevice ? 'Keep this screen open until the payment arrives.' : undefined} />;
 
+  const shareAsset = selectedAsset.isRGB
+    ? (selectedAsset.asset_id === NEW_RGB_ASSET_ID ? 'RGB asset' : selectedAsset.ticker)
+    : currentAmountSats > 0 ? `${currentAmountSats.toLocaleString()} sats` : 'BTC';
+
   const renderUnifiedBody = () => {
     if (showOutcome && unifiedUri) return unifiedLoading ? renderQrLoading() : renderOutcome();
     const accent = theme.colors.networks.unified;
@@ -1586,7 +1595,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         {renderAmountRow()}
 
         {receiveMethods.filter(a => /^ln(bc|tb|bcrt)/i.test(a.value)).map(a => <InvoiceExpiry showCountdown={showCountdown} key={a.key} invoice={a.value} onRefresh={() => { void generateUnifiedUri({ includeLightning: true, preserveExisting: true, reason: 'manual' }); }} />)}
-        <ReceiveRequestActions value={unifiedUri} network={unifiedReceiveNetwork} />
+        <ReceiveRequestActions value={unifiedUri} summary={`${shareAsset} · Bitcoin payment request`} network={unifiedReceiveNetwork} />
       </View>
     );
   };
@@ -1652,6 +1661,9 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
 
     const method = receiveMethods[0];
     const title = method ? requestKind(method) : 'Bitcoin address';
+    const shareAmount = arkadeReceive && method?.layer === 'lightning'
+      ? `${arkadeReceive.payAmountSats.toLocaleString()} sats` : shareAsset;
+    const shareRoute = method?.layer === 'rgb' ? 'RGB on-chain' : title;
     const swapNote = arkadeReceive && method?.protocol === 'ARKADE' && method.layer === 'lightning'
       ? `The sender pays ${arkadeReceive.payAmountSats.toLocaleString('en-US')} sats; ${(arkadeReceive.payAmountSats - arkadeReceive.amountSats).toLocaleString('en-US')} sats go to ${arkadeReceive.provider} for the swap.`
       : undefined;
@@ -1677,7 +1689,7 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         {renderAmountRow()}
 
         <InvoiceExpiry showCountdown={showCountdown} invoice={address} onRefresh={() => { void generateAddress(); }} />
-        <ReceiveRequestActions value={address} label={title} network={method ? receiveAccountChain(method.protocol) : undefined} />
+        <ReceiveRequestActions value={address} summary={`${shareAmount} · ${shareRoute}`} label={title} network={method ? receiveAccountChain(method.protocol) : undefined} />
       </View>
     );
   };
@@ -1828,6 +1840,9 @@ export default function ReceiveScreen({ navigation, route: navRoute }: Props) {
         amountIsBalanceChange={depositMonitor.amountSource === 'balance'}
         account={depositMonitor.protocol === 'RGB' ? rgbLabel : depositMonitor.protocol === 'ARKADE' ? 'Arkade' : depositMonitor.protocol === 'SPARK' ? 'Spark' : depositMonitor.protocol === 'BARK' ? 'Bark' : undefined}
         network={depositMonitor.layer ? formatDepositLayer(depositMonitor.layer) : networkType === 'unified' ? undefined : networkType}
+        receivedAt={depositMonitor.updatedAt}
+        backup={depositMonitor.layer === 'rgb' && rgbAccountIsOnDevice() ? backup : undefined}
+        onBackup={() => { void runRgbBackup(true); }}
         onActivity={() => { setShowDepositSuccess(false); cancelReceiveWork(); navigation.navigate('Dashboard', { screen: 'Activity' }); }}
         onDone={() => {
           setShowDepositSuccess(false);

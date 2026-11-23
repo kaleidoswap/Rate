@@ -75,7 +75,7 @@ jest.mock('./rgbBackup', () => ({
   setRgbBackupContext: jest.fn(),
 }));
 
-import { initializeWdkProtocols, switchRgbL1Network, syncRgbOnDevice } from './wdk';
+import { isRgbConnecting, subscribeRgbConnecting, initializeWdkProtocols, switchRgbL1Network, syncRgbOnDevice } from './wdk';
 
 const configs = (...types: string[]) => types.map((type) => ({ type, enabled: true, config: '{}' }));
 
@@ -132,7 +132,11 @@ test('RGB on this phone waits for the node and stays off when the node connects'
 test('RGB on this phone connects once the node is known to be unavailable', async () => {
   mockRgbL1Network = 'mainnet';
   mockFail.RGB_LN = 'unreachable';
+  const phases: boolean[] = [];
+  const unsubscribe = subscribeRgbConnecting(() => phases.push(isRgbConnecting()));
   const results = await initializeWdkProtocols('seed', configs('rgb', 'spark'));
+  unsubscribe();
+  expect(phases).toEqual([true, false]);
   expect(mockEvents.indexOf('start RGB_L1')).toBeGreaterThan(mockEvents.indexOf('start RGB_LN'));
   expect(results.get('RGB_L1' as any)).toEqual({ success: true });
 });
