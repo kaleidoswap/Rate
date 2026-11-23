@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import { act, fireEvent, render } from '@testing-library/react-native';
 
 const mockCancel = jest.fn(async () => true);
+const mockRefreshTransfers = jest.fn(async (_adapter: unknown) => {});
 jest.mock('../store/hooks', () => ({ useAppSelector: (f: any) => f({ settings: { bitcoinUnit: 'sats' } }) }));
 jest.mock('../services/paymentProofs', () => ({ findPaymentProof: jest.fn(async () => null) }));
 jest.mock('../services/TxAccelerationService', () => ({ accelerationTarget: () => null }));
@@ -11,10 +12,18 @@ const mockDelete = jest.fn(async () => true);
 jest.mock('../services/rgbWallet', () => ({
   cancelRgbTransfer: (...args: any[]) => mockCancel(...(args as [])),
   deleteRgbTransfer: (...args: any[]) => mockDelete(...(args as [])),
+  refreshRgbTransfers: (adapter: unknown) => mockRefreshTransfers(adapter),
 }));
 let mockCaps: any = {};
+const mockGetConnectionInfo = jest.fn(async () => ({ network: 'signet' }));
 jest.mock('../services/protocols', () => ({
-  rgbAccountAdapter: () => ({ protocolName: 'RGB_L1', isConnected: () => true, listTransfers: jest.fn(), account: { failTransfer: jest.fn(), capabilities: () => mockCaps } }),
+  rgbAccountAdapter: () => ({
+    protocolName: 'RGB_L1',
+    isConnected: () => true,
+    listTransfers: jest.fn(),
+    getConnectionInfo: mockGetConnectionInfo,
+    account: { failTransfer: jest.fn(), refreshTransfers: jest.fn(), capabilities: () => mockCaps },
+  }),
 }));
 
 jest.mock('../services/mindIntents/model', () => ({ localTextModel: () => ({ ready: () => false, complete: jest.fn() }) }));
@@ -34,8 +43,8 @@ const item = (rgbTransfer: ActivityItem['rgbTransfer']): ActivityItem => ({
 test('a transfer waiting for the sender shows its progress and can be cancelled after confirming', async () => {
   const onRefresh = jest.fn(async () => true);
   const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-counterparty', direction: 'incoming', batchTransferIdx: 7 })} onClose={jest.fn()} onRefresh={onRefresh} />);
-  expect(screen.getByText('Waiting for the other side')).toBeTruthy();
-  expect(screen.queryByText('Check status')).toBeNull();
+  expect(screen.getByText('Waiting for sender')).toBeTruthy();
+  expect(screen.getByText('Check status')).toBeTruthy();
   expect(screen.getByText(/Your invoice is open/)).toBeTruthy();
   fireEvent.press(screen.getByText('Cancel invoice'));
   const buttons = (Alert.alert as jest.Mock).mock.calls.at(-1)[2];
@@ -43,6 +52,34 @@ test('a transfer waiting for the sender shows its progress and can be cancelled 
   expect(mockCancel).toHaveBeenCalledWith(expect.anything(), 7);
   expect(onRefresh).toHaveBeenCalled();
   expect(screen.getByText('Cancelled.')).toBeTruthy();
+  expect(screen.queryByText('Check status')).toBeNull();
+});
+
+test('checking a pending RGB transfer syncs the account and refreshes Activity', async () => {
+  mockRefreshTransfers.mockClear();
+  const onRefresh = jest.fn(async () => true);
+  const pending = item({ status: 'waiting-counterparty', direction: 'outgoing', batchTransferIdx: 7 });
+  const screen = render(<ActivityDetailSheet item={pending} onClose={jest.fn()} onRefresh={onRefresh} />);
+  expect(screen.getByText('Waiting for recipient')).toBeTruthy();
+  await act(async () => { fireEvent.press(screen.getByText('Check status')); });
+  expect(mockRefreshTransfers).toHaveBeenCalledTimes(1);
+  expect(onRefresh).toHaveBeenCalledTimes(1);
+  screen.rerender(<ActivityDetailSheet item={{ ...pending, rgbTransfer: { status: 'waiting-confirmations', direction: 'outgoing' } }} onClose={jest.fn()} onRefresh={onRefresh} />);
+  expect(screen.queryByText('Waiting for recipient')).toBeNull();
+  expect(screen.getByText('Waiting for confirmations')).toBeTruthy();
+});
+
+test('keeps the last known RGB status when checking fails and lets the user retry', async () => {
+  mockRefreshTransfers.mockRejectedValueOnce(new Error('offline'));
+  const onRefresh = jest.fn(async () => true);
+  const screen = render(<ActivityDetailSheet item={item({ status: 'waiting-confirmations', direction: 'incoming' })} onClose={jest.fn()} onRefresh={onRefresh} />);
+  await act(async () => { fireEvent.press(screen.getByText('Check status')); });
+  expect(screen.getByText(/Could not check this transfer/)).toBeTruthy();
+  expect(screen.getByText('Waiting for confirmations')).toBeTruthy();
+  expect(onRefresh).not.toHaveBeenCalled();
+  await act(async () => { fireEvent.press(screen.getByText('Check status')); });
+  expect(screen.queryByText(/Could not check this transfer/)).toBeNull();
+  expect(onRefresh).toHaveBeenCalledTimes(1);
 });
 
 test('a transfer already in a transaction can’t be cancelled', () => {

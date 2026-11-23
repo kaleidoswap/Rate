@@ -41,6 +41,15 @@ it('updates tab labels from the shared app language', () => {
   expect(screen.getByText('Portafoglio')).toBeTruthy();
   expect(screen.getByText('Attività')).toBeTruthy();
   expect(screen.getByText('Scansiona')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Scansiona un codice QR di pagamento' })).toBeTruthy();
+});
+
+it('exposes the selected destination when the navigation state changes', () => {
+  const p = props();
+  const screen = render(<WalletTabBar {...p} />);
+  expect(screen.getByRole('tab', { selected: true, name: 'Wallet' })).toBeTruthy();
+  screen.rerender(<WalletTabBar {...p} state={{ ...p.state, index: 1 }} />);
+  expect(screen.getByRole('tab', { selected: true, name: 'Activity' })).toBeTruthy();
 });
 
 it('the Activity tab wears the count of payments that need attention', async () => {
