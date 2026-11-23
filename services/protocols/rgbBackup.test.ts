@@ -70,6 +70,7 @@ describe('restore from the cloud', () => {
   beforeEach(() => { mockWrites.length = 0; });
 
   test('hands the last upload to rgb-lib with the seed-derived password', async () => {
+    setRgbBackupContext({ mnemonic: 'seed', network: 'mainnet', account: () => account });
     mockDownload.mockResolvedValueOnce({ data: new Uint8Array([9, 9]), manifest: { createdAt: 456 } });
     expect(await restoreRgbFromCloud({ mnemonic: 'seed', network: 'mainnet', restore })).toBe('restored');
     expect(createVssClient).toHaveBeenLastCalledWith('https://vss.kaleidoswap.com/vss', rgbBackupStoreId('seed', 'mainnet'), expect.any(Uint8Array));
@@ -160,4 +161,17 @@ test('an upload from the previous network cannot mark the new network backed up'
   finish();
   await pending;
   expect(rgbBackupStatus()).toEqual({ state: 'idle' });
+});
+
+test('remembers the successful upload time only for the matching wallet and network', async () => {
+  await runRgbBackup(true);
+  setRgbBackupContext({ mnemonic: 'other', network: 'mutinynet', account: () => account });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(rgbBackupStatus().lastBackupAt).toBeUndefined();
+  setRgbBackupContext({ mnemonic: 'seed', network: 'mainnet', account: () => account });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(rgbBackupStatus().lastBackupAt).toBeUndefined();
+  setRgbBackupContext({ mnemonic: 'seed', network: 'mutinynet', account: () => account });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(rgbBackupStatus().lastBackupAt).toBe(123);
 });

@@ -8,20 +8,51 @@ const loadChoices = (channel: string | undefined) => {
   return mod!;
 };
 
+const mockHasBarkPreference = jest.fn(async () => false);
+const mockSetBarkOff = jest.fn(async () => undefined);
+const mockSaveRgbL1Network = jest.fn(async () => undefined);
 jest.mock('../DatabaseService', () => ({ __esModule: true, default: { getInstance: () => ({}) } }));
-jest.mock('./barkPreferences', () => ({ saveBarkNetwork: jest.fn(), setBarkOff: jest.fn() }));
+jest.mock('./bark', () => ({ BARK_ENABLED: true }));
+jest.mock('./barkPreferences', () => ({
+  hasBarkPreference: mockHasBarkPreference,
+  saveBarkNetwork: jest.fn(),
+  setBarkOff: mockSetBarkOff,
+}));
+jest.mock('./rgbL1', () => ({
+  RGB_L1_ENABLED: true,
+  RGB_L1_DEFAULT_NETWORK: 'mainnet',
+  pinnedRgbL1Network: jest.fn(),
+  saveRgbL1Network: mockSaveRgbL1Network,
+}));
 
-afterEach(() => { delete process.env.EXPO_PUBLIC_CHANNEL; });
-
-test('a beta build sets up Spark only and offers no held or Labs account', () => {
-  const { LITE_ACCOUNTS, ADVANCED_ACCOUNTS, SETUP_OFFERS } = loadChoices('beta');
-  expect(LITE_ACCOUNTS).toEqual({ spark: true, arkade: false, bark: false, rgbOnDevice: false });
-  expect(SETUP_OFFERS).toEqual({ arkade: false, bark: false, rgbOnDevice: false });
-  expect(ADVANCED_ACCOUNTS).toEqual(LITE_ACCOUNTS);
+afterEach(() => {
+  delete process.env.EXPO_PUBLIC_CHANNEL;
+  jest.clearAllMocks();
 });
 
-test('a development build keeps today’s setup', () => {
-  const { LITE_ACCOUNTS, ADVANCED_ACCOUNTS } = loadChoices(undefined);
-  expect(LITE_ACCOUNTS).toMatchObject({ spark: true, rgbOnDevice: true });
-  expect(ADVANCED_ACCOUNTS).toMatchObject({ spark: true, arkade: true });
+test.each(['beta', 'store'])('a %s build offers only Spark during onboarding', channel => {
+  const { DEFAULT_ACCOUNTS, SETUP_ACCOUNTS } = loadChoices(channel);
+  expect(DEFAULT_ACCOUNTS).toEqual({ spark: true, arkade: false, bark: false, rgbOnDevice: false });
+  expect(SETUP_ACCOUNTS.map(account => account.key)).toEqual(['spark']);
+});
+
+test('a development build offers choices with Spark and RGB initially selected', () => {
+  const { DEFAULT_ACCOUNTS, SETUP_ACCOUNTS } = loadChoices(undefined);
+  expect(DEFAULT_ACCOUNTS).toEqual({ spark: true, arkade: false, bark: false, rgbOnDevice: true });
+  expect(SETUP_ACCOUNTS.map(account => account.key)).toEqual(['spark', 'rgbOnDevice', 'arkade', 'bark']);
+});
+
+test('beta onboarding leaves saved on-device account preferences intact', async () => {
+  mockHasBarkPreference.mockResolvedValueOnce(true);
+  const { DEFAULT_ACCOUNTS, saveAccountPreferences } = loadChoices('beta');
+  await saveAccountPreferences('test seed', DEFAULT_ACCOUNTS);
+  expect(mockSaveRgbL1Network).not.toHaveBeenCalled();
+  expect(mockSetBarkOff).not.toHaveBeenCalled();
+});
+
+test('beta onboarding turns off the Bark default for a new seed', async () => {
+  const { DEFAULT_ACCOUNTS, saveAccountPreferences } = loadChoices('beta');
+  await saveAccountPreferences('test seed', DEFAULT_ACCOUNTS);
+  expect(mockSetBarkOff).toHaveBeenCalledWith('test seed');
+  expect(mockSaveRgbL1Network).not.toHaveBeenCalled();
 });

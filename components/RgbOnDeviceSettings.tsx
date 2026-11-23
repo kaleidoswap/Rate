@@ -463,6 +463,8 @@ export function RgbOnDeviceSettings({ walletId, nodeActive = false, onOpenNode, 
           <View style={styles.text}>
             <Text style={styles.label}>Cloud backup</Text>
             <Text style={[styles.description, cloudWarn && { color: cloudColor }]} numberOfLines={2}>{cloudLine}</Text>
+            {!!cloud.lastBackupAt && (cloudWarn || cloud.state === 'backing-up') &&
+              <Text style={styles.description}>Last successful backup · {new Date(cloud.lastBackupAt).toLocaleString()}</Text>}
           </View>
           {cloud.state === 'backing-up' ? <ActivityIndicator color={accent} /> : <Text style={styles.action}>Back up now</Text>}
         </TouchableOpacity>

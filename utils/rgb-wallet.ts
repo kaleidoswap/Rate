@@ -180,6 +180,14 @@ export const RGB_TRANSFER_STATUS_LABEL: Record<RgbTransferStatus, string> = {
   failed: 'Failed',
 };
 
+export function rgbTransferProgressLabel({ status, direction }: Pick<RgbTransfer, 'status' | 'direction'>): string {
+  if (status === 'waiting-counterparty') {
+    if (direction === 'incoming') return 'Waiting for sender';
+    if (direction === 'outgoing') return 'Waiting for recipient';
+  }
+  return RGB_TRANSFER_STATUS_LABEL[status];
+}
+
 /** What each step means for this direction, in plain words. */
 export function rgbTransferStatusDetail(status: RgbTransferStatus, direction: RgbTransferDirection): string {
   switch (status) {

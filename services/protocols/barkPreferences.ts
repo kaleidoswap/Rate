@@ -19,6 +19,11 @@ export async function isBarkOff(mnemonic: string): Promise<boolean> {
   return (await DatabaseService.getInstance().getSetting(key(mnemonic))) === OFF;
 }
 
+export async function hasBarkPreference(mnemonic: string): Promise<boolean> {
+  const saved = await DatabaseService.getInstance().getSetting(key(mnemonic));
+  return saved === OFF || saved === 'mainnet' || saved === 'signet';
+}
+
 export async function setBarkOff(mnemonic: string): Promise<void> {
   await DatabaseService.getInstance().setSetting(key(mnemonic), OFF);
 }

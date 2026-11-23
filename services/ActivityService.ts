@@ -359,7 +359,11 @@ export function transferItems(transfers: any[], meta: AssetMeta, network: string
 
     const rawAmount = t.requested_assignment?.value ?? t.amount ?? 0;
     out.push({
-      id: `transfer-${t.txid || offset + i}-${t.idx ?? 0}`,
+      // The transfer gets its transaction ID later. Keep the same row and
+      // detail sheet selected when the status check discovers the broadcast.
+      id: t.idx != null
+        ? `transfer-${network ?? ''}-${meta.asset_id}-${t.idx}`
+        : `transfer-${t.txid || offset + i}-0`,
       type,
       source: 'transfer',
       asset: meta.asset_id,

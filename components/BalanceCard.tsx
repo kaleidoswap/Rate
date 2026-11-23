@@ -68,8 +68,6 @@ interface BalanceCardProps {
 }
 
 
-const CONTROL_HIT_SLOP = { top: 7, bottom: 7, left: 7, right: 7 };
-
 const PROTOCOL_DISPLAY: Array<{ key: string; label: string; color: string }> = [
     { key: 'RGB', label: 'Lightning', color: protocolColor('RGB') },
     { key: 'SPARK', label: 'Spark', color: protocolColor('SPARK') },
@@ -211,25 +209,20 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
 
     return (
         <View style={styles.container}>
-            {/* No label or status words above the figure: the refresh button is
-                the one updating indicator, and the details sit behind the
-                "Details" text toggle under the balance. */}
             <View style={styles.cardHeader}>
-                <View style={styles.topControls}>
-                    <TouchableOpacity
-                        style={styles.controlButton}
-                        accessibilityRole="button"
-                        onPress={onRefresh}
-                        disabled={refreshing || syncing}
-                        accessibilityLabel="Refresh balance"
-                        accessibilityState={{ disabled: refreshing || syncing }}
-                        hitSlop={CONTROL_HIT_SLOP}
-                    >
-                        {syncing
-                            ? <ActivityIndicator size="small" accessibilityLabel="Updating balance" color={theme.colors.text.secondary} style={styles.controlSpinner} />
-                            : <Ionicons name="refresh" size={16} color={refreshing ? theme.colors.text.tertiary : theme.colors.text.secondary} />}
-                    </TouchableOpacity>
-                </View>
+                <Text accessibilityRole="header" style={styles.cardTitle}>Wallet balance</Text>
+                <TouchableOpacity
+                    style={styles.controlButton}
+                    accessibilityRole="button"
+                    onPress={onRefresh}
+                    disabled={syncing}
+                    accessibilityLabel="Refresh balance"
+                    accessibilityState={{ disabled: syncing, busy: syncing }}
+                >
+                    {syncing
+                        ? <ActivityIndicator size="small" accessibilityLabel="Updating balance" color={theme.colors.text.secondary} />
+                        : <Ionicons name="refresh" size={18} color={theme.colors.text.secondary} />}
+                </TouchableOpacity>
             </View>
             <Animated.View style={[styles.totalBalanceContainer, { opacity: amountOpacity }]}>
                 {loading ? (
@@ -250,6 +243,9 @@ export const BalanceCard: React.FC<BalanceCardProps> = ({
                                 {/* Fiat figures already carry their symbol, so only sats/BTC get a unit label. */}
                                 {!hideAmounts && (primaryUnitLabel === 'sats' || primaryUnitLabel === 'BTC') && (
                                     <Text style={styles.balanceCurrency}>{primaryUnitLabel}</Text>
+                                )}
+                                {onCycleDenomination && !hideAmounts && (
+                                    <Ionicons name="swap-horizontal" size={16} color={theme.colors.text.secondary} />
                                 )}
                             </View>
                         </TouchableOpacity>
@@ -409,17 +405,25 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         // Distinct rounded card surface, matching the extension's TOTAL BALANCE
         // card (#0F1C33, 16px radius, hairline border on the navy background).
         backgroundColor: theme.colors.surface.primary,
-        borderRadius: 16,
+        borderRadius: theme.borderRadius.xl,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border.light,
         paddingHorizontal: theme.spacing[4],
         paddingVertical: theme.spacing[3],
     },
     cardHeader: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: theme.spacing[3],
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: theme.spacing[3],
+    },
+    cardTitle: {
+        flex: 1,
+        color: theme.colors.text.secondary,
+        fontSize: theme.typography.fontSize.sm,
+        fontWeight: theme.typography.fontWeight.semibold,
     },
     totalBalanceContainer: {
         alignItems: 'center', paddingTop: theme.spacing[1], paddingBottom: theme.spacing[2],
     },
-    primaryBalance: { width: '100%', alignItems: 'center' },
+    primaryBalance: { width: '100%', minHeight: 44, alignItems: 'center', justifyContent: 'center' },
     subLine: {
         fontSize: theme.typography.fontSize.xs,
         color: theme.colors.text.secondary,
@@ -449,7 +453,7 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         gap: 2,
         alignSelf: 'center',
         marginTop: theme.spacing[2],
-        minHeight: 32,
+        minHeight: 44,
         paddingHorizontal: theme.spacing[2],
     },
     detailsToggleText: {
@@ -469,20 +473,14 @@ const makeStyles = (theme: typeof import('../theme').theme) => StyleSheet.create
         color: theme.colors.text.tertiary,
         marginTop: theme.spacing[0.5],
     },
-    topControls: {
-        flexDirection: 'row',
-        gap: theme.spacing[2],
-    },
-    // Small icon buttons; hitSlop keeps the touch target at 44pt.
     controlButton: {
-        width: 30,
-        height: 30,
+        width: 44,
+        height: 44,
         borderRadius: theme.borderRadius.full,
         backgroundColor: theme.colors.surface.secondary,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    controlSpinner: { transform: [{ scale: 0.75 }] },
     breakdownSection: {
         marginTop: theme.spacing[3],
     },

@@ -31,6 +31,7 @@ interface AssetListProps {
     assets: NiaAsset[];
     onViewAll: () => void;
     onAssetPress: (asset: NiaAsset) => void;
+    hideAmounts?: boolean;
 }
 
 const VISIBLE = 4;
@@ -46,14 +47,24 @@ function groupThousands(amount: string): string {
 export { formatUsd };
 
 /** One asset: what it is on the left, how much (and what it's worth) on the right. */
-const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPress: () => void }> = ({ asset, index, last, onPress }) => {
+interface AssetRowProps {
+    asset: NiaAsset;
+    index: number;
+    last: boolean;
+    hideAmounts: boolean;
+    onPress: () => void;
+}
+
+const AssetRow: React.FC<AssetRowProps> = ({ asset, index, last, hideAmounts, onPress }) => {
     const baseUnits = getAssetBaseUnitBalance(asset.balance);
     const amount = groupThousands(formatAssetAmount(baseUnits, asset.precision));
     const unit = asset.unit ?? asset.ticker;
     const empty = baseUnits <= 0;
     const ticker = asset.ticker !== asset.name ? asset.ticker : null;
     const network = asset.protocol ? PROTOCOL_LABEL[asset.protocol] : null;
-    const fiat = asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
+    const fiat = !hideAmounts && asset.fiatValue !== undefined && asset.fiatValue > 0 ? formatUsd(asset.fiatValue) : null;
+    const identity = network ? `${asset.name} on ${network}` : asset.name;
+    const balanceLabel = hideAmounts ? 'balance hidden' : `${amount} ${unit}${fiat ? `, about ${fiat}` : ''}`;
 
     return (
         <Animated.View entering={FadeInDown.delay(index * motion.stagger).duration(motion.duration.base)}>
@@ -61,7 +72,7 @@ const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPres
                 scaleTo={0.98}
                 onPress={() => { feedback.select(); onPress(); }}
                 accessibilityRole="button"
-                accessibilityLabel={`${asset.name}, ${amount} ${unit}${fiat ? `, about ${fiat}` : ''}`}
+                accessibilityLabel={`${identity}, ${balanceLabel}`}
                 style={[styles.row, !last && styles.rowDivider]}
             >
                 <AssetIcon ticker={asset.ticker} protocol={asset.protocol} logoUri={asset.icon} size={40} />
@@ -77,9 +88,11 @@ const AssetRow: React.FC<{ asset: NiaAsset; index: number; last: boolean; onPres
                     )}
                 </View>
                 <View style={styles.amounts}>
-                    <AmountText style={[styles.amount, empty && styles.amountEmpty]} numberOfLines={1}>
-                        {amount} <Text style={styles.unit}>{unit}</Text>
-                    </AmountText>
+                    {hideAmounts ? <AmountText style={styles.amount}>••••</AmountText> : (
+                        <AmountText style={[styles.amount, empty && styles.amountEmpty]} numberOfLines={1}>
+                            {amount} <Text style={styles.unit}>{unit}</Text>
+                        </AmountText>
+                    )}
                     {fiat && <AmountText style={styles.fiat} numberOfLines={1}>≈ {fiat}</AmountText>}
                 </View>
                 <Ionicons name="chevron-forward" size={16} color={theme.colors.text.tertiary} />
@@ -92,11 +105,12 @@ export const AssetList: React.FC<AssetListProps> = ({
     assets,
     onViewAll,
     onAssetPress,
+    hideAmounts = false,
 }) => {
     const shown = assets.slice(0, VISIBLE);
     return (
         <View style={styles.section}>
-            <SectionHeader title="Assets" eyebrow actionLabel="View All" onAction={onViewAll} />
+            <SectionHeader title="Assets" actionLabel="View All" onAction={onViewAll} />
 
             {assets.length === 0 ? (
                 <Card style={styles.emptyCard}>
@@ -113,7 +127,7 @@ export const AssetList: React.FC<AssetListProps> = ({
             ) : (
                 <View style={styles.group}>
                     {shown.map((asset, i) => (
-                        <AssetRow key={asset.asset_id} asset={asset} index={i} last={i === shown.length - 1}
+                        <AssetRow key={asset.asset_id} asset={asset} index={i} last={i === shown.length - 1} hideAmounts={hideAmounts}
                             onPress={() => onAssetPress(asset)} />
                     ))}
                 </View>

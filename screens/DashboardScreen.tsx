@@ -728,6 +728,15 @@ export default function DashboardScreen({ navigation }: Props) {
   const holdingBalance = balanceRefreshing && lastCompleteTotal.current?.wallet === walletKey;
   const totalBalance = holdingBalance ? lastCompleteTotal.current!.value : liveTotalBalance;
   const denominatedTotal = formatDisplayAmount(totalBalance);
+  const balanceUnavailable = !!connectionError && totalBalance === 0;
+  const offlineNames = offlineAccounts.join(', ');
+  const partialBalanceNotice = offlineNames
+    ? `${offlineNames.replace(/^./, c => c.toUpperCase())} ${offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete.`
+    : null;
+  const connectionNotice = offlineNames ? `Can't reach ${offlineNames}.` : 'Wallet connection unavailable.';
+  const balanceNotice = connectionError ? connectionNotice : balanceWarning ?? partialBalanceNotice;
+  const hasAssetBalances = balanceUpdatedAt !== undefined || Object.keys(protocolBalances ?? {}).length > 0 || tokens.length > 0;
+  const showAssets = hasAssetBalances || (!balanceRefreshing && !connectionError && !balanceWarning);
 
   // Bitcoin leads the list, in the BTC/sats display preference.
   const btcListEntry = {
@@ -924,36 +933,42 @@ export default function DashboardScreen({ navigation }: Props) {
             onRestore={() => navigation.navigate('WalletRestore')}
           />
         ) : <>
-        {!connectionError && !balanceWarning && offlineAccounts.length > 0 && (
-          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={() => onRefresh()}>
+        {balanceNotice && !balanceUnavailable && (
+          <TouchableOpacity
+            style={styles.connectionNotice}
+            accessibilityRole="button"
+            accessibilityLabel={`${balanceNotice} Retry connection`}
+            accessibilityState={{ disabled: refreshing || isConnecting }}
+            disabled={refreshing || isConnecting}
+            onPress={() => void onRefresh()}
+          >
             <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
-            <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
-              {offlineAccounts.join(', ').replace(/^./, (c) => c.toUpperCase())} {offlineAccounts.length === 1 ? 'is' : 'are'} offline, so the total may be incomplete. Tap to retry.
-            </Text>
+            <Text style={[styles.noticeMessage, styles.inlineNoticeMessage]}>{balanceNotice}</Text>
+            <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         )}
-        {(connectionError || balanceWarning) && (
-          <TouchableOpacity style={styles.placesLink} accessibilityRole="button" onPress={() => onRefresh()}>
-            <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
-            <Text style={{ flex: 1, color: theme.colors.text.secondary }}>
-              {connectionError
-                ? (offlineAccounts.length ? `Can't reach ${offlineAccounts.join(', ')}. Tap to retry.` : 'Wallet connection unavailable. Tap to retry.')
-                : `${balanceWarning} Tap to retry.`}
-            </Text>
-          </TouchableOpacity>
-        )}
-        {/* Unified wallet card: balance + per-network breakdown + action buttons. */}
         <View style={styles.walletCard}>
-          {connectionError && totalBalance === 0 ? (
-            <View style={{ padding: theme.spacing[6], gap: theme.spacing[2] }}>
-              <Text style={{ color: theme.colors.text.primary, fontSize: theme.typography.fontSize.lg }}>Balance unavailable</Text>
-              <Text style={{ color: theme.colors.text.secondary }}>Reconnect to see your balance and make payments.</Text>
-              <TouchableOpacity accessibilityRole="button" onPress={() => void onRefresh()} style={{ alignSelf: 'flex-start', marginTop: theme.spacing[2], minHeight: 44, paddingHorizontal: theme.spacing[4], justifyContent: 'center', borderRadius: theme.borderRadius.md, backgroundColor: theme.colors.primary[50], borderWidth: 1, borderColor: theme.colors.primary[500] }}>
-                <Text style={{ color: theme.colors.primary[500], fontWeight: '600' }}>Retry</Text>
+          {balanceUnavailable ? (
+            <View style={styles.unavailableCard}>
+              <View style={styles.unavailableHeader}>
+                <Ionicons name="cloud-offline-outline" size={20} color={theme.colors.warning[500]} />
+                <Text accessibilityRole="header" style={styles.unavailableTitle}>Balance unavailable</Text>
+              </View>
+              <Text style={styles.noticeMessage}>
+                {balanceNotice} Reconnect to see your balance and make payments.
+              </Text>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Retry wallet connection"
+                accessibilityState={{ disabled: refreshing || isConnecting }}
+                disabled={refreshing || isConnecting}
+                onPress={() => void onRefresh()}
+                style={styles.retryButton}
+              >
+                <Text style={styles.retryText}>Retry</Text>
               </TouchableOpacity>
             </View>
           ) :
-
           <BalanceCard
             totalBalance={totalBalance}
             holdingBalance={holdingBalance}
@@ -1003,7 +1018,8 @@ export default function DashboardScreen({ navigation }: Props) {
             : navigation.navigate('Activity'))}
         />
 
-        <AssetList
+        {showAssets && <AssetList
+          hideAmounts={denominatedTotal.hidden}
           // BTC always leads the list; in lite mode hide USDt (it's folded into the
           // USD figure above) and strip the per-asset protocol badge (a network detail).
           assets={[
@@ -1037,9 +1053,7 @@ export default function DashboardScreen({ navigation }: Props) {
               }
             });
           }}
-        />
-
-
+        />}
         </>}
 
         {!needsSetup && policy.showChannelManagement && hasChannelCapableNode && (lspOn || channels.length > 0) && (
@@ -1084,6 +1098,57 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', gap: theme.spacing[3],
     margin: theme.spacing[4], padding: theme.spacing[4],
     borderRadius: theme.borderRadius.lg, backgroundColor: theme.colors.surface.primary,
+  },
+  connectionNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[3],
+    minHeight: 44,
+    marginHorizontal: theme.spacing[4],
+    marginTop: theme.spacing[4],
+    padding: theme.spacing[3],
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.warning[50],
+  },
+  noticeMessage: {
+    color: theme.colors.text.secondary,
+    fontSize: theme.typography.fontSize.sm,
+  },
+  inlineNoticeMessage: {
+    flex: 1,
+    minWidth: 0,
+  },
+  unavailableCard: {
+    gap: theme.spacing[3],
+    padding: theme.spacing[4],
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: theme.colors.border.light,
+    backgroundColor: theme.colors.surface.primary,
+  },
+  unavailableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing[2],
+  },
+  unavailableTitle: {
+    flex: 1,
+    color: theme.colors.text.primary,
+    fontSize: theme.typography.fontSize.lg,
+    fontWeight: theme.typography.fontWeight.bold,
+  },
+  retryButton: {
+    alignSelf: 'flex-start',
+    minHeight: 44,
+    paddingHorizontal: theme.spacing[4],
+    justifyContent: 'center',
+    borderRadius: theme.borderRadius.lg,
+    backgroundColor: theme.colors.primary[50],
+  },
+  retryText: {
+    color: theme.colors.primary[500],
+    fontSize: theme.typography.fontSize.sm,
+    fontWeight: theme.typography.fontWeight.semibold,
   },
   walletCard: {
     // The unified balance + actions card sits just below the sticky header.

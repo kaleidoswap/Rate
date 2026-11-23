@@ -51,3 +51,10 @@ test('share failure is visible and full addresses are available on demand', asyn
   await act(async () => { fireEvent.press(screen.getByLabelText('Share Spark')); });
   expect(screen.getByText(/Could not share/)).toBeTruthy();
 });
+test('shares an RGB invoice with its asset and route and copies the raw invoice', async () => {
+  const ui = render(<ReceiveRequestActions value="rgb:invoice" summary="USDT · RGB on-chain" />);
+  await act(async () => { fireEvent.press(ui.getByText('Share')); });
+  expect(share).toHaveBeenCalledWith(expect.objectContaining({ message: 'USDT · RGB on-chain\nrgb:invoice' }));
+  await act(async () => { fireEvent.press(ui.getByText('Copy')); });
+  expect(Clipboard.setString).toHaveBeenCalledWith('rgb:invoice');
+});

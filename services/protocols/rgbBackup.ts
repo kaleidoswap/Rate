@@ -56,11 +56,22 @@ export function onRgbBackupStatus(listener: (s: RgbBackupStatus) => void): () =>
 /** Per seed and wallet (`rgbL1DataId`), apart from the other wallets' VSS data under the same key. */
 export const rgbBackupStoreId = (mnemonic: string, network: string) => `rgb-l1-file-${rgbL1WalletKey(mnemonic)}-${network}`;
 
+const lastBackupKey = (ctx: Pick<BackupContext, 'mnemonic' | 'network'>) => `rgb-last-backup-${rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network))}`;
+
 /** Set while RGB on this phone is connected (./wdk.ts), cleared when it disconnects. */
 export function setRgbBackupContext(next: BackupContext | null): void {
   const changed = context?.mnemonic !== next?.mnemonic || context?.network !== next?.network;
   context = next;
-  if (changed) { contextRevision++; setStatus({ state: 'idle' }); }
+  if (changed) {
+    const revision = ++contextRevision;
+    setStatus({ state: 'idle' });
+    if (next) void AsyncStorage.getItem(lastBackupKey(next)).then(value => {
+      const timestamp = Number(value);
+      if (revision === contextRevision && !status.lastBackupAt && Number.isFinite(timestamp) && timestamp > 0) {
+        setStatus({ ...status, lastBackupAt: timestamp });
+      }
+    }).catch(() => undefined);
+  }
   if (!next && timer) { clearTimeout(timer); timer = null; }
 }
 
@@ -95,6 +106,7 @@ export async function runRgbBackup(force = false): Promise<void> {
         const data = await file.bytes();
         const client = createVssClient(RGB_VSS_SERVER_URL, rgbBackupStoreId(ctx.mnemonic, rgbL1DataId(ctx.network)), vssSigningKey(ctx.mnemonic));
         const manifest = await uploadBackupFile(client, PREFIX, data);
+        await AsyncStorage.setItem(lastBackupKey(ctx), String(manifest.createdAt));
         await AsyncStorage.removeItem(retryKey);
         update({ state: 'done', lastBackupAt: manifest.createdAt });
       } finally {
@@ -148,7 +160,10 @@ export async function restoreRgbFromCloud(opts: {
   } finally {
     try { if (file.exists) file.delete(); } catch { /* cache is cleared by the OS anyway */ }
   }
-  setStatus({ state: 'done', lastBackupAt: backup.manifest.createdAt });
+  await AsyncStorage.setItem(lastBackupKey(opts), String(backup.manifest.createdAt)).catch(() => undefined);
+  if (context?.mnemonic === opts.mnemonic && context.network === opts.network) {
+    setStatus({ state: 'done', lastBackupAt: backup.manifest.createdAt });
+  }
   return 'restored';
 }
 

@@ -95,6 +95,32 @@ test('anything that is not payable cannot be reviewed', async () => {
   expect(previewInput).not.toHaveBeenCalled();
 });
 
+test('a request with no compatible account exposes the reason and opens Settings', async () => {
+  const reason = 'None of your connected accounts can pay this request.';
+  (previewInput as jest.Mock).mockResolvedValueOnce({ ...mockPreview, plan: { status: 'unsupported', reason } });
+  const navigation = nav();
+  const screen = await reviewed(navigation);
+  expect(screen.getByText(reason)).toBeTruthy();
+  fireEvent.press(screen.getByText('Open Settings'));
+  expect(navigation.navigate).toHaveBeenCalledWith('Settings');
+  expect(executePaymentOffer).not.toHaveBeenCalled();
+});
+
+test('a confirmed expired invoice can be replaced from review', async () => {
+  const { loadPaymentAttempt, beginPaymentAttempt, dismissPaymentAttempt } = require('../services/kaleidoPay/attempts');
+  loadPaymentAttempt.mockResolvedValueOnce({ id: 'previous', status: 'unknown' });
+  const unavailable = 'This invoice has expired. Please request a new one.';
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([{ ...offer('Spark', 1010), quote: undefined, unavailable }]);
+  const screen = await reviewed();
+  expect(screen.getByText(unavailable)).toBeTruthy();
+  expect(screen.queryByText('Refresh price')).toBeNull();
+  fireEvent.press(screen.getByText('Replace invoice'));
+  expect(screen.getByLabelText('Payment request').props.value).toBe('');
+  expect(beginPaymentAttempt).not.toHaveBeenCalled();
+  expect(dismissPaymentAttempt).not.toHaveBeenCalled();
+  expect(executePaymentOffer).not.toHaveBeenCalled();
+});
+
 test('a completed payment can be closed and refreshes balances', async () => {
   (quotePaymentOffers as jest.Mock).mockResolvedValue([offer('Spark', 1010)]);
   (executePaymentOffer as jest.Mock).mockResolvedValue({ status: 'completed' });
@@ -476,6 +502,29 @@ test('RGB has a visible balance and amount, accepts decimal comma and reviews a 
   expect(previewInput).toHaveBeenCalledWith('rgb:any', undefined, expect.any(String), { asset: { id: 'rgb-usd', ticker: 'USD', precision: 2, amount: 125 } });
   expect(screen.getByText('Review RGB transfer')).toBeTruthy();
   expect(screen.queryByText(/quote valid|Best price|Compare all|Refresh quotes/)).toBeNull();
+});
+
+test('a local RGB wallet with no bitcoin can refresh the balance before sending', async () => {
+  const { inspectRgbRequest, prepareRgbRequest } = require('../services/kaleidoPay/connect');
+  const asset = { id: 'rgb-usd', ticker: 'USDT', precision: 2, amount: 100, available: 500 };
+  inspectRgbRequest.mockResolvedValueOnce({ asset, choices: [], bitcoinAvailable: 0 });
+  inspectRgbRequest.mockResolvedValueOnce({ asset, choices: [], bitcoinAvailable: 1000 });
+  prepareRgbRequest.mockResolvedValueOnce(asset).mockResolvedValueOnce(asset);
+  const rgbPreview = { ...mockPreview, code: { kind: 'rgb', raw: 'rgb:fixed' }, request: { ...mockPreview.request, asset } };
+  (previewInput as jest.Mock).mockResolvedValueOnce(rgbPreview).mockResolvedValueOnce(rgbPreview);
+  const quoted = offer('rgb-asset', 100);
+  (quotePaymentOffers as jest.Mock).mockResolvedValue([{ ...quoted, quote: { ...quoted.quote, feeSat: 600 } }]);
+  mockFeeOptions = [{ speed: 'normal', rate: 2, feeSat: 600, live: false }];
+  try {
+    const screen = render(<SendScreen navigation={nav()} route={{ params: { prefilledAddress: 'rgb:fixed' } }} />);
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 100)); });
+    expect(screen.getByText(/This RGB wallet has no bitcoin for fees/)).toBeTruthy();
+    expect(screen.queryByLabelText('Send 100 sats')).toBeNull();
+    expect(executePaymentOffer).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.press(screen.getByText('Refresh transfer')); });
+    expect(screen.queryByText(/This RGB wallet has no bitcoin for fees/)).toBeNull();
+    expect(screen.getByLabelText('Send 100 sats')).toBeTruthy();
+  } finally { mockFeeOptions = null; }
 });
 
 test('a definite RGB failure explains the cause and saves it for reopening', async () => {

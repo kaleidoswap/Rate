@@ -80,6 +80,12 @@ function decodeQuietly(text: string): { target?: PayTarget; error?: string } {
   try { return { target: decodeTarget(text) }; } catch (e) { return { error: e instanceof Error ? e.message : 'Not payable' }; }
 }
 
+function sendRecovery(message: string) {
+  if (/\binvoice (?:has )?expired\b/i.test(message)) return 'replace-invoice';
+  if (/different network|none of your connected accounts|no connected account|account disconnected|connect your RGB wallet|turn on RGB in Settings/i.test(message)) return 'settings';
+  return null;
+}
+
 export default function SendScreen({ navigation, route }: Props) {
   const socialOn = useFeature('social');
   const t = useAppTheme();
@@ -112,6 +118,7 @@ export default function SendScreen({ navigation, route }: Props) {
   const [rgbChoices, setRgbChoices] = useState<RgbRequestAsset[]>([]);
   const [rgbReading, setRgbReading] = useState(false);
   const [rgbBitcoin, setRgbBitcoin] = useState<number>();
+  const [rgbInspection, setRgbInspection] = useState(0);
   const [rgbAsset, setRgbAsset] = useState<RgbRequestAsset | null>(null);
   // A Spark address can be paid in bitcoin or in a Spark token the wallet holds (e.g. USDB).
   const [sparkTokenList, setSparkTokenList] = useState<SparkToken[]>([]);
@@ -188,12 +195,13 @@ export default function SendScreen({ navigation, route }: Props) {
     let active = true;
     setRgbChoices([]); setRgbBitcoin(undefined);
     if (target?.kind !== 'rgb') { setRgbReading(false); return; }
+    setError('');
     setRgbReading(true);
     void inspectRgbRequest(target.rgbInvoice!).then(result => {
       if (active) { setRgbAsset(result.asset); setRgbChoices(result.choices); setRgbBitcoin(result.bitcoinAvailable); if (!result.asset && !result.choices.length) setError('No spendable RGB assets in the connected wallet.'); }
     }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setRgbReading(false); });
     return () => { active = false; };
-  }, [input]);
+  }, [input, rgbInspection]);
   // Start the slow setup (wallet syncs, server keys) as soon as Send opens, not on Continue.
   useEffect(() => { void prepareKaleidoPay(); }, []);
   // Each visit starts at the Normal fee speed.
@@ -248,6 +256,9 @@ export default function SendScreen({ navigation, route }: Props) {
 
   const selected = offers.find(o => o.id === selectedId);
   const quote = selected?.quote;
+  const feeOptions = selected && RGB_ONCHAIN_SOURCES.has(selected.route.sourceId) ? rgbL1FeeOptions() : null;
+  const zeroRgbFeeBalance = selected?.route.sourceId === 'rgb-asset' && rgbBitcoin === 0
+    && (quote?.feeSat ?? 0) > 0 && !!feeOptions;
   const spend = quote ? quoteSpend(quote) : null;
   const total = spend ? displaySpend(spend.total, spend.asset) : '';
   const expired = !!quote && quote.expiresAt * 1000 <= now;
@@ -282,6 +293,11 @@ export default function SendScreen({ navigation, route }: Props) {
       if (current !== revision.current) return;
       let asset: RequestAsset | undefined;
       if (target?.kind === 'rgb') {
+        if (refresh) {
+          const liveBalance = await inspectRgbRequest(target.rgbInvoice!).then(result => result.bitcoinAvailable, () => undefined);
+          if (current !== revision.current) return;
+          setRgbBitcoin(liveBalance);
+        }
         // The RGB node reads the invoice's asset (and amount, when it has one).
         const decoded = await prepareRgbRequest(target.rgbInvoice!, undefined, rgbAsset?.id);
         if (current !== revision.current) return;
@@ -392,7 +408,7 @@ export default function SendScreen({ navigation, route }: Props) {
   }
 
   async function pay() {
-    if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || quote.expiresAt * 1000 <= Date.now() || !selected.executable || unresolvedAttempt(attempt)) return;
+    if (paying.current || !walletId || !journalReady || !preview || !selected || !quote || selected.unavailable || quote.expiresAt * 1000 <= Date.now() || !selected.executable || zeroRgbFeeBalance || unresolvedAttempt(attempt)) return;
     paying.current = true; setBusy(true); setError('');
     const recipient = preview.request.asset ? formatSpend(preview.request.asset.amount, preview.request.asset) : formatSats(preview.request.amountSat);
     const next: PaymentAttempt = { destinationRail: selected.route.to, network: paymentAccountNetwork(selected.route.sourceId) ?? preview.request.network, recipientName, feeDisplay: spend ? (selected.route.sourceId === 'rgb-asset' ? `~${selected.quote?.feeSat ?? 0} sats (BTC)` : displaySpend(spend.fee, spend.asset)) : undefined, accountName: selected.accountName || selected.provider, id: Crypto.randomUUID(), sourceId: selected.route.sourceId, provider: selected.provider, total, recipient, createdAt: Date.now(), status: 'pending' };
@@ -541,6 +557,13 @@ export default function SendScreen({ navigation, route }: Props) {
   // Pay from: the ways to pay grouped by the account they spend from.
   const choices = groupOffersByAccount(offers, { advanced, balances: balancesSat, now });
   const shownOffers = visibleOffers(offers);
+  const hasPayableOffer = shownOffers.some(o => o.executable && !!o.quote && !o.unavailable && o.quote.expiresAt * 1000 > now);
+  const blockedReasons = preview?.plan.status === 'ready' && !busy && !moreQuotes && !hasPayableOffer
+    ? [...new Set(shownOffers.flatMap(o => o.unavailable ? [o.unavailable] : []))]
+    : [];
+  const blockedRecovery = blockedReasons.map(sendRecovery);
+  const recovery = sendRecovery(error) ?? (blockedRecovery.includes('settings') ? 'settings'
+    : blockedRecovery.length > 0 && blockedRecovery.every(action => action === 'replace-invoice') ? 'replace-invoice' : null);
   const best = bestOffer(shownOffers);
   const accountHeading = (o: PaymentOffer) => {
     const account = offerAccount(o);
@@ -561,7 +584,6 @@ export default function SendScreen({ navigation, route }: Props) {
   const shownSat = fixedSat ?? amountSat;
   const usdOf = (sats: number) => usd ? `≈ $${formatSatoshisToUSD(sats, usd)}` : '';
   const selectedAccount = selected ? offerAccount(selected) : null;
-  const feeOptions = selected && RGB_ONCHAIN_SOURCES.has(selected.route.sourceId) ? rgbL1FeeOptions() : null;
   const feeOption = feeOptions?.find(o => o.speed === feeSpeed);
   const chooseSpeed = (next: RgbFeeSpeed) => {
     if (next === feeSpeed || busy) return;
@@ -577,6 +599,29 @@ export default function SendScreen({ navigation, route }: Props) {
     if (paying.current) return;
     if (preview && !attempt) { resetToInput(); return; }
     navigation.goBack();
+  };
+
+  const replaceInvoice = () => {
+    resetToInput();
+    setInput('');
+    setContactName(undefined);
+  };
+  const renderSendBlocker = () => {
+    const messages = error ? [error] : blockedReasons;
+    if (messages.length === 0) return null;
+    return (
+      <View accessibilityRole="alert" style={[card, { gap: t.spacing[2], marginBottom: t.spacing[3] }]}>
+        {messages.map(message => <Text key={message} style={text}>{message}</Text>)}
+        {recovery === 'settings' && <>
+          <Text style={muted}>Check which accounts are connected and whether they use the recipient’s network.</Text>
+          <Button title="Open Settings" variant="secondary" onPress={() => navigation.navigate('Settings')} />
+          {!preview && target?.kind === 'rgb' &&
+            <Button title="Check RGB connection" variant="ghost" disabled={rgbReading} onPress={() => setRgbInspection(value => value + 1)} />}
+        </>}
+        {recovery === 'replace-invoice' &&
+          <Button title="Replace invoice" variant="secondary" onPress={replaceInvoice} />}
+      </View>
+    );
   };
 
   const targetIcon = (kind: PayTarget['kind']) => ({ bolt11: 'lightning', lnurl: 'lightning', offer: 'lightning', bitcoin: 'onchain', spark: 'spark', ark: 'arkade', rgb: 'rgb' } as Record<string, string>)[kind];
@@ -769,7 +814,12 @@ export default function SendScreen({ navigation, route }: Props) {
           options={feeOptions.map(o => ({ key: o.speed, label: `${SPEED_LABEL[o.speed]} · ${formatSats(o.feeSat)}` }))} />
         <Text style={small}>Slower costs less, faster confirms sooner.</Text>
       </View>}
-      {offers.filter(o => o.unavailable).map(o => <Text key={o.id} accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500] }}>{o.unavailable}</Text>)}
+      {!busy && quote?.feeSat !== undefined && rgbBitcoin !== undefined && rgbBitcoin < quote.feeSat &&
+        <Text accessibilityRole="alert" style={{ ...text, color: t.colors.warning[500] }}>
+          {zeroRgbFeeBalance ? 'This RGB wallet has no bitcoin for fees.' : 'The estimated fee exceeds the bitcoin available in this RGB wallet.'}
+          {' Add bitcoin to this RGB wallet on the network shown above.'}
+          {!zeroRgbFeeBalance && feeOptions ? ' You can also try a lower fee.' : ''}
+        </Text>}
       {expired && <Text style={muted}>Refresh the transfer details before sending.</Text>}
       {busy && <ActivityIndicator color={t.colors.primary[500]} />}
       <Button title="Edit amount or invoice" variant="secondary" onPress={resetToInput} />
@@ -858,9 +908,10 @@ export default function SendScreen({ navigation, route }: Props) {
             {expired ? (autoRefreshes.current < 3 ? 'Price expired. Updating…' : 'Price expired. Refresh before paying.') : `Total ${total} · valid ${Math.max(0, Math.ceil((quote.expiresAt * 1000 - now) / 1000))}s`}
           </Text>
         </View>}
-        {!!selected?.unavailable && <Text accessibilityRole="alert" style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>{selected.unavailable}</Text>}
+        {hasPayableOffer && !!selected?.unavailable && <Text accessibilityRole="alert" style={{ ...muted, color: t.colors.warning[500], textAlign: 'center' }}>{selected.unavailable}</Text>}
         {!!previousTotal && previousTotal !== total && !busy && <Text accessibilityLiveRegion="polite" style={{ ...muted, textAlign: 'center' }}>Price updated · now {total}</Text>}
-        {!busy && preview.plan.status === 'ready' && !offers.some(o => o.quote) && <Text style={{ ...muted, textAlign: 'center' }}>No way to pay this right now. Check your balances and connected accounts, then refresh.</Text>}
+        {!busy && !moreQuotes && preview.plan.status === 'ready' && !shownOffers.some(o => o.quote) && !blockedReasons.length &&
+          <Text style={{ ...muted, textAlign: 'center' }}>No price is available for this request yet. Refresh to check again.</Text>}
         {selected && !selected.executable && <Text style={{ ...muted, textAlign: 'center' }}>This account can quote but cannot pay yet.</Text>}
         {busy && <ActivityIndicator color={t.colors.primary[500]} />}
         {!busy && moreQuotes && <View style={{ flexDirection: 'row', alignItems: 'center', gap: t.spacing[2] }}>
@@ -907,14 +958,17 @@ export default function SendScreen({ navigation, route }: Props) {
             <Ionicons name="flask-outline" size={16} color={t.colors.warning[500]} />
             <Text style={{ ...muted, color: t.colors.warning[500], flex: 1, fontSize: t.typography.fontSize.sm }}>Demo build: quotes are live, the payment step is simulated. No funds move.</Text>
           </View>}
-          {!!error && !attempt && <ActionableError message={error} context="send" />}
+          {!attempt && (error && !recovery
+            ? <ActionableError message={error} context="send" />
+            : renderSendBlocker())}
           {journalUnreadable && !attempt && <Button title="Start a new payment" variant="secondary" onPress={startNewPayment} style={{ marginBottom: t.spacing[4] }} />}
           {attempt ? renderResult(attempt) : preview ? renderReview() : renderInput()}
         </ScrollView>}
         {!crossChain && !attempt && <View style={{ padding: t.spacing[5], gap: t.spacing[3], backgroundColor: t.colors.background.primary }}>
           {!preview
             ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Getting quotes…') : (target?.kind === 'rgb' ? 'Review transfer' : 'Continue')} disabled={!target || busy || !journalReady || rgbReading || (target?.kind === 'rgb' && !rgbAsset)} onPress={review} />
-            : !quote || quote.expiresAt * 1000 <= now || selected?.unavailable
+            : recovery === 'replace-invoice' ? null
+            : !quote || quote.expiresAt * 1000 <= now || selected?.unavailable || zeroRgbFeeBalance
               ? <Button title={busy ? (target?.kind === 'rgb' ? 'Checking transfer…' : 'Updating price…') : (target?.kind === 'rgb' ? 'Refresh transfer' : 'Refresh price')} disabled={busy} onPress={() => void getOffers(true)} />
               : <SlideToConfirm label={payLabel} loading={busy} disabled={!selected?.executable || !walletId || !journalReady} onConfirm={() => void pay()} />}
           {preview && !walletId && <Text style={{ ...muted, textAlign: 'center' }}>Set up a wallet to pay.</Text>}

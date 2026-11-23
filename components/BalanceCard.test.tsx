@@ -47,7 +47,7 @@ describe('balance disclosure', () => {
 
   it('no longer spells out the dollar-token share, and shows one updating indicator', () => {
     const screen = render(<BalanceCard {...props} updating refreshing />);
-    // No label above the figure: the refresh button is the indicator.
+    expect(screen.getByText('Wallet balance')).toBeTruthy();
     expect(screen.queryByText('Balance so far')).toBeNull();
     expect(screen.queryByText('Total balance')).toBeNull();
     expect(screen.queryByText(/in dollar tokens/)).toBeNull();
