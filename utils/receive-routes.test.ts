@@ -44,7 +44,6 @@ describe('receive routes', () => {
     expect(methodsFor('BTC', [{ account: 'ARKADE', chain: 'mutinynet' }], {})).toEqual(['universal', 'lightning', 'onchain', 'ark']);
     expect(methodsFor('RGB', all, { rgbChannels: 'none' })).toEqual(['onchain']);
     expect(methodsFor('RGB', [{ account: 'SPARK' }], {})).toEqual([]);
-    expect(methodsFor('USD', all, {})).toEqual(['universal']);
   });
 
   it('defaults to a destination that works without an amount, and keeps a usable remembered one', () => {
@@ -163,7 +162,7 @@ describe('receive by account', () => {
   it('labels the asset in plain words', () => {
     expect(receiveAssetLabel({ asset_id: 'RGB_NEW', ticker: 'RGB' })).toBe('Any RGB asset');
     expect(receiveAssetLabel({ asset_id: 'BTC', ticker: 'BTC' })).toBe('Bitcoin');
-    expect(receiveAssetLabel({ asset_id: 'USD', ticker: 'USD' })).toBe('US Dollar');
+    expect(receiveAssetLabel({ asset_id: 'rgb:abc', ticker: 'USDT', name: 'Tether' })).toBe('Tether');
     expect(receiveAssetLabel({ asset_id: 'rgb:abc', ticker: 'TKN', name: 'Token' })).toBe('Token');
   });
 });

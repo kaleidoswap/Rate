@@ -123,8 +123,7 @@ export function receiveSummary({ method, account, caps, included = [] }: {
 /** The asset as the summary names it. */
 export function receiveAssetLabel(asset: { asset_id: string; ticker: string; name?: string }): string {
   if (asset.asset_id === ANY_RGB_ASSET_ID) return 'Any RGB asset';
-  if (asset.ticker === 'BTC') return 'Bitcoin';
-  if (/usd/i.test(asset.ticker)) return 'US Dollar';
+  if (asset.asset_id === 'BTC') return 'Bitcoin';
   return asset.name || asset.ticker;
 }
 
@@ -187,7 +186,7 @@ export function arkDestinations(accounts: ReceiveAccountInfo[]): ReceiveDestinat
 }
 
 export function destinationsFor(
-  method: ReceiveMethodId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily | 'USD' = 'BTC',
+  method: ReceiveMethodId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily = 'BTC',
 ): ReceiveDestination[] {
   // An RGB asset only ever lands in the RGB node, on-chain or over its channels.
   if (family === 'RGB') {
@@ -208,8 +207,7 @@ export function destinationsFor(
 }
 
 /** The ways to receive the selected asset, in display order. */
-export function methodsFor(family: AssetFamily | 'USD', accounts: ReceiveAccountInfo[], caps: ReceiveCaps): ReceiveMethodId[] {
-  if (family === 'USD') return ['universal'];
+export function methodsFor(family: AssetFamily, accounts: ReceiveAccountInfo[], caps: ReceiveCaps): ReceiveMethodId[] {
   if (family === 'RGB') {
     if (!has(accounts, 'RGB')) return [];
     return caps.rgbOnDevice || caps.rgbChannels === 'none' ? ['onchain'] : ['onchain', 'lightning'];
@@ -325,7 +323,7 @@ export interface AccountMethod { method: ReceiveMethodId; destination: ReceiveDe
 
 /** The ways a payment can reach `account`, with each one's availability and detail. */
 export function accountMethods(
-  account: AccountId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily | 'USD' = 'BTC',
+  account: AccountId, accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily = 'BTC',
 ): AccountMethod[] {
   const out: AccountMethod[] = [];
   for (const method of ACCOUNT_METHOD_ORDER[account]) {
@@ -336,7 +334,7 @@ export function accountMethods(
 }
 
 /** Accounts that can receive this asset at all, in the order Receive lists them. */
-export function receivableAccounts(accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily | 'USD' = 'BTC'): AccountId[] {
+export function receivableAccounts(accounts: ReceiveAccountInfo[], caps: ReceiveCaps, family: AssetFamily = 'BTC'): AccountId[] {
   return (['SPARK', 'ARKADE', 'BARK', 'RGB'] as AccountId[])
     .filter(account => accountMethods(account, accounts, caps, family).some(m => m.destination.available));
 }

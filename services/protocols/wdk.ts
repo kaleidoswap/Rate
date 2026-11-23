@@ -341,6 +341,19 @@ export async function initializeWdkProtocols(
  * Same per-protocol contract as the loop above: record the outcome, never throw.
  * Calls run one at a time: two opens of rgb-lib's data folder would collide.
  */
+let rgbConnecting = false
+const rgbConnectionListeners = new Set<() => void>()
+export const isRgbConnecting = () => rgbConnecting
+export function subscribeRgbConnecting(listener: () => void) {
+  rgbConnectionListeners.add(listener)
+  return () => { rgbConnectionListeners.delete(listener) }
+}
+function setRgbConnecting(value: boolean) {
+  if (rgbConnecting === value) return
+  rgbConnecting = value
+  rgbConnectionListeners.forEach(listener => listener())
+}
+
 let rgbL1Queue: Promise<void> = Promise.resolve()
 /** The network the connected RGB_L1 wallet is on. */
 let rgbL1ConnectedNetwork: RgbL1Network | null = null
@@ -445,6 +458,7 @@ async function connectRgbL1Once(
       results.set('RGB_L1', { success: true })
       return
     }
+    setRgbConnecting(true)
     if (!isRgbLibNativeAvailable()) {
       const error = 'This app build does not include RGB. Install a newer build.'
       recordRgbConnectionError(network, error)
@@ -493,6 +507,8 @@ async function connectRgbL1Once(
     const msg = recordRgbConnectionError(network, error).message
     console.error('[initializeWdkProtocols] RGB_L1 failed:', msg)
     results.set('RGB_L1', { success: false, error: msg })
+  } finally {
+    setRgbConnecting(false)
   }
 }
 

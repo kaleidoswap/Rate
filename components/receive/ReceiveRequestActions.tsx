@@ -6,8 +6,8 @@ import { PaymentNetworkLabel } from '../payments/PaymentNetworkLabel';
 import { feedback } from '../../utils/feedback';
 
 /** Copy/share feedback belongs to the exact request, never to another method. */
-export function ReceiveRequestActions({ value, label = 'Payment request', showValue = false, network }: {
-  value: string; label?: string; showValue?: boolean; network?: string;
+export function ReceiveRequestActions({ value, label = 'Payment request', showValue = false, network, summary }: {
+  value: string; label?: string; showValue?: boolean; network?: string; summary?: string;
 }) {
   const t = useAppTheme();
   const { fontScale } = useWindowDimensions();
@@ -36,7 +36,7 @@ export function ReceiveRequestActions({ value, label = 'Payment request', showVa
   const share = async () => {
     const current = generation.current;
     try {
-      await Share.share({ message: value, title: label });
+      await Share.share({ message: summary ? `${summary}\n${value}` : value, title: label });
       if (current === generation.current) setError('');
     }
     catch { if (current === generation.current) setError('Could not share. Try again or copy the request.'); }
