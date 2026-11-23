@@ -331,7 +331,7 @@ export const ActivityDetailSheet: React.FC<Props> = ({ item, onClose, onRefresh 
                     )}
                     </>}
                     {cancellable && (
-                        <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling} onPress={cancelTransfer} activeOpacity={0.8}>
+                        <TouchableOpacity accessibilityRole="button" style={styles.closeButton} disabled={cancelling || statusCheck?.checking} onPress={cancelTransfer} activeOpacity={0.8}>
                             <Text style={[styles.closeButtonText, { color: theme.colors.error[500] }]}>{cancelling ? 'Cancelling…' : rgb?.direction === 'incoming' ? 'Cancel invoice' : 'Cancel transfer'}</Text>
                         </TouchableOpacity>
                     )}
