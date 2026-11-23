@@ -32,8 +32,12 @@ const PATTERNS: RegExp[] = [
   /[\w.+-]+@[\w-]+\.[\w.-]+/g,
 ];
 
-/** Words this close together count as one phrase: only spaces, quotes, commas and brackets between them. */
-const PHRASE_GAP = /^[\s"'`,;:|()[\]{}-]*$/;
+/**
+ * Words this close together count as one phrase: only separators, brackets and an
+ * optional list number ("2.", "#2=", "2:") between them. A bare '.' still ends a run,
+ * so sentences of common words are not joined.
+ */
+const PHRASE_GAP = /^[\s"'`,;:|()[\]{}#_\/=-]*(?:\d+\.?[\s"'`,;:|()[\]{}#_\/=-]*)?$/;
 /** A run of this many BIP39 words is treated as (part of) a recovery phrase. */
 const PHRASE_MIN_WORDS = 5;
 

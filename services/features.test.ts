@@ -4,6 +4,8 @@ import reducer, { selectFeatureOn, setLabsFeature } from '../store/slices/settin
 test('an unknown or missing channel is a development build', () => {
   expect(parseChannel(undefined)).toBe('dev');
   expect(parseChannel('production')).toBe('dev');
+  expect(parseChannel('Beta')).toBe('dev');
+  expect(parseChannel(' store')).toBe('dev');
   expect(parseChannel('beta')).toBe('beta');
   expect(parseChannel('store')).toBe('store');
 });

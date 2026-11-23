@@ -58,6 +58,30 @@ test('scrubs partial, quoted, comma-separated and JSON recovery phrases', () => 
   }
 });
 
+test('scrubs numbered and underscore-joined recovery phrases', () => {
+  const { scrub } = load();
+  const words = MNEMONIC.split(' ');
+  for (const phrase of [
+    words.map((w, i) => `${i + 1}. ${w}`).join(' '),
+    words.map((w, i) => `${i + 1}:${w}`).join(' '),
+    words.map((w, i) => `#${i + 1}=${w}`).join('\n'),
+    words.join('_'),
+    words.join('/'),
+  ]) {
+    const out = scrub(`restore failed: ${phrase}`);
+    expect(out).toMatch(/^restore failed: (1\. |1:|#1=)?\[redacted\]$/);
+  }
+});
+
+test('leaves prose with a few BIP39 words alone', () => {
+  const { scrub } = load();
+  for (const message of [
+    'Swap failed: unable to find a route for this amount. Please try again in a minute.',
+    'Step 2. Open the wallet, then tap Send to pay the invoice.',
+    'Network error: request timed out after 30 seconds (attempt 3/5)',
+  ]) expect(scrub(message)).toBe(message);
+});
+
 test('scrubs WIF keys and addresses of any bech32 prefix', () => {
   const { scrub } = load();
   for (const secret of [
