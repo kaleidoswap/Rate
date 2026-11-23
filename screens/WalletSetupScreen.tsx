@@ -29,9 +29,7 @@ import { prismoText } from '../localization/prismo';
 import { theme } from '../theme';
 import { NetworkConfig } from '../services/DatabaseService';
 import { PROTOCOL_DEFAULT_NETWORK } from '../services/protocols/networkConfig';
-import { ADVANCED_ACCOUNTS, LITE_ACCOUNTS, hasAnyAccount, saveAccountPreferences, walletNetworksFor, type AccountChoice } from '../services/protocols/accountChoices';
-import { BARK_ENABLED } from '../services/protocols/bark';
-import { RGB_L1_ENABLED } from '../services/protocols/rgbL1';
+import { SETUP_ACCOUNTS, DEFAULT_ACCOUNTS, hasAnyAccount, saveAccountPreferences, walletNetworksFor, type AccountChoice } from '../services/protocols/accountChoices';
 
 // New wallets start on the default networks; on a test build those hold test bitcoin.
 const TEST_BUILD = PROTOCOL_DEFAULT_NETWORK.spark !== 'mainnet' || PROTOCOL_DEFAULT_NETWORK.arkade !== 'mainnet';
@@ -55,14 +53,6 @@ interface Props {
   navigation: any;
 }
 
-/** The layers Advanced setup offers (the RGB node is its own step, over NWC). */
-const SETUP_ACCOUNTS: { key: keyof AccountChoice; name: string; desc: string; icon: string }[] = [
-  { key: 'spark', name: 'Spark', desc: 'Instant bitcoin, Lightning and tokens', icon: 'spark' },
-  ...(RGB_L1_ENABLED ? [{ key: 'rgbOnDevice' as const, name: 'RGB on this phone', desc: 'RGB assets on-chain, no node needed · beta', icon: 'rgb' }] : []),
-  { key: 'arkade', name: 'Arkade', desc: 'Low-fee bitcoin payments off-chain', icon: 'arkade' },
-  ...(BARK_ENABLED ? [{ key: 'bark' as const, name: 'Bark', desc: 'Bitcoin on Second’s Ark network', icon: 'bark' }] : []),
-];
-
 type SetupStep = 'welcome' | 'rln' | 'networks' | 'creating' | 'backup' | 'confirmBackup' ;;
 
 export default function WalletSetupScreen({ navigation }: Props) {
@@ -82,9 +72,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   // Disclosure level chosen at creation (default 'lite', reversible in Settings).
   const [mode, setMode] = useState<DisclosureLevel>('lite');
 
-  // Accounts this wallet uses: Lite starts with Spark and RGB on this phone;
-  // Advanced picks its own on the "Choose accounts" step.
-  const [accounts, setAccounts] = useState<AccountChoice>(ADVANCED_ACCOUNTS);
+  const [accounts, setAccounts] = useState<AccountChoice>(DEFAULT_ACCOUNTS);
 
   // RLN (RGB Lightning Node) over NWC — paste/scan a connection string to drive a
   // remote node. Optional: the user can skip and add it later in Settings.
@@ -187,8 +175,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
       }
       dispatch(setDisclosureLevel('lite'));
       setMode('lite');
-      setAccounts(LITE_ACCOUNTS);
-      handleCreate();
+      animateTransition('networks');
     } else if (step === 'networks') {
       if (!hasAnyAccount(accounts, rlnConnected)) {
         Alert.alert('Choose an account', 'Turn on at least one account to receive and send payments.');
@@ -198,14 +185,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
     }
   };
 
-  /** Advance past the RLN step: Lite goes straight to backup, Advanced picks networks. */
-  const proceedAfterRln = () => {
-    if (mode === 'lite') {
-      handleCreate();
-    } else {
-      animateTransition('networks');
-    }
-  };
+  const proceedAfterRln = () => animateTransition('networks');
 
   const handleConnectRln = async () => {
     Keyboard.dismiss();
@@ -285,11 +265,11 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const handleBack = () => {
     Keyboard.dismiss();
     if (step === 'networks') {
-      animateTransition('rln');
+      animateTransition(mode === 'advanced' ? 'rln' : 'welcome');
     } else if (step === 'rln') {
       animateTransition('welcome');
     } else if (step === 'backup') {
-      animateTransition(mode === 'advanced' ? 'networks' : 'welcome');
+      animateTransition('networks');
     } else if (step === 'confirmBackup') {
       animateTransition('backup');
     } else if (step === 'welcome') {
@@ -335,10 +315,9 @@ export default function WalletSetupScreen({ navigation }: Props) {
     animateTransition('creating');
 
     try {
-      const choice = mode === 'lite' ? LITE_ACCOUNTS : accounts;
-      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = walletNetworksFor(choice);
+      const selectedNetworks: Omit<NetworkConfig, 'id' | 'wallet_id'>[] = walletNetworksFor(accounts);
       // Before the first connect: an account left out (Bark, RGB on this phone) must never start.
-      await saveAccountPreferences(generatedMnemonic, choice);
+      await saveAccountPreferences(generatedMnemonic, accounts);
       // RLN is reached over NWC: enable it only when the user connected a node.
       // The NwcRgbAdapter reads the connection string from SecureStore.
       if (rlnConnected) {
@@ -378,7 +357,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
   const renderStepIndicator = () => {
     const steps: SetupStep[] = mode === 'advanced'
       ? ['welcome', 'rln', 'networks', 'backup', 'confirmBackup']
-      : ['welcome', 'backup', 'confirmBackup'];
+      : ['welcome', 'networks', 'backup', 'confirmBackup'];
     const labels: Record<SetupStep, string> = {
       welcome: 'Start', rln: 'Lightning', networks: 'Accounts',
       backup: 'Backup', confirmBackup: 'Verify', creating: '',
@@ -470,7 +449,7 @@ export default function WalletSetupScreen({ navigation }: Props) {
           animateTransition('rln');
         }}
       >
-        <Text style={styles.skipButtonText}>{prismoText('Advanced setup · choose accounts')}</Text>
+        <Text style={styles.skipButtonText}>{prismoText('Connect a Lightning node')}</Text>
       </TouchableOpacity>
       <TouchableOpacity
         style={styles.skipButton}
