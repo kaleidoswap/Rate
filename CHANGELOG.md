@@ -40,6 +40,10 @@ and the project aims to follow [Semantic Versioning](https://semver.org/spec/v2.
   publishes the APK, and the release notes say iOS is missing.
 
 ### Security
+- Expo's tooling uses the patched `node-forge` 1.4.3. The redundant direct
+  Metro dependency was removed.
+- Android release builds omit two unused permissions and the Expo development
+  URL scheme. The iOS map requests location only while the app is in use.
 - The recovery phrase enters the view only after the user taps to reveal it.
   An interrupted migration retries removing the legacy SQLite copy when it
   matches the value in secure storage.
