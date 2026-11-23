@@ -325,6 +325,8 @@ export default function SettingsScreen({ navigation }: Props) {
   // either its node is paired or RGB on this phone is on.
   const [accountEnabled, setAccountEnabledState] = useState<Partial<Record<SettingsAccount, boolean>>>({});
   const [protocolErrors, setProtocolErrors] = useState<Partial<Record<SettingsAccount, string>>>({});
+  const showRgbDataBackup = feature.rgbOnDevice || !!protoNetworks.rgbL1
+    || !!protocolManager.getAdapterIfAvailable('RGB_L1')?.isConnected();
   const refreshProtocolStatus = useCallback(() => {
     setProtocolStatus({
       RGB: rgbAccountAdapter()?.isConnected() ?? false,
@@ -831,7 +833,7 @@ export default function SettingsScreen({ navigation }: Props) {
             value={isWalletUnlocked ? 'Unlocked' : 'Locked'}
             onPress={handleRecoverMnemonic}
           />
-          {activeWallet?.id != null && <Row icon="cloud-upload-outline" label="RGB data backup"
+          {activeWallet?.id != null && showRgbDataBackup && <Row icon="cloud-upload-outline" label="RGB data backup"
             description="RGB assets need an encrypted data backup as well as your recovery phrase. Check the last backup, retry or export a copy."
             onPress={() => setAccount('RGB')} />}
         </Group>
@@ -902,6 +904,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {account === 'RGB' && activeWallet?.id != null && (
           <RgbAccountSettings walletId={activeWallet.id}
+            allowNewPhoneSetup={feature.rgbOnDevice}
             node={{ connected: rgbNodeConnected(), alias: selectedNwcConnection?.alias, network: selectedNwcConnection?.network ?? protoNetworks.rln }}
             onOpenNode={() => feature.rgbNode || (nostrState.nwcConnections ?? []).length > 0
               ? navigation.navigate('RgbNode')
