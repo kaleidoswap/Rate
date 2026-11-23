@@ -236,12 +236,16 @@ export class DatabaseService {
   private async hydrateMnemonic(wallet: WalletRecord): Promise<WalletRecord> {
     if (!wallet.id) return wallet;
     const security = SecurityService.getInstance();
+    const legacyMnemonic = wallet.encrypted_mnemonic;
     let mnemonic = await security.getMnemonic(wallet.id);
-    if (!mnemonic && wallet.encrypted_mnemonic) {
-      // One-time migration of a legacy plaintext seed → secure enclave.
-      mnemonic = wallet.encrypted_mnemonic;
+    if (!mnemonic && legacyMnemonic) {
+      mnemonic = legacyMnemonic;
       const stored = await security.storeMnemonic(wallet.id, mnemonic);
       if (!stored) return { ...wallet, encrypted_mnemonic: mnemonic };
+    }
+    // Retry scrubbing after an interrupted migration. Keep the legacy copy
+    // if secure storage holds a different value.
+    if (legacyMnemonic && mnemonic === legacyMnemonic) {
       await this.db!.runAsync(
         'UPDATE wallets SET encrypted_mnemonic = NULL WHERE id = ?',
         [wallet.id],
